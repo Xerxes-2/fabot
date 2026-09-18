@@ -297,16 +297,18 @@ if (command === "console") {
         console.log(`  ${r.owner}  ${r.id}  ${body}`);
       }
       // Since #376 the approach is measured against **armed** hostiles alone,
-      // so an episode of scouts and keepers-at-a-distance has none; and a loss
+      // so an episode of scouts and keepers-at-a-distance has none — but a row
+      // written before #376 measured every hostile, and nothing on the row
+      // says which bundle wrote it, so the line is not labelled; and a loss
       // carries the tile the body last stood on, printed grouped by room so
       // "8 reservers lost in W15S27" is a line and not an inference. A row
       // written before #376 has no tile and groups under "room unknown".
       console.log(
         e.closest
-          ? `  closest approach (armed): range ${e.closest.range} ` +
+          ? `  closest approach: range ${e.closest.range} ` +
               `at ${e.closest.room ? `${e.closest.room} ` : ""}` +
               `(${e.closest.x},${e.closest.y}) on t${e.closest.t}`
-          : "  closest approach (armed): none — no armed hostile stood where anything of ours was placed",
+          : "  closest approach: none — no armed hostile stood where anything of ours was placed",
       );
       const losses = e.losses ?? [];
       if (losses.length === 0) {
