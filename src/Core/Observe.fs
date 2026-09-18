@@ -1803,12 +1803,14 @@ let private breachesIn (view: ColonyView) : Breach list =
     /// should not be holding at all (`Errand.routable`): the alarm stays silent
     /// rather than guessing a distance, because a lead time guessed too long is
     /// a row that cries on every tick forever.
+    let walkFloor hops = hops * 50
+
     let leadTicks (room: string) =
         let cast = List.length courierPattern.Block * 3
 
         view.Spatial.RoomName
         |> Option.bind (fun home -> RoomName.hopsBetween home room)
-        |> Option.map (fun hops -> cast + hops * 50)
+        |> Option.map (fun hops -> cast + walkFloor hops)
 
     // A body is a courier by its **shape**, matched against the row's own
     // pattern rather than its name: the name is a spawn-time string this
@@ -1843,27 +1845,45 @@ let private breachesIn (view: ColonyView) : Breach list =
     // reads that as nobody answering. That direction is the correct one for an
     // alarm whose whole value is arriving early (#361), and the row clears
     // itself the tick the load is aboard.
-    let laden = couriers |> List.exists (fun courier -> courier.Thorium > 0)
+    // **And ore aboard is only an answer if it can get there in time** (#377).
+    // A load in the air silences this alarm, which is right, and the first
+    // reading of that took any laden courier anywhere as one — so a body that
+    // drew at home and has three crossings to walk answered for a store with a
+    // hundred ticks left in it, and the store reached zero with the load still
+    // two rooms out. Live at t559,4xx that was the shape twice over: the
+    // programme kept a body loaded and the streak broke under it.
+    //
+    // Timed against the same **floor** `leadTicks` is and for its reason — no
+    // flood and no priced walk in this channel — at 50 ticks a crossing, with
+    // the body's own room read off the projection. A body the projection does
+    // not place is not an answer either: an alarm whose value is arriving early
+    // errs toward crying, which is the direction the empty-courier case above
+    // is already written in.
+    let answered (room: string, reactor: ReactorInfo) =
+        couriers
+        |> List.exists (fun courier ->
+            courier.Thorium > 0
+            && SpatialInfo.creepRoomOf view.Spatial courier.Name
+               |> Option.bind (fun at -> RoomName.hopsBetween at room)
+               |> Option.exists (fun hops -> walkFloor hops <= reactor.Thorium))
 
     let runningDry =
-        if laden then
-            []
-        else
-            reactors
-            |> List.filter (fun (room, reactor) ->
-                reactor.Owner = ReactorOwner.Ours
-                && reactor.Thorium > 0
-                && leadTicks room |> Option.exists (fun lead -> reactor.Thorium <= lead))
-            |> List.map (fun (room, reactor) ->
-                {
-                    Kind = BreachKind.ReactorRunningDry
-                    Room = room
-                    Subject = reactor.Id
-                    // The ticks of burn left, which is what the operator acts
-                    // on: it counts down every tick the row stands, and the
-                    // row's age says how long nobody has answered.
-                    Amount = reactor.Thorium
-                })
+        reactors
+        |> List.filter (fun (room, reactor) ->
+            reactor.Owner = ReactorOwner.Ours
+            && reactor.Thorium > 0
+            && not (answered (room, reactor))
+            && leadTicks room |> Option.exists (fun lead -> reactor.Thorium <= lead))
+        |> List.map (fun (room, reactor) ->
+            {
+                Kind = BreachKind.ReactorRunningDry
+                Room = room
+                Subject = reactor.Id
+                // The ticks of burn left, which is what the operator acts on:
+                // it counts down every tick the row stands, and the row's age
+                // says how long nobody has answered.
+                Amount = reactor.Thorium
+            })
 
     // A Reactor of ours standing dry. The programme pays 1 point per T at a
     // broken streak against the multiplier a continuous one earns

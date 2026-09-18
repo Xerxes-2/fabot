@@ -3360,6 +3360,21 @@ let private courierAt name carried (colony: ColonyView) =
     colony
     |> Decide.Fixtures.standingInErrand [ { ours name with Thorium = carried }, { X = 25; Y = 43 } ]
 
+/// The same body standing **at home**, three crossings from the Reactor, where
+/// `courierAt` stands one on the Reactor's own ring (#377).
+///
+/// Asymmetric on purpose and only safely so while the colonies it is built on
+/// stand nobody at home: it conses onto `Creeps` and *replaces* the home
+/// layer's `CreepPositions`, so a second body placed at home would be evicted
+/// rather than joined.
+let private courierAtHome name carried (colony: ColonyView) =
+    let laden = { ours name with Thorium = carried }
+
+    { colony with
+        Creeps = laden :: colony.Creeps
+        Spatial = colony.Spatial |> withCreepsAt [ name, { X = 10; Y = 10 } ]
+    }
+
 /// The courier's real body on a named creep (#361): the alarm matches the
 /// **shape** `Bodies.courierPattern` casts — twenty Carry and ten Move — so a
 /// fixture that wants to be seen as a courier has to carry it, and the
@@ -3627,6 +3642,44 @@ let breachKindTests =
                     (breachesOn 100 (quiet |> erranding 10 |> courierAt "hauler" 500))
                     [ BreachKind.ReactorRunningDry, errandRoom, reactor, 10 ]
                     "a three-part body standing out there is not a courier and carries no load worth a delivery"
+            }
+
+            // #377: a load in the air answers the alarm only while it can
+            // still land in time. The first reading took any laden courier
+            // anywhere as an answer, so a body that drew at home — three
+            // crossings and 150 ticks of floor away — silenced a store with
+            // ten ticks left in it, and the store reached zero with the load
+            // still two rooms out. Live at t559,4xx that happened twice, and
+            // the streak broke under it.
+            test "a load too far to land in time is not an answer" {
+                let far store =
+                    quiet
+                    |> erranding store
+                    |> courierAtHome "courier" 500
+                    |> withCourierBody "courier"
+
+                Expect.equal
+                    (breachesOn 100 (far 10))
+                    [ BreachKind.ReactorRunningDry, errandRoom, reactor, 10 ]
+                    "ten ticks of store against three crossings of walk: the load cannot land and the row stands"
+
+                Expect.equal
+                    (breachesOn 100 (far 200))
+                    []
+                    "two hundred ticks covers the same walk, so the same load is a genuine answer"
+
+                // The near case is the one that must keep working: a body on
+                // the Reactor's own ring is no crossings away, so it answers
+                // whatever the store holds.
+                Expect.equal
+                    (breachesOn
+                        100
+                        (quiet
+                         |> erranding 1
+                         |> courierAt "courier" 500
+                         |> withCourierBody "courier"))
+                    []
+                    "and a load already standing at the Reactor answers a store with one tick left"
             }
 
             test "a declared Reactor whose row is not ours is a breach, and is not also starved" {

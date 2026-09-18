@@ -419,6 +419,24 @@ module SpatialInfo =
     let roomOf (spatial: SpatialInfo) (id: string) : string option =
         placementOf spatial id |> Option.map (fun tile -> tile.Room)
 
+    /// Where the projection places one of this colony's **creeps**, and None
+    /// for a body it does not place (ADR 0004). `placementOf`'s twin down the
+    /// other column: a target rides `TargetPositions` and a body rides
+    /// `CreepPositions`, so the join that answers "which room is this in" has
+    /// to be made once per column rather than re-typed as a lambda wherever a
+    /// rule wants it — which is the argument `roomOf` above already makes, and
+    /// which `Observe` had gone on to make privately three times over (#377).
+    let creepPlacementOf (spatial: SpatialInfo) (name: string) : RoomPos option =
+        spatial.Rooms
+        |> Map.tryPick (fun room (layer: RoomLayer) ->
+            Map.tryFind name layer.CreepPositions |> Option.map (RoomPos.at room))
+
+    /// The room the projection places one of this colony's creeps in, and None
+    /// for a body it does not place (ADR 0004) — `creepPlacementOf` with the
+    /// tile dropped, as `roomOf` is `placementOf` with the tile dropped.
+    let creepRoomOf (spatial: SpatialInfo) (name: string) : string option =
+        creepPlacementOf spatial name |> Option.map (fun tile -> tile.Room)
+
     /// Every target the projection carries hits for, joined to the structure
     /// kind it is filed under, in id order. Hits with no kind, and hits on a
     /// target of a non-structure kind, drop out (ADR 0004). One walk over the
