@@ -97,6 +97,11 @@ let guardPattern =
         Block = [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
     }
 
+/// The most whole guard blocks one body can carry — the engine's part cap over
+/// the block (#375): the ceiling `guardBlocksFor` searches under and the size
+/// a caller holding no colony prices the row at.
+let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
+
 /// The [[miner]] row (ADR 0057 decision 2): the store-less Work body that
 /// stands over the mineral container and digs the season's Thorium. The block
 /// is `[Work; Work; Move]` and the sizing rule is one Move per
@@ -398,6 +403,14 @@ let internal reserverBodyFor capacity =
 let private guardBodyFor capacity =
     wholeBlockBodyFor guardPattern.Block capacity
 
+/// The guard row's body at the blocks its exchange takes (#375, ADR 0072):
+/// `reserverBodyWithin`'s shape on the guard column — the bank truncates the
+/// blocks and the blocks truncate the bank, so a colony that can afford one
+/// block casts one where one wins, and never waits on the three its capacity
+/// would buy.
+let internal guardBodyWithin blocks capacity =
+    guardBodyFor (min capacity (blocks * bodyCost guardPattern.Block))
+
 /// The upgrader row's sizing rule (ADR 0046): one Carry, and every part slot
 /// the rest of the capacity affords spent on Work/Move **pairs** — `W = M =
 /// floor((capacity - 50) / 150)`, never below one pair. The gain over the
@@ -438,6 +451,13 @@ type BodySizing =
         /// bank does not answer. Unlike those two it is a *tunable* rather than
         /// a fact of the tick, so every caster hands over its colony's own.
         MinerWorkPerMove: int
+        /// `Quota.guardBlocksWanted`'s answer this tick (#375, ADR 0072): the
+        /// whole guard blocks the worst of the guarded rooms' exchanges takes
+        /// to win, at least one. The guard row was the one row sized by the
+        /// bank alone — three blocks at 2,250 against a 1,000-hit invader one
+        /// block kills — and a body the bank never reaches is a row that
+        /// never casts, whatever its place in the cascade.
+        GuardBlocks: int
     }
 
 /// The sizing a caller holding nothing but a capacity can ask for: every row at
@@ -452,6 +472,7 @@ let largestSizing =
         AnchorCap = heldWorkCap
         ReserverClaims = []
         MinerWorkPerMove = Tuning.defaults.MinerWorkPerMove
+        GuardBlocks = guardBlocksMost
     }
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule
@@ -480,7 +501,7 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         // slipped furthest can land on the room that has not.
         | claims -> reserverBodyWithin (List.max claims) capacity
     elif pattern.Name = guardPattern.Name then
-        guardBodyFor capacity
+        guardBodyWithin sizing.GuardBlocks capacity
     elif pattern.Name = upgraderPattern.Name then
         upgraderBodyFor capacity
     elif pattern.Name = minerPattern.Name then

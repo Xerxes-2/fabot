@@ -110,6 +110,7 @@ let private castBodyOf
             AnchorCap = anchorCapAt sizing.AnchorPostCaps tile
             ReserverClaims = sizing.ReserverClaims
             MinerWorkPerMove = sizing.MinerWorkPerMove
+            GuardBlocks = sizing.GuardBlocks
         }
         pattern
         view.Bank.Capacity
@@ -390,6 +391,7 @@ let internal planSpawns
                 AnchorCap = anchorCap
                 ReserverClaims = rows.Reserver
                 MinerWorkPerMove = sizing.MinerWorkPerMove
+                GuardBlocks = sizing.GuardBlocks
             }
 
         let rows: SpecialistRow list =

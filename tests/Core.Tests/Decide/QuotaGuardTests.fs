@@ -388,15 +388,16 @@ let guardRowTests =
                     "the same two healers standing in the other outpost price nothing here: this room's raid heals nothing"
             }
 
-            test "the row is cast in front of the reserver and reads its own body back" {
+            test "the row is cast in front of the reserver, and the raided room's seat waits for it" {
                 // The cascade slot (ADR 0056): behind the [[supply floor]]
-                // and in front of the [[reserver]]. Both gaps are open on
-                // this tick — the reservation is at its cap, so the reserver
-                // row wants one block — and the colony's four idle spawns
-                // draw the seats in order, so the *first* cast says which row
-                // was asked first. Pairwise against the quiet tick, where the
-                // reserver is the head of the cascade exactly as ADR 0042
-                // left it.
+                // and in front of the [[reserver]]. Pairwise against the
+                // quiet tick, where the reserver is the head of the cascade
+                // exactly as ADR 0042 left it. And since #375 (ADR 0072) the
+                // raided room's own reserver seat is not bought on the tick
+                // the guard is still wanting: it was that seat, bought at 650
+                // every time the bank reached 650, that kept the bank from
+                // ever reaching the guard — eight bodies into W15S27 in 491
+                // ticks, none of them a guard.
                 let castNames colony =
                     spawnIntents (decideOn colony).Intents
                     |> List.map (fun (_, _, name: string) -> name.Split('-').[0])
@@ -406,27 +407,66 @@ let guardRowTests =
                     [ "reserver" ]
                     "the premise: with nothing to fight, the reserver is the head of the cascade"
 
+                let raided = guardColony [ hostileIn "W1N2" raidTile smallMelee ] []
+
                 Expect.equal
-                    (castNames (guardColony [ hostileIn "W1N2" raidTile smallMelee ] [])
-                     |> List.truncate 2)
-                    [ "guard"; "reserver" ]
-                    "and a raid puts the guard in front of it, without displacing it"
+                    (castNames raided |> List.truncate 1)
+                    [ "guard" ]
+                    "a raid puts the guard in front"
+
+                Expect.isFalse
+                    (castNames raided |> List.contains "reserver")
+                    "and the raided room's seat is not bought on the tick its guard is still wanting"
+
+                let inOven =
+                    { raided with
+                        Casting =
+                            [
+                                {
+                                    Name = "guard-1-spawn-1"
+                                    Body = bodyFor guardPattern 800
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    (castNames inOven |> List.truncate 1)
+                    [ "reserver" ]
+                    "the tick the guard is in the oven the seat is back, and the reserver is the head again"
             }
 
-            test "the guard the row casts is the block the bank buys" {
-                // The cast itself and not the quota: at the live RCL5 bank
-                // the row buys two whole blocks, which is the body every
-                // damage number above is written in.
+            test "the guard the row casts is the block the fight takes, not the bank" {
+                // #375 (ADR 0072). `guardBlocksBeat` already priced the raid
+                // for the *count*; the *size* read the bank alone, so the
+                // 1,800 bank `reserverColony` holds bought two blocks against
+                // a lone melee one block kills, and W15S28's 2,300 bank asked
+                // 2,250 that the reserver row spent down to 650 every tick
+                // it was reached. Now the body is the blocks the exchange
+                // takes, the bank truncating it as it truncates the reserver's
+                // claims.
+                let castsAgainst hostiles =
+                    guardCasts (decideOn (guardColony hostiles [])).Intents
+
                 Expect.equal
-                    (guardCasts
-                        (decide
-                            (guardColony [ hostileIn "W1N2" raidTile smallMelee ] [])
-                            Map.empty
-                            Set.empty
-                            None)
-                            .Intents)
-                    [ bodyFor guardPattern 1800 ]
-                    "one cast, at the 1,800 bank `reserverColony` holds"
+                    (castsAgainst [ hostileIn "W1N2" raidTile smallMelee ])
+                    [ bodyFor guardPattern 800 ]
+                    "one cast, one block: what a lone melee takes, at a bank that would buy two"
+
+                Expect.equal
+                    (castsAgainst (raidOf 2))
+                    [ bodyFor guardPattern 1500; bodyFor guardPattern 1500 ]
+                    "two healers put one block under the healing, so the two guards the count buys are two blocks each"
+
+                let blindAndLatched =
+                    { guardColony [] [] with
+                        RoomControl = (guardColony [] []).RoomControl |> Map.remove "W1N2"
+                        ThreatenedOutposts = Set.singleton "W1N2"
+                    }
+
+                Expect.equal
+                    (guardCasts (decideOn blindAndLatched).Intents)
+                    [ bodyFor guardPattern 800 ]
+                    "a remembered raid nobody can see is one block: enough to go and look"
             }
 
             test "a bank that cannot afford a block yields the tick" {

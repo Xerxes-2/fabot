@@ -414,7 +414,12 @@ let private upgradeDrainOf body =
 /// the parts like every other row predicate (ADR 0006), so a fighting body the
 /// colony was handed rather than cast fills this row's quota exactly as one it
 /// cast does.
-let internal isGuardBody (creep: CreepInfo) = partCount creep.Body Attack > 0
+/// The guard cut, over parts (ADR 0006): an ATTACK part. One predicate for the
+/// two readers that must not drift — a living body and one still in an oven
+/// (#375).
+let internal isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
+
+let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
 /// How many guards one raided [[outpost]] wants (ADR 0056 decision 1, as #272
 /// amends it), which is **0** for the whole of a colony's ordinary life because
@@ -542,6 +547,47 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 let internal guardQuota (view: ColonyView) : int =
     guardedOutposts view |> List.sumBy (guardsWanted view)
 
+/// The whole guard blocks one raided room's exchange takes to win (#375, ADR
+/// 0072): the smallest count `guardBlocksBeat` answers yes to, up to the
+/// largest body the engine casts, and that largest where none wins. A room
+/// the colony is blind in prices at one — its raid is the remembered one and
+/// `view.Hostiles` carries nothing of it, so the exchange reads as won — which
+/// is what a 750 body against an unseen raid is worth: enough to go and look.
+let internal guardBlocksFor (view: ColonyView) (room: string) : int =
+    [ 1..guardBlocksMost ]
+    |> List.tryFind (guardBlocksBeat view room)
+    |> Option.defaultValue guardBlocksMost
+
+/// The blocks the guard row casts at this tick: the worst of the guarded rooms'
+/// answers, one where nothing is guarded. Every cast this tick carries it, as
+/// the reserver row's casts carry the largest outstanding claim — the Matcher
+/// pairs a finished body to a room by travel cost, so a body sized for the
+/// heavier raid can land on the lighter one and the other way about would
+/// lose. This is what the guard row was missing: `guardsWanted` read the
+/// exchange for the **count** and `guardBodyFor` read the bank for the
+/// **size**, so at W15S28's 2,300 bank the row asked 2,250 for a raid one
+/// 750 block wins, and a bank the reserver row drains at 650 never reached it.
+let internal guardBlocksWanted (view: ColonyView) : int =
+    match guardedOutposts view |> List.map (guardBlocksFor view) with
+    | [] -> 1
+    | blocks -> List.max blocks
+
+/// Whether the guard row is filled — every body it wants standing or in an
+/// oven (#375, ADR 0072). Read by the reserver row: a guarded room's seat
+/// waits on this. Counted over every living guard and not over the row's
+/// census less its expiring bodies (ADR 0026): a guard inside its lead still
+/// stands in the room, so the seat stays open while the row buys the relief,
+/// and closes again only when the incumbent is actually gone.
+let internal guardStands (view: ColonyView) : bool =
+    let living = view.Creeps |> List.filter isGuardBody |> List.length
+
+    let inOven =
+        view.Casting
+        |> List.filter (fun cast -> isGuardParts (partsOf cast.Body))
+        |> List.length
+
+    living + inOven >= guardQuota view
+
 /// The [[miner]] row's quota (ADR 0057 decision 2): **one body per deposit the
 /// colony can actually dig**, and nothing for one it cannot. Three facts and
 /// all of them read off this tick's projection rather than off anything
@@ -643,11 +689,33 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
     // which is the same fact read from the other end.
     let claims = claimTargets view
 
+    // **A guarded room's seat waits for its guard** (#375, ADR 0072). The
+    // guard row stands in front of this one in the cascade for a reason, and
+    // ADR 0050's yield undid it: a guard the bank could not yet afford let
+    // this row buy a 650 body the tick the bank held 650, the body walked
+    // into the room the raid log knew was held and died there inside fifty
+    // ticks, the gap reopened, and the next 650 bought the next — eight in
+    // 491 ticks at W15S27, thirty-three with the reactor room before it,
+    // while the guard never cast and the colony spent down to six bodies. So
+    // while the guard row has a gap, the rooms it is hired for are not this
+    // row's to hire for; the tick a guard stands or is in the oven, the seat
+    // is back. The rest of the row is untouched, and so is the Reserve Task
+    // (#366): what stops is the buying of bodies the raider is eating, which
+    // is the seam ADR 0050 said this belonged at. The target moves by one per
+    // withheld room, keyed to the guard gap and not to the spending, so it
+    // flips once and not every cast.
+    let withheld =
+        if guardStands view then
+            Set.empty
+        else
+            guardedOutposts view |> Set.ofList
+
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
     else
         let reserved =
             reservableOutposts view
+            |> List.filter (fun room -> not (Set.contains room withheld))
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 
@@ -713,6 +781,11 @@ type RowSizing =
         /// alone either, and the third thing it reads is a knob of this
         /// colony's rather than a fact of the tick.
         MinerWorkPerMove: int
+        /// `guardBlocksWanted`'s answer this tick (#375, ADR 0072): the whole
+        /// blocks the worst guarded room's exchange takes, carried through to
+        /// `BodySizing` so the guard row is sized by the fight and not by the
+        /// bank.
+        GuardBlocks: int
         /// `minerQuota`'s answer this tick — one [[miner]] per diggable
         /// deposit. Here for `ReserverClaims`' own reason (#304): the number is
         /// both the addend of the [[workforce target]] and the multiplier of
@@ -730,6 +803,7 @@ let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
         AnchorPostCaps = postWorkCapsOf view atlas
         ReserverClaims = reserverClaimsOf view
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
+        GuardBlocks = guardBlocksWanted view
         MinerQuota = minerQuota view atlas
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }

@@ -279,6 +279,50 @@ let reserverRowTests =
                     "one block's worth of capacity is where the row starts hiring"
             }
 
+            // #375 (ADR 0072): a guarded room's seat waits for its guard. The
+            // row's quota is read off the ground (the reservation is at its
+            // cap, so W1N2 wants one block), and while the guard row hired
+            // for that room has a gap the seat is withheld — the body it would
+            // buy is the body the raider is eating. Standing or in the oven,
+            // the guard gives it back.
+            test
+                "a guarded room's reserver seat is withheld until its guard stands or is in the oven" {
+                let quotaOf colony =
+                    rowOf "reserver" colony |> Option.map (fun row -> row.Quota)
+
+                Expect.equal
+                    (quotaOf (guardColony [] []))
+                    (Some 1)
+                    "the premise: the quiet room hires its one reserver"
+
+                let raided = guardColony [ hostileIn "W1N2" raidTile smallMelee ] []
+
+                Expect.equal (quotaOf raided) (Some 0) "raided and unguarded, the seat is withheld"
+
+                Expect.equal
+                    (quotaOf (
+                        guardColony
+                            [ hostileIn "W1N2" raidTile smallMelee ]
+                            [ guard "g-1", outpostSeat ]
+                    ))
+                    (Some 1)
+                    "a guard standing in the room gives the seat back"
+
+                Expect.equal
+                    (quotaOf
+                        { raided with
+                            Casting =
+                                [
+                                    {
+                                        Name = "guard-1-spawn-1"
+                                        Body = bodyFor guardPattern 800
+                                    }
+                                ]
+                        })
+                    (Some 1)
+                    "and so does one in the oven: the seat waits on the row, not on the walk"
+            }
+
             test "a living reserver fills the quota; one inside its lead does not" {
                 // The quota counts bodies and not rooms (#130): which
                 // controller each body ends up holding is the Reserve
