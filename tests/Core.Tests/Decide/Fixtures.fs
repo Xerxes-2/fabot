@@ -1938,6 +1938,35 @@ let withReactorOwner owner (colony: ColonyView) =
             | None -> []
     }
 
+/// The delivering colony (ADR 0067): `mineHaulColony`'s mine and Storage with
+/// the sector Reactor declared as an [[errand]], a re-claimer standing on its
+/// ring and a bank that can buy a courier. Two domains read it — `ErrandTests`
+/// asks what the declaration buys, and the projection sweep asks whether it is
+/// a shape `World.ofGame` could build (#355) — which is what puts it here
+/// rather than in the suite that used to own it.
+///
+/// **The Reactor's own store is not written into `Spatial.Thorium`** (#355):
+/// the sweep files it in `RoomFacts.Reactors` and gives the object neither a
+/// tile nor a kind, so an entry here would be the shape that cost #354 its 915
+/// T — the gate read the store out of this map and the projection answered 0
+/// for a store holding 999. `withReactorOwner` stands the row it really rides.
+let deliveryColony owner =
+    let resident = creepWith "relay" 0 0 [ BodyPart.Claim; Move ]
+
+    let colony =
+        { mineHaulColony with
+            Bank = bank 2300 2300
+            Spatial =
+                { mineHaulColony.Spatial with
+                    Thorium = mineHaulColony.Spatial.Thorium |> Map.add "sto-1" 2997
+                }
+        }
+
+    colony
+    |> withReactorErrand
+    |> withReactorOwner owner
+    |> standingInErrand [ resident, reactorRing ]
+
 /// What the declared Reactor's store holds (#354). Beside `withReactorOwner`
 /// and never instead of it: no vision, no row, and a colony that cannot see the
 /// Reactor draws nothing towards it.

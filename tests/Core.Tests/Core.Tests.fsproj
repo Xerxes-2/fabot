@@ -61,6 +61,7 @@
     <Compile Include="ReactorObserveTests.fs" />
     <Compile Include="ObserveTests.fs" />
     <Compile Include="WireTests.fs" />
+    <Compile Include="ProjectionShapeTests.fs" />
     <Compile Include="RoomInvariantFixtures.fs" />
     <Compile Include="RoomFixtureLoaderTests.fs" />
     <Compile Include="RoomLayoutInvariantTests.fs" />

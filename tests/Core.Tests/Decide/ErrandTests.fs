@@ -37,26 +37,6 @@ let private courier name =
 /// The complete delivery programme on the one-hop decision fixture. The live
 /// three-hop price is pinned by `RoomSeamTests`; here each test moves one fact
 /// that opens the row or one end of its Withdraw→Refill cycle.
-let private deliveryColony owner =
-    let resident = claimer "relay"
-
-    let colony =
-        { mineHaulColony with
-            Bank = bank 2300 2300
-            Spatial =
-                { mineHaulColony.Spatial with
-                    Thorium =
-                        mineHaulColony.Spatial.Thorium
-                        |> Map.add "sto-1" 2997
-                        |> Map.add reactorId 0
-                }
-        }
-
-    colony
-    |> withReactorErrand
-    |> withReactorOwner owner
-    |> standingInErrand [ resident, reactorRing ]
-
 let private courierRow colony =
     (decideOn colony).Quotas.Rows |> List.find (fun row -> row.Row = "courier")
 

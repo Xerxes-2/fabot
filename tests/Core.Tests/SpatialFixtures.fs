@@ -107,3 +107,113 @@ let withNeighbour room layer (spatial: SpatialInfo) =
     { spatial with
         Rooms = Map.add room layer spatial.Rooms
     }
+
+/// **What shape the projection can actually have** (#355): which kinds of
+/// object `World.ofGame` can file under each of its id-keyed maps, and the
+/// check that asks a colony whether it is one of them.
+///
+/// Sixty-three of this suite's sixty-five files run on fixtures we author, so
+/// what they confirm is the code's belief about the projection rather than the
+/// engine's behaviour, and `src/App/World.fs` — the sweep that builds the
+/// thing — is Fable/JS and has no test at all by construction. Four live
+/// incidents in one day came through that gap, and the first of them is this
+/// shape: `Facts.reactorTakesALoad` read the Reactor's store out of
+/// `SpatialInfo.Thorium`, where the sweep never writes it (it rides
+/// `RoomFacts.Reactors`), so the projection answered 0 for a store holding
+/// 999, the draw gate never closed, and 915 T reached the floor. The unit test
+/// agreed, because the fixture had written the store where the gate looked.
+///
+/// The table below is read off `World.fs` **block by block, by inspection** —
+/// the sweep cannot be run from .NET, and standing the real `World.ofGame`
+/// against a fake `Game` is the profile harness's to do (#294, #308). So a
+/// change to one of those blocks that is not made here is a drift no test can
+/// see, and each rule names the block it came from so the next reader can
+/// check. What it buys is the half that caught the incident: the two sides of
+/// a number have to agree about which objects can carry it.
+///
+/// It lives here, with the projection builders and ahead of every suite, so
+/// that any test can ask it of a colony it built; `ProjectionShapeTests` asks
+/// it of every shared fixture and of `ColonyView.ofWorld`'s own output.
+/// One entry of a projection whose key is an object the sweep could not have
+/// filed under that map.
+type ShapeViolation =
+    {
+        /// The map's name, as `SpatialInfo` spells it.
+        Map: string
+        /// The id filed under it.
+        Id: string
+        /// The kind the projection gives that id, and `None` for an id it
+        /// gives no kind at all — which is what an [[errand]]'s declared
+        /// target has, the Reactor included.
+        Kind: TargetKind option
+    }
+
+/// Which kinds of object `World.ofGame` files an **ore** holding under (its
+/// `Thorium` block): a structure with a store (`isStored`, the Core fact the
+/// sweep itself reads), the [[thorium]] deposit, ore on the floor, and a
+/// tombstone or ruin holding some (#359). A **Reactor is not one of them**.
+let private admitsOre =
+    function
+    | Some(Structure built) -> isStored built
+    | Some Mineral
+    | Some Tombstone
+    | Some(Dropped Thorium) -> true
+    | _ -> false
+
+/// The same read down the energy column (the `Stores` block): a structure with
+/// a store, a tombstone or ruin, and energy on the floor.
+let private admitsEnergy =
+    function
+    | Some(Structure built) -> isStored built
+    | Some Tombstone
+    | Some(Dropped Energy) -> true
+    | _ -> false
+
+/// The `Cooldowns` block, which is one structure kind wide.
+let private admitsCooldown = (=) (Some(Structure BuiltKind.Extractor))
+
+/// The `Hits` block: a structure with a repair line. **Permissive on purpose**
+/// — the sweep narrows further by `needsOwner`/`ourIds`, which is a fact about
+/// the object and not about its kind, so this under-reports rather than lies.
+let private admitsHits =
+    function
+    | Some(Structure built) -> (wholeLine built).IsSome
+    | _ -> false
+
+/// Every entry of a projection whose key is an object the sweep could not have
+/// filed under that map. Asked of a whole `ColonyView` and not of its
+/// `SpatialInfo` alone, because the `Owners` block is the odd one: the sweep
+/// files an owner for a **Reactor** and for nothing else, and the only place
+/// the projection names a Reactor is `ColonyView.Reactors`.
+let shapeViolations (view: ColonyView) : ShapeViolation list =
+    let spatial = view.Spatial
+    let kindOf id = Map.tryFind id spatial.TargetKinds
+    let reactors = view.Reactors |> List.map (fun reactor -> reactor.Id) |> Set.ofList
+
+    let check name admits (map: Map<string, 'v>) =
+        map
+        |> Map.toList
+        |> List.choose (fun (id, _) ->
+            let kind = kindOf id
+
+            if admits id kind then
+                None
+            else
+                Some { Map = name; Id = id; Kind = kind })
+
+    let byKind admits = fun _ kind -> admits kind
+
+    check "Thorium" (byKind admitsOre) spatial.Thorium
+    @ check "Stores" (byKind admitsEnergy) spatial.Stores
+    @ check "Cooldowns" (byKind admitsCooldown) spatial.Cooldowns
+    @ check "Hits" (byKind admitsHits) spatial.Hits
+    @ check "Owners" (fun id _ -> Set.contains id reactors) spatial.Owners
+
+/// A violation as a line a failing test can print.
+let shapeViolationLine (name: string) (violation: ShapeViolation) =
+    let what =
+        match violation.Kind with
+        | Some kind -> string kind
+        | None -> "an object the projection gives no kind"
+
+    $"{name}: {violation.Map}[{violation.Id}] is {what}, which `World.ofGame` never files there"
