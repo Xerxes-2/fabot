@@ -31,12 +31,12 @@ type Atlas =
             /// Creep name -> the room the projection files it under and the
             /// tile it stands on there: the id-to-room join ADR 0041 puts on
             /// the API, resolved once so a query costs one lookup.
-            CreepAt: Map<string, string * Pos>
+            CreepAt: System.Collections.Generic.Dictionary<string, string * Pos>
             /// Target id -> the room the projection files it under and its tile
             /// there — the same join over the other id space, and the reason
             /// `TargetKinds` stays flat: an object id is already unique, so the
             /// kind census needs no room.
-            TargetAt: Map<string, string * Pos>
+            TargetAt: System.Collections.Generic.Dictionary<string, string * Pos>
             /// The kind census read the other way round: kind -> the ids of
             /// that kind, in id order. `SpatialInfo.TargetKinds` answers "what
             /// kind is this id", and every census on this API asks the
@@ -224,16 +224,24 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     // world, so the layer that holds it is the room it is in (ADR 0041) —
     // which is what makes searching every layer the right answer here and the
     // wrong one for a query that starts from a bare `Pos`.
+    // A string-keyed `Dictionary` and not a `Map`: an id is a string, which
+    // Fable hashes into a native JS `Map` for nothing, where an F# `Map`
+    // compares the string per tree level on every one of the dozens of asks a
+    // candidate makes (#370's lead 1, tried here first because these two
+    // joins are private to this file). Filled by walking the layers; the one
+    // allocation per id is the tuple `Map.add` allocated anyway, and the tree
+    // path it rebuilt per id is gone.
     let locate select =
-        spatial.Rooms
-        |> Map.fold
-            (fun found room layer ->
-                select layer
-                |> Map.fold (fun found id pos -> Map.add id (room, pos) found) found)
-            Map.empty
+        let found = System.Collections.Generic.Dictionary<string, string * Pos>()
 
-    let creepAt = locate (fun (layer: RoomLayer) -> layer.CreepPositions)
-    let targetAt = locate (fun (layer: RoomLayer) -> layer.TargetPositions)
+        for KeyValue(room, layer) in spatial.Rooms do
+            for KeyValue(id, pos) in (select layer: Map<string, Pos>) do
+                found.[id] <- (room, pos)
+
+        found
+
+    let creepsFound = locate (fun (layer: RoomLayer) -> layer.CreepPositions)
+    let targetsFound = locate (fun (layer: RoomLayer) -> layer.TargetPositions)
 
     // The kind census inverted, once. `Map.fold` walks the census in ascending
     // id order and each id is prepended, so reversing each bucket leaves the
@@ -250,8 +258,11 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     let placed =
         view.Creeps
         |> List.choose (fun creep ->
-            Map.tryFind creep.Name creepAt
-            |> Option.map (fun (room, pos) -> creep.Name, room, pos))
+            if creepsFound.ContainsKey creep.Name then
+                let room, pos = creepsFound.[creep.Name]
+                Some(creep.Name, room, pos)
+            else
+                None)
 
     let factors =
         view.Creeps
@@ -381,8 +392,8 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Tuning = tuning
         Placed = placed
         Factors = factors
-        CreepAt = creepAt
-        TargetAt = targetAt
+        CreepAt = creepsFound
+        TargetAt = targetsFound
         KindIds = kindIds
         Weights = weights
         Ground = ground
@@ -468,6 +479,25 @@ let private ringOf (atlas: Atlas) (room: string) : int[] =
 let private occupiedOf (atlas: Atlas) (room: string) : bool[] =
     Map.tryFind room atlas.Occupied |> Option.defaultValue noTraffic
 
+/// The room and tile a target id stands at, or None for an id the projection
+/// does not place (ADR 0004): `TargetAt` read as the option every reader that
+/// wants the placement wants (the one existence test reads `ContainsKey`
+/// alone), `ContainsKey` then the indexer — three native `Map` probes in
+/// Fable, the indexer re-checking membership before it reads, and still none
+/// of the four allocations `TryGetValue` in a match costs (`memoised`'s note).
+let private targetAt (atlas: Atlas) (id: string) : (string * Pos) option =
+    if atlas.TargetAt.ContainsKey id then
+        Some atlas.TargetAt.[id]
+    else
+        None
+
+/// The same read over the creeps' join.
+let private creepAt (atlas: Atlas) (creep: string) : (string * Pos) option =
+    if atlas.CreepAt.ContainsKey creep then
+        Some atlas.CreepAt.[creep]
+    else
+        None
+
 /// A copy of one room's step weight per tile index — the grid that room's
 /// floods price from, -1 impassable. Read by the census guard (ADR 0032) and
 /// nothing else: spawn walks are recalled on the census signature alone, so two
@@ -521,8 +551,7 @@ let homeRoom (atlas: Atlas) : string option = atlas.Spatial.RoomName
 /// across the world. Room and tile in one (ADR 0052 decision 2), so no join
 /// can read one room's coordinates as another's.
 let positionOf (atlas: Atlas) (targetId: string) : RoomPos option =
-    Map.tryFind targetId atlas.TargetAt
-    |> Option.map (fun (room, pos) -> RoomPos.at room pos)
+    targetAt atlas targetId |> Option.map (fun (room, pos) -> RoomPos.at room pos)
 
 /// Tiles a construction site may occupy in the colony's own room: non-Wall
 /// terrain holding no projected target — anything standing or being built keeps
@@ -567,7 +596,7 @@ let private targetsOfKind (atlas: Atlas) (kind: TargetKind) : string list =
 /// census that unions tiles has to drop the other rooms' before it unions, and
 /// that is the whole of what its readers ask `TargetAt`.
 let private tileIn (atlas: Atlas) (room: string) (id: string) : Pos option =
-    match Map.tryFind id atlas.TargetAt with
+    match targetAt atlas id with
     | Some(where, tile) when where = room -> Some tile
     | _ -> None
 
@@ -734,7 +763,7 @@ let isMineral (atlas: Atlas) (targetId: string) : bool =
 /// `None` while only a site stands there, which is the same answer as no
 /// extractor at all: a site extracts nothing. Total (ADR 0004).
 let extractorOn (atlas: Atlas) (mineralId: string) : string option =
-    match Map.tryFind mineralId atlas.TargetAt with
+    match targetAt atlas mineralId with
     | None -> None
     | Some(room, tile) ->
         targetsOfKind atlas (Structure BuiltKind.Extractor)
@@ -861,22 +890,20 @@ let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// `positionOf` is the same question about a target — and, like it, room
 /// and tile in one (ADR 0052 decision 2).
 let creepTile (atlas: Atlas) (creep: string) : RoomPos option =
-    Map.tryFind creep atlas.CreepAt
-    |> Option.map (fun (room, pos) -> RoomPos.at room pos)
+    creepAt atlas creep |> Option.map (fun (room, pos) -> RoomPos.at room pos)
 
 /// The room a creep stands in; None for a creep the projection does not
 /// place. `creepTile`'s room alone, kept as a query of its own for the
 /// readers that want only it — a Reach, a safe set, a grid or flood indexed
 /// by that room. An unplaced creep names no room, which is ADR 0004's answer.
-let creepRoom (atlas: Atlas) (creep: string) : string option =
-    Map.tryFind creep atlas.CreepAt |> Option.map fst
+let creepRoom (atlas: Atlas) (creep: string) : string option = creepAt atlas creep |> Option.map fst
 
 /// The room the projection files a target under; None for one it does not
 /// place. `positionOf`'s room alone, as `creepRoom` is `creepTile`'s: the
 /// room a target's Work Area lies in, and so the room whose Reach is taken
 /// out of that area (#138), and the room a spawn's doorstep is read in.
 let targetRoom (atlas: Atlas) (targetId: string) : string option =
-    Map.tryFind targetId atlas.TargetAt |> Option.map fst
+    targetAt atlas targetId |> Option.map fst
 
 /// What a Task acts on, and the Chebyshev range its action reaches from
 /// (Screeps: harvest, withdraw, transfer and reserveController at range 1;
@@ -929,7 +956,7 @@ let private actionTilesOf (atlas: Atlas) (task: Task) : (string * Pos list) opti
     match actionOn task with
     | None -> None
     | Some(targetId, _) ->
-        match Map.tryFind targetId atlas.TargetAt with
+        match targetAt atlas targetId with
         | None -> None
         | Some(room, target) ->
             match clusterOf atlas task with
@@ -950,7 +977,7 @@ let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
 /// the colony's: the id resolves the room (ADR 0041), so an outpost source's
 /// Seats are never a home tile of the same coordinate.
 let private seatTilesIn (atlas: Atlas) (rockId: string) : (string * Set<Pos>) option =
-    Map.tryFind rockId atlas.TargetAt
+    targetAt atlas rockId
     |> Option.map (fun (room, pos) -> room, seatTiles (groundOf atlas room) pos)
 
 let seatTilesOf (atlas: Atlas) (rockId: string) : Set<RoomPos> = seatTilesIn atlas rockId |> stamped
@@ -1188,7 +1215,7 @@ let dualSeatsIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// reprieve through its source's empty window and ADR 0048 leaves that
 /// exclusion standing. An unplaced creep stands on nothing (ADR 0004).
 let standsOnDualSeat (atlas: Atlas) (creep: string) : bool =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | Some(room, tile) when room = atlas.Home -> Set.contains tile (dualSeatsIn atlas room)
     | _ -> false
 
@@ -1353,7 +1380,7 @@ let postSiteTile (atlas: Atlas) (siteId: string) : RoomPos option =
     if Map.tryFind siteId atlas.Spatial.TargetKinds <> Some(Site BuiltKind.Container) then
         None
     else
-        match Map.tryFind siteId atlas.TargetAt with
+        match targetAt atlas siteId with
         | Some(room, tile) when Set.contains tile (containerSitePostsIn atlas room) ->
             Some(RoomPos.at room tile)
         | _ -> None
@@ -1373,7 +1400,7 @@ let private together
     (creep: string)
     (targetId: string)
     : (string * Pos * Pos) option =
-    match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
+    match creepAt atlas creep, targetAt atlas targetId with
     | Some(creepRoom, tile), Some(targetRoom, target) when creepRoom = targetRoom ->
         Some(creepRoom, tile, target)
     | _ -> None
@@ -1386,7 +1413,7 @@ let private apart
     (creep: string)
     (targetId: string)
     : (string * Pos * string) option =
-    match Map.tryFind creep atlas.CreepAt, Map.tryFind targetId atlas.TargetAt with
+    match creepAt atlas creep, targetAt atlas targetId with
     | Some(creepRoom, from), Some(targetRoom, _) when creepRoom <> targetRoom ->
         Some(creepRoom, from, targetRoom)
     | _ -> None
@@ -1686,7 +1713,7 @@ let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list optio
 /// engine put it down on the tick it crossed. Read off the coordinate alone;
 /// total (ADR 0004).
 let standsOnSeam (atlas: Atlas) (creep: string) : bool =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | Some(_, pos) -> pos.X = 0 || pos.X = Seam.exitEdge || pos.Y = 0 || pos.Y = Seam.exitEdge
     | None -> false
 
@@ -2397,7 +2424,7 @@ let private pricedPathTo
     (creep: string)
     (area: Set<RoomPos>)
     : int option =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | None -> Some 0
     | Some(room, pos) ->
         // Read, never rebuilt: this runs once per creep per candidate Task in
@@ -2458,7 +2485,7 @@ let private crossingToward
     (room: string)
     (area: Set<RoomPos>)
     : (string * Pos * (int * Pos) option) option =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | Some(creepRoom, from) when creepRoom <> room ->
         Some(
             creepRoom,
@@ -2574,7 +2601,7 @@ let private pricedOffField
 /// reads (`crossingFor`), and the walk takes the field (`pricedOffField`).
 let private pricedPath (atlas: Atlas) (pricing: Pricing) (creep: string) (task: Task) : int option =
     match actionOn task with
-    | Some(targetId, _) when not (Map.containsKey targetId atlas.TargetAt) -> Some 0
+    | Some(targetId, _) when not (atlas.TargetAt.ContainsKey targetId) -> Some 0
     | _ ->
         match borderCrossing atlas creep task with
         | None -> pricedPathTo atlas pricing creep (workAreaFor atlas creep task)
@@ -2661,7 +2688,7 @@ let mayAct (atlas: Atlas) (creep: string) (task: Task) (area: Set<RoomPos>) : bo
     // from, which for a [[refill cluster]] is its hungry members and for
     // every other Task is the one target it always was (ADR 0054).
     | Some(_, actionRange) ->
-        match Map.tryFind creep atlas.CreepAt, actionTilesOf atlas task with
+        match creepAt atlas creep, actionTilesOf atlas task with
         | Some(creepRoom, creepPos), Some(_, targetTiles) ->
             if not (walkableAt (weightsOf atlas creepRoom) creepPos) then
                 targetTiles |> List.exists (fun target -> range creepPos target <= actionRange)
@@ -2701,11 +2728,11 @@ let refillTarget
         let hungry = RefillCluster.hungry cluster
 
         let inReach =
-            match actionOn task, Map.tryFind creep atlas.CreepAt with
+            match actionOn task, creepAt atlas creep with
             | Some(_, actionRange), Some(creepRoom, creepPos) ->
                 hungry
                 |> List.choose (fun id ->
-                    match Map.tryFind id atlas.TargetAt with
+                    match targetAt atlas id with
                     | Some(room, tile) when room = creepRoom && range creepPos tile <= actionRange ->
                         Some(range creepPos tile, id)
                     | _ -> None)
@@ -2736,7 +2763,7 @@ let private firstStepVia
     (creep: string)
     (goalTiles: Set<RoomPos>)
     : RoomPos option =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | None -> None
     | Some(room, pos) ->
         // The creep's own room's share, for the reason `pricedPathTo`
@@ -2885,7 +2912,7 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 /// has to decide; `AtlasCrossRoomTests` pins the divergence, so closing it turns
 /// a test red rather than passing unnoticed.
 let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
-    match Map.tryFind creep atlas.CreepAt with
+    match creepAt atlas creep with
     | Some(creepRoom, from) when creepRoom <> room ->
         // The **next** room of the chain and not the goal (ADR 0058): what a
         // creep crossing toward a room two hops out can aim at is the border
