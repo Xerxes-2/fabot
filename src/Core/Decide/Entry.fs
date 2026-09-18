@@ -44,29 +44,35 @@ let censusSignature (view: ColonyView) : string =
     let spatial = view.Spatial
     let home = SpatialInfo.homeName spatial
 
-    // One join for both halves: a target is read wherever the
-    // projection places it, standing or pending alike, because both halves
-    // move a grid the memo holds an answer off.
-    let census select =
-        spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, kind) ->
-            select kind
-            |> Option.bind (fun (built: BuiltKind) ->
-                SpatialInfo.placementOf spatial id
-                |> Option.map (fun tile -> $"{built}@{tile.Room}:{tile.X},{tile.Y}")))
-        |> List.sort
-        |> String.concat ";"
+    // One walk for the three id-keyed halves: each room's placed ids, each
+    // looked up once in the flat kind census, sorted per half afterwards — so
+    // the strings are the same strings in the same order as three walks of
+    // the census with a placement search per id used to build, because one
+    // object stands in one room (ADR 0041) and a placed id reaches exactly
+    // one layer. An id placed in a layer but absent from the census is
+    // skipped, as the census-first walk skipped an id the projection placed
+    // nowhere. The old shape was 4% of a `pair --level 7` tick by inclusive
+    // samples (`npm run profile -- 300 40 --scenario pair --level 7`,
+    // 2026-09-18, #370), most of it `placementOf` searching every room per
+    // id; the A/B came back inside the clock's spread, and this ships on the
+    // exactness argument, not on the clock.
+    let standingIds = ResizeArray<string>()
+    let pendingIds = ResizeArray<string>()
+    let mineralIds = ResizeArray<string>()
 
-    let standing =
-        census (function
-            | Structure kind -> Some kind
-            | _ -> None)
+    for KeyValue(room, layer) in spatial.Rooms do
+        for KeyValue(id, tile) in layer.TargetPositions do
+            match Map.tryFind id spatial.TargetKinds with
+            | Some(Structure built) -> standingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
+            | Some(Site built) -> pendingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
+            | Some Mineral -> mineralIds.Add $"Mineral@{room}:{tile.X},{tile.Y}"
+            | _ -> ()
 
-    let pending =
-        census (function
-            | Site kind -> Some kind
-            | _ -> None)
+    let joined (ids: ResizeArray<string>) =
+        ids |> List.ofSeq |> List.sort |> String.concat ";"
+
+    let standing = joined standingIds
+    let pending = joined pendingIds
 
     // The Thorium deposits, each on its tile (ADR 0057 decision 1). Signed on
     // ADR 0044's rule that the memo signs the union of its readers: since this
@@ -77,17 +83,7 @@ let censusSignature (view: ColonyView) : string =
     // case and not a hypothetical: the mod deletes an exhausted Thorium deposit
     // outright, and unsigned, the memo would keep handing back a plan naming a
     // container on the Seat of a rock that is gone.
-    let minerals =
-        spatial.TargetKinds
-        |> Map.toList
-        |> List.choose (fun (id, kind) ->
-            match kind with
-            | Mineral ->
-                SpatialInfo.placementOf spatial id
-                |> Option.map (fun tile -> $"Mineral@{tile.Room}:{tile.X},{tile.Y}")
-            | _ -> None)
-        |> List.sort
-        |> String.concat ";"
+    let minerals = joined mineralIds
 
     // The tiles another player's construction sites hold (#248), named the way
     // ADR 0044's consequence names every census input — `{kind}@{room}:{x},{y}`

@@ -500,7 +500,11 @@ control flow around it, and the one change that *did* move it (#278's flat
   wrong; and the pool's two census walks read the inverted census
   (`Atlas.idsOfKind`) — `pair` 2.63–2.69 → 2.59–2.62, spreads adjacent, under
   the page's own bar and shipped on the reading that the same ids in the
-  same order cannot cost more than a walk of the census.
+  same order cannot cost more than a walk of the census. Two more under the
+  bar and shipped the same way: the census signature built in one walk over
+  the placed ids (its share 4.0% → 3.1%), and `partsOf` counted in one pass
+  (the sweep 12.3% → 9.6% of the pair tick) — whole tick 3.26–3.52 →
+  3.27–3.34 ms, decide unmoved.
 
 The baseline moved with the world it measures, and older numbers do not
 compare with today's: #144 furnished the room and derived the fleet; #163

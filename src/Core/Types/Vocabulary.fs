@@ -26,7 +26,48 @@ type BodyPart =
 /// living creep alike (ADR 0006). Two spellings of "how many of this part" is
 /// how a rule written for both drifts: the row predicates in `Decide.Bodies`
 /// were six arms each in two representations, kept in step by hand.
-let partsOf (body: BodyPart list) : Map<BodyPart, int> = body |> List.countBy id |> Map.ofList
+///
+/// Counted in one pass over eight counters and folded into the map from the
+/// kinds that occur, rather than through `List.countBy`, which hashes each
+/// part structurally into a table and then builds the map anyway: the shell
+/// counts every living body this way every tick, and that was 3% of a `pair
+/// --level 7` tick by inclusive samples (`npm run profile -- 300 40 --scenario
+/// pair --level 7`, 2026-09-18, #370); the A/B on the whole tick came back
+/// inside the clock's spread, so this ships on the map being the same map — a
+/// kind occurs in it with its count, or not at all — and not on the clock.
+let partsOf (body: BodyPart list) : Map<BodyPart, int> =
+    let mutable work = 0
+    let mutable carry = 0
+    let mutable move = 0
+    let mutable attack = 0
+    let mutable ranged = 0
+    let mutable heal = 0
+    let mutable claim = 0
+    let mutable tough = 0
+
+    for part in body do
+        match part with
+        | Work -> work <- work + 1
+        | Carry -> carry <- carry + 1
+        | Move -> move <- move + 1
+        | Attack -> attack <- attack + 1
+        | RangedAttack -> ranged <- ranged + 1
+        | Heal -> heal <- heal + 1
+        | Claim -> claim <- claim + 1
+        | Tough -> tough <- tough + 1
+
+    [
+        Work, work
+        Carry, carry
+        Move, move
+        Attack, attack
+        RangedAttack, ranged
+        Heal, heal
+        Claim, claim
+        Tough, tough
+    ]
+    |> List.filter (fun (_, count) -> count > 0)
+    |> Map.ofList
 
 /// How many of one part a counted body holds — 0 for one it has none of,
 /// which is the reading every body rule wants: a body with no CLAIM is a body
