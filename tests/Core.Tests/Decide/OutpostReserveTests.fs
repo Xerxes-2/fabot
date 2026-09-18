@@ -792,7 +792,6 @@ let standDownGateTests =
                                 Walks = withoutLook.Memo.Walks
                                 SeamWalks = withoutLook.Memo.SeamWalks
                                 FarFields = withoutLook.Memo.FarFields
-                                TrafficFarFields = withoutLook.Memo.TrafficFarFields
                             }
                     }
                     withoutLook

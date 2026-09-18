@@ -464,6 +464,10 @@ let internal floodFrom weights occupied stepPrices (start: Pos) =
 /// clock is blind to it and counts whole ticks (ADR 0029), and the baseline
 /// counts half-ticks with the crowd taken out (ADR 0030). The one place the
 /// pair is laid side by side, so no flood can take one half without the other.
+///
+/// `TravelCost` and `Baseline` must go on sharing a step table, because
+/// `Atlas.farFieldAlong` files the far field of both under one key, so the
+/// field flooded for either is the field read back by the other.
 let internal pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Pricing) =
     match pricing with
     | TravelCost -> stepTable (stepUnits factor), occupied
@@ -518,8 +522,12 @@ let internal entryCost
 /// origin: cheapest cost from every tile of the room to the nearest goal,
 /// counting the step onto the tile it is read at and the step onto the goal it
 /// ends on (ADR 0041).
-let internal floodPricedInto weights occupied factor pricing (goals: Pos list) : int[] =
-    let stepPrices, traffic = pricingOf occupied factor pricing
+///
+/// Over empty ground always, and no occupancy argument to say otherwise: its
+/// one caller is the far leg of a cross-room price, which since ADR 0070
+/// prices no standing crowd under any pricing.
+let internal floodPricedInto weights factor pricing (goals: Pos list) : int[] =
+    let stepPrices, traffic = pricingOf noTraffic factor pricing
 
     goals
     |> List.choose (fun goal ->

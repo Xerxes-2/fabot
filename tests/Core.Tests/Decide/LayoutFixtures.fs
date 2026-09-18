@@ -334,7 +334,6 @@ let sentinelMemo snapshot =
         Walks = WalkTable()
         SeamWalks = SeamWalkTable()
         FarFields = FarFieldTable()
-        TrafficFarFields = FarFieldTable()
     }
 
 /// Two rooms whose coordinates collide on purpose (ADR 0041). At home:

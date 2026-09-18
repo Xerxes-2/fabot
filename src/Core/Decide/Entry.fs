@@ -194,16 +194,18 @@ let decideUnarbitrated
         | None -> WalkTable()
 
     // The far legs of every cross-room price, on the same terms as the walks
-    // above and for the same reason (ADR 0032,
+    // above and for the same reason (ADR 0032, ADR 0070,
     // `docs/research/cpu-headroom.md` §5.1): they are a pure function of the
-    // chain's walking grids and Seam bands — which the census signature signs
-    // — and, for the traffic-aware pricing, of the crowd standing along the
-    // chain, which the key's own occupancy sign names. So both tables are
-    // recalled with the walks and dropped with them, because all three are
-    // stale under exactly the same condition; the traffic-aware one is
-    // recalled from the tick *before* this one and re-filled here, since its
-    // keys move with the crowd and a table of every crowd a colony ever stood
-    // in would grow with the clock.
+    // chain's walking grids and Seam bands, which the census signature signs,
+    // and of nothing else — the far leg prices no standing crowd under any
+    // pricing, so nothing here is keyed on the crowd. What crosses this line
+    // is the far fields whose **origins** the census signs as well, which is
+    // every ask derived from a Task; an ask the decision layer narrowed for
+    // itself — a Guard's ring off this tick's Threats — keys on tiles that
+    // move every tick, and rides the Atlas's own per-tick table instead
+    // (`Atlas.TickFarFields`). Both tables here are recalled with the walks
+    // and dropped with them, because all three are stale under exactly the
+    // same condition.
     let farFields =
         {
             SeamWalks =
@@ -214,11 +216,6 @@ let decideUnarbitrated
                 match recalled with
                 | Some m -> m.FarFields
                 | None -> FarFieldTable()
-            LastTick =
-                match recalled with
-                | Some m -> m.TrafficFarFields
-                | None -> FarFieldTable()
-            ThisTick = FarFieldTable()
         }
 
     let atlas = Atlas.ofViewRecalling walks farFields view
@@ -233,19 +230,18 @@ let decideUnarbitrated
     // the plan is owed and the next turn pays it.
     let plan =
         match recalled with
-        // The recalled memo goes on whole but for the one table that is a
-        // fact of the tick rather than of the census: what goes forward is
-        // the table *this* tick filled, so the next tick reads this tick's
-        // crowd and not the one before it.
-        | Some m ->
-            { m with
-                TrafficFarFields = farFields.ThisTick
-            }
-        // A colony whose turn has not come (#357) carries the same table
-        // forward for the same reason: the plan it serves is old on purpose,
-        // but the crowd it priced against is this tick's, and a deferred
-        // colony that handed on last tick's table would stop the carry dead
-        // on every turn it skipped.
+        // The recalled memo goes on whole: its three tables are the tables
+        // this tick filled — the Atlas was handed them and writes into them —
+        // and every one of them is the census's, so nothing here is a fact of
+        // the tick that has to be swapped out at the boundary (ADR 0070).
+        | Some m -> m
+        // A colony whose turn has not come (#357) serves its stale plan but
+        // carries the tick's own tables on it: a deferred colony declines to
+        // plan, not to price, and the tables it filled this tick are worth
+        // exactly what any other tick's are.
+        //
+        // The tables are this tick's while the signature on them is the stale
+        // plan's, which is #372's shape and not this change's to fix.
         | None when turn = ReplanTurn.Waiting ->
             match memo with
             | Some stale ->
@@ -253,10 +249,8 @@ let decideUnarbitrated
                     Walks = walks
                     SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
-                    TrafficFarFields = farFields.ThisTick
                 }
-            | None ->
-                PlanMemo.deferred walks farFields.SeamWalks farFields.PerCensus farFields.ThisTick
+            | None -> PlanMemo.deferred walks farFields.SeamWalks farFields.PerCensus
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -276,7 +270,6 @@ let decideUnarbitrated
                 Walks = walks
                 SeamWalks = farFields.SeamWalks
                 FarFields = farFields.PerCensus
-                TrafficFarFields = farFields.ThisTick
             }
 
     // The tick's Threats, derived once off the view's hostiles and the

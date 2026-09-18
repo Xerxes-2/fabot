@@ -658,21 +658,11 @@ let planMemoTests =
                     [ "W1N1", { X = 1; Y = 1 }, Tower ]
                     "the memo's site Intents pass through, nothing recomputes"
 
-                Expect.equal
-                    { decision.Memo with
-                        TrafficFarFields = memo.TrafficFarFields
-                    }
-                    memo
-                    "the memo rides out unchanged for next tick"
-
-                // The one field a reused memo cannot carry over verbatim: the
-                // traffic-aware far fields are keyed on where creeps stood
-                // when they were flooded, so what goes forward is the table
-                // *this* tick filled and never the one before it
-                // (`docs/research/cpu-headroom.md` §5.1).
-                Expect.isFalse
-                    (obj.ReferenceEquals(decision.Memo.TrafficFarFields, memo.TrafficFarFields))
-                    "but for the table that holds this tick's own crowd, which is replaced"
+                // Verbatim, field for field: every table on it is the census's
+                // and every one of them is the table this tick's Atlas was
+                // handed and wrote into, so there is nothing on a reused memo
+                // that has to be swapped out at the tick boundary (ADR 0070).
+                Expect.equal decision.Memo memo "the memo rides out unchanged for next tick"
             }
 
             test "an added structure invalidates the memo" {
@@ -958,14 +948,14 @@ let planMemoTests =
             }
 
             test "the far fields ride the memo on the walk table's own terms" {
-                // `docs/research/cpu-headroom.md` §5.1: the traffic-blind far
-                // leg of a cross-room price reads the chain's walking grids
-                // and its Seam bands and nothing else, so it is recalled and
-                // dropped under exactly the condition the spawn walks are
-                // (ADR 0032). One seam and one signature for both tables,
-                // which is why this pins the lifetime here and leaves the
-                // field's contents to the Atlas suite, where a border is
-                // cheap to draw.
+                // `docs/research/cpu-headroom.md` §5.1: the far leg of a
+                // cross-room price reads the chain's walking grids and its
+                // Seam bands and nothing else — under every pricing, since
+                // ADR 0070 — so it is recalled and dropped under exactly the
+                // condition the spawn walks are (ADR 0032). One seam and one
+                // signature for both tables, which is why this pins the
+                // lifetime here and leaves the field's contents to the Atlas
+                // suite, where a border is cheap to draw.
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
 
                 let first = decideOn (staffed (trunkColony 2))
@@ -1060,10 +1050,6 @@ let planMemoTests =
                     blind.Memo.Signature
                     ""
                     "the signature is empty, which no census signature is"
-
-                Expect.isFalse
-                    (obj.ReferenceEquals(blind.Memo.TrafficFarFields, blind.Memo.FarFields))
-                    "and the tick's own two tables ride it apart: a colony that declines to plan has still priced"
 
                 let paid = decideOn (staffed (trunkColony 2))
 

@@ -505,6 +505,18 @@ control flow around it, and the one change that *did* move it (#278's flat
   the placed ids (its share 4.0% → 3.1%), and `partsOf` counted in one pass
   (the sweep 12.3% → 9.6% of the pair tick) — whole tick 3.26–3.52 →
   3.27–3.34 ms, decide unmoved.
+- **2026-09-18, ADR 0070 (the far leg of a cross-room price is traffic-blind).**
+  The far field now floods over empty ground under every pricing, so it rides
+  the census memo whole and `TravelCost`/`Baseline` share one entry. **The
+  harness cannot measure this one**: its worlds are frozen, so no body ever
+  moves and no far key was ever re-keyed by a crowd in them — the report diff
+  is the check that the decisions move only where the ADR says they may, not a
+  reading: `pair --level 7` identical, and in `outpost` one hauler pair swapped
+  containers, a cross-room near-tie the far leg's surcharge had been breaking.
+  The live
+  `decide` line is the reading, taken with the intent count beside it: the
+  probe on #370 counted about five far re-floods a tick, 9,464 heap pops, a
+  third of every flood the tick ran, and that is what should vanish.
 
 The baseline moved with the world it measures, and older numbers do not
 compare with today's: #144 furnished the room and derived the fleet; #163

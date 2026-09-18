@@ -50,7 +50,7 @@ let invaderCoreTests =
                 // and recompute from scratch anyway.
                 //
                 // Three fields of the memo cannot ride the record comparison:
-                // `Walks`, `FarFields` and `TrafficFarFields` are the mutable
+                // `Walks`, `SeamWalks` and `FarFields` are the mutable
                 // `Dictionary`s the Atlas fills through the tick, and a
                 // Dictionary compares by reference, so two floods of identical
                 // walks are unequal on them for a reason that has nothing to
@@ -62,14 +62,17 @@ let invaderCoreTests =
                     |> List.ofSeq
                     |> List.sortBy fst
 
-                let rowsOf (table: FarFieldTable) =
-                    table
+                let seamRows (memo: PlanMemo) =
+                    memo.SeamWalks
                     |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
                     |> List.ofSeq
                     |> List.sortBy fst
 
                 let farRows (memo: PlanMemo) =
-                    rowsOf memo.FarFields, rowsOf memo.TrafficFarFields
+                    memo.FarFields
+                    |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
+                    |> List.ofSeq
+                    |> List.sortBy fst
 
                 let unchangedWith label cores =
                     let threatened = decideOn { colony with InvaderCores = cores }
@@ -81,7 +84,6 @@ let invaderCoreTests =
                                     Walks = untroubled.Memo.Walks
                                     SeamWalks = untroubled.Memo.SeamWalks
                                     FarFields = untroubled.Memo.FarFields
-                                    TrafficFarFields = untroubled.Memo.TrafficFarFields
                                 }
                         }
                         untroubled
@@ -91,6 +93,11 @@ let invaderCoreTests =
                         (walkRows threatened.Memo)
                         (walkRows untroubled.Memo)
                         $"{label}: the same spawn walks flooded under it"
+
+                    Expect.equal
+                        (seamRows threatened.Memo)
+                        (seamRows untroubled.Memo)
+                        $"{label}: the same Seam walks beside them"
 
                     Expect.equal
                         (farRows threatened.Memo)
@@ -180,7 +187,6 @@ let invaderCoreTests =
                                 Walks = rivalHeld.Memo.Walks
                                 SeamWalks = rivalHeld.Memo.SeamWalks
                                 FarFields = rivalHeld.Memo.FarFields
-                                TrafficFarFields = rivalHeld.Memo.TrafficFarFields
                             }
                     }
                     rivalHeld

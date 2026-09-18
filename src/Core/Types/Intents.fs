@@ -142,8 +142,12 @@ type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * str
 ///
 /// The split that matters to every reader of it is **traffic**: `TravelCost`
 /// prices this tick's standing creeps and the other two are blind to them
-/// (`Grid.pricingOf` substitutes `noTraffic`), which is what decides whether
-/// an answer may outlive the tick that computed it.
+/// (`Grid.pricingOf` substitutes `noTraffic`). Since ADR 0070 that split is
+/// the **near** leg's alone — the creep's own flood, the one whose crowd it
+/// will meet in the next few ticks and the one its first step is read off.
+/// The far leg of a cross-room price floods over empty ground under every
+/// pricing, so no far field reads a creep's tile and every one of them may
+/// outlive the tick that computed it.
 type Pricing =
     /// Travel cost's units — half-ticks, floored at one unit a step, with
     /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
@@ -180,20 +184,21 @@ type Pricing =
 /// is a field that cannot have.
 ///
 /// The key is the field's whole derivation: the chain of rooms, the Task and
-/// whether the body is Work-heavy, the fatigue factor, the pricing, the
-/// **origins** the flood is seeded from — that one because two callers hand
-/// different ones under the same Task (#358) — and the **standing traffic**
-/// the flood priced, as `Atlas`' occupancy sign spells it: the occupied tiles
-/// of every room of the chain, in one string, and the empty string for the
-/// two traffic-blind pricings, which read no occupancy at all
-/// (`Grid.pricingOf` substitutes `noTraffic`).
+/// whether the body is Work-heavy, the fatigue factor, the pricing, and the
+/// **origins** the flood is seeded from — that last one because two callers
+/// hand different ones under the same Task (#358).
 ///
-/// A traffic-blind field therefore keys on the census alone and a
-/// traffic-aware one keys on this tick's crowd as well, which is what decides
-/// the lifetime of each — `FarFieldMemo` below is where that split is spelled.
+/// Nothing about a creep's tile is in it, and nothing needs to be: since ADR
+/// 0070 the far leg floods over empty ground under every pricing, so a field
+/// is a function of the census and of nothing else. The pricing that reaches
+/// the key is **normalised** with it — `TravelCost` and `Baseline` differ in
+/// traffic and in nothing else (ADR 0030), so with the traffic gone they are
+/// one field, filed and read under the `TravelCost` entry
+/// (`Atlas.farFieldAlong`). Every field in here therefore keys on the census
+/// alone and lives exactly as long as the census does.
 type FarFieldTable =
     System.Collections.Generic.Dictionary<
-        string list * Task * bool * FatigueFactor * Pricing * Pos list * string,
+        string list * Task * bool * FatigueFactor * Pricing * Pos list,
         int[]
      >
 
@@ -209,16 +214,16 @@ type FarFieldTable =
 type SeamWalkTable = System.Collections.Generic.Dictionary<string * string, int[]>
 
 /// The tables an Atlas prices its cross-room legs out of and the census memo
-/// recalls: the three far-field tables, one per **lifetime** — which is the
-/// only thing that distinguishes them, so they are named for it and not for a
-/// caller (`docs/research/cpu-headroom.md` §5.1, §5.3) — and beside them the
-/// Seam walks, the near half of a cross-room price with the far leg left off,
-/// which share the census's lifetime and are told apart by what they hold.
+/// recalls: the far fields, and beside them the Seam walks — the near half of
+/// a cross-room price with the far leg left off. **One** lifetime between
+/// them, the census's, which is what ADR 0070 bought: the far leg prices no
+/// traffic under any pricing, so there is no longer a table whose keys move
+/// with the crowd and no tick-long carry to bound one.
 ///
-/// A record and not four arguments of one type, because three
-/// `FarFieldTable`s in a row is a swap the compiler cannot see: laying the
-/// tick's table where the census's belongs would hold this tick's traffic
-/// forever and read as a stale travel cost, never as an error.
+/// A record still, and not two bare arguments: it is the one name the whole
+/// far side of a cross-room price is handed around under — into the Atlas,
+/// back out onto the plan memo — and it is where a reader meets the rule the
+/// two tables share (`docs/research/cpu-headroom.md` §5.1, §5.3).
 type FarFieldMemo =
     {
         /// The Seam walks flooded under this census signature (ADR 0032):
@@ -229,31 +234,29 @@ type FarFieldMemo =
         /// reads is the census's: the room's walking grid, its Seam band, and
         /// a planning body that is a constant.
         SeamWalks: SeamWalkTable
-        /// The traffic-blind fields (`Walk`, `Baseline`), held while the
-        /// census signature stands (ADR 0032). Grows with the census: the
-        /// chains a colony's declarations reach over, times the Tasks at the
-        /// end of them.
-        PerCensus: FarFieldTable
-        /// The traffic-aware fields (`TravelCost`) the **previous** tick
-        /// flooded, read here and never written. An entry is readable only
-        /// under a key naming the same standing traffic, so a crowd that
-        /// moved is a miss rather than a stale number.
-        LastTick: FarFieldTable
-        /// The traffic-aware fields **this** tick floods — every one it
-        /// recalls from `LastTick` included, so an answer stays alive as long
-        /// as it goes on being asked for. Handed to the next tick on the plan
-        /// memo, where it becomes that tick's `LastTick`.
+        /// The far fields, every pricing's, held while the census signature
+        /// stands (ADR 0032, ADR 0070). Grows with the census: the chains a
+        /// colony's declarations reach over, times the Tasks at the end of
+        /// them — and no longer with the crowd, which since ADR 0070 no far
+        /// field prices.
         ///
-        /// One tick of carry and not an unbounded table, because a key
-        /// carrying the crowd's position is a key that moves when the crowd
-        /// does: a table holding every one of them would grow with the ticks
-        /// where this one is bounded by what a single tick asks.
-        ThisTick: FarFieldTable
+        /// Task-derived **origins** only, which is what keeps that true: an
+        /// ask the decision layer narrowed for itself — a Guard's ring cut out
+        /// of this tick's Threats — keys on tiles that move every tick, and
+        /// under a census that has not moved would mint a key a tick here with
+        /// nothing to evict it. Those ride the Atlas's per-tick table instead
+        /// (`Atlas.TickFarFields`, `Atlas.farFieldAlong`).
+        ///
+        /// The name survives ADR 0070 rather than being kept out of habit:
+        /// what it says — this field lives exactly as long as the census —
+        /// used to tell one of the three tables from the other two, and is now
+        /// simply every far field's lifetime.
+        PerCensus: FarFieldTable
     }
 
 [<RequireQualifiedAccess>]
 module FarFieldMemo =
-    /// Three empty tables: the Atlas of a caller holding no memo at all — a
+    /// Two empty tables: the Atlas of a caller holding no memo at all — a
     /// test, or a one-off. A function and never a value, because a table
     /// shared by two parallel test lists is two threads writing one
     /// `Dictionary` (#310, `AGENTS.md` § Code hygiene).
@@ -261,8 +264,6 @@ module FarFieldMemo =
         {
             SeamWalks = SeamWalkTable()
             PerCensus = FarFieldTable()
-            LastTick = FarFieldTable()
-            ThisTick = FarFieldTable()
         }
 
 /// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
@@ -402,18 +403,12 @@ type PlanMemo =
         /// The Seam walks flooded under this signature, on the same terms as
         /// `Walks` and for the same reason (`SeamWalkTable`).
         SeamWalks: SeamWalkTable
-        /// The traffic-blind far fields flooded under this signature, filled
-        /// through the tick by that same Atlas — `Walks`' rule one query over
-        /// (`docs/research/cpu-headroom.md` §5.1).
+        /// The far fields flooded under this signature, filled through the
+        /// tick by that same Atlas — `Walks`' rule one query over
+        /// (`docs/research/cpu-headroom.md` §5.1). Every pricing's since ADR
+        /// 0070: the far leg reads no creep's tile, so there is one table
+        /// here and it rides the signature like the two above it.
         FarFields: FarFieldTable
-        /// The traffic-aware far fields this tick flooded, for the next tick
-        /// to read under a key naming the same crowd (`FarFieldMemo.ThisTick`
-        /// above, `docs/research/cpu-headroom.md` §5.1). It rides the
-        /// signature with the two tables above it because a moved census is a
-        /// moved walking grid, which stales a priced field whatever the crowd
-        /// is doing; it is replaced every tick rather than added to, because
-        /// its keys move with the crowd.
-        TrafficFarFields: FarFieldTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -452,17 +447,15 @@ module PlanMemo =
     /// and a hauler row of zero casts no body rather than dismissing one. What
     /// is lost is one tick of *new* placement per colony per turn — measured
     /// against a tick that the engine kills outright.
-    /// The four tables are handed in and not defaulted, because every one of
+    /// The three tables are handed in and not defaulted, because every one of
     /// them is a fact this tick paid for: a deferred colony declines to
     /// **plan**, not to price. Handing in an empty table here would throw away
-    /// the tick's own walks, Seam walks and far fields, and handing in last tick's
-    /// traffic-aware table would stop that carry dead on every turn a colony
-    /// skips (ADR 0032, `docs/research/cpu-headroom.md`).
+    /// the tick's own walks, Seam walks and far fields (ADR 0032,
+    /// `docs/research/cpu-headroom.md`).
     let deferred
         (walks: WalkTable)
         (seamWalks: SeamWalkTable)
         (farFields: FarFieldTable)
-        (trafficFarFields: FarFieldTable)
         : PlanMemo =
         {
             Signature = ""
@@ -477,5 +470,4 @@ module PlanMemo =
             Walks = walks
             SeamWalks = seamWalks
             FarFields = farFields
-            TrafficFarFields = trafficFarFields
         }

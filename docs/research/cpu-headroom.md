@@ -314,6 +314,14 @@ a different decision?
 
 ### 5.1 Hold the far field across ticks — **the big one**
 
+> **Superseded by ADR 0070 (2026-09-18).** The split this section turns on —
+> `TravelCost` keyed on the crowd along the chain and held one tick, the
+> traffic-blind pricings keyed on the census and held while it stands — is
+> gone. The far leg prices no traffic under any pricing, so there is one
+> table, one lifetime (the census's), and one entry shared by `TravelCost`
+> and `Baseline`. Read below for the measurement and the mechanism, not for
+> the shape of the memo.
+
 **What.** `farFieldAlong`'s memo is `atlas.FarFields`, a `Dictionary` rebuilt
 with the Atlas every tick (`Atlas.fs:377`). Every tick therefore re-floods the
 same four reserve chains under the same two pricings. But the far field is a

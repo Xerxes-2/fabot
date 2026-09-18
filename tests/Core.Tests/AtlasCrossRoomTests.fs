@@ -480,15 +480,55 @@ let crossRoomTests =
                     "and the caller's own tile is priced to itself, not to the Seat behind it"
             }
 
-            test
-                "the traffic-blind far field rides the census table; the traffic-aware one never does" {
-                // `docs/research/cpu-headroom.md` §5.1: every input of a far
-                // field under `Walk` or `Baseline` is in the census — the
-                // chain's walking grids and its Seam bands — so it rides the
-                // plan memo across the tick boundary exactly as the spawn
-                // walk table does (ADR 0032). `TravelCost` prices this tick's
-                // standing creeps, which no census signs, so it is filed in a
-                // table of its own — the one the case below follows.
+            test "caller-narrowed origins ride the tick's table, never the census's" {
+                // The other side of the key above. Origins the *Task* derives
+                // are signed by the census signature, so their field may be
+                // held for as long as it stands; origins the decision layer
+                // narrowed are not — a Guard's ring is cut out of this tick's
+                // `Threats`, which move every tick (ADR 0033, ADR 0056). Filed
+                // in the census-held table, a moving goal set under a census
+                // that has not moved mints a whole chain's field every tick
+                // and nothing ever evicts it. So `crossingToward` files into
+                // the Atlas's own per-tick table, which goes with the Atlas.
+                let snapshot () =
+                    northOfSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let held = FarFieldMemo.empty ()
+
+                // Eight ticks of a goal set that moves one tile a tick, each
+                // over its own Atlas and all eight under one census.
+                for y in 41..48 do
+                    let atlas = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                    Expect.isSome
+                        (travelCostToward
+                            atlas
+                            "w"
+                            (Harvest "src-out")
+                            "W1N2"
+                            (Set.singleton (at "W1N2" { X = 25; Y = y })))
+                        "the crossing is still priced, off the tick's own table"
+
+                Expect.equal
+                    held.PerCensus.Count
+                    0
+                    "eight ticks of a moving goal set leave the census-held table empty"
+            }
+
+            test "every far field rides the census table, whatever the pricing" {
+                // `docs/research/cpu-headroom.md` §5.1 and ADR 0070: every
+                // input of a far field is in the census — the chain's walking
+                // grids and its Seam bands — under **every** pricing, because
+                // the far leg floods over empty ground under every one of
+                // them. So every far field rides the plan memo across the tick
+                // boundary exactly as the spawn walk table does (ADR 0032),
+                // and there is one table rather than three.
                 let snapshot () =
                     northOfSnapshot
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -503,14 +543,12 @@ let crossRoomTests =
                 // The walk files two fields and not one: the far room's, the
                 // suffix its own recursion bottoms out at, and the same field
                 // carried one hop further into the creep's room, which is
-                // what the walk is read off (`pricedOffField`). Both are the
-                // census's, so both ride this table; the ranking price's own
-                // far field is the tick's and rides the table below.
-                let fieldOver (chain: string list) =
+                // what the walk is read off (`pricedOffField`).
+                let fieldOver (pricing: Pricing) (chain: string list) =
                     held.PerCensus
                     |> Seq.filter (fun entry ->
-                        let filed, _, _, _, _, _, _ = entry.Key
-                        filed = chain)
+                        let filed, _, _, _, priced, _ = entry.Key
+                        filed = chain && priced = pricing)
                     |> Seq.map (fun entry -> entry.Value)
                     |> Seq.exactlyOne
 
@@ -526,8 +564,8 @@ let crossRoomTests =
                     2
                     "and leaves the far field in the table it was handed, beside its carry into the creep's room"
 
-                let flooded = fieldOver [ "W1N2" ]
-                let carried = fieldOver [ "W1N1"; "W1N2" ]
+                let flooded = fieldOver Walk [ "W1N2" ]
+                let carried = fieldOver Walk [ "W1N1"; "W1N2" ]
 
                 Expect.equal
                     (travelCost first "w" (Harvest "src-out"))
@@ -536,10 +574,28 @@ let crossRoomTests =
 
                 Expect.equal
                     held.PerCensus.Count
-                    2
-                    "and adds nothing here: a field that prices traffic is not signed by the census"
+                    3
+                    "and files its own far field in the same table: it prices no crowd, so the census signs it too"
 
-                Expect.equal held.ThisTick.Count 1 "it goes to the tick's own table instead"
+                let ranked = fieldOver TravelCost [ "W1N2" ]
+
+                // The other half of ADR 0070's collapse: `Baseline` is
+                // `TravelCost` over empty ground and the far leg is over empty
+                // ground either way, so the two are one field. The key is
+                // normalised onto `TravelCost` and the reroute attribution's
+                // own route reads the entry the ranking price filed.
+                Expect.isSome
+                    (firstStepBlindFor first "w" (Harvest "src-out"))
+                    "the traffic-blind route crosses the same border"
+
+                Expect.equal
+                    held.PerCensus.Count
+                    3
+                    "and files nothing: the Baseline far leg is the TravelCost one, key and array"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(fieldOver TravelCost [ "W1N2" ], ranked))
+                    "the same array, read under the ranking price's own key"
 
                 let second = snapshot () |> ofViewRecalling (WalkTable()) held
 
@@ -548,11 +604,17 @@ let crossRoomTests =
                     (Some 18)
                     "the recalled field prices the same walk"
 
-                Expect.equal held.PerCensus.Count 2 "no second entry under the same keys"
+                Expect.equal
+                    (travelCost second "w" (Harvest "src-out"))
+                    (Some 36)
+                    "and the recalled ranking field the same crossing"
+
+                Expect.equal held.PerCensus.Count 3 "no second entry under the same keys"
 
                 Expect.isTrue
-                    (obj.ReferenceEquals(fieldOver [ "W1N2" ], flooded)
-                     && obj.ReferenceEquals(fieldOver [ "W1N1"; "W1N2" ], carried))
+                    (obj.ReferenceEquals(fieldOver Walk [ "W1N2" ], flooded)
+                     && obj.ReferenceEquals(fieldOver Walk [ "W1N1"; "W1N2" ], carried)
+                     && obj.ReferenceEquals(fieldOver TravelCost [ "W1N2" ], ranked))
                     "the second Atlas read the first's fields rather than running its own"
 
                 // The other half of the seam, the tick the census moves: a
@@ -566,7 +628,12 @@ let crossRoomTests =
                     (Some 18)
                     "an empty table is flooded into, and prices the walk identically"
 
-                Expect.equal fresh.PerCensus.Count 2 "the fields it ran are left in it"
+                Expect.equal
+                    (travelCost dropped "w" (Harvest "src-out"))
+                    (Some 36)
+                    "and prices the crossing identically"
+
+                Expect.equal fresh.PerCensus.Count 3 "the fields it ran are left in it"
             }
 
             test "the Seam walk rides the census table, like the walks and the far fields" {
@@ -624,89 +691,116 @@ let crossRoomTests =
                 Expect.equal fresh.SeamWalks.Count 1 "the flood it ran is left in it"
             }
 
-            test "the traffic-aware far field is recalled for as long as the crowd stands still" {
-                // The other half of `docs/research/cpu-headroom.md` §5.1: a
-                // `TravelCost` field reads the census *and* the tiles creeps
-                // stand on along the chain, so it is keyed on both and rides
-                // one tick forward on the plan memo. The corridor is one tile
-                // wide, so a body standing in it is a body every crossing
-                // walks through: the surcharge is in the number, and a field
-                // recalled when it should not be would be visible as the old
-                // number rather than as a slow tick.
-                let snapshot (blocker: Pos) =
+            test "the far leg is blind to a crowd standing on it; the near leg is not" {
+                // ADR 0070's pin. The corridor is one tile wide, so a body
+                // standing in it is a body every path walks through — and the
+                // far leg walks through it without paying: `carriedAcross`,
+                // `foldChain` and `chainedInto` all price `noTraffic`, under
+                // every pricing. What ADR 0008's surcharge still buys is the
+                // **near** leg, the creep's own flood over the room it is
+                // walking now, and the same body standing in the home corridor
+                // costs the same ten (`Grid.occupancyPenalty`, which is
+                // `Engine.swampWeight` — ADR 0008 as #225 amends it).
+                let snapshot homeCreeps outCreeps names =
                     northOfSnapshot
-                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        (corridorHome homeCreeps)
                         [ { X = 25; Y = 0 }, Plain ]
                         { corridorOutpost with
-                            CreepPositions = Map.ofList [ "out", blocker ]
+                            CreepPositions = Map.ofList outCreeps
                         }
                         [ { X = 25; Y = 49 }, Plain ]
                         [ "src-out", Source ]
+                        names
+
+                // In the far corridor, on the walk down to the Seat, so every
+                // path the far leg is taken over runs through it.
+                let farCrowd () =
+                    snapshot
+                        [ "w", { X = 25; Y = 10 } ]
+                        [ "out", { X = 25; Y = 45 } ]
                         [ worker "w"; worker "out" ]
 
-                // On the walk down to the Seat, so the crossing pays the
-                // occupancy surcharge for the one tile it cannot go round:
-                // `Grid.occupancyPenalty`, which is `Engine.swampWeight` —
-                // ten (ADR 0008 as #225 amends it).
-                let onTheWay = { X = 25; Y = 45 }
-                // Past the source and off every path the price is taken
-                // over, so the same crowd of one costs nothing.
-                let aside = { X = 25; Y = 30 }
+                // The same one body, fifteen tiles further up the same
+                // one-tile corridor: a crowd that *moved*, which under the old
+                // key was a new field and under this one is not even a new
+                // read.
+                let farCrowdMoved () =
+                    snapshot
+                        [ "w", { X = 25; Y = 10 } ]
+                        [ "out", { X = 25; Y = 30 } ]
+                        [ worker "w"; worker "out" ]
 
-                let carried (memo: FarFieldMemo) =
-                    {
-                        SeamWalks = memo.SeamWalks
-                        PerCensus = memo.PerCensus
-                        LastTick = memo.ThisTick
-                        ThisTick = FarFieldTable()
-                    }
+                // In the creep's own room, between it and the exit.
+                let nearCrowd () =
+                    snapshot
+                        [ "w", { X = 25; Y = 10 }; "home", { X = 25; Y = 5 } ]
+                        []
+                        [ worker "w"; worker "home" ]
 
-                let field (memo: FarFieldMemo) =
-                    memo.ThisTick |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
-
-                let first = FarFieldMemo.empty ()
+                let held = FarFieldMemo.empty ()
 
                 Expect.equal
                     (travelCost
-                        (snapshot onTheWay |> ofViewRecalling (WalkTable()) first)
-                        "w"
-                        (Harvest "src-out"))
-                    (Some 46)
-                    "the premise: the blocked corridor costs the empty one's 36 plus the surcharge"
-
-                let flooded = field first
-                let second = carried first
-
-                Expect.equal
-                    (travelCost
-                        (snapshot onTheWay |> ofViewRecalling (WalkTable()) second)
-                        "w"
-                        (Harvest "src-out"))
-                    (Some 46)
-                    "the next tick prices the same crossing"
-
-                Expect.isTrue
-                    (obj.ReferenceEquals(field second, flooded))
-                    "off the field the last tick flooded, because the key names the same standing crowd"
-
-                let third = carried second
-
-                Expect.equal
-                    (travelCost
-                        (snapshot aside |> ofViewRecalling (WalkTable()) third)
+                        (farCrowd () |> ofViewRecalling (WalkTable()) held)
                         "w"
                         (Harvest "src-out"))
                     (Some 36)
-                    "and the tick the body steps off the way, the surcharge goes with it"
+                    "the body standing in the far corridor costs nothing: the empty corridor's own 36"
 
-                Expect.isFalse
-                    (obj.ReferenceEquals(field third, flooded))
-                    "which is a field of its own: a crowd that moved is a miss, never a stale number"
+                let farFieldHeld () =
+                    held.PerCensus
+                    |> Seq.filter (fun entry ->
+                        let chain, _, _, _, priced, _ = entry.Key
+                        chain = [ "W1N2" ] && priced = TravelCost)
+                    |> Seq.map (fun entry -> entry.Value)
+                    |> Seq.exactlyOne
+
+                let beforeItMoved = farFieldHeld ()
+
+                // The crowd moves, which is the schedule the old key was
+                // rebuilt on: same census, same chain, same Task, a body
+                // fifteen tiles along.
+                let moved = farCrowdMoved () |> ofViewRecalling (WalkTable()) held
 
                 Expect.equal
-                    third.ThisTick.Count
-                    1
-                    "and the tick's table holds what the tick asked for, never a tick's history of crowds"
+                    (travelCost moved "w" (Harvest "src-out"))
+                    (Some 36)
+                    "the body moves and the crossing is the same 36"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(farFieldHeld (), beforeItMoved))
+                    "and off the very field the tick before flooded: a crowd that moves is no more in the key than one that stands"
+
+                // The entry is poisoned in place before the second Atlas reads
+                // it, so an Atlas that flooded a field of its own would answer
+                // 36 again and one that read the handed table answers the
+                // poison: a reference check on a table `memoised` never
+                // overwrites would pass either way.
+                let far = farFieldHeld ()
+
+                let landing = 25 * Engine.roomSide + 48
+                far.[landing] <- far.[landing] + 100
+
+                let second = farCrowd () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (travelCost second "w" (Harvest "src-out"))
+                    (Some 136)
+                    "and the next tick prices the crossing off the field this one flooded, poison and all"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(farFieldHeld (), far))
+                    "the same array, because a crowd that stands still is not in the key and neither is one that moves"
+
+                // And the half ADR 0008 keeps: the same one body, in the room
+                // the creep is walking now, is the ten it always was.
+                Expect.equal
+                    (travelCost
+                        (nearCrowd () |> ofViewRecalling (WalkTable()) (FarFieldMemo.empty ()))
+                        "w"
+                        (Harvest "src-out"))
+                    (Some 46)
+                    "the near leg keeps the surcharge: 36 plus the one occupied tile it cannot go round"
             }
         ]
 
@@ -1769,7 +1863,7 @@ let multiHopTests =
                 let chains () =
                     held.PerCensus
                     |> Seq.map (fun entry ->
-                        let chain, _, _, _, _, _, _ = entry.Key
+                        let chain, _, _, _, _, _ = entry.Key
                         chain)
                     |> List.ofSeq
                     |> List.sortBy List.length
