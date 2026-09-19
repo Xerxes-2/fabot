@@ -65,6 +65,7 @@ let private control owner : RoomControlInfo =
         Owner = owner
         Reservation = None
         SafeMode = false
+        Sign = None
     }
 
 /// One room of a hand-built world: who holds it, the targets standing in

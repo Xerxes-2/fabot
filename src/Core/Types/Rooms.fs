@@ -277,6 +277,18 @@ type RoomControlInfo =
         /// safe mode shields the room it is in, whoever is looking, and only
         /// a room *we* own shields us. False where no controller stands.
         SafeMode: bool
+        /// The text standing on this controller, and **None for a controller
+        /// nobody has signed** (ADR 0004). A sign is written by any creep
+        /// adjacent to the controller and lasts until somebody overwrites it,
+        /// so it is the one fact about a room that outlives every body that
+        /// made it — which is why four of ours carried another player's
+        /// flavour text for hundreds of thousands of ticks before anybody
+        /// read the field.
+        ///
+        /// The text alone and not who wrote it: what the rule asks is whether
+        /// what stands there is what this colony means to say, and a rival who
+        /// copies our words has said it for us.
+        Sign: string option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]

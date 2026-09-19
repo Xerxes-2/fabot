@@ -208,6 +208,13 @@ type IConstructionSite =
 type IOwner =
     abstract username: string
 
+/// The line somebody has written onto a controller (#381). Undefined until
+/// one is, and it outlives every body in the room: four of ours carried a
+/// stranger's flavour text for hundreds of thousands of ticks.
+type ISign =
+    /// The text itself, at most a hundred characters.
+    abstract text: string
+
 /// The reservation standing on a neutral controller: who holds it, and
 /// how long it has left. Undefined on a controller nothing reserves, and
 /// on every owned one — a reservation and an owner are exclusive.
@@ -237,6 +244,9 @@ type IController =
     abstract ticksToDowngrade: int
     /// Safe-mode activations banked.
     abstract safeModeAvailable: int
+    /// The sign standing on this controller, `undefined` until somebody
+    /// writes one (#381).
+    abstract sign: ISign
     /// Ticks of safe mode remaining; undefined when safe mode is off.
     abstract safeMode: int
     abstract pos: IRoomPosition
@@ -347,6 +357,10 @@ type ICreep =
     /// 1, one CLAIM part, and refused — ERR_GCL_NOT_ENOUGH — while every
     /// GCL level this account has is already spent on a room.
     abstract claimController: target: obj -> int
+    /// Write an arbitrary line onto a controller this creep stands beside
+    /// (#381): no body part, range 1, a hundred characters, and it lasts until
+    /// somebody overwrites it.
+    abstract signController: target: obj * text: string -> int
     /// Take the sector Reactor for this player (ADR 0057 decision 5). The
     /// season mod's own custom intent and not an engine method: range 1, one
     /// live CLAIM part, **no cooldown and no ownership precondition** — so it

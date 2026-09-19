@@ -84,6 +84,11 @@ type Intent =
     /// `WithdrawFromStore` precedent read out, and it is the whole of the
     /// difference between this paragraph and the one above.
     | PickupPile of creepName: string * resourceId: string
+    /// One creep writing the colony's signature onto a controller it stands
+    /// beside. Carries the text so the Executor needs no declaration of its
+    /// own: what a room says is a human's to write (`Colony.signature`), and
+    /// the shell's job is to put it there.
+    | SignController of creepName: string * controllerId: string * text: string
     /// The melee act (ADR 0056): a body with ATTACK parts standing within
     /// range 1 of a hostile creep deals `Engine.attackPower` a part. The
     /// [[guard]]'s own act, and the one Intent that names a creep this colony

@@ -808,6 +808,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                         Owner = Ownership.Ours
                         Reservation = None
                         SafeMode = false
+                        Sign = None
                     }
                 ]
         ConstructionSites = []

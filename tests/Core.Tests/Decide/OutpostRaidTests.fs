@@ -774,6 +774,7 @@ let blindGuardTests =
                                     Owner = Ownership.Unowned
                                     Reservation = None
                                     SafeMode = false
+                                    Sign = None
                                 }
                     }
 

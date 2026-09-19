@@ -49,6 +49,7 @@ let ownedRoom: RoomControlInfo =
         Owner = Ownership.Ours
         Reservation = None
         SafeMode = false
+        Sign = None
     }
 
 /// A room another player has taken: seen, owned, and owned by somebody
@@ -62,6 +63,7 @@ let rivalRoom: RoomControlInfo =
         Owner = Ownership.Rival
         Reservation = None
         SafeMode = false
+        Sign = None
     }
 
 /// A neutral room nobody holds: seen, and worth half. Not the same fact as
@@ -72,6 +74,7 @@ let neutralRoom: RoomControlInfo =
         Owner = Ownership.Unowned
         Reservation = None
         SafeMode = false
+        Sign = None
     }
 
 /// A neutral room under a reservation of the given holder, with the given
@@ -91,6 +94,7 @@ let reservedRoom ours ticksToEnd : RoomControlInfo =
                     TicksToEnd = ticksToEnd
                 }
         SafeMode = false
+        Sign = None
     }
 
 /// A neutral room whose reservation the NPC Invader holds — what a
@@ -108,6 +112,7 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
                     TicksToEnd = ticksToEnd
                 }
         SafeMode = false
+        Sign = None
     }
 
 /// The [[stage]] map of a colony that declares itself and nothing else
@@ -838,6 +843,29 @@ let named room (colony: ColonyView) =
                 RoomName = Some room
                 Rooms = Map.add room layer colony.Spatial.Rooms
             }
+    }
+
+/// The ground both colony reflexes are tested on (#381): one target of the
+/// given kind at (10,10), open plain five tiles either way, and the given
+/// creeps standing on the given tiles. The pickup reflex and the signature
+/// reflex ask the same question of it — who is standing within range 1 of one
+/// thing — so they ask it of one fixture rather than of two that agree by
+/// coincidence.
+let reflexColony targetId kind creeps positions =
+    { bareRespawn with
+        Sources = []
+        Controller = None
+        Creeps = creeps
+        Spatial =
+            { spatial
+                  [ targetId, { X = 10; Y = 10 } ]
+                  [
+                      for x in 8..12 do
+                          for y in 8..12 -> { X = x; Y = y }, Plain
+                  ] with
+                TargetKinds = Map.ofList [ targetId, kind ]
+            }
+            |> withCreepsAt positions
     }
 
 /// The shipping colony (#349): `mineHaulColony`'s mine and Storage with a

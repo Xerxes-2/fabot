@@ -346,12 +346,18 @@ let decideUnarbitrated
             | PickupPile(name, _) -> not (Set.contains name taskPickers)
             | _ -> true)
 
+    // The signature (#381), beside the pickup reflex it is shaped after: no
+    // walk, no Task, no competition, and silent on every tick after the first
+    // one that catches a body beside an unsigned controller.
+    let signIntents = planSignatures view atlas Colony.signature
+
     let intents =
         defenseIntents
         @ consignmentIntents
         @ spawnIntents
         @ plan.SiteIntents
         @ outpostSiteIntents
+        @ signIntents
         @ pickupIntents
         @ taskIntents
         |> Fabot.Core.IntentPlan.create

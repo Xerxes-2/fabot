@@ -64,22 +64,10 @@ let pickups intents =
         | _ -> None)
 
 /// A colony around a dropped energy pile at (10, 10) on open ground, with
-/// the given creeps standing on the given tiles.
+/// the given creeps standing on the given tiles — `reflexColony`'s ground
+/// under the kind this reflex is about (#381).
 let pileColony creeps positions =
-    { bareRespawn with
-        Sources = []
-        Creeps = creeps
-        Spatial =
-            { spatial
-                  [ "pile-1", { X = 10; Y = 10 } ]
-                  [
-                      for x in 8..12 do
-                          for y in 8..12 -> { X = x; Y = y }, Plain
-                  ] with
-                TargetKinds = Map.ofList [ "pile-1", (Dropped Energy) ]
-            }
-            |> withCreepsAt positions
-    }
+    reflexColony "pile-1" (Dropped Energy) creeps positions
 
 /// The same colony with a second room's layer beside its own (ADR 0041):
 /// that room's ground, the piles it names, and the creeps standing on its

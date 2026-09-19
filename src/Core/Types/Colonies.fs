@@ -969,6 +969,32 @@ type Colony =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
+    /// What this colony writes on a controller it stands beside (#381).
+    ///
+    /// A human's line, moved by a human in a commit, for the same reason the
+    /// roster below is: what a room says to the rest of the server is not a
+    /// number the bot derives. One line for every room rather than one per
+    /// room — the thing being said is true of all of them, and a per-room
+    /// table would be a table to keep in step for no gain.
+    ///
+    /// The engine caps a sign at 100 characters and keeps it until somebody
+    /// overwrites it, so this is written rarely and read by strangers: it says
+    /// what the bot *is* rather than who owns the room, which the map already
+    /// shows.
+    ///
+    /// Core is F# and reaches no engine object, and the shell is Fable's
+    /// JavaScript: both plainly true. "Core is pure" is the compression a
+    /// hundred characters buys — `decide` is referentially transparent, and it
+    /// writes the walk and far-field memo tables the caller carries across
+    /// ticks (`PlanMemo`, #310), so it is pure the way a function with a cache
+    /// is and not the way a textbook is. "One projection in, intents out" is
+    /// the same kind of compression: it also takes the tick's assignments and
+    /// memo, and returns [[verdict]]s and a [[movement]] beside the intents
+    /// (ADR 0009). Flavour on a sign, not a specification — recorded here so
+    /// the next reader does not take it for one.
+    let signature =
+        "A functional bot. F# compiled by Fable; Core is pure — one projection in, intents out"
+
     /// The colonies a human has declared (ADR 0047). Chosen by a human in an
     /// ADR or a survey and moved by a human in a commit, exactly as the
     /// Layout's horizon is (ADR 0039), so claiming a room begins here and not

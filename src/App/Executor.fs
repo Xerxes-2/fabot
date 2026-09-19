@@ -82,6 +82,14 @@ let private execute (intent: Intent) : Outcome =
             | None -> c.withdraw (t, resourceName resource)
             | Some units -> withdrawAmount c t (resourceName resource) units)
     | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
+    // The colony's line onto a controller the creep stands beside (#381). One
+    // act like every other here, and the text rides the Intent: what a room
+    // says is `Colony.signature`'s to decide, and this layer's job is to put
+    // it there. The failure this cannot see is the one that matters least — a
+    // sign refused for range is a body that moved between the decision and the
+    // act, and the reflex offers it again the next time anybody passes.
+    | SignController(creepName, controllerId, text) ->
+        withCreepTarget creepName controllerId (fun c t -> c.signController (t, text))
     | RepairStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.repair t)
     | UpgradeController(creepName, controllerId) ->

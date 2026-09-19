@@ -27,6 +27,7 @@ let private owning room (colony: ColonyView) =
                     Owner = Ownership.Ours
                     Reservation = None
                     SafeMode = false
+                    Sign = None
                 }
                 colony.RoomControl
     }

@@ -1073,6 +1073,58 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
             |> cheapest fst snd
             |> Option.map (fun (_, seat) -> PlaceConstructionSite(RoomPos.at room seat, Container)))
 
+/// **The colony's signature, written by whoever is standing there** (#381).
+///
+/// A reflex and not a Task: it never sends a body anywhere, never competes for
+/// one and never enters the pool. The [[upgrader]] row lives at the controller
+/// and the whole fleet walks past it, so a room gets signed within a few
+/// hundred ticks of anybody's ordinary work and costs one intent, once, for
+/// ever after — the engine keeps a sign until it is overwritten.
+///
+/// Every controller the **projection places** is a candidate, home and
+/// [[outpost]] alike, and that is a narrower set than it sounds: `transiting`
+/// takes the controller out of a room a chain merely crosses and `erranding`
+/// is built on it, and a stood-down or rival-held outpost is demoted to a
+/// transit room — so no room this colony has withdrawn from is ever reachable
+/// here. What it does reach besides its own is a [[nursery]] child's
+/// controller, which is `borrowable` and which the mother may as well sign.
+///
+/// Silent when the text already standing there is ours (`RoomControlInfo.Sign`)
+/// — and **absence is not a match** (ADR 0004): a controller nobody has signed
+/// reads `None` and is signed, which is the case this exists for. A room whose
+/// sign a rival overwrites is signed again the next time one of ours passes,
+/// which is one intent and no walk, so there is nothing to ration.
+///
+/// One creep per controller per tick, the lowest name of those standing beside
+/// it, because two bodies writing the same words is one wasted intent and the
+/// `IntentPlan` would have to arbitrate a tie that means nothing.
+///
+/// Geometry through the Atlas and not off the projection (ADR 0004): a rule
+/// that reads `SpatialInfo` tiles directly is a rule the [[keeper margin]]'s
+/// mask cannot reach, which #317 names as the thing to keep from happening.
+/// Signing at range 1 could not care, and the exception would still be the
+/// first one.
+let internal planSignatures (view: ColonyView) atlas (text: string) : Intent list =
+    let signed room =
+        Map.tryFind room view.RoomControl
+        |> Option.bind (fun control -> control.Sign)
+        |> Option.contains text
+
+    let placed = Atlas.placedCreeps atlas
+
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.choose (fun id ->
+        match Atlas.positionOf atlas id with
+        | Some at when not (signed at.Room) ->
+            placed
+            |> List.filter (fun (_, tile) ->
+                RoomPos.range tile at |> Option.exists (fun range -> range <= 1))
+            |> List.map fst
+            |> List.sort
+            |> List.tryHead
+            |> Option.map (fun name -> SignController(name, id, text))
+        | _ -> None)
+
 /// Colony reflex beside the pipeline, the second after safe mode: every creep
 /// with free carry capacity standing within pickup range of a dropped energy
 /// pile asks to pick it up — beside its assigned Task's action, since the

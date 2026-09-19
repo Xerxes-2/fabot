@@ -495,12 +495,24 @@ let private seenFacts
                         Owner = Ownership.Unowned
                         Reservation = None
                         SafeMode = false
+                        // A room with no controller has nothing to sign.
+                        Sign = None
                     }
                 | Some c ->
                     {
                         // `safeMode` is the tick count remaining and
                         // undefined otherwise.
                         SafeMode = not (isNull (box c.safeMode))
+                        // The text standing on the controller, absent on one
+                        // nobody has signed (#381). `sign` is undefined until
+                        // somebody writes one, and its `text` is what the rule
+                        // compares — who wrote it is not asked, a rival who
+                        // copies our words having said them for us.
+                        Sign =
+                            if isNull (box c.sign) then
+                                None
+                            else
+                                Some(string c.sign.text)
                         // `my` is undefined and not false on a controller
                         // nobody owns, so ours is asked first and off
                         // `my`. `owner` separates the other two: an owner

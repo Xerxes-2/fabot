@@ -250,6 +250,7 @@ let visible room reservation (colony: ColonyView) =
                     Owner = Ownership.Unowned
                     Reservation = reservation
                     SafeMode = false
+                    Sign = None
                 }
     }
 
@@ -271,6 +272,7 @@ let ownedByRival room (colony: ColonyView) =
                     Owner = Ownership.Rival
                     Reservation = None
                     SafeMode = false
+                    Sign = None
                 }
     }
 

@@ -185,6 +185,7 @@ let internal colonyOf (room: LoadedRoom) level =
                         Owner = Ownership.Ours
                         Reservation = None
                         SafeMode = false
+                        Sign = None
                     }
                 ]
         ConstructionSites = []
@@ -986,6 +987,7 @@ let internal declaredColony level =
                         Owner = Ownership.Unowned
                         Reservation = None
                         SafeMode = false
+                        Sign = None
                     }
                     control)
         Sources =

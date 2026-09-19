@@ -36,6 +36,17 @@ type private Channel =
     | Pickup
     | Move
     | Say
+    /// Writing the colony's line onto a controller (#381). A channel of its
+    /// own rather than `Exclusive`, on the reading that a sign is neither work
+    /// nor a spend and so is not one of the actions the engine serialises
+    /// against each other — **unverified**: `docs/research/creep-action-conflicts.md`
+    /// pins an engine revision whose intent table does not mention
+    /// `signController` at all. If the reading is wrong the cost is one
+    /// refused act on the ticks a body signs and upgrades together, and this
+    /// line is where to change it. What the channel does buy for certain is
+    /// the one thing that can go wrong here — two bodies writing the same
+    /// words beside one controller — and the reflex already picks one.
+    | Sign
 
 let private channel =
     function
@@ -51,6 +62,7 @@ let private channel =
     | ClaimController(name, _) -> Some(name, Claim)
     | ClaimReactor(name, _) -> Some(name, Reclaim)
     | PickupPile(name, _) -> Some(name, Pickup)
+    | SignController(name, _, _) -> Some(name, Sign)
     | MoveCreep(name, _) -> Some(name, Move)
     | SayCreep(name, _) -> Some(name, Say)
     | SpawnCreep _

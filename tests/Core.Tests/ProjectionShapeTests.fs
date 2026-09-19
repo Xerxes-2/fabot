@@ -90,6 +90,7 @@ let private roomOf name owner (targets: (string * Pos * TargetKind) list) stores
                     Owner = owner
                     Reservation = None
                     SafeMode = false
+                    Sign = None
                 }
     }
 
