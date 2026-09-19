@@ -1,5 +1,18 @@
 # The Link footings stay unfilled at RCL5: the hauler row is already at its floor, and a link cannot go below a floor
 
+> **Re-measured at RCL6 and RCL7 (#245, 2026-09-19) and the refusal stands — in every colony, by a wide margin.** ADR 0055 owed this the day a mother reached RCL6; two are RCL7 now and a third is RCL6, and the answer did not move. A controller link takes the **buffer** out of the hauler's menu, so each source's `output × max(sink trip)` falls back to `max(cluster, storage)`. Measured off the live demand rows:
+>
+> | colony | load | demand now | bodies | demand with a link | bodies |
+> |---|---|---|---|---|---|
+> | W11S29 | 1,200 | 1,100 | 1 | 590 | 1 |
+> | W15S28 | 1,500 | 1,480 | 1 | 1,350 | 1 |
+> | W12S28 | 1,600 | 2,640 | 2 | 2,440 | 2 |
+> | W13S28 | 1,600 | 4,730 | 3 | 4,450 | 3 |
+>
+> Not one crosses a load boundary, and none is close: W12S28 would have to shed another 840 of demand to drop a body and W13S28 another 1,250. The reason is the one this ADR already gives, seen from a wider colony — **the demand is dominated by the outpost sources, whose buffer and storage trips differ by a handful of ticks** because the cross-room walk dwarfs the in-room difference (W11S28: buffer 147, storage 135; W14S28: 195 and 181). The in-room sources, where the link really does erase most of the trip, are the cheap rows: W12S28's two come to 160 and 60 out of 2,640.
+>
+> Against that, two links cost 10,000 energy up front and 3% of everything ever sent through them. The prize is still a body and there is still no body to win.
+
 > **Revised by ADR 0049** on the arithmetic below and not on the answer. This ADR's refusal stands and W12S28 still sits on the hauler row's floor, but the floor named here — "one term per source container, each rounded up, so the row's floor is the number of source containers" — was the old rounding's. The quota now sums every source container's demand and rounds **once for the colony**, so the floor is one body for the whole home haul rather than one per container, and the flip condition moves with it: the eighty-to-a-hundred-and-twenty ticks named below were one container's round trip, where the second body now arrives when the room's *summed* trips reach the same line — roughly half that apiece for a pair of containers. The prize is still one body against two links at 5,000, so the trade is refused harder, and the RCL6 revisit inherits ADR 0049's rule.
 
 ADR 0022 reserved the Link footings from level 0 and ADR 0027 made them count, both refusing to say what a link is for: the order the footings fill in and what the links send where was RCL5's design. This ADR spends that deferral, and spends it on a refusal — **this colony builds no links at RCL5**. The footings stay reserved, because their tiles never come back and holding them costs nothing; nothing is placed on them.
