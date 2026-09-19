@@ -79,13 +79,17 @@ let episodeTests =
                     ||> List.fold (fun state t ->
                         let colony = if t = 10 || t = 16 then raid squad else quiet
 
-                        foldRaids
-                            3
-                            (colony.Creeps |> List.map (fun c -> c.Name) |> Set.ofList)
+                        let seen =
                             { colony with
                                 Time = t
                                 Tuning = { colony.Tuning with QuietGap = gap }
                             }
+
+                        foldRaids
+                            3
+                            (colony.Creeps |> List.map (fun c -> c.Name) |> Set.ofList)
+                            seen
+                            (Fabot.Core.Decide.Planner.outpostFactsOf seen)
                             state)
                     |> windows
 

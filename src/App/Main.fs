@@ -397,7 +397,7 @@ let loop () =
         raids
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
-        |> Observe.foldRaids Observe.capEpisodes living view
+        |> Observe.foldRaids Observe.capEpisodes living view (Decide.Planner.outpostFactsOf view)
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's own channel (ADR 0035): the footing targets this tick's

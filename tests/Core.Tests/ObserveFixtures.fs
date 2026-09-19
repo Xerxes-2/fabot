@@ -192,13 +192,24 @@ let atShortGap t (colony: ColonyView) =
 /// that leaves it left the world.
 let raidTick t (colony: ColonyView) state =
     let alive = colony.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
-    foldRaids 3 alive (atShortGap t colony) state
+
+    foldRaids
+        3
+        alive
+        (atShortGap t colony)
+        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony))
+        state
 
 /// The same fold with the world said separately from the colony: what the
 /// shell hands in since #191, where a ColonyView carries one colony's fleet
 /// and `Game.creeps` carries everyone's (ADR 0047).
 let raidTickIn alive t (colony: ColonyView) state =
-    foldRaids 3 (Set.ofList alive) (atShortGap t colony) state
+    foldRaids
+        3
+        (Set.ofList alive)
+        (atShortGap t colony)
+        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony))
+        state
 
 /// The recorded episodes as (opened, last-seen) windows, oldest first.
 let windows (state: RaidState) =

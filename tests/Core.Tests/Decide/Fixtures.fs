@@ -498,7 +498,12 @@ let decideFrom assigned colony = decide colony assigned Set.empty None
 /// and leave every call site compiling with two facts it never named. A test
 /// *about* the two lines calls `planTasksHolding` below.
 let planTasksOn view threats =
-    Planner.planTasks view (Atlas.ofView view) threats HeldTaskFacts.empty
+    Planner.planTasks
+        view
+        (Atlas.ofView view)
+        threats
+        HeldTaskFacts.empty
+        (Planner.outpostFactsOf view)
 
 /// `planTasksOn` over a colony whose living creeps hold these Tasks (ADR 0061):
 /// the held set spelled the way the pool reads it, forward through `taskId`,
@@ -511,12 +516,18 @@ let planTasksHolding (holding: Task list) view =
         { HeldTaskFacts.empty with
             All = holding |> List.map taskId |> Set.ofList
         }
+        (Planner.outpostFactsOf view)
 
 /// The same narrow held-task fact for a carrier that still has Thorium aboard.
 let planTasksHoldingThorium (holding: Task list) view =
     let ids = holding |> List.map taskId |> Set.ofList
 
-    Planner.planTasks view (Atlas.ofView view) noThreats { All = ids; WithThorium = ids }
+    Planner.planTasks
+        view
+        (Atlas.ofView view)
+        noThreats
+        { All = ids; WithThorium = ids }
+        (Planner.outpostFactsOf view)
 
 /// This tick's pool with its priorities and capacities, over the
 /// snapshot's own Atlas — what the Matcher and the mover are both handed

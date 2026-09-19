@@ -544,8 +544,8 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
         Engine.guardCap
 
 /// The guard row's quota: `guardsWanted` over every raided outpost, summed.
-let internal guardQuota (view: ColonyView) : int =
-    guardedOutposts view |> List.sumBy (guardsWanted view)
+let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
+    outposts.Guarded |> List.sumBy (guardsWanted view)
 
 /// The whole guard blocks one raided room's exchange takes to win (#375, ADR
 /// 0072): the smallest count `guardBlocksBeat` answers yes to, up to the
@@ -567,8 +567,8 @@ let internal guardBlocksFor (view: ColonyView) (room: string) : int =
 /// exchange for the **count** and `guardBodyFor` read the bank for the
 /// **size**, so at W15S28's 2,300 bank the row asked 2,250 for a raid one
 /// 750 block wins, and a bank the reserver row drains at 650 never reached it.
-let internal guardBlocksWanted (view: ColonyView) : int =
-    match guardedOutposts view |> List.map (guardBlocksFor view) with
+let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
+    match outposts.Guarded |> List.map (guardBlocksFor view) with
     | [] -> 1
     | blocks -> List.max blocks
 
@@ -578,7 +578,7 @@ let internal guardBlocksWanted (view: ColonyView) : int =
 /// census less its expiring bodies (ADR 0026): a guard inside its lead still
 /// stands in the room, so the seat stays open while the row buys the relief,
 /// and closes again only when the incumbent is actually gone.
-let internal guardStands (view: ColonyView) : bool =
+let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
     let living = view.Creeps |> List.filter isGuardBody |> List.length
 
     let inOven =
@@ -586,7 +586,7 @@ let internal guardStands (view: ColonyView) : bool =
         |> List.filter (fun cast -> isGuardParts (partsOf cast.Body))
         |> List.length
 
-    living + inOven >= guardQuota view
+    living + inOven >= guardQuota view outposts
 
 /// The [[miner]] row's quota (ADR 0057 decision 2): **one body per deposit the
 /// colony can actually dig**, and nothing for one it cannot. Three facts and
@@ -671,7 +671,7 @@ let internal minerQuota (view: ColonyView) atlas : int =
 /// afford one block**, or the row hires nobody: a colony that cannot buy a
 /// reservation does not hold one, and a row hired against a body it can never
 /// buy is an addend of the Workforce target no cast will pay off.
-let internal reserverClaimsOf (view: ColonyView) : int list =
+let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int list =
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
@@ -687,7 +687,7 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
     // never the deficit's nine: a claim is one act by one CLAIM part, finished
     // the tick it succeeds. Their rooms are already out of `declaredOutposts`,
     // which is the same fact read from the other end.
-    let claims = claimTargets view
+    let claims = outposts.Claims
 
     // **A guarded room's seat waits for its guard** (#375, ADR 0072). The
     // guard row stands in front of this one in the cascade for a reason, and
@@ -705,16 +705,16 @@ let internal reserverClaimsOf (view: ColonyView) : int list =
     // withheld room, keyed to the guard gap and not to the spending, so it
     // flips once and not every cast.
     let withheld =
-        if guardStands view then
+        if guardStands view outposts then
             Set.empty
         else
-            guardedOutposts view |> Set.ofList
+            outposts.Guarded |> Set.ofList
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
     else
         let reserved =
-            reservableOutposts view
+            outposts.ReservableRooms
             |> List.filter (fun room -> not (Set.contains room withheld))
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
@@ -798,12 +798,12 @@ type RowSizing =
         CourierQuota: int
     }
 
-let internal rowSizingOf (view: ColonyView) atlas : RowSizing =
+let internal rowSizingOf (view: ColonyView) atlas (outposts: OutpostFacts) : RowSizing =
     {
         AnchorPostCaps = postWorkCapsOf view atlas
-        ReserverClaims = reserverClaimsOf view
+        ReserverClaims = reserverClaimsOf view outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
-        GuardBlocks = guardBlocksWanted view
+        GuardBlocks = guardBlocksWanted view outposts
         MinerQuota = minerQuota view atlas
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
@@ -1004,12 +1004,18 @@ type QuotaRows =
 /// once because the cascade that casts a body, the amortization that charges
 /// for it and the target that counts it must read one set of numbers — a second
 /// derivation is a body hired against one number and counted against another.
-let internal quotaRowsOf (view: ColonyView) atlas (sizing: RowSizing) haulerQuota : QuotaRows =
+let internal quotaRowsOf
+    (view: ColonyView)
+    atlas
+    (outposts: OutpostFacts)
+    (sizing: RowSizing)
+    haulerQuota
+    : QuotaRows =
     let surplus = surplusOverLifetime view atlas sizing haulerQuota
 
     {
         Reserver = sizing.ReserverClaims
-        Guard = guardQuota view
+        Guard = guardQuota view outposts
         // One Anchor per Post of *every* projected room (ADR 0042): an
         // outpost's Post is the same garrison tile a home Post is, so it hires
         // from the same row and travel cost pins each Anchor on the Post

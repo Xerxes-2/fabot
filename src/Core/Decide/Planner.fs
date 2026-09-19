@@ -233,8 +233,8 @@ let private outpostControllers (view: ColonyView) : string list =
 /// there is still a raid on a room the colony works. Whether such a room should
 /// stay declared at all is the question #333 leaves for a human, and it is not
 /// this rule's to answer by omission.
-let private reservableControllers (view: ColonyView) : string list =
-    outpostControllers view
+let private reservableControllersOf (view: ColonyView) (controllers: string list) : string list =
+    controllers
     |> List.filter (fun id ->
         match SpatialInfo.roomOf view.Spatial id with
         // A controller the projection does not place names no room, and a room
@@ -294,10 +294,8 @@ let internal declaredOutposts (view: ColonyView) : string list =
 /// The rooms of `reservableControllers`, which is what makes the row and the
 /// Reserve pool one answer rather than two — the row hires one body per room
 /// the pool offers a controller in, and no more.
-let internal reservableOutposts (view: ColonyView) : string list =
-    reservableControllers view
-    |> List.choose (SpatialInfo.roomOf view.Spatial)
-    |> List.distinct
+let private reservableOutpostsOf (view: ColonyView) (reservable: string list) : string list =
+    reservable |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
 /// The declared [[outpost]]s a [[threat]] stands in this tick (ADR 0056): the
 /// rooms the guard row hires a body for, and the rooms `planTasks` pools a
@@ -331,11 +329,11 @@ let internal reservableOutposts (view: ColonyView) : string list =
 /// A declared outpost that has never been looked into is in **neither** half
 /// and asks for no guard, which is ADR 0004 unchanged: absence classifies
 /// nothing, and this rule buys a body rather than a look.
-let internal guardedOutposts (view: ColonyView) : string list =
+let private guardedOutpostsOf (view: ColonyView) (declared: string list) : string list =
     if List.isEmpty view.Hostiles && Set.isEmpty view.ThreatenedOutposts then
         []
     else
-        declaredOutposts view
+        declared
         |> List.filter (fun room ->
             let seenArmed =
                 view.Hostiles
@@ -370,7 +368,70 @@ let internal guardedOutposts (view: ColonyView) : string list =
 /// the Planner still sees no body, position or name, only task ids and whether
 /// their holders have any delivery resource left; the facts keep that boundary
 /// where the `Assignments` map would not.
-let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) : Task list =
+/// The outpost chain's answers for this tick, derived once and carried (#383).
+///
+/// Every field below was a function of the view that its readers re-entered
+/// whole. Measured on `--scenario reactor --level 7`: `claimTargets` ran 11.4
+/// times a tick, `outpostControllers` 9.1, `declaredOutposts` 6.8 and
+/// `guardedOutposts` 4.6 — and `outpostControllers` runs a `claimTargets`
+/// inside it, so the kind census was walked for `Controller` nineteen times a
+/// tick where the colony has one answer. `declaredOutposts` above already
+/// promised "one scan, narrowed once, so no reader can be looking at a
+/// different set of outposts than its neighbour"; this makes that true of the
+/// readers and not only of the derivation.
+///
+/// The shape is `RowSizing`'s and `HeldTaskFacts`' — "X's answer this tick",
+/// derived at the top of the tick and threaded — because that is the pattern
+/// this codebase already trusts for exactly this, and because it needs no
+/// mutable table and so no rule about when that table goes stale. Eager and
+/// not lazy: every field is read on a quiet tick as well as a loud one, and
+/// the one that is not, `Guarded` on a tick with no hostile anywhere,
+/// short-circuits before it walks anything.
+type OutpostFacts =
+    {
+        /// `claimTargets`' answer: each candidate colony's controller, with
+        /// the room it stands in.
+        Claims: (string * string) list
+        /// `declaredOutposts`' answer: the rooms this colony works.
+        Declared: string list
+        /// The controller ids the Reserve pool offers, somebody else's hold
+        /// already dropped (#333).
+        ReservableControllers: string list
+        /// The rooms of those controllers, which is what the reserver row
+        /// hires per — one body per room the pool offers a controller in.
+        ReservableRooms: string list
+        /// The declared outposts a [[threat]] stands in (ADR 0056).
+        Guarded: string list
+    }
+
+/// Derive the chain once, sharing each stage with the next. That sharing is
+/// the other half of the saving: `reservableOutposts` re-entered
+/// `reservableControllers`, which re-entered `outpostControllers`, which
+/// re-entered `claimTargets`, so one ask at the end of the chain used to walk
+/// the census four times.
+let outpostFactsOf (view: ColonyView) : OutpostFacts =
+    let controllers = outpostControllers view
+
+    let declared =
+        controllers |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
+
+    let reservable = reservableControllersOf view controllers
+
+    {
+        Claims = claimTargets view
+        Declared = declared
+        ReservableControllers = reservable
+        ReservableRooms = reservableOutpostsOf view reservable
+        Guarded = guardedOutpostsOf view declared
+    }
+
+let planTasks
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (held: HeldTaskFacts)
+    (outposts: OutpostFacts)
+    : Task list =
     // Flee exists while a Reach does (ADR 0033): one Task for the whole
     // colony, at the head of the pool as its Safety tier is at the head of
     // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
@@ -383,7 +444,7 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // nobody bought. Beside Flee at the head of the pool — the two Tasks of the
     // Safety tier, disjoint by [[body class]], so nothing ever asks how they
     // order.
-    let guards = guardedOutposts view |> List.map Guard
+    let guards = outposts.Guarded |> List.map Guard
 
     // Harvest exists for every source, drained or not (ADR 0013, revised by
     // ADR 0025): the task no longer flickers with the source's stock, because
@@ -471,7 +532,7 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
 
     // One Claim per candidate colony's controller (ADR 0047), read off
     // the one rule that says which those are (`claimTargets`).
-    let claims = claimTargets view |> List.map (fst >> Claim)
+    let claims = outposts.Claims |> List.map (fst >> Claim)
 
     // One Reclaim per declared [[errand]] (ADR 0057 decision 5, ADR 0060
     // decision 3), read off the **declaration** and off no kind census at all.
@@ -499,7 +560,7 @@ let planTasks (view: ColonyView) atlas (threats: Threats) (held: HeldTaskFacts) 
     // this tick's vision where there is any and off the last look's record
     // where there is none. A controller the projection does not place names no
     // room and stays pooled (ADR 0004).
-    let reserves = reservableControllers view |> List.map Reserve
+    let reserves = outposts.ReservableControllers |> List.map Reserve
 
     // The haul cycle's intake (ADR 0012), shaped over the projection's
     // stores rather than energy's name: every stocked container yields a

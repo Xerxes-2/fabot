@@ -292,7 +292,15 @@ let decideUnarbitrated
     // only: the worker row's floor asks the pool whether anything is standing
     // in Build or Repair (ADR 0046), and nothing in the pool reads a spawn
     // Intent.
-    let sizing = rowSizingOf view atlas
+    // The outpost chain's answers, derived once for the whole tick (#383).
+    // Before this, `claimTargets` ran 11.4 times a tick and `outpostControllers`
+    // 9.1, each walking the kind census for `Controller`, because every reader
+    // of the chain re-entered it whole. Derived here for `RowSizing`'s own
+    // reason, stated below: the row hired against a number and the target that
+    // counts it must read one set of numbers.
+    let outposts = outpostFactsOf view
+
+    let sizing = rowSizingOf view atlas outposts
 
     // The narrow facts the Planner reads about the colony's own decisions (ADR
     // 0061, ADR 0067): the task ids its living creeps hold, and which holders
@@ -301,14 +309,14 @@ let decideUnarbitrated
     // assignments and the fleet to filter them by.
     let held = heldTaskFacts view assignments
 
-    let tasks = planTasks view atlas threats held
+    let tasks = planTasks view atlas threats held outposts
 
     // The pool's other half (ADR 0052 decision 6): every entry's priority
     // and capacity, set once here and read by the Matcher and the mover.
     let pool = planPool view atlas tasks
 
     let spawnIntents, quotas =
-        planSpawns view atlas sizing threats tasks plan.HaulerQuota
+        planSpawns view atlas outposts sizing threats tasks plan.HaulerQuota
 
     let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next

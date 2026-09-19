@@ -183,7 +183,11 @@ let errandStandDownTests =
 
                 let log =
                     Observe.RaidState.empty
-                    |> Observe.foldRaids Observe.capEpisodes Set.empty colony
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony)
 
                 Expect.contains
                     (Observe.standDown Tuning.defaults (tick + 1) log).Shut
@@ -212,9 +216,15 @@ let errandStandDownTests =
                         TicksToLive = 600
                     }
 
-                let folded colony =
+                let folded (colony: ColonyView) =
+                    let seen = { colony with Time = tick }
+
                     Observe.RaidState.empty
-                    |> Observe.foldRaids Observe.capEpisodes Set.empty { colony with Time = tick }
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        seen
+                        (Planner.outpostFactsOf seen)
                     |> Observe.standDown Tuning.defaults (tick + 1)
                     |> fun gate -> gate.Shut
 
@@ -330,15 +340,19 @@ let errandStandDownTests =
                         TicksToLive = 600
                     }
 
+                let seen =
+                    { admitted with
+                        Time = 100
+                        Hostiles = [ defender ]
+                    }
+
                 let log =
                     Observe.RaidState.empty
                     |> Observe.foldRaids
                         Observe.capEpisodes
                         Set.empty
-                        { admitted with
-                            Time = 100
-                            Hostiles = [ defender ]
-                        }
+                        seen
+                        (Planner.outpostFactsOf seen)
 
                 let gateAt tick =
                     (Observe.standDown Tuning.defaults tick log).Shut

@@ -207,6 +207,7 @@ type private SpecialistRow =
 let internal planSpawns
     (view: ColonyView)
     atlas
+    (outposts: OutpostFacts)
     (sizing: RowSizing)
     (threats: Threats)
     (tasks: Task list)
@@ -244,7 +245,7 @@ let internal planSpawns
         // the target below *and* a gap of its own in the cascade, and a body
         // hired against one reading and counted against another is an oversell
         // every tick.
-        let rows = quotaRowsOf view atlas sizing haulerQuota
+        let rows = quotaRowsOf view atlas outposts sizing haulerQuota
 
         let target = workforceTarget view atlas tasks rows
 

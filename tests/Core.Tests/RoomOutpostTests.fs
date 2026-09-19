@@ -391,7 +391,12 @@ let outpostContainerTests =
                 let pooled homes =
                     let view = { colony with Declared = homes }
 
-                    planTasks view (Fabot.Core.Atlas.ofView view) noThreats HeldTaskFacts.empty
+                    planTasks
+                        view
+                        (Fabot.Core.Atlas.ofView view)
+                        noThreats
+                        HeldTaskFacts.empty
+                        (outpostFactsOf view)
                     |> List.filter (function
                         | Reserve _
                         | Claim _ -> true

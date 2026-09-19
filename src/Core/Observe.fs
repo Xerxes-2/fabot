@@ -769,11 +769,11 @@ let private rivalDeadlines (view: ColonyView) =
 /// the same declared-outpost derivation as the guard row rather than matching
 /// the hostile's owner: an Invader or player in a transit-only room is no more
 /// actionable by this gate than a Source Keeper is.
-let private raidDeadlines (view: ColonyView) =
+let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
     let errandRooms =
         view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
 
-    let outpostRooms = Fabot.Core.Decide.Planner.declaredOutposts view |> Set.ofList
+    let outpostRooms = Set.ofList outposts.Declared
 
     view.Hostiles
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
@@ -799,7 +799,7 @@ let private raidDeadlines (view: ColonyView) =
 
         room, (view.Time + life, StandDownBasis.InvaderRaid))
 
-let private deadlines (view: ColonyView) =
+let private deadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
     // The stronghold bit rides beside the clock and is **or**-ed over a room's
     // sightings where the clock is maxed (#382): the two answer different
     // questions, so a room seen once with a bunker and once with a raider is
@@ -810,7 +810,7 @@ let private deadlines (view: ColonyView) =
          core.RoomName, (expiry, basis, core.Level >= 1)))
     @ (rivalDeadlines view
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
-    @ (raidDeadlines view
+    @ (raidDeadlines view outposts
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
     |> List.groupBy fst
     |> List.map (fun (room, seen) ->
@@ -1041,7 +1041,13 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
 /// (`RaidState.RivalHeld`), the withdrawal that carries no clock because nothing
 /// in the engine ends it, which still dates itself because the tick a gate shut
 /// on is the trace #117's US-20 asks for.
-let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidState) : RaidState =
+let foldRaids
+    (cap: int)
+    (alive: Set<string>)
+    (view: ColonyView)
+    (outposts: Fabot.Core.Decide.Planner.OutpostFacts)
+    (prior: RaidState)
+    : RaidState =
     // The silence that closes an episode is the colony's own tunable and
     // arrives on its view (ADR 0052 decision 5), where the ring's depth is
     // still the caller's: one is a judgement about how long an absence has to
@@ -1180,7 +1186,7 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
         // and a room that is clear — leaves every stand-down exactly as it
         // found it, clock included.
         Outposts =
-            (prior.Outposts, deadlines view)
+            (prior.Outposts, deadlines view outposts)
             ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
@@ -1290,7 +1296,7 @@ let foldRaids (cap: int) (alive: Set<string>) (view: ColonyView) (prior: RaidSta
             let standing =
                 prior.Threatened |> Map.filter (fun _ latch -> view.Time < latch.Until)
 
-            let declared = Fabot.Core.Decide.Planner.declaredOutposts view |> Set.ofList
+            let declared = Set.ofList outposts.Declared
 
             let armedIn room =
                 view.Hostiles

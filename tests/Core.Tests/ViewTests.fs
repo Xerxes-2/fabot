@@ -1122,7 +1122,12 @@ let colonyViewTests =
                     Pool.planPool
                         view
                         atlas
-                        (Planner.planTasks view atlas (threatsOf view atlas) HeldTaskFacts.empty)
+                        (Planner.planTasks
+                            view
+                            atlas
+                            (threatsOf view atlas)
+                            HeldTaskFacts.empty
+                            (Planner.outpostFactsOf view))
                     |> List.tryFind (fun entry -> entry.Task = Guard outpost)
 
                 Expect.equal
@@ -1258,7 +1263,12 @@ let colonyViewTests =
                     "unowned, the lost child is a room the mother projects again"
 
                 Expect.contains
-                    (planTasks taken (Fabot.Core.Atlas.ofView taken) noThreats HeldTaskFacts.empty)
+                    (planTasks
+                        taken
+                        (Fabot.Core.Atlas.ofView taken)
+                        noThreats
+                        HeldTaskFacts.empty
+                        (outpostFactsOf taken))
                     (Claim $"ctrl-{child}")
                     "and its controller is a Claim in her pool"
 
@@ -1269,7 +1279,12 @@ let colonyViewTests =
                     "a room somebody else holds is the stand-down's business, not a projection's"
 
                 Expect.isEmpty
-                    (planTasks rival (Fabot.Core.Atlas.ofView rival) noThreats HeldTaskFacts.empty
+                    (planTasks
+                        rival
+                        (Fabot.Core.Atlas.ofView rival)
+                        noThreats
+                        HeldTaskFacts.empty
+                        (outpostFactsOf rival)
                      |> List.filter (function
                          | Claim _ -> true
                          | _ -> false))
@@ -1313,7 +1328,8 @@ let colonyViewTests =
                             taken
                             (Fabot.Core.Atlas.ofView taken)
                             noThreats
-                            HeldTaskFacts.empty))
+                            HeldTaskFacts.empty
+                            (outpostFactsOf taken)))
                     "nothing of that room is an intake of hers"
             }
 
@@ -1341,7 +1357,8 @@ let colonyViewTests =
                             raising
                             (Fabot.Core.Atlas.ofView raising)
                             noThreats
-                            HeldTaskFacts.empty))
+                            HeldTaskFacts.empty
+                            (outpostFactsOf raising)))
                     "so nothing pools a draw on it"
 
                 Expect.equal

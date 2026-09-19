@@ -10,6 +10,14 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.OutpostFixtures
 
+/// `Observe.foldRaids` with the outpost chain's answers derived off the same
+/// view (#383). The fold takes them rather than re-deriving them, because the
+/// shell derives them once for the tick and hands the same value to both
+/// halves; a test that built its own would be exercising a shape the bot does
+/// not run.
+let private foldRaidsOf alive (view: ColonyView) prior =
+    Observe.foldRaids Observe.capEpisodes alive view (Planner.outpostFactsOf view) prior
+
 [<Tests>]
 let reserveTests =
     testList
@@ -426,8 +434,7 @@ let reserveTests =
                     // No world roster, for the reason the gate tests below
                     // give: one tick folded off an empty log has no `Living`
                     // baseline, so nothing reads as a loss (#191).
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -630,8 +637,7 @@ let standDownGateTests =
                     // No world roster: one tick folded off an empty log
                     // has no `Living` baseline, so nothing can be read as a
                     // loss whatever `Game.creeps` holds (#191).
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -682,8 +688,7 @@ let standDownGateTests =
                     // No world roster: one tick folded off an empty log
                     // has no `Living` baseline, so nothing can be read as a
                     // loss whatever `Game.creeps` holds (#191).
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -725,8 +730,7 @@ let standDownGateTests =
                 let log =
                     Observe.RaidState.empty
                     // No world roster, for the reason the test above gives.
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -811,8 +815,7 @@ let standDownGateTests =
                 let latched =
                     Observe.RaidState.empty
                     // No world roster, for the reason the tests above give.
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = 100
@@ -835,8 +838,7 @@ let standDownGateTests =
                 // clear the latch.
                 let freed =
                     latched
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
+                    |> foldRaidsOf
                         Set.empty
                         { incomeColony with
                             Time = late
