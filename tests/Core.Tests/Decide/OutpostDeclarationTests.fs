@@ -1518,8 +1518,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29"; "W14S28" ]
-                    "and the second colony works its south outpost and, again since 2026-09-18, its west one: W14S28 was withdrawn by hand while W11S29 was also in this list, and came back once #352 had taken W11S29 out and the haul demand had fallen to 2,790 over two haulers"
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost alone since 2026-09-20: W14S28 went to W15S28, which stands 46 tiles from its rock where this colony stood 181 ticks from it, and five rocks were turning into 15.7 e/t of controller progress here against four rocks making 30.7 at W12S28, the difference banked and standing still"
 
                 // What the removal cost while it was overdue, kept as a number
                 // because the argument for the removal is a haul bill (#352):
@@ -1557,19 +1557,20 @@ let outpostTests =
                 // The room between home and the nursery is in the projection
                 // on the *bootstrap* half's own account (ADR 0058), where until
                 // 2026-09-10 it was there only because a declaration happened
-                // to name it. That is what this assertion had to prove while
-                // W14S28 was withdrawn; with the declaration back it proves
-                // only the order, so the standing proof of the bootstrap
-                // account is the `roomsProjected` assertion below, which passes
-                // an empty outpost list.
+                // to name it. Since 2026-09-20 that is again the only account
+                // it is there on: W14S28 is W15S28's outpost now, so from here
+                // it is a transit room and sorts **after** the declared rooms
+                // rather than among them. The order is the proof — a declared
+                // room is projected before the transit rooms a bootstrap half
+                // brings, and W14S28 has moved to the far side of that line.
                 Expect.equal
                     (Colony.roomsProjected
                         (Colony.outpostsOf Colony.declared "W13S28")
                         (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
-                    [ "W13S28"; "W13S29"; "W14S28"; "W15S28" ]
-                    "the home, its two outposts and the child two hops out — W14S28 moving up the list is the declaration coming back, since a declared room is projected before the transit rooms a bootstrap half brings"
+                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
+                    "the home, its one outpost and the child two hops out, with W14S28 behind them: it is W15S28's since 2026-09-20, so it reaches this scan set as a transit room and sorts after the declared ones"
 
                 // Three rooms left this scan set with W11S29's declaration
                 // (#352) — the nursery itself, W12S29 and W11S28, plus
@@ -1593,8 +1594,8 @@ let outpostTests =
                     [
                         "W13S28"
                         "W13S29"
-                        "W14S28"
                         "W15S28"
+                        "W14S28"
                         "W11S29"
                         "W12S28"
                         "W12S29"
@@ -1602,8 +1603,9 @@ let outpostTests =
                     ]
                     "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain — W12S28's own home among them (ADR 0058), which is where it belonged all along"
 
-                // The third colony's two, and the pairing is the reason to pin
-                // them here: W15S27 is the room the delivery route crosses on
+                // The third colony's three since 2026-09-20, and the pairing
+                // of the first two is the reason to pin them here: W15S27 is
+                // the room the delivery route crosses on
                 // the way to the Reactor, and W15S29 is the one declared for
                 // its own sake (2026-09-17, `outpost-wave-2.md`) once the
                 // survey's CPU refusal stopped being the price — +0.55 ms of
@@ -1611,8 +1613,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29" ]
-                    "the third colony works the room its errand crosses and the one declared for its own sake: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it, and re-declared on 2026-09-18 once the raid memory stopped expiring while nobody looked (#369) and this colony's fleet was back at ten of eleven with delivery restarted"
+                    [ "W15S27"; "W15S29"; "W14S28" ]
+                    "the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
                 // And the fourth colony's, declared the day after its spawn
                 // stood (`w12s29-outpost.md`): 81 ticks of haul, the cheapest

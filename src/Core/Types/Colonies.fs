@@ -366,7 +366,14 @@ module Outpost =
             Controller = "6a8caaaddd4872bccd319367", { Room = "W13S29"; X = 15; Y = 41 }
         }
 
-    /// W13S28's west outpost, declared 2026-09-10 off
+    /// **W15S28's east outpost since 2026-09-20**, and W13S28's before that.
+    /// The history below is W13S28's and is kept because it is the record of
+    /// what the room cost twice; what moved it the second time is at the two
+    /// colonies' own entries, and in one line it is that the rock walks 46
+    /// tiles from W15S28's Storage and 67 from W13S28's while W13S28 was the
+    /// colony with no hauler to spare.
+    ///
+    /// Declared 2026-09-10 off
     /// `docs/research/multihop-outposts.md`, which ranks it second of the
     /// six: one source, a 21-tile west Seam, and the lowest cost of any of
     /// them because the room was already in the projection as the transit
@@ -380,7 +387,7 @@ module Outpost =
     /// three crossings out and mined by its own colony at the same time, and
     /// the two together took this colony's haul demand from 2,780 over two
     /// haulers to 4,810 over four. #352 took W11S29 out and the demand fell
-    /// back to 2,790 over two, which is the colony this declaration re-enters:
+    /// back to 2,790 over two, which was the colony it re-entered in September:
     /// nine of ten living, no row with a gap, the terminal at (14,10) built and
     /// shipping. Re-read the day it came back — one source at (6,8), no Source
     /// Keeper lair, no invader core, controller unreserved at (22,15), and the
@@ -1132,13 +1139,47 @@ module Colony =
                 // colony ran one on the same rock, and this colony's demand
                 // went 2,780 over two haulers to 5,760 over four. That is the
                 // shape that took W14S28 from 2,790 to 4,810 and had it
-                // withdrawn by hand the day it was declared. W14S28 is back in
-                // the list below, and what changed is that half: W11S29 left
-                // this colony in #352 and the demand went back to 2,790 over
-                // two haulers, so the room is being added to a colony that has
-                // the seat for it rather than beside another colony's anchor on
-                // the same rock.
-                Outposts = [ Outpost.w13s29; Outpost.w14s28 ]
+                // withdrawn by hand the day it was declared. W14S28 came back
+                // on that argument — W11S29 left this colony in #352 and the
+                // demand fell to 2,790 over two haulers — and **left again on
+                // 2026-09-20 for the paragraph below**, which is the same
+                // argument read at the next size up: the seat was still not
+                // here.
+                // **W14S28 left again on 2026-09-20**, and this time to a
+                // colony rather than to nobody. The reason is a conversion
+                // rate, measured off the controller's own progress over 246
+                // live ticks at t593,825-594,071:
+                //
+                //   this colony  5 rocks, ~50 e/t in, **15.7 e/t** into the
+                //                controller, 849,766 banked and flat
+                //   W12S28       4 rocks, ~40 e/t in, 30.7 e/t, Storage at 0
+                //   W15S28       3 rocks, ~30 e/t in, 25.3 e/t, Storage falling
+                //
+                // The colony with the most rocks turns the least of them into
+                // controller, by a factor of two, and banks the difference.
+                // Beside that, haul demand 4,730 over three haulers with the
+                // W14S28 rock 181 ticks from this Storage, against W12S28's
+                // 2,640 over two; and at the tick the sample was taken the
+                // controller container at 22,15 held nothing and the 24-Work
+                // upgrader beside it read `idle (none-applicable)`.
+                //
+                // Where it goes instead is the upgrade buffer, the fifth of
+                // six tiers (`Pool.priorityOfTier`), whose own comment says
+                // what sinks into it is "whatever is left". A hauler row that
+                // always has Feeding work never has a spare load, and with
+                // thirteen bodies to feed and the fifth rock a 360-tick round
+                // trip out it always has Feeding work.
+                //
+                // **Not** because the Storage outbids the buffer — it does not,
+                // the buffer is a tier *shallower* than the Stock and a load
+                // that can reach one can reach the other. This entry claimed
+                // that and it was wrong. What is measured here is the rate and
+                // the demand; the last step between them is not, and belongs in
+                // a ticket rather than in a comment that would read as settled.
+                // Taking the farthest rock away is the one lever this file has
+                // either way: it is the demand this colony carries, not the
+                // income, that this entry can change.
+                Outposts = [ Outpost.w13s29 ]
                 // Five crossings to the Reactor, so this colony declares no
                 // errand either — and the 22,000 Thorium it banks is ore
                 // nothing here can deliver, which ADR 0060 decision 3 files as
@@ -1160,8 +1201,10 @@ module Colony =
             // extensions — so the rooms it *would* want stop being bodies
             // bought for nobody, and W15S27 is the first of them (2026-09-16,
             // `docs/research/w15s27-outpost.md`). W15S29 and W14S29 are not
-            // measured yet; W14S28 is W13S28's by the entry above and one hop
-            // from here, which is a reassignment and not a new declaration.
+            // measured yet; W14S28 was W13S28's by the entry above and one
+            // hop from here, and on 2026-09-20 it became this colony's — a
+            // reassignment and not a new declaration, which is why it is
+            // argued at both entries and surveyed at neither.
             {
                 Home = "W15S28"
                 // W15S29 joins it on 2026-09-17. The wave-2 survey called it
@@ -1212,7 +1255,37 @@ module Colony =
                 // after nine thousand ticks dry, with the roads we laid in
                 // W15S29 still standing and its controller unreserved by
                 // anyone.
-                Outposts = [ Outpost.w15s27; Outpost.w15s29 ]
+                // **And W14S28 since 2026-09-20**, taken off W13S28 rather
+                // than newly found. A flood over the three rooms' real terrain,
+                // Storage to the container on the rock at 6,8, measures **46
+                // tiles from here against 67 from W13S28** — both walked the
+                // same way, because the 181 ticks W13S28's haul arithmetic
+                // charges for the same rock is a laden round trip and not a
+                // distance, and the two do not compare. So this is a **31%**
+                // shorter haul and not the fourfold one a tiles-against-ticks
+                // reading would suggest.
+                //
+                // That alone would not move a room. What moves it is which
+                // colony has the row to carry it: W13S28 was at 4,730 of demand
+                // over three haulers and banking what it could not convert,
+                // this colony at 1,480 over two. The rock's demand is smaller
+                // here than it was there, so the pair of colonies sheds haul
+                // rather than shifting it.
+                //
+                // The condition the withdrawal named is met and has been for a
+                // while: `Outpost.w14s28` was written to go back "the day
+                // W15S28 stands its own spawn", and Spawn3 stands at 18,30.
+                // What that note did not say is which colony it goes back to,
+                // and it went back to the one that could not reach it.
+                //
+                // The seat is partly on loan: **W15S27 is shut** to t655,973
+                // on its own core's collapse timer, and the errand's road
+                // through W15S26 is out of every chain while a bunker stands
+                // there (ADR 0074), so neither is drawing a hauler today. When
+                // W15S27 reopens the row is sized off the rocks again — and
+                // this one is then the *nearest* of the three, so it is the
+                // last a hauler shortage would strand.
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
                 // And the one errand there is (ADR 0060 decision 1): the
                 // sector Reactor in W15S25, three crossings out by W15S27 and
                 // the Source Keeper room W15S26. This colony declares it
