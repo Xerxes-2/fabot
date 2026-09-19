@@ -248,6 +248,25 @@ type Tuning =
         /// hits and whole at it — the ticks the room must hold times the damage
         /// per tick. No hysteresis, one Repair visit clearing the line.
         RampartFloor: int
+        /// How many whole bodies of the colony's own bank the Storage keeps
+        /// back before the upgrader row may spend any of it (#385). **Counted
+        /// in bodies rather than in energy** so it scales with the room:
+        /// 36,000 at RCL5's 1,800 bank, 46,000 at RCL6's 2,300, 106,000 at
+        /// RCL7's 5,300, and 246,000 at RCL8's 12,300 — a quarter of a full
+        /// Storage there, which is the one level where this floor is large
+        /// enough to be worth re-reading, and also the level where an extra
+        /// mouth is worth least (the engine caps an owned RCL8 controller at
+        /// 15 e/t however many stand at it).
+        ///
+        /// What it is a floor *for* is the colony's ability to re-cast itself:
+        /// twenty bodies is the whole workforce of the largest colony this bot
+        /// has run, once over. **Twenty is argued and not measured** — the
+        /// harness cannot stand a full Storage yet (#343), which is what would
+        /// let it be. The stock the worker row's backlog term draws on (#364)
+        /// is *not* reserved beneath it: both terms charge the sites first and
+        /// then draw on the same remainder, and what bounds the overlap is this
+        /// floor rather than an accounting between them.
+        UpgradeStockBodies: int
         /// The pile a Pickup is worth walking for: a dropped pile enters the
         /// pool at this many units and never below it. A hundred, derived at
         /// the **300 bank** — two Carry parts' worth, the smallest load that
@@ -614,6 +633,7 @@ module Tuning =
             RepairRescueLine = 0.25
             RepairRescues = 2
             RampartFloor = 100_000
+            UpgradeStockBodies = 20
             PickupThreshold = 100
             ReachMargin = 2
             StandingCarryPerWork = 4

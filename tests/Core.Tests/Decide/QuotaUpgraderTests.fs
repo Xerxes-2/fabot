@@ -177,6 +177,112 @@ let upgraderQuotaTests =
                     "a second standing body is over the quota, and it holds the generalist row down rather than casting beside it"
             }
 
+            // The stock's own half of the row (#385). The colony below is the
+            // same 1,800-bank, two-source one every case above uses: income
+            // buys one standing body and the floor is `UpgradeStockBodies` ×
+            // 1,800 = 36,000.
+            test "a bank above the floor buys a second standing body the income cannot" {
+                // Live, this rule's absence was 849,766 energy standing in
+                // W13S28's Storage that had not moved by one unit in 365 ticks,
+                // while the colony put 14.1 e/t into its controller and a
+                // neighbour on the same rocks and no stock at all put 30.6.
+                let banked =
+                    stocking 200_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+
+                Expect.stringStarts
+                    (castName (
+                        spawnIntents
+                            (decideOn
+                                { banked with
+                                    Creeps = upgraderFleet 1 1
+                                })
+                                .Intents
+                    ))
+                    "upgrader-"
+                    "the income's one body is standing and the stock buys the second"
+            }
+
+            test "a bank under the floor buys nothing" {
+                // 30,000 is short of the 36,000 the floor keeps back, and a
+                // floor that is not whole is not a floor: the colony must be
+                // able to re-cast itself before it spends a unit on upgrading.
+                let thin =
+                    stocking 30_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                Expect.isEmpty
+                    (spawnIntents (decideOn { thin with Creeps = upgraderFleet 1 1 }).Intents)
+                    "one standing body and one generalist are still the whole of what this colony hires"
+            }
+
+            test "the stock may double the row and no more" {
+                // 200,000 over the floor is eleven bodies' worth of drink, and
+                // the cap is the row the income itself buys — one. A second
+                // mouth is about what one buffer refilled by one hauler's spare
+                // loads can feed, and each tick re-decides as the stock falls.
+                let rich =
+                    stocking 1_000_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                Expect.isEmpty
+                    (spawnIntents (decideOn { rich with Creeps = upgraderFleet 2 1 }).Intents)
+                    "two standing bodies are the whole of what a stock of any size buys beside this income"
+            }
+
+            test "a bank buys nothing where the row itself is illegal" {
+                // The first draft of #385 shipped without this and a review
+                // caught it: the stock's half repeated none of the row's gate
+                // (ADR 0046 decision 3), so a colony whose buffer was still a
+                // site cast a standing body against its bank. Live that body
+                // reads `NoneApplicable` for its whole life — the row's
+                // Withdraw is shut to everything but the buffer (#206) — and
+                // the phantom quota inflates the Workforce target beside it.
+                let pending =
+                    stocking 200_000 (upgraderColony (withBuffer (Site BuiltKind.Container)))
+
+                Expect.stringStarts
+                    (castName (casts pending (upgraderFleet 0 0)))
+                    "worker-"
+                    "a container site is no buffer however much is banked behind it"
+
+                Expect.isEmpty
+                    (casts pending (upgraderFleet 0 2))
+                    "and the bank moves the Workforce target by nothing at all"
+            }
+
+            test "the building is charged before the mouth, as it is before the body" {
+                // The same subtraction the worker row's backlog term makes and
+                // for its reason: a row hired against a bank that empties
+                // mid-build is ADR 0039's mistake in another currency. 200,000
+                // buys a mouth on its own — 200,000 − 36,000 of floor over an
+                // 18,200 body — and does not once a site is owed 150,000 of it.
+                let building =
+                    stocking 200_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+                    |> owing [ 150_000 ]
+
+                // The site itself puts a Build in the pool, so the generalist
+                // row is what this colony hires next — the point is only that
+                // the standing row is not.
+                Expect.stringStarts
+                    (castName (casts building (upgraderFleet 1 1)))
+                    "worker-"
+                    "the site is covered first and the stock's mouth is what goes"
+            }
+
+            test "the worker row is not charged for a body the stock bought" {
+                // The trap this split exists for: `workforceTarget` hires the
+                // generalist row out of the surplus the upgrade row leaves, and
+                // a mouth the stock bought ate no surplus. Charged for it, the
+                // worker row would be taken away twice — once at the Storage
+                // the energy came from and once in the arithmetic here.
+                let banked =
+                    stocking 200_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                Expect.equal
+                    (targetOf banked)
+                    (targetOf (upgraderColony (withBuffer (Structure BuiltKind.Container))) + 1)
+                    "the target grows by the stock's one body and the generalist row is left where it was"
+            }
+
             test "a surplus of two and a half standing bodies hires two" {
                 // The pairwise on the surplus alone, one rival at a time:
                 // the same room, the same 1,800 bank, the same

@@ -943,16 +943,93 @@ let private upgraderLifetimeCost capacity =
 /// buffer is this row's working ground (ADR 0046 against ADR 0012's
 /// generalization), and a site there is a promise, not a store to withdraw
 /// from. A negative surplus hires none.
-let internal upgraderQuota (view: ColonyView) atlas surplus =
-    let capacity = view.Bank.Capacity
+/// What the colony may hire out of its **stock** rather than its income (#385),
+/// beyond the row the income already pays for.
+///
+/// The precedent is in this same function's neighbour: the worker row's backlog
+/// term is "paid out of the stock and not out of income" (#364,
+/// `Facts.stockedEnergy`), because a 100,000-energy terminal is bought with
+/// what is banked. This is the same argument for the row whose product is the
+/// one thing a colony can never lose — **controller progress does not unwind**,
+/// so an upgrader that dies the tick the stock runs out leaves everything it
+/// bought standing, and the mouth it stops being costs nobody a seat or a walk.
+///
+/// Live at t594,190 with this rule absent: W13S28 held 849,766 energy that had
+/// not moved by one unit in 365 ticks while it put 14.1 e/t into its controller
+/// and W12S28, on the same number of rocks and no stock at all, put 30.6.
+///
+/// **Two bounds, and they are what keep this from being ADR 0039's mistake in
+/// another currency.** The floor (`Tuning.UpgradeStockBodies`) is the colony's
+/// ability to re-cast itself, kept back before a unit of this is spent. The cap
+/// is the row the income itself buys: the stock may **double** the row and no
+/// more, because a second mouth is already about what one buffer refilled by
+/// one hauler's spare loads can feed, and because each tick re-decides as the
+/// stock falls — a row hired on a bank that empties shrinks by attrition, which
+/// is how every other row here shrinks. A colony whose income buys no mouth at
+/// all may still buy one, since a stock that cannot be spent is a stock that
+/// is lost.
+/// Whether this colony may hire the standing row at all (ADR 0046): a **built**
+/// controller container to stand at, and a bank whose own cast is a standing
+/// body. Named rather than spelled twice, because both halves of the row — the
+/// income's and the stock's (#385) — must answer to it, and a body hired where
+/// the row is illegal reads `NoneApplicable` for its whole life.
+let private rowStands (view: ColonyView) atlas =
+    not (Set.isEmpty (Atlas.controllerContainers atlas))
+    && standingParts view.Tuning (partsOf (bodyFor upgraderPattern view.Bank.Capacity))
 
-    if
-        Set.isEmpty (Atlas.controllerContainers atlas)
-        || not (standingParts view.Tuning (partsOf (bodyFor upgraderPattern capacity)))
-    then
+let internal upgraderQuota (view: ColonyView) atlas surplus =
+    if not (rowStands view atlas) then
         0
     else
-        surplus / upgraderLifetimeCost capacity |> max 0
+        surplus / upgraderLifetimeCost view.Bank.Capacity |> max 0
+
+/// What the colony's **stock** buys on top of the row its income pays for
+/// (#385, amending ADR 0046 decision 3).
+///
+/// The precedent is the worker row's backlog term below, which is "paid out of
+/// the stock and not out of income" (#364, `Facts.stockedEnergy`): a
+/// 100,000-energy terminal is bought with what is banked. This is that argument
+/// for the row whose product a colony can never lose — **controller progress
+/// does not unwind**, so an upgrader that dies the tick the stock runs out
+/// leaves everything it bought standing, and the mouth it stops being costs
+/// nobody a seat or a walk.
+///
+/// Live at t594,190 with this rule absent: W13S28 held 849,766 energy that had
+/// not moved by one unit in 365 ticks while it put 14.1 e/t into its controller
+/// and W12S28, on the same number of rocks and no stock at all, put 30.6.
+///
+/// **Three bounds, and they are what keep this from being ADR 0039's mistake in
+/// another currency.**
+///
+/// - `upgraderQuota`'s own gate, read here too and not repeated: no buffer
+///   standing, no row — a body hired where ADR 0046 makes the row illegal is a
+///   body that reads `NoneApplicable` for its whole life, which is what the
+///   first draft of this shipped and a review caught.
+/// - The **sites are charged first**, the same subtraction and for the same
+///   reason the backlog term makes it: bodies are hired out of what is left
+///   once the building is covered.
+/// - The floor (`Tuning.UpgradeStockBodies`) is the colony's ability to re-cast
+///   itself, kept back before a unit of the rest is spent.
+///
+/// And **one mouth at a time**, which is the whole of the cap: one more is
+/// about what a single buffer refilled by one hauler's spare loads can feed,
+/// `haulerQuota` is fixed before this term so the extra mouth brings no carrier
+/// with it, and each tick re-decides as the stock falls — a row hired on a bank
+/// that empties shrinks by attrition, which is how every row here shrinks. A
+/// colony whose income buys no mouth may still buy this one, because a stock
+/// that cannot be spent is a stock that is lost.
+let private upgradersOnStock (view: ColonyView) atlas =
+    let capacity = view.Bank.Capacity
+
+    if not (rowStands view atlas) then
+        0
+    else
+        let floor = view.Tuning.UpgradeStockBodies * capacity
+        let owed = view.ConstructionSites |> List.sumBy (fun site -> site.Left)
+
+        (Facts.stockedEnergy view - owed - floor |> max 0)
+        / upgraderLifetimeCost capacity
+        |> min 1
 
 /// The worker row's floor (ADR 0046): the row's income term is whatever the
 /// upgrader row has not eaten, and beside a buffer that can still be nothing at
@@ -996,6 +1073,12 @@ type QuotaRows =
         Miner: int
         Courier: int
         Upgrader: int
+        /// How many of `Upgrader` the **stock** bought rather than the income
+        /// (#385). Carried rather than re-derived because `workforceTarget`
+        /// charges the surplus for the row and must charge it for these mouths
+        /// **not at all**: they ate no income, so the worker row hired out of
+        /// what the upgrade row left is owed every unit of it.
+        UpgraderOnStock: int
         Surplus: int
     }
 
@@ -1013,6 +1096,11 @@ let internal quotaRowsOf
     : QuotaRows =
     let surplus = surplusOverLifetime view atlas sizing haulerQuota
 
+    // The two halves of the upgrade row, derived once and kept apart (#385):
+    // what the rocks pay for, and what the Storage pays for on top of it.
+    let onIncome = upgraderQuota view atlas surplus
+    let onStock = upgradersOnStock view atlas
+
     {
         Reserver = sizing.ReserverClaims
         Guard = guardQuota view outposts
@@ -1024,7 +1112,8 @@ let internal quotaRowsOf
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
         Courier = sizing.CourierQuota
-        Upgrader = upgraderQuota view atlas surplus
+        Upgrader = onIncome + onStock
+        UpgraderOnStock = onStock
         Surplus = surplus
     }
 
@@ -1033,7 +1122,8 @@ let internal quotaRowsOf
 /// row's own colony fact — reservers one per declared outpost, guards one or two
 /// per raided one, Anchors one per Post, haulers the throughput quota, miners
 /// one per diggable deposit, upgraders
-/// the surplus divided by a standing body's drain, workers the income arithmetic
+/// the surplus divided by a standing body's drain plus at most one more the
+/// stock buys (#385), workers the income arithmetic
 /// that is left and the pioneers a nursery adds to it (ADR 0047) — floored at
 /// `Tuning.MinWorkforce` and derived
 /// fresh each tick. A source whose Post is provided for retires its other
@@ -1080,7 +1170,11 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     // is hired against the rest (ADR 0046): the energy its Work drinks over a
     // lifetime, and the row's replacement cost over the same lifetime, priced
     // at the body the casting step would actually cast.
-    let upgraderCost = rows.Upgrader * upgraderLifetimeCost capacity
+    // The **income-bought** mouths only (#385). A mouth the stock bought ate no
+    // income, so charging the worker row for it would take the surplus away
+    // twice — once at the Storage where the energy came from and once here.
+    let upgraderCost =
+        (rows.Upgrader - rows.UpgraderOnStock) * upgraderLifetimeCost capacity
 
     // Rounded up through the same ceilDiv as the hauler row (ADR 0037): the
     // granularity a floor would drop is a whole worker body's Work, which grows
