@@ -69,6 +69,31 @@ let private leafOr (empty: 'a) (leaf: unit -> obj) (decode: obj -> 'a) : 'a =
     with _ ->
         empty
 
+// **A whole number off the wire, and a throw for anything else** (#294).
+// `unbox<int>` is erased by Fable, so an off-shape value compiles to `| 0` and
+// reads back as tick 0 — a stand-down whose `expiry` was hand-edited to an
+// object decoded to a row that `standingDown` then read as *spent*, which is
+// the one direction ADR 0043 says the gate may not be wrong in. Every decoder
+// below that took a tick or a coordinate took it this way; the wire gate
+// (`scripts/wire-check.mjs`) is what found it, and #275 is where the same cast
+// cost a rival latch its tick.
+//
+// A throw and not a default, because every caller of this is inside a row
+// decoder: a row that will not read costs its own row (ADR 0028), and a
+// default would be the invented tick all over again.
+let private numberValue (value: obj) : int option =
+    if jsTypeof value <> "number" then
+        None
+    else
+        Some(unbox<int> value)
+
+let private numberOf (raw: obj) (key: string) : int =
+    match numberValue raw?(key) with
+    | Some number -> number
+    // Named, because the gate's output is read by somebody holding a leaf and
+    // asking which field of it will not read.
+    | None -> failwith ("not a number: " + key)
+
 // A keyed wire object read back as whole numbers — `hashOf box`'s decode
 // partner, absent reading as empty the way an absent row array does.
 let private intMapOf (raw: obj) : Map<string, int> =
@@ -76,7 +101,10 @@ let private intMapOf (raw: obj) : Map<string, int> =
         Map.empty
     else
         objectEntries raw
-        |> Array.map (fun (key, value) -> key, unbox<int> value)
+        // A value that is not a number costs its own entry (#294): these are
+        // baselines a later tick re-reads, so dropping one is a tick of
+        // silence where keeping it is a difference taken against nonsense.
+        |> Array.choose (fun (key, value) -> numberValue value |> Option.map (fun n -> key, n))
         |> Map.ofArray
 
 // A reason's numbers sit on the row that names it, beside the reason
@@ -90,11 +118,15 @@ let private writeNumbers (o: obj) =
         o?wait <- wait
     | None -> ()
 
+// Two degradations in one row, on purpose: a reason carrying neither number is
+// a bare tag, which reads as `None` and is what every reason without numbers
+// writes; a reason carrying one that will not read is a row that will not
+// restate itself, and costs itself the way every other off-shape number does.
 let private readNumbers (raw: obj) =
     if isNull raw?walk || isNull raw?wait then
         None
     else
-        Some(unbox<int> raw?walk, unbox<int> raw?wait)
+        Some(numberOf raw "walk", numberOf raw "wait")
 
 // A Candidate on the wire: a scored row carries the full matching key, a
 // rejected row its reason — the presence of `reason` tells them apart.
@@ -118,9 +150,9 @@ let private decodeCandidate (raw: obj) : Candidate =
     if isNull raw?reason then
         Candidate.Scored(
             string raw?task,
-            unbox<int> raw?rank,
-            unbox<int> raw?cost,
-            unbox<int> raw?load
+            numberOf raw "rank",
+            numberOf raw "cost",
+            numberOf raw "load"
         )
     else
         match rejectReasonOf (readNumbers raw) (string raw?reason) with
@@ -233,7 +265,7 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
                 tryVerdict e?v
                 |> Option.map (fun verdict ->
                     {
-                        Tick = unbox<int> e?t
+                        Tick = numberOf e "t"
                         Verdict = verdict
                     }))
         LastTask =
@@ -268,8 +300,8 @@ let private roomPosOf (raw: obj) : RoomPos =
     RoomPos.at
         (string raw?room)
         {
-            X = unbox<int> raw?x
-            Y = unbox<int> raw?y
+            X = numberOf raw "x"
+            Y = numberOf raw "y"
         }
 
 let private encodeEpisode (episode: RaidEpisode) =
@@ -326,8 +358,8 @@ let private encodeEpisode (episode: RaidEpisode) =
 
 let private decodeEpisode (raw: obj) : RaidEpisode =
     {
-        Opened = unbox<int> raw?opened
-        LastSeen = unbox<int> raw?last
+        Opened = numberOf raw "opened"
+        LastSeen = numberOf raw "last"
         Roster =
             raw?roster
             |> unbox<obj[]>
@@ -338,9 +370,10 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     Body =
                         objectEntries row?body
                         |> Array.map (fun (name, count) ->
-                            match partOf name with
-                            | Some part -> part, unbox<int> count
-                            | None -> failwith "unknown wire name")
+                            match partOf name, numberValue count with
+                            | Some part, Some number -> part, number
+                            | Some _, None -> failwith ("not a number: " + name)
+                            | None, _ -> failwith "unknown wire name")
                         |> Map.ofArray
                 })
             |> Map.ofArray
@@ -348,23 +381,21 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
             if isNull raw?closest then
                 None
             else
+                let closest = raw?closest
+
                 Some
                     {
-                        Range = unbox<int> raw?closest?range
+                        Range = numberOf closest "range"
                         Pos =
                             {
                                 // An approach with no room reads as the
                                 // empty name, as a projection naming no
                                 // room does, rather than costing the row.
-                                Room =
-                                    if isNull raw?closest?room then
-                                        ""
-                                    else
-                                        string raw?closest?room
-                                X = unbox<int> raw?closest?x
-                                Y = unbox<int> raw?closest?y
+                                Room = if isNull closest?room then "" else string closest?room
+                                X = numberOf closest "x"
+                                Y = numberOf closest "y"
                             }
-                        Tick = unbox<int> raw?closest?t
+                        Tick = numberOf closest "t"
                     }
         Losses =
             raw?losses
@@ -372,17 +403,17 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
             |> Array.map (fun d ->
                 {
                     Creep = string d?creep
-                    Tick = unbox<int> d?t
+                    Tick = numberOf d "t"
                     // Absent on a row written before #376, and on a body the
                     // projection never placed: both read as no tile.
                     Where = if isNull d?room then None else Some(roomPosOf d)
                 })
             |> Array.toList
-        // An episode written before the damage was recorded reads as zero
-        // rather than costing its row: the field is missing, not wrong,
-        // and the roster and approach beside it were written correctly
-        // (ADR 0028).
-        Damage = if isNull raw?damage then 0 else unbox<int> raw?damage
+        // Absent on an episode written before ADR 0034, and zero is what that
+        // says: the field is missing rather than wrong, and the roster and
+        // approach beside it were written correctly (ADR 0028). Present and
+        // off-shape is the other case, and costs the row like every number.
+        Damage = if isNull raw?damage then 0 else numberOf raw "damage"
     }
 
 // One outpost episode on the wire (ADR 0043): the room it shuts, the
@@ -407,18 +438,21 @@ let private encodeOutpost (episode: OutpostEpisode) =
 let private decodeOutpost (raw: obj) : OutpostEpisode =
     {
         RoomName = string raw?room
-        Opened = unbox<int> raw?opened
-        LastSeen = unbox<int> raw?last
+        Opened = numberOf raw "opened"
+        LastSeen = numberOf raw "last"
         // The one field with no honest default: `unbox` is a cast and not a
         // check, so a row without this key would decode to `undefined`, every
         // comparison against it would answer false, and `standingDown` would
         // report a running stand-down as spent — the one direction ADR 0043
         // does not allow the gate to be wrong in.
-        Expiry =
-            if isNull raw?expiry then
-                failwith "missing expiry"
-            else
-                unbox<int> raw?expiry
+        // A row with no expiry, or one whose expiry is not a number, costs its
+        // own row. `unbox` is a cast and not a check, so either would have
+        // decoded to `undefined` or to 0, every comparison against it would
+        // answer false, and `standingDown` would report a running stand-down
+        // as spent — the one direction ADR 0043 does not allow the gate to be
+        // wrong in. The off-shape half of that was live until #294's wire gate
+        // asked.
+        Expiry = numberOf raw "expiry"
         // A basis the vocabulary does not have costs its row rather than
         // reading as another basis: a stand-down that cannot say why it
         // holds an outpost is no stand-down, and the load already degrades
@@ -467,13 +501,10 @@ let private decodeHold (raw: obj) : OutpostHold =
             | Some holder -> holder
             | None -> failwith "unknown wire name"
 
-        if jsTypeof raw?until <> "number" then
-            failwith "not a tick"
-        else
-            {
-                Holder = holder
-                Until = unbox<int> raw?until
-            }
+        {
+            Holder = holder
+            Until = numberOf raw "until"
+        }
 
 // The hold map read back, entry by entry as the latch map is and for the same
 // reason: one unreadable entry must not take the leaf's whole history with it.
@@ -510,10 +541,8 @@ let private encodeThreat (latch: ThreatLatch) =
 let private decodeThreat (raw: obj) : ThreatLatch =
     if isNull raw || jsTypeof raw <> "object" then
         failwith "not a threat latch"
-    elif jsTypeof raw?until <> "number" then
-        failwith "not a tick"
     else
-        { Until = unbox<int> raw?until }
+        { Until = numberOf raw "until" }
 
 // The threat map read back, entry by entry as the two maps above are.
 let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
@@ -881,7 +910,25 @@ let loadRaids (home: string) : RaidState =
             // until they do the row answers off vision alone, which is what it
             // did before the record existed.
             Threatened = threatMapOf raids?threatened
-            Living = raids?living |> unbox<string[]> |> Set.ofArray
+            // Names, and a name is a string: `unbox` is erased, so without
+            // the filter a number under `living` becomes a creep we think
+            // stands somewhere, and the tick after it "dies" and charges the
+            // episode a loss nobody suffered.
+            Living =
+                // An array and not merely a truthy thing: `unbox` is a cast,
+                // so a string under this key walks character by character and
+                // reads as one creep per letter (#294).
+                if not (JS.Constructors.Array.isArray raids?living) then
+                    Set.empty
+                else
+                    raids?living
+                    |> unbox<obj[]>
+                    |> Array.choose (fun name ->
+                        if jsTypeof name = "string" then
+                            Some(unbox<string> name)
+                        else
+                            None)
+                    |> Set.ofArray
             // The tiles beside the names (#376), absent from a bundle that
             // predates them: the first loss after a deploy carries no tile.
             Placed =
@@ -889,7 +936,14 @@ let loadRaids (home: string) : RaidState =
                     Map.empty
                 else
                     objectEntries raids?placed
-                    |> Array.map (fun (name, tile) -> name, roomPosOf tile)
+                    |> Array.choose (fun (name, tile) ->
+                        // Entry by entry, the way `latchMapOf` reads: a tile
+                        // that will not decode costs the body it belongs to
+                        // and not the episode ring beside it.
+                        try
+                            Some(name, roomPosOf tile)
+                        with _ ->
+                            None)
                     |> Map.ofArray
             // The damage baseline, absent from a bundle written
             // before it existed: an empty baseline charges the next

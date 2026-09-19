@@ -5,6 +5,7 @@
 - Formatter: Fantomas (local dotnet tool). Run `npm run format` before committing; CI-style check: `npm run format:check`. Style knobs live in `.editorconfig`.
 - A new `Decide` test goes in the file its *domain* owns, never one named after the ticket: the table is in `docs/agents/orchestration.md` § Where a new Decide test goes.
 - **An Atlas fixture is a function, never a module-level value** — and the function captures no Atlas of its own. Expecto runs test lists in parallel and an Atlas memoises onto mutable `Dictionary` tables, so one static Atlas shared by two lists is two threads writing one table: wrong numbers, sometimes a throw, at roughly one run in ten (#310). `ParallelSafetyTests` fails the build on any static that reaches one, reading both the declared type and the value's runtime type.
+- **The wire has its own gate** (#294): `tests/Core.Tests` references Core alone, so `src/App/ObserveMemory.fs` — every Memory leaf the bot reads and writes — is covered by `scripts/wire-check.mjs` and by nothing else. It drives every `load*`/`save*` over the built Fable output — load, then save, then compare the wire — and asserts the documented degradation: one bad row costs that row (ADR 0028), an absent, null or wrong-type leaf reads empty, a legacy shape still reads, and nothing invents a tick. That last one is the class #275's second defect belongs to: `unbox<int>` is erased by Fable, so an off-shape value compiles to `| 0` and a stand-down's expiry of zero reads as *spent*. The raid log, the creep log, the reactor reading and the positions leaf carry the full malformed-leaf table; the CPU line, the breach log and the two write-only leaves (`saveQuotas`, `saveLayout`, read by `observe.mjs` and by nothing in F#) carry less. Run by `npm test` after `dotnet test`, and by `npm run wire` alone. A new leaf or a changed wire key wants a case here; `dotnet test` cannot see either.
 - Lint: the F# compiler with `TreatWarningsAsErrors` + `--warnon:1182` (unused bindings), set in `Directory.Build.props`. A clean `npm run build` / `dotnet test` is the lint gate.
 - `[<Emit>]` binding stubs use `_`-prefixed params (args are used positionally via `$0`, invisible to the compiler).
 - An `[<Emit>]` accessor with a real body (the checked index that runs on .NET, e.g. the Atlas flood's `at`) names its params normally: the .NET body uses them.
@@ -19,7 +20,7 @@ Solo repo: no PRs, no feature branches. Work on `main` directly.
 
 Before pushing (the point of no return — pushed commits become immutable):
 
-1. `npm run format` and `npm run build` / `dotnet test` are clean.
+1. `npm run format` and `npm run build` / `npm test` are clean. `npm test` is `dotnet test` and then the wire gate; it leaves `dist/` alone, so the artifact a deploy uploads survives a test run.
 2. `/code-review` has run on the diff and its findings are resolved.
 
 Then:

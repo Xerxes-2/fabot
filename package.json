@@ -2,12 +2,15 @@
   "name": "fabot",
   "private": true,
   "scripts": {
-    "build": "rm -rf build dist && dotnet fable src/App -o build/fable && esbuild build/fable/Main.js --bundle --format=cjs --outfile=dist/main.js",
+    "build:fable": "rm -rf build && dotnet fable src/App -o build/fable",
+    "build": "npm run build:fable --silent && rm -rf dist && esbuild build/fable/Main.js --bundle --format=cjs --outfile=dist/main.js",
     "format": "dotnet fantomas src tests",
     "format:check": "dotnet fantomas --check src tests",
     "upload": "node --env-file-if-exists=.env scripts/upload.mjs",
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "profile": "node scripts/profile.mjs",
+    "wire": "npm run build:fable --silent && node scripts/wire-check.mjs",
+    "test": "dotnet test && npm run wire --silent",
     "deploy": "npm run build && npm run upload",
     "capture-room": "node --env-file-if-exists=.env scripts/capture-room.mjs"
   },
