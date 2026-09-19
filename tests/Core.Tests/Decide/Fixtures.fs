@@ -1867,7 +1867,10 @@ let private errandFloor =
 ///
 /// Merges into whatever layer that room already carries, so bodies may be stood
 /// in it before or after.
-let withReactorErrand (colony: ColonyView) =
+/// The declaration on the floor it was first written with, which **cannot
+/// price its crossing** (#379). Asked for through `bareDeliveryColony` below
+/// by the one case whose subject is what a rule does with no price at all.
+let internal withBareReactorErrand (colony: ColonyView) =
     let existing = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
 
     { colony with
@@ -1883,6 +1886,79 @@ let withReactorErrand (colony: ColonyView) =
                     TargetPositions = Map.add reactorId reactorTile existing.TargetPositions
                 }
     }
+
+/// A whole room of plain ground, which is what a crossing needs on **both**
+/// sides of it (#379).
+let private wholeFloor =
+    [
+        for x in 1..48 do
+            for y in 1..48 -> { X = x; Y = y }, Plain
+    ]
+
+/// The same declaration with its one crossing **priceable** (#379), which is
+/// what `withReactorErrand` now hands out and what the suites reading it
+/// mostly want.
+///
+/// The bare fixture cannot price a cross-room walk at all, and for two
+/// reasons at once. Its errand floor stops at y 47 and its home floor is a
+/// corridor, so neither side of the crossing has ground behind the tile it
+/// lands on (ADR 0062) and `Atlas.routes` answers `[]`. And the `spatial`
+/// funnel files home under the **empty** name, which has no sector coordinates
+/// to be adjacent by, so no chain out of it can exist however the ground is
+/// laid. Every cross-room price out of it is therefore `None`, and every rule
+/// that reads one takes its permissive branch (ADR 0004) — so three suites
+/// were exercising the delivery, the one thing in this bot that walks three
+/// rooms, on the branch where the walk has no price. `ErrandTests` carried a
+/// `paved` funnel to buy a real price back for the handful of cases that could
+/// not do without one; this inverts that, and `withBareReactorErrand` above is
+/// what the cases that genuinely want the unpriced branch ask for by name.
+///
+/// **Lays its ground over whatever was there**: the home layer's terrain and
+/// both rooms' borders are replaced rather than merged, so a colony that
+/// walled something at home before declaring the errand loses the wall. Every
+/// caller today declares on open ground; a case that wants both lays its walls
+/// after this.
+let private priced (colony: ColonyView) =
+    let home = SpatialInfo.homeName colony.Spatial
+    let errandLayer = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
+
+    // A home that already has a name keeps it: a suite that named its own
+    // said something by naming it — `ObserveTests` puts the home three rooms
+    // out so the alarm's lead is the live route's — and renaming it here would
+    // answer a question nobody asked. What this supplies is the name the
+    // `spatial` funnel leaves **empty**, which is the half of the unpriceable
+    // fixture that no amount of ground can fix.
+    let named = if home = "" then "W1N1" else home
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                RoomName = Some named
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.remove home
+                    |> Map.add named (SpatialInfo.layerOf colony.Spatial home)
+                Borders =
+                    colony.Spatial.Borders
+                    |> Map.add named plainRing
+                    |> Map.add reactorErrand.RoomName plainRing
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = TerrainGrid.ofList wholeFloor
+                })
+            |> withNeighbour
+                reactorErrand.RoomName
+                { errandLayer with
+                    Terrain = TerrainGrid.ofList wholeFloor
+                }
+    }
+
+/// The declaration as the suites read it: priceable, because a delivery whose
+/// leg has no price is a delivery none of its rules are really being asked
+/// about (#379).
+let withReactorErrand (colony: ColonyView) =
+    colony |> withBareReactorErrand |> priced
 
 /// Our own bodies standing in the errand room, filed into its layer (ADR
 /// 0041): a creep the projection places nowhere stands in no room at all, and a
@@ -1950,7 +2026,7 @@ let withReactorOwner owner (colony: ColonyView) =
 /// tile nor a kind, so an entry here would be the shape that cost #354 its 915
 /// T — the gate read the store out of this map and the projection answered 0
 /// for a store holding 999. `withReactorOwner` stands the row it really rides.
-let deliveryColony owner =
+let private deliveryColonyWith declare owner =
     let resident = creepWith "relay" 0 0 [ BodyPart.Claim; Move ]
 
     let colony =
@@ -1963,9 +2039,21 @@ let deliveryColony owner =
         }
 
     colony
-    |> withReactorErrand
+    |> declare
     |> withReactorOwner owner
     |> standingInErrand [ resident, reactorRing ]
+
+/// The delivering colony with its crossing priceable, which is what the cases
+/// about the delivery want (#379).
+let deliveryColony owner =
+    deliveryColonyWith withReactorErrand owner
+
+/// And the same colony on the **unpriceable** floor, for the cases whose
+/// subject is what a rule does when the walk has no price at all (ADR 0004).
+/// Asked for by name since #379, where it used to be what every case got by
+/// default and most of them were not asking for it.
+let bareDeliveryColony owner =
+    deliveryColonyWith withBareReactorErrand owner
 
 /// What the declared Reactor's store holds (#354). Beside `withReactorOwner`
 /// and never instead of it: no vision, no row, and a colony that cannot see the

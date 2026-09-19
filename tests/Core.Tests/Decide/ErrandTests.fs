@@ -95,62 +95,9 @@ let private reclaimsOf (colony: ColonyView) =
         | Reclaim _ -> true
         | _ -> false)
 
-/// A whole room of plain ground, for the two cases that need the delivery leg
-/// **priced**.
-let private plainFloor =
-    [
-        for x in 1..48 do
-            for y in 1..48 -> { X = x; Y = y }, Plain
-    ]
-
-/// The shared fixture with that floor under both ends of its one crossing, and
-/// a real room name on the home layer. The shared fixture cannot price a
-/// cross-room walk at all: its errand floor stops at y 47 and its home floor is
-/// a corridor at y 10..11, so neither side of the crossing has ground behind
-/// its landing tile (ADR 0062), `Atlas.routes` answers `[]`, and every
-/// cross-room price out there is `None`.
-///
-/// Named, and the home layer re-filed under the name: the `spatial` funnel
-/// files home under the **empty** name, and an empty name has no sector
-/// coordinates to be adjacent by, so no chain out of it can exist at all —
-/// which is the deeper reason the shared fixture cannot price this leg.
-/// `homeControl` carrying both keys is this case anticipated.
-///
-/// A `let private` **function** and not a value, `AGENTS.md` § Code hygiene:
-/// what it is handed carries an Atlas-bearing view, and a module-level value
-/// shared by two lists is two threads onto one memo table (#310).
-let private paved (colony: ColonyView) =
-    let errand = SpatialInfo.layerOf colony.Spatial errandRoom
-
-    { colony with
-        Spatial =
-            { colony.Spatial with
-                RoomName = Some "W1N1"
-                Rooms =
-                    colony.Spatial.Rooms
-                    |> Map.remove (SpatialInfo.homeName colony.Spatial)
-                    |> Map.add
-                        "W1N1"
-                        (SpatialInfo.layerOf colony.Spatial (SpatialInfo.homeName colony.Spatial))
-                Borders =
-                    colony.Spatial.Borders
-                    |> Map.add "W1N1" plainRing
-                    |> Map.add errandRoom plainRing
-            }
-            |> withHome (fun layer ->
-                { layer with
-                    Terrain = TerrainGrid.ofList plainFloor
-                })
-            |> withNeighbour
-                errandRoom
-                { errand with
-                    Terrain = TerrainGrid.ofList plainFloor
-                }
-    }
-
-/// The Task **id** one named body holds this tick, which is what the assignment
-/// table is keyed in. `holds` below is what a case should reach for: it takes
-/// the Task itself, so a case names the Task and never spells the string.
+/// The Task the Matcher settles on for one creep, and None for a creep it
+/// leaves idle — the whole decision read back through the one name a case
+/// cares about.
 let private assignedTask name (colony: ColonyView) =
     let { Assignments = assignments } = decideOn colony
     Map.tryFind name assignments
@@ -185,7 +132,7 @@ let private loadedLegOf (creep: CreepInfo, colony: ColonyView) =
 
     match Atlas.walkTicksFrom (Atlas.ofView colony) loaded store (snd reactorErrand.Target) with
     | Some ticks -> ticks
-    | None -> failtest "the widened floor must price the delivery leg, or this case shows nothing"
+    | None -> failtest "the fixture prices this leg since #379, or this case shows nothing"
 
 /// The `ClaimReactor` Intents one tick emits.
 let private reclaimIntents (colony: ColonyView) =
@@ -861,9 +808,7 @@ let courierTests =
                         }
 
                     aged,
-                    deliveryColony (Some Ownership.Ours)
-                    |> paved
-                    |> withHomeCreep { X = 13; Y = 10 } aged
+                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } aged
 
                 let draws (creep: CreepInfo, colony) =
                     Map.tryFind creep.Name (decideOn colony).Assignments = Some(
@@ -901,9 +846,7 @@ let courierTests =
                         (List.replicate 11 Work @ List.replicate 12 Carry @ List.replicate 12 Move)
 
                 let alone =
-                    deliveryColony (Some Ownership.Ours)
-                    |> paved
-                    |> withHomeCreep { X = 13; Y = 10 } worker
+                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } worker
 
                 Expect.isFalse
                     (alone |> holds worker.Name (Withdraw("sto-1", Thorium)))
@@ -943,9 +886,7 @@ let courierTests =
                         }
 
                     slow,
-                    deliveryColony (Some Ownership.Ours)
-                    |> paved
-                    |> withHomeCreep { X = 13; Y = 10 } slow
+                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } slow
 
                 let draws (creep: CreepInfo, colony) =
                     colony |> holds creep.Name (Withdraw("sto-1", Thorium))
@@ -957,7 +898,7 @@ let courierTests =
                         Atlas.walkTicks (Atlas.ofView colony) creep.Name (Refill(reactor, Thorium))
                     with
                     | Some ticks -> ticks
-                    | None -> failtest "the widened floor must price the empty walk too"
+                    | None -> failtest "the fixture prices the empty walk too"
 
                 let loadedLeg = loadedLegOf (atStorage Engine.creepLifetime)
 
@@ -1001,7 +942,7 @@ let courierTests =
             test
                 "the last load is drawn whole once no more ore is coming, and the full-load gate stands while it is" {
                 let banked amount digging =
-                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let ready = deliveryColony (Some Ownership.Ours)
 
                     { ready with
                         Spatial =
@@ -1078,7 +1019,7 @@ let courierTests =
                 let carrier = courier "courier-holding" |> carrying 376
 
                 let colony =
-                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let ready = deliveryColony (Some Ownership.Ours)
 
                     { ready with
                         Spatial =
@@ -1133,7 +1074,7 @@ let courierTests =
                     |> carrying (Tuning.defaults.ReactorLoad + 100)
 
                 let colony =
-                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let ready = deliveryColony (Some Ownership.Ours)
 
                     { ready with
                         Spatial =
@@ -1168,7 +1109,7 @@ let courierTests =
                 let tombTile = { X = 26; Y = 45 }
 
                 let colony =
-                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let ready = deliveryColony (Some Ownership.Ours)
                     let layer = SpatialInfo.layerOf ready.Spatial errandRoom
 
                     { ready with
@@ -1242,11 +1183,12 @@ let courierTests =
                     }
 
                 let colony =
-                    deliveryColony (Some Ownership.Ours) |> withHomeCreep { X = 13; Y = 10 } aged
+                    bareDeliveryColony (Some Ownership.Ours)
+                    |> withHomeCreep { X = 13; Y = 10 } aged
 
                 Expect.isNone
                     (Atlas.walkTicks (Atlas.ofView colony) aged.Name (Refill(reactor, Thorium)))
-                    "the fixture's premise: this leg has no price"
+                    "the fixture's premise: this leg has no price, which is what `bareDeliveryColony` is for (#379)"
 
                 Expect.equal
                     (Map.tryFind aged.Name (decideOn colony).Assignments)
@@ -1527,7 +1469,7 @@ let courierTests =
                             TicksToLive = life
                         }
 
-                    let ready = deliveryColony (Some Ownership.Ours) |> paved
+                    let ready = deliveryColony (Some Ownership.Ours)
                     let layer = SpatialInfo.layerOf ready.Spatial errandRoom
 
                     aged,
@@ -1580,12 +1522,12 @@ let courierTests =
                 let carried = 175
                 let loaded = courier "courier-part" |> carrying carried
 
-                // Paved, because the Storage half of the pair is a **walk home**
-                // and the shared fixture prices no crossing at all (ADR 0062,
-                // `paved` above): an unpriceable sink would read as "no sink"
-                // here for a reason that is the fixture's and not the rule's.
-                let open' =
-                    deliveryColony (Some Ownership.Ours) |> paved |> withErrandCreep ringTile loaded
+                // The Storage half of the pair is a **walk home**, so it needs
+                // a crossing that prices (ADR 0062): an unpriceable sink reads
+                // as "no sink" for a reason that is the fixture's and not the
+                // rule's. Since #379 the shared fixture prices it, where this
+                // case used to have to ask for a floor of its own.
+                let open' = deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
 
                 Expect.isTrue
                     (open' |> holds loaded.Name (Refill(reactor, Thorium)))
@@ -1847,7 +1789,6 @@ let consignmentTests =
                 Expect.isFalse
                     (scoredFor (
                         deliveryColony (Some Ownership.Ours)
-                        |> paved
                         |> withHomeCreep { X = 13; Y = 10 } worker
                     ))
                     "in the colony that declared the errand, the same draw is rejected for the same body"

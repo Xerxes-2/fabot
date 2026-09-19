@@ -678,10 +678,11 @@ let reclaimerRowTests =
                 // the body out there is the colony's only vision of the room
                 // and the only thing holding its flag.
                 //
-                // This fixture's chain is unpriceable, which isolates the
-                // overlap from the ordinary oven-plus-walk lead. The threshold
-                // is therefore the knob itself.
-                let atLife overlap life =
+                // The threshold is the **lead plus the overlap**, and both
+                // terms are real since #379: this fixture's chain used to be
+                // unpriceable, which zeroed the lead's walk and left the case
+                // measuring the knob against nothing at all.
+                let colonyAt overlap life =
                     let incumbent = reserver "rc" |> withLife life
 
                     let colony =
@@ -694,18 +695,55 @@ let reclaimerRowTests =
                             }
                     }
                     |> standingIn reactorErrand.RoomName [ incumbent, reactorRing ]
-                    |> fun colony -> reserverCasts (decideOn colony).Intents
+
+                let atLife overlap life =
+                    reserverCasts (decideOn (colonyAt overlap life)).Intents
+
+                // The threshold is the **lead plus the overlap**, and since
+                // #379 the lead has a real walk in it: the shared fixture used
+                // to price this crossing at `None`, which zeroed the walk term
+                // and left this case measuring the knob against nothing. Read
+                // off the Atlas rather than written down, so it stays pinned to
+                // the walk the colony prices and not to a number that moves
+                // with the floor under it.
+                let lead =
+                    let colony = colonyAt 25 25
+                    let atlas = Atlas.ofView colony
+
+                    let spawn =
+                        match SpatialInfo.placementOf colony.Spatial "spawn-1" with
+                        | Some tile -> RoomPos.pos tile
+                        | None -> failtest "the fixture stands a spawn"
+
+                    match
+                        Atlas.castWalkTicks
+                            atlas
+                            oneBlock
+                            spawn
+                            (RoomPos.at reactorErrand.RoomName reactorRing)
+                    with
+                    | Some walk -> Engine.spawnTicksPerPart * List.length oneBlock + walk
+                    | None ->
+                        failtest
+                            "the errand's crossing is priceable since #379, or this case shows nothing"
+
+                Expect.isGreaterThan
+                    lead
+                    (Engine.spawnTicksPerPart * List.length oneBlock)
+                    "the premise: the lead has a **walk** in it and not an oven alone, which is what #379 bought this case"
 
                 Expect.isEmpty
-                    (atLife 25 26)
-                    "one tick above the overlap the incumbent is the row's one body"
+                    (atLife 25 (lead + 26))
+                    "one tick above the lead plus the overlap, the incumbent is the row's one body"
 
                 Expect.equal
-                    (atLife 25 25)
+                    (atLife 25 (lead + 25))
                     [ oneBlock ]
                     "at it the relief is cast while the incumbent still holds the flag"
 
-                Expect.isEmpty (atLife 10 25) "a shorter overlap leaves the same body counted"
+                Expect.isEmpty
+                    (atLife 10 (lead + 25))
+                    "and a shorter overlap leaves the same body counted: the knob is the term that moved"
             }
 
             test "a body at home is not led by the errand's overlap" {
