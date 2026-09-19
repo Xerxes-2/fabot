@@ -129,6 +129,44 @@ let private collapseTickOf (structure: IStructure) : int option =
 /// rest under `Foreign`). `ours` is the name the engine spells this player,
 /// read in `ofGame`: whose a reservation is, is a comparison against it, so
 /// Core is handed the answer rather than the two names (ADR 0042).
+/// The census's **stable half**, memoised per room name (#384).
+///
+/// Building `TargetKinds` is 6.5% of a profiled tick on its own, measured by
+/// building it twice and pricing the delta (`--scenario reactor --level 7`,
+/// four interleaved pairs, pinned to one CCD). It is one `Map.ofArray` over
+/// every object the room holds, and an F# `Map` of N entries is N inserts with
+/// rebalancing — so the cost is the *building*, not the reading, which is why
+/// #383's three attempts at a cheaper walk all measured zero.
+///
+/// Almost none of it changes. A room's sources, minerals, controller and
+/// structures are the same objects tick after tick; what moves is the floor —
+/// dropped piles and tombstones — and those are a handful of entries that cost
+/// a handful of `Map.add`s onto a map already built. So the stable half is
+/// built once and kept, and the tick adds its floor to it.
+///
+/// **The key is a checksum and not a count**, because the direction that must
+/// never be wrong is a structure that is *gone*: a census still naming a
+/// destroyed target is a Task pointed at nothing. Count alone would miss one
+/// structure destroyed and another built on the same tick. The sum and the xor
+/// of the ids' hashes together catch any change of membership, and are
+/// order-insensitive, so a `find` sweep that answers in a different order is a
+/// hit rather than a needless rebuild.
+///
+/// Heap state only — nothing here reaches Memory, a global reset empties it,
+/// and the worst a lost table can do is rebuild what it would have built
+/// anyway. The precedent and the shape are `terrainMemo` above.
+type private StableCensus =
+    {
+        Sum: int
+        Xor: int
+        Count: int
+        Kinds: Map<string, TargetKind>
+        Positions: Map<string, Pos>
+    }
+
+let private censusMemo =
+    System.Collections.Generic.Dictionary<string, StableCensus>()
+
 let private seenFacts
     (ours: string option)
     (terrain: RoomTerrain)
@@ -284,23 +322,94 @@ let private seenFacts
         else
             Some controllers.[0]
 
+    // The stable half of the census, recalled or rebuilt (#384). The ids that
+    // enter it are the room's fixtures — its rocks, its controller, and every
+    // structure and site standing in it — and the checksum below is taken over
+    // exactly those, so a structure destroyed, a site finished or a road laid
+    // all miss and rebuild. The floor is not in it and is added per tick below.
+    let stable =
+        let mutable sum = 0
+        let mutable bits = 0
+        let mutable count = 0
+
+        let note (id: string) =
+            let h = hash id
+            sum <- sum + h
+            bits <- bits ^^^ h
+            count <- count + 1
+
+        for s in sources do
+            note s.id
+
+        for (st, _) in structures do
+            note st.id
+
+        for (site, _) in sites do
+            note site.id
+
+        for c in controllers do
+            note c.id
+
+        for m in minerals do
+            note m.id
+
+        for r in reactors do
+            note r.id
+
+        match censusMemo.TryGetValue room.name with
+        | true, held when held.Sum = sum && held.Xor = bits && held.Count = count -> held
+        | _ ->
+            let built =
+                {
+                    Sum = sum
+                    Xor = bits
+                    Count = count
+                    // The same order the flat build had, so a controller that
+                    // also travels through `FIND_STRUCTURES` still resolves to
+                    // `Controller` and not to `Structure Other`: later entries
+                    // win in `Map.ofArray`, and the floor added afterwards can
+                    // never collide with a fixture's id.
+                    Kinds =
+                        Map.ofArray (
+                            Array.concat
+                                [
+                                    sources |> Array.map (fun s -> s.id, Source)
+                                    structures
+                                    |> Array.map (fun (st, kind) -> st.id, Structure kind)
+                                    sites |> Array.map (fun (site, kind) -> site.id, Site kind)
+                                    controllers |> Array.map (fun c -> c.id, Controller)
+                                    minerals |> Array.map (fun m -> m.id, Mineral)
+                                ]
+                        )
+                    Positions =
+                        Map.ofArray (
+                            Array.concat
+                                [
+                                    sources |> Array.map (fun s -> s.id, posOf s.pos)
+                                    structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
+                                    sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
+                                    controllers |> Array.map (fun c -> c.id, posOf c.pos)
+                                    minerals |> Array.map (fun m -> m.id, posOf m.pos)
+                                ]
+                        )
+                }
+
+            censusMemo.[room.name] <- built
+            built
+
     {
         Layer =
             {
                 Terrain = terrain.Ground
+                // The fixtures recalled, the floor added (#384): a handful of
+                // `Map.add`s onto a map already built, against rebuilding two
+                // hundred entries from scratch every tick.
                 TargetPositions =
-                    Map.ofArray (
-                        Array.concat
-                            [
-                                sources |> Array.map (fun s -> s.id, posOf s.pos)
-                                structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
-                                sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
-                                controllers |> Array.map (fun c -> c.id, posOf c.pos)
-                                dropped |> Array.map (fun (r, _) -> r.id, posOf r.pos)
-                                tombstones |> Array.map (fun r -> r.id, posOf r.pos)
-                                minerals |> Array.map (fun m -> m.id, posOf m.pos)
-                            ]
-                    )
+                    (stable.Positions,
+                     Array.append
+                         (dropped |> Array.map (fun (r, _) -> r.id, posOf r.pos))
+                         (tombstones |> Array.map (fun r -> r.id, posOf r.pos)))
+                    ||> Array.fold (fun places (id, tile) -> Map.add id tile places)
                 // This room's creeps, not the world's — the scope rides on the
                 // argument, `ofGame` having grouped the one sweep by room. A
                 // layer keyed by room name may hold only the tiles of the room
@@ -356,21 +465,16 @@ let private seenFacts
         // Same array order as the layer's TargetPositions, so a controller
         // that also travels through FIND_STRUCTURES resolves to Controller
         // both times.
+        // The fixtures recalled, the floor added (#384). A tombstone stands on
+        // the tile its creep died on and a ruin where its structure stood, and
+        // both are gone within a few hundred ticks; the fixtures outlive them
+        // by the life of the server.
         TargetKinds =
-            Map.ofArray (
-                Array.concat
-                    [
-                        sources |> Array.map (fun s -> s.id, Source)
-                        structures |> Array.map (fun (st, kind) -> st.id, Structure kind)
-                        sites |> Array.map (fun (site, kind) -> site.id, Site kind)
-                        controllers |> Array.map (fun c -> c.id, Controller)
-                        dropped |> Array.map (fun (r, resource) -> r.id, Dropped resource)
-                        // A tombstone stands on the tile its creep died on and
-                        // a ruin where its structure stood.
-                        tombstones |> Array.map (fun r -> r.id, Tombstone)
-                        minerals |> Array.map (fun m -> m.id, Mineral)
-                    ]
-            )
+            (stable.Kinds,
+             Array.append
+                 (dropped |> Array.map (fun (r, resource) -> r.id, Dropped resource))
+                 (tombstones |> Array.map (fun r -> r.id, Tombstone)))
+            ||> Array.fold (fun kinds (id, kind) -> Map.add id kind kinds)
         // Hits on the repairable kinds only — the decaying roads and containers
         // (ADR 0010, ADR 0012), the Keep and our own ramparts (ADR 0034):
         // fields nobody decides on stay out.
