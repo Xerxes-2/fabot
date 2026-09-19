@@ -1198,11 +1198,24 @@ module Colony =
                 Outposts = [ Outpost.w12s29 ]
                 Errands = []
                 Mother = Some "W13S28"
-                // Its own 45,000 T is in the ground, not the bank, and the
-                // extractor to reach it is four levels away — nothing to ship
-                // yet. The pairing is owed to this room too (ADR 0060 decision
-                // 3), and is declared the tick there is a terminal at each end.
-                Consignee = None
+                // Its own 45,000 T — the richest deposit we can reach, and
+                // after the season's banked stock ran out on 2026-09-18 the
+                // **only** ore left that can score — goes the way W12S28's and
+                // W13S28's went: three rooms of `send` into W15S28's terminal,
+                // and the last three crossings by the courier row that colony
+                // already runs (#349). Its own walk to the Reactor is four
+                // crossings and four rooms wide, past `Tuning.MaxHops`, so it
+                // will never make one.
+                //
+                // **Declared before the terminal it needs, on purpose** (#349's
+                // shape, read forward): the pairing is inert without one —
+                // `consignWithdraws` folds over terminals and finds none,
+                // `Layout.planConsignment`'s `ship` the same — and the tick the
+                // Layout stands it at RCL6 the ore has a path with nobody
+                // having to remember. The alternative is a hand edit at a
+                // moment no alarm watches, which is how 36,484 T sat unshipped
+                // until #349 was noticed.
+                Consignee = Some "W15S28"
             }
         ]
 
