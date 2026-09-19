@@ -1,5 +1,7 @@
 # A stand-down is not a route lock
 
+> **Amended by #382** (ADR 0074) for one case it does not cover. The reasoning below turns on the shut room's danger being to *work in that room*, which a crossing body does not do — true of every stand-down but a **stronghold**'s. Four towers under million-hit ramparts reach every tile of their room, and live a `bunker4` in W15S26 killed two 650-energy re-claimers on the same entry tile 161 ticks apart while the gate had the room correctly shut. A room holding an invader core of level 1 or more is now taken out of every chain for as long as that core's collapse timer runs. Every other stand-down still propagates through no route.
+
 ADR 0043's [[stand-down]] withdraws the work a colony declared in one room: the room leaves the [[spatial projection]], so its tasks, quotas and bodies' destination disappear together. An [[errand]] made the other possible reading visible because its whole value is a walk through rooms where it declares no work (#325).
 
 We decided **a stand-down does not propagate through a route**. An Errand is withheld when its own target room is shut (ADR 0064), and not when one of its [[transit room]]s is. A room that is both a transit room and a stood-down [[outpost]] loses the outpost work that gave the gate meaning, while the Errand's chain and target remain projected. This supersedes ADR 0064 and ADR 0065 only where their closing paragraphs leave #325's route question open.

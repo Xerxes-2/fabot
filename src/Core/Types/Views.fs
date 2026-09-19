@@ -638,7 +638,7 @@ module ColonyView =
                 stages
                 (World.unownedHomes colonies world)
                 colonies
-                gate.Shut
+                gate
                 world
                 colony
 
@@ -899,7 +899,11 @@ module ColonyView =
                 // scan set above just walked, and the route search re-asks
                 // per hop — 93 calls over 26 pairs in one tick before any
                 // table stood (`docs/research/cpu-headroom.md`).
-                let reaches = World.linkedRecalling joins (Tuning.keeperMargin tuning) world
+                // Through the one combinator the scan set is built on (#382),
+                // so the report names the same refusals the set made — a
+                // declaration that vanished because a bunker stands on the
+                // only way to it must not vanish with nothing said about why.
+                let reaches = World.reachesUnder gate joins tuning world
 
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
                 @ Errand.refused reaches tuning.MaxHops home colony.Errands

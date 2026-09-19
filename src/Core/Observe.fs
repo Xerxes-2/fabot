@@ -312,6 +312,19 @@ type OutpostEpisode =
         /// because "shut until 2,600" and "shut until 2,600 because nothing
         /// could be read" are different answers to an operator (#117).
         Basis: StandDownBasis
+        /// Whether a **stronghold** — an invader core of level 1 or more, which
+        /// is towers under million-hit ramparts and a garrison — was seen in
+        /// this room while the row stood (#382, ADR 0074). What makes the room
+        /// impassable and not merely withheld.
+        ///
+        /// **Sticky for the row's life**: once seen it stays seen, because the
+        /// colony stops crossing the room and therefore stops seeing anything
+        /// in it. A field of its own and not a `Basis` case, which is the shape
+        /// this was first built in and was wrong — `Basis` says which clock the
+        /// expiry came off and `sight` overwrites it whenever a later deadline
+        /// arrives, so a room whose raid outlived its core would have gone back
+        /// to being crossed with four towers standing.
+        Stronghold: bool
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: ADR
@@ -787,11 +800,23 @@ let private raidDeadlines (view: ColonyView) =
         room, (view.Time + life, StandDownBasis.InvaderRaid))
 
 let private deadlines (view: ColonyView) =
-    (view.InvaderCores |> List.map (fun core -> core.RoomName, deadlineOf view core))
-    @ rivalDeadlines view
-    @ raidDeadlines view
+    // The stronghold bit rides beside the clock and is **or**-ed over a room's
+    // sightings where the clock is maxed (#382): the two answer different
+    // questions, so a room seen once with a bunker and once with a raider is
+    // a room with a bunker in it, whichever deadline happens to be longer.
+    (view.InvaderCores
+     |> List.map (fun core ->
+         let expiry, basis = deadlineOf view core
+         core.RoomName, (expiry, basis, core.Level >= 1)))
+    @ (rivalDeadlines view
+       |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
+    @ (raidDeadlines view
+       |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
     |> List.groupBy fst
-    |> List.map (fun (room, seen) -> room, seen |> List.map snd |> List.maxBy fst)
+    |> List.map (fun (room, seen) ->
+        let found = seen |> List.map snd
+        let expiry, basis, _ = found |> List.maxBy (fun (expiry, _, _) -> expiry)
+        room, (expiry, basis, found |> List.exists (fun (_, _, bunker) -> bunker)))
 
 /// Fold one room's sighting into the outpost ring: the room's standing episode
 /// takes it — its window extends and its clock is re-read, this being a tick
@@ -803,7 +828,7 @@ let private deadlines (view: ColonyView) =
 /// rule applied across ticks, and for the same reason — a sighting that lands
 /// on a worse deadline is real, and reading it in would cut a stand-down short,
 /// the direction ADR 0043's Consequences forbid.
-let private sight tick (room, (expiry, basis)) (episodes: OutpostEpisode list) =
+let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpisode list) =
     let holds (episode: OutpostEpisode) =
         episode.RoomName = room && standingDown tick episode
 
@@ -815,6 +840,10 @@ let private sight tick (room, (expiry, basis)) (episodes: OutpostEpisode list) =
                     LastSeen = tick
                     Expiry = max episode.Expiry expiry
                     Basis = if expiry > episode.Expiry then basis else episode.Basis
+                    // Sticky, where the basis is not: a bunker seen once is a
+                    // bunker, and the tick after the colony stops crossing the
+                    // room it stops seeing one (#382).
+                    Stronghold = episode.Stronghold || stronghold
                 }
             else
                 episode)
@@ -827,6 +856,7 @@ let private sight tick (room, (expiry, basis)) (episodes: OutpostEpisode list) =
                 LastSeen = tick
                 Expiry = expiry
                 Basis = basis
+                Stronghold = stronghold
             }
         ]
 
@@ -943,6 +973,17 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.map (fun episode -> episode.RoomName)
             |> Set.ofList
             |> Set.union (state.RivalHeld |> Map.toList |> List.map fst |> Set.ofList)
+        // The rooms of that set a body cannot walk through either (#382): the
+        // ones a **stronghold** shut. Read off the row's basis and not off
+        // this tick's vision, which is the whole reason the row exists — stop
+        // crossing a room and the colony stops seeing what is in it, so a rule
+        // keyed on vision would re-link the room, walk a body in, lose it, see
+        // the bunker again and shut it again, for ever.
+        Impassable =
+            state.Outposts
+            |> List.filter (fun episode -> standingDown tick episode && episode.Stronghold)
+            |> List.map (fun episode -> episode.RoomName)
+            |> Set.ofList
         Rechecked =
             state.RivalHeld
             |> Map.toList

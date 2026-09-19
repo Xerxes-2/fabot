@@ -640,6 +640,7 @@ let standDownGateTests =
                                     {
                                         RoomName = "W1N2"
                                         CollapseTick = Some 900
+                                        Level = 0
                                     }
                                 ]
                         }

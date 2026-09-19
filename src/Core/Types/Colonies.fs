@@ -830,6 +830,23 @@ type StandDown =
         /// [[spatial projection]] at all — the whole of "withdraw" in an
         /// architecture that recomputes every tick (ADR 0004, ADR 0043).
         Shut: Set<string>
+        /// The rooms of `Shut` that **cannot be crossed either** (#382, ADR
+        /// 0074): the ones shut on a `StandDownBasis.Stronghold` — a core of
+        /// level 1 or more, which is towers under million-hit ramparts and a
+        /// garrison of 25-part Invaders.
+        ///
+        /// A subset of `Shut` and a different question from it. ADR 0066
+        /// decided that a stand-down does not propagate through a route, and
+        /// it is right about its own case: what the gate ordinarily withholds
+        /// is *work in a room*, which a body crossing that room does not do,
+        /// and propagating a coarse outpost clock to the route would stop the
+        /// Reactor's supply for something that never touched the walk. A
+        /// stronghold is the case that reasoning does not cover — its danger
+        /// is to the passage itself. Live, a `bunker4` in W15S26 killed two
+        /// 650-energy re-claimers on the same entry tile 161 ticks apart while
+        /// the gate had the room correctly shut and the relay went on walking
+        /// through it.
+        Impassable: Set<string>
         /// The rooms of `Shut` this tick takes one look into (#165): a
         /// **subset** of it and never a room leaving it. The look re-admits the
         /// room to the scan — the colony reads its controller, so the next
@@ -889,6 +906,7 @@ module StandDown =
     let none =
         {
             Shut = Set.empty
+            Impassable = Set.empty
             Rechecked = Set.empty
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty

@@ -396,6 +396,12 @@ let private encodeOutpost (episode: OutpostEpisode) =
     o?last <- episode.LastSeen
     o?expiry <- episode.Expiry
     o?basis <- standDownBasisName episode.Basis
+    // Written only when true (#382), so a row from a bundle that predates the
+    // field reads `false` — "no bunker seen here", which is what every row
+    // written before this change meant.
+    if episode.Stronghold then
+        o?stronghold <- true
+
     o
 
 let private decodeOutpost (raw: obj) : OutpostEpisode =
@@ -421,6 +427,10 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
             match standDownBasisOf (string raw?basis) with
             | Some basis -> basis
             | None -> failwith "unknown wire name"
+        // Absent on every row written before #382, and absent on a row that
+        // never saw one: both mean "no bunker here", which is the reading the
+        // colony had for the whole of its life until this field existed.
+        Stronghold = not (isNull raw?stronghold) && unbox<bool> raw?stronghold
     }
 
 // One room held by somebody else's reservation on the wire (#333):

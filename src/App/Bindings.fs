@@ -165,6 +165,11 @@ type IStructure =
     /// The effects standing on this structure; undefined when none does,
     /// the shape `safeMode` and `reservation` also arrive in.
     abstract effects: IEffect[]
+    /// An invader core's level, and `undefined` on every other structure
+    /// (#382): 0 is the expansion core a stronghold plants in a neighbouring
+    /// room, 1 and up is the bunker itself — towers under million-hit
+    /// ramparts, and a room nothing of ours crosses alive.
+    abstract level: int
     /// Ticks before this structure may act again. Defined on the extractor
     /// alone among the kinds we build (`EXTRACTOR_COOLDOWN` is 5), and read
     /// only there — the shell classifies the kind first, so no other structure

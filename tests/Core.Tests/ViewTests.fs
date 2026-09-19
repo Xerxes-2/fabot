@@ -2465,6 +2465,66 @@ let errandTests =
                     "so the same unchanged declaration remains projected"
             }
 
+            // ADR 0074, the one carve-out from the line above (#382). ADR 0066
+            // is right that a stand-down does not propagate through a route:
+            // what the gate ordinarily withholds is *work in a room*, which a
+            // crossing body does not do. A **stronghold** is the case that
+            // reasoning does not cover — four towers under million-hit
+            // ramparts reach every tile, and the loss is the walk rather than
+            // the withheld work. Live, a `bunker4` in W15S26 killed two
+            // 650-energy re-claimers on the same entry tile 161 ticks apart
+            // while the gate had that room correctly shut.
+            test
+                "a stronghold on the only route withholds the errand, where an ordinary stand-down does not" {
+                let viewWith gate =
+                    let colony = errandDeclared |> List.find (fun colony -> colony.Home = mother)
+
+                    let holders =
+                        World.creepColonies
+                            Tuning.defaults
+                            errandDeclared
+                            (World.living errandDeclared errandWorld)
+                            (Map.ofList [ mother, gate.Shut ])
+                            errandWorld
+
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        errandDeclared
+                        gate
+                        holders
+                        errandWorld
+                        colony
+
+                let crossing = Set.singleton errandCrossed
+
+                let ordinary = viewWith { StandDown.none with Shut = crossing }
+
+                Expect.equal
+                    (ordinary.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ errandRoom ]
+                    "the premise, and ADR 0066: an ordinary stand-down on a crossing is no route lock"
+
+                let bunkered =
+                    viewWith
+                        { StandDown.none with
+                            Shut = crossing
+                            Impassable = crossing
+                        }
+
+                Expect.isEmpty
+                    bunkered.Errands
+                    "a stronghold on the way takes the declaration as a unit: the walk is what it costs"
+
+                Expect.isFalse
+                    (Map.containsKey errandRoom bunkered.Spatial.Rooms)
+                    "so its target room leaves the projection and nothing is pooled three rooms out"
+
+                Expect.contains
+                    (bunkered.Refused |> List.map (fun refusal -> refusal.RoomName))
+                    errandRoom
+                    "and the refusal is named, or a declaration would vanish with nothing said about why"
+            }
+
             test "an errand no chain reaches leaves the scan set and is named, with its kind" {
                 // ADR 0060 decision 1's third question. Carrying an
                 // unreachable errand is strictly worse than carrying an
@@ -2831,7 +2891,7 @@ let private admittedScan =
 /// answer is a child's and this colony has none, so every room in `Scanned`
 /// beyond the home is one of the two narrowed clauses' doing.
 let private scanUnder tuning (colony: Colony) =
-    World.scanOf tuning Map.empty Set.empty [ colony ] Set.empty (keeperWorld ()) colony
+    World.scanOf tuning Map.empty Set.empty [ colony ] StandDown.none (keeperWorld ()) colony
 
 let private declaringOutpost outpost : Colony =
     {

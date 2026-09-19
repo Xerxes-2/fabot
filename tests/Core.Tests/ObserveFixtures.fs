@@ -231,6 +231,14 @@ let core room collapse : InvaderCoreInfo =
     {
         RoomName = room
         CollapseTick = collapse
+        Level = 0
+    }
+
+/// The same core as a **stronghold** — level 1 or more, which is to say towers
+/// under million-hit ramparts and a garrison (#382).
+let bunker room collapse level : InvaderCoreInfo =
+    { core room collapse with
+        Level = level
     }
 
 /// A colony that can see these cores, and nothing else going on.
@@ -300,6 +308,11 @@ let withDeclaredOutpost room (colony: ColonyView) =
 
 /// The recorded stand-downs as (room, opened, last seen, expiry, basis),
 /// oldest first — the whole of what the outpost family records.
+/// Whether each recorded stand-down remembers a stronghold (#382), oldest
+/// first — the fact that decides whether the room may be crossed.
+let strongholds (state: RaidState) =
+    state.Outposts |> List.map (fun e -> e.Stronghold)
+
 let standDowns (state: RaidState) =
     state.Outposts
     |> List.map (fun e -> e.RoomName, e.Opened, e.LastSeen, e.Expiry, e.Basis)
@@ -309,6 +322,11 @@ let standDowns (state: RaidState) =
 /// 0043 wrote every pin below against: which rooms the colony does not work.
 let shutAt tick state =
     (standDown Tuning.defaults tick state).Shut
+
+/// The rooms the gate also withholds from **walking** at a tick (#382): the
+/// subset of `shutAt` a stronghold holds.
+let impassableAt tick state =
+    (standDown Tuning.defaults tick state).Impassable
 
 /// The gate's other half (#165): the latched rooms this tick takes one look
 /// into — a subset of `shutAt`'s answer and never a room leaving it.

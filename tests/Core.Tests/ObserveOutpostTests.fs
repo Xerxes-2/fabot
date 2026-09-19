@@ -13,6 +13,51 @@ let outpostTests =
     testList
         "raid fold: outpost episodes"
         [
+            // #382 (ADR 0074). The two cores of one stronghold carry the
+            // **same** collapse timer — live, W15S26's `bunker4` and the
+            // level-0 core it expanded into W15S27 were both clocked to
+            // t655,973 — so the clock cannot tell them apart and the level
+            // can. Only the bunker's room is impassable: a level-0 core has
+            // no tower, no rampart and no garrison, and a body walks past it.
+            test "a stronghold's room is shut and impassable; a level-0 core's is only shut" {
+                let expiry = 400
+
+                let atLevel level =
+                    RaidState.empty |> raidTick 10 (seen [ bunker outpostRoom (Some expiry) level ])
+
+                Expect.equal
+                    (shutAt 20 (atLevel 0), impassableAt 20 (atLevel 0))
+                    (Set.singleton outpostRoom, Set.empty)
+                    "a level-0 expansion core withholds the work and leaves the walk alone"
+
+                Expect.equal
+                    (shutAt 20 (atLevel 4), impassableAt 20 (atLevel 4))
+                    (Set.singleton outpostRoom, Set.singleton outpostRoom)
+                    "a bunker withholds both, which is the one thing a stand-down does not otherwise say"
+
+                Expect.equal
+                    (strongholds (atLevel 4))
+                    [ true ]
+                    "the row remembers the bunker, so the fact outlives the vision that read it"
+
+                // The defect the first build had, pinned. `Basis` says which
+                // clock the expiry came off and `sight` overwrites it whenever
+                // a later deadline arrives, so keying the room's passability
+                // on the basis meant a raid outliving its core put four towers
+                // back on a crossable route. The flag is sticky instead.
+                let thenRaided =
+                    atLevel 4 |> raidTick 20 (raid [ raiderIn outpostRoom 1 [ Move; Attack ] ])
+
+                Expect.equal
+                    (strongholds thenRaided, impassableAt 30 thenRaided)
+                    ([ true ], Set.singleton outpostRoom)
+                    "a later deadline moves the basis and never the bunker"
+
+                Expect.isEmpty
+                    (impassableAt (expiry + 1) (atLevel 4))
+                    "the core's own timer ends it: the room re-links with no rule of its own"
+            }
+
             test "a raid two guards cannot beat stands the room down to its own life" {
                 // #257. ADR 0043 clocked a stand-down off an invader *core*
                 // and off nothing else, so a raid of plain creeps offered no

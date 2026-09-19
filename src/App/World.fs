@@ -656,6 +656,15 @@ let private seenFacts
                 ({
                     RoomName = room.name
                     CollapseTick = collapseTickOf st
+                    // A level-0 expansion core reads 0 and a bunker reads its
+                    // own level (#382). The guard is belt and braces: the
+                    // sweep above has already filtered to `structureInvaderCore`
+                    // and every one of those carries a level, so the fallback
+                    // is unreachable — and it is the **wrong** direction if it
+                    // ever fires, reading an unknown structure as safe to
+                    // cross, which is why the filter and not this is what the
+                    // rule rests on.
+                    Level = if isNull (box st.level) then 0 else st.level
                 }
                 : InvaderCoreInfo))
             |> Array.toList

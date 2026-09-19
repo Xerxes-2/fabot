@@ -66,6 +66,15 @@ type InvaderCoreInfo =
         /// `ReservationHolder.Invader` is a case of its own. That is the common
         /// case on the frontier.
         CollapseTick: int option
+        /// The core's level, and what tells a **stronghold** from the level-0
+        /// expansion core beside it (#382). A level-1-and-up core is a bunker:
+        /// towers under million-hit ramparts, a garrison of 25-part Invaders,
+        /// and a room nothing of ours crosses alive. A level-0 core has none
+        /// of that — no tower, no rampart, no garrison — and a body walks past
+        /// it. Live W15S26 carried a `bunker4` and W15S27 the level-0 core the
+        /// same stronghold expanded into, both on the same collapse clock, so
+        /// the clock cannot tell them apart and this can.
+        Level: int
     }
 
 /// Whose flag a visible sector Reactor carries. Unlike `Ownership`, the rival
@@ -100,6 +109,13 @@ type StandDownBasis =
     /// The core's own `EFFECT_COLLAPSE_TIMER`: the tick the engine put on
     /// the stronghold that expanded here, and the first answer wherever
     /// it can be read.
+    ///
+    /// **Which clock the expiry came off, and nothing about the room** —
+    /// whether a bunker stands in it is `OutpostEpisode.Stronghold`'s to say
+    /// (#382). The two were briefly one field and it was wrong: `sight`
+    /// overwrites the basis whenever a later deadline arrives, so a room whose
+    /// raid outlived its core would have gone back to being crossed with four
+    /// towers standing in it.
     | CollapseTimer
     /// The end of the reservation the core took with `attackController` —
     /// what a level-0 core answers with, having no stronghold to collapse
@@ -632,6 +648,42 @@ module World =
                     joins.[key] <- joined
                     joined
 
+    /// **A room a stronghold holds is not a link** (#382, ADR 0074). ADR 0066
+    /// decided that a stand-down does not propagate through a route, and it is
+    /// right about its own case: the gate ordinarily withholds *work in a
+    /// room*, which a body crossing that room does not do, and propagating a
+    /// coarse outpost clock to the route would stop the Reactor's supply for
+    /// something that never touched the walk. A stronghold is the case that
+    /// reasoning does not cover — four towers under million-hit ramparts reach
+    /// every tile of the room, and a `[20 Carry; 10 Move]` courier carries
+    /// 3,000 hits. Live, a `bunker4` in W15S26 killed two 650-energy
+    /// re-claimers on the same entry tile 161 ticks apart while the gate had
+    /// the room correctly shut and the relay walked through it anyway.
+    ///
+    /// Asked of **both** ends of every hop, so such a room is neither entered
+    /// nor left. What follows needs no rule of its own: a declaration whose
+    /// every chain crossed it stops being `routable`, `Errand.refused` and
+    /// `Outpost.refused` withhold it as a unit and say so, and the tick the
+    /// core's own collapse timer runs out the room re-links and the
+    /// declaration comes back.
+    let linkedAvoiding (impassable: Set<string>) (joined: string -> string -> bool) =
+        fun (fromRoom: string) (toRoom: string) ->
+            not (Set.contains fromRoom impassable)
+            && not (Set.contains toRoom impassable)
+            && joined fromRoom toRoom
+
+    /// **The predicate every production reader of a chain is built on** (#382):
+    /// the memoised join, with the rooms a stronghold holds taken out of it.
+    /// One combinator and not two spellings, because the scan set and the
+    /// refusal report have to agree — a report that named different refusals
+    /// than the set made would be a declaration vanishing with nothing said
+    /// about why — and because a third reader should inherit the rule rather
+    /// than silently skip it. `linkedBy` below is the bare join a test or a
+    /// one-off asks for and deliberately avoids nothing.
+    let reachesUnder (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
+        linkedRecalling joins (Tuning.keeperMargin tuning) world
+        |> linkedAvoiding gate.Impassable
+
     /// `linkedRecalling` over a table of this call's own — the shape a test
     /// or a one-off asks in, the way `Atlas.ofView` is `ofViewRecalling` over
     /// fresh tables. The shell never calls this: it holds one table for the
@@ -697,7 +749,11 @@ module World =
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
         (colonies: Colony list)
-        (shut: Set<string>)
+        // The gate whole and not its `Shut` set alone (#382): the scan set
+        // asks it two different questions — which rooms are withheld from
+        // work, and which of those cannot be crossed either — and a caller
+        // handing over one set could only answer the first.
+        (gate: StandDown)
         (world: World)
         (colony: Colony)
         : ScanSet =
@@ -708,15 +764,15 @@ module World =
         // reader and every tick that hands the same one in. The outposts and
         // the errands are still two filters, because they are two declaration
         // kinds and the failure sizes differ (ADR 0060).
-        let reaches = linkedRecalling joins (Tuning.keeperMargin tuning) world
+        let reaches = reachesUnder gate joins tuning world
 
         let outposts =
-            Outpost.worked shut colony.Outposts
+            Outpost.worked gate.Shut colony.Outposts
             |> List.filter (Outpost.routable reaches tuning.MaxHops colony.Home)
 
         let errands =
             colony.Errands
-            |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
+            |> List.filter (fun errand -> not (Set.contains errand.RoomName gate.Shut))
             |> List.filter (Errand.routable reaches tuning.MaxHops colony.Home)
 
         // The two halves of what a mother projects for a child of hers, and
@@ -739,11 +795,15 @@ module World =
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
         (colonies: Colony list)
-        (shut: Set<string>)
+        // The gate whole and not its `Shut` set alone (#382): the scan set
+        // asks it two different questions — which rooms are withheld from
+        // work, and which of those cannot be crossed either — and a caller
+        // handing over one set could only answer the first.
+        (gate: StandDown)
         (world: World)
         (colony: Colony)
         : ScanSet =
-        scanRecalling (JoinTable()) tuning stages unowned colonies shut world colony
+        scanRecalling (JoinTable()) tuning stages unowned colonies gate world colony
 
     /// The declared homes that stand empty this tick: ours to take back if
     /// they ever were ours, and the candidates a human means to take. Read off
@@ -764,7 +824,7 @@ module World =
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
-        (shut: Set<string>)
+        (gate: StandDown)
         (world: World)
         (colony: Colony)
         : string list =
@@ -775,7 +835,7 @@ module World =
                 (stages tuning colonies world)
                 (unownedHomes colonies world)
                 colonies
-                shut
+                gate
                 world
                 colony
 
@@ -804,7 +864,17 @@ module World =
                     joins
                     tuning
                     colonies
-                    (Map.tryFind colony.Home shut |> Option.defaultValue Set.empty)
+                    { StandDown.none with
+                        // **Passability is deliberately not asked here** (#382):
+                        // this reader answers which colony each body belongs
+                        // to, and a body already standing inside a bunker's
+                        // room is exactly the one that must still be
+                        // attributed to somebody — two of them were, on the
+                        // tick this rule was written for. `Impassable` stays
+                        // empty, and the map this reader is handed carries
+                        // only `Shut` in any case.
+                        Shut = Map.tryFind colony.Home shut |> Option.defaultValue Set.empty
+                    }
                     world
                     colony)
 

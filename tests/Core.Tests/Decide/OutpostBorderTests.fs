@@ -110,6 +110,7 @@ let invaderCoreTests =
                         ({
                             RoomName = "W1N2"
                             CollapseTick = Some(colony.Time + 64000)
+                            Level = 0
                         }
                         : InvaderCoreInfo)
                     ]
@@ -124,6 +125,7 @@ let invaderCoreTests =
                         ({
                             RoomName = "W1N2"
                             CollapseTick = None
+                            Level = 0
                         }
                         : InvaderCoreInfo)
                     ]
@@ -138,6 +140,7 @@ let invaderCoreTests =
                         ({
                             RoomName = "W1N1"
                             CollapseTick = Some colony.Time
+                            Level = 0
                         }
                         : InvaderCoreInfo)
                     ]
@@ -170,6 +173,7 @@ let invaderCoreTests =
                             ({
                                 RoomName = "W1N2"
                                 CollapseTick = None
+                                Level = 0
                             }
                             : InvaderCoreInfo)
                         ]
