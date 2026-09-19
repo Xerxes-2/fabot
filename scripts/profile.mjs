@@ -91,7 +91,7 @@
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
 import { performance } from "node:perf_hooks";
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync, statSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { report as cpuReport } from "./cpu-trigger.mjs";
@@ -3454,13 +3454,80 @@ function buildReactorWorld() {
       ticksToLive: undefined,
     });
   });
+  // --- the bunker standing in the crossed room ----------------------------
+  //
+  // Read off W15S26 on 2026-09-19 at t588,848, the live stronghold that shut
+  // the Reactor chain (#382, ADR 0074). Written as a template rather than as
+  // 53 literal tiles because the engine's own arrangement *is* a template: a
+  // level-4 stronghold occupies the 5x5 block centred on its core, and every
+  // tile of the live read falls out of the four rules below. The core tile is
+  // the one fact the template needs, and it is the live one.
+  //
+  // Why it is here at all. This scenario's W15S26 carried terrain and rocks
+  // and nothing else, and the comment above says why lairs were left out:
+  // nothing in this bot reads a lair. That is true and it is not the question
+  // — the projection does not have to *read* a structure to pay for it. Every
+  // structure the room holds enters `SpatialInfo.TargetKinds` through
+  // `FIND_STRUCTURES` (`World.fs:142`), and every `idsOfKindIn` walks all of
+  // them on every ask (#383). Live, this one room takes the colony's census
+  // from 258 entries to 321. Without the furniture the harness measured a
+  // crossed keeper room at four entries and could not see that cost at all,
+  // which is why the 2026-09-19 outage had to be read off timeout stacks
+  // rather than off this file.
+  const BUNKER_CORE = { x: 21, y: 21 };
+  const bunkerTile = (dx, dy) => ({ x: BUNKER_CORE.x + dx, y: BUNKER_CORE.y + dy });
+  const bunkerBlock = [];
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) bunkerBlock.push([dx, dy]);
+  // The four towers sit on the inner diagonal, the four containers on the
+  // inner cross two tiles out, a rampart covers every tile of the block, and
+  // the roads cover the block but for the core's tile and the towers'.
+  const isTower = (dx, dy) => Math.abs(dx) === 1 && Math.abs(dy) === 1;
+  const isContainer = (dx, dy) => (Math.abs(dx) === 2) !== (Math.abs(dy) === 2) && (dx === 0 || dy === 0);
+  const isCore = (dx, dy) => dx === 0 && dy === 0;
+
+  const bunker = [];
+  for (const [dx, dy] of bunkerBlock) {
+    const pos = bunkerTile(dx, dy);
+    const at = `${pos.x}-${pos.y}`;
+    // A rampart on every tile, at the live hits: a million standing of three
+    // hundred million max, which is what makes a bunker4 unbreakable by
+    // anything this colony can cast (ADR 0072's exchange).
+    bunker.push(structure(`bunker-rampart-${at}`, "rampart", pos, { hits: 1000000, hitsMax: 300000000 }));
+    if (!isCore(dx, dy) && !isTower(dx, dy)) {
+      bunker.push(structure(`bunker-road-${at}`, "road", pos, { hits: 5000, hitsMax: 5000 }));
+    }
+    if (isTower(dx, dy)) {
+      bunker.push(structure(`bunker-tower-${at}`, "tower", pos, { hits: 3000, hitsMax: 3000 }));
+    }
+    if (isContainer(dx, dy)) {
+      bunker.push(structure(`bunker-container-${at}`, "container", pos, { hits: 250000, hitsMax: 250000 }));
+    }
+  }
+  // The core itself, and the four lairs at the tiles the live room stands them
+  // on. Both classify as `BuiltKind.Other` (`World.fs:35`) — Core has no kind
+  // predicate for either (`Bindings.fs:88`) — so they are five census rows
+  // that no rule can ever match, which is the one part of #383 that is about
+  // the kind and not about the walk.
+  bunker.push(structure("bunker-core", "invaderCore", bunkerTile(0, 0), { hits: 100000, hitsMax: 100000 }));
+  for (const lair of [{ x: 35, y: 11 }, { x: 6, y: 17 }, { x: 5, y: 36 }, { x: 42, y: 39 }]) {
+    bunker.push(structure(`bunker-lair-${lair.x}-${lair.y}`, "keeperLair", lair));
+  }
+  // The owner-less extractor the engine pre-places over a keeper room's rock,
+  // standing on the mineral's own tile. A modelled kind and so not ballast,
+  // but it is one of the room's 63 live rows and leaving it out would make
+  // this census a tile short of the one that was measured.
+  bunker.push(structure("bunker-extractor", "extractor", { x: 38, y: 7 }));
+
   const keeperRoom = stubRoom({
     name: keeperCapture.name,
     controller: undefined,
     findTables: {
       105: keeperSources,
       108: [],
-      107: [],
+      // `FIND_STRUCTURES`, which is the sweep `TargetKinds` is built from and
+      // therefore the only one that has to carry the bunker for this scenario
+      // to measure what it exists to measure.
+      107: bunker,
       114: [],
       115: [],
       103: keepers,
@@ -4747,6 +4814,37 @@ const bundle = path.join(here, "..", "dist", "main.js");
 if (!existsSync(bundle)) {
   console.error("dist/main.js not found — run `npm run build` first.");
   process.exit(1);
+}
+
+// A stale bundle is the one way this harness lies without saying anything: it
+// copies `dist/main.js` and never builds, so an edit under `src/` that has not
+// been rebuilt is measured as if it had never been made. That is not a
+// hypothetical — on 2026-09-19 a whole round of A/B runs on #383 came back
+// flat because every one of them profiled the same bundle, and the difference
+// only appeared once `npm run build` had actually run. `docs/profiling.md`
+// says to build first; this makes forgetting an error rather than a wrong
+// number.
+{
+  const built = statSync(bundle).mtimeMs;
+  const sourceRoot = path.join(here, "..", "src");
+  const newest = (dir) => {
+    let latest = 0;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "bin" || entry.name === "obj") continue;
+      const full = path.join(dir, entry.name);
+      latest = Math.max(latest, entry.isDirectory() ? newest(full) : statSync(full).mtimeMs);
+    }
+    return latest;
+  };
+  const edited = newest(sourceRoot);
+  if (edited > built) {
+    console.error(
+      `dist/main.js is older than src/ (bundle ${new Date(built).toISOString()}, source ` +
+        `${new Date(edited).toISOString()}) — run \`npm run build\` first, or this run measures ` +
+        "the previous bundle and reports it as if it were the current one.",
+    );
+    process.exit(1);
+  }
 }
 
 // Loaded before the world is built and not after: a scenario's terrain set
