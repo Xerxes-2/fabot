@@ -750,10 +750,26 @@ module ColonyView =
         // the scan set's order.
         let collected (select: RoomFacts -> 'a list) = worked |> List.collect (snd >> select)
 
+        // Seeded with the **biggest** room's table rather than with `Map.empty`
+        // (#384). The line above is what makes that free: one object stands in
+        // one room, so no key is ever written twice and the result does not
+        // depend on which table seeds it. What it saves is the seed's own
+        // entries — live, the home room is 204 of a colony's ~320, so six
+        // merges a tick stop re-inserting two thirds of what they touch.
         let mergedBy (select: RoomFacts -> Map<string, 'v>) =
-            (Map.empty, worked)
-            ||> List.fold (fun acc (_, facts) ->
-                (acc, select facts) ||> Map.fold (fun acc id value -> Map.add id value acc))
+            match worked |> List.map (snd >> select) with
+            | [] -> Map.empty
+            | tables ->
+                let seed = tables |> List.maxBy Map.count
+
+                (seed, tables)
+                ||> List.fold (fun acc table ->
+                    // By reference, and only the seed instance is skipped: two
+                    // rooms cannot hand back the same table object.
+                    if obj.ReferenceEquals(table, seed) then
+                        acc
+                    else
+                        (acc, table) ||> Map.fold (fun acc id value -> Map.add id value acc))
 
         let homeFacts = World.roomOf world home
 
