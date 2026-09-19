@@ -1076,10 +1076,18 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
 /// **The colony's signature, written by whoever is standing there** (#381).
 ///
 /// A reflex and not a Task: it never sends a body anywhere, never competes for
-/// one and never enters the pool. The [[upgrader]] row lives at the controller
-/// and the whole fleet walks past it, so a room gets signed within a few
-/// hundred ticks of anybody's ordinary work and costs one intent, once, for
-/// ever after — the engine keeps a sign until it is overwritten.
+/// one and never enters the pool, and it costs one intent, once — the engine
+/// keeps a sign until it is overwritten.
+///
+/// **What it reaches is what somebody already has business beside**, which is
+/// narrower than it first looks and was measured after it shipped (#381). An
+/// [[outpost]]'s controller is signed the tick it is seen: `reserveController`
+/// needs range 1, so the [[reserver]] stands there anyway. A room claimed from
+/// now on is signed by its claimer for the same reason. A **home** controller
+/// it does not reach: the [[upgrader]] row works it from range 3 and nothing
+/// else of ours has business beside it, and over a sampled hundred ticks the
+/// closest any body came to each of four home controllers was two tiles. Those
+/// four were signed by hand once; this keeps every room after them.
 ///
 /// Every controller the **projection places** is a candidate, home and
 /// [[outpost]] alike, and that is a narrower set than it sounds: `transiting`
