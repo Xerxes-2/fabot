@@ -59,7 +59,12 @@
     <Compile Include="Decide/AnchorArrivalTests.fs" />
     <Compile Include="Decide/AnchorStandingTests.fs" />
     <Compile Include="ReactorObserveTests.fs" />
+    <Compile Include="ObserveFixtures.fs" />
     <Compile Include="ObserveTests.fs" />
+    <Compile Include="ObserveRaidTests.fs" />
+    <Compile Include="ObserveOutpostTests.fs" />
+    <Compile Include="ObserveCpuTests.fs" />
+    <Compile Include="ObserveBreachTests.fs" />
     <Compile Include="WireTests.fs" />
     <Compile Include="ProjectionShapeTests.fs" />
     <Compile Include="RoomInvariantFixtures.fs" />
