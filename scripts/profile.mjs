@@ -1235,6 +1235,15 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // is first matched takes the whole run down, and that is how a stub says
     // "this row does not exist".
     claimReactor: ok,
+    // The signature reflex's verb (#381), and the same bill a **sixth** time:
+    // the reflex shipped on 2026-09-19 and nothing here was run against it
+    // until the next day, when `--scenario pair` took the whole run down on
+    // the first tick a body stood beside an unsigned controller. `dotnet test`
+    // cannot see this class — it never drives the Executor against a stub —
+    // and the reflex is not even a pooled row, so no quota had to move for it
+    // to reach the Executor. Whatever else is added to `Bindings.fs`, its verb
+    // belongs in this table on the same commit.
+    signController: ok,
     // The [[guard]]'s two verbs (ADR 0056), and the same bill a fourth
     // time: the `--raided` outpost is where a Guard is pooled, so the tick
     // a Fighter stands on an invader's ring the Executor reaches for both
