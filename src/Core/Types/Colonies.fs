@@ -969,18 +969,29 @@ type Colony =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
-    /// The colonies a human has declared (ADR 0047): W12S28 with ADR 0042's
-    /// north outpost W12S27, W13S28 — the colony it raised — beside it, and
-    /// W15S28, which nobody owns yet. Chosen by a human in an ADR or a survey
-    /// and moved by a human in a commit, exactly as the Layout's horizon is
-    /// (ADR 0039). Claiming a room therefore begins here and not in the bot:
-    /// an entry beside these ones is the whole of "I mean to take that room"
-    /// (ADR 0047's user story 1), which is why the third entry has no spawn
-    /// behind it and is not a mistake.
+    /// The colonies a human has declared (ADR 0047). Chosen by a human in an
+    /// ADR or a survey and moved by a human in a commit, exactly as the
+    /// Layout's horizon is (ADR 0039), so claiming a room begins here and not
+    /// in the bot: an entry in this list is the whole of "I mean to take that
+    /// room" (ADR 0047's user story 1), and an entry with no spawn behind it
+    /// yet is that intent rather than a mistake.
     ///
-    /// Three declared and two **living**: `Colony.living` is the set `decide`
-    /// runs over, and a home with no spawn of ours in it is not in it — its
-    /// mother works that room until one stands.
+    /// Declared is not **living**: `Colony.living` is the set `decide` runs
+    /// over, and a home with no spawn of ours standing in it is not in it —
+    /// its mother works that room until one stands.
+    ///
+    /// **No roster in this comment, deliberately** (#302). It used to name the
+    /// rooms and count them — "three declared and two living", "W15S28, which
+    /// nobody owns yet" — and every one of those clauses was a dated snapshot
+    /// written in the present tense: W15S28 was claimed at about t305,200 and
+    /// had its own spawn, thirty extensions and two towers long before anybody
+    /// re-read the sentence saying nobody owned it. The list below **is** the
+    /// roster and is right by construction; a reader who wants to know which
+    /// of them are live asks `Colony.living`, and one who wants a room's stage
+    /// asks the room. The dated notes on the individual entries stay: each one
+    /// says the tick or the day it was written and cites the survey it came
+    /// from, which is a record of why a room is here and not a claim about
+    /// today.
     let declared: Colony list =
         [
             {
