@@ -52,7 +52,7 @@ Date: 2026-09-02. All claims verified against primary sources (official docs, so
 
 - CPU limit is wall-clock ms per tick; baseline **20 ms** ("20" limit), raised by subscription/GCL and CPU Unlock.
 - **Bucket**: unused CPU accumulates up to **10,000**; while the bucket has content the script may overrun its limit, spending up to **500 CPU in one tick**.
-- **`Game.cpu.tickLimit`**: available CPU this tick; equals 500 while the bucket is full, never less than the account limit.
+- **`Game.cpu.tickLimit`**: available CPU this tick; equals 500 while the bucket is full, never less than the account limit. **And it stays there**: the docs' own sentence is *"It will start decreasing only after the accumulation is depleted"* (https://docs.screeps.com/cpu-limit.html), so the 500 ceiling is in force for the whole life of a non-empty bucket and is not a privilege of a full one. Read the other way — as `min(limit + bucket, 500)` falling steadily as the bucket drains — it says a 250 ms tick becomes fatal early in a drain, and it does not: it becomes fatal only once the bucket is gone. What that means for a post-mortem is that a `Script execution timed out` while the bucket still had anything in it is a tick that genuinely tried to take **more than half a second**.
 - `Game.cpu.limit` / `tickLimit` / `bucket` definitions, `Game.cpu.getHeapStatistics()` (v8-style stats plus `externally_allocated_size`, which "counts against this isolate's memory limit"), and `Game.cpu.halt()` ("Reset your runtime environment and wipe all data in heap memory"): https://docs.screeps.com/api/ (Cpu section; source markdown https://github.com/screeps/docs/blob/master/api/source/Cpu.md).
 
 ### Execution model

@@ -1349,8 +1349,14 @@ type CpuReadings =
         /// `Game.cpu.bucket` as the tick ended: the margin, which is the one
         /// number that says whether a spike matters (#357). Read live rather
         /// than derived, because the engine's own arithmetic — a tick may spend
-        /// up to `limit + bucket` capped at 500 ms, and what it does not spend
-        /// it banks — is the thing being checked, not restated.
+        /// up to 500 ms, and what it does not spend it banks — is the thing
+        /// being checked, not restated.
+        ///
+        /// The ceiling does not slide down with the bucket: it "will start
+        /// decreasing only after the accumulation is depleted" (#387,
+        /// `docs/research/fable-screeps.md`). So this number is a countdown to
+        /// when the ceiling moves at all, and never a measure of how high it
+        /// currently is.
         Bucket: int
         /// How many of this bot's colonies threw their plan memo away this tick
         /// (ADR 0033). Carried on the CPU line rather than inferred from it
