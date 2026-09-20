@@ -1,5 +1,4 @@
-/// The cross-room half of every query: a body in one room, its work in
-/// another (ADR 0041, ADR 0042).
+/// The cross-room half of every query: a body in one room, its work in another.
 module Fabot.Core.Tests.AtlasCrossRoomTests
 
 open Expecto
@@ -10,12 +9,8 @@ open Fabot.Core.Tests.AtlasFixtures
 /// Two exits north, and the near one is the wrong one: the creep at (25,10)
 /// reaches (25,0) in nine steps and (27,0) in ten, but the outpost's column
 /// below (25,49) is swamp all the way down while the one below (27,49) is
-/// plain. The minimum is over the whole band — 10 + 1 + 8 against 9 + 1 + 36 —
-/// which is the arithmetic ADR 0041 pays a Seam band for, and it is #142's trap
-/// for the mover besides: one that minimised its near leg again would walk the
-/// creep up column 25 to a crossing the price was never paid at. The far ring
-/// is the caller's, because walling a crossing off is how both the price and
-/// the step are shown falling back to the other one.
+/// plain: 10 + 1 + 8 against 9 + 1 + 36. The far ring is the caller's, so a
+/// crossing can be walled off.
 let private twoExitAcross farRing =
     let home =
         { RoomLayer.empty with
@@ -51,10 +46,7 @@ let private twoExitAcross farRing =
         [ "src-out", Source ]
         [ worker "w" ]
 
-/// Both crossings open — the fixture the two prices and the step are pinned on.
-/// A **function** and not a value, like every Atlas fixture in this suite, for
-/// the reason `ParallelSafetyTests` states and enforces (#310): each test
-/// builds its own, and the fixture captures no Atlas of its own either.
+/// Both crossings open. A function, not a value (#310).
 let private twoExitBothOpen () =
     twoExitAcross
         [
@@ -63,15 +55,11 @@ let private twoExitBothOpen () =
             { X = 27; Y = 49 }, Plain
         ]
 
-/// The swamp shortcut against the plain detour, in one room and no border: the
-/// line east from (10,10) crosses (11,10) and (12,10) as swamp to a goal at
-/// (13,10), and the loop south down column 10 runs plain to a goal at
-/// (10, `loopEnd`). Priced as a road (plain 2, swamp 3) the three-step swamp
-/// line costs 8 against a five-step loop's 10; priced at the walking grid's
-/// swamp it would cost 22 and the router would pave the long way round, which
-/// is the twenty-one-tile detour W13S28 was carrying (#211). How far the loop
-/// runs is the caller's: the ratio is one step, and the pairwise cases turn on
-/// exactly that.
+/// The swamp shortcut against the plain detour: the line east from (10,10)
+/// crosses two swamps to a goal at (13,10), and the loop south down column
+/// 10 runs plain to a goal at (10, `loopEnd`). Priced as a road (plain 2,
+/// swamp 3) the swamp line costs 8 against a five-step loop's 10; at the
+/// walking grid's swamp it would cost 22 (the detour W13S28 was carrying, #211).
 let private swampShortcut loopEnd =
     spatial
         []
@@ -89,17 +77,11 @@ let crossRoomTests =
         "atlas cross-room walk"
         [
             test "a walk across the border is the near leg, the exit's own price and the far leg" {
-                // The worked example, countable a tile at a time. The creep
-                // stands at (25,10) of a one-wide plain corridor: nine steps
-                // up to (25,1), one onto the exit at (25,0), then the engine
-                // moves it to (25,49) of the outpost for nothing at the end
-                // of that tick, one step off the landing onto (25,48), and
-                // seven more down to (25,41) — the Work Area of a source at
-                // (25,40) whose own tile the projection carries no ground
-                // for. Eighteen tiles stepped onto, each one tick for a body
-                // at fatigue parity: the crossing charges the exit tile and
-                // the far room's first tile, and never the landing tile,
-                // which the creep arrives on without moving.
+                // Nine steps up to (25,1), one onto the exit at (25,0), the
+                // engine moves the creep to (25,49) for nothing at the end
+                // of that tick, one step onto (25,48), and seven more down
+                // to (25,41). Eighteen tiles stepped onto; the landing tile
+                // is never charged.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 }; "w-back", { X = 25; Y = 14 } ])
@@ -119,10 +101,7 @@ let crossRoomTests =
                     (Some 36)
                     "and the same join in the ranking price's own units — two a plain step"
 
-                // The far leg is the target's, not the creep's: a second
-                // creep four tiles further back pays four more and not a
-                // tile besides, which is what one flood out of the target
-                // serving the whole colony looks like from outside.
+                // The far leg is the target's, not the creep's.
                 Expect.equal
                     (walkTicks atlas "w-back" (Harvest "src-out"))
                     (Some 22)
@@ -130,13 +109,8 @@ let crossRoomTests =
             }
 
             test "a swamp exit is priced as a swamp step, not counted as one tile" {
-                // ADR 0041 writes the join as `walk_here + 1 + walk_there`,
-                // and #123 narrows that `+1` to the price ADR 0029 gives the
-                // exit tile itself: `max(1, ceil(units / 2))`, the same rule
-                // every other step is priced by. On plain ground under a
-                // body at fatigue parity the two agree, which is why this is
-                // a narrowing and not an overturning; on a swamp exit they
-                // do not, and the engine charges the swamp.
+                // The exit tile is priced like every other step:
+                // `max(1, ceil(units / 2))`.
                 let across ring =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -163,14 +137,10 @@ let crossRoomTests =
             }
 
             test "the tile under the creep is charged nothing, however dear it is" {
-                // The worked example above with the creep's own tile turned
-                // to swamp: it is standing on it, not stepping onto it, so
-                // the walk is the same eighteen and the ranking price the
-                // same thirty-six. The walk is read off a field that charges
-                // that tile like any other and takes it off again
-                // (`pricedOffField`), and swamp is where taking off the wrong
-                // number — the ranking price's units, or a plain step — is
-                // four or nine ticks out rather than one.
+                // The walk is read off a field that charges the creep's own
+                // tile like any other and takes it off again
+                // (`pricedOffField`); swamp is where taking off the wrong
+                // number is four or nine ticks out rather than one.
                 let home =
                     { corridorHome [ "w", { X = 25; Y = 10 } ] with
                         Terrain =
@@ -202,15 +172,8 @@ let crossRoomTests =
             }
 
             test "the walk takes the cheapest crossing in the band, not the nearest" {
-                // Two exits, and the near one is the wrong one: the creep
-                // reaches (25,0) in nine steps and (27,0) in ten, but the
-                // outpost's column below (25,49) is swamp all the way down
-                // while the one below (27,49) is plain. The minimum is over
-                // the whole band — 10 + 1 + 8 against 9 + 1 + 36 — which is
-                // the arithmetic ADR 0041 pays a Seam band for.
-                // The two-exit border this file states once, up top: the two
-                // tests that stand on it are the price's and the mover's, and
-                // agreeing on the ground is the whole of what they compare.
+                // The two-exit border stated up top; this is the price's
+                // half and `crossRoomStepTests` has the mover's.
                 let across = twoExitAcross
                 let bothOpen = twoExitBothOpen ()
 
@@ -226,9 +189,7 @@ let crossRoomTests =
                     (Some 38)
                     "and the ranking price joins at that same crossing, in its own units"
 
-                // Take the cheap crossing out and the walk does not vanish:
-                // it falls back to the dear one, which is the band being a
-                // minimum rather than a choice made once.
+                // Take the cheap crossing out and the walk falls back to the dear one.
                 let swampOnly =
                     across
                         [
@@ -244,14 +205,8 @@ let crossRoomTests =
             }
 
             test "a border with no crossing has no price, and the target is still placed" {
-                // A walled ring: the band is empty, so the minimum is over
-                // nothing. That is the answer an unreachable Work Area in
-                // the creep's own room gets — the Task is inapplicable to
-                // this creep — and not the zero an unplaced target gets,
-                // which would count it as free. The same projection with
-                // that one tile of ring opened closes the case at the
-                // bottom: the None is the wall's answer and not something
-                // the two rooms would have said anyway.
+                // A walled ring: inapplicable, not the zero an unplaced
+                // target gets. The same ring opened closes the case.
                 let across ring =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -283,11 +238,6 @@ let crossRoomTests =
             }
 
             test "a target in a room the projection does not carry has no walk to price" {
-                // ADR 0004's totality, at the seam #123 widens: a room that
-                // is not in the projection at all leaves its targets
-                // unplaced, and unplaceable geometry prices at zero, counts
-                // against no Task and blocks no action. The walk answers it
-                // the way travel cost always has.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -306,10 +256,7 @@ let crossRoomTests =
                     (mayActFor atlas "w" (Harvest "src-far"))
                     "and it blocks nothing (ADR 0004)"
 
-                // Nor does it move anybody: there is no room to cross to,
-                // so there is no Seam to aim at and no near side of one
-                // (#142). An unplaced target is free, unblocking and
-                // unwalked, all three off the same absence.
+                // No room to cross to, so no Seam to aim at.
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-far"))
                     None
@@ -317,13 +264,7 @@ let crossRoomTests =
             }
 
             test "the price crosses the border and the standing tiles do not" {
-                // ADR 0041's Consequences drawn on one ColonyView: geometry
-                // crosses, arbitration does not. The creep has an honest
-                // number for a Task in the outpost — that is what puts the
-                // outpost's Harvest in the same pool as home's — and no tile
-                // of the outpost is ever handed to it as somewhere to stand,
-                // step to or act from, because a `Set<Pos>` carries no room
-                // and the mover reads it as this room's.
+                // Geometry crosses, arbitration does not.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -346,14 +287,9 @@ let crossRoomTests =
                     (mayAct atlas "w" (Harvest "src-out") handed)
                     "it may not act on a target a room away"
 
-                // #142's correction, and the one line of this case that
-                // moved: a step is not a standing tile. The mover is given
-                // the near side of the crossing the price was paid at —
-                // a tile of the creep's *own* room — because a Task that is
-                // priced and unwalkable is a Task the Matcher gives away and
-                // anti-thrash never takes back. What stays refused is
-                // everything the creep would do on the far side: nowhere to
-                // stand, and no action reaching over.
+                // A step is not a standing tile: a Task that is priced and
+                // unwalkable is one the Matcher gives away and anti-thrash
+                // never takes back (#142).
                 Expect.equal
                     (firstStep atlas "w" (Harvest "src-out") handed |> tileHome atlas)
                     (Some { X = 25; Y = 9 })
@@ -361,26 +297,12 @@ let crossRoomTests =
             }
 
             test "a heavy body's far leg is its Post's, not the source's nearest Seat" {
-                // The far leg floods out of the Work Area *for this body*
-                // (ADR 0020), so the narrowing has to cross the border with
-                // the price: a Work-heavy creep is walked to the Seat under
-                // the outpost's container even when a nearer Seat is on the
-                // way. The source at (25,40) seats (25,41), one step off the
+                // The source at (25,40) seats (25,41), one step off the
                 // corridor, and (24,39), reachable only the long way round
-                // through column 23 — eighteen tiles to the near Seat and
-                // twenty to the Post. Three Work over two Move is heavy by
-                // ADR 0016's predicate; every plain step costs it two ticks,
-                // so the light body's numbers are half of its own.
-                //
-                // Unposted, this case read `Some 36` until #159: the heavy
-                // body took ADR 0020's bare-Seat fallback across the border
-                // and walked to a rock with no container under it. That
-                // fallback is home's bootstrap and an outpost has another
-                // one (ADR 0042), so the far leg now floods out of nothing
-                // and there is no walk at all — the same answer a blocked
-                // Post gives, one room over. The light body's own walk to
-                // that Seat is untouched, which is what says the narrowing
-                // is still the body's and not the room's.
+                // through column 23: eighteen tiles to the near Seat and
+                // twenty to the Post. Three Work over two Move pays two
+                // ticks a plain step. Unposted, this read `Some 36` until
+                // #159 took the bare-Seat fallback off the outpost.
                 let outpost =
                     { RoomLayer.empty with
                         Terrain =
@@ -442,14 +364,9 @@ let crossRoomTests =
             }
 
             test "two origin sets under one Task are two far fields, not one" {
-                // The far field is memoised per (chain, Task, body, pricing),
-                // and the origins it was flooded out of used to ride in as an
-                // argument rather than in the key. Two callers hand different
-                // ones for the same Task: `travelCost` prices toward the
-                // Task's own narrowed area, and `travelCostToward` toward the
-                // tiles the decision layer hands it — a Work Area with a Reach
-                // taken out, or a Flee set (ADR 0033). Whichever asked first
-                // answered for both (#358).
+                // The origins used to ride in as an argument rather than in
+                // the memo key, so whichever of `travelCost` and
+                // `travelCostToward` asked first answered for both (#358).
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -459,16 +376,12 @@ let crossRoomTests =
                         [ "src-out", Source ]
                         [ worker "w" ]
 
-                // The worked example above, in the ranking price's units:
-                // nine near steps, the exit, and eight in the outpost down to
-                // the source's one Seat at (25,41), two units a plain step.
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-out"))
                     (Some 36)
                     "the premise: the Task's own area is flooded first"
 
-                // Four tiles nearer the landing than that Seat, so four steps
-                // and eight units cheaper: 9 + 1 + 4 steps.
+                // Four tiles nearer the landing than the Seat: 9 + 1 + 4 steps.
                 Expect.equal
                     (travelCostToward
                         atlas
@@ -481,15 +394,10 @@ let crossRoomTests =
             }
 
             test "caller-narrowed origins ride the tick's table, never the census's" {
-                // The other side of the key above. Origins the *Task* derives
-                // are signed by the census signature, so their field may be
-                // held for as long as it stands; origins the decision layer
-                // narrowed are not — a Guard's ring is cut out of this tick's
-                // `Threats`, which move every tick (ADR 0033, ADR 0056). Filed
-                // in the census-held table, a moving goal set under a census
-                // that has not moved mints a whole chain's field every tick
-                // and nothing ever evicts it. So `crossingToward` files into
-                // the Atlas's own per-tick table, which goes with the Atlas.
+                // Origins the decision layer narrowed move every tick (a
+                // Guard's ring is cut out of this tick's `Threats`); filed
+                // in the census-held table they would mint a whole chain's
+                // field every tick and nothing would evict it.
                 let snapshot () =
                     northOfSnapshot
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -501,8 +409,7 @@ let crossRoomTests =
 
                 let held = FarFieldMemo.empty ()
 
-                // Eight ticks of a goal set that moves one tile a tick, each
-                // over its own Atlas and all eight under one census.
+                // Eight ticks of a goal set moving one tile a tick, all under one census.
                 for y in 41..48 do
                     let atlas = snapshot () |> ofViewRecalling (WalkTable()) held
 
@@ -522,13 +429,9 @@ let crossRoomTests =
             }
 
             test "every far field rides the census table, whatever the pricing" {
-                // `docs/research/cpu-headroom.md` §5.1 and ADR 0070: every
-                // input of a far field is in the census — the chain's walking
-                // grids and its Seam bands — under **every** pricing, because
-                // the far leg floods over empty ground under every one of
-                // them. So every far field rides the plan memo across the tick
-                // boundary exactly as the spawn walk table does (ADR 0032),
-                // and there is one table rather than three.
+                // Every input of a far field is in the census under every
+                // pricing (`docs/research/cpu-headroom.md` §5.1), so there
+                // is one table rather than three.
                 let snapshot () =
                     northOfSnapshot
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -540,10 +443,8 @@ let crossRoomTests =
 
                 let held = FarFieldMemo.empty ()
 
-                // The walk files two fields and not one: the far room's, the
-                // suffix its own recursion bottoms out at, and the same field
-                // carried one hop further into the creep's room, which is
-                // what the walk is read off (`pricedOffField`).
+                // The walk files two fields: the far room's, and the same
+                // field carried one hop into the creep's room (`pricedOffField`).
                 let fieldOver (pricing: Pricing) (chain: string list) =
                     held.PerCensus
                     |> Seq.filter (fun entry ->
@@ -579,11 +480,8 @@ let crossRoomTests =
 
                 let ranked = fieldOver TravelCost [ "W1N2" ]
 
-                // The other half of ADR 0070's collapse: `Baseline` is
-                // `TravelCost` over empty ground and the far leg is over empty
-                // ground either way, so the two are one field. The key is
-                // normalised onto `TravelCost` and the reroute attribution's
-                // own route reads the entry the ranking price filed.
+                // `Baseline` is `TravelCost` over empty ground, so the key
+                // is normalised onto `TravelCost`.
                 Expect.isSome
                     (firstStepBlindFor first "w" (Harvest "src-out"))
                     "the traffic-blind route crosses the same border"
@@ -617,9 +515,7 @@ let crossRoomTests =
                      && obj.ReferenceEquals(fieldOver TravelCost [ "W1N2" ], ranked))
                     "the second Atlas read the first's fields rather than running its own"
 
-                // The other half of the seam, the tick the census moves: a
-                // table with nothing in it is flooded into, and prices the
-                // same walk off its own Dijkstra.
+                // The tick the census moves: an empty table is flooded into.
                 let fresh = FarFieldMemo.empty ()
                 let dropped = snapshot () |> ofViewRecalling (WalkTable()) fresh
 
@@ -638,12 +534,8 @@ let crossRoomTests =
 
             test "the Seam walk rides the census table, like the walks and the far fields" {
                 // `Atlas.seamWalkTicks` floods a whole room out of its Seam
-                // band under a constant planning body, and #266's outpost
-                // budget asks it every tick an outpost holds more sites than
-                // the budget covers. Everything it reads is the census's, so
-                // the table is the plan memo's (`SeamWalkTable`, ADR 0032): a
-                // second Atlas handed the same memo reads the first's flood,
-                // and a fresh memo floods again to the same number.
+                // band under a constant planning body, and everything it
+                // reads is the census's (`SeamWalkTable`).
                 let snapshot () =
                     northOfSnapshot
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -663,11 +555,8 @@ let crossRoomTests =
 
                 Expect.equal held.SeamWalks.Count 1 "the flood is left in the table it was handed"
 
-                // The entry is poisoned before the second Atlas reads it, so
-                // an Atlas that laid a table of its own would answer four
-                // again and one that read the handed table answers the
-                // poison: a reference check on a table `memoised` never
-                // overwrites would pass either way.
+                // Poisoned before the second Atlas reads it: a reference
+                // check on a table `memoised` never overwrites would pass either way.
                 let poisoned = Array.copy held.SeamWalks.[("W1N2", "W1N1")]
                 poisoned.[25 * Engine.roomSide + 45] <- 99
                 held.SeamWalks.[("W1N2", "W1N1")] <- poisoned
@@ -692,15 +581,10 @@ let crossRoomTests =
             }
 
             test "the far leg is blind to a crowd standing on it; the near leg is not" {
-                // ADR 0070's pin. The corridor is one tile wide, so a body
-                // standing in it is a body every path walks through — and the
-                // far leg walks through it without paying: `carriedAcross`,
-                // `foldChain` and `chainedInto` all price `noTraffic`, under
-                // every pricing. What ADR 0008's surcharge still buys is the
-                // **near** leg, the creep's own flood over the room it is
-                // walking now, and the same body standing in the home corridor
-                // costs the same ten (`Grid.occupancyPenalty`, which is
-                // `Engine.swampWeight` — ADR 0008 as #225 amends it).
+                // The corridor is one tile wide, so a standing body is one
+                // every path walks through: `carriedAcross`, `foldChain` and
+                // `chainedInto` all price `noTraffic`, while the near leg
+                // pays `Grid.occupancyPenalty` (`Engine.swampWeight`).
                 let snapshot homeCreeps outCreeps names =
                     northOfSnapshot
                         (corridorHome homeCreeps)
@@ -712,18 +596,15 @@ let crossRoomTests =
                         [ "src-out", Source ]
                         names
 
-                // In the far corridor, on the walk down to the Seat, so every
-                // path the far leg is taken over runs through it.
+                // In the far corridor, on the walk down to the Seat.
                 let farCrowd () =
                     snapshot
                         [ "w", { X = 25; Y = 10 } ]
                         [ "out", { X = 25; Y = 45 } ]
                         [ worker "w"; worker "out" ]
 
-                // The same one body, fifteen tiles further up the same
-                // one-tile corridor: a crowd that *moved*, which under the old
-                // key was a new field and under this one is not even a new
-                // read.
+                // The same body fifteen tiles further up: a crowd that
+                // *moved*, which under the old key was a new field.
                 let farCrowdMoved () =
                     snapshot
                         [ "w", { X = 25; Y = 10 } ]
@@ -757,9 +638,6 @@ let crossRoomTests =
 
                 let beforeItMoved = farFieldHeld ()
 
-                // The crowd moves, which is the schedule the old key was
-                // rebuilt on: same census, same chain, same Task, a body
-                // fifteen tiles along.
                 let moved = farCrowdMoved () |> ofViewRecalling (WalkTable()) held
 
                 Expect.equal
@@ -771,11 +649,7 @@ let crossRoomTests =
                     (obj.ReferenceEquals(farFieldHeld (), beforeItMoved))
                     "and off the very field the tick before flooded: a crowd that moves is no more in the key than one that stands"
 
-                // The entry is poisoned in place before the second Atlas reads
-                // it, so an Atlas that flooded a field of its own would answer
-                // 36 again and one that read the handed table answers the
-                // poison: a reference check on a table `memoised` never
-                // overwrites would pass either way.
+                // Poisoned in place before the second Atlas reads it.
                 let far = farFieldHeld ()
 
                 let landing = 25 * Engine.roomSide + 48
@@ -792,8 +666,7 @@ let crossRoomTests =
                     (obj.ReferenceEquals(farFieldHeld (), far))
                     "the same array, because a crowd that stands still is not in the key and neither is one that moves"
 
-                // And the half ADR 0008 keeps: the same one body, in the room
-                // the creep is walking now, is the ten it always was.
+                // The same body in the room the creep is walking now.
                 Expect.equal
                     (travelCost
                         (nearCrowd () |> ofViewRecalling (WalkTable()) (FarFieldMemo.empty ()))
@@ -810,15 +683,6 @@ let outpostHeavyAreaTests =
         "atlas outpost heavy work area"
         [
             test "an unposted rock a room away is no ground at all for a Work-heavy body" {
-                // ADR 0020's fallback to the bare Seats is home's bootstrap:
-                // before the first container stands, an Anchor there still
-                // has to dig, and it does it a few tiles from the spawn that
-                // replaces it and the haulers already working the room. An
-                // outpost bootstraps through a reserver and a light builder
-                // instead (ADR 0042), so the fallback would put a heavy body
-                // on a rock with nothing under it to catch twelve a tick and
-                // no hauler quota to collect it — the strand ADR 0042 names
-                // when it makes the container the switch.
                 let bare = twoRockRooms [] []
 
                 Expect.isEmpty
@@ -850,12 +714,8 @@ let outpostHeavyAreaTests =
             }
 
             test "the same body, the same tick, keeps the bare Seats of the rock at home" {
-                // The discriminator, in one projection: two rocks with no
-                // container on either, one heavy body's answer for each, and
-                // the room the only difference between them. Read on the
-                // home creep rather than the outpost one because that is
-                // where ADR 0020's fallback has to survive — a colony whose
-                // own first container is not built yet.
+                // Two rocks with no container on either, and the room the
+                // only difference between them.
                 let bare = twoRockRooms [] []
 
                 Expect.isEmpty
@@ -873,10 +733,6 @@ let outpostHeavyAreaTests =
             }
 
             test "a container standing on the outpost Seat gives the heavy body its ground back" {
-                // The switch, at the geometry (ADR 0042). Nothing here is a
-                // rule about outposts and heavy bodies: it is the same
-                // narrowing to the Posts the home room has always had, and
-                // the outpost's answer moves the tick a container stands.
                 let posted =
                     twoRockRooms
                         [ "cont-out", { X = 25; Y = 41 } ]
@@ -903,26 +759,19 @@ let crossRoomLeadTests =
     testList
         "atlas cross-room castWalkTicks"
         [
-            /// The hauler unit empty: no fatigue-generating part at all, so
-            /// it rides the walk's one-tick floor over every tile.
+            /// The hauler unit empty: no fatigue at all, so the one-tick floor.
             let hauler = [ Carry; Carry; Move ]
 
-            /// The Anchor row's minimal cast, empty: two Work over one Move,
-            /// so 4 units and 2 ticks a plain step and 20 units and 10 ticks
-            /// a swamp one. The body an outpost's garrison is actually
-            /// replaced by at a 300 bank (`anchorBodyFor`).
+            /// The Anchor row's minimal cast, empty: 2 ticks a plain step
+            /// and 10 a swamp one.
             let anchorUnit = [ Work; Work; Carry; Move ]
 
             let openRings = [ { X = 25; Y = 0 }, Plain ], [ { X = 25; Y = 49 }, Plain ]
 
             test "a creep in the outpost is led across the Seam, on the join everything else uses" {
-                // ADR 0026's succession over ADR 0041's border (#153). The
-                // replacement is born on (25,9), walks eight tiles up to
-                // (25,1), steps onto the exit at (25,0), is moved to (25,49)
-                // for nothing at the end of that tick, steps off onto
-                // (25,48) and walks seven more down to the Seat at (25,41):
-                // seventeen tiles stepped onto, one tick each for a body
-                // that generates no fatigue.
+                // Born on (25,9), eight tiles up to (25,1), the exit at
+                // (25,0), moved to (25,49) free, (25,48) and seven more to
+                // the Seat at (25,41): seventeen.
                 let homeRing, outpostRing = openRings
 
                 let atlas =
@@ -937,12 +786,8 @@ let crossRoomLeadTests =
                     (Some 17)
                     "eight near, the exit, and eight in the outpost"
 
-                // The same ground, the same body and the same border, read
-                // by the other clock in the colony: a creep standing on the
-                // birth tile is walked to that Seat in exactly the ticks the
-                // lead charges for reaching it. One join, two readers (ADR
-                // 0030) — a second cross-room arithmetic of the lead's own
-                // would agree here and drift everywhere else.
+                // The other clock: a creep on the birth tile is walked to
+                // that Seat in exactly the ticks the lead charges.
                 Expect.equal
                     (walkTicks atlas "w" (Harvest "src-out"))
                     (castWalkTicks atlas hauler leadSpawn (at "W1N2" outpostSeat))
@@ -950,12 +795,9 @@ let crossRoomLeadTests =
             }
 
             test "the exit tile is charged what the body pays to step onto it" {
-                // #123's narrowing of ADR 0041's literal `+1`, on the lead's
-                // reader too: the Anchor unit pays 2 ticks a plain tile, so
-                // sixteen near, the exit, and sixteen in the outpost. A
-                // swamp crossing costs it ten rather than two, and the whole
-                // lead is eight ticks longer — the eight ticks a colony
-                // whose Seam is swamp has to cast its replacement earlier.
+                // The Anchor unit pays 2 ticks a plain tile: sixteen near,
+                // the exit, sixteen in the outpost. A swamp crossing costs
+                // it ten rather than two.
                 let homeRing, outpostRing = openRings
 
                 let over ring =
@@ -977,11 +819,7 @@ let crossRoomLeadTests =
             }
 
             test "a goal in the colony's own room is led off the home flood, unchanged" {
-                // The regression ADR 0026's existing cases are the rest of:
-                // the room the goal stands in is the caller's since #153,
-                // and naming home is the walk this rule always ran — the
-                // same flood out of the birth tiles, the same lookup, no
-                // band consulted. Nine tiles down the corridor from (25,11).
+                // Nine tiles down the corridor from (25,11), no band consulted.
                 let homeRing, outpostRing = openRings
                 let atlas = leadAcross homeRing outpostRing [] []
 
@@ -992,20 +830,10 @@ let crossRoomLeadTests =
             }
 
             test "no crossing and no ring each lead nobody" {
-                // Total (ADR 0004), one absence at a time: an unpriceable
-                // Seam is no Seam, so the lead is absent exactly as an
-                // unreachable tile inside one room makes it absent — never a
-                // zero, which would leave the creep counted as living for
-                // ever. The open ring at the bottom is what makes the None
-                // above the wall's answer rather than the fixture's.
-                //
-                // Two of `seams`'s absences, and the third is not here: the
-                // walled ring reaches the band and finds nothing passable in
-                // it, the last room reaches no band at all because the
-                // projection carries no ring under its name — while a room
-                // that *is* projected and simply is not an orthogonal
-                // neighbour is `RoomInvariantTests.seamTests`' case, on the
-                // real captures. One answer, three reasons.
+                // Never a zero, which would leave the creep counted as
+                // living for ever. Two of `seams`'s absences; the third (a
+                // projected room that is no orthogonal neighbour) is
+                // `RoomInvariantTests.seamTests`'.
                 let homeRing, outpostRing = openRings
                 let open' = leadAcross homeRing outpostRing [] []
                 let walled = leadAcross [ { X = 25; Y = 0 }, Wall ] outpostRing [] []
@@ -1029,14 +857,9 @@ let crossRoomLeadTests =
             }
 
             test "a creep on the border ring itself leads nobody, on either side of it" {
-                // The tick a crossing lands: the engine parks the creep on
-                // the far room's ring tile and `ColonyView.ofWorld` files it there, so
-                // a lead asked for that tick is asked about a tile that is
-                // in no room's ground (ADR 0041 keeps the rings beside the
-                // projection, never inside it). Unpriceable, therefore, and
-                // absent rather than zero-with-a-guess — for one tick the
-                // creep is simply counted living, and the next tick it
-                // stands on ground and is led again.
+                // The tick a crossing lands the engine parks the creep on
+                // the far room's ring tile: for one tick the creep is simply
+                // counted living, and the next tick it is led again.
                 let homeRing, outpostRing = openRings
                 let atlas = leadAcross homeRing outpostRing [] []
 
@@ -1052,14 +875,8 @@ let crossRoomLeadTests =
             }
 
             test "the far leg joins the walk table, under the room the goal stands in" {
-                // #169: the far leg rides ADR 0032's table exactly as the
-                // near leg does, because every input it reads is in the
-                // census — the goal room's weight grid is signed per
-                // projected room, and the Seam band is terrain, which never
-                // moves. So the key grew the room that keeps two rooms'
-                // coordinates apart, and the table holds one entry per goal
-                // *room* rather than one per goal tile: a second tile of the
-                // same outpost is a lookup, not a flood.
+                // The table holds one entry per goal *room*, not per goal
+                // tile (#169).
                 let homeRing, outpostRing = openRings
                 let walks = WalkTable()
 
@@ -1101,10 +918,7 @@ let crossRoomLeadTests =
                     2
                     "neither adds an entry: the key names the room, never the goal"
 
-                // The recall half, both rooms at once: an Atlas handed a
-                // filled table reads the very arrays the first one flooded,
-                // so a census that has not moved pays for no second
-                // Dijkstra on either side of the border (ADR 0032).
+                // The recall half, both rooms at once.
                 let second =
                     leadAcrossSnapshot homeRing outpostRing [] []
                     |> ofViewRecalling walks (FarFieldMemo.empty ())
@@ -1144,16 +958,9 @@ let crossRoomHaulTests =
         "atlas cross-room haulRoundTripTicks"
         [
             test "the round trip across a border is two Seam joins, one per leg" {
-                // ADR 0042's outpost haul, countable a tile at a time.
-                // Loaded, a plain step costs two ticks for this body and
-                // the exit tile costs the same: seven steps up the
-                // outpost's corridor to (25,48) is 14, the crossing at
-                // (25,49) is 2, and the far leg — the step onto (25,1)
-                // plus eight more down to (25,9) — is 18. Thirty-four out.
-                // Empty, every one of those tiles sits on ADR 0029's
-                // one-tick floor: 7 + 1 + 9 = 17 back. Fifty-one for the
-                // round trip, which is the order ADR 0042 costs an unpaved
-                // outpost haul at and not a bug.
+                // Loaded, two ticks a step: seven up to (25,48) is 14, the
+                // crossing 2, and (25,1) plus eight to (25,9) is 18. Empty,
+                // every tile is on the one-tick floor: 7 + 1 + 9 = 17.
                 let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Plain ]
 
                 Expect.equal
@@ -1163,14 +970,8 @@ let crossRoomHaulTests =
             }
 
             test "each leg is the walk's own join, read off the same Seam band" {
-                // ADR 0030's law, at the reader that used to be exempt from
-                // it: the quota's round trip must be the same arithmetic
-                // the Matcher ranks on and the mover walks, and not a
-                // second cross-room pricing of its own. So the two legs are
-                // pinned against `walkTicks` — one creep carrying the load
-                // the leg out is priced for, one empty as the leg back is —
-                // walking to the very tiles a transfer reaches the spawn
-                // from.
+                // The two legs pinned against `walkTicks`: one creep
+                // carrying the load the leg out is priced for, one empty.
                 let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Plain ]
 
                 let out = walkTicks atlas "loaded" (Refill("spawn-1", Energy))
@@ -1186,14 +987,9 @@ let crossRoomHaulTests =
             }
 
             test "a swamp crossing is charged to each leg at its own factor" {
-                // The trap the two legs exist for. Swamp weighs five
-                // times plain, so this body pays ten ticks to step onto
-                // the crossing loaded and one empty — the empty leg's step
-                // was already on ADR 0029's floor and cannot get dearer.
-                // Against the plain-exit case above the round trip gains
-                // exactly the loaded leg's eight, which a single crossing
-                // priced once for both legs could not produce at any
-                // factor.
+                // Ten ticks onto the crossing loaded and one empty: the
+                // round trip gains exactly the loaded leg's eight, which a
+                // single crossing priced once for both legs could not produce.
                 let atlas = haulAcross [ { X = 25; Y = 0 }, Plain ] [ { X = 25; Y = 49 }, Swamp ]
 
                 Expect.equal
@@ -1203,10 +999,7 @@ let crossRoomHaulTests =
             }
 
             test "a border with no crossing prices no round trip" {
-                // ADR 0004, and the shape the hauler quota reads it in: an
-                // unpriceable Seam is no Seam, so the haul has no price and
-                // the container hires nobody — never a zero, which would
-                // hire a fleet for free.
+                // Never a zero, which would hire a fleet for free.
                 let atlas = haulAcross [ { X = 25; Y = 0 }, Wall ] [ { X = 25; Y = 49 }, Plain ]
 
                 Expect.isEmpty (seams atlas "W1N2" "W1N1") "the premise: the exit is walled"
@@ -1221,17 +1014,9 @@ let crossRoomStepTests =
         "atlas cross-room step"
         [
             test "the mover aims at the crossing the price was paid at, not the nearest one" {
-                // #142's trap, on the fixture the price is already pinned
-                // on: (25,0) is nine steps away and (27,0) ten, but the
-                // outpost's column under (25,49) is swamp and the one under
-                // (27,49) is plain, so the band's minimum is the *farther*
-                // exit. A mover that minimised the near leg again — its own
-                // second minimisation — would walk the creep up column 25
-                // to a crossing it was never priced at, and the two answers
-                // would agree on every number and split on this one.
-                // The two-exit border this file states once, up top: the two
-                // tests that stand on it are the price's and the mover's, and
-                // agreeing on the ground is the whole of what they compare.
+                // The mover's half of the two-exit border stated up top: a
+                // mover that minimised the near leg again would walk the
+                // creep up column 25 to a crossing it was never priced at (#142).
                 let across = twoExitAcross
                 let bothOpen = twoExitBothOpen ()
 
@@ -1245,9 +1030,7 @@ let crossRoomStepTests =
                     (Some { X = 26; Y = 10 })
                     "so the creep leaves its column sideways, toward that crossing"
 
-                // Wall the cheap crossing and the price falls back to the
-                // near one; the step falls back with it, which is the pair
-                // moving together rather than one of them being a constant.
+                // Wall the cheap crossing and the step falls back with the price.
                 let swampOnly =
                     across
                         [
@@ -1268,33 +1051,18 @@ let crossRoomStepTests =
             }
 
             test "a creep parked on the ring prices and crosses from the tile it stands on" {
-                // The one tile off a room's ground a near leg is honestly
-                // read at (#175). The near side of a crossing is the room's
-                // own ground and nothing else — the ring is not ground (ADR
-                // 0036) and a flood never relaxes onto it — but a flood
-                // *seeds* its origin whatever that tile weighs, so a creep
-                // the engine parked on the ring the tick it crossed (#142,
-                // #145) is already standing beside every crossing next to
-                // it, at no cost at all.
+                // A flood never relaxes onto the ring but *seeds* its origin
+                // whatever that tile weighs, so a creep parked on the ring
+                // is already beside every crossing next to it (#175).
+                // Whether it should be aimed sideways along the ring is
+                // #146's open question.
                 //
-                // What is pinned here is the price and the step #175 found
-                // in the tree, not a ruling on #146: whether a creep on the
-                // ring should be aimed sideways along it at the crossing
-                // next door is that ticket's open question, and this one
-                // only had to leave the answer where it was.
-                //
-                // Countable: the creep stands on the home room's ring at
-                // (24,0), with two crossings open. Priced at (25,0) it pays
-                // nothing to approach — it is standing beside it — one tick
-                // onto the exit and eight in the outpost, which is nine.
-                // Priced at (24,0) it would first step to (25,1), the only
-                // ground beside that exit, and pay ten. So the band's
-                // minimum is (25,0), the crossing the creep can reach
-                // without leaving the ring, and the step is that exit
-                // itself. Read the ring off the near side instead and both
-                // crossings cost ten, the tie falls to (24,0), and the
-                // creep is walked inland to (25,1) to cross where it was
-                // never priced.
+                // Standing on the home ring at (24,0): priced at (25,0) it
+                // pays one onto the exit and eight in the outpost, nine;
+                // priced at (24,0) it would first step to (25,1) and pay
+                // ten. Read the ring off the near side instead and both
+                // cost ten, the tie falls to (24,0), and the creep is
+                // walked inland to cross where it was never priced.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 24; Y = 0 } ])
@@ -1325,37 +1093,19 @@ let crossRoomStepTests =
             }
 
             test "two crossings tied on the sum fall to the lowest exit, not to the cheaper half" {
-                // The tie the bounded band read must not turn over (#176).
-                // The near leg now stops at the crossing that wins, and the
-                // rule that decides whether a crossing is worth settling for
-                // is "its lower bound is at or under the best sum" — *at*,
-                // and not merely under, because the answer is the smallest
-                // `(sum, exit)` pair and never the smallest sum alone. A
-                // crossing that can only tie still moves the exit, and the
-                // exit is where the mover walks (#142).
+                // The bounded band read settles for a crossing whose lower
+                // bound is *at or under* the best sum, because the answer is
+                // the smallest `(sum, exit)` pair and a tie still moves the
+                // exit (#176).
                 //
-                // Countable. The creep stands at (23,1) on a plain row from
-                // x=20 to x=30, and the band holds two crossings:
-                //
-                //   west (20,0), a *swamp* exit: two steps to (21,1), the
-                //     ground beside it, five ticks onto the swamp exit, and
-                //     eleven in the outpost — eighteen.
-                //   east (30,0), a plain exit: six steps to (29,1), one tick
-                //     onto the exit, and the same eleven — eighteen.
-                //
-                // The outpost's eleven is the same both sides by
-                // construction: from the tile beside either landing, seven
-                // down its column, a diagonal onto the row at y=41, and three
-                // along it to the nearest tile of the source's Work Area.
-                //
-                // So the sums tie, and the east crossing is the one the band
-                // reads first — its exit price and far leg are the cheaper
-                // half, which is the order the bound is taken in. A read that
-                // stopped at "strictly better" would never look at the west
-                // crossing at all and would walk the creep east, to a
-                // crossing the pre-#176 minimum over the whole band never
-                // picked: `List.min` over `(sum, exit)` pairs falls to the
-                // lowest exit, and (20,0) is lower than (30,0).
+                // The creep at (23,1) on a plain row x=20..30:
+                //   west (20,0), swamp: two steps to (21,1), five onto the
+                //     exit, eleven in the outpost. Eighteen.
+                //   east (30,0), plain: six steps to (29,1), one onto the
+                //     exit, the same eleven. Eighteen.
+                // The east crossing is read first, its far leg being the
+                // cheaper half; a read that stopped at "strictly better"
+                // would never look at the west one.
                 let home stand =
                     { RoomLayer.empty with
                         Terrain =
@@ -1405,10 +1155,7 @@ let crossRoomStepTests =
                     (Some { X = 22; Y = 1 })
                     "so the creep is sent west, to the lower exit the tie falls to"
 
-                // The pairwise control, one tile east: nothing about the
-                // rooms changes, the sums stop tying, and the cheaper
-                // crossing wins outright — so the west answer above is the
-                // tie-break and not a westward bias.
+                // The pairwise control, one tile east: the sums stop tying.
                 let untied = across { X = 24; Y = 1 }
 
                 Expect.equal
@@ -1423,13 +1170,8 @@ let crossRoomStepTests =
             }
 
             test "the last step onto an exit tile is a step nothing offers to stand on" {
-                // ADR 0036 and ADR 0041 keep the exit out of the projection's
-                // ground, and #142 does not put it back: the mover may push a
-                // creep *onto* one, and every query that offers somewhere to
-                // stand still refuses to name it. So the tile is reachable as
-                // a destination and unreachable as a Seat, a Work Area member
-                // or a walkable tile — which is what stops the Matcher ever
-                // seating a creep the engine will empty out from under it.
+                // The mover may push a creep *onto* an exit; every query
+                // that offers somewhere to stand still refuses to name it.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 25; Y = 1 } ])
@@ -1462,16 +1204,9 @@ let crossRoomStepTests =
             }
 
             test "the action gate stays shut at the Seam and opens where the creep may stand" {
-                // The boundary #142 pushes a creep up to and never over.
-                // `mayAct` is `false` across a border because the engine's
-                // ranges are measured inside one room, and the mover asking
-                // for a step toward the Seam does not make it `true`: the
-                // Work Area a creep is handed is still empty, and the tile
-                // it is walked to is still no tile of one. The gate opens
-                // when the creep is standing in the target's own room and on
-                // a tile of the Work Area there, which is a fact about where
-                // the projection files it and needs no rule of its own —
-                // and the tile the engine lands it on is not yet one.
+                // The engine's ranges are measured inside one room; the
+                // gate opens off where the projection files the creep and
+                // needs no rule of its own.
                 let across creepAt outpostCreeps =
                     northOf
                         (corridorHome creepAt)
@@ -1496,18 +1231,11 @@ let crossRoomStepTests =
                     (Some { X = 25; Y = 0 })
                     "and it is walked onto the exit on the very tick it may not act"
 
-                // The tile the crossing above actually delivers to, and not
-                // an interior one hand-placed past it: stepping onto (25,0)
-                // lands the creep on the outpost's own ring at (25,49). The
-                // gate is still shut there — the landing tile is no Work
-                // Area tile, and the raw-range escape a ringed creep takes
-                // measures nine, not one — and the Atlas answers the step
-                // that opens it. What walks that step is the Resolver,
-                // which arbitrates each projected room by itself (ADR
-                // 0041, #145): the outpost's pass hands the landed creep
-                // that step, and `OutpostTests` drives it from the landing
-                // tile to the dig. This test's subject is the gate, which
-                // the Atlas keeps shut until the creep may stand.
+                // The tile the crossing delivers to, (25,49): the gate is
+                // still shut there (the raw-range escape a ringed creep
+                // takes measures nine, not one) and the Atlas answers the
+                // step that opens it. `OutpostTests` drives it from the
+                // landing tile to the dig.
                 Expect.isFalse
                     (mayActFor landed "w" (Harvest "src-out"))
                     "the tile the engine puts it down on is no tile of the Work Area"
@@ -1529,13 +1257,8 @@ let crossRoomStepTests =
 
             test
                 "a creep on the border ring stands on a Seam, and one on ground or nowhere does not" {
-                // The fact the far-side mover reads (#145): the tile the
-                // engine lands a crossing creep on is a Seam, never ground
-                // (ADR 0036), and a creep left standing on it is moved out
-                // of the room again at the end of the tick. Read off the
-                // coordinate, in whichever room the projection files the
-                // creep under; a creep it places nowhere stands on no Seam
-                // (ADR 0004).
+                // A creep left standing on a ring tile is moved out of the
+                // room again at the end of the tick (#145).
                 let at homeCreeps outpostCreeps =
                     northOf
                         (corridorHome homeCreeps)
@@ -1565,15 +1288,10 @@ let crossRoomStepTests =
             }
 
             test "a tied band is committed to, not shuttled between" {
-                // The tie is where two minimisations diverge, so the fixture
-                // holds the tie open for the whole approach: the creep walks
-                // a column that stays equidistant from both crossings, and
-                // the two are mirror images down to the far room's ground.
-                // Priced separately they cost the same to the tick, which is
-                // the premise; priced together the band's minimum picks one,
-                // and the mover has to pick that same one every tick or the
-                // creep walks a diagonal back and forth below the border and
-                // never crosses at all.
+                // The creep walks a column equidistant from two mirror-image
+                // crossings; the mover has to pick the same one every tick
+                // or the creep walks a diagonal back and forth below the
+                // border and never crosses.
                 let home pos =
                     { RoomLayer.empty with
                         Terrain =
@@ -1621,10 +1339,8 @@ let crossRoomStepTests =
                     2
                     "and with both open the band holds two of them"
 
-                // Driven a tick at a time, the way the Resolver drives it:
-                // the creep stands where the last step put it and is asked
-                // again. The drive stops the tick the step leaves this
-                // room's ground, which is the tick it crosses.
+                // Driven a tick at a time; the drive stops the tick the
+                // step leaves this room's ground.
                 let ground = (home start).Terrain
 
                 let rec drive pos taken =
@@ -1653,9 +1369,7 @@ let crossRoomStepTests =
                     ]
                     "one crossing, one route, and the exit tile is the last step of it"
 
-                // The price falls by one plain step's units every tick of
-                // that drive — which is the two answers being read off one
-                // minimisation and not two that happen to agree today.
+                // The price falls by one plain step's units every tick of the drive.
                 let priced =
                     start :: List.take 9 (drive start [])
                     |> List.map (fun pos ->
@@ -1674,13 +1388,8 @@ let trunkPricingTests =
         "atlas trunk pricing"
         [
             test "a trunk takes two swamps to save two plain steps: paved length, not the walk" {
-                // #211. Two goals off one origin, everything else wall.
-                // Goal A is three steps away across two swamps, goal B five
-                // steps away over plain. Priced as a road (plain 2, swamp 3)
-                // A costs 8 and B 10, so the line goes through the swamp;
-                // priced as a walk (swamp 10) A would cost 22 and the router
-                // would pave the long way round — which is the twenty-one-
-                // tile loop W13S28 got.
+                // Goal A three steps across two swamps (8 as a road), goal
+                // B five steps over plain (10).
                 let atlas = swampShortcut 15 |> snapshotWith [] |> ofView
 
                 let path =
@@ -1697,11 +1406,7 @@ let trunkPricingTests =
 
                 Expect.equal (List.length path) 3 "three tiles, two of them swamp"
 
-                // Pairwise on the surcharge alone: one more plain step on
-                // the long way and the swamp line still wins; one fewer and
-                // the plain way does — the ratio is one step, which is what
-                // a 1,200-energy construction difference is worth against
-                // a permanent detour.
+                // One fewer plain step on the long way and the plain way wins.
                 let shorterPlain = swampShortcut 13 |> snapshotWith [] |> ofView
 
                 Expect.equal
@@ -1717,17 +1422,8 @@ let trunkPricingTests =
             }
 
             test "the swamp surcharge is the colony's tunable, and priced at the walk it detours" {
-                // `Tuning.TrunkSwampWeight` (ADR 0052 decision 5), pairwise
-                // over the one field on one geometry: the same five-step
-                // plain loop and the same three-step swamp line, priced at
-                // the road's three and then at the walking grid's ten.
-                //
-                // Three is what #211 landed and ten is what it replaced, so
-                // this is the regression written as a tunable rather than
-                // as a literal: at ten the swamp line costs 2 + 10 + 10 = 22
-                // against the loop's 10 and the router paves the long way
-                // round, which is the twenty-one-tile detour W13S28 was
-                // carrying.
+                // `Tuning.TrunkSwampWeight` at the road's three (#211) and
+                // at the walking grid's ten it replaced.
                 let room = swampShortcut 15
 
                 let paved surcharge =
@@ -1756,16 +1452,11 @@ let trunkPricingTests =
                     { X = 10; Y = 15 }
                     "at a walking creep's weight it pays five plain steps to avoid two swamps"
 
-                // One past the field's stated invariant, which is where a
-                // tunable stops being a number and becomes a crash: the
-                // flood's step table is `Array.init (Engine.swampWeight +
-                // 1)`, so a grid holding eleven indexes off the end of it —
-                // an `IndexOutOfRangeException` here and an `undefined`
-                // price through `at`'s `[<Emit>]` accessor on the deployed
-                // bundle, on a tick `Main.loop` runs under no handler.
-                // `trunkPath` holds the number at the engine's own weight,
-                // so a colony that asks for a costlier swamp than a walking
-                // creep pays gets the walking creep's answer.
+                // The flood's step table is `Array.init (Engine.swampWeight
+                // + 1)`, so a grid holding eleven indexes off the end: an
+                // `IndexOutOfRangeException` here and an `undefined` price
+                // through `at`'s `[<Emit>]` accessor on the bundle.
+                // `trunkPath` clamps the number at the engine's own weight.
                 Expect.equal
                     (paved (Engine.swampWeight + 1))
                     (paved Engine.swampWeight)
@@ -1784,23 +1475,13 @@ let multiHopTests =
         "atlas multi-hop walk"
         [
             test "a walk over two borders is the same three terms, twice" {
-                // The worked example of ADR 0058, countable a tile at a time
-                // and read against the one-hop example above, which it
-                // extends by exactly one room. The creep stands at (25,10)
-                // of W1N1's corridor and the source at (25,40) of W1N3's,
-                // two rooms north:
-                //
+                // The one-hop example extended by one room:
                 //   W1N1  nine steps up to (25,1), one onto the exit (25,0)
-                //   W1N2  landed free on (25,49), one step onto (25,48),
-                //         forty-seven down the corridor to (25,1), one onto
-                //         the exit (25,0)
-                //   W1N3  landed free on (25,49), one step onto (25,48),
-                //         seven more to (25,41), the source's Work Area
-                //
-                // Ten, forty-nine and eight: sixty-seven tiles stepped onto,
-                // each one tick at fatigue parity. Two landings charged
-                // nothing, which is the convention the one-hop join states
-                // and this one inherits unchanged.
+                //   W1N2  landed free on (25,49), one onto (25,48),
+                //         forty-seven to (25,1), one onto the exit
+                //   W1N3  landed free on (25,49), one onto (25,48),
+                //         seven more to (25,41)
+                // Ten, forty-nine and eight.
                 let atlas =
                     chainOfThree
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
@@ -1829,10 +1510,7 @@ let multiHopTests =
             }
 
             test "the far leg is the chain's, so a creep further back pays only its own tiles" {
-                // The property the whole memo rests on: what the chain
-                // answers does not depend on the creep, so a body four tiles
-                // further from the first border pays four ticks more and not
-                // a tile besides — over two borders exactly as over one.
+                // What the chain answers does not depend on the creep.
                 let atlas =
                     chainOfThree
                         (corridorHome [ "w", { X = 25; Y = 10 }; "w-back", { X = 25; Y = 14 } ])
@@ -1852,12 +1530,9 @@ let multiHopTests =
 
             test
                 "a chain is filed beside its own suffix, so the next chain over that tail floods nothing" {
-                // `docs/research/cpu-headroom.md` §5.3: two chains toward one
-                // target from different rooms share a tail, and folding each
-                // from the target every time floods the shared rooms once per
-                // chain. Here the body at home is priced over W1N2>W1N3 and
-                // the body in the transit room over W1N3 alone — the first
-                // chain's own suffix — so the second is a lookup.
+                // Two chains toward one target share a tail
+                // (`docs/research/cpu-headroom.md` §5.3): the transit body's
+                // chain is the home body's suffix, so it is a lookup.
                 let held = FarFieldMemo.empty ()
 
                 let chains () =
@@ -1887,10 +1562,8 @@ let multiHopTests =
                     (Some 67)
                     "the premise: the home body is priced over both borders"
 
-                // Three entries and not two: the fold's own halves — the far
-                // room's field and it carried one hop — and the walk's own
-                // reading, that field carried once more into the home room
-                // (`pricedOffField`), each filed under its own chain.
+                // Three entries: the far room's field, it carried one hop,
+                // and it carried home (`pricedOffField`).
                 Expect.equal
                     (chains ())
                     [ [ "W1N3" ]; [ "W1N2"; "W1N3" ]; [ "W1N1"; "W1N2"; "W1N3" ] ]
@@ -1908,11 +1581,8 @@ let multiHopTests =
             }
 
             test "a creep standing in the transit room prices the hop it has left" {
-                // A body mid-chain is not a special case: it asks the same
-                // question from where it stands, and the route from the
-                // transit room is one hop. Counted: one step onto (25,48)
-                // is behind it, so from (25,20) it walks nineteen to (25,1),
-                // one onto the exit, then eight in the far room.
+                // From (25,20): nineteen to (25,1), one onto the exit, eight
+                // in the far room.
                 let atlas =
                     chainOfThree
                         (corridorHome [])
@@ -1933,12 +1603,9 @@ let multiHopTests =
             }
 
             test "three crossings is the budget, and it prices" {
-                // `Tuning.MaxHops` is three, so this is the longest chain the
-                // colony will ever join — worth a worked example of its own,
-                // because a fold is exactly where an off-by-one lives and two
-                // hops cannot tell a fold that runs `n-1` times from one that
-                // runs twice. Ten in W1N1, forty-nine in each of the two
-                // transit rooms, eight in the last: 10 + 49 + 49 + 8.
+                // The longest chain the colony will ever join: two hops
+                // cannot tell a fold that runs `n-1` times from one that
+                // runs twice. 10 + 49 + 49 + 8.
                 let plainCorridorRing = [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
 
                 let atlas =
@@ -1971,17 +1638,13 @@ let multiHopTests =
             }
 
             test "a chain longer than the hop budget is no chain at all" {
-                // The budget is the wall, and it is the declaration's own
-                // rule read at the tile level: three rooms is two hops and
-                // inside it, so this pins the shape rather than the number —
-                // the far room is simply not joined when the search may not
-                // reach it.
+                // Three rooms is two hops and inside the budget, so this
+                // pins the shape rather than the number.
                 let atlas =
                     chainOfThree
                         (corridorHome [ "w", { X = 25; Y = 10 } ])
                         [ { X = 25; Y = 0 }, Plain ]
-                        // The middle room's north border is walled end to
-                        // end, so there is no second crossing to make.
+                        // The middle room's north border is walled end to end.
                         [ { X = 25; Y = 49 }, Plain ]
                         corridorTransit
                         [ { X = 25; Y = 49 }, Plain ]
@@ -2001,25 +1664,14 @@ let multiHopTests =
             }
         ]
 
-/// The L: a target two hops out on the diagonal, with **both** rooms a
-/// shortest chain could turn the corner in carried as transit layers (#288).
-/// W1N1 is world (-2,-2), so the corners are W1N2 to the north and W2N1 to
-/// the west and the target W2N2 is (-3,-3).
-///
-/// Everything about the two chains is deliberately symmetric but the corner
-/// itself, so the difference between them is the corner room and nothing
-/// else. The creep stands at (25,25), where the home room's two one-wide
-/// corridors meet, twenty-five ticks from either exit. The target's corridor
-/// is entered within a tile of the same place whichever corner the walk
-/// turned in, and the source at (48,40) is seven or eight ticks up it. What
-/// differs is the corner itself: the **north** one's corridor is swamp, five
-/// ticks a tile, and the **west** one's is plain — a hundred ticks apart over
-/// chains of equal hop length. `RoomName.adjacent` names north before west,
-/// so the compass's chain is the dear one.
-///
-/// The home ring is the caller's, which is how one corner is taken away: no
-/// band out of the home room is no chain through that corner, and the same
-/// geometry then prices the one chain that is left.
+/// The L (#288): W1N1 is world (-2,-2), the corners are W1N2 north and W2N1
+/// west, the target W2N2 is (-3,-3). The two chains are symmetric but the
+/// corner: the creep at (25,25) is twenty-five ticks from either exit, the
+/// target's corridor is entered within a tile of the same place either way,
+/// and the north corner's corridor is swamp while the west one's is plain.
+/// `RoomName.adjacent` names north before west, so the compass's chain is
+/// the dear one. The home ring is the caller's, which is how one corner is
+/// taken away.
 let private cornerOfFour homeRing =
     let home =
         { RoomLayer.empty with
@@ -2027,8 +1679,6 @@ let private cornerOfFour homeRing =
                 TerrainGrid.ofList (
                     plainLine
                         [
-                            // The column up to the north exit and the row west
-                            // to the west one, meeting where the creep stands.
                             for y in 1..25 do
                                 { X = 25; Y = y }
 
@@ -2039,15 +1689,15 @@ let private cornerOfFour homeRing =
             CreepPositions = Map.ofList [ "w", { X = 25; Y = 25 } ]
         }
 
-    // The dear corner: landed on (25,49), the walk turns west along a row of
-    // swamp to the exit at (0,48), which lands it on (49,48) of the target.
+    // The dear corner: landed on (25,49), west along swamp to the exit at
+    // (0,48), landing on (49,48) of the target.
     let northCorner =
         { RoomLayer.empty with
             Terrain = TerrainGrid.ofList [ for x in 1..25 -> { X = x; Y = 48 }, Swamp ]
         }
 
-    // The cheap one: landed on (49,25), the walk turns north up a plain
-    // column to the exit at (48,0), which lands it on (48,49) of the target.
+    // The cheap one: landed on (49,25), north up plain to the exit at
+    // (48,0), landing on (48,49) of the target.
     let westCorner =
         { RoomLayer.empty with
             Terrain = TerrainGrid.ofList (plainLine [ for y in 1..25 -> { X = 48; Y = y } ])
@@ -2086,9 +1736,7 @@ let private cornerOfFour homeRing =
     |> snapshotWith [ worker "w" ]
     |> ofView
 
-/// Both corners reachable — the fixture every case below is really about.
-/// Functions and not values, for the reason `twoExitBothOpen` is one (#310):
-/// each case below builds the corners it reads.
+/// Both corners reachable. Functions, not values (#310).
 let private cornersBothOpen () =
     cornerOfFour [ { X = 25; Y = 0 }, Plain; { X = 0; Y = 25 }, Plain ]
 
@@ -2100,21 +1748,15 @@ let private cornersNorthOnly () =
 let private cornersWestOnly () =
     cornerOfFour [ { X = 0; Y = 25 }, Plain ]
 
-/// A body that feels a swamp on both legs: one Work part beside the Carry,
-/// where the [[hauler unit]]'s empty leg generates no fatigue at all and
-/// would cross the swamp corner at a plain tile's price (ADR 0029).
+/// A body that feels a swamp on both legs.
 let private walkerBody = [ Work; Carry; Move ]
 
-/// A [[hauler unit]]'s own body, which is the one the corners split: loaded it
-/// feels the swamp corner at five ticks a tile, empty it generates no fatigue
-/// at all and crosses that same corner for a plain tile's price (ADR 0029). So
-/// the leg out is cheapest round the west corner and the leg back is cheapest
-/// round the north one — over two *different* chains.
+/// A hauler unit's body, which the corners split: loaded it feels the swamp
+/// corner, empty it generates no fatigue and crosses it at a plain tile's
+/// price, so each leg is cheapest round a different corner.
 let private haulerBody = [ Carry; Move ]
 
-/// The haul the L is priced on: the target room's container at (48,41),
-/// one tile up its corridor from the source, to the home room's spawn tile
-/// where the two corridors meet.
+/// The target room's container at (48,41) to the home room's spawn tile.
 let private cornerHaulWith body atlas =
     haulRoundTripTicks atlas body (at "W2N2" { X = 48; Y = 41 }) (at "W1N1" { X = 25; Y = 25 })
 
@@ -2130,24 +1772,12 @@ let cornerTests =
                 let northCornerOnly = cornersNorthOnly ()
                 let westCornerOnly = cornersWestOnly ()
 
-                // #288: two chains of the same hop length are not two chains
-                // of the same price — the room the walk turns the corner in
-                // decides how long the legs are — so the price is taken over
-                // every shortest chain and the cheapest kept.
-                //
-                // Counted, over the cheap corner: twenty-five ticks out of
-                // the home room (twenty-four steps up to (25,1) and the exit
-                // tile), the landing on (49,25) free, twenty-five in the west
-                // corner — the diagonal step onto (48,24), twenty-three more
-                // up its column and the exit at (48,0) — the landing on
-                // (48,49) free again, and eight in the target: the step onto
-                // (48,48) and seven more to the Seat at (48,41). Fifty-eight.
-                //
-                // The same walk turned in the north corner pays 121 for that
-                // room instead of 25, because its tiles are swamp at five
-                // ticks apiece, and seven in the target instead of eight
-                // because its landing at (49,48) has ground diagonally
-                // beside it: a hundred and fifty-three.
+                // Over the cheap corner: twenty-five out of the home room,
+                // twenty-five in the west corner (the diagonal onto (48,24),
+                // twenty-three up its column, the exit), eight in the
+                // target. Fifty-eight. The north corner pays 121 for its
+                // swamp and seven in the target, its landing at (49,48)
+                // having ground diagonally beside it: 153.
                 Expect.equal
                     (routes bothCorners "W1N1" "W2N2")
                     [ [ "W1N1"; "W1N2"; "W2N2" ]; [ "W1N1"; "W2N1"; "W2N2" ] ]
@@ -2178,10 +1808,9 @@ let cornerTests =
                 let bothCorners = cornersBothOpen ()
                 let northCornerOnly = cornersNorthOnly ()
 
-                // ADR 0030's law over the chain the price chose: a mover
-                // that followed the compass while the price followed the
-                // terrain would walk the creep out of the wrong border of
-                // its own room every tick of the haul.
+                // A mover that followed the compass while the price
+                // followed the terrain would walk the creep out of the
+                // wrong border every tick.
                 Expect.equal
                     (firstStepFor bothCorners "w" (Harvest "src-far"))
                     (Some { X = 24; Y = 25 })
@@ -2196,13 +1825,9 @@ let cornerTests =
             test "the vision-grace mover still walks the compass's chain" {
                 let bothCorners = cornersBothOpen ()
 
-                // #297, standing and pinned rather than fixed here: the mover
-                // of #151's vision grace has no price to choose a chain with —
-                // its target's room is dark — so it takes the first chain and
-                // that is the compass's. The same creep under the price walks
-                // the other way out of its own room, and the two swap as the
-                // vision lapses and returns. Red the day #297 lands, which is
-                // the point of writing it down.
+                // #297, pinned rather than fixed: the vision-grace mover has
+                // no price to choose a chain with, so it takes the compass's.
+                // Red the day #297 lands.
                 Expect.equal
                     (stepTowardRoom bothCorners "w" "W2N2")
                     (Some(at "W1N1" { X = 25; Y = 24 }))
@@ -2214,10 +1839,8 @@ let cornerTests =
                 let northCornerOnly = cornersNorthOnly ()
                 let westCornerOnly = cornersWestOnly ()
 
-                // ADR 0049 sums these into the hauler quota, which is what
-                // makes the tie-break an energy bill and not a cosmetic one
-                // (#288): the dear chain hires bodies for a haul nobody
-                // makes.
+                // The hauler quota sums these: the dear chain hires bodies
+                // for a haul nobody makes.
                 let dear = cornerHaulOf northCornerOnly
                 let cheap = cornerHaulOf westCornerOnly
 
@@ -2239,15 +1862,9 @@ let cornerTests =
                 let northCornerOnly = cornersNorthOnly ()
                 let westCornerOnly = cornersWestOnly ()
 
-                // #288 with its sign flipped: a hauler's loaded leg is
-                // cheapest round the plain corner and its empty leg, which
-                // generates no fatigue and so crosses swamp for nothing, is
-                // cheapest round the swamp one. Priced a leg at a time the
-                // trip comes out at 113 — under the better of the two chains
-                // a creep could actually walk, because no creep goes out
-                // round one corner and comes back round the other. ADR 0049
-                // sums this into the hauler quota, so a number below every
-                // real journey hires a fleet for a haul nobody makes.
+                // Priced a leg at a time the trip comes out at 113, under
+                // the better of the two chains a creep could actually walk:
+                // no creep goes out round one corner and back round the other.
                 let both = cornerHaulWith haulerBody bothCorners
 
                 Expect.equal
@@ -2276,9 +1893,7 @@ let cornerTests =
                 let northCornerOnly = cornersNorthOnly ()
                 let westCornerOnly = cornersWestOnly ()
 
-                // `castWalkTicks` folds the same chain forwards (ADR 0030,
-                // ADR 0058), so a lead over an L is the same choice made
-                // over a table of every tile at once.
+                // `castWalkTicks` folds the same chain forwards.
                 let lead atlas =
                     castWalkTicks atlas walkerBody { X = 25; Y = 25 } (at "W2N2" { X = 48; Y = 41 })
 

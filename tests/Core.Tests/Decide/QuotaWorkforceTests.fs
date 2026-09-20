@@ -1,5 +1,4 @@
-/// The workforce target and the hauler row it is summed from (ADR 0012,
-/// ADR 0049).
+/// The workforce target and the hauler row it is summed from.
 module Fabot.Core.Tests.Decide.QuotaWorkforceTests
 
 open Expecto
@@ -90,19 +89,15 @@ let haulerTests =
         "hauler"
         [
             test "a farther source container hires a larger hauler quota" {
-                // Near spawn: 8 steps from the container, [4 Carry; 2 Move]
-                // at the 300-capacity bank — each leg a walk (ADR 0029),
-                // 2 ticks a loaded step and 1 empty, so 24 round-trip ticks
-                // and quota ceil(24 x 4 / 200) = 1. Far spawn: 27 steps —
-                // 81 ticks, quota 2. The rock ships four and not ten
-                // because that is what the Anchor this bank casts digs out
-                // of it (#208). The living Anchor fills the Post, so every
-                // remaining specialist gap is a hauler cast, and five idle
-                // spawns on a 1500 bank can pay for the larger quota.
-                //
-                // The generalist standing beside the Anchor is the supply
-                // floor's premise (ADR 0050) and nothing else: it is not a
-                // hauler, so the row this case counts is untouched.
+                // Near spawn: 8 steps from the container, [4 Carry; 2 Move] at the
+                // 300-capacity bank, each leg a walk, 2 ticks a loaded step and 1
+                // empty, so 24 round-trip ticks and quota ceil(24 x 4 / 200) = 1. Far
+                // spawn: 27 steps, 81 ticks, quota 2. The rock ships four and not ten
+                // because that is what the Anchor this bank casts digs (#208). The
+                // living Anchor fills the Post, so every remaining specialist gap is a
+                // hauler cast, and five idle spawns on a 1500 bank can pay for the
+                // larger quota. The generalist beside the Anchor is the supply floor's
+                // premise and nothing else.
                 let decideAt spawnX =
                     decideOn
                         { quotaColony spawnX 5 1500 with
@@ -117,24 +112,15 @@ let haulerTests =
             }
 
             test "the repricing does not move the measured room's quota: the fix was not a resizing" {
-                // ADR 0029 repriced each leg of the round trip as a walk,
-                // and both legs got dearer — the live room's two containers
-                // move from 3 and 5 round-trip ticks to 4 and 6. The pair's
-                // demand rises with them, from 80 to 100 energy-ticks
-                // against the 200-carry hauler a 300 bank casts, and stays
-                // under the one body that clears it — the live room's
-                // 16-Carry body wants a second only past 80 ticks — so the
-                // fleet is the size it was. The error this corrects bites
-                // at remote-mining distances, not at home; a future reader
-                // finding the fleet unchanged is looking at the right
-                // outcome, not at a fix that failed to land.
-                //
-                // One body and not one apiece since ADR 0049: the two
-                // containers are summed and rounded once, which is what
-                // took this room's row from two down to one. The claim
-                // under test is unmoved by that — both roundings, before
-                // ADR 0029's repricing and after it, still land on the same
-                // fleet.
+                // Repricing each leg as a walk made both legs dearer: the live room's
+                // two containers move from 3 and 5 round-trip ticks to 4 and 6, the
+                // pair's demand from 80 to 100 energy-ticks against the 200-carry
+                // hauler a 300 bank casts, still under the one body that clears it
+                // (the live room's 16-Carry body wants a second only past 80 ticks).
+                // The error bites at remote-mining distances, not at home: a reader
+                // finding the fleet unchanged is looking at the right outcome. One
+                // body and not one apiece: the two containers are summed and rounded
+                // once.
                 let snapshot =
                     { bareRespawn with
                         Spawns =
@@ -148,14 +134,11 @@ let haulerTests =
                         Bank = bank 1200 300
                         Sources = [ source "src-a"; source "src-b" ]
                         Spatial = shortHaulRoom
-                        // The generalist beside the two Anchors is the
-                        // supply floor's premise and not this case's (ADR
-                        // 0050): an Anchor holds a Carry and can still put
-                        // nothing into an extension, so a fleet of Anchors
-                        // alone hires a carrier sized from `bank.Available`
-                        // in front of every row, and the cast this case
-                        // counts would be that one instead of the hauler
-                        // row's own capacity-sized body.
+                        // The generalist beside the two Anchors is the supply floor's
+                        // premise: an Anchor holds a Carry and can still put nothing into
+                        // an extension, so a fleet of Anchors alone hires a carrier sized
+                        // from `bank.Available` in front of every row, and the cast this
+                        // case counts would be that one.
                         Creeps = [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                     }
 
@@ -227,18 +210,13 @@ let haulerTests =
             }
 
             test "the reserver row leads and is empty here: Anchor, hauler, worker follow" {
-                // The 27-step round trip hires two haulers, so the order
-                // runs Anchor, both haulers, then the generalist — four
-                // casts, one per idle spawn, off the one debited bank. The
-                // far spawn and not the near one since #208: at four a tick
-                // an 8-step haul is one body, and a second hauler is what
-                // makes the order readable.
-                //
-                // The reserver row runs in front of all three (ADR 0042)
-                // and casts nothing at all here: a colony projecting one
-                // room has no outpost to declare, so that row's quota is
-                // zero and its gap with it. A reserver appearing in this list
-                // would mean the gap had been computed unconditionally.
+                // The 27-step round trip hires two haulers, so the order runs Anchor,
+                // both haulers, then the generalist: four casts, one per idle spawn,
+                // off the one debited bank. The far spawn since #208: at four a tick
+                // an 8-step haul is one body. The reserver row runs in front of all
+                // three and casts nothing here: one projected room has no outpost, so
+                // its quota is zero. A reserver in this list would mean the gap had
+                // been computed unconditionally.
                 let snapshot =
                     { quotaColony 39 4 1200 with
                         Creeps = [ worker "w1" 0 50 ]
@@ -448,13 +426,10 @@ let haulRoundingTests =
         "the hauler quota rounds once for the colony"
         [
             test "the row is the sum of the demands, never the sum of their ceilings" {
-                // ADR 0049, on the live shape's own arithmetic: three
-                // containers wanting 0.52 of a hauler and two wanting 0.2
-                // come to 1.96 and hire **two**. A ceiling apiece — the
-                // rule until #194 — bought a body for each of those five
-                // fractions and hired five: three bodies the flow never
-                // asked for, which is the overhire the live colony was
-                // seen carrying.
+                // On the live shape's own arithmetic: three containers wanting 0.52
+                // of a hauler and two wanting 0.2 come to 1.96 and hire two. A
+                // ceiling apiece (the rule until #194) hired five: three bodies the
+                // flow never asked for.
                 let colony = haulRoundingColony (haulRoundingArms { X = 25; Y = 11 })
                 let atlas = Atlas.ofView colony
                 let home = SpatialInfo.homeName colony.Spatial
@@ -483,11 +458,9 @@ let haulRoundingTests =
             }
 
             test "one container of the same colony still rounds up on its own" {
-                // The granularity is all that moved (ADR 0049): a colony
-                // with one container rounds one demand up exactly as ADR
-                // 0012 always did, because a sum of one is its own
-                // summand. Pairwise against the case above, whose long arm
-                // this is.
+                // The granularity is all that moved: a colony with one container
+                // rounds one demand up as before, because a sum of one is its own
+                // summand. Pairwise against the case above, whose long arm this is.
                 let alone = haulRoundingColony [ List.head (haulRoundingArms { X = 25; Y = 11 }) ]
 
                 Expect.equal (quotaOf alone) 1 "0.52 of a body alone is still a whole body"
@@ -519,34 +492,25 @@ let haulRoundingTests =
             }
 
             test "one divisor for the colony too: the row's own body at the colony's bank" {
-                // The other half of "rounded once" (ADR 0049), and the one
-                // no arithmetic case above can see: the sum is divided by
-                // **one** load and never by a load per spawn. The load is
-                // the row's own cast at `richestCapacity` — the same body
-                // `workforceTarget` charges this row's amortization at and
-                // the same one a Withdraw's cap divides its store's stock
-                // by (#161) — so a quota denominated anywhere else would
-                // let the three disagree about what one hauler carries and
-                // hire bodies the caps never admit.
+                // The other half of "rounded once": the sum is divided by one load
+                // and never by a load per spawn. The load is the row's own cast at
+                // `richestCapacity`, the same body `workforceTarget` charges this
+                // row's amortization at and a Withdraw's cap divides its store's
+                // stock by (#161), so a quota denominated anywhere else would let the
+                // three disagree about what one hauler carries.
                 //
-                // The same five arms, the same 980 energy-ticks of haul,
-                // and only the bank moves: a 600 bank's hauler carries 400
-                // and the colony hires three, an RCL4 bank's carries 800
-                // and it hires two. Road parity holds at every size, so
-                // the round trips themselves do not move with the body —
-                // asserted, because if they did the two numbers would not
-                // be one division apart.
+                // The same five arms, the same 980 energy-ticks of haul, and only the
+                // bank moves: a 600 bank's hauler carries 400 and the colony hires
+                // three, an RCL4 bank's carries 800 and it hires two. Road parity
+                // holds at every size, so the round trips do not move with the body;
+                // asserted, because if they did the two numbers would not be one
+                // division apart.
                 //
-                // The lean bank here is 600 and not this fixture's own 300,
-                // so that the *divisor* is the only thing moving (#208). A
-                // Post is worth what the Anchor row's cast digs, capped at
-                // the rock's rate, and at 300 that cast is `2W` and digs
-                // four: the numerator would fall with the bank beside the
-                // denominator and the pair would no longer be one division
-                // apart. At 600 the cast is five Work — ten a tick, the
-                // rate — and at 1,300 it is six, so both banks price these
-                // rocks at the same ten and the haul is the same 980
-                // either side.
+                // The lean bank is 600 and not 300 so that the divisor is the only
+                // thing moving (#208): at 300 the Anchor cast is `2W` and digs four,
+                // so the numerator would fall with the bank. At 600 the cast is five
+                // Work, ten a tick, the rate, and at 1,300 it is six, so both banks
+                // price these rocks at ten.
                 let colony =
                     { haulRoundingColony (haulRoundingArms { X = 25; Y = 11 }) with
                         Bank = bank 600 600
@@ -628,11 +592,11 @@ let incomeWorkforceTests =
             }
 
             test "at a 1300 bank the whole fleet is 2 Anchors + 1 hauler + 4 workers" {
-                // One Anchor per Post (2), one hauler for both containers
-                // (0.6 of a body at this bank's 800 carry capacity, rounded
-                // once for the colony — ADR 0049), and the income workers
-                // — 30,000 of lifetime income less 2 × 700 + 1 × 1200 of
-                // amortization over the row's 6 × 1500 → ceil(3.044) = 4.
+                // One Anchor per Post (2), one hauler for both containers (0.6 of a
+                // body at this bank's 800 carry capacity, rounded once for the
+                // colony), and the income workers: 30,000 of lifetime income less
+                // 2 × 700 + 1 × 1200 of amortization over the row's 6 × 1500 →
+                // ceil(3.044) = 4.
                 let snapshot =
                     { richIncomeColony with
                         Creeps = richIncomeFleet 4
@@ -643,13 +607,11 @@ let incomeWorkforceTests =
             }
 
             test "the worker row rounds up at a Work drain of 6, not down to a body short" {
-                // The whole defect at one RCL: 30,000 of lifetime income
-                // less 2,600 of anchor and hauler amortization over the
-                // worker row's 6 × 1500 is 3.044 bodies. Truncating gives
-                // 3 and pins upgrade throughput whatever the surplus is;
-                // rounding up gives the fourth body (ADR 0037). The fleet
-                // below is three workers, so only the rounded-up target
-                // has a gap to cast into.
+                // The whole defect at one RCL: 30,000 of lifetime income less 2,600
+                // of anchor and hauler amortization over the worker row's 6 × 1500 is
+                // 3.044 bodies. Truncating gives 3 and pins upgrade throughput
+                // whatever the surplus is; rounding up gives the fourth. The fleet
+                // below is three workers, so only the rounded-up target has a gap.
                 let snapshot =
                     { richIncomeColony with
                         Creeps = richIncomeFleet 3
@@ -680,19 +642,14 @@ let outpostWorkforceTests =
             let rock = { X = 40; Y = 40 }
 
             test "an outpost source with no container leaves the target exactly where it was" {
-                // ADR 0042's most important regression, and the reason the
-                // constant and this narrowing land in one commit. The
-                // unposted-seat rule counts a source's Seats into the target
-                // because "its output is spoken for by the seat crews that
-                // walk it" — which presumes the walk is cheap. Across a
-                // border it is not: the three declared outpost sources carry
-                // six Seats between them, five of them swamp, and counted
-                // here they would hire six generalists to commute
-                // forty-seven to fifty-six tiles to dig them.
-                //
-                // So a source whose room has no container is a source the
-                // quotas cannot see, and the proof of it is that the colony
-                // decides what it decides with the room not there at all.
+                // The unposted-seat rule counts a source's Seats into the target
+                // because its output is spoken for by the seat crews that walk it,
+                // which presumes the walk is cheap. Across a border it is not: the
+                // three declared outpost sources carry six Seats between them, five
+                // of them swamp, and counted here they would hire six generalists to
+                // commute forty-seven to fifty-six tiles. So a source whose room has
+                // no container is a source the quotas cannot see, and the proof is
+                // that the colony decides the same with the room not there at all.
                 let withOutpostSource =
                     incomeColonyPlus (
                         withOutpost "W1N2" [ "src-out", rock, Source ] (threeSeatField rock)
@@ -709,14 +666,11 @@ let outpostWorkforceTests =
             }
 
             test "the same rock in the spawn room still contributes its Seats" {
-                // The other half of the pair, and the only reading under
-                // which the case above says anything: the same source, the
-                // same three Plain Seats, the same fleet — filed under the
-                // home room's layer rather than an outpost's. ADR 0042
-                // narrows the unposted-seat rule to the spawn room and does
-                // not repeal it, so this colony hires the three walkers it
-                // always did. Without this case a rule that counted no
-                // Seats anywhere would pass the one above.
+                // The other half of the pair: the same source, the same three Plain
+                // Seats, the same fleet, filed under the home room's layer. The
+                // unposted-seat rule is narrowed to the spawn room and not repealed,
+                // so this colony hires the three walkers it always did. Without this
+                // case a rule that counted no Seats anywhere would pass the one above.
                 let atHome =
                     incomeColonyPlus (fun colony ->
                         { colony with
@@ -739,20 +693,14 @@ let outpostWorkforceTests =
             }
 
             test "an outpost Seat on a home Post's coordinates posts nothing" {
-                // The trap ADR 0042 names as the most dangerous in the
-                // whole set, at the one query that was still asking it
-                // room-blind. A `Pos` carries no room, so testing an
-                // outpost source's Seats against the *home* room's Posts
-                // answers yes on a bare coordinate collision — and that
-                // outpost source then reads as posted with no container
-                // under it, puts ten energy a tick of income that does not
-                // exist into the base, and the colony hires the workers to
-                // spend it.
-                //
-                // The rock stands at (11,11) of the outpost, so its Seat
-                // (11,10) is the very tile the home room's `can-a` stands
-                // on. Judged in the source's own room (`Atlas.postsOf`) the
-                // collision means nothing whatever.
+                // A `Pos` carries no room, so testing an outpost source's Seats
+                // against the home room's Posts answers yes on a bare coordinate
+                // collision: that outpost source then reads as posted with no
+                // container under it, puts ten a tick of income that does not exist
+                // into the base, and the colony hires the workers to spend it. The
+                // rock stands at (11,11) of the outpost, so its Seat (11,10) is the
+                // very tile the home room's `can-a` stands on. Judged in the source's
+                // own room (`Atlas.postsOf`) the collision means nothing.
                 let collidingRock = { X = 11; Y = 11 }
 
                 let colliding =
@@ -775,22 +723,15 @@ let outpostWorkforceTests =
             }
 
             test "an outpost source moves no tile of the home room's Layout" {
-                // The fourth room-blind `Pos` join of the family the ticket's
-                // Traps section says to verify rather than assume, and the
-                // one that was still open: the Layout plans off
-                // `snapshot.Sources`, which since #124 is every scanned
-                // room's. An outpost source counted there widens the footing
-                // reservation by a slot and moves the clustered picks with
-                // it, floods a trunk *at home* from the outpost's
-                // coordinates, and plants a container site on a home tile
-                // that is a Seat of a source a room away. ADR 0042: "The
-                // outpost gets a container and nothing else. No roads, and
-                // no Layout."
-                //
-                // The rock stands at (15,30), which is plain walkable ground
-                // of the *home* fixture as well — that is what makes the
-                // phantom trunk routable and the collision real rather than
-                // theoretical.
+                // The fourth room-blind `Pos` join of the family, and the one still
+                // open: the Layout plans off `snapshot.Sources`, which since #124 is
+                // every scanned room's. An outpost source counted there widens the
+                // footing reservation by a slot and moves the clustered picks, floods
+                // a trunk at home from the outpost's coordinates, and plants a
+                // container site on a home tile that is a Seat of a source a room
+                // away. The outpost gets a container and nothing else. The rock
+                // stands at (15,30), plain walkable ground of the home fixture as
+                // well, which makes the phantom trunk routable and the collision real.
                 let colony = trunkColony 2
                 let rock = { X = 15; Y = 30 }
 
@@ -855,11 +796,10 @@ let backlogWorkforceTests =
                     1
                     "exactly one body's worth of building hires exactly one body"
 
-                // Floored, where every other division in `Quota` is a ceiling
-                // (ADR 0037): what a ceiling rounds up here is a whole body for
-                // a road, and `workerFloor` already stands two the moment
-                // anything is in the Build pool. The remainder is the floor's
-                // job.
+                // Floored, where every other division in `Quota` is a ceiling: what a
+                // ceiling rounds up here is a whole body for a road, and `workerFloor`
+                // already stands two the moment anything is in the Build pool. The
+                // remainder is the floor's job.
                 Expect.equal
                     (targetOf (banked |> owing [ perLife + 1 ]) - targetOf banked)
                     1
@@ -879,9 +819,8 @@ let backlogWorkforceTests =
                     (targetOf (trunkColony 6))
                     "no Storage and no stock: the same row as with no site at all"
 
-                // ADR 0039's mistake in another currency — bodies standing
-                // beside a site nobody can pay for. The stock has to cover the
-                // building first and the bodies out of what is left.
+                // Bodies standing beside a site nobody can pay for: the stock has to
+                // cover the building first and the bodies out of what is left.
                 Expect.equal
                     (targetOf (stocking 90_000 (trunkColony 6) |> owing [ 100_000 ]))
                     (targetOf (stocking 90_000 (trunkColony 6)))

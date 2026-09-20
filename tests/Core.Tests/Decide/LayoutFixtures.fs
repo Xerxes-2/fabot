@@ -1,7 +1,3 @@
-/// The Layout: what the Planner places and where — the clustered ordering, the
-/// trunks, the Storage, the Link footings, the room layer a site is filed under
-/// — and the plan memo the census signature keys, which is the Layout's own
-/// cache and moves with every input the plan reads (ADR 0017, ADR 0044).
 /// The Layout suite's fixtures: the colonies and pockets the Planner is run
 /// over, and the helpers that read a placement back.
 module Fabot.Core.Tests.Decide.LayoutFixtures
@@ -29,7 +25,7 @@ let noSourceColony level =
 
 /// The trunk fixture with a second source walled into a pocket: every
 /// neighbour of (20,30) is wall terrain except the single Seat east of
-/// it — the W12S28-source-B shape (ADR 0012).
+/// it — the W12S28-source-B shape.
 let pocketColony level =
     let srcB = { X = 20; Y = 30 }
     let seat = { X = 21; Y = 30 }
@@ -57,12 +53,9 @@ let pocketColony level =
     }
 
 /// The colony with its own road plan already standing: the state the
-/// source containers drop in — a container defers to a road site on its
-/// tile (one construction site per tile) and coexists with the built road.
-///
-/// It stands the roads the plan *places*, not the roads it plans, so
-/// below the road gate it stands none (#209) and the premise is empty:
-/// every caller that needs a road under its container asks from RCL3 up.
+/// source containers drop in. It stands the roads the plan *places*, not
+/// the roads it plans, so below the road gate it stands none and every
+/// caller that needs a road under its container asks from RCL3 up.
 let withRoadsBuilt colony =
     let { Intents = intents } = decideOn colony
 
@@ -78,15 +71,13 @@ let withRoadsBuilt colony =
 let chebyshev a b = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
 /// The clustered ordering's sort key for a fixture whose spawn stands at
-/// (25,25): nearest-to-spawn first, ties by x then y (ADR 0011).
+/// (25,25): nearest-to-spawn first, ties by x then y.
 let orderKey tile =
     chebyshev tile { X = 25; Y = 25 }, tile.X, tile.Y
 
-/// A tile of the room the Layout fixtures below plan. `openRoom` names
-/// its projection "W1N1", and every tile the Layout records carries the
-/// room it planned since #216 R3 (ADR 0052 decision 2) — so an
-/// expectation written as a grid coordinate joins it back here, and a
-/// footing recorded in any other room fails it.
+/// A tile of the room the Layout fixtures below plan. `openRoom` names its
+/// projection "W1N1" and every tile the Layout records carries its room,
+/// so an expectation written as a grid coordinate joins it back here.
 let plannedTile (tile: Pos) : RoomPos = RoomPos.at "W1N1" tile
 
 /// Synthetic footing fixture: the source stands three tiles north of the
@@ -94,7 +85,7 @@ let plannedTile (tile: Pos) : RoomPos = RoomPos.at "W1N1" tile
 /// planned there, while the Storage takes the ordering's first pick at
 /// (24,24). The tile the container's Link footing wants, (23,23), is one
 /// of the cluster's own same-colour tiles — the collision the reservation
-/// exists to settle (ADR 0022).
+/// exists to settle.
 let footingRoom = openRoom 6 |> withTargets [ "src-a", { X = 25; Y = 22 }, Source ]
 
 /// The two tiles `footingRoom` holds as Link footings: one beside the
@@ -113,8 +104,8 @@ let withStanding id pos kind room =
             Obstacles = Set.add pos layer.Obstacles
         })
 
-/// The tile the trunk fixture's Thorium deposit stands on (ADR 0057): a
-/// wall tile well south of the trunk line, so its eight Seats are open
+/// The tile the trunk fixture's Thorium deposit stands on: a wall tile
+/// well south of the trunk line, so its eight Seats are open
 /// ground and the Seat nearest the trunk is a choice and not the only
 /// candidate. South rather than beside the spawn because the pick is a
 /// comparison and a deposit inside the cluster would make it a tie.
@@ -123,9 +114,8 @@ let mineralPos = { X = 25; Y = 33 }
 /// The trunk fixture with a Thorium deposit standing in it: a wall tile
 /// carrying a `TargetKind.Mineral`, blocking its own tile the way the shell
 /// projects one (a mineral is one of Screeps' OBSTACLE_OBJECT_TYPES) and
-/// off every trunk. The colony's roads are stood first, because the
-/// container pick is priced against the trunks and a room below the road
-/// gate has paved none (#209).
+/// off every trunk. The roads are stood first, because the container pick
+/// is priced against the trunks and a room below the road gate has none.
 let mineralColonyAt pos level =
     let colony = trunkColony level
 
@@ -143,15 +133,13 @@ let mineralColonyAt pos level =
 let mineralColony level = mineralColonyAt mineralPos level
 
 /// The tile a second deposit fixture stands on: the one place in this room
-/// where the two readings of "the Seat nearest the trunk" disagree, and the
-/// premise of the test that tells them apart (ADR 0057 decision 1). The trunk
-/// fixture's source→controller leg **arcs north over the spawn** — the spawn
-/// and its two built extensions are in the way — so a deposit here has one Seat
-/// standing on that arc at (22,19) and another one step off the source→spawn
-/// leg at (22,21). Priced against every trunk the room paved, the arc's tile
-/// wins at range 0 and the container is seated on the side facing *away* from
-/// the Storage; priced against the Storage's trunk, which is what ADR 0057
-/// says, (22,21) wins.
+/// where the two readings of "the Seat nearest the trunk" disagree. The trunk
+/// fixture's source→controller leg arcs north over the spawn — the spawn and
+/// its two built extensions are in the way — so a deposit here has one Seat
+/// on that arc at (22,19) and another one step off the source→spawn leg at
+/// (22,21). Priced against every trunk the arc's tile wins at range 0, on
+/// the side facing away from the Storage; priced against the Storage's
+/// trunk, (22,21) wins.
 let trunkSplitMineralPos = { X = 23; Y = 20 }
 
 /// The Seat of `trunkSplitMineralPos` that stands on the controller-bound arc,
@@ -161,8 +149,8 @@ let controllerSideSeat = { X = 22; Y = 19 }
 let storageSideSeat = { X = 22; Y = 21 }
 
 /// The deposit's Seats in `mineralColony`: the walkable neighbours of its
-/// tile, by terrain alone (ADR 0001), derived rather than written down so
-/// the set follows the fixture's terrain if that ever moves.
+/// tile, derived rather than written down so the set follows the fixture's
+/// terrain if that ever moves.
 let mineralSeats (colony: ColonyView) =
     Atlas.seatTilesOf (Atlas.ofView colony) "min-a" |> Set.map RoomPos.pos
 
@@ -170,7 +158,7 @@ let mineralSeats (colony: ColonyView) =
 /// source stands against the room's east edge and the controller against
 /// its west edge, so the source→controller trunk crosses the whole
 /// cluster and the tiles a footing pushes the cluster onto are the ones
-/// the trunk would otherwise want (ADR 0022, ADR 0027).
+/// the trunk would otherwise want.
 let crossedRoom =
     openRoom 6
     |> withTargets [ "src-a", { X = 30; Y = 26 }, Source ]
@@ -178,11 +166,9 @@ let crossedRoom =
 
 /// The colony one tick on: every site the Layout just asked for now
 /// standing in the projection as a construction site, the obstacle kinds
-/// blocking their tile exactly as the engine's own sites do — the state
-/// the next tick's plan is computed against. Both halves go through the
-/// Core's own tables (#75): a .NET-side projection builder that restated
-/// them would drift from the one `buildSpatial` really builds, and the
-/// tests would stay green describing a room the bot never sees.
+/// blocking their tile as the engine's own sites do. Both halves go
+/// through the Core's own tables: a .NET-side builder that restated them
+/// would drift from the one `buildSpatial` really builds.
 let withPlanPending colony =
     let { Intents = intents } = decideOn colony
 
@@ -205,29 +191,18 @@ let withPlanPending colony =
 /// W12S28's `10,43` shape, synthesised (#77): the pocket source's only
 /// Seat is its container's pick, and every one of the eight tiles beside
 /// that pick is spoken for — four wall, the source itself, the one trunk
-/// road out (the diagonal, see below) and two standing extensions, which
-/// is the live room's own tile table in proportion. The extensions are the live loss: `11,43`
-/// took one in the RCL4 burst, planned by a bundle that did not yet hold
-/// footings back. Nothing is left for the fold to reserve, so this room's
-/// guarantee is short by one — and `pocketColony`, the same room without
-/// the seal, is the control that serves all four.
+/// road out and two standing extensions, the live room's own tile table
+/// in proportion. Nothing is left for the fold to reserve, so this room's
+/// guarantee is short by one; `pocketColony`, the same room without the
+/// seal, is the control that serves all four.
 ///
-/// The trunk leaves the Seat by the **diagonal** `22,29` since ADR 0064,
-/// and the two extensions stand on `22,30` and `22,31` rather than either
-/// side of an orthogonal exit. The seal is the same eight tiles and the
-/// same proportions; what moved is which of them the road is. The
-/// reservation is level-blind again and sized at `allowanceOf`'s ceiling,
-/// so it reaches five tiles out from the spawn — far enough to take
-/// `22,30`, which is on the spawn's own checkerboard colour. A corridor
-/// the cluster can claim is a corridor the trunk cannot use, and the
-/// source would be cut off rather than sealed: no trunk, no container
-/// pick, no footing target, and the shortfall this fixture exists to
-/// record would vanish by having nothing to fall short of. `22,29` is on
-/// the *other* colour, so no reservation at any level can take it and the
-/// trunk arrives at every level this fixture is ever run at. Under the
-/// shipped `level + 1` reservation the orthogonal exit survived to RCL5
-/// and was claimed from RCL6 up, so the old fixture was a level away from
-/// the same silence.
+/// The trunk leaves the Seat by the diagonal `22,29`, which is on the
+/// other checkerboard colour from the spawn: no reservation at any level
+/// can claim it, so the trunk arrives at every level this fixture runs
+/// at. An orthogonal exit is on the spawn's colour, a reservation wide
+/// enough claims it, and the source is cut off rather than sealed — no
+/// trunk, no pick, no footing, and the shortfall vanishes by having
+/// nothing to fall short of.
 let sealedPocketColony level =
     let colony = pocketColony level
     let sealedTiles = [ { X = 21; Y = 29 }; { X = 21; Y = 31 } ]
@@ -289,18 +264,13 @@ let enclosedSourceColony level =
                 })
     }
 
-/// The step-weight grid ADR 0032's guard compares, for the room the caller
-/// names. The room is the caller's rather than the fixture's home since
-/// #169: the walk table now holds an entry per *goal* room and the far
-/// leg's entry is a pure function of that room's grid, so a guard that
-/// could only ask about home would pin the pairing in one room while the
-/// memo reads every projected one — which is the asymmetry
-/// `Atlas.stepWeights` was already given a room parameter for. Read off
-/// the projection rather than retyped as a literal: `stepWeights` answers
-/// every tile impassable for a room the projection does not carry (ADR
-/// 0004, ADR 0041), so a literal that drifted from its fixture would leave
-/// the one `sequenceEqual` in the group comparing two empty grids and
-/// passing whatever the census did.
+/// The step-weight grid the memo guard compares, for the room the caller
+/// names: the walk table holds an entry per goal room, so a guard that
+/// could only ask about home would pin one room while the memo reads every
+/// projected one. Read off the projection rather than retyped: `stepWeights`
+/// answers every tile impassable for a room the projection does not carry,
+/// so a drifted literal would leave `sequenceEqual` comparing two empty
+/// grids and passing whatever the census did.
 let internal stepGridOf (room: string) (snapshot: ColonyView) =
     Atlas.stepWeights (Atlas.ofView snapshot) room
 
@@ -311,7 +281,7 @@ let internal homeGridOf (snapshot: ColonyView) =
 
 /// The colony with the given creeps standing on the given tiles. A placed
 /// creep beside a placed spawn is all it takes to price a lead, and pricing
-/// one floods out of the spawner (ADR 0026).
+/// one floods out of the spawner.
 let staffedColony creeps positions colony =
     { colony with
         Creeps = creeps
@@ -337,7 +307,7 @@ let sentinelMemo snapshot =
         FarFields = FarFieldTable()
     }
 
-/// Two rooms whose coordinates collide on purpose (ADR 0041). At home:
+/// Two rooms whose coordinates collide on purpose. At home:
 /// the controller at (25,22), the buffer container "can-home" two tiles
 /// off it, and a source far away at (20,30) — so the buffer is the
 /// controller's and no source's. In the outpost: a source at (25,25),

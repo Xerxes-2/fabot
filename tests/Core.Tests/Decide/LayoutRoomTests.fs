@@ -1,4 +1,4 @@
-/// The room layer a site is filed under (ADR 0041), and the square ring.
+/// The room layer a site is filed under, and the square ring.
 module Fabot.Core.Tests.Decide.LayoutRoomTests
 
 open Expecto
@@ -45,14 +45,11 @@ let roomLayerTests =
                     0
                     "the same source at home does, and hires for the haul"
 
-                // And the mirror, because the quota picks a room twice
-                // over: since #149 it folds the containers of every
-                // projected room, but each is judged against the sources
-                // of *its own* room — so an outpost container beside a
-                // home source's coordinates serves no rock and is priced
-                // by nothing. The failure this guards is the container
-                // being paired with the home rock and then flooded over
-                // home terrain, hiring a fleet for a haul nobody makes.
+                // The mirror: the quota folds every projected room's
+                // containers, each judged against the sources of its own
+                // room. The failure guarded is an outpost container paired
+                // with the home rock and flooded over home terrain, hiring
+                // a fleet for a haul nobody makes.
                 Expect.equal
                     (quotaOf outpostContainerColony)
                     0
@@ -60,15 +57,10 @@ let roomLayerTests =
             }
 
             test "the home room keeps its own targets after a second one has joined" {
-                // A target added to the home room after an outpost layer is
-                // already in the projection lands beside that layer, never
-                // over it — `Rooms` is a map keyed by room name and every
-                // funnel here merges into the entry it names. Worth pinning
-                // because the failure is silent in the direction a fixture
-                // cannot see: a home container the projection dropped
-                // produces no Refill and no quota, and reads as "the room
-                // rule rejected it" when in fact no reader was ever shown
-                // it.
+                // A target added after an outpost layer is in the projection
+                // lands beside that layer, never over it. The failure is
+                // silent: a dropped home container produces no Refill and
+                // no quota, and reads as "the room rule rejected it".
                 let late =
                     collidingRooms
                     |> withTarget "can-late" { X = 26; Y = 22 } (Structure BuiltKind.Container)
@@ -87,18 +79,13 @@ let roomLayerTests =
             }
 
             test "a projection that names no room files and reads under the empty name" {
-                // The convention `SpatialInfo.homeName` spells, and the one
-                // every fixture here that never sets `RoomName` rests on:
-                // tiles and no room name is this colony's own room written
-                // without saying so, and the empty name is both where its
-                // geometry is filed and where every home query looks for
-                // it. Its only pin used to be a test of the bridge, so it
-                // went when the bridge did; the convention did not go with
-                // it. A site that spelled the unnamed room differently
-                // would file the home room under one name and read it under
-                // another, and ADR 0004 would answer every home query with
-                // the empty set rather than throwing — silent in the one
-                // direction a fixture cannot see.
+                // The convention `SpatialInfo.homeName` spells, which every
+                // fixture that never sets `RoomName` rests on: tiles and no
+                // room name is this colony's own room, filed and read under
+                // the empty name. A site that spelled it differently would
+                // file the home room under one name and read it under
+                // another, and every home query would answer the empty set
+                // rather than throw.
                 let unnamed = spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 9; Y = 10 }, Plain ]
 
                 Expect.equal (SpatialInfo.homeName unnamed) "" "the unnamed room's own name"
@@ -135,12 +122,10 @@ let squareRingTests =
                     }
                     |> withHome (fun layer ->
                         { layer with
-                            // A 3×3 block of extensions with a road ring around it and
-                            // a plain approach row on each side: the two lanes round
-                            // the block are equal, so the occupancy surcharge alone
-                            // decides which lane a body takes.
-                            // Walls everywhere but the ring and the two approach rows, so
-                            // the two lanes round the block are the only ways past it.
+                            // A 3×3 block of extensions with a road ring around it, a
+                            // plain approach row on each side and wall everywhere else:
+                            // the two lanes round the block are equal and the only ways
+                            // past, so the occupancy surcharge alone picks the lane.
                             Terrain =
                                 TerrainGrid.ofList (
                                     [

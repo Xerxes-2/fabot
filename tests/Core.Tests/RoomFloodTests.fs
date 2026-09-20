@@ -1,5 +1,5 @@
 /// The Atlas flood settled on demand, and the band read bounded by the
-/// best sum (ADR 0029).
+/// best sum.
 module Fabot.Core.Tests.RoomFloodTests
 
 open Expecto
@@ -17,23 +17,16 @@ let onDemandFloodTests =
         [
             test "a walk read off the resumable memo is the whole flood's, tile for tile" {
                 // The oracle, and the only case here that does not compare
-                // the memo against itself. `haulRoundTripTicks` runs its own
-                // floods and settles them whole (ADR 0012, and #174 left it
-                // that way deliberately), while `walkTicks` reads the tick's
-                // per-creep memo, which #174 made resumable. Point them at
-                // one room, one origin and one goal set and they must
-                // answer the same number: same weights, same Walk pricing
-                // (ADR 0029), both traffic-blind.
+                // the memo against itself: `haulRoundTripTicks` settles its
+                // own floods whole, `walkTicks` reads the resumable per-creep
+                // memo, and both are traffic-blind, so they must agree.
                 //
-                // The two are made to line up by the fixture and not by a
-                // special case: a Carry-less body is priced identically
-                // loaded and empty, so the round trip is exactly twice the
-                // one-way walk; and a spawn structure is an obstacle, so
-                // the Refill Work Area at range 1 is exactly the sink's
-                // adjacent walkable tiles. Real terrain is what makes it
-                // worth asserting — the walk detours around walls and pays
-                // swamp, and a flood stopped a pop too early would answer a
-                // route it had not finished finding (ADR 0036).
+                // The fixture makes them line up: a Carry-less body is priced
+                // identically loaded and empty, so the round trip is exactly
+                // twice the one-way walk; and a spawn is an obstacle, so the
+                // Refill Work Area at range 1 is exactly its adjacent
+                // walkable tiles. On real terrain a flood stopped a pop too
+                // early would answer a route it had not finished finding.
                 let body = [ Work; Move ]
 
                 for roomName, spawn, _ in floodRooms do
@@ -77,7 +70,7 @@ let onDemandFloodTests =
                                 (one * 2)
                                 round
                                 $"{roomName} from {stand}: the memo's walk is the whole flood's"
-                        | None, None -> () // no route: absent from both, as ADR 0004 has it
+                        | None, None -> () // no route: absent from both
                         | one, round ->
                             failtest
                                 $"{roomName} from {stand}: memo {one} and whole flood {round} disagree on whether there is a walk"
@@ -86,16 +79,11 @@ let onDemandFloodTests =
             }
 
             test "a tile prices the same whichever order the room is read in" {
-                // The memo is shared: every query pricing a creep this tick
-                // reads one flood, so what it answers must not depend on
-                // what was asked of it before (`Floods`). `travelCostWithin`
-                // takes the tiles the caller names, so one call is one
-                // tile's distance out of that flood, and a flood pushed out
-                // tile by tile, a flood asked from the far end in, and a
-                // flood asked for one tile and nothing else must agree
-                // everywhere. Dijkstra settles a tile for good when it
-                // leaves the heap, so this is a property and not a
-                // coincidence.
+                // The memo is shared, so what it answers must not depend on
+                // what was asked of it before: a flood pushed out tile by
+                // tile, one asked from the far end in, and one asked for a
+                // single tile must agree everywhere. Dijkstra settles a tile
+                // for good when it leaves the heap, so this is a property.
                 for roomName, spawn, stand in floodRooms do
                     let capture = load roomName
 
@@ -129,13 +117,10 @@ let onDemandFloodTests =
                             |> List.filter (fun (index, _) -> index % coldStride = 0)
                             |> List.map (fun (_, tile) -> priced (atlasOf ()) tile)
 
-                        // The fourth order, and the one that makes this a
-                        // comparison against the whole flood rather than
-                        // against another resumable one: a tile nothing
-                        // reaches settles the heap to exhaustion, so every
-                        // read after it comes off exactly the flood the
-                        // pre-#174 code laid in one go. Asking it first is
-                        // the ticket's "whole flood, then on demand".
+                        // The fourth order compares against the whole flood:
+                        // a tile nothing reaches settles the heap to
+                        // exhaustion, so every read after it comes off the
+                        // flood laid in one go.
                         let wholeFirst =
                             let atlas = atlasOf ()
 
@@ -170,15 +155,12 @@ let onDemandFloodTests =
             }
 
             test "the step toward a tile is the one the whole flood leaves, read early or late" {
-                // The other half of a flood is its predecessor chain, and it
-                // is read *after* the goal settles: every tile of a cheapest
-                // path is strictly cheaper than the goal, so all of them
-                // left the heap first. `firstStep` is the reader, and a
-                // stale parent would move its answer without moving a single
-                // price — a creep walking one way while ranked another
-                // (ADR 0008, #142). Both routing pricings are swept: the
-                // Resolver compares them and blames the difference on
-                // traffic (ADR 0018, ADR 0030).
+                // The other half of a flood is its predecessor chain, read
+                // after the goal settles: every tile of a cheapest path is
+                // strictly cheaper than the goal, so all of them left the
+                // heap first. A stale parent would move `firstStep`'s answer
+                // without moving a single price. Both routing pricings are
+                // swept, since the Resolver compares them.
                 for roomName, spawn, stand in floodRooms do
                     let capture = load roomName
                     let loaded = project capture spawn None
@@ -204,13 +186,10 @@ let onDemandFloodTests =
 
                         let cold = goals |> List.map (fun goal -> step (atlasOf ()) goal)
 
-                        // The chain against a flood settled whole, which is
-                        // the only order here that is not the memo compared
-                        // with itself: a goal nothing reaches drains the
-                        // heap through this very reader, so the steps that
-                        // follow are walked back down the predecessor grid
-                        // the pre-#174 flood left. The drain has to answer
-                        // absent, or it has not drained.
+                        // The chain against a flood settled whole: a goal
+                        // nothing reaches drains the heap through this very
+                        // reader. The drain has to answer absent, or it has
+                        // not drained.
                         let wholeFirst =
                             let atlas = atlasOf ()
 
@@ -267,13 +246,10 @@ let onDemandFloodTests =
             }
 
             test "the walk resumes across the Tasks that share one flood" {
-                // The third pricing (ADR 0029): the clock, whose reader takes
-                // a Task rather than a tile, so it is the Tasks of a room
-                // that ask one flood for one creep in one tick. Asked in
-                // either order, or each on a flood of its own, every Task
-                // must answer the same walk — the memo's own promise
-                // (`Floods`), which #174 made depend on where the flood
-                // stopped.
+                // The clock's reader takes a Task rather than a tile, so it
+                // is the Tasks of a room that ask one flood for one creep in
+                // one tick. Asked in either order, or each on a flood of its
+                // own, every Task must answer the same walk.
                 for roomName, spawn, stand in floodRooms do
                     let capture = load roomName
                     let loaded = project capture spawn None
@@ -322,13 +298,12 @@ let onDemandFloodTests =
             }
 
             test "a tile nothing reaches is unreachable and not merely unsettled" {
-                // The trap #174 introduces and no type can catch: `unreached`
-                // means "nothing gets here" in a whole flood and "nobody has
-                // asked yet" in a resumed one, so a reader that answered off
-                // the grid before settling would call a reachable tile
-                // unreachable — and an unpriceable Task is a creep that never
-                // works (ADR 0004). Every wall of a real room is a case, and
-                // so is the ring around it.
+                // The trap a resumable flood sets and no type can catch:
+                // `unreached` means "nothing gets here" in a whole flood and
+                // "nobody has asked yet" in a resumed one, so a reader that
+                // answered off the grid before settling would call a
+                // reachable tile unreachable. Every wall of a real room is a
+                // case, and so is the ring around it.
                 let capture = load "W12S28"
                 let creep = AtlasFixtures.worker "w"
                 let stand = { X = 24; Y = 24 }
@@ -356,13 +331,10 @@ let onDemandFloodTests =
                         (travelCostWithin atlas creep.Name (Set.singleton (here wall)))
                         $"a wall at {wall} is reachable by nothing"
 
-                // After all of that: an absent answer drains the flood, and
-                // the reads that follow one must still answer — the failure
-                // a shortcut that gave up on absence would hide. The tile
-                // the creep stands on is left out of both, because
-                // `pricedPathTo` answers that one before it asks the flood
-                // anything (`Set.contains pos area`), so a set holding it
-                // would be green with no flood at all.
+                // An absent answer drains the flood, and the reads that
+                // follow must still answer. The creep's own tile is left out:
+                // `pricedPathTo` answers it before asking the flood anything,
+                // so a set holding it would be green with no flood at all.
                 let elsewhere =
                     nearestFirst stand capture |> List.filter (fun tile -> tile <> stand)
 
@@ -394,22 +366,15 @@ let boundedBandTests =
         "atlas band read bounded by the best sum"
         [
             test "a cross-room price is the one the whole band answers, crossing for crossing" {
-                // #176's whole promise. The near leg is now pushed out only
-                // as far as the crossing that wins, so the crossings behind
-                // the bound are never settled for at all — and the answer
-                // has to be the one the band gave when every crossing was.
+                // The near leg is pushed out only as far as the crossing
+                // that wins, so the crossings behind the bound are never
+                // settled — and the answer has to be the one the band gave
+                // when every crossing was. The comparison is against the
+                // same memo after it has been drained: with the heap empty
+                // the frontier bounds nothing and no crossing is skipped.
                 //
-                // The comparison is against the same memo read after it has
-                // been drained, which is the pre-#176 reading exactly: with
-                // the heap empty the frontier bounds nothing, every tile
-                // holds its final distance, and no crossing is skipped. So
-                // one side prunes and the other cannot, over one band, one
-                // creep, one body and one room's terrain (ADR 0036).
-                //
-                // Both routes ride along, because a price and a step that
-                // disagree are a creep walked to one crossing and ranked at
-                // another (#142): the winning exit comes out of this very
-                // minimum, so a wrongly pruned crossing moves the step
+                // Both routes ride along: the winning exit comes out of this
+                // very minimum, so a wrongly pruned crossing moves the step
                 // whether or not it moves the number.
                 let mutable priced = 0
                 let mutable stepped = 0
@@ -440,13 +405,10 @@ let boundedBandTests =
                                 if Option.isSome cost then
                                     priced <- priced + 1
 
-                                // The drained side's goals are the drain
-                                // itself: the tiles a cross-room Task hands
-                                // its mover are empty either way (`workAreaFor`
-                                // answers a creep a room away with nothing),
-                                // so both sides fall through to the Seam, and
-                                // passing the unreachable tile is what settles
-                                // the traffic-blind flood before it does.
+                                // `workAreaFor` answers a creep a room away
+                                // with nothing, so both sides fall through to
+                                // the Seam; passing the unreachable tile is
+                                // what settles the traffic-blind flood first.
                                 let step = firstStep bounded "w" task (workAreaFor bounded "w" task)
 
                                 Expect.equal
@@ -471,20 +433,13 @@ let boundedBandTests =
             }
 
             test "the walk across is the one a flood settled whole answers" {
-                // The oracle from outside the memo, and the only case here
-                // that does not compare a flood against itself. The hauler
-                // quota's round trip runs its own floods and settles them
-                // whole (ADR 0012), joins the same band by the same rule
-                // (`joinedAcross`), and prices in the same whole ticks
-                // (ADR 0029) — so over a Carry-less body its two legs are
-                // one journey twice and it must answer exactly twice the
-                // Matcher's walk, which reads the tick's resumable memo and
-                // prunes the band against its best sum.
-                //
-                // Real terrain is what makes it worth asserting: the walk
-                // detours around walls and pays swamp on both sides of the
-                // border, and the two rooms' cheapest crossings are not the
-                // same tile from every stand (ADR 0036).
+                // The oracle from outside the memo: the hauler quota's round
+                // trip settles its own floods whole and joins the same band
+                // by the same rule (`joinedAcross`), so over a Carry-less
+                // body it must answer exactly twice the Matcher's walk, which
+                // reads the resumable memo and prunes the band against its
+                // best sum. On real terrain the two rooms' cheapest crossings
+                // are not the same tile from every stand.
                 let mutable walked = 0
 
                 for border in borders do
@@ -513,7 +468,7 @@ let boundedBandTests =
                                         (out * 2)
                                         trip
                                         $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId}'s bounded walk is the whole flood's"
-                                | None, None -> () // unreachable from both, as ADR 0004 has it
+                                | None, None -> () // unreachable from both
                                 | out, trip ->
                                     failtest
                                         $"{from} -> {into} from {stand.X},{stand.Y}: {sourceId} walks {out} on the memo and {trip} on the whole flood"
@@ -522,31 +477,19 @@ let boundedBandTests =
             }
         ]
 
-/// The road level gate on real terrain (#209 amending ADR 0011). Stated
-/// pairwise on one fixture and one spawn, a level at a time: what the gate
-/// changes is *when* the plan reaches the ground, so nothing but the level
-/// may differ between the two runs it is read off. The child colony the
-/// gate was written for is W13S28 — the room that placed 64 road sites at
-/// RCL1 with 8 energy a tick coming in — and the mother is W12S28, which
-/// is above the line and must not move.
-///
-/// No tile is named: the room says which tiles the trunks want and this
-/// says only that the level decides whether they are asked for.
+/// The road level gate on real terrain, stated pairwise on one fixture and
+/// one spawn, a level at a time: nothing but the level may differ between
+/// the two runs it is read off. W13S28 is the child the gate was written
+/// for (64 road sites at RCL1 on 8 energy a tick); W12S28 is the mother,
+/// above the line, and must not move. No tile is named.
 [<Tests>]
 let roadGateTests =
-    /// One captured room planned from one fixed spawn at a level, as the
-    /// sweep plans it — the same `colonyOf` and the same projection, so the
-    /// only thing that varies across a pair below is the controller level.
-    ///
-    /// The spawn is the tile the room's colony actually stands on where
-    /// there is one: `AlsoSweep` carries W12S28's live spawn for exactly
-    /// that reason (its own doc above), and the stride's first tile is
-    /// (6,6), a corner of the room no colony has ever stood in. A pair
-    /// read off `List.head` would be a real pair about an imaginary
-    /// mother. A room the capture cannot answer for is planned from the
-    /// stride's first tile, which is a premise and not an answer: what the
-    /// gate is read off is the level, and the spawn only has to be the
-    /// same in both runs.
+    /// One captured room planned from one fixed spawn at a level, through
+    /// the sweep's own `colonyOf` and projection. The spawn is the live one
+    /// where `AlsoSweep` carries it — a pair read off the stride's first
+    /// tile would be a real pair about an imaginary mother — and the
+    /// stride's first tile otherwise, which only has to be the same in both
+    /// runs.
     let colonyAt roomName level =
         let room = rooms |> List.find (fun room -> room.Name = roomName)
         let capture = load roomName
@@ -583,25 +526,11 @@ let roadGateTests =
 
             test "the road gap is all the level withheld, and it drops whole" {
                 // The gate is a filter on the placement and never on the
-                // plan (ADR 0011's "computed whole"), and what "drops
-                // whole" means is that the tick the gate opens leaves
-                // nothing owed: pave the set RCL3 asks for and the same
-                // room at the same level asks for no road at all. A gate
-                // that paced would hand out the rest on the tick after.
-                //
-                // **Level-invariance** above the line is pinned with it,
-                // and the pin has been round trip: it held under ADR 0055's
-                // constant, went under ADR 0063 — a reservation sized at
-                // the room's own level plus one made RCL4 reserve a tower
-                // and ten extensions more than RCL3, so planned from `6,6`
-                // this room paved 32 tiles at RCL3 and 29 at RCL4, cutting
-                // a corner (`10,4 11,3 12,2`) rather than losing a trunk —
-                // and is back under ADR 0064, whose reservation is sized at
-                // `allowanceOf`'s ceiling and reads no level. The gate
-                // never moved through any of it; what moved was whether the
-                // plan it filters is a function of the level. The mother's
-                // own invariance — W12S28 paving the same set from RCL3 to
-                // RCL5 — is pinned two tests down and still holds.
+                // plan: the tick it opens leaves nothing owed. Pave the set
+                // RCL3 asks for and the same room at the same level asks for
+                // no road at all; a gate that paced would hand out the rest
+                // on the tick after. Level-invariance above the line is
+                // pinned with it: the road reservation reads no level.
                 let placed = tilesOfKind Road (placedAt "W13S28" 3)
 
                 Expect.isNonEmpty placed "RCL3 asks for the trunk set"
@@ -611,11 +540,9 @@ let roadGateTests =
                     (Set.ofList placed)
                     "and RCL4 asks for exactly what RCL3 asks for: the road plan reads no level"
 
-                // The same room and the same spawn `placedAt` chose, taken
-                // through the same builder rather than re-derived here: the
-                // two halves of a "pave it and nothing is owed" pin have to
-                // be one room, and a second derivation of the spawn would
-                // stop being one the day W13S28 gains an `AlsoSweep` tile.
+                // The same spawn `placedAt` chose, through the same builder:
+                // a second derivation would stop being the same room the day
+                // W13S28 gains an `AlsoSweep` tile.
                 let colony = colonyAt "W13S28" 3
 
                 let paved =
@@ -635,11 +562,9 @@ let roadGateTests =
             }
 
             test "a bootstrapping room still gets its containers — they wait on no road" {
-                // The tile clause (ADR 0040) defers a container to a road
-                // *site* on its tile, and below the gate there is none. A
-                // source container is the [[post]] that hires the [[anchor]]
-                // whose income the gate exists to protect, so holding it
-                // back until RCL3 would spend the gate's own saving.
+                // A container defers to a road site on its tile, and below
+                // the gate there is none; holding the Post back until RCL3
+                // would spend the gate's own saving.
                 let rcl1 = placedAt "W13S28" 1
 
                 Expect.isNonEmpty
@@ -648,15 +573,12 @@ let roadGateTests =
             }
 
             test "W13S28's trunks cross the swamp field instead of looping the west edge" {
-                // #211: priced at the walk's swamp 10 the router paved a
-                // ~28-tile loop along the room's north and west edges to
-                // reach the spawn from the north source; priced as a road
-                // (swamp 3) it crosses the swamp field between them. Pinned
-                // as "some placed road site stands on swamp, and the whole
-                // set is well under the loop's size" rather than as a tile
-                // list (`RoomFixtures`: real terrain is a counterexample
-                // generator, not a source of expected values). The loop's
-                // set was 68 sites; the crossing's is 30.
+                // Priced at the walk's swamp 10 the router paved a ~28-tile
+                // loop along the north and west edges; priced as a road
+                // (swamp 3) it crosses the swamp field. Pinned as "some road
+                // stands on swamp, and the set is well under the loop's
+                // size" rather than as a tile list: the loop was 68 sites,
+                // the crossing 30.
                 let capture = load "W13S28"
                 let roads = tilesOfKind Road (placedAt "W13S28" 3)
 
@@ -673,17 +595,10 @@ let roadGateTests =
             }
 
             test "the mother is above the line and does not move" {
-                // W12S28 from the tile its colony stands on, at the live
-                // RCL5: the gate is inert from the bootstrap line up, so the road
-                // sites there are the same set RCL3 places. What this pins
-                // is the gate's upper edge and not byte-identity with the
-                // revision before it — one revision cannot compare itself
-                // to another, and a stored tile list is the expected value
-                // this suite refuses to hold (`RoomFixtures`: real terrain
-                // is a counterexample generator, not a source of expected
-                // values). What judges the set itself is the RCL4 sweep's
-                // own road invariants, which run over every swept spawn of
-                // this room, this tile among them.
+                // The gate is inert from the bootstrap line up, so RCL5's
+                // road sites are the set RCL3 places. This pins the gate's
+                // upper edge, not a stored tile list; the sweep's own road
+                // invariants judge the set itself.
                 let rcl5 = tilesOfKind Road (placedAt "W12S28" 5) |> Set.ofList
 
                 Expect.isNonEmpty rcl5 "the mother still paves"
@@ -695,12 +610,8 @@ let roadGateTests =
             }
 
             test "the gate withholds one kind and does not stop the Layout" {
-                // What a level gate on roads is not: a Layout that waits for
-                // RCL3. Every other kind is judged at RCL2 by its own rule
-                // and still reaches the ground — the extensions the level
-                // does unlock, the containers no level gates at all, the
-                // ramparts from the bootstrap line up — so the room goes on
-                // growing into exactly the spend the gate is protecting.
+                // A level gate on roads is not a Layout that waits for RCL3:
+                // every other kind is judged at RCL2 by its own rule.
                 let rcl2 = placedAt "W13S28" 2
 
                 Expect.isEmpty (tilesOfKind Road rcl2) "the premise: RCL2 places no road"

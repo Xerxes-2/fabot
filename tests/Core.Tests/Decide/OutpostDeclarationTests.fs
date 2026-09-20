@@ -1,4 +1,4 @@
-/// What a declared outpost is worth and what it asks for (ADR 0042).
+/// What a declared outpost is worth and what it asks for.
 module Fabot.Core.Tests.Decide.OutpostDeclarationTests
 
 open Expecto
@@ -9,11 +9,10 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.OutpostFixtures
 
-/// The colony's one creep taken out of the home room and stood in the outpost
-/// across the north border. Where a body the concurrent-builder cap has already
-/// parked out there actually is, and the only place from which the outpost's
-/// own site is the near target rather than anything at home — which is the fact
-/// every case that takes this fixture is pinning.
+/// The colony's one creep taken out of the home room and stood in the
+/// outpost across the north border: where a body the concurrent-builder
+/// cap has parked out there actually is, and the only place from which
+/// the outpost's own site is the near target.
 let private standingInOutpost (pos: Pos) (colony: ColonyView) =
     { colony with
         Spatial =
@@ -34,23 +33,13 @@ let outpostTests =
     testList
         "outposts"
         [
-            // ADR 0041's central claim, at the seam it is claimed on: an
-            // outpost's Task is not steered to the front of the pool or to
-            // the back of it, it is ranked. Both Harvests sit on the
-            // feeding tier, so what separates them is travel cost — and
-            // travel cost crosses the Seam since #123, which is what makes
-            // the outpost's Task comparable at all rather than a special
-            // case somewhere ahead of the ranking.
+            // An outpost's Task is ranked, not steered to the front or back of the
+            // pool: both Harvests sit on the feeding tier, so what separates them
+            // is travel cost, which crosses the Seam since #123.
             //
-            // Pairwise, one rival at a time: this pool holds these two
-            // Tasks and nothing else, so the factor a Matched Verdict
-            // reports is about this pair and no third candidate stands in
-            // for either of them.
-            //
-            // The ranking and deliberately not the tick that follows it:
-            // this test reads the Verdict, which is the half ADR 0041
-            // delivers. What the winner does with the tick is #142's, and
-            // the case below it drives that.
+            // Pairwise, one rival at a time: this pool holds these two Tasks and
+            // nothing else. The ranking and not the tick that follows it: what the
+            // winner does with the tick is #142's, and the case below drives that.
             test "an outpost Harvest and a home Harvest are ranked in one pool" {
                 Expect.equal
                     (matchOf (
@@ -60,8 +49,7 @@ let outpostTests =
                     (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
                     "the outpost source is the nearer of the two, across the Seam"
 
-                // The same fixture with the two sources swapped over: only
-                // how far each one is moves, and the ranking moves with it.
+                // The same fixture with the two sources swapped over.
                 Expect.equal
                     (matchOf (
                         northBorderColony { X = 10; Y = 4 }
@@ -71,21 +59,15 @@ let outpostTests =
                     "the home source is the nearer of the two, and wins the same comparison"
             }
 
-            // #235's live shape, read from the row it evicted. The mother's
-            // workers matched the outpost rock's Harvest across the Seam —
-            // Feeding tier (ADR 0023), and nearer than her own — and the Seats
-            // they took count against that source's whole Total (ADR 0051), so
-            // W12S27's own Anchor read `none-free` on the Post it was standing
-            // on. One clause answers both halves: a rock a six-Work Anchor is
-            // already draining pays a light body nothing for the crossing, so
-            // the mother's worker is not applicable to it at all and the
-            // ranking above falls to her own room.
+            // #235's live shape: the mother's workers matched the outpost rock's
+            // Harvest across the Seam, nearer than her own, and the Seats they took
+            // counted against that source's whole Total, so W12S27's own Anchor
+            // read `none-free` on the Post it was standing on. A rock a six-Work
+            // Anchor is already draining pays a light body nothing for the
+            // crossing, so the mother's worker is not applicable to it at all.
             //
-            // Pairwise on the garrison alone. The container stands in both
-            // halves, so what moves between them is a body on the Post — which
-            // is also the safety valve stated as a case: a Post nobody is
-            // standing on is a rock with its whole ten a tick spare, and the
-            // mother's worker is welcome to it.
+            // Pairwise on the garrison alone: a Post nobody is standing on is a
+            // rock with its whole ten a tick spare.
             test "an outpost rock its Anchor drains is refused the mother's worker" {
                 let colonyWith garrison =
                     let base' =
@@ -96,8 +78,7 @@ let outpostTests =
 
                     { base' with
                         Creeps = base'.Creeps @ garrison
-                        // Reserved by us, so the rock can be priced at all
-                        // (ADR 0004) and prices at the held ten a tick — the
+                        // Reserved by us, so the rock prices at the held ten a tick, the
                         // number six Work overrun by two.
                         RoomControl = Map.add "W1N2" (reservedRoom true 4000) base'.RoomControl
                         Spatial =
@@ -143,25 +124,17 @@ let outpostTests =
             }
 
             test "the winner of that comparison is walked toward the Seam, tick after tick" {
-                // #142's reproduction, at the seam it was reproduced on.
-                // Before it, this fixture answered `Matched ("w",
-                // "harvest:src-out", TravelCost)` and then a lone
-                // `SayCreep`: the Task had a price and no step, so the
-                // creep stood still, said its glyph, and anti-thrash kept
-                // it there for the rest of its life — having given up the
-                // home source it would otherwise have dug.
+                // #142: before it, this fixture answered `Matched ("w",
+                // "harvest:src-out", TravelCost)` and then a lone `SayCreep`: the
+                // Task had a price and no step, and anti-thrash kept the creep there
+                // for the rest of its life.
                 //
-                // Now the mover aims at the near side of the crossing the
-                // price was paid at. That tile is in the creep's own room,
-                // so nothing here is arbitrated across the border: the
-                // Resolver settles a step of this room exactly as it always
-                // has. This band is plain the whole way round and the
-                // corridor meets it at x = 10, so three crossings — x = 9,
-                // 10 and 11 — cost this creep the same to the tick, and the
-                // band's minimum takes the lowest (X, Y) of them as every
-                // other tie in the Atlas is taken. The creep therefore
-                // leaves the corridor diagonally, which the engine allows
-                // onto an exit exactly as it allows anywhere else.
+                // The mover aims at the near side of the crossing the price was paid
+                // at, a tile in the creep's own room, so nothing is arbitrated across
+                // the border. This band is plain the whole way round and the corridor
+                // meets it at x = 10, so x = 9, 10 and 11 cost the same to the tick
+                // and the band's minimum takes the lowest (X, Y). The creep leaves the
+                // corridor diagonally, which the engine allows onto an exit.
                 let colonyAt pos =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -193,10 +166,9 @@ let outpostTests =
                     (actionIntents opening)
                     "it may not dig a source a room away, however well priced (ADR 0041)"
 
-                // Driven the way the engine drives it: the creep stands
-                // where the last tick's Intent put it, its Assignment handed
-                // back, until the step it is given leaves this room's
-                // ground — the tick it crosses.
+                // Driven the way the engine drives it: the creep stands where the last
+                // tick's Intent put it, its Assignment handed back, until the step it
+                // is given leaves this room's ground.
                 let ground = Map.ofList (corridor 10 1 40)
 
                 let rec drive pos walked =
@@ -222,23 +194,15 @@ let outpostTests =
             }
 
             test "and the tick after the crossing is the far room's: the landed creep walks on" {
-                // Where the drive above hands the creep to the engine, and
-                // what takes it from there. The engine lifts the creep off
-                // (9,0) and files it in W1N2 on that room's border row, and
-                // from that tick the Resolver arbitrates W1N2 as a room of
-                // its own (#145): its occupants, its blocked tiles and its
-                // Move Intents, over that room's tiles and no other's, so
-                // the creep that landed gets a step exactly as one standing
-                // at home does. Before #145 the far side was deferred, and
-                // this case asserted the creep standing on its landing tile
-                // holding its Task against anti-thrash, saying its glyph —
-                // the trace #142 quotes, one tile past the border.
+                // The engine lifts the creep off (9,0) and files it in W1N2 on that
+                // room's border row, and from that tick the Resolver arbitrates W1N2
+                // as a room of its own (#145). Before #145 the far side was deferred,
+                // and this case asserted the creep standing on its landing tile
+                // holding its Task against anti-thrash: the trace #142 quotes.
                 //
-                // The landing tile is not ground — the ring is no room's
-                // floor (ADR 0036) — and the tile beside it is; the mover
-                // answers from both, because a flood seeds its start tile
-                // whatever that tile's weight, and steps off it onto the
-                // room's own ground.
+                // The landing tile is not ground (the ring is no room's floor) and the
+                // tile beside it is; the mover answers from both, because a flood
+                // seeds its start tile whatever that tile's weight.
                 let landedAt pos =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -262,16 +226,12 @@ let outpostTests =
 
                 let assigned = Map.ofList [ "w", taskId (Harvest "src-out") ]
 
-                // Nothing else leaves the colony on these ticks, and one
-                // absence is worth naming: this outpost carries no
-                // `RoomControl` entry, so it is a room the colony is not
-                // looking into, and ADR 0042's container rule plans into
-                // no such room (`planOutpostContainers`). Give the fixture
+                // This outpost carries no `RoomControl` entry, so the container rule
+                // plans into no such room (`planOutpostContainers`); give the fixture
                 // vision and a placement Intent joins the lines below.
                 //
-                // The tile the crossing above delivers to, two more ring and
-                // ground tiles at the top of the corridor, and one a step
-                // from the Work Area: each is walked toward the source.
+                // The tile the crossing above delivers to, two more ring and ground
+                // tiles at the top of the corridor, and one a step from the Work Area.
                 for pos, expected in
                     [
                         { X = 9; Y = 49 }, TopRight
@@ -297,8 +257,8 @@ let outpostTests =
                         [ Verdict.Kept("w", taskId (Harvest "src-out")) ]
                         "and anti-thrash keeps the Task it is now walking to"
 
-                // Driven the way the engine drives it, from the landing
-                // tile: two steps up the corridor and the dig begins.
+                // Driven from the landing tile: two steps up the corridor and the dig
+                // begins.
                 let rec drive pos walked =
                     if List.length walked > 10 then
                         failtest "the creep never started digging"
@@ -319,21 +279,13 @@ let outpostTests =
             }
 
             test "our site in the outpost is a Build the one pool holds" {
-                // #150's reproduction, at the seam it was reproduced on.
-                // The container rule placed a site in the outpost, saw it
-                // standing on the next tick and correctly declined to place
-                // a second — and nothing ever built the first, because the
-                // Build pool is `ColonyView.ConstructionSites` mapped one to
-                // one and that list was the spawn rooms' alone. A container
-                // that is never built is a source that never becomes a
-                // Post, so ADR 0042's switch could not close.
+                // #150: the container rule placed a site in the outpost and nothing
+                // ever built it, because the Build pool is `ColonyView.ConstructionSites`
+                // mapped one to one and that list was the spawn rooms' alone.
                 //
-                // Nothing in the Build path is outpost-shaped: the Task
-                // names the site by id, its Work Area is the site's own
-                // room's (ADR 0041, ADR 0020) and its price sums the legs
-                // over the Seam (#123), exactly as the outpost Harvest
-                // above does. What was missing was the entry, and this is
-                // the entry.
+                // Nothing in the Build path is outpost-shaped: the Task names the site
+                // by id, its Work Area is the site's own room's and its price sums the
+                // legs over the Seam (#123). What was missing was the entry.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -345,32 +297,24 @@ let outpostTests =
                     (Some(taskId (Build "site-out"), MatchFactor.OnlyCandidate))
                     "the site a room away is a Task this worker is given"
 
-                // The pool is that list and never the kind census: a site
-                // the projection places but the shell did not hand over —
-                // which is every site in a room the colony cannot see this
-                // tick (ADR 0004) — names no Task at all.
+                // The pool is that list and never the kind census: a site the shell
+                // did not hand over, which is every site in a room the colony cannot
+                // see this tick, names no Task at all.
                 Expect.equal
                     (matchOf { sited with ConstructionSites = [] })
                     None
                     "and a site the ColonyView does not carry is no Task, however well the projection places it"
 
-                // The memo *does* flinch at it, and this is the tick that
-                // changed (#169). #121 and #149 left the `pending` half
-                // joined against the home layer alone because nothing the
-                // memo carried read a site outside home — this rule's own
-                // site least of all, since it is recomputed every tick (ADR
-                // 0042) — and the throw-away it saved was one Layout and
-                // one spawn walk table on the tick the site appeared. The
-                // walk table's far leg is now a memo entry over the *goal*
-                // room's weight grid, and an obstacle-kind site closes its
-                // tile in whatever room it stands in (`projectVisible`), so
-                // a pending census stopping at the home layer is ADR 0017's
-                // signature gap out there. Signing the half whole rather
-                // than only its blocking kinds keeps one rule instead of a
-                // second asymmetry to hold in step with the App's obstacle
-                // filter; the price is exactly the throw-away above, on the
-                // handful of ticks in a colony's life that an outpost
-                // container site appears.
+                // The memo *does* flinch at it (#169). #121 and #149 left the `pending`
+                // half joined against the home layer alone because nothing the memo
+                // carried read a site outside home. The walk table's far leg is now a
+                // memo entry over the *goal* room's weight grid, and an obstacle-kind
+                // site closes its tile in whatever room it stands in (`projectVisible`),
+                // so a pending census stopping at the home layer is a signature gap out
+                // there. Signing the half whole rather than only its blocking kinds
+                // keeps one rule instead of a second asymmetry held in step with the
+                // App's obstacle filter; the price is one Layout and one spawn walk
+                // table thrown away on the tick an outpost container site appears.
                 Expect.notEqual
                     (censusSignature sited)
                     (censusSignature (
@@ -391,42 +335,34 @@ let outpostTests =
             }
 
             test "the tick the outpost goes dark the worker crossing for its site is kept" {
-                // #151's reproduction, at the seam it was reproduced on. The
-                // reserver dies — a CLAIM body lives 600 ticks — and with it
-                // goes the only vision W1N2 had: the site leaves
-                // `ConstructionSites`, the projection stops placing it, and
-                // `build:site-out` leaves the pool. Every gate below the
-                // first in the Matcher's keep cascade is about the *Task*,
-                // so none of them is even reached; the assignment fell
-                // through the one gate that reads an empty lookup as a
-                // target that is gone. The worker turned round with a full
-                // load, and on the tick the vision came back the whole
-                // crossing began again — a half-built container can stand
-                // there for ever that way.
+                // #151: the reserver dies (a CLAIM body lives 600 ticks) and with it
+                // goes the only vision W1N2 had: the site leaves `ConstructionSites`
+                // and `build:site-out` leaves the pool. Every gate below the first in
+                // the Matcher's keep cascade is about the *Task*, so the assignment
+                // fell through the one gate that reads an empty lookup as a target
+                // that is gone; the worker turned round with a full load, and a
+                // half-built container can stand there for ever that way.
                 //
-                // What the grace changes is exactly that first gate, and it
-                // reads a fact about looking rather than about the site: the
-                // room the id was last seen in has not been seen since, and
-                // it went dark inside `Tuning.VisionGrace`.
+                // The grace changes exactly that first gate, and it reads a fact about
+                // looking rather than about the site: the room the id was last seen in
+                // has not been seen since, and it went dark inside `Tuning.VisionGrace`.
                 let crossing =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
                     |> withOutpostSite { X = 10; Y = 43 }
                     |> loaded
 
-                // A tick a long way from zero, so the dark ticks the grace
-                // is read over are ticks and not a fixture's arithmetic.
+                // A tick a long way from zero, so the dark ticks the grace is read over
+                // are ticks and not a fixture's arithmetic.
                 let sited = { crossing with Time = 1000 }
 
                 let held = taskId (Build "site-out")
                 let assignments = Map.ofList [ "w", held ]
 
-                // The room as the shell hands it over with no vision in it:
-                // the site list is empty, the kind census and the tile go
-                // with it (ADR 0004 is right here and this ticket does not
-                // touch it), and the one thing left is the world's own
-                // record of when the room was last looked into and what
-                // stood in it then.
+                // The room as the shell hands it over with no vision in it: the site
+                // list is empty, the kind census and the tile go with it, and the one
+                // thing left is the world's record of when the room was last looked
+                // into and what stood in it then.
                 let darkSince tick =
                     { sited with
                         ConstructionSites = []
@@ -453,10 +389,8 @@ let outpostTests =
                 let verdictsAt tick =
                     (decideFrom assignments (darkSince tick)).Verdicts
 
-                // Pairwise on the grace and on nothing else: one room, one
-                // creep, one held Task, and the only thing that moves
-                // between the three readings is the tick the room was last
-                // seen at.
+                // Pairwise on the grace and on nothing else: the only thing that moves
+                // between the three readings is the tick the room was last seen at.
                 Expect.contains
                     (decideFrom assignments sited).Verdicts
                     (Verdict.Kept("w", held))
@@ -477,21 +411,16 @@ let outpostTests =
                     (Verdict.Released("w", held, ReleaseReason.TaskGone))
                     "one tick past it the release is task-gone, as it always was: a container really destroyed is not held for ever"
 
-                // What the grace buys, both halves of it. The assignment is
-                // handed to the next tick, *and* the creep keeps walking the
-                // crossing it was released off before: a body that stops
-                // where it stands arrives no sooner than the one that turned
-                // round, and it is the arrival itself that ends the darkness.
+                // What the grace buys, both halves: the assignment is handed to the
+                // next tick, *and* the creep keeps walking the crossing, because it is
+                // the arrival itself that ends the darkness.
                 //
-                // The mover aims it with what the grace already knows — the
-                // room the id was last seen in — and asks the border layer
-                // and the memoised terrain for the rest
-                // (`Atlas.stepTowardRoom`, ADR 0031, ADR 0041), which is the
-                // route `cac0124` built for a crossing creep. No remembered
-                // tile is laid into the layer, nothing is placed and nothing
-                // is priced off the sighting, so ADR 0004's vision gate
-                // stands exactly where #151 left it: the Emitter still has
-                // no act to spell for a target nobody can see.
+                // The mover aims it with the room the id was last seen in and asks the
+                // border layer and the memoised terrain for the rest
+                // (`Atlas.stepTowardRoom`), the route `cac0124` built for a crossing
+                // creep. No remembered tile is laid into the layer and nothing is
+                // priced off the sighting, so the Emitter still has no act to spell
+                // for a target nobody can see.
                 let {
                         Intents = waiting
                         Assignments = next
@@ -514,29 +443,22 @@ let outpostTests =
             }
 
             test "the tick the vision comes back the Build is judged as it always was" {
-                // The other half of #151's rule, and the reason it is a
-                // grace and not a latch: nothing about a kept assignment
-                // survives the vision returning. The relief lands, the room
-                // answers again, and the site is either standing — the
-                // worker walks the rest of the crossing it never abandoned —
-                // or gone, and the release it was owed arrives one tick
-                // late instead of never.
+                // The other half of #151's rule, and why it is a grace and not a
+                // latch: nothing about a kept assignment survives the vision returning.
                 let crossing =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
                     |> withOutpostSite { X = 10; Y = 43 }
                     |> loaded
 
-                // A tick a long way from zero, so the dark ticks the grace
-                // is read over are ticks and not a fixture's arithmetic.
+                // A tick a long way from zero, as above.
                 let sited = { crossing with Time = 1000 }
 
                 let held = taskId (Build "site-out")
                 let assignments = Map.ofList [ "w", held ]
 
-                // Forty dark ticks behind it, and vision in the room this
-                // tick: the sighting is stamped at the tick it is read, so
-                // the grace can no longer fire whatever it remembers.
+                // Forty dark ticks behind it, and vision in the room this tick: the
+                // sighting is stamped at the tick it is read.
                 let backWithSite =
                     { sited with
                         Sightings =
@@ -566,9 +488,8 @@ let outpostTests =
                     [ "w", Top ]
                     "and walks on up its corridor, the crossing it never turned back from"
 
-                // The same tick with the site gone: the room is seen, so
-                // the sighting is this tick's and the grace has nothing to
-                // say — a target that vanished under our own eyes is gone.
+                // The same tick with the site gone: a target that vanished under our
+                // own eyes is gone.
                 let backWithout =
                     { backWithSite with
                         ConstructionSites = []
@@ -594,19 +515,13 @@ let outpostTests =
             }
 
             test "and the worker that landed in the outpost builds it" {
-                // The far half of the same walk, driven the way the engine
-                // drives it: #145 arbitrates the outpost as a room of its
-                // own, so the creep the engine put down on W1N2's border
-                // row gets a step off the ring exactly as one standing at
-                // home does, and the tick it stands inside the site's Work
-                // Area — build reaches three tiles — the Intent it has
-                // been walking toward is emitted.
+                // The far half of the same walk: #145 arbitrates the outpost as a room
+                // of its own, and the tick the creep stands inside the site's Work Area
+                // (build reaches three tiles) the Intent is emitted.
                 //
-                // A slow answer and the right one (ADR 0042): whoever
-                // holds this Task spends five hits a tick per Work part
-                // into a 5,000-hit container. There is no outpost builder
-                // row, and this ticket invents none — which creep holds it
-                // is the ranking's answer, pinned in the test below.
+                // A slow answer and the right one: whoever holds this Task spends five
+                // hits a tick per Work part into a 5,000-hit container. There is no
+                // outpost builder row; which creep holds it is the ranking's answer.
                 let landedAt pos =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -653,35 +568,21 @@ let outpostTests =
             }
 
             test "the site outranks the home Upgrade: a loaded worker crosses the Seam for it" {
-                // #157, and the reverse of what this very fixture asserted
-                // before it. The two cases above hold one worker and no
-                // controller, which is what let their factor name the
-                // Build's one rival; the colony that really exists has a
-                // controller, and while the site was surplus work that
-                // controller took every loaded worker every tick. Build and
-                // Upgrade shared the surplus tier, so nothing but travel
-                // cost separated them, and a loaded worker standing at home
-                // is a corridor from its own controller and a Seam plus
-                // fifty tiles from the site.
+                // #157, and the reverse of what this fixture asserted before it. The
+                // colony that really exists has a controller, and while the site was
+                // surplus work that controller took every loaded worker every tick: a
+                // loaded worker at home is a corridor from its own controller and a
+                // Seam plus fifty tiles from the site.
                 //
-                // Deployed, that was ADR 0042's switch laid down and never
-                // closed: the reserver went out (#131), the site went up
-                // (#128), and nobody ever built it. #150's answer here —
-                // that the builder would be a creep which had walked out
-                // for this room's own Harvest and filled up there — never
-                // happened either, because the Storage's Withdraw is
-                // feeding tier and a few tiles from home while the
-                // cross-Seam Harvest is fifty, so no worker made the trip
-                // to fill up out there in the first place.
+                // Deployed, that was the switch laid down and never closed: the
+                // reserver went out (#131), the site went up (#128), and nobody ever
+                // built it. #150's answer, a creep that had walked out for this room's
+                // own Harvest, never happened either, because the Storage's Withdraw
+                // is feeding tier and a few tiles from home.
                 //
-                // So this Build is feeding tier now (`tierOf`): it decides
-                // whether the room is in the economy at all, which is the
-                // same kind of question the Reserve beside it settles about
-                // the rate. The factor is `Rank` and deliberately not
-                // `TravelCost` — the site is still much the farther of the
-                // two targets and wins anyway. Pairwise, one rival at a
-                // time: one Build, one Upgrade, and the home Harvest
-                // inapplicable to a body with nothing free to fill.
+                // So this Build is feeding tier now (`tierOf`). The factor is `Rank`
+                // and not `TravelCost`: the site is still much the farther target and
+                // wins anyway. Pairwise, one rival at a time.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -707,11 +608,8 @@ let outpostTests =
             }
 
             test "and the worker already in the outpost still builds it" {
-                // The other half of the same colony, unmoved by #157: a
-                // creep standing in the outpost is nearer the site than
-                // anything at home, so it held this Task on the surplus
-                // tier and holds it on the feeding one. What changed is
-                // that it is no longer the *only* creep that ever could.
+                // The other half, unmoved by #157: a creep standing in the outpost held
+                // this Task on the surplus tier and holds it on the feeding one.
                 let landed =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -727,17 +625,13 @@ let outpostTests =
             }
 
             test "a hungry extension still comes first: same tier, and the nearer target wins" {
-                // ADR 0010's layering is untouched by #157, and this is
-                // what keeps a starving spawn from waiting on a container
-                // fifty tiles away with no special case written for it. The
-                // spawn and the extensions were always on the feeding tier
-                // and the outpost's site has joined them, so what separates
-                // the two is travel cost — and a hungry extension underfoot
-                // is nearer than a site across a Seam, every time.
+                // What keeps a starving spawn from waiting on a container fifty tiles
+                // away with no special case: the spawn and the extensions were always
+                // on the feeding tier and the outpost's site has joined them, so travel
+                // cost separates them and a hungry extension underfoot is nearer.
                 //
-                // Pairwise, one rival at a time: no controller in this
-                // fixture, so the pool is the Build, the Refill and a home
-                // Harvest a full body cannot take.
+                // Pairwise: no controller here, so the pool is the Build, the Refill
+                // and a home Harvest a full body cannot take.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -774,26 +668,18 @@ let outpostTests =
             }
 
             test "a home container site is surplus still: the room is what makes one a switch" {
-                // The half of #157 that must not move. What makes the
-                // outpost's site a switch is the room it stands in and not
-                // the kind it is, and a `Pos` carries no room (ADR 0041) —
-                // so a reading that went by the kind census alone would
-                // lift every container the Layout ever places (ADR 0040)
-                // onto the feeding tier and pull the whole worker row off
-                // the controller with it.
+                // The half of #157 that must not move: what makes the outpost's site a
+                // switch is the room it stands in and not the kind, and a `Pos` carries
+                // no room, so a reading by the kind census alone would lift every
+                // container the Layout places onto the feeding tier.
                 //
-                // Discriminating by construction, and against the **flow**
-                // since #234: this site stands at home, so the rung reaches
-                // it and the controller under the creep's feet stopped being
-                // an instrument. What tells the two readings apart is a
-                // hungry extension placed **farther** than the site. Read as
-                // a switch the site ties that Refill on the feeding tier and
-                // wins on price — which is exactly the failure this pins;
-                // read as the surplus it is, the Refill outranks it outright
-                // however near it stands. The two readings differ in the
-                // winner and not merely in the factor. Pairwise: one Build,
-                // one Refill, and an Upgrade the rung leaves cheapest to
-                // neither.
+                // Against the **flow** since #234: this site stands at home, so the
+                // rung reaches it and the controller underfoot stopped being an
+                // instrument. A hungry extension placed **farther** than the site
+                // tells the two readings apart: read as a switch the site ties that
+                // Refill on the feeding tier and wins on price; read as surplus, the
+                // Refill outranks it outright. Pairwise: one Build, one Refill, and an
+                // Upgrade the rung leaves cheapest to neither.
                 let homeSite =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -813,25 +699,17 @@ let outpostTests =
             }
 
             test "an ordinary outpost site keeps its travel cost: #234's rung stops at home" {
-                // The other half of #234's rung, and the reason it reads the
-                // site's room (`isHomeSite`). At home the rung is the whole
-                // point — a site outranks the controller a loaded body is
-                // already standing beside. Out here it would be the failure
-                // #157's builders' budget was invented against, "or the tier
-                // would walk the whole worker row over the Seam at once", and
-                // it is `Tuning.OutpostBuilders` and never the rung that
-                // answers whether a body crosses (#266): the budget lifts the
-                // sites nearest the Seam onto the feeding tier, and everything
-                // behind them stays exactly where #234 left it — surplus, on
-                // the tier's lower rung, priced against an Upgrade the body is
-                // already standing in the Work Area of.
+                // The other half of #234's rung, and why it reads the site's room
+                // (`isHomeSite`). Out here the rung would walk the whole worker row
+                // over the Seam at once; it is `Tuning.OutpostBuilders` and never the
+                // rung that answers whether a body crosses (#266), and everything
+                // behind the lifted sites stays surplus, priced against an Upgrade the
+                // body is already standing in the Work Area of.
                 //
-                // So the queue is one site longer than the budget: the two
-                // nearest are lifted and take one builder apiece, and the third
-                // is the one this case is about. Roads on purpose, so the
-                // container rule cannot be what answers, and the whole row is
-                // loaded, standing inside the home controller's Work Area and a
-                // Seam from every one of them.
+                // So the queue is one site longer than the budget, and the third is
+                // the one this case is about. Roads on purpose, so the container rule
+                // cannot be what answers, and the whole row is loaded inside the home
+                // controller's Work Area.
                 let crowd =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -855,25 +733,18 @@ let outpostTests =
             }
 
             test "the trunk is paved from the Seam outward, and the container jumps the queue" {
-                // #266, at the seam W13S29 was reported on: two containers
-                // standing, 45 hand-laid road sites at 0/300, and the whole
-                // worker row at home. A road in an outpost was a plain surplus
-                // Build (#234's rung stopping at the home room), so travel cost
-                // answered 120 against an Upgrade underfoot costing nothing and
-                // nobody ever crossed — and the trunk is what the [[hauler
-                // unit]]'s round trip is priced on, so the room went on being
-                // hauled as if it were unpaved.
+                // #266, as W13S29 reported it: two containers standing, 45 hand-laid
+                // road sites at 0/300, and the whole worker row at home. A road in an
+                // outpost was a plain surplus Build, so travel cost answered 120
+                // against an Upgrade underfoot costing nothing and nobody ever
+                // crossed, and the trunk is what the hauler's round trip is priced on.
                 //
-                // What lifts them is the budget itself: the first
-                // `Tuning.OutpostBuilders` sites in the queue are feeding-tier
-                // and the rest are not, so the crowd that may cross and the
-                // number of sites worth crossing for are one number. The queue
-                // is the container first — ADR 0042's switch on whether the
-                // room is in the economy at all, and here deliberately the
-                // **farthest** site of the six, so nothing but the kind can be
-                // putting it in front — and then the walk out to the Seam
-                // (`Atlas.seamWalkTicks`), nearest first, because the paved
-                // tiles beside the crossing are the ones every haul walks over.
+                // The first `Tuning.OutpostBuilders` sites in the queue are
+                // feeding-tier and the rest are not. The queue is the container first
+                // (here deliberately the **farthest** site of the six, so nothing but
+                // the kind can put it in front) and then the walk out to the Seam
+                // (`Atlas.seamWalkTicks`), nearest first, because the paved tiles
+                // beside the crossing are the ones every haul walks over.
                 let trunk =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -898,10 +769,8 @@ let outpostTests =
                     ]
                     "the switch and the site beside the crossing take one builder each, and the third stays home"
 
-                // And the queue moves: the container is built, `site-r1` with
-                // it, and the two behind them are the next two out. Nothing
-                // schedules that — the pool is recomputed from the sites that
-                // are left, and the head of it is the answer (ADR 0013).
+                // And the queue moves: nothing schedules it, the pool is recomputed
+                // from the sites that are left and the head of it is the answer.
                 let paved =
                     { trunk with
                         ConstructionSites =
@@ -921,22 +790,14 @@ let outpostTests =
             }
 
             test "two builders cross for the site, and the third stays home" {
-                // The cap `planPool` puts on this Build (#157). On
-                // the feeding tier the site outbids the home Upgrade for
-                // every loaded worker at once, and travel cost cannot thin
-                // that crowd — a Seam away is a Seam away from every tile
-                // of one corridor. Uncapped, the whole worker row walks out
-                // together and the home room stops working for the fifty
-                // ticks each of them spends crossing.
+                // The cap `planPool` puts on this Build (#157): on the feeding tier the
+                // site outbids the home Upgrade for every loaded worker at once, and a
+                // Seam away is a Seam away from every tile of one corridor.
                 //
-                // Two is a tunable and the third worker is what reads it:
-                // rejected as capacity-full, it falls to the Upgrade it
-                // would have taken anyway. Asserted as the whole tally, so
-                // a cap that admitted all three or only one both fail.
-                // Two is the whole colony's budget and not this site's
-                // alone — one site standing is what makes the two numbers
-                // agree here; the test below opens a second site and reads
-                // them apart.
+                // Two is a tunable and the third worker is what reads it: rejected as
+                // capacity-full, it falls to the Upgrade. Asserted as the whole tally.
+                // Two is the whole colony's budget and not this site's; the test below
+                // opens a second site and reads them apart.
                 let crowd = crowdAtOutpostSite (northBorderColony { X = 10; Y = 38 })
 
                 let { Assignments = assignments } = decideOn crowd
@@ -948,31 +809,17 @@ let outpostTests =
             }
 
             test "the whole ring closes at `decide`: cross, build it empty, dig it full, build on" {
-                // ADR 0042's switch closing under its own power, end to
-                // end and with no new concept in it (#157) — the loop the
-                // ticket asks for, driven one tick at a time over the one
-                // seam this repo decides at.
+                // The switch closing under its own power, end to end (#157): a
+                // controller at home, a rock and a container site in the outpost, one
+                // loaded worker at home. It crosses because the site outranks the
+                // controller (`tierOf`); emptied, the Build goes inapplicable and the
+                // outpost's own rock a step away is the cheapest Task it has; full
+                // again, the site outranks everything once more. No "go home" act.
                 //
-                // The colony that really exists: a controller at home, a
-                // rock and a container site in the outpost, and one loaded
-                // worker standing at home. It crosses because the site now
-                // outranks the controller (`tierOf`); it builds until the
-                // build empties it; emptied, the Build goes inapplicable
-                // and the outpost's own rock — a step away, feeding tier —
-                // is the cheapest Task it has (`applicable`, ADR 0013);
-                // full again, the site outranks everything once more. No
-                // "go home" act and no outpost builder row: the ring is
-                // the ordinary ranking, turning.
-                //
-                // Driven the way the engine drives it: this tick's
-                // Assignments handed back as the next tick's, a Move
-                // Intent stepped, and a step onto the exit row handed over
-                // to the neighbour's own border row, which is exactly what
-                // the engine does with a creep that ends its tick there
-                // (ADR 0036, #145). What a build spends and a dig collects
-                // is the engine's arithmetic and not this seam's, so the
-                // two act on the store at their limits — emptied, filled —
-                // which is the state the ring turns on.
+                // Driven the way the engine drives it: a step onto the exit row is
+                // handed over to the neighbour's own border row (#145). What a build
+                // spends and a dig collects is the engine's arithmetic, so the two act
+                // on the store at their limits, emptied and filled.
                 let colonyAt room pos carrying =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -1015,10 +862,8 @@ let outpostTests =
                         | [], [ _, direction ] ->
                             let next = stepFrom pos direction
 
-                            // The engine's own handover: a creep ending its
-                            // tick on the exit row is lifted into the
-                            // neighbour and filed on that room's opposite
-                            // border row, same column.
+                            // The engine's own handover: a creep ending its tick on the exit row
+                            // is filed on the neighbour's opposite border row, same column.
                             if room = "W1N1" && next.Y = 0 then
                                 step ("W1N2", { next with Y = 49 }, carrying) "cross"
                             else
@@ -1044,23 +889,16 @@ let outpostTests =
             }
 
             test "the switch is light bodies' work: a full Anchor stays on its Post" {
-                // What the feeding tier took away and `applicable` gives
-                // back (#157). Travel cost was the only thing keeping a
-                // heavy body off a distant site — `applicable`'s own doc
-                // says so, "Travel cost pins an Anchor that is at its
-                // Post" — and a rank the whole colony shares is exactly
-                // what travel cost cannot answer. A full Anchor whose Post
-                // carries no standing container yet loses Harvest
-                // (`garrisons`), and was then outranked off its own
-                // controller and walked fifty tiles at four to seven ticks
-                // a step to spend one Carry into a 5,000-progress site,
-                // burning a builder place while it went. A heavy body's
-                // cross-room work is a Post (ADR 0020), so the gate is
-                // ADR 0016's shape: this one Build is inapplicable to it.
+                // What the feeding tier took away and `applicable` gives back (#157).
+                // Travel cost was the only thing keeping a heavy body off a distant
+                // site, and a rank the whole colony shares is what travel cost cannot
+                // answer: a full Anchor whose Post carries no standing container yet
+                // loses Harvest (`garrisons`), was outranked off its own controller and
+                // walked fifty tiles to spend one Carry into a 5,000-progress site.
+                // This one Build is inapplicable to a heavy body.
                 //
-                // The two bodies stand on the same tile in the same
-                // colony, so what tells them apart is the body and
-                // nothing geometric.
+                // The two bodies stand on the same tile, so what tells them apart is
+                // the body and nothing geometric.
                 let sited body =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -1088,25 +926,19 @@ let outpostTests =
             }
 
             test "what shares this tier and what only looks like it does" {
-                // The half of #157's Implementation decisions that is not
-                // true as the ticket wrote it, pinned as it really is. The
-                // ticket said "Refill still comes first — the home
-                // extension / tower is nearer, cost decides"; ADR 0010 is
-                // the authority and it puts a **tower** Refill in the
-                // surplus tier, not the feeding one, so cost never gets
-                // asked. Two pairwise cases, one rival each.
+                // The half of #157's Implementation decisions that is not true as the
+                // ticket wrote it: "Refill still comes first, the home extension /
+                // tower is nearer, cost decides". A **tower** Refill is surplus tier,
+                // so cost never gets asked. Two pairwise cases, one rival each.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
                     |> withOutpostSite { X = 10; Y = 43 }
 
-                // A tower with 500 free, three tiles from the worker,
-                // against a site a Seam and fifty tiles away. It loses on
-                // rank and distance is never reached — which is ADR 0010's
-                // own "a colony feeds its own reproduction before its
-                // guns" with this Build counted as reproduction, and a
-                // real change of behaviour under a raid at home. The
-                // answer for a raid is the stand-down (ADR 0043, #136).
+                // A tower with 500 free, three tiles from the worker, against a site a
+                // Seam and fifty tiles away: it loses on rank and distance is never
+                // reached, a real change of behaviour under a raid at home. The answer
+                // for a raid is the stand-down (#136).
                 let tower =
                     { (sited |> loaded) with
                         Refillables = [ refillable "tower-1" 500 BuiltKind.Tower ]
@@ -1118,12 +950,9 @@ let outpostTests =
                     (Some(taskId (Build "site-out"), MatchFactor.Rank))
                     "a hungry tower is surplus work and is outranked outright, not beaten on distance"
 
-                // The spawn does share the tier, so cost decides — and
-                // cost is answered from where the creep stands. For the
-                // one the cap has already parked in the outpost the
-                // nearer target is the site, not the spawn: the home room
-                // feeds itself through the creeps standing in it and not
-                // by any rule.
+                // The spawn does share the tier, so cost decides from where the creep
+                // stands: for the one parked in the outpost the nearer target is the
+                // site, not the spawn.
                 let outThere =
                     { (sited |> loaded) with
                         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
@@ -1138,14 +967,10 @@ let outpostTests =
             }
 
             test "the two builders are the colony's budget, not each site's" {
-                // `planPool`'s cap read at colony scale (#157).
-                // `planOutpostContainers` places one site per unserved
-                // outpost source and places them all on the same tick, so
-                // a per-site two over the declaration's three sources is a
-                // colony-wide six — the whole worker row, which is the one
-                // thing the cap exists to prevent. Spread instead: two
-                // sites take one apiece, and the case above, with one site
-                // standing, still takes two.
+                // `planPool`'s cap read at colony scale (#157): `planOutpostContainers`
+                // places one site per unserved outpost source on the same tick, so a
+                // per-site two over three sources is a colony-wide six, the whole
+                // worker row. Spread instead: two sites take one apiece.
                 let crowd =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -1193,21 +1018,15 @@ let outpostTests =
 
             test
                 "the two rooms are arbitrated apart: a neighbour's creep holds no tile of this room" {
-                // #142's acceptance criterion 5, at the seam it is decided
-                // on. Each room's arbitration reads that room's creeps and
-                // no other's (#145): a `Map<Pos, string>` of occupants has
-                // no room on its key, so a creep standing on the same
-                // coordinate of the neighbouring room is not an occupant
-                // here, is not displaced by this room's travellers, and
-                // attributes nothing. Pairwise, one rival at a time — the
-                // home traveller and one creep on its next tile, first in
-                // the neighbour, then at home — because a pool holding
-                // both proves nothing about which of them the traveller
-                // was settled against.
+                // #142's acceptance criterion 5: each room's arbitration reads that
+                // room's creeps and no other's (#145). A `Map<Pos, string>` of
+                // occupants has no room on its key, so a creep on the same coordinate
+                // of the neighbouring room is not an occupant here. Pairwise, one
+                // rival at a time: the home traveller and one creep on its next tile,
+                // first in the neighbour, then at home.
                 //
-                // The bystanders are full, so no Harvest applies to them
-                // and they park where they stand, displaceable to any
-                // adjacent tile of their own room.
+                // The bystanders are full, so no Harvest applies to them and they park
+                // where they stand.
                 let colony (homeCreeps: (string * Pos) list) (outpostCreeps: (string * Pos) list) =
                     let colonyOf =
                         northBorderColony { X = 10; Y = 38 }
@@ -1220,10 +1039,8 @@ let outpostTests =
                         Spatial =
                             colonyOf.Spatial
                             |> withCreepsAt (("w", { X = 10; Y = 4 }) :: homeCreeps)
-                            // The outpost's corridor runs the whole column
-                            // here, so the coordinate the rival stands on is
-                            // ground in both rooms and the case is about the
-                            // room, never about a tile nobody could stand on.
+                            // The outpost's corridor runs the whole column, so the coordinate the
+                            // rival stands on is ground in both rooms.
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
@@ -1233,9 +1050,8 @@ let outpostTests =
                                 }
                     }
 
-                // The home source is the rival this time, at (10,38) with
-                // the worker at (10,4) walking down to it, a step at a time
-                // — its next tile is (10,5).
+                // The home source is the rival this time, at (10,38) with the worker
+                // at (10,4) walking down to it; its next tile is (10,5).
                 let assigned = Map.ofList [ "w", taskId (Harvest "src-home") ]
 
                 let outcome homeCreeps outpostCreeps =
@@ -1270,13 +1086,10 @@ let outpostTests =
 
             test
                 "a grounded creep in the neighbouring room is grounded there, and pre-claims nothing here" {
-                // ADR 0008 in the far room: a fatigued creep sits its own
-                // room's arbitration out, so it is reported Grounded — the
-                // Verdict it was denied while only home was arbitrated —
-                // and its tile is blocked in its room only. The home
-                // traveller whose next tile shares that coordinate steps
-                // regardless; before #145 this half held by the creep not
-                // being arbitrated at all, now it holds by the room.
+                // A fatigued creep sits its own room's arbitration out, so it is
+                // reported Grounded (the Verdict it was denied while only home was
+                // arbitrated) and its tile is blocked in its room only. Before #145
+                // this held by the creep not being arbitrated at all; now by the room.
                 let colony =
                     let colonyOf =
                         northBorderColony { X = 10; Y = 38 }
@@ -1321,19 +1134,14 @@ let outpostTests =
             }
 
             test "a creep on the far room's ring is never settled there: it walks inward" {
-                // The ring is no place to stay (ADR 0036, ADR 0041): a
-                // creep that ends its tick on the border row is moved out
-                // of the room by the engine, so a landed creep the
-                // Resolver leaves standing where it is would be bounced
-                // back across the border and re-cross the next tick, for
-                // as long as it kept losing its step. Two cases, one
-                // branch of the mover each. Parked: a full creep with
-                // nothing applicable, standing on the landing tile, is
-                // walked onto the outpost's ground rather than settled on
-                // the ring. Travelling: two landed creeps whose cheapest
-                // step is the same ground tile — the one that yields is
-                // handed the other ground tile beside it, and steps off
-                // the ring instead of staying on it.
+                // A creep that ends its tick on the border row is moved out of the
+                // room by the engine, so a landed creep the Resolver leaves standing
+                // would be bounced back across the border and re-cross the next tick.
+                // Two cases, one branch of the mover each. Parked: a full creep with
+                // nothing applicable on the landing tile is walked onto the outpost's
+                // ground. Travelling: two landed creeps whose cheapest step is the
+                // same ground tile, and the one that yields is handed the other
+                // ground tile beside it.
                 let colonyWith creeps (outpostCreeps: (string * Pos) list) =
                     let colonyOf =
                         northBorderColony { X = 10; Y = 38 }
@@ -1347,10 +1155,8 @@ let outpostTests =
                                 { layer with
                                     CreepPositions = Map.empty
                                 })
-                            // One landing tile beside the corridor's top,
-                            // so the ring has two ground tiles to step
-                            // onto and a contested step has somewhere
-                            // else to go.
+                            // One landing tile beside the corridor's top, so the ring has two
+                            // ground tiles to step onto and a contested step has somewhere to go.
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
@@ -1396,14 +1202,10 @@ let outpostTests =
             }
 
             test "a parked outpost creep is displaced onto its own room's ground, never home's" {
-                // The ticket's rule — each room's arbitration uses that
-                // room's tiles and no other's — at the displacement seam:
-                // the tile beside a parked creep is read off the room the
-                // creep is filed under. Home has ground at (9,5) and the
-                // outpost has none there, so a parked outpost creep pushed
-                // off (10,5) by an outpost traveller must be swapped up
-                // the corridor, never sent Left onto a coordinate that is
-                // only walkable at home.
+                // Each room's arbitration uses that room's tiles, at the displacement
+                // seam: home has ground at (9,5) and the outpost has none there, so a
+                // parked outpost creep pushed off (10,5) must be swapped up the
+                // corridor, never sent Left onto a coordinate only walkable at home.
                 let colony =
                     let colonyOf =
                         northBorderColony { X = 10; Y = 38 }
@@ -1442,25 +1244,19 @@ let outpostTests =
             }
 
             test "a neighbour room of bare ground changes nothing" {
-                // ADR 0004's totality over a room layer carrying terrain
-                // and a border ring and nothing else: every query of it
-                // answers empty, so it is unpriceable, enters no Task and
-                // blocks no action — "empty" is not a state anything has to
-                // model, and the proof is that the tick decides exactly
+                // Totality over a room layer carrying terrain and a border ring and
+                // nothing else: every query answers empty, so the tick decides exactly
                 // what it decided with no such room at all.
                 //
-                // Not a blind outpost, which this test claimed to be until
-                // #148: a declared room the colony cannot see carries its
-                // sources and its controller all the same (`Outpost.place`,
-                // ADR 0041), and the tests further down pin what *that*
-                // decides. What is left here is the totality property the
-                // furniture is laid on top of.
+                // Not a blind outpost, which this test claimed to be until #148: a
+                // declared room the colony cannot see carries its sources and its
+                // controller all the same (`Outpost.place`), and the tests further
+                // down pin what *that* decides.
                 //
-                // Read at the top seam over all three outputs at once,
-                // because the ways this could go wrong are not local: a
-                // second room's weight grid consulted for a home price, a
-                // Seam band admitting a crossing to nowhere, a Task pooled
-                // off a layer with nothing in it.
+                // Read at the top seam over all three outputs at once, because the
+                // ways this could go wrong are not local: a second room's weight grid
+                // consulted for a home price, a Seam band admitting a crossing to
+                // nowhere, a Task pooled off a layer with nothing in it.
                 let colony = northBorderColony { X = 10; Y = 38 }
 
                 Expect.contains
@@ -1476,28 +1272,18 @@ let outpostTests =
 
             test
                 "the declared outposts are ADR 0042's north room, the survey's south one and the third colony's room two hops east" {
-                // #124 landed this constant empty and pinned the emptiness,
-                // because ADR 0041 ships the capability to project a
-                // neighbour and deliberately no behaviour. ADR 0042 fills
-                // it, and this is where that pin turns over: the rooms, in
-                // the order a human wrote them, and the scan set the shell
-                // takes from them.
+                // #124 landed this constant empty and pinned the emptiness; this is
+                // where that pin turns over: the rooms, in the order a human wrote
+                // them, and the scan set the shell takes from them.
                 //
-                // Read through the colony that declares them (ADR 0047):
-                // the outposts are one colony's now, so the home room is
-                // the key the shell looks them up under (`ColonyView.ofWorld`
-                // takes it off the first spawn) and the rooms and the scan
-                // set are what that lookup answers with. A home nobody
-                // declared answers with none, which is the other half of
-                // the same rule and the behaviour the empty declaration
-                // shipped with.
+                // Read through the colony that declares them: the home room is the
+                // key the shell looks them up under (`ColonyView.ofWorld` takes it
+                // off the first spawn). A home nobody declared answers with none.
                 //
-                // Which ids and which tiles is a claim about the committed
-                // captures rather than about this list, so it is pinned
-                // where the captures are read (`RoomOutpostTests`, whose
-                // first case reads every outpost of this same constant) and
-                // never retyped here — two literals of the same ids would
-                // agree with each other and with nothing else.
+                // Which ids and which tiles is a claim about the committed captures,
+                // pinned where the captures are read (`RoomOutpostTests`) and never
+                // retyped here: two literals of the same ids would agree with each
+                // other and with nothing else.
                 let outposts = Colony.outpostsOf Colony.declared "W12S28"
 
                 Expect.equal
@@ -1521,13 +1307,11 @@ let outpostTests =
                     [ "W13S29" ]
                     "and the second colony works its south outpost alone since 2026-09-20: W14S28 went to W15S28, which stands 46 tiles from its rock where this colony stood 181 ticks from it, and five rocks were turning into 15.7 e/t of controller progress here against four rocks making 30.7 at W12S28, the difference banked and standing still"
 
-                // What the removal cost while it was overdue, kept as a number
-                // because the argument for the removal is a haul bill (#352):
-                // W13S28 ran an anchor on W11S29's rock **three crossings out**
-                // while W11S29's own colony ran one on the same rock, and this
-                // colony's demand went 2,780 over two haulers to 5,760 over
-                // four. A claimed room in both lists reads as a room we mine,
-                // and two colonies then mine it.
+                // What the removal cost while it was overdue (#352): W13S28 ran an
+                // anchor on W11S29's rock **three crossings out** while W11S29's own
+                // colony ran one on the same rock, and this colony's demand went 2,780
+                // over two haulers to 5,760 over four. A claimed room in both lists
+                // reads as a room we mine, and two colonies then mine it.
                 Expect.isFalse
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.exists (fun outpost -> outpost.RoomName = "W11S29"))
@@ -1538,15 +1322,12 @@ let outpostTests =
                     "W11S29"
                     "while the declaration itself is kept written for the record: it is how the fourth colony was taken, and ADR 0047's arrangement needs it readable"
 
-                // W15S28 is declared and is **not** an outpost of anybody's:
-                // it is owned, so it is a room its mother raises and not one
-                // she mines, and `childrenWhere` gives a room in both lists to
-                // the outpost list — which is the classification that stalled
-                // it live on 2026-09-10 (claimed, spawn site placed by hand,
-                // no body sent). What the mother projects for it is
-                // `Colony.roomsProjected`'s bootstrap half, and the transit
-                // room on the way is in there for the same reason an
-                // outpost's is (ADR 0058).
+                // W15S28 is declared and is **not** an outpost of anybody's: it is
+                // owned, so its mother raises it and does not mine it, and
+                // `childrenWhere` gives a room in both lists to the outpost list, the
+                // classification that stalled it live on 2026-09-10 (claimed, spawn
+                // site placed by hand, no body sent). What the mother projects for it
+                // is `Colony.roomsProjected`'s bootstrap half, transit room included.
                 Expect.isFalse
                     (Colony.declared
                      |> List.exists (fun colony ->
@@ -1554,15 +1335,11 @@ let outpostTests =
                          |> List.exists (fun outpost -> outpost.RoomName = "W15S28")))
                     "the third colony's room is nobody's outpost now that it is ours"
 
-                // The room between home and the nursery is in the projection
-                // on the *bootstrap* half's own account (ADR 0058), where until
-                // 2026-09-10 it was there only because a declaration happened
-                // to name it. Since 2026-09-20 that is again the only account
-                // it is there on: W14S28 is W15S28's outpost now, so from here
-                // it is a transit room and sorts **after** the declared rooms
-                // rather than among them. The order is the proof — a declared
-                // room is projected before the transit rooms a bootstrap half
-                // brings, and W14S28 has moved to the far side of that line.
+                // The room between home and the nursery is in the projection on the
+                // *bootstrap* half's own account; since 2026-09-20 that is again the
+                // only account, W14S28 being W15S28's outpost now, so from here it is
+                // a transit room and sorts **after** the declared rooms. The order is
+                // the proof.
                 Expect.equal
                     (Colony.roomsProjected
                         (Colony.outpostsOf Colony.declared "W13S28")
@@ -1572,18 +1349,15 @@ let outpostTests =
                     [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
                     "the home, its one outpost and the child two hops out, with W14S28 behind them: it is W15S28's since 2026-09-20, so it reaches this scan set as a transit room and sorts after the declared ones"
 
-                // Three rooms left this scan set with W11S29's declaration
-                // (#352) — the nursery itself, W12S29 and W11S28, plus
-                // W12S28's own home, which was in here only as a corner of the
-                // rectangle `transitBetween` names for a three-hop chain. That
-                // is four rooms of terrain, borders and census this colony no
-                // longer reads every tick, and it lands in the middle of a CPU
-                // squeeze (`docs/research/cpu-headroom.md`).
+                // Three rooms left this scan set with W11S29's declaration (#352): the
+                // nursery itself, W12S29 and W11S28, plus W12S28's own home, which was
+                // in here only as a corner of the rectangle `transitBetween` names for
+                // a three-hop chain. Four rooms of terrain, borders and census no
+                // longer read every tick, in the middle of a CPU squeeze
+                // (`docs/research/cpu-headroom.md`).
                 //
-                // And what replaces it for the nursery is the **bootstrap**
-                // half, which is the point ADR 0047 decision 4 rests on: a
-                // room a mother raises is projected because she raises it, not
-                // because somebody once declared it a mine. Named as
+                // What replaces it for the nursery is the **bootstrap** half: a room a
+                // mother raises is projected because she raises it. Named as
                 // bootstrapped, it and its transit room come straight back.
                 Expect.equal
                     (Colony.roomsProjected
@@ -1603,12 +1377,10 @@ let outpostTests =
                     ]
                     "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain — W12S28's own home among them (ADR 0058), which is where it belonged all along"
 
-                // The third colony's three since 2026-09-20, and the pairing
-                // of the first two is the reason to pin them here: W15S27 is
-                // the room the delivery route crosses on
-                // the way to the Reactor, and W15S29 is the one declared for
-                // its own sake (2026-09-17, `outpost-wave-2.md`) once the
-                // survey's CPU refusal stopped being the price — +0.55 ms of
+                // The third colony's three since 2026-09-20: W15S27 is the room the
+                // delivery route crosses on the way to the Reactor, and W15S29 is the
+                // one declared for its own sake (2026-09-17, `outpost-wave-2.md`) once
+                // the survey's CPU refusal stopped being the price: +0.55 ms of
                 // `decide` on today's code against the +1.5-2.0 it measured.
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
@@ -1616,9 +1388,9 @@ let outpostTests =
                     [ "W15S27"; "W15S29"; "W14S28" ]
                     "the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
-                // And the fourth colony's, declared the day after its spawn
-                // stood (`w12s29-outpost.md`): 81 ticks of haul, the cheapest
-                // in the programme, against 380 of demand over one hauler.
+                // The fourth colony's, declared the day after its spawn stood
+                // (`w12s29-outpost.md`): 81 ticks of haul, the cheapest in the
+                // programme, against 380 of demand over one hauler.
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W11S29"
                      |> List.map (fun outpost -> outpost.RoomName))
@@ -1636,11 +1408,9 @@ let outpostTests =
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {
-                // Written in the engine's own ids, as a declaration has to
-                // be: the projection keys every target by the id the server
-                // hands back, so a constant written in the captures'
-                // readable short names would match nothing at all on a live
-                // server, and would do it in silence (ADR 0004).
+                // Written in the engine's own ids: the projection keys every target by
+                // the id the server hands back, so a constant written in the captures'
+                // readable short names would match nothing on a live server, in silence.
                 let north =
                     {
                         RoomName = "W12S27"
@@ -1665,11 +1435,9 @@ let outpostTests =
                     [ "W12S28"; "W12S27"; "W13S28" ]
                     "the spawn room, then the declarations in their own order"
 
-                // A declaration naming the spawn room is a human's slip in
-                // a constant a human moves (ADR 0039's precedent), and the
-                // projection keys rooms by name: scanning that room twice
-                // would file one room's geometry under one name twice over
-                // rather than say anything about it.
+                // A declaration naming the spawn room is a human's slip in a constant a
+                // human moves, and the projection keys rooms by name: scanning that
+                // room twice would file one room's geometry under one name twice over.
                 Expect.equal
                     (Outpost.roomsProjected [ { north with RoomName = "W12S28" } ] "W12S28")
                     [ "W12S28" ]
@@ -1677,29 +1445,22 @@ let outpostTests =
             }
 
             test "a declaration nobody can see this tick still pools its rock, and wins on it" {
-                // ADR 0041's deadlock, read at the top seam (#148): *"A
-                // source's position needs vision; vision needs a creep
-                // there; a creep goes there because a Task exists; the Task
-                // exists because the source is in the projection."* #124
-                // read ADR 0004's per-entry absence onto the declaration
-                // as well, so the outpost's rock entered the pool only on a
-                // tick the colony could see the room — and nothing was ever
-                // sent to make that tick happen.
+                // The deadlock (#148): a source's position needs vision, vision needs a
+                // creep there, a creep goes there because a Task exists, and the Task
+                // exists because the source is in the projection. #124 read per-entry
+                // absence onto the declaration as well, so the outpost's rock entered
+                // the pool only on a tick the colony could see the room.
                 //
-                // The room here is shaped exactly as the shell shapes one
-                // it cannot see (`World.factsOf`): terrain and a
-                // border ring, because `Game.map.getRoomTerrain` needs no
-                // vision, and not one entry more. Everything the outpost
-                // contributes below is the declaration's.
+                // The room is shaped as the shell shapes one it cannot see
+                // (`World.factsOf`): terrain and a border ring, because
+                // `Game.map.getRoomTerrain` needs no vision, and not one entry more.
                 let declaration =
                     {
                         RoomName = "W1N2"
                         Sources = [ "src-out", { Room = "W1N2"; X = 10; Y = 46 } ]
-                        // Off the corridor on purpose: what the controller
-                        // is doing to this fixture is standing in
-                        // `Obstacles`, and a controller on the corridor
-                        // would seal it and make the comparison below about
-                        // reachability instead of about distance.
+                        // Off the corridor on purpose: the controller stands in `Obstacles`,
+                        // and one on the corridor would seal it and make the comparison below
+                        // about reachability instead of distance.
                         Controller = "ctrl-out", { Room = "W1N2"; X = 11; Y = 44 }
                     }
 
@@ -1716,18 +1477,13 @@ let outpostTests =
                     (Some(taskId (Harvest "src-home"), MatchFactor.OnlyCandidate))
                     "the premise: undeclared, the blind room offers nothing and the home rock stands alone"
 
-                // The win has to be on the *placed* rock's price, and that
-                // needs saying because an unplaced target is not inactive:
-                // ADR 0004's escape prices it at 0, which beats every real
-                // walk on the same factor. So a `place` that did nothing at
-                // all would hand the Verdict below the same task and the
-                // same `TravelCost` for the opposite reason. These two
-                // lines are what tell the reasons apart: the rock is filed
-                // under its own room, and the price that won is a real
-                // crossing rather than the escape — the step down to the
-                // border, the crossing itself, and two down the outpost's
-                // corridor to the Seat at (10,47), four plain tiles at
-                // travel cost's 2 apiece (ADR 0010's half-ticks).
+                // The win has to be on the *placed* rock's price: an unplaced target
+                // prices at 0, which beats every real walk on the same factor, so a
+                // `place` that did nothing would hand the Verdict below the same task
+                // and factor for the opposite reason. These two lines tell the reasons
+                // apart: the step down to the border, the crossing itself, and two
+                // down the outpost's corridor to the Seat at (10,47), four plain tiles
+                // at travel cost's 2 apiece.
                 let atlas = Atlas.ofView declared
 
                 Expect.equal
@@ -1740,10 +1496,9 @@ let outpostTests =
                     (Some 8)
                     "and its price is a real crossing, never the escape: four plain steps at 2 apiece"
 
-                // The same pair the ranking test above compares, at the
-                // same two tiles — so what moved is only that the outpost's
-                // rock is now declared rather than seen, and it is still
-                // travel cost that separates the two.
+                // The same pair the ranking test above compares, at the same two
+                // tiles: only that the outpost's rock is now declared rather than
+                // seen has moved.
                 Expect.equal
                     (matchOf declared)
                     (Some(taskId (Harvest "src-out"), MatchFactor.TravelCost))
@@ -1751,29 +1506,18 @@ let outpostTests =
             }
 
             test "where vision answers, laying the declaration in changes nothing" {
-                // The other half of the rule: a declaration carries only
-                // what cannot wait for vision — the ids and the tiles — and
-                // is laid *under* what the room's `find` families answered,
-                // never over it (ADR 0041). The reservation remaining, the
-                // hits, the stores, the creeps and every structure standing
-                // are vision's alone and stay vision's.
+                // A declaration carries only what cannot wait for vision, the ids and
+                // the tiles, and is laid *under* what the room's `find` families
+                // answered, never over it.
                 //
-                // Asserted as an equality on the whole projection rather
-                // than field by field: what has to hold is that not one
-                // entry moves, and a per-field check would pass while some
-                // field nobody thought of was overwritten.
+                // Asserted as an equality on the whole projection rather than field by
+                // field, so a field nobody thought of cannot be overwritten unnoticed.
                 //
-                // The declaration below names the rock one tile off where
-                // vision put it, and that disagreement is the whole test.
-                // Live the two agree by construction — the ids are the
-                // engine's own and a rock does not move — so a declaration
-                // that matched vision tile for tile would leave this
-                // equality true whichever of the two won, and the rule
-                // would be pinned by nothing. Only a conflict can say which
-                // truth is authoritative. The one that can really arise is
-                // a human's: the constant is moved by hand (ADR 0041), and
-                // a mistyped tile must not move a rock the engine is
-                // answering for out from under its Seats.
+                // The declaration below names the rock one tile off where vision put
+                // it, and that disagreement is the whole test: live the two agree by
+                // construction, so a matching declaration would leave this equality
+                // true whichever won. The conflict that can really arise is a
+                // mistyped tile in a hand-moved constant.
                 let declaration =
                     {
                         RoomName = "W1N2"
@@ -1826,16 +1570,12 @@ let outpostTests =
             }
 
             test "an unseen rock is pooled at the held-energy default, not at never" {
-                // ADR 0025: a restock is a time, and 0 is what a source
-                // holding energy reads. The unknown restock takes the same
-                // 0 rather than something large, because a drained source's
-                // Harvest is judged at the creep's arrival — a walk has to
-                // cover the wait — so any other number would be a source no
-                // walk could ever cover, which is the vision deadlock again
-                // in a second place. What withholds the dig from a rock
-                // that turns out to be empty when the creep gets there is
-                // the Emitter's own gate, on the tick there is vision to
-                // read it from.
+                // A restock is a time, and 0 is what a source holding energy reads. The
+                // unknown restock takes the same 0 rather than something large, because
+                // a drained source's Harvest is judged at arrival and a walk has to
+                // cover the wait; any other number would be a source no walk could
+                // cover, the vision deadlock in a second place. The Emitter's own gate
+                // withholds the dig from a rock that turns out empty.
                 let declaration =
                     {
                         RoomName = "W1N2"
@@ -1850,13 +1590,10 @@ let outpostTests =
             }
 
             test "a declaration for a room the scan set left out places nothing and pools nothing" {
-                // The scan set is the one gate on which rooms the colony
-                // works (`roomsProjected`), and the stand-down of ADR 0043
-                // narrows exactly it: a room withdrawn from does not enter
-                // the projection at all. A declaration able to furnish a
-                // room the scan left out would be a second gate free to
-                // disagree with the first — furniture standing on terrain
-                // nobody read.
+                // The scan set is the one gate on which rooms the colony works
+                // (`roomsProjected`), and the stand-down narrows exactly it. A
+                // declaration able to furnish a room the scan left out would be a
+                // second gate free to disagree with the first.
                 let declaration =
                     {
                         RoomName = "W9N9"
@@ -1871,17 +1608,12 @@ let outpostTests =
                     blind.Spatial
                     "no layer for that room, so no tile of it is placed"
 
-                // The pool passes the same gate, and has to: an unplaced
-                // target is not inert. `Atlas.travelCost` answers 0 for
-                // geometry the projection cannot place (ADR 0004's escape),
-                // so a rock pooled for a room nothing was projected for
-                // *wins* its tier on price, and the Emitter aims a Harvest
-                // at an object `Game.getObjectById` cannot answer for while
-                // anti-thrash holds the creep on it (#142's stuck creep, in
-                // a second place). Reachable the tick the colony's last
-                // spawn dies — the shell's scan set is empty with no home
-                // room — and the shape ADR 0043's stand-down withdraws a
-                // room in.
+                // The pool passes the same gate, and has to: `Atlas.travelCost` answers
+                // 0 for geometry the projection cannot place, so a rock pooled for an
+                // unprojected room *wins* its tier on price and the Emitter aims a
+                // Harvest at an object `Game.getObjectById` cannot answer for while
+                // anti-thrash holds the creep on it (#142's stuck creep). Reachable the
+                // tick the colony's last spawn dies, when the scan set is empty.
                 Expect.equal
                     (Outpost.pooledSources [ "W1N1"; "W1N2" ] [ declaration ] blind.Sources)
                     blind.Sources
@@ -1893,22 +1625,15 @@ let outpostTests =
             }
 
             test "a declared rock filed under another room is neither placed nor pooled" {
-                // The declaration's tiles carry their own room since ADR
-                // 0052 decision 2, so "this rock is in this outpost" is a
-                // thing a human can now get *wrong* in the constant — it
-                // used to be true by construction, a bare `Pos` beside
-                // `RoomName` with nothing to disagree with. `Outpost.place`
-                // drops such a tile rather than writing it onto this room's
-                // coordinate (the #191 phantom), and the pool has to drop
-                // it in the same breath: an unplaced target prices at 0
-                // (ADR 0004's escape), so a pooled-but-unplaced rock *wins*
-                // its tier, takes no Seat cap because the Atlas can seat no
-                // tile for it, and holds every applicable worker on a
-                // Harvest the engine cannot resolve.
+                // The declaration's tiles carry their own room, so "this rock is in
+                // this outpost" is a thing a human can get *wrong* in the constant.
+                // `Outpost.place` drops such a tile rather than writing it onto this
+                // room's coordinate (the #191 phantom), and the pool has to drop it in
+                // the same breath: an unplaced target prices at 0, so a pooled-but-
+                // unplaced rock *wins* its tier, takes no Seat cap and holds every
+                // applicable worker on a Harvest the engine cannot resolve.
                 //
-                // Pairwise on the one field that moved: the same id at the
-                // same coordinate, once filed under the outpost's own room
-                // and once under the mother's.
+                // Pairwise on the one field that moved.
                 let atRoom room =
                     {
                         RoomName = "W1N2"
@@ -1941,22 +1666,15 @@ let outpostTests =
             }
 
             test "a declared controller stands in Obstacles, so no Work Area offers its tile" {
-                // The third thing a declaration puts in the projection
-                // beside the tiles and the kinds: the controller's own tile
-                // joins `Obstacles`, exactly as the seen half files it. A
-                // controller is an obstacle structure — a reserver stands
-                // beside it and never on it — so a Work Area built over
-                // ground that ignored it would offer a tile the engine
-                // refuses to move onto, and #131's reserver would be
-                // assigned there and held there.
+                // The controller's own tile joins `Obstacles`, as the seen half files
+                // it: a reserver stands beside it and never on it, so a Work Area
+                // built over ground that ignored it would offer a tile the engine
+                // refuses to move onto, and #131's reserver would be held there.
                 //
-                // On plain ground on purpose, and that is the whole reason
-                // this fixture exists rather than an assertion over the
-                // committed captures: both declared controllers stand on
-                // terrain the capture reads as wall, so the weight grid refuses
-                // their tiles before `Obstacles` is ever consulted and the
-                // rule would be pinned by the terrain rather than by the
-                // code (ADR 0036 supplies counterexamples, not cover).
+                // On plain ground on purpose: both declared controllers stand on
+                // terrain the capture reads as wall, so the weight grid refuses their
+                // tiles before `Obstacles` is consulted and the rule would be pinned by
+                // the terrain rather than the code.
                 let declaration =
                     {
                         RoomName = "W1N2"
@@ -1984,16 +1702,11 @@ let outpostTests =
             }
 
             test "an outpost controller's Upgrade area is nobody's working ground" {
-                // #241 read against ADR 0042. The mover asks for the
-                // [[working ground]] room by room now, and an outpost's
-                // controller is filed under its room like any other: asked
-                // whole, the query hands back the 7x7 around it as a
-                // workplace. The colony upgrades one controller, its own,
-                // and *reserves* an outpost's — a Seat inside an outpost
-                // controller's area is ground nobody upgrades from — so
-                // there is nothing there for an idle body to step out of.
-                // The outpost's Seats are another matter: its Anchor really
-                // does work from those, and they stay in.
+                // #241. The mover asks for the working ground room by room, and asked
+                // whole the query hands back the 7x7 around an outpost controller as a
+                // workplace. The colony *reserves* an outpost's controller, so a Seat
+                // inside its area is ground nobody upgrades from. The outpost's Seats
+                // are another matter: its Anchor really does work from those.
                 let outpost creeps =
                     let colony =
                         { bareRespawn with

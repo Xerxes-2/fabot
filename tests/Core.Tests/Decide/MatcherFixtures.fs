@@ -1,10 +1,5 @@
-/// The Matcher and the Resolver: which Tasks a body may hold, the travel cost
-/// that ranks them (ADR 0002), the yield arbitration that settles a contested
-/// tile (ADR 0001), the Verdicts a match and a release are returned under (ADR
-/// 0009), the verbose list an operator reads (ADR 0018), and the Intents the
-/// whole decision emits.
 /// The Matcher suite's fixtures: the corridors, crowds and casts the
-/// matching and arbitration below are run over.
+/// matching and arbitration are run over.
 module Fabot.Core.Tests.Decide.MatcherFixtures
 
 open Expecto
@@ -14,13 +9,11 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
-/// The live `9W/9C/9M` generalist of #235: neither Work-heavy (ADR 0016's
-/// ratio is strict) nor a standing body (ADR 0046's is too), so it answers
-/// every one of the Harvest gate's light-body clauses and no exemption. Its
-/// store is the caller's, because the whole of the first clause is what the
-/// store holds. Named for the [[body class]] and not "commuter", which this
-/// file already spends on `CapScope.Commuters` — the crowd that is merely not
-/// Heavy, the Standing row included.
+/// The live `9W/9C/9M` generalist: neither Work-heavy nor a standing body
+/// (both ratios are strict), so it answers every one of the Harvest gate's
+/// light-body clauses and no exemption. Named for the body class and not
+/// "commuter", which `CapScope.Commuters` already spends on the crowd that
+/// is merely not Heavy.
 let lightWorker name energy freeCapacity =
     creepWith
         name
@@ -33,14 +26,11 @@ let lightWorker name energy freeCapacity =
 /// A three-row field y = 9..11, x = 8..15, with one source walled into the
 /// middle of it at (10,10), and nothing else in the world to do: the Harvest
 /// is the whole pool, so an unmatched body here was refused by the gate and
-/// not outranked. Three rows so the rock is walked *around* — a body on one
-/// side of a one-wide lane can reach no Seat on the other, and a Seat the
-/// light body cannot reach would answer this suite's questions with ADR 0002's
-/// reachability instead of the applicability it is asking about. The source
-/// arrives through `withTargets` and so carries its **kind**, which the Seat
-/// union is read through (ADR 0041): a projection that placed the rock and
-/// did not say what it was answers no Seats, and so no Post, whatever stands
-/// on them.
+/// not outranked. Three rows so the rock is walked around — on a one-wide
+/// lane a Seat the light body cannot reach would answer with reachability
+/// instead of applicability. The source arrives through `withTargets` and so
+/// carries its kind: a projection that placed the rock and did not say what
+/// it was answers no Seats, and so no Post.
 let loneSourceRoom =
     spatial
         []
@@ -51,28 +41,23 @@ let loneSourceRoom =
     |> withTargets [ "src-a", { X = 10; Y = 10 }, Source ]
 
 /// The same field with a container standing on the Seat at (11,10), which
-/// makes that Seat a [[post]] (ADR 0042) and leaves the rock's seven other
-/// Seats as the light body's Work Area (ADR 0051). Stocked with nothing, so
-/// the container pools no Withdraw of its own and the pool stays the one
+/// makes that Seat a Post and leaves the rock's seven other Seats as the
+/// light body's Work Area. Stocked with nothing, so the pool stays the one
 /// Harvest — what refuses a body here is the gate and never a rival.
 let postedSourceRoom =
     loneSourceRoom
     |> withTargets [ "can-a", { X = 11; Y = 10 }, Structure BuiltKind.Container ]
 
 /// The same field one step earlier: the container on (11,10) is still a
-/// construction site. #205 makes that Seat a [[post]] all the same — the
-/// Anchor hired for it is the body that raises it — but ADR 0042's split
-/// keeps it out of the economy until the structure stands, which is the
-/// half `Decide.isPosted` reads and the half #235's spare-rate clause reads
-/// with it.
+/// construction site — a Post for the Anchor that raises it, and out of the
+/// economy until the structure stands.
 let siteSourceRoom =
     loneSourceRoom
     |> withTargets [ "can-a", { X = 11; Y = 10 }, Site BuiltKind.Container ]
 
 /// The colony over one of those rooms: the named bodies on the named tiles,
-/// an owned home room — so the rock is priced at the held ten a tick
-/// (ADR 0042) — and no controller, refillable with room or store to pool a
-/// second Task.
+/// an owned home room — so the rock is priced at the held ten a tick — and
+/// no controller, refillable with room or store to pool a second Task.
 let sourceColony room (bodies: (CreepInfo * Pos) list) =
     { bareRespawn with
         Sources = [ source "src-a" ]
@@ -128,7 +113,7 @@ let shortCorridorColony creeps positions =
     corridorColonyOver [ 11..14 ] creeps positions
 
 /// The Resolver's movement Verdicts at the same seam, with the named
-/// creeps on the verbose list (ADR 0018).
+/// creeps on the verbose list.
 let resolveVerdictsVerboseOn snapshot assigned verbose =
     resolve
         snapshot
@@ -189,26 +174,18 @@ let laneWith pocket ours foreign =
                 Set.empty
     }
 
-/// W13S28's north Upgrade pocket (#241), the geometry the jam is made of,
-/// narrowed to six tiles and written either way round. The controller stands
-/// at (24,17) with the whole row y = 16 walled, so the only ground inside its
-/// Upgrade Work Area is the pocket north of it — (21..23,14) and (21..23,15) —
-/// reached down one corridor along y = 14. The live pocket is the eight tiles
-/// the ticket lists, (21..25,14) and (21..23,15); the two east tiles are left
-/// out here so the corridor is ordinary ground and the pocket's mouth is one
-/// tile.
+/// W13S28's north Upgrade pocket, narrowed to six tiles and written either
+/// way round. The controller stands at (24,17) with the row y = 16 walled,
+/// so the only ground inside its Upgrade Work Area is the pocket north of it
+/// — (21..23,14) and (21..23,15) — reached down one corridor along y = 14;
+/// the live pocket's two east tiles are left out so the mouth is one tile.
 ///
-/// `mirror` is which way that corridor runs, and it is not decoration: every
-/// tie in this bot falls to the lowest x then y, so the two orientations put
-/// the working ground on opposite sides of the order `arbitrate` re-houses a
-/// displaced body in. One of them can be right by accident, which is why both
-/// are pinned below.
+/// `mirror` is which way the corridor runs: every tie falls to the lowest x
+/// then y, so one orientation can be right by accident, and both are pinned.
 ///
-/// The [[buffer]] container stands at (22,15), *inside* the pocket, so its
-/// five standing tiles are Upgrade [[working ground]] to the last one: nowhere
-/// here is a tile a body can park on without taking it from the row that works
-/// there or from the hauler that feeds them. The buffer is empty, which is
-/// what leaves the upgraders with no Task at all.
+/// The buffer container stands at (22,15), inside the pocket, so its five
+/// standing tiles are working ground to the last one. It is empty, which is
+/// what leaves the upgraders with no Task.
 let internal pocketFacing (mirror: int -> int) =
     let controller = { X = mirror 24; Y = 17 }
     let buffer = { X = mirror 22; Y = 15 }
@@ -281,15 +258,11 @@ let walkedTicks colony assigned count (start: Map<string, Pos>) =
 let upgrader name =
     creepWith name 0 50 [ Work; Work; Carry; Move ]
 
-/// The wall pocket a tucked store stands in (#268): the tile at (10,10) with
-/// wall on every side but two — (10,11) and (11,11) — and a corridor running
-/// east from them along y = 11. Those two tiles are the whole of the ground a
-/// store there can be reached from, and they are outside ADR 0022's [[working
-/// ground]] to the last one: the room holds no source and no controller, so
-/// #241's set is empty here and whatever vacates them is the mover's own rule.
-/// The store's own tile is an obstacle, exactly as the engine has it, so it is
-/// no third standing tile. Two stores are stood in it below, and the pocket is
-/// stated once so the pair differ in the store and in nothing else.
+/// The wall pocket a tucked store stands in: the tile at (10,10) with wall
+/// on every side but (10,11) and (11,11), and a corridor running east along
+/// y = 11. Those two tiles are the whole of the ground the store can be
+/// reached from and no working ground, so whatever vacates them is the
+/// mover's own rule. Two stores are stood in it below.
 let private wallPocket =
     spatial
         []
@@ -297,18 +270,16 @@ let private wallPocket =
          @ [ for x in 11..18 -> { X = x; Y = 11 }, Plain ])
     |> withObstacles [ { X = 10; Y = 10 } ]
 
-/// The [[storage]] in that pocket (#268): an empty stock, so the room's one
-/// Task is the Refill of it.
+/// The storage in that pocket: an empty stock, so the room's one Task is
+/// the Refill of it.
 let internal wallStorageRoom =
     { wallPocket with
         Stores = Map.ofList [ "sto-1", 0 ]
     }
     |> withTargets [ "sto-1", { X = 10; Y = 10 }, Structure BuiltKind.Storage ]
 
-/// A [[tower]] in the same pocket (#277): a Refill target like any other (ADR
-/// 0010), and the store #268's enumeration held out — so this room is the
-/// storage's jam with the one structure swapped in whose ring the mover could
-/// not see.
+/// A tower in the same pocket: the storage's jam with the one structure
+/// swapped in whose ring the mover once could not see (#277).
 let internal wallTowerRoom =
     wallPocket
     |> withTargets [ "tow-1", { X = 10; Y = 10 }, Structure BuiltKind.Tower ]
@@ -323,7 +294,7 @@ let wallStorageColony creeps positions =
         Spatial = wallStorageRoom |> withCreepsAt positions
     }
 
-/// The same colony over the tower pocket (#277): the tower is the colony's own
+/// The same colony over the tower pocket: the tower is the colony's own
 /// Refillable, which is what pools the Refill and what puts its tile in the
 /// stores the mover rings.
 let wallTowerColony creeps positions =
@@ -355,10 +326,9 @@ let tierColony refillables =
     }
 
 /// The surplus fixture: one loaded generalist and a hungry tower, in a
-/// colony the projection places nothing in — unpriceable geometry never
-/// counts against a Task (ADR 0004), so every candidate ties on travel
-/// cost and load, and rank is the only thing left that can separate a
-/// pair. Each caller adds exactly one rival, so the Verdict's factor is
+/// colony the projection places nothing in, so every candidate ties on
+/// travel cost and load and rank is the only thing left that can separate
+/// a pair. Each caller adds exactly one rival, so the Verdict's factor is
 /// evidence about that rival alone.
 let surplusColony =
     { bareRespawn with
@@ -374,11 +344,11 @@ let surplusColony =
 /// site runs through the tile `har` stands on, which is the whole of what the
 /// cases over this corridor are about.
 ///
-/// Two things vary and no more. **Which rows exist**: one lane leaves `bob`
+/// Two things vary and no more. Which rows exist: one lane leaves `bob`
 /// nothing to sidestep into, two give it the parallel lane the occupancy
-/// surcharge prices it into (ADR 0008). And **`har` itself**: a fatigued Seat
-/// blocks its tile for the tick where a rested one can be shuffled off it (ADR
-/// 0001), so who ends up standing down is a fact about that body.
+/// surcharge prices it into. And `har` itself: a fatigued Seat blocks its
+/// tile for the tick where a rested one can be shuffled off it, so who ends
+/// up standing down is a fact about that body.
 let blockedLane (rows: int list) har =
     { bareRespawn with
         Sources = [ source "src-a" ]

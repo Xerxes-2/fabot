@@ -1,4 +1,4 @@
-/// The colony's signature (#381): the one line it writes onto a controller it
+/// The colony's signature: the one line it writes onto a controller it
 /// stands beside, and the reflex that writes it.
 module Fabot.Core.Tests.Decide.SignatureTests
 
@@ -92,12 +92,9 @@ let signatureTests =
                     "two bodies writing the same words is one wasted intent; the lowest name takes it"
             }
 
-            // #381 says "home and outpost alike", and that is the shape a
-            // range test can get wrong: a creep at (10,11) of one room is not
-            // beside a controller at (10,10) of another, however the numbers
-            // read. `RoomPos.range` answers `None` across a border, so the
-            // filter drops it — pinned here because nothing else in this file
-            // stands two rooms.
+            // A creep at (10,11) of one room is not beside a controller at (10,10) of
+            // another: `RoomPos.range` answers `None` across a border. Nothing else
+            // in this file stands two rooms.
             test
                 "a second room's controller is signed by a body in that room, and by nobody at home" {
                 let outpost = "W1N2"

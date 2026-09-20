@@ -1,4 +1,4 @@
-/// The loader that reads a committed room capture back (ADR 0036).
+/// The loader that reads a committed room capture back.
 module Fabot.Core.Tests.RoomFixtureLoaderTests
 
 open Expecto
@@ -48,13 +48,10 @@ let loaderTests =
             }
 
             test "the border ring is loaded beside that window, holding the room's exits" {
-                // The trim above and this are one split, not two truths: the
-                // ring is delivered beside the ground and never inside it
-                // (ADR 0041), so the Seam has the engine's own exit terrain
-                // while nothing that stands a creep can reach it. The exits
-                // are named here, with the furniture, because they are what
-                // the server said this room's edges are — the invariants
-                // below name no tile.
+                // The trim above and this are one split: the ring is beside
+                // the ground and never inside it. The exits are named here,
+                // with the furniture, because they are what the server said
+                // this room's edges are.
                 let home = load "W12S28"
 
                 Expect.hasLength home.Border (50 * 50 - 48 * 48) "the ring, and only the ring"
@@ -118,13 +115,9 @@ let loaderTests =
 
             test "the Thorium deposit is loaded and the room's ordinary ore is not" {
                 // The cut `World.ofGame` makes, restated in the loader that
-                // stands in for it (ADR 0057 decision 1): the season mod
-                // stands an ordinary-ore mineral beside the Thorium one and
-                // the colony never extracts it, so only the Thorium deposit
-                // reaches the projection. The capture records both — it says
-                // what the server said — and the `resource` column is what
-                // tells them apart. W12S28 carries "O" at (11,7) and "T" at
-                // (26,5); one of the two survives.
+                // stands in for it. The capture records both minerals and the
+                // `resource` column tells them apart: W12S28 carries "O" at
+                // (11,7) and "T" at (26,5); one of the two survives.
                 let room = load "W12S28"
 
                 Expect.equal
@@ -137,9 +130,7 @@ let loaderTests =
                     [ "6a901a44b8684d000833897b", { X = 26; Y = 5 } ]
                     "under the id the server gave it"
 
-                // The other two owned rooms, named here with the furniture
-                // because these are the tiles ADR 0057's whole programme is
-                // about and the Layout tests below name none.
+                // The other two owned rooms, named here with the furniture.
                 Expect.equal
                     ((load "W13S28").Minerals, (load "W15S28").Minerals)
                     ([ "min-0", { X = 42; Y = 30 } ], [ "min-0", { X = 29; Y = 12 } ])
@@ -151,19 +142,11 @@ let loaderTests =
             }
 
             test "the engine's own ids ride beside the readable ones" {
-                // The decision #124 had to make and this pins: an outpost
-                // is declared in the *engine's* ids, because a live
-                // projection keys every target by the id the server hands
-                // back — `TargetKinds`, `Hits`, `Stores` and
-                // `ColonyView.Sources` all do. A declaration written in the
-                // readable names above would match nothing online, and
-                // would do it in silence: an id the projection does not
-                // place is unpriceable geometry, so the outpost would never
-                // enter a Task rather than fail (ADR 0004). These are what
-                // ADR 0042's declaration of this very room is written from,
-                // and what a ColonyView built to meet it has to carry — so
-                // they are pinned here, with the furniture, against the
-                // committed capture.
+                // An outpost is declared in the engine's ids, because a live
+                // projection keys every target by them. A declaration in the
+                // readable names would match nothing online, in silence: an
+                // id the projection does not place is unpriceable geometry,
+                // so the outpost would never enter a Task rather than fail.
                 let room = load "W12S27"
 
                 Expect.equal
@@ -176,17 +159,13 @@ let loaderTests =
                     (Some("6a8caabadd4872bccd3194a5", { X = 37; Y = 43 }))
                     "and the controller a reserver would hold (ADR 0042)"
 
-                // Read on the multi-source rooms by literal, in capture
-                // order, because that is the only reading of order that can
-                // fail: `Sources` and `RealSources` are two `List.map`s of
-                // one list, so comparing them to each other is `x = x` and
-                // a loader that sorted the objects would reorder both
-                // together and stay green. The order is a claim — ADR
-                // 0042's declaration of W13S28 pairs `…362` with (16,7) and
-                // `…361` with (18,4), the reverse of the order its prose
-                // reads in — and a reorder here would have a declaration
-                // and the ColonyView built beside it name two different
-                // rocks.
+                // Read by literal, in capture order, because that is the
+                // only reading of order that can fail: `Sources` and
+                // `RealSources` are two `List.map`s of one list, so a loader
+                // that sorted the objects would reorder both and stay green.
+                // The outpost declaration of W13S28 pairs `…362` with (16,7)
+                // and `…361` with (18,4), so a reorder here would have the
+                // declaration and the ColonyView name two different rocks.
                 Expect.equal
                     (load "W13S28").RealSources
                     [

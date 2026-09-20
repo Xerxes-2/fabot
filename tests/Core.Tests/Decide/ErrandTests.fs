@@ -1,10 +1,6 @@
-/// The [[errand]] as `decide` sees it (ADR 0060 decision 1, ADR 0057 decision
-/// 5): the one Task a declared controller-less room offers, who may hold it,
-/// what caps it, and the act it fires — which is fired on a tick the target is
-/// **not ours** and on no other. The projection half of an errand — what a
-/// colony may carry of that room at all — is `ViewTests`' and stays there; this
-/// is the work the declaration buys, so it lives in `Decide`'s own suite beside
-/// the outposts' rather than in the view's.
+/// The errand as `decide` sees it: the one Task a declared controller-less
+/// room offers, who may hold it, what caps it, and the act it fires. The
+/// projection half — what a colony may carry of that room — is `ViewTests`'.
 module Fabot.Core.Tests.Decide.ErrandTests
 
 open Expecto
@@ -15,19 +11,16 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.MatcherFixtures
 
-/// The errand these cases run and the tiles they name are `Fixtures`' own
-/// (#318) — one spelling for this suite and the reserver row's, which reads the
-/// same declaration for what it costs. The room is a neighbour of the fixtures'
-/// home, so the chain is one crossing and nothing here is about the walk: the
-/// live errand is three crossings out and `RoomSeamTests` prices it.
+/// The errand and tiles are `Fixtures`' own, shared with the reserver row's
+/// suite. The room neighbours the fixtures' home, so the chain is one
+/// crossing and nothing here is about the walk: `RoomSeamTests` prices the
+/// live three-crossing errand.
 let private errandRoom = reactorErrand.RoomName
 let private reactor = reactorId
 let private ringTile = reactorRing
 
-/// A CLAIM body of ours: `[Claim; Move]`, 650 energy, the one block the
-/// reserver row casts and so the one the re-claimer is (ADR 0057 decision 5,
-/// ADR 0006 — a second pattern row would be the same block under a second
-/// name).
+/// A CLAIM body of ours: `[Claim; Move]`, the one block the reserver row
+/// casts and so the one the re-claimer is.
 let private claimer name =
     creepWith name 0 0 [ BodyPart.Claim; Move ]
 
@@ -70,15 +63,12 @@ let private withErrandCreep pos creep colony =
 
 /// The shared declaration with the given bodies standing on the given tiles of
 /// the errand room, and the owner entry the act is gated on: `None` leaves it
-/// out altogether, which is what a gapped relay reads and what the act treats
-/// as *not ours* (ADR 0004).
+/// out altogether, which is what a gapped relay reads.
 let private errandColony owner creeps (colony: ColonyView) =
     colony |> withReactorErrand |> withReactorOwner owner |> standingInErrand creeps
 
-/// The fixtures' home room with nothing of its own to offer: no controller, no
-/// refillable with room, no source placed — so the pool a case reads is the
-/// errand's and the comparison is pairwise (the orchestration note: a pool
-/// holding three rivals proves nothing about the two that lost).
+/// The fixtures' home room with nothing of its own to offer, so the pool a
+/// case reads is the errand's and the comparison is pairwise.
 let private bareHome =
     { bareRespawn with
         Sources = []
@@ -95,33 +85,25 @@ let private reclaimsOf (colony: ColonyView) =
         | Reclaim _ -> true
         | _ -> false)
 
-/// The Task the Matcher settles on for one creep, and None for a creep it
-/// leaves idle — the whole decision read back through the one name a case
-/// cares about.
+/// The Task the Matcher settles on for one creep, None for one it leaves idle.
 let private assignedTask name (colony: ColonyView) =
     let { Assignments = assignments } = decideOn colony
     Map.tryFind name assignments
 
-/// The Task id of one named body's assignment, for the two cases that compare
-/// against a Task rather than reading one back.
 let private holds name task (colony: ColonyView) =
     assignedTask name colony = Some(taskId task)
 
-/// The delivery's loaded leg as the gate prices it (#373): from the Storage's
-/// free neighbours to the Reactor's ring, for this body carrying
-/// `Tuning.ReactorLoad`. Read off the Atlas and not asserted: the clause is
-/// pinned to the walk the colony prices, not to a number that moves with the
-/// floor under it.
-/// The life the delivery draw asks of a body for a leg of this length (#378):
-/// three ticks a tick on the hot tile, plus `Tuning.DeliveryLifeMargin`. Read
-/// through the knob rather than written out, so the cases below pin the rule
-/// and not the number the knob happens to hold.
+/// The life the delivery draw asks of a body for a leg of this length, read
+/// through the knobs so the cases pin the rule and not the numbers.
 let private lifeNeededFor leg =
     leg
     * Tuning.defaults.MineContactAgeing
     * (100 + Tuning.defaults.DeliveryLifeMargin)
     / 100
 
+/// The delivery's loaded leg as the gate prices it: from the Storage's free
+/// neighbours to the Reactor's ring, for this body carrying
+/// `Tuning.ReactorLoad`. Read off the Atlas, not asserted as a number.
 let private loadedLegOf (creep: CreepInfo, colony: ColonyView) =
     let store =
         match SpatialInfo.placementOf colony.Spatial "sto-1" with
@@ -145,9 +127,8 @@ let private reclaimIntents (colony: ColonyView) =
 
 /// Shibdib's live W15S25 defender at t444,287: enough ranged damage to kill
 /// the 200-hit re-claimer, and enough healing that the guard arithmetic wants
-/// two blocks rather than one. The exact body is the independent premise that
-/// distinguishes this incident from an overwhelming raid the existing
-/// stand-down already handles.
+/// two blocks rather than one — which distinguishes it from an overwhelming
+/// raid the stand-down already handles.
 let private liveDefender =
     List.replicate 5 BodyPart.RangedAttack @ List.replicate 6 Move @ [ Heal ]
 
@@ -436,11 +417,9 @@ let errandTaskTests =
         "the errand's own Task: one per declaration, held by a CLAIM body, one at a time"
         [
             test "one Reclaim per declared errand, named for the target the declaration names" {
-                // ADR 0060 decision 1's narrowing said in the pool: the errand
-                // room's one target is work and nothing else in that room is,
-                // so the Task is pooled off the **declaration** and never off a
-                // kind census — which is what keeps `Errand.place`'s kind-less
-                // target enumerable by no pool that sweeps a kind.
+                // The Task is pooled off the declaration and never off a kind
+                // census: `Errand.place`'s target is kind-less, so no pool
+                // that sweeps a kind can find it.
                 let colony = bareHome |> errandColony (Some Ownership.Rival) []
 
                 Expect.equal
@@ -454,9 +433,6 @@ let errandTaskTests =
             }
 
             test "a colony that declares no errand pools no Reclaim" {
-                // The other half of the same rule: the Task is the
-                // declaration's, so a colony without one offers none however
-                // much of that room it can see.
                 let colony =
                     bareHome
                     |> errandColony (Some Ownership.Rival) []
@@ -468,10 +444,8 @@ let errandTaskTests =
             }
 
             test "a CLAIM body may hold it and a worker may not" {
-                // Part arithmetic and nothing else (ADR 0006, ADR 0057
-                // decision 5): `claimReactor` is a CLAIM part's act, and a
-                // re-claimer carries nothing and asks for no energy state.
-                // Pairwise: one rival at a time, and the pool holds one Task.
+                // Part arithmetic and nothing else: `claimReactor` is a CLAIM
+                // part's act, and a re-claimer asks for no energy state.
                 let withClaimer =
                     bareHome |> errandColony (Some Ownership.Rival) [ claimer "rc", ringTile ]
 
@@ -488,10 +462,8 @@ let errandTaskTests =
             }
 
             test "one body at a time: the relay is never a garrison of two" {
-                // ADR 0057 decision 5's capacity, and the Reserve's own
-                // argument one room further out: the flag is taken by one
-                // touch of one CLAIM part, so a second body beside it buys
-                // nothing at all.
+                // The flag is taken by one touch of one CLAIM part, so a
+                // second body beside it buys nothing.
                 let colony =
                     bareHome
                     |> errandColony
@@ -509,18 +481,10 @@ let errandTaskTests =
             }
 
             test "the relief is admitted in time to land with the handover window left" {
-                // The one task-specific exception to ADR 0026 (#329): a
-                // Reclaim incumbent stops consuming the handover seat when a
-                // candidate can land with `ReclaimerOverlap` ticks of its life
-                // left. Ordinary capped Tasks continue to count a holder that
-                // survives through the candidate's arrival.
-                //
                 // Three plain tiles between the relief and the ring, so the
-                // walk is three ticks for a one-fatigue-part body. Twenty-nine
-                // ticks of incumbent life would leave 26 at arrival and still
-                // blocks; twenty-eight leaves the chosen 25-tick overlap and
-                // admits the relief. The permanent cap remains one: the case
-                // above puts two fresh bodies on the ring and admits only one.
+                // walk is three ticks: twenty-nine ticks of incumbent life
+                // leave 26 at arrival and still block; twenty-eight leaves the
+                // 25-tick overlap and admits the relief.
                 let relayAt life =
                     let colony =
                         bareHome
@@ -552,11 +516,9 @@ let errandActTests =
         "the act: claimReactor on a tick the reactor is not ours, and on no other"
         [
             test "a rival holds it, so the body standing on the ring takes it back" {
-                // The board this row was cut for (ADR 0060 decision 3): W15S25
-                // is `Odiodin`'s, any Thorium delivered scores for him, and
-                // `claimReactor` has no cooldown and no ownership precondition
-                // — so the claim is the **first** act of the programme and
-                // fires against a standing owner.
+                // `claimReactor` has no cooldown and no ownership
+                // precondition, so the claim is the first act of the
+                // programme and fires against a standing owner.
                 let colony =
                     bareHome |> errandColony (Some Ownership.Rival) [ claimer "rc", ringTile ]
 
@@ -567,11 +529,9 @@ let errandActTests =
             }
 
             test "it is ours already, so the body stands there and says nothing" {
-                // "Every other tick the body stands there and says nothing,
-                // which is what resident means" (ADR 0057 decision 5). The act
-                // is withheld and the Task is not: the body keeps its Reclaim,
-                // holds the tile and goes on being the colony's only eye on the
-                // room.
+                // The act is withheld and the Task is not: the body keeps its
+                // Reclaim, holds the tile and stays the colony's only eye on
+                // the room.
                 let colony =
                     bareHome |> errandColony (Some Ownership.Ours) [ claimer "rc", ringTile ]
 
@@ -597,11 +557,11 @@ let errandActTests =
             }
 
             test "no owner entry at all is not ours: the act fires the tick vision arrives" {
-                // ADR 0004's per-entry absence, read the safe way round. The
-                // relay is the colony's only vision of the room, so the tick a
-                // body lands is the first tick there is an answer — and a
-                // withheld act on a missing fact would leave the flag with
-                // whoever planted it until the *next* tick.
+                // Absence read the safe way round: the relay is the colony's
+                // only vision of the room, so the tick a body lands is the
+                // first tick there is an answer, and a withheld act on a
+                // missing fact would leave the flag with whoever planted it
+                // until the next tick.
                 let colony = bareHome |> errandColony None [ claimer "rc", ringTile ]
 
                 Expect.equal
@@ -692,11 +652,9 @@ let courierTests =
                             }
                     }
 
-                // At the shipped 636-tick cadence this income still hires four
-                // generalists. Buying the same 1,500-energy courier every tick
-                // costs 2,250,000 over a worker life and leaves only the Task
-                // floor: a fixed one-cast charge, or no charge, would leave the
-                // row at four.
+                // At the 636-tick cadence this income still hires four
+                // generalists; a 1,500-energy courier every tick costs
+                // 2,250,000 over a worker life and leaves only the Task floor.
                 Expect.equal
                     (workerQuota earning, workerQuota everyTick)
                     (4, 1)
@@ -740,14 +698,9 @@ let courierTests =
                     ] do
                     Expect.equal (courierRow colony).Quota 0 reason
 
-                // The mine is **not** one of the facts, and this is the pair
-                // that used to say the opposite (#361). Thorium never
-                // regenerates, so every deposit ends mined out with its ore in
-                // a Storage; the tick W15S28's mine ran dry this row closed,
-                // the courier was not replaced, and the Reactor started
-                // burning down its store with 7,226 T banked and a 7,989-tick
-                // streak standing. Ore in the bank scores what ore in the
-                // ground scores.
+                // The mine is not one of the facts: Thorium never regenerates,
+                // so every deposit ends mined out with its ore in a Storage,
+                // and ore in the bank scores what ore in the ground scores.
                 for colony, reason in
                     [
                         exhausted,
@@ -796,24 +749,9 @@ let courierTests =
                     "at 864 TTL the next fixed body is owed"
             }
 
-            // #354's third clause, over a floor wide enough to price the leg it
-            // turns on. The shared errand fixture cannot: its errand floor
-            // stops at y 47 and its home floor is a corridor at y 10..11, so
-            // neither side of the one crossing has ground behind its landing
-            // tile (ADR 0062), `Atlas.routes` answers `[]`, and every
-            // cross-room price out there is `None`. Widened here, in the one
-            // case that needs a priced walk, rather than in the fixture three
-            // suites read.
-            //
-            // The clause: the Storage's Thorium draw is refused a body whose
-            // life is under `walk × Tuning.MineContactAgeing` for the Reactor's
-            // own Refill. Under the 1,000-unit contact cliff the mod spends
-            // `floor(log10 store.T)` extra life a tick on every creep whose
-            // tile carries ore, and the ore on that tile is the body's own
-            // load — so there is no cool tile anywhere for a loaded courier,
-            // and a body that dies on the leg does not lose a body, it loses
-            // the ore: the tombstone cooks its own tile, decays at the same
-            // three-fold rate, and drops a pile that bleeds at 1 T a tick.
+            // The mod spends `floor(log10 store.T)` extra life a tick on a
+            // creep whose tile carries ore, and a loaded courier's own load
+            // is on its tile: a body that dies on the leg loses the ore.
             test "the delivery draw refuses a body that could not outlive the loaded leg" {
                 let atStorage life =
                     let aged =
@@ -840,16 +778,9 @@ let courierTests =
                     "one tick short of it is refused: that load would be dropped short of the Reactor"
             }
 
-            // #373. The gate reads parts and never a row (ADR 0006), so ADR
-            // 0067's "one fixed `[20 Carry; 10 Move]` body" was a row fact
-            // and not a gate: any empty light carrier of 500 or more carry
-            // passed every clause of the delivery draw, and once #367 ranked
-            // that draw at the top of Feeding the empty workers refuelling
-            // beside the Storage won it on rank — live W15S28, two 500 T
-            // loads out on `11W 12C 12M` bodies in one slot while the courier
-            // hauled energy. A Work part is dead weight on a leg that is all
-            // carrying, and it is what puts the body above fatigue parity at
-            // exactly the load the programme carries.
+            // The gate reads parts and never a row: a Work part is dead
+            // weight on a leg that is all carrying, and puts the body above
+            // fatigue parity at exactly the load the programme carries.
             test
                 "the delivery draw refuses a body with a Work part, and the pure carrier beside it draws" {
                 let worker =
@@ -878,16 +809,11 @@ let courierTests =
                     "and the worker still does not"
             }
 
-            // #373's second half. The TTL clause (#354) priced the loaded leg
-            // off the body **as it stands** when it asks — and it stands
-            // empty, because it has to be empty to draw. An empty body is not
-            // the one that walks the leg: a `10 Carry; 5 Move` body is
-            // weightless empty and two ticks a plain tile under a 500-unit
-            // load, so the old read let it through at half the walk it went
-            // on to make, and three ticks of life a tick on that walk is what
-            // killed the worker in W15S25. The leg is now priced from the
-            // Storage's own neighbours for the body carrying
-            // `Tuning.ReactorLoad` (`Atlas.walkTicksFrom`, `Grid.factorCarrying`).
+            // The body asking is empty (it has to be, to draw), and an empty
+            // body is not the one that walks the leg: a `10 Carry; 5 Move`
+            // body is weightless empty and two ticks a plain tile under a
+            // 500-unit load. The leg is priced from the Storage's own
+            // neighbours for the body carrying `Tuning.ReactorLoad`.
             test "the loaded leg is priced for the body as loaded, not as it stands empty" {
                 let atStorage life =
                     let slow =
@@ -933,26 +859,16 @@ let courierTests =
                     (draws (atStorage (lifeNeededFor loadedLeg - 1)))
                     "one tick short of it is refused"
 
-                // #378: the margin itself. `hauler-558190` drew live with
-                // about two ticks over a 196-tick leg and died in the
-                // Reactor's room with 500 T aboard, because the gate was the
-                // bare equality and the walk the body makes is not the walk
-                // the Atlas prices — a flee, a keeper detour, a swamp step.
+                // The margin: the walk the body makes is not the walk the
+                // Atlas prices — a flee, a keeper detour, a swamp step.
                 Expect.isFalse
                     (draws (atStorage (loadedLeg * Tuning.defaults.MineContactAgeing)))
                     "exactly the loaded leg's own arithmetic, with no slack over it, is refused"
             }
 
-            // #378, the three parts of the last load, on the fixture the
-            // delivery pair already uses.
-            //
-            // Live at t559,469 the Reactor ran down toward zero with **376 T**
-            // standing in W15S28's Storage, because `courierProgrammeOpen` and
-            // the draw both read `stock >= Tuning.ReactorLoad` and 376 is not
-            // 500. Every deposit we owned was mined out, so there was never
-            // going to be a fuller load: the gate could not say "this is the
-            // last of it" and the season's remainder was unreachable by
-            // construction.
+            // Live at t559,469 the Reactor ran down toward zero with 376 T in
+            // W15S28's Storage and every deposit mined out: there was never
+            // going to be a fuller load.
             test
                 "the last load is drawn whole once no more ore is coming, and the full-load gate stands while it is" {
                 let banked amount digging =
@@ -990,14 +906,11 @@ let courierTests =
                     (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some partial))
                     "and the Intent names the remainder, where it names the whole load when there is one"
 
-                // #380: a pooled Task nobody may hold is not a delivery. The
-                // remainder is under half this body's carry, so #232's
+                // A pooled Task nobody may hold is not a delivery: the
+                // remainder is under half this body's carry, so the
                 // worth-the-trip line refuses it unless the delivery draw is
-                // exempt — and the exemption used to be carried by a rank
-                // comparison that #367's tier lift silently falsified. Live
-                // that left 376 T in the Storage with the Reactor dry for 424
-                // ticks and no body applicable to the draw, while the pooling
-                // assertion above passed.
+                // exempt, and the exemption was once carried by a rank
+                // comparison a tier lift silently falsified.
                 Expect.isTrue
                     (atStorage |> holds empty.Name (Withdraw("sto-1", Thorium)))
                     "and a body may actually hold it: the store is worth the trip because the ore has nowhere deeper to fall"
@@ -1016,19 +929,11 @@ let courierTests =
                     "a whole load is still a whole load"
             }
 
-            // #378's second part. A body holding the last load must have the
-            // Reactor as its sink, or the remainder is drawn and poured back
-            // into the store it came out of once a tick for ever: the marker
-            // that pools that sink is the exact `ReactorLoad`, which a
-            // remainder is not, so `Facts.carryingADelivery` carries the
-            // terminal state's own reading beside it.
-            //
-            // What *prefers* the Reactor is the tier gap and not a refusal
-            // (ADR 0023): the Reactor's Refill is Feeding and the Storage's is
-            // Stock. Refusing the Storage outright was tried and taken back
-            // out — it reached the last mine haul and an arriving
-            // consignment's carrier, which is #262's stranded body — so the
-            // Storage stays a sink for the tick the Reactor cannot be one.
+            // A remainder is not the exact `ReactorLoad` that marks a
+            // delivery, so `Facts.carryingADelivery` reads the terminal state
+            // beside it. The Reactor is preferred by the tier gap, not a
+            // refusal: refusing the Storage outright reached the last mine
+            // haul and an arriving consignment's carrier.
             test "a body holding the last load takes it to the Reactor, and may still bank it" {
                 let carrier = courier "courier-holding" |> carrying 376
 
@@ -1062,23 +967,15 @@ let courierTests =
                     "the Storage is still a sink: a body that cannot reach the Reactor banks the ore rather than standing on it"
             }
 
-            // The regression the widened refusal would have caused, pinned so
-            // it cannot come back (#378, found by this change's spec review).
-            // `oreStillComing` is false for **every** colony with nothing left
-            // to dig, so a rule keyed on it alone reaches bodies that have
-            // nothing to do with the delivery: the hauler carrying the mine's
-            // last load home, a body sweeping a crossed room's pile, and the
-            // carrier walking an arriving consignment in from the terminal
-            // (#349). All three bank into the Storage, and `Planner.mineRefills`
-            // is written unconditionally so that they can.
+            // `oreStillComing` is false for every colony with nothing left to
+            // dig, so a rule keyed on it alone reaches the mine's last load,
+            // a crossed room's pile and an arriving consignment's carrier.
+            // All three bank into the Storage, and `Planner.mineRefills` is
+            // written unconditionally so that they can.
             test "a mined-out colony still banks ore too heavy for the Reactor" {
-                // The body is a carrier holding **more than one load** — the
-                // shape an arriving consignment's hauler has (#349), and the
-                // one the Reactor's own Refill turns away on
-                // `creep.Thorium <= ReactorLoad`. Its only sink is the
-                // Storage, so a rule that refuses the Storage to "a body
-                // holding ore in a mined-out colony" leaves it applicable to
-                // nothing at all.
+                // A carrier holding more than one load, which the Reactor's
+                // own Refill turns away on `creep.Thorium <= ReactorLoad`:
+                // its only sink is the Storage.
                 let hauler =
                     creepWith
                         "hauler-arrival"
@@ -1112,12 +1009,9 @@ let courierTests =
                     "and the body holds it: refusing this leaves an over-full carrier applicable to nothing (#262)"
             }
 
-            // #378's third part, and #367's finding one object over. A
-            // tombstone beside the Reactor is season score at the far end of
+            // A tombstone beside the Reactor is season score at the far end of
             // the delivery's own walk; ranked `StockDraw` it lost every
-            // travel-cost tie to the energy work at home, and live 500 T sat
-            // in `hauler-558190`'s tombstone in W15S25 decaying while a
-            // courier hauled a container's energy three rooms away.
+            // travel-cost tie to the energy work at home.
             test
                 "ore lying in the Reactor's room ranks with the delivery and its sink is the Reactor" {
                 let tombTile = { X = 26; Y = 45 }
@@ -1176,20 +1070,11 @@ let courierTests =
                     "the sink is the Reactor five tiles away, not the Storage three crossings back"
             }
 
-            // #354's third clause, at the one end this fixture can show. The
-            // clause: a delivery draw is refused a body that cannot outlive the
-            // loaded leg, priced at three ticks of life per tick walked
-            // (`Tuning.MineContactAgeing`) — a body that dies loaded does not
-            // lose a body, it loses the ore, through a tombstone that cooks its
-            // own tile and drops a pile that bleeds at 1 T a tick.
-            //
-            // What is pinned here is its **permissive** end (ADR 0004): an
-            // unpriceable leg refuses nobody. This fixture is one crossing with
-            // no ground behind either landing (ADR 0062) and a nameless home
-            // layer, so every cross-room price out of it is `None` — which is
-            // why the refusal itself is pinned nowhere yet and #354 carries the
-            // ticket for it. `RoomSeamTests` holds the arithmetic over the real
-            // captures: 159 loaded ticks, 477 of life at the contact rate.
+            // The TTL clause's permissive end: an unpriceable leg refuses
+            // nobody. `bareDeliveryColony` is one crossing with no ground
+            // behind either landing, so every cross-room price out of it is
+            // `None`. `RoomSeamTests` holds the arithmetic over the real
+            // captures.
             test "an unpriceable delivery leg refuses nobody, however old the body" {
                 let aged =
                     { courier "courier-aged" with
@@ -1210,14 +1095,10 @@ let courierTests =
                     "a walk the Atlas cannot price is no reason to refuse a body its work"
             }
 
-            // #354. The Reactor burns exactly 1 T a tick against a
-            // 1,000-unit store, so nothing about a *cadence* can meter this
-            // delivery: 999 T every 636 ticks is 1.57 T a tick, and the
-            // surplus has nowhere to be but a courier's store or the floor —
-            // which is where 915 T of it went. The draw is gated on the
-            // store's own room instead, read at the draw and so strictly
-            // conservative: the store drains for the whole loaded walk, so a
-            // load admitted here has more room when it lands than when it left.
+            // The Reactor burns 1 T a tick against a 1,000-unit store, so no
+            // cadence can meter the delivery; the draw is gated on the store's
+            // own room, read at the draw and so strictly conservative: the
+            // store drains for the whole loaded walk.
             test "the draw waits for the Reactor to have room for a whole load" {
                 let withStore held =
                     deliveryColony (Some Ownership.Ours) |> withReactorStore held
@@ -1240,13 +1121,9 @@ let courierTests =
                     "and a full Reactor is the case that stranded a loaded courier on its own hot tile"
 
                 // The sink is not gated with the draw: a load already drawn
-                // must have somewhere to go while any of it fits, which is the
-                // same reason the start facts closing does not strand one. A
-                // store with room for one unit and not for one load closes the
-                // draw and keeps the sink — and only a Reactor at its cap
-                // closes both, which is the `stored < reactorCapacity` rule
-                // this leaves alone: an engine `transfer` into a full store is
-                // an error, not a wait.
+                // must have somewhere to go while any of it fits. Only a
+                // Reactor at its cap closes both, since an engine `transfer`
+                // into a full store is an error, not a wait.
                 let loaded = courier "courier-loaded" |> carrying 500
 
                 let nearlyFull =
@@ -1264,23 +1141,17 @@ let courierTests =
                     "and the draw behind it stays shut"
             }
 
-            // #362, and the sentence the gate's docstring had to give up: "a
-            // load admitted here has strictly more room when it lands" is true
-            // of one carrier and false of two. Live at t501,501 a hauler drew
-            // 204 T against a low store; the gate stayed open behind it, a
-            // courier drew a whole 500 and landed first, and the hauler reached
-            // a store of 999 with 196 T it could not put down — 152 ticks
-            // standing on the Reactor's tile, beside 419 T already on the floor
-            // from the same shape.
+            // "A load admitted here has strictly more room when it lands" is
+            // true of one carrier and false of two: live a hauler drew 204 T,
+            // a courier drew a whole 500 behind it and landed first, and the
+            // hauler reached a store of 999 with 196 T it could not put down.
             test "the draw counts the ore already walking, not only the ore already burnt" {
                 let room = Engine.reactorCapacity - Tuning.defaults.ReactorLoad
 
                 let withStore held =
                     deliveryColony (Some Ownership.Ours) |> withReactorStore held
 
-                // One unit afloat is one unit of the room already spoken for,
-                // which is the whole of the fix: the store is not the only
-                // claim on the Reactor's space.
+                // One unit afloat is one unit of the room already spoken for.
                 let afloat aboard held =
                     withStore held
                     |> withErrandCreep ringTile (courier "courier-walking" |> carrying aboard)
@@ -1295,19 +1166,18 @@ let courierTests =
                     (Withdraw("sto-1", Thorium))
                     "and a unit of room to spare over what is afloat opens it again"
 
-                // The live shape, to the numbers it happened at: 204 aboard
-                // against a store that leaves room for a load and no more.
+                // The live shape: 204 aboard against a store that leaves room
+                // for a load and no more.
                 Expect.isFalse
                     (planTasksOn (afloat 204 room) noThreats
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "the incident's own arithmetic: 204 walking is 204 of the store's room already claimed"
 
                 // Counting every unit afloat counts a mine hauler's load too,
-                // which is not inbound to the Reactor at all. That is the
-                // conservative side of the trade and it is asserted rather than
-                // regretted: naming which body is inbound means reading the
-                // assignments the Planner is blind to (ADR 0025), and the cost
-                // of the reading is one haul cycle of cadence.
+                // which is not inbound to the Reactor at all: naming which
+                // body is inbound means reading the assignments the Planner is
+                // blind to, and the cost of the reading is one haul cycle of
+                // cadence.
                 let mineHaul =
                     { withStore room with
                         Creeps =
@@ -1320,17 +1190,10 @@ let courierTests =
                     "ore walking home to the Storage defers the draw as well, deliberately"
             }
 
-            // The regression the first version of this gate shipped (#354).
-            // `SpatialInfo.Thorium` carries every store a Task can name and
-            // deliberately not the Reactor's — `RoomFacts.Thorium`'s own
-            // comment says so — and the gate read it there anyway: a Reactor
-            // holding 999 answered 0, the gate never closed once in flight, and
-            // ore went on arriving at a full store and reaching its floor.
-            //
-            // What made it invisible is the part worth pinning: the test agreed
-            // with the gate, because the fixture wrote the store where the gate
-            // looked. This case writes the Reactor's store into that map on
-            // purpose and asserts the gate does **not** see it.
+            // `SpatialInfo.Thorium` deliberately does not carry the Reactor's
+            // store, and a gate that read it there once answered 0 for a
+            // Reactor holding 999 while the fixture agreed with it. This case
+            // writes the store into that map on purpose.
             test "the draw reads the Reactor's own row, and no Thorium map beside it" {
                 let ready = deliveryColony (Some Ownership.Ours)
 
@@ -1353,21 +1216,18 @@ let courierTests =
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "the same number on the Reactor's own row closes the draw"
 
-                // And the row's absence is a closed draw, not an open one: a
-                // Reactor we cannot see has no store to answer with, and a load
+                // The row's absence is a closed draw, not an open one: a load
                 // is better banked at home than walked towards a level nobody
-                // read (ADR 0004).
+                // read.
                 Expect.isFalse
                     (planTasksOn { ready with Reactors = [] } noThreats
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "no vision, no row, no draw"
             }
 
-            // The other half of #354: the ore that reached the floor could be
-            // named by nobody. `Facts.ourThoriumPiles` filtered "a room we
-            // own", and the Reactor's room has no controller at all, so it is
-            // owned by nobody and its floor was invisible — while a CLAIM body
-            // of ours stood two tiles away and the pile decayed at 1 T a tick.
+            // `Facts.ourThoriumPiles` once filtered "a room we own", and the
+            // Reactor's room has no controller at all, so its floor was
+            // invisible while a CLAIM body of ours stood two tiles away.
             test "a Thorium pile on the declared Reactor's floor is ours to pick up" {
                 let pileTile = { X = 26; Y = 43 }
 
@@ -1409,19 +1269,11 @@ let courierTests =
                     "a room we neither own nor declared is still none of ours"
             }
 
-            // #359, the same room one object over. A courier that dies on the
-            // ring leaves its ore in a **tombstone**, not on the floor: live at
-            // W15S25 that was 175 T at (43,6). The floor check above catches it
-            // only after the tombstone decays, which drops the whole store as
-            // piles that then bleed — so what is drawn here is what those ticks
-            // would have cost.
-            //
-            // The shape these cases hand-write — a `Tombstone` kind, a tile and
-            // a Thorium amount, all three inside a declared room — is one the
-            // projection has to be able to build, and until this ticket it could
-            // not: `erranding` emptied that room's census. `ViewTests`' "and the
-            // ore in a tombstone on that floor rides on the same argument" is
-            // this case's other half and was written with it (#355, #356).
+            // A courier that dies on the ring leaves its ore in a tombstone,
+            // not on the floor; the floor check catches it only after the
+            // tombstone decays into piles that bleed. The shape hand-written
+            // here is one the projection has to be able to build, and
+            // `ViewTests`' tombstone case is this one's other half.
             test "a tombstone of ours on that floor is ours to draw, ore and all" {
                 let tombTile = { X = 26; Y = 45 }
 
@@ -1449,10 +1301,8 @@ let courierTests =
                     (Withdraw("tomb-reactor", Thorium))
                     "the errand room's tombstone is drawn on the errand room's own argument"
 
-                // **No threshold**, where the pile above carries one: the
-                // [[pickup reflex]] is the pile's alternative to a Task and
-                // there is no reflex that empties a store, so the alternative
-                // here is the decay. One unit is a Task.
+                // No threshold, where the pile above carries one: there is no
+                // reflex that empties a store, so the alternative is the decay.
                 Expect.contains
                     (planTasksOn (withTomb errandRoom 1) noThreats)
                     (Withdraw("tomb-reactor", Thorium))
@@ -1464,16 +1314,11 @@ let courierTests =
                     "a room we neither own nor declared is still none of ours"
             }
 
-            // #354's TTL clause, asked of the object #359 added, on the one
-            // fixture in this suite whose leg has a price. The clause refuses a
-            // **Storage** draw to a body that cannot outlive the loaded leg at
-            // `Tuning.MineContactAgeing`, because that load has nowhere to go
-            // but the Reactor three rooms away and no cool tile to wait on. A
-            // tombstone draw is the opposite errand in every term: the ore is
-            // already in the room, the walk is over, and the ore is decaying
-            // under a body that is standing next to it. Refusing it would leave
-            // the colony watching the ore go rather than saving a body that is
-            // going anyway.
+            // A tombstone draw is the opposite errand from the Storage's in
+            // every term: the ore is already in the room, the walk is over,
+            // and it is decaying under a body standing next to it. Refusing
+            // it would leave the colony watching the ore go rather than
+            // saving a body that is going anyway.
             test "the TTL clause refuses the Storage's load and not a tombstone's in that room" {
                 let tombTile = { X = 26; Y = 45 }
 
@@ -1495,12 +1340,9 @@ let courierTests =
                                 Thorium =
                                     ready.Spatial.Thorium
                                     |> Map.add "tomb-reactor" 175
-                                    // The mine emptied, so the ore intakes this
-                                    // body chooses between are the two under
-                                    // test and not three: the matcher scores a
-                                    // candidate against its cheapest rival
-                                    // alone, and the container is nearer than
-                                    // either.
+                                    // The mine emptied, so the ore intakes are
+                                    // the two under test: the container is
+                                    // nearer than either.
                                     |> Map.add "can-min" 0
                             }
                             |> withNeighbour
@@ -1524,33 +1366,25 @@ let courierTests =
                     "and the very same body draws the tombstone: a short local errand over ore that is bleeding"
             }
 
-            // #359's other end: a draw is only worth pooling if the load has
-            // somewhere to go (#262's stranded carrier, which is why the
-            // Storage's Thorium sink is pooled off free capacity alone). A
-            // tombstone's 175 is under `Tuning.ReactorLoad`, so what this pins
-            // is that **no rung of the delivery's arithmetic shuts on a
-            // sub-load**: the 500-unit gate #354 added is on the *draw* from
-            // Storage, and the Reactor's own Refill admits any load at or under
-            // one (#319's cap clause).
+            // A tombstone's 175 is under `Tuning.ReactorLoad`, so this pins
+            // that no rung of the delivery's arithmetic shuts on a sub-load:
+            // the 500-unit gate is on the draw from Storage, and the Reactor's
+            // own Refill admits any load at or under one.
             test "a sub-load of ore has a sink: the Reactor beside it, or the Storage at home" {
                 let carried = 175
                 let loaded = courier "courier-part" |> carrying carried
 
-                // The Storage half of the pair is a **walk home**, so it needs
-                // a crossing that prices (ADR 0062): an unpriceable sink reads
-                // as "no sink" for a reason that is the fixture's and not the
-                // rule's. Since #379 the shared fixture prices it, where this
-                // case used to have to ask for a floor of its own.
+                // The Storage half of the pair is a walk home, so it needs a
+                // crossing that prices: an unpriceable sink reads as "no sink"
+                // for the fixture's reason and not the rule's.
                 let open' = deliveryColony (Some Ownership.Ours) |> withErrandCreep ringTile loaded
 
                 Expect.isTrue
                     (open' |> holds loaded.Name (Refill(reactor, Thorium)))
                     "with the programme open the Reactor is the nearer sink and takes a part load"
 
-                // The pairwise control: the same body in the same room with the
-                // bank drained under one delivery, which is the one fact
-                // `courierProgrammeOpen` reads here. The Reactor's Refill leaves
-                // the pool with it, and the sink is the Storage's own.
+                // The pairwise control: the bank drained under one delivery,
+                // which is the one fact `courierProgrammeOpen` reads here.
                 let shut =
                     { open' with
                         Spatial =
@@ -1709,11 +1543,8 @@ let courierTests =
             }
         ]
 
-/// The sweep's third reach (#360): ore in a room a chain merely **crosses**.
-/// The pool-side counterpart of `ViewTests`' "only the ore comes through", for
-/// the reason #355 and #356 were both filed — a rule green against a shape the
-/// projection cannot build, or a projection carrying a fact no rule reads, and
-/// this feature is one function in each file.
+/// Ore in a room a chain merely crosses: the pool-side counterpart of
+/// `ViewTests`' "only the ore comes through".
 [<Tests>]
 let crossedSweepTests =
     testList
@@ -1751,26 +1582,19 @@ let crossedSweepTests =
             }
         ]
 
-/// The consignment (#349): W12S28 and W13S28 bank 36,484 T between them and sit
-/// five and six crossings from the Reactor, outside `Tuning.MaxHops` — so no
-/// courier row of theirs can ever open, and the ore moves by terminal or not at
-/// all. Three rules haul it (`Planner`) and one ships it (`Layout`), and these
-/// are the tests of the pairing between them.
+/// The consignment: W12S28 and W13S28 sit five and six crossings from the
+/// Reactor, outside `Tuning.MaxHops`, so the ore moves by terminal or not at
+/// all. Three rules haul it (`Planner`) and one ships it (`Layout`).
 [<Tests>]
 let consignmentTests =
     testList
         "the consignment"
         [
-            // #373's Work-part clause is the **delivery** draw's: a consignor's
-            // Storage is drawn for its own terminal, a leg of a few tiles with
-            // no crossing on it, and it is a Storage's Thorium too. What tells
-            // the two apart in the Emitter is the errand — a consignor declares
-            // none — so the worker this colony has is still a body for the
-            // consign draw. Read off the verbose Scoring rather than the
-            // assignment, because the fixture pools a mine haul and the
-            // energy economy against it and which wins is not this case's
-            // claim; that the draw is *scored* for the worker, and not rejected
-            // at applicability, is.
+            // A consignor's Storage is drawn for its own terminal, a leg of a
+            // few tiles, and what tells it from the delivery draw is the
+            // errand a consignor does not declare. Read off the verbose
+            // Scoring: that the draw is scored for the worker, not rejected at
+            // applicability, is the claim; which Task wins is not.
             test
                 "a consignor's Storage draw keeps the worker: the Work-part clause is the delivery draw's alone" {
                 let worker =
@@ -1822,9 +1646,7 @@ let consignmentTests =
                     (Refill("term-1", Thorium))
                     "and the terminal is where it goes"
 
-                // The fee's intake, which matters as much as the ore: `send` is
-                // paid out of the sending terminal's own energy, and W12S28's
-                // storage was emptied to 0 by the 100,000 the terminal cost.
+                // `send` is paid out of the sending terminal's own energy.
                 Expect.contains
                     (planTasksOn (consigningColony 0 0) noThreats)
                     (Refill("term-1", Energy))
@@ -1850,28 +1672,17 @@ let consignmentTests =
                     (Refill("sto-1", Thorium))
                     "and the Storage takes it, the same sink the mine's own ore uses"
 
-                // 4,000 energy a colony turns on this clause. Only a sender
-                // pays a fee, and a terminal stocked for a send it will never
-                // make has taken that much out of the spawn economy to hold
-                // forever — which live would have been W15S28, the receiving
-                // end, and W11S29, four levels from an extractor.
+                // Only a sender pays a fee, and a terminal stocked for a send
+                // it will never make has taken 4,000 out of the spawn economy
+                // to hold forever.
                 Expect.isFalse
                     (arriving |> List.contains (Refill("term-1", Energy)))
                     "and no fee is stocked for a send this colony never makes"
 
-                // The ore sink is gated too, and this pair is the live bug
-                // (#363). The argument for leaving it open was `mineRefills`' —
-                // a laden body must have somewhere to put its load down — and
-                // it is a good argument about the wrong pair: the *Storage's*
-                // Thorium sink is pooled unconditionally and is that somewhere.
-                // An ungated terminal sink is a **second** sink in a room that
-                // also draws ore out of that same terminal, and the two fed
-                // each other: at W15S28 a courier and a hauler both matched the
-                // terminal's Refill while 19,848 T sat in it waiting to be
-                // walked to the Storage, and the courier's delivery load —
-                // drawn for a Reactor three crossings out, then at 619 and 380
-                // ticks without a delivery — was about to go back into the
-                // terminal beside it.
+                // The ore sink is gated too: the Storage's unconditional
+                // Thorium sink is where a laden body puts its load down, and
+                // an ungated terminal sink in a room that also draws out of
+                // that terminal fed itself live.
                 Expect.isFalse
                     (arriving |> List.contains (Refill("term-1", Thorium)))
                     "and the receiving end never offers its terminal as a sink: that is the loop, and the Storage is the sink a laden body needs"
@@ -1883,8 +1694,7 @@ let consignmentTests =
 
                 // The two directions must never both be pooled in one colony:
                 // a room that ships out and draws in would cycle its ore
-                // between two stores forever, one Task undoing the other — the
-                // self-feeding loop ADR 0023 refuses for the stock's Withdraw.
+                // between two stores forever.
                 Expect.isFalse
                     (planTasksOn (consigningColony 5_000 10_000) noThreats
                      |> List.contains (Withdraw("term-1", Thorium)))
@@ -1951,27 +1761,18 @@ let consignmentTests =
             }
         ]
 
-/// #367: the one Thorium draw whose sink is the Reactor, and the tier it ranks
-/// on. Filed under the errand because that is what makes this draw unlike every
-/// other one — there is a programme at the far end that turns the load into
-/// score, and a store at the far end that burns 1 T a tick whether or not the
-/// load arrives.
+/// The one Thorium draw whose sink is the Reactor, and the tier it ranks on:
+/// a programme at the far end turns the load into score, and a store there
+/// burns 1 T a tick whether or not the load arrives.
 [<Tests>]
 let deliveryRankTests =
     testList
         "the delivery's rank"
         [
             test "the delivery's own draw outranks the energy hauling beside it" {
-                // Live at t506,631-507,096 it did not. The courier scored
-                // `withdraw:<storage>:Thorium` at rank 8 every tick while
-                // ordinary energy hauling scored -2 and 0, so it hauled energy
-                // for 465 ticks and the Reactor fell from 500 T to 47 with
-                // 35,376 T banked ten tiles away. Nothing in the pool had
-                // changed; the colony had — W15S29's two source containers, the
-                // terminal's arrival haul and the mine haul between them mean
-                // there is now *always* energy work, and ADR 0057 decision 3's
-                // "the work a body does when it has no better" became work
-                // nobody ever did.
+                // With source containers, the arrival haul and the mine haul
+                // there is always energy work, so "the work a body does when
+                // it has no better" became work nobody ever did.
                 let delivering = deliveryColony (Some Ownership.Ours)
 
                 let rankOf colony task =
@@ -1980,10 +1781,8 @@ let deliveryRankTests =
                         if pooled.Task = task then Some pooled.Priority else None)
 
                 // Stated as a tier and not against a neighbour task, because
-                // what it competes with is every Feeding-tier intake in the
-                // colony and this fixture carries only some of them: the claim
-                // is that the draw now sits *in* that tier instead of one below
-                // it, which is exactly the -2 against 8 the live scoring showed.
+                // it competes with every Feeding-tier intake and this fixture
+                // carries only some of them.
                 Expect.isLessThan
                     (rankOf delivering (Withdraw("sto-1", Thorium)))
                     (Some(priorityOfTier StockDraw))
@@ -2007,16 +1806,10 @@ let deliveryRankTests =
             }
 
             test "and it admits one body, not one per banked load" {
-                // The hazard the tier change introduces, capped in the same
-                // breath: the ordinary Withdraw capacity divides the store by
-                // the load, which for a bank of 34,876 T is 69 holders — and at
-                // the top of the Feeding tier that is every idle Carrier in the
-                // colony walking 500 T three rooms out while the spawn cluster
-                // it was refilling goes empty (live W15S28: 215 of 8,300).
-                //
-                // One, because the programme is one body by construction: #319
-                // sized a fixed 20-Carry courier against a 636-tick cadence and
-                // the row's quota is 1.
+                // The ordinary Withdraw capacity divides the store by the
+                // load, which for a bank of 34,876 T is 69 holders — at the
+                // top of Feeding, every idle Carrier walking 500 T three rooms
+                // out. One, because the programme is one body by construction.
                 let capOf colony task =
                     poolOn colony
                     |> List.tryPick (fun pooled ->
@@ -2030,13 +1823,9 @@ let deliveryRankTests =
                     (Some 1)
                     "one courier's worth of the bank, whatever the bank holds"
 
-                // Pairwise against the mine's own draw on the same fixture
-                // family, which keeps the load-divided cap it was given (#161).
-                // And the mine's own draw keeps #161's arithmetic — 1,200 of
-                // ore over this fixture's 200-energy hauler load is six bodies
-                // — which is the number this cap is *right* to answer: that
-                // haul is a few tiles of one room, and a body that fills up
-                // half way puts the rest down beside it.
+                // Pairwise against the mine's own draw, which keeps its
+                // load-divided cap: 1,200 of ore over this fixture's 200 load
+                // is six bodies, right for a haul of a few tiles in one room.
                 Expect.equal
                     (capOf (mineHaulColony |> withMineStock 1200) (Withdraw("can-min", Thorium))
                      |> Option.bind (Capacity.capOf CapScope.Everyone))

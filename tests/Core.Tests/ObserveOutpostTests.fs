@@ -1,6 +1,6 @@
-/// The Raid log's second family (ADR 0043): the stand-downs, the ring they
-/// trim by a rule of their own, the gate that reads them, the withdrawal with
-/// no clock, the reservation somebody else is standing on, and the guard's
+/// The Raid log's second family: the stand-downs, the ring they trim by a
+/// rule of their own, the gate that reads them, the withdrawal with no
+/// clock, the reservation somebody else is standing on, and the guard's
 /// memory of a room it has gone blind in.
 module Fabot.Core.Tests.ObserveOutpostTests
 
@@ -13,12 +13,9 @@ let outpostTests =
     testList
         "raid fold: outpost episodes"
         [
-            // #382 (ADR 0074). The two cores of one stronghold carry the
-            // **same** collapse timer — live, W15S26's `bunker4` and the
-            // level-0 core it expanded into W15S27 were both clocked to
-            // t655,973 — so the clock cannot tell them apart and the level
-            // can. Only the bunker's room is impassable: a level-0 core has
-            // no tower, no rampart and no garrison, and a body walks past it.
+            // #382. The two cores of one stronghold carry the **same** collapse
+            // timer (live, W15S26's `bunker4` and the level-0 core it expanded into
+            // W15S27 were both clocked to t655,973), so the level tells them apart.
             test "a stronghold's room is shut and impassable; a level-0 core's is only shut" {
                 let expiry = 400
 
@@ -40,11 +37,10 @@ let outpostTests =
                     [ true ]
                     "the row remembers the bunker, so the fact outlives the vision that read it"
 
-                // The defect the first build had, pinned. `Basis` says which
-                // clock the expiry came off and `sight` overwrites it whenever
-                // a later deadline arrives, so keying the room's passability
-                // on the basis meant a raid outliving its core put four towers
-                // back on a crossable route. The flag is sticky instead.
+                // The defect the first build had: `Basis` says which clock the expiry
+                // came off and `sight` overwrites it whenever a later deadline arrives,
+                // so keying passability on the basis put four towers back on a
+                // crossable route. The flag is sticky instead.
                 let thenRaided =
                     atLevel 4 |> raidTick 20 (raid [ raiderIn outpostRoom 1 [ Move; Attack ] ])
 
@@ -59,20 +55,14 @@ let outpostTests =
             }
 
             test "a raid two guards cannot beat stands the room down to its own life" {
-                // #257. ADR 0043 clocked a stand-down off an invader *core*
-                // and off nothing else, so a raid of plain creeps offered no
-                // deadline at all: W13S29 stayed open through one, the rows
-                // went on hiring into it, and in three hundred ticks it took
-                // two reservers and a guard while the invaders kept full
-                // health. An Invader in a room nobody owns never suicides, so
-                // what it has left is exactly what it will spend and that is
-                // the clock.
+                // #257: a stand-down clocked off an invader *core* alone gave a raid of
+                // plain creeps no deadline; W13S29 stayed open through one and in three
+                // hundred ticks lost two reservers and a guard. An Invader in a room
+                // nobody owns never suicides, so what it has left is the clock.
                 //
-                // Read only for a raid the guard row's cap cannot beat, which
-                // is what keeps the withdrawal from cancelling ADR 0056 before
-                // it fights: shutting a room takes it out of the scan set, so a
-                // raid that shut it on sight would hide its own hostiles and
-                // buy no guard at all. Pairwise on the raid's size alone.
+                // Read only for a raid the guard row's cap cannot beat: shutting a room
+                // takes it out of the scan set, so a raid that shut it on sight would
+                // hide its own hostiles and buy no guard. Pairwise on the raid's size.
                 let raidIn hostiles =
                     { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles = hostiles |> List.mapi (raiderIn outpostRoom)
@@ -130,12 +120,9 @@ let outpostTests =
             }
 
             test "a transit-room hostile opens no stand-down, regardless of owner" {
-                // #324. W15S26 is projected only because the Errand's chain
-                // crosses it. Its hostiles stay in the view so a walker can
-                // Flee, but this gate can neither garrison the room nor
-                // withhold any work in it. The ordinary Invader is the
-                // asymmetric case: filtering only the expected Source Keeper
-                // would make this half fail.
+                // #324. W15S26 is projected only because the Errand's chain crosses
+                // it. The ordinary Invader is the asymmetric case: filtering only the
+                // expected Source Keeper would make this half fail.
                 let transitRoom = "W15S26"
                 let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
 
@@ -154,9 +141,8 @@ let outpostTests =
             }
 
             test "an invader core opens a stand-down that runs to its collapse timer" {
-                // The best of ADR 0043's three deadlines, and the only one
-                // the engine hands over already absolute — the shell added
-                // this tick to `ticksRemaining` on the way in (#133).
+                // The only deadline the engine hands over already absolute: the shell
+                // added this tick to `ticksRemaining` on the way in (#133).
                 let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom (Some 900) ])
 
                 Expect.equal
@@ -166,10 +152,8 @@ let outpostTests =
             }
 
             test "a core with no collapse timer runs to the end of the reservation it took" {
-                // A level-0 core has no stronghold to collapse and carries
-                // no timer, so the only deadline it has is the hold it took
-                // with `attackController`. `TicksToEnd` is relative, so the
-                // tick is this one plus it: stored as read it would be a
+                // A level-0 core carries no timer, so its only deadline is the hold it
+                // took. `TicksToEnd` is relative: stored as read it would be a
                 // deadline four thousand ticks after the epoch.
                 let state =
                     RaidState.empty
@@ -185,23 +169,13 @@ let outpostTests =
             }
 
             test "a hold shorter than the fallback is no deadline at all" {
-                // ADR 0043's amendment, taken in #136 because this is the
-                // ticket where a short clock first became observable: the
-                // reservation branch may only ever answer *later* than the
-                // fallback.
+                // #136, where a short clock first became observable: the reservation
+                // branch may only ever answer *later* than the fallback. A core
+                // re-reserves the controller the tick the hold lapses, and a core that
+                // has just taken an unreserved controller holds it for three ticks;
+                // read literally that is a three-tick stand-down.
                 //
-                // A core outlives the hold it takes — it re-reserves the
-                // controller the tick the hold lapses — so the end of a
-                // reservation is never the end of the core, and a hold
-                // with a handful of ticks left says only what the core did
-                // last tick. The engine hands out exactly that: a core
-                // that has just taken a controller nobody reserved holds it
-                // for three ticks. Read literally that is a three-tick
-                // stand-down, which is the "immediately" ADR 0043's own
-                // user story says no path may reach.
-                //
-                // Pairwise, one number at a time, on either side of the
-                // 2,500-tick fallback: only the length of the hold moves.
+                // Pairwise on either side of the 2,500-tick fallback.
                 let heldFor ticks =
                     RaidState.empty
                     |> raidTick
@@ -231,13 +205,9 @@ let outpostTests =
                     ]
                     "at the fallback's own length the hold reads through, and says so"
 
-                // The basis is the operator's half of the amendment: the
-                // number the two answers give at the boundary is the same,
-                // and "shut until 2,600" and "shut until 2,600 because
-                // nothing could be read" are different answers (#117). So
-                // the floor is not a `max` over the tick with the reason
-                // left standing — a stand-down naming a reservation names
-                // the tick that reservation really ends on.
+                // The basis: "shut until 2,600" and "shut until 2,600 because nothing
+                // could be read" are different answers (#117), so the floor is not a
+                // `max` over the tick with the reason left standing.
                 let basisOf rows =
                     rows |> List.map (fun (_, _, _, _, basis) -> basis)
 
@@ -249,12 +219,9 @@ let outpostTests =
 
             test
                 "the fallback clock is the colony's tunable, and it is both the floor and the answer" {
-                // `Tuning.StandDownFallback` (ADR 0052 decision 5),
-                // pairwise over the one field: it is read twice in the same
-                // rule — as the deadline a threat gave no readable clock
-                // for, and as the floor under a hold too short to believe —
-                // so moving it has to move both answers together or the
-                // second reading is a literal wearing the first one's name.
+                // `Tuning.StandDownFallback` is read twice in the same rule, as the
+                // deadline for an unreadable clock and as the floor under a short
+                // hold, so moving it has to move both answers together.
                 let shut fallback ticks =
                     let colony =
                         seen [ core outpostRoom None ]
@@ -288,10 +255,8 @@ let outpostTests =
             }
 
             test "with neither deadline readable the clock is the expansion period" {
-                // Nothing is unreadable here by accident: a core with no
-                // timer in a room nothing holds is the shape the fallback
-                // exists for, and no path may answer "indefinitely" or
-                // "now".
+                // A core with no timer in a room nothing holds is the shape the
+                // fallback exists for.
                 let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom None ])
 
                 Expect.equal
@@ -301,18 +266,12 @@ let outpostTests =
             }
 
             test "only the invader's own hold is a clock" {
-                // Pairwise, one holder at a time: a rule reading "not ours"
-                // would take a rival's reservation for the core's and shut
-                // the room until a tick that says nothing about the core,
-                // and ADR 0043 answers those two differently. Both fall back
-                // rather than reading a deadline off a hold that is not the
-                // threat's.
+                // Pairwise, one holder at a time: a rule reading "not ours" would take
+                // a rival's reservation for the core's.
                 //
-                // Since #165 a rival's hold is a deadline of its own — 300
-                // ticks here — and this is where the two families meet: the
-                // ring keeps the **later** of the reads a tick produces for
-                // one room, so the rival's short clock can never cut a core's
-                // stand-down short.
+                // Since #165 a rival's hold is a deadline of its own (300 ticks here):
+                // the ring keeps the **later** of the reads a tick produces for one
+                // room, so the rival's short clock never cuts a core's stand-down short.
                 let held holder =
                     RaidState.empty
                     |> raidTick
@@ -344,17 +303,11 @@ let outpostTests =
             }
 
             test "a re-read never shortens a stand-down that is already running" {
-                // The gate may be wrong in one direction only (ADR 0043's
-                // Consequences): a stale stand-down costs an outpost's
-                // income until its clock runs out, and the failure it
-                // prevents costs a creep a cycle. A later sighting can
-                // land on a worse deadline than the one already recorded
-                // — the core drains our hold and takes its own, freshly
-                // at a handful of ticks, or our reserver takes it back and
-                // the read falls through to the fallback — and reading
-                // that in would cut the stand-down short, which is the
-                // other direction. The same rule `deadlines` applies to
-                // two cores in one tick, applied across ticks.
+                // A later sighting can land on a worse deadline (the core drains our
+                // hold and takes its own at a handful of ticks, or the read falls
+                // through to the fallback), and reading that in would cut the
+                // stand-down short. The same rule `deadlines` applies to two cores in
+                // one tick, applied across ticks.
                 let shortened =
                     RaidState.empty
                     |> raidTick
@@ -383,11 +336,9 @@ let outpostTests =
             }
 
             test "a tick without vision moves no clock and closes no stand-down" {
-                // The dangerous case (#117): losing vision reads exactly
-                // like peace, and the quiet gap here is five ticks, so the
-                // spawn family would have closed this episode six times
-                // over. This family is exempt — the colony stops looking
-                // the moment it withdraws, so silence is never evidence.
+                // #117: losing vision reads exactly like peace, and the quiet gap here
+                // is five ticks, so the spawn family would have closed this episode
+                // six times over.
                 let standing = RaidState.empty |> raidTick 100 (seen [ core outpostRoom None ])
 
                 let blind =
@@ -401,11 +352,8 @@ let outpostTests =
             }
 
             test "a room seen clear stands down all the same, until its clock runs out" {
-                // Re-entry is a clock running out and never a second look
-                // (ADR 0043). A tick with vision and no core is not
-                // evidence the core is gone — it is what a creep passing
-                // the wrong tile sees — and even a true one does not open
-                // the gate early.
+                // A tick with vision and no core is what a creep passing the wrong
+                // tile sees, and even a true one does not open the gate early.
                 let state =
                     RaidState.empty
                     |> raidTick 100 (seen [ core outpostRoom None ])
@@ -450,10 +398,9 @@ let outpostTests =
             }
 
             test "a ring full of raids evicts no stand-down that is running" {
-                // One ring shared between the families would drop the
-                // episode driving the gate and reopen the room in the
-                // middle of a stand-down (#117). The cap is three here and
-                // four raids overflow it.
+                // One ring shared between the families would drop the episode driving
+                // the gate mid-stand-down (#117). The cap is three and four raids
+                // overflow it.
                 let state =
                     (RaidState.empty |> raidTick 10 (seen [ core outpostRoom (Some 500) ]),
                      [ 20; 30; 40; 50 ])
@@ -471,10 +418,9 @@ let outpostTests =
             }
 
             test "a stand-down still running survives a ring overflowing past it" {
-                // Six spent stand-downs in one room around one long-running
-                // one somewhere else, against a cap of three. The overflow
-                // is paid out of the finished rows and never out of the one
-                // holding a room shut.
+                // Six spent stand-downs in one room around one long-running one
+                // elsewhere, against a cap of three: the overflow is paid out of the
+                // finished rows.
                 let other = "W13S28"
 
                 let state =
@@ -498,14 +444,9 @@ let outpostTests =
             }
 
             test "a core in an outpost leaves the spawn room's raid exactly as it was" {
-                // The regression #117 asks for. The two families share a
-                // Memory leaf and nothing else, so every step the raid fold
-                // takes — the window, the roster, the closest approach, the
-                // losses and the damage, plus both baselines it carries
-                // between ticks — must read the same with a core standing
-                // next door as without one. Compared as whole states rather
-                // than through the projections, so a field no list here
-                // reads is covered too.
+                // #117's regression: the two families share a Memory leaf and nothing
+                // else. Compared as whole states, so a field no list here reads is
+                // covered too.
                 let sequence (colony: ColonyView) =
                     (RaidState.empty, [ 10..14 ])
                     ||> List.fold (fun state t ->
@@ -542,18 +483,12 @@ let clocklessTests =
         "raid fold: the withdrawal with no clock"
         [
             test "a room another player holds is remembered, and no episode opens for it" {
-                // ADR 0043's other trigger, and the community's one
-                // unanimous abandonment rule. It is not a threat, so there
-                // is no threat to read a deadline off and nothing for a
-                // basis to explain: the record is the room's name and
-                // that is the whole of it.
+                // Not a threat, so no deadline and nothing for a basis to explain: the
+                // record is the room's name.
                 //
-                // **Ownership alone since #165.** Owned and reserved are one
-                // fact to the economics (ADR 0042) and two facts to a gate
-                // that has to say when the room comes back: the engine ends a
-                // reservation and ends nothing about an owner. So the
-                // reservation moved to the ring, and the pairwise contrast is
-                // one room, one look, one field of the control entry apart.
+                // **Ownership alone since #165.** The engine ends a reservation and
+                // ends nothing about an owner, so the reservation moved to the ring;
+                // the pairwise contrast is one field of the control entry apart.
                 let owned = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
 
                 let reserved =
@@ -580,13 +515,10 @@ let clocklessTests =
             }
 
             test "the NPC's hold is a clock and never an exit" {
-                // Pairwise, one holder at a time — the whole reason
-                // `ReservationHolder` is three states and not a "not ours"
-                // flag (#133). Since #165 no holder latches: a reservation of
-                // anybody's ends on a tick the engine counts down, and the
-                // three answers are three *clocks* — the NPC's read off the
-                // core standing there, the rival's off the hold itself, and
-                // ours no clock at all because the room is being worked by us.
+                // Pairwise, one holder at a time, the reason `ReservationHolder` is
+                // three states and not a "not ours" flag (#133). Since #165 no holder
+                // latches: the NPC's clock is read off the core, the rival's off the
+                // hold, and ours is no clock at all.
                 let folded holder =
                     RaidState.empty
                     |> raidTick 100 (quiet |> visible outpostRoom (heldBy holder 4000))
@@ -603,10 +535,9 @@ let clocklessTests =
                     (held ReservationHolder.Rival)
                     "nor does the third: since #165 the latch is ownership's alone"
 
-                // The NPC's hold is read off the *core* and never off the
-                // controller (`deadlineOf`), so a hold with no core standing
-                // in the room opens nothing — where a rival's hold is read off
-                // the controller itself and opens an episode on the spot.
+                // The NPC's hold is read off the *core* and never off the controller
+                // (`deadlineOf`), so a hold with no core standing in the room opens
+                // nothing, where a rival's opens an episode on the spot.
                 Expect.isEmpty
                     (standDowns (folded ReservationHolder.Invader))
                     "no core is standing there, so the NPC's hold is nobody's deadline this tick"
@@ -622,14 +553,10 @@ let clocklessTests =
             }
 
             test "the conclusion is held through every tick nobody is looking" {
-                // The load-bearing half, and the reason this is persisted
-                // at all rather than read off each tick's ColonyView: the
-                // gate's own effect is to withdraw the creeps that paid for
-                // the vision that judged it. A rule re-read from nothing
-                // would reopen the room the tick after it shut it, and the
-                // colony would walk back into somebody else's room for
-                // ever — `standingDown`'s oscillation, arriving through
-                // the other trigger.
+                // The reason this is persisted rather than read off each tick's
+                // ColonyView: the gate's own effect is to withdraw the creeps that paid
+                // for the vision that judged it. Re-read from nothing it would reopen
+                // the room the tick after it shut it.
                 let taken = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
 
                 let blind =
@@ -642,14 +569,9 @@ let clocklessTests =
             }
 
             test "the tick recorded is the look that shut the gate, not the last look" {
-                // The trace half of the record (#117's US-20): the number
-                // beside the room is the tick the withdrawal began, so an
-                // operator can line an income drop up against it months
-                // later. A second look that finds the room still taken is
-                // not a second withdrawal and must not restamp it — and
-                // nothing measures against the tick, so keeping the first
-                // costs nothing and moving it would cost the only date
-                // there is.
+                // #117's US-20: the number beside the room is the tick the withdrawal
+                // began, so an operator can line an income drop up against it. A
+                // second look that agrees must not restamp it.
                 let twice =
                     RaidState.empty
                     |> raidTick 100 (quiet |> ownedByRival outpostRoom)
@@ -662,10 +584,7 @@ let clocklessTests =
             }
 
             test "a room taken again after it was freed is dated by the second withdrawal" {
-                // The other side of the rule above: the tick is the
-                // *current* withdrawal's, not the room's first ever, so a
-                // room that came back and was taken again dates from the
-                // taking that is holding it now.
+                // The tick is the *current* withdrawal's, not the room's first ever.
                 let again =
                     RaidState.empty
                     |> raidTick 100 (quiet |> ownedByRival outpostRoom)
@@ -679,20 +598,14 @@ let clocklessTests =
             }
 
             test "only a tick with vision takes a room back out" {
-                // "Until it is seen again" is the rule ADR 0043 gives, and
-                // it is written on vision in both directions: a look that
-                // finds the room free is as good evidence as the look that
-                // found it taken.
+                // Written on vision in both directions: a look that finds the room
+                // free is as good evidence as the look that found it taken.
                 //
-                // In the live colony that second look used to be something
-                // the bot could not arrange — a room this holds shut is not
-                // scanned, so nothing went there to see it — which made the
-                // withdrawal permanent until a human hand-edited the leaf.
-                // #165 arranges it: the gate re-admits a latched room to the
-                // **scan** once every `Tuning.RivalRecheck` ticks, and this
-                // fold is what such a look lands in. The rule here is
-                // unchanged and is why that was enough — a look that finds
-                // the room free has always taken it back out.
+                // Live, that second look used to be something the bot could not
+                // arrange, which made the withdrawal permanent until a human
+                // hand-edited the leaf. #165 re-admits a latched room to the **scan**
+                // every `Tuning.RivalRecheck` ticks, and this fold is where such a
+                // look lands.
                 let freed =
                     RaidState.empty
                     |> raidTick 100 (quiet |> ownedByRival outpostRoom)
@@ -702,19 +615,14 @@ let clocklessTests =
             }
 
             test "the look that falls due moves the stride, and never the date the gate shut on" {
-                // #275. The stride is measured between *looks*, so the tick a
-                // look was taken on is the one the record has to carry — and
-                // it is carried beside the shutting tick rather than over it,
-                // because the two answer different questions: one dates an
-                // income drop for an operator (#117's US-20), the other says
-                // when the colony next questions its own conclusion.
+                // #275. The stride is measured between *looks*, carried beside the
+                // shutting tick rather than over it: one dates an income drop, the
+                // other says when the colony next questions its own conclusion.
                 //
-                // The look is stamped whether or not vision answered. The gate
-                // re-admits the room to the scan for that tick and the colony
-                // may well be blind in it — which is the common case, the
-                // withdrawal itself having taken the vision away — and a look
-                // stamped only when it saw something would leave a blind room
-                // re-admitted on every tick from the stride onwards.
+                // The look is stamped whether or not vision answered: the colony is
+                // usually blind in a withdrawn room, and a look stamped only when it
+                // saw something would leave the room re-admitted on every tick from
+                // the stride onwards.
                 let recheck = Tuning.defaults.RivalRecheck
                 let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
 
@@ -723,9 +631,8 @@ let clocklessTests =
                     (Map.ofList [ outpostRoom, { Since = 100; LastLooked = 100 } ])
                     "the look that shut the gate is the last look taken, so far"
 
-                // Forty ticks late, which is the whole of what this ticket
-                // fixes: a tick the gate was not evaluated on delays the look
-                // rather than cancelling it.
+                // Forty ticks late: a tick the gate was not evaluated on delays the
+                // look rather than cancelling it.
                 let looked = state |> raidTick (100 + recheck + 40) quiet
 
                 Expect.equal
@@ -751,10 +658,8 @@ let clocklessTests =
             }
 
             test "a look with vision that agrees moves the stride and clears nothing" {
-                // The look that finds the rival still there: the latch stands,
-                // its date stands, and the stride runs again from this look.
-                // The one thing that separates it from the blind look above is
-                // that it could have cleared the latch and did not.
+                // The look that finds the rival still there: the latch and its date
+                // stand, and the stride runs again from this look.
                 let recheck = Tuning.defaults.RivalRecheck
 
                 let agreed =
@@ -776,10 +681,9 @@ let clocklessTests =
             }
 
             test "a colony nobody has taken anything from remembers nothing" {
-                // The home room is in `RoomControl` on every tick with
-                // vision and is the colony's own, so a rule reading
-                // "somebody holds this" the wrong way round would withdraw
-                // the colony from itself.
+                // The home room is in `RoomControl` on every tick with vision, so a
+                // rule reading "somebody holds this" the wrong way round would
+                // withdraw the colony from itself.
                 let home =
                     RaidState.empty
                     |> raidTick
@@ -808,16 +712,12 @@ let holdTests =
         "raid fold: the reservation somebody else is standing on"
         [
             test "a hold that is not ours is recorded against the tick it runs out on" {
-                // #333's record, and the three answers `ReservationHolder`
-                // gives read one at a time. What goes in the leaf is the
-                // fact the reserver row now refuses to hire against — the
-                // engine answers ERR_INVALID_TARGET on a controller anybody
-                // but us holds — so the channel can say *why* a declared
-                // outpost is being mined and not reserved.
+                // #333's record: the engine answers ERR_INVALID_TARGET on a controller
+                // anybody but us holds, so the channel can say *why* a declared outpost
+                // is being mined and not reserved.
                 //
-                // The tick is absolute, the engine's countdown being
-                // relative: 100 + 4,000. Stored as read it would date a hold
-                // to the start of the world.
+                // The tick is absolute, the engine's countdown being relative: 100 +
+                // 4,000. Stored as read it would date a hold to the start of the world.
                 let recorded holder =
                     (RaidState.empty
                      |> raidTick 100 (quiet |> visible outpostRoom (heldBy holder 4000)))
@@ -857,13 +757,9 @@ let holdTests =
             }
 
             test "the hold outlives the vision that read it, and ends itself" {
-                // The two rules the record is kept on, which are the latch's
-                // first and the ring's second. A tick without vision leaves
-                // the conclusion standing — the colony is blind in most of
-                // these rooms most of the time, and re-reading the entry off
-                // nothing would clear it the tick after it was written. And
-                // the entry ends on the tick it named, no look being needed
-                // to know a countdown has run out (ADR 0043's re-entry rule).
+                // A tick without vision leaves the conclusion standing (the colony is
+                // blind in most of these rooms most of the time), and the entry ends
+                // on the tick it named, no look being needed.
                 let taken =
                     RaidState.empty
                     |> raidTick
@@ -894,11 +790,8 @@ let holdTests =
             }
 
             test "a look that finds the controller free takes the room back out" {
-                // The other direction, on the same evidence rule: a tick
-                // with vision decides the room either way, so the entry that
-                // matters is the last look's and never the first. Pinned
-                // *before* the clock runs out, or the expiry above would be
-                // what cleared it and this would pass on the wrong reason.
+                // A tick with vision decides the room either way. Pinned *before* the
+                // clock runs out, or the expiry above would be what cleared it.
                 let freed =
                     RaidState.empty
                     |> raidTick
@@ -910,9 +803,8 @@ let holdTests =
                     freed.Holds
                     "the controller the colony can see is nobody else's again"
 
-                // And a hold re-read is re-clocked: the engine counts down at
-                // one a tick, so the same hold read 40 ticks later names the
-                // same absolute tick, and a *fresh* hold names a later one.
+                // A hold re-read is re-clocked: the engine counts down at one a tick,
+                // so the same hold read 40 ticks later names the same absolute tick.
                 let reread =
                     RaidState.empty
                     |> raidTick
@@ -936,26 +828,18 @@ let holdTests =
             }
 
             test "the Invader's hold withdraws nothing, and a rival's withdraws the room as well" {
-                // The line this record is drawn on, and the whole reason it
-                // is a third shape rather than a row of the ring — but the
-                // line is the **Invader's** alone, and saying it of "somebody
-                // else" would be false of the other half of the very
-                // predicate the record is folded on (`heldByOther`).
+                // The line is the **Invader's** alone; said of "somebody else" it would
+                // be false of the other half of `heldByOther`.
                 //
-                // The Invader's leftover hold is the new case: no core stands
-                // over it, ADR 0043's ring is clocked off cores, and #165's
-                // rival clause does not answer for the NPC. So the room is
-                // mined and only the *reservation* is refused. Written as a
-                // stand-down it would have withdrawn the room, which is the
-                // architectural question #333 leaves for a human.
+                // The Invader's leftover hold: no core stands over it, the ring is
+                // clocked off cores, and #165's rival clause does not answer for the
+                // NPC. So the room is mined and only the *reservation* is refused;
+                // written as a stand-down it would have withdrawn the room, which
+                // #333 leaves for a human.
                 //
-                // A rival's identical hold is a clocked stand-down already
-                // (#165) — the same control entry opens an episode and the
-                // gate shuts the room — so for that holder the record says
-                // *why* a room that is withheld anyway is also unreservable,
-                // and nothing about a room the colony goes on mining. Pinned
-                // pairwise, one holder apart, because the sentence in the
-                // docs is written one way and is true only one way.
+                // A rival's identical hold is a clocked stand-down already (#165), so
+                // for that holder the record says *why* a room withheld anyway is
+                // also unreservable. Pairwise, one holder apart.
                 let heldByWhom holder =
                     RaidState.empty
                     |> raidTick 100 (quiet |> visible outpostRoom (heldBy holder 4000))
@@ -990,15 +874,11 @@ let holdTests =
             }
 
             test "the gate stops holding a reservation on the tick the engine's countdown reaches" {
-                // What the gate does with the record, which is the half the
-                // rule the ticket is about actually reads
-                // (`Planner.reservableControllers` through
-                // `ColonyView.HeldOutposts`). The set is the standing holds
-                // and nothing else: `tick < Until`, the same test the fold
-                // retires an entry on and `observe.mjs` prints one under, so
-                // a leaf the fold has not caught up with — no tick with
-                // vision since the hold ended — cannot withhold a
-                // reservation the engine would now accept.
+                // What the gate does with the record (`Planner.reservableControllers`
+                // through `ColonyView.HeldOutposts`): `tick < Until`, the same test the
+                // fold retires an entry on and `observe.mjs` prints one under, so a
+                // leaf the fold has not caught up with cannot withhold a reservation
+                // the engine would now accept.
                 let taken =
                     RaidState.empty
                     |> raidTick
@@ -1026,13 +906,10 @@ let threatMemoryTests =
         "raid fold: the guard's memory of a raided outpost"
         [
             test "an armed threat seen in a declared outpost is remembered through the blind ticks" {
-                // #366. The guard row hires on a threat seen in an outpost,
-                // and the bodies that vision comes from — the anchor, the
-                // hauler, the reserver — are exactly what the raid kills, so
-                // the room goes dark and the row that bought a 15-ATTACK-part
-                // body stops asking for it. This is #333's answer in the guard
-                // row: the conclusion is written down on the tick with vision
-                // and read on the ticks without one.
+                // #366: the bodies the vision comes from are exactly what the raid
+                // kills, so the room goes dark and the row that bought a 15-ATTACK-part
+                // body stops asking for it. The conclusion is written on the tick with
+                // vision and read on the ticks without one.
                 let looked =
                     RaidState.empty
                     |> raidTick 100 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
@@ -1045,9 +922,8 @@ let threatMemoryTests =
                         })
                     "the look writes the room down against its own clock: this tick plus ThreatMemory"
 
-                // The blind tick is the whole point: nothing of ours stands in
-                // the room any more, so there is no control entry and no
-                // hostile on the view, and the record has to survive that.
+                // The blind tick: no control entry and no hostile on the view, and the
+                // record has to survive that.
                 let blind = looked |> raidTick 140 quiet
 
                 Expect.equal
@@ -1055,13 +931,11 @@ let threatMemoryTests =
                     (Some { Until = 100 + Engine.creepLifetime })
                     "a tick with no vision in the room leaves the conclusion exactly as it found it"
 
-                // The clock is a backstop and not a schedule (#369). It was 300
-                // — the guard's cast plus its walk — and that is the right size
-                // for *sending* a guard and the wrong size for *remembering*:
-                // while the room is dark an expiry cannot mean the raid ended,
-                // only that we stopped remembering, and the row then reads a
-                // room full of invader as clear. W15S29 killed four of W15S28's
-                // bodies that way in one day, one unarmed body at a time.
+                // The clock is a backstop and not a schedule (#369). It was 300, the
+                // guard's cast plus its walk, the right size for *sending* a guard and
+                // the wrong size for *remembering*: while the room is dark an expiry
+                // cannot mean the raid ended. W15S29 killed four of W15S28's bodies
+                // that way in one day, one unarmed body at a time.
                 Expect.equal
                     (threatenedAt 999 blind)
                     (Set.singleton outpostRoom)
@@ -1082,12 +956,9 @@ let threatMemoryTests =
             }
 
             test "a look that finds the outpost clear forgets the raid on the tick it takes" {
-                // The other direction of the same rule, and the one that keeps
-                // this a memory rather than a second [[stand-down]]: a tick
-                // with vision decides the room either way. The guard's own
-                // arrival is what usually takes this look, which is why the
-                // memory may be generous — the cost of it being too long is one
-                // body's walk into a room that turns out to be clear.
+                // A tick with vision decides the room either way, which keeps this a
+                // memory and not a second stand-down. The guard's own arrival usually
+                // takes this look, so the cost of a long memory is one body's walk.
                 let remembered =
                     RaidState.empty
                     |> raidTick 100 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
@@ -1100,9 +971,8 @@ let threatMemoryTests =
 
                 Expect.isEmpty (threatenedAt 161 cleared) "so the gate answers for nothing"
 
-                // Vision and no Threat is a clearing; vision and a Threat is a
-                // fresh write, which is what keeps a raid that outlives the
-                // memory from being forgotten while it is being watched.
+                // Vision and no Threat is a clearing; vision and a Threat is a fresh
+                // write, so a raid that outlives the memory is not forgotten while watched.
                 let stillThere =
                     remembered
                     |> raidTick 160 (quiet |> lookingAt outpostRoom [ armedIn outpostRoom ])
@@ -1115,14 +985,10 @@ let threatMemoryTests =
 
             test
                 "a healer alone is remembered nowhere, and neither is a room the colony merely crosses" {
-                // Two narrowings in one case, both of them the rule's own
-                // spelling rather than this fixture's. ADR 0033's Threat test:
-                // a hostile with no ATTACK or RANGED_ATTACK part reaches
-                // nothing and is no reason to buy a body, so it writes no
-                // memory a guard row could act on. And the room: the guard row
-                // is per **declared outpost**, so a raid at home is the
-                // [[keep]]'s (ADR 0034) and one in a room the colony does not
-                // declare hires nobody (#324).
+                // Two narrowings: a hostile with no ATTACK or RANGED_ATTACK part reaches
+                // nothing and writes no memory a guard row could act on; and the guard
+                // row is per **declared outpost**, so a raid at home is the keep's and
+                // one in an undeclared room hires nobody (#324).
                 let healerSeen =
                     RaidState.empty
                     |> raidTick 100 (quiet |> lookingAt outpostRoom [ healerIn outpostRoom ])
@@ -1163,10 +1029,8 @@ let gateTests =
         "the stand-down gate"
         [
             test "a running clock shuts its room, and the tick it runs out opens it" {
-                // The gate reads the log the way `observe.mjs outposts`
-                // reads it: shut while the tick is short of the expiry,
-                // and the expiry is the first tick the room may be
-                // re-entered.
+                // The gate reads the log the way `observe.mjs outposts` reads it: the
+                // expiry is the first tick the room may be re-entered.
                 let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom (Some 900) ])
 
                 Expect.equal
@@ -1182,9 +1046,7 @@ let gateTests =
             }
 
             test "each outpost's gate is its own" {
-                // ADR 0043's independent gates: W12S27 standing down says
-                // nothing about W13S28. Two rooms, one core each, two
-                // clocks that run out at different ticks.
+                // Two rooms, one core each, two clocks that run out at different ticks.
                 let other = "W13S28"
 
                 let state =
@@ -1203,9 +1065,8 @@ let gateTests =
             }
 
             test "a room in another player's hands is shut by no clock at all" {
-                // The two triggers meet in one set, and only here: the
-                // clocked family carries an expiry the gate compares
-                // against, the clockless one carries nothing to compare.
+                // The two triggers meet in one set: the clocked family carries an
+                // expiry, the clockless one nothing to compare.
                 let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
 
                 Expect.equal
@@ -1220,17 +1081,12 @@ let gateTests =
             }
 
             test "a room another player reserved comes back when the reservation runs out" {
-                // #165's first half, at the gate: a passing claimer is a
-                // routine event where an owner is not, and the engine is
-                // already counting its hold down. The room stands down for
-                // exactly that hold and re-enters with **no vision needed** —
-                // which is the whole of ADR 0043's "re-entry is a clock
-                // running out, not a look", now reached through the trigger
-                // that used to latch.
+                // #165's first half: a passing claimer is routine where an owner is
+                // not, and the engine is already counting its hold down, so the room
+                // re-enters with **no vision needed**.
                 //
-                // Pairwise against the owner above, one field of one control
-                // entry apart: 200 ticks of a rival's reservation seen at
-                // t100, against the same room owned outright.
+                // Pairwise against the owner above: 200 ticks of a rival's reservation
+                // seen at t100.
                 let reserved =
                     RaidState.empty
                     |> raidTick
@@ -1242,11 +1098,9 @@ let gateTests =
                     (Set.singleton outpostRoom)
                     "the tick before the hold ends the room is still withheld"
 
-                // t300 and not t301: `TicksToEnd` is the engine's own
-                // countdown to the tick the reservation is *gone*, and
-                // `Expiry` is the first tick the room may be re-entered —
-                // the same reading `deadlineOf` gives the Invader's hold,
-                // where 4,000 ticks at t100 records 4,100.
+                // t300 and not t301: `TicksToEnd` counts down to the tick the
+                // reservation is *gone*, and `Expiry` is the first tick the room may
+                // be re-entered, as `deadlineOf` reads the Invader's hold.
                 Expect.isEmpty
                     (shutAt 300 reserved)
                     "on the tick the hold ends the room is back in the pool, nobody having looked"
@@ -1255,13 +1109,10 @@ let gateTests =
             }
 
             test "a latched room is looked into again every RivalRecheck ticks" {
-                // #165's second half. The latch is ownership's and stays
-                // ownership's — the room is withheld from the work on every
-                // tick below — but the gate hands the shell one room to look
-                // into on the ticks a whole `RivalRecheck` after the look
-                // that shut it, so the tick with vision that clears a latch
-                // can arrive at all. Outside those ticks the room is
-                // withdrawn and unscanned, which is ADR 0043 unchanged.
+                // #165's second half: the latch stays ownership's, but the gate hands
+                // the shell one room to look into a whole `RivalRecheck` after the
+                // look that shut it, so the tick with vision that clears a latch can
+                // arrive at all.
                 let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
                 let recheck = Tuning.defaults.RivalRecheck
 
@@ -1279,11 +1130,9 @@ let gateTests =
                     (Set.singleton outpostRoom)
                     "on the stride itself the room is re-admitted to the scan"
 
-                // The look is one tick long because taking it stamps the
-                // stride, so the test for that has to fold the tick the look
-                // was taken on — the gate alone, asked twice about a log
-                // nothing wrote to in between, is being asked about a look
-                // that is still owed (#275, and the test below).
+                // The look is one tick long because taking it stamps the stride, so
+                // this has to fold the tick the look was taken on; the gate alone,
+                // asked twice, is being asked about a look still owed (#275).
                 let looked = state |> raidTick (100 + recheck) (quiet |> ownedByRival outpostRoom)
 
                 Expect.isEmpty
@@ -1299,16 +1148,11 @@ let gateTests =
                     (recheckedAt 100 state)
                     "the look that shut the gate is not itself a recheck"
 
-                // The knob at a second value, which is what makes it a
-                // tunable and not a constant in disguise (ADR 0052 decision
-                // 5). The exact-multiple rule had its own trap here — 5,000 is
-                // a multiple of 1,000, so a colony tuned to 1,000 would have
-                // looked on the shipped stride too — and the elapsed rule
-                // (#275) has none: any value below the shipped one separates
-                // the two at a tick between them. 3,000 is that, and the pair
-                // below asks 3,100: a stride of 3,000 has elapsed there and a
-                // stride of 5,000 has not, so the second assertion fails
-                // outright if the constant is read in place of the knob.
+                // The knob at a second value. The exact-multiple rule had its own trap
+                // here (5,000 is a multiple of 1,000) and the elapsed rule (#275) has
+                // none: 3,100 is past a stride of 3,000 and short of one of 5,000, so
+                // the second assertion fails outright if the constant is read in
+                // place of the knob.
                 let sooner =
                     { Tuning.defaults with
                         RivalRecheck = 3000
@@ -1335,16 +1179,11 @@ let gateTests =
             }
 
             test "a tick the gate was never evaluated on delays the look, never forfeits it" {
-                // #275. The stride used to be an exact-multiple test —
-                // `(tick - since) % RivalRecheck = 0` — a gate that has to be
-                // asked on precisely the right tick or not at all. A tick's
-                // evaluation is not guaranteed: the loop can throw before the
-                // log is written, the engine cuts a tick short when the bot is
-                // out of CPU and the bucket is empty, and a deploy lands in the
-                // middle of one. Under the old test every tick lost that way
-                // cost a whole 5,000 ticks of an outpost's income, silently,
-                // because the next tick the gate answered on was another stride
-                // away. A look that is owed stays owed.
+                // #275. The stride used to be `(tick - since) % RivalRecheck = 0`, a
+                // gate asked on precisely the right tick or not at all; the loop can
+                // throw before the log is written, the engine cuts a tick short on an
+                // empty bucket, and a deploy lands mid-tick. Every tick lost that way
+                // cost 5,000 ticks of an outpost's income, silently.
                 let recheck = Tuning.defaults.RivalRecheck
                 let state = RaidState.empty |> raidTick 100 (quiet |> ownedByRival outpostRoom)
 
@@ -1369,17 +1208,11 @@ let gateTests =
             }
 
             test "a look stamped ahead of the clock is owed now, and the fold stamps the real tick" {
-                // #275's own hazard, which the exact multiple it replaces did
-                // not have. An elapsed test has no upper bound, so a
-                // `LastLooked` in the future absorbs every tick until the
-                // clock catches it up and a stride passes on top — a latch
-                // silenced for longer than the stride, which is exactly the
-                // unfalsifiable gate #165 bought its way out of. Two ways in,
-                // both real: a mistyped hand edit of this leaf, which is the
-                // documented way out of a stuck latch, and a private server
-                // rolled back behind the tick the log was written on. No look
-                // is taken on a tick that has not happened, so a stamp ahead
-                // of the clock is a wrong number and not a record.
+                // #275's own hazard: an elapsed test has no upper bound, so a
+                // `LastLooked` in the future silences the latch until the clock
+                // catches it up. Two ways in: a mistyped hand edit of this leaf, the
+                // documented way out of a stuck latch, and a private server rolled
+                // back behind the tick the log was written on.
                 let ahead =
                     { RaidState.empty with
                         RivalHeld =
@@ -1396,9 +1229,8 @@ let gateTests =
                     (Set.singleton outpostRoom)
                     "and the room is withheld from the work through it, as on every other tick"
 
-                // The gate corrects in one tick; the leaf corrects with it,
-                // because the fold stamps the tick the look actually fell due
-                // on over the impossible one.
+                // The leaf corrects with the gate: the fold stamps the tick the look
+                // actually fell due on over the impossible one.
                 let healed = ahead |> raidTick 100_000 (quiet |> ownedByRival outpostRoom)
 
                 Expect.equal
@@ -1412,10 +1244,9 @@ let gateTests =
             }
 
             test "a clocked stand-down is never re-checked, and an empty log never looks" {
-                // The recheck belongs to the latch alone: a clocked
-                // stand-down needs no look, because its own clock takes the
-                // room back (ADR 0043), and scanning it early would cost a
-                // room read for an answer nothing acts on.
+                // The recheck belongs to the latch alone: a clocked stand-down's own
+                // clock takes the room back, and scanning it early would cost a room
+                // read for an answer nothing acts on.
                 let clocked = RaidState.empty |> raidTick 100 (seen [ core outpostRoom (Some 900) ])
 
                 Expect.equal
@@ -1433,10 +1264,8 @@ let gateTests =
             }
 
             test "an empty log withholds nothing" {
-                // The colony's ordinary state, and the one it has run in
-                // since ADR 0042 filled the declaration: no outpost has
-                // ever held a core, so the gate is open and the shell
-                // scans every room a human declared.
+                // The colony's ordinary state: no outpost has ever held a core, so the
+                // shell scans every room a human declared.
                 Expect.isEmpty (shutAt 100 RaidState.empty) "nothing is recorded, nothing is shut"
             }
         ]

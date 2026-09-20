@@ -1,7 +1,6 @@
-/// The projection's shape, asked of both sides (#355): of every fixture this
-/// suite hands to a decision, and of what `ColonyView.ofWorld` builds out of a
-/// world. The table and the check are `SpatialFixtures`', with the argument
-/// for them; this file is the sweep.
+/// The projection's shape, asked of both sides: of every fixture this
+/// suite hands to a decision, and of what `ColonyView.ofWorld` builds out
+/// of a world. The table and the check are `SpatialFixtures`'.
 module Fabot.Core.Tests.ProjectionShapeTests
 
 open Expecto
@@ -11,10 +10,8 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
 /// The colonies the shared fixture files hand to a decision, by the name a
-/// failure should print. The season's ore path first, which is where every one
-/// of #355's incidents landed, and then a spread over the other domains: the
-/// check costs a map walk apiece, and a fixture nobody sweeps is a fixture
-/// free to drift.
+/// failure should print. The ore path first, then a spread over the other
+/// domains: a fixture nobody sweeps is a fixture free to drift.
 let private fixtures =
     [
         "mineColony", mineColony
@@ -47,12 +44,10 @@ let private home = "W1N1"
 let private outpost = "W1N2"
 let private errand = "W1N3"
 
-/// Plain to every edge, and a ring on all four of them. Not a corner of the
-/// room, which is what this fixture was first written as and what #355's own
-/// third incident is about: a crossing is only a crossing when the tile it
-/// lands on has ground of the far room beside it (ADR 0062), so a room floored
-/// in one corner is a room no chain can enter — and the errand three rooms out
-/// then falls out of the scan set with no test saying so.
+/// Plain to every edge, and a ring on all four of them — not a corner of
+/// the room: a crossing needs ground of the far room beside its landing,
+/// so a room floored in one corner is one no chain can enter, and the
+/// errand three rooms out falls out of the scan set with no test saying so.
 let private ground =
     TerrainGrid.ofList
         [
@@ -240,15 +235,10 @@ let projectionShapeTests =
             }
 
             test "what ofWorld builds out of a conforming world conforms too" {
-                // The other side of the same question, and the half a Core
-                // test can actually run (`ColonyView.ofWorld` is Core; the
-                // sweep that feeds it is not). The narrowings are filters —
-                // `transiting` and `erranding` keep some ids and drop others —
-                // so what this refuses is a narrowing that moves an entry
-                // between maps, or keeps a number after taking away the kind
-                // that made it readable. #357 was the second of those read the
-                // other way: the kind went and the rule that wanted it found
-                // nothing.
+                // The half a Core test can run (`ColonyView.ofWorld` is Core; the sweep
+                // that feeds it is not). The narrowings are filters, so what this refuses
+                // is one that moves an entry between maps, or keeps a number after taking
+                // away the kind that made it readable.
                 let offenders =
                     shapeViolations (sweptView ()) |> List.map (shapeViolationLine "ofWorld")
 
@@ -256,11 +246,8 @@ let projectionShapeTests =
             }
 
             test "the Reactor's store is not an ore entry, in the world or in the view" {
-                // #354's incident, stated as the fact that closes it: the
-                // sweep files a Reactor in `Reactors` and `Owners` and gives
-                // it no kind, so a Thorium entry for it is a shape nothing can
-                // build — and the rule that wants its store has exactly one
-                // place to read it.
+                // The sweep files a Reactor in `Reactors` and `Owners` and gives it no
+                // kind, so a Thorium entry for it is a shape nothing can build.
                 let view = sweptView ()
 
                 Expect.isNone

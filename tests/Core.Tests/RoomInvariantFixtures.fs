@@ -1,12 +1,8 @@
-/// The Layout's whole-room invariants, checked against real room terrain
-/// (ADR 0036). Real terrain is a counterexample generator here, never a
-/// source of expected values: no test below names a tile the Layout is
-/// supposed to pick. The spawn sweeps, because the failure this suite
-/// exists for — #77's — is a function of terrain *and* of where the
-/// cluster grew from.
 /// The sweep itself and the fixtures it runs: the committed room captures,
 /// the colonies laid on them, and the readers each invariant is checked
-/// through.
+/// through. Real terrain is a counterexample generator, never a source of
+/// expected values; the spawn sweeps because #77's failure is a function of
+/// terrain *and* of where the cluster grew from.
 module Fabot.Core.Tests.RoomInvariantFixtures
 
 open Expecto
@@ -16,10 +12,10 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 
-/// Which spawns need ADR 0068's paved-swamp fallback rather than the strict
-/// controller-buffer pick. This is a fact the real-terrain sweep discovered,
-/// kept beside the other per-room losses instead of repeated as room names in
-/// each invariant that accepts the resulting Link-footing shortfall.
+/// Which spawns need the paved-swamp fallback rather than the strict
+/// controller-buffer pick: a fact the sweep discovered, kept beside the other
+/// per-room losses instead of repeated as room names in each invariant that
+/// accepts the resulting Link-footing shortfall.
 type internal PavedBuffer =
     | Never
     | EverySpawn
@@ -38,24 +34,22 @@ let internal usesPavedBuffer fallback spawn =
 type internal Room =
     {
         Name: string
-        /// A controller for a room the capture found none in. It is a
-        /// premise of the fixture, not part of what is tested — the rules
-        /// must hold wherever the controller sits — which is why it lives
-        /// here and not in the capture, whose whole value is that it says
-        /// only what the server said. Without a projected controller
-        /// *position* the Layout degenerates: the Upgrade Work Area is
-        /// empty, the trunks route to the spawn alone, and the footing
-        /// count comes out wrong for reasons that are not the rule's.
+        /// A controller for a room the capture found none in: a premise of
+        /// the fixture, kept out of the capture, whose value is that it says
+        /// only what the server said. Without a projected controller the
+        /// Layout degenerates: no Upgrade Work Area, trunks to the spawn
+        /// alone, and a footing count wrong for reasons that are not the
+        /// rule's.
         FallbackController: Pos option
         /// Spawn tiles swept on top of the stride's.
         AlsoSweep: Pos list
-        /// Spawns where only ADR 0068's paved controller-buffer fallback
-        /// preserves the room's growth buffer.
+        /// Spawns where only the paved controller-buffer fallback preserves
+        /// the room's growth buffer.
         PavedBuffer: PavedBuffer
-        /// #105: spawn tiles whose doorstep the clustered reservation
-        /// seals, so a source's trunk cannot be routed and is dropped
-        /// whole. Excluded from the trunk invariant and asserted to be
-        /// *still* broken below, so the pin cannot outlive its cause.
+        /// Spawn tiles whose doorstep the clustered reservation seals, so a
+        /// source's trunk is dropped whole (#105). Excluded from the trunk
+        /// invariant and asserted to be *still* broken, so the pin cannot
+        /// outlive its cause.
         SealedDoorsteps: Pos list
     }
 
@@ -68,11 +62,10 @@ let internal noLosses =
         SealedDoorsteps = []
     }
 
-/// Ours, two ordinary claimable neighbours (#83's remote targets), and a
-/// three-source sector centre. "Ours" is three rooms since ADR 0047, and the
-/// third of them joined the sweep with #331 — which is how that ticket's loss
-/// turned out to be one spawn's and not the room's, a claim only a sweep can
-/// make and a single-spawn test would have got wrong.
+/// Our three rooms, two ordinary claimable neighbours (#83's remote targets),
+/// and a three-source sector centre. The third home joined the sweep with
+/// #331, which is how that ticket's loss turned out to be one spawn's and not
+/// the room's.
 let internal rooms =
     [
         // The one room whose plan can be compared against a live colony,
@@ -82,14 +75,9 @@ let internal rooms =
             AlsoSweep = [ { X = 12; Y = 40 } ]
         }
         // 32,2 is swept on top of the stride because the reservation seals
-        // it: the tile is one of three in this room — 31,1 and 33,1 are the
-        // others — whose corridor out the clustered window closes. It is
-        // back in `SealedDoorsteps` with ADR 0064, which is where ADR 0055
-        // put it and where the reservation ceasing to read the level puts it
-        // again: sealed at every level from 3 to 8 rather than at RCL5 and
-        // above, so the sweep's own RCL4 sees it. A loss the suite cannot
-        // see is a loss nobody reproduces, so the sweep keeps sweeping the
-        // tile.
+        // it: one of three tiles in this room — 31,1 and 33,1 are the others
+        // — whose corridor out the clustered window closes. A loss the suite
+        // cannot see is a loss nobody reproduces.
         { noLosses with
             Name = "W12S27"
             AlsoSweep = [ { X = 32; Y = 2 } ]
@@ -97,10 +85,9 @@ let internal rooms =
             SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
-        // #331: the third home. From the live spawn tile alone its strict
-        // buffer set is empty, so the paved-swamp fallback applies and its
-        // controller Link footing is the one accepted unserved target in the
-        // sweep. The buffer itself now exists from every spawn.
+        // From the live spawn tile alone its strict buffer set is empty, so
+        // the paved-swamp fallback applies and its controller Link footing
+        // is the one accepted unserved target in the sweep (#331).
         { noLosses with
             Name = "W15S28"
             AlsoSweep = [ { X = 18; Y = 30 } ]
@@ -173,8 +160,7 @@ let internal colonyOf (room: LoadedRoom) level =
                     SafeModeActive = false
                 })
         // The captured room is this colony's own, so it is owned and its
-        // sources are priced at the full rate (ADR 0042) — the sweep is
-        // over one room and every one of them is a room with a spawn in it.
+        // sources are priced at the full rate.
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
         RoomControl =
@@ -191,22 +177,15 @@ let internal colonyOf (room: LoadedRoom) level =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
-        // A captured room holds no invader core: the four fixtures were
-        // taken off a sector whose cores stand four rooms away (ADR 0043).
+        // A captured room holds no invader core: the captures were taken
+        // off a sector whose cores stand four rooms away.
         InvaderCores = []
         Spatial = room.Spatial
-        // The sweep is over one owned room, so it declares none: a
-        // candidate colony is a declared home nobody owns yet (ADR 0047),
-        // and this room has a spawn standing in it.
+        // One owned room with a spawn in it declares no candidate colony.
         Declared = []
-        // The [[stage]] this colony stands at, derived from the same level
-        // the controller above carries (ADR 0052 decision 3) rather than
-        // written down beside it: the two cannot disagree, and every rule
-        // that used to read the level — the roads, the ramparts, the
-        // feeding tier of a young room's sites — reads this. A room the
-        // capture gives no controller has no stage, which is the answer
-        // `Colony.stageOf` gives a colony whose controller nothing can
-        // place.
+        // The stage is derived from the same level the controller above
+        // carries rather than written down beside it, so the two cannot
+        // disagree. A room the capture gives no controller has no stage.
         Stages =
             match
                 room.ControllerId
@@ -214,33 +193,19 @@ let internal colonyOf (room: LoadedRoom) level =
             with
             | Some stage -> Map.ofList [ name, stage ]
             | None -> Map.empty
-        // The sweep is one colony over one room: every body in it is this
-        // colony's (ADR 0052 decision 1), and it raises no child, so there
-        // is nothing borrowed to carry.
+        // One colony over one room: every body is its own, it raises no
+        // child, declares no errand, and every tick has vision.
         Foreign = Set.empty
         Borrowed = { Rooms = [] }
-        // And nothing refused: the declarations read here are ADR 0042's,
-        // each of them a room bordering W12S28 (#243).
         Refused = []
-        // And no [[errand]]: an errand is a room a human declared because
-        // one named object out there has to be acted on (ADR 0060 decision
-        // 1), and this fixture declares none — so no Reclaim is pooled and
-        // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []
-        // And nothing remembered of a room it cannot see: every fixture
-        // here is a tick with vision, so the sighting map answers nothing
-        // the pool has not already answered (#151).
         Sightings = Map.empty
-        // The numbers this bot ships with (ADR 0052 decision 5): a
-        // fixture starts from them and the tests that are *about* a
-        // tunable move the one field they are about.
+        // The tests that are *about* a tunable move the one field they are
+        // about.
         Tuning = Tuning.defaults
-        // Nothing in the oven: a fixture's rows count what is alive, and
-        // the casting cascade's own tests are the ones that put a body
-        // here (#156).
         Casting = []
     }
 
@@ -254,24 +219,19 @@ let internal tilesOfKind kind placed =
     placed |> List.choose (fun (pos, k) -> if k = kind then Some pos else None)
 
 /// The clustered structures of a plan: the Storage, the tower and every
-/// extension — the tiles one ordering rule picks (ADR 0011, ADR 0022).
+/// extension — the tiles one ordering rule picks.
 let internal clusteredTiles placed =
     tilesOfKind Storage placed
     @ tilesOfKind Tower placed
     @ tilesOfKind Extension placed
     |> Set.ofList
 
-/// The same room with a list of clustered structures standing on it —
-/// filed through the shared builders, which is where a tile-shaped
-/// container has lived since ADR 0041's contract step, and made obstacles
-/// the way the shell makes a standing structure one. The tiles are the
-/// Layout's own picks rather than a person's, so the fixture stays a
-/// counterexample generator and never a table of expected values.
-///
-/// The kind travels with the tile because #341's re-derivation is the first
-/// to need a room built out in more than one kind: W12S28 stands at RCL7
-/// with forty extensions *and* two towers, and a model that stood only the
-/// extensions would hand the third tower a tile one of the first two is on.
+/// The same room with a list of clustered structures standing on it, made
+/// obstacles the way the shell makes a standing structure one. The tiles are
+/// the Layout's own picks rather than a person's, so the fixture stays a
+/// counterexample generator. The kind travels with the tile: a model that
+/// stood only the extensions would hand the third tower a tile one of the
+/// first two is on.
 let internal withBuilt (built: (Pos * BuiltKind) list) (colony: ColonyView) =
     { colony with
         Spatial =
@@ -286,11 +246,9 @@ let internal withBuilt (built: (Pos * BuiltKind) list) (colony: ColonyView) =
                 })
     }
 
-/// The same room with a set of roads already paved. Tiles live under a room
-/// name and nowhere else (ADR 0041), so the roads go onto that room's own
-/// layer; what reads them is the container rule, which defers a container to
-/// a road *site* sharing its tile and so answers differently once the road
-/// stands (ADR 0040).
+/// The same room with a set of roads already paved on its own layer. What
+/// reads them is the container rule, which defers a container to a road
+/// *site* sharing its tile and so answers differently once the road stands.
 let internal withRoadsStanding (name: string) (roads: Set<Pos>) (colony: ColonyView) =
     { colony with
         Spatial =
@@ -337,11 +295,9 @@ type internal Case =
         SpawnId: string
         ControllerId: string option
         // The three fields below are Atlas censuses taken while the case is
-        // built, and are here instead of the Atlas itself for the reason
-        // `ParallelSafetyTests` states and enforces (#310): a case is a value
-        // every invariant in every list shares, and an Atlas shared that way
-        // is Expecto's parallel tests writing one Dictionary. They are plain
-        // sets, taken once per case instead of once per case per invariant.
+        // built, here instead of the Atlas itself because a case is a value
+        // every list shares and a shared Atlas is Expecto's parallel tests
+        // writing one Dictionary (#310).
 
         /// The room's ground an Anchor or an upgrader works from
         /// (`workingGroundIn`), which the clustered ordering may not take.
@@ -357,70 +313,35 @@ type internal Case =
         Placed: (Pos * StructureKind) list
         Unserved: UnservedFooting list
         /// The footings the Layout placed, each naming its target, that
-        /// target's kind and the tile reserved for it (#106). Read off the
-        /// plan this case already computed, like `Unserved`: plans per
-        /// case is the expensive axis of this sweep, and an invariant that
-        /// re-derived one to see the tiles would double it.
+        /// target's kind and the tile reserved for it. Read off the plan
+        /// this case already computed, like `Unserved`: plans per case is
+        /// the expensive axis of this sweep.
         Served: ServedFooting list
-        /// The trunks the Layout could not route (#107), one entry per
-        /// (source, goal) the router found no path for. Read off the same
-        /// plan for the same reason as the two footing records.
+        /// The trunks the Layout could not route, one entry per (source,
+        /// goal) the router found no path for. Read off the same plan.
         Unrouted: UnroutedTrunk list
-        /// The container sites a tick on, with the road plan standing. A
-        /// source container is planned onto the Seat nearest its trunk,
-        /// which in practice is the tile the trunk leaves the source by,
-        /// and the engine takes one construction site per tile — so on the
-        /// first tick a container defers to the road it shares ground
-        /// with. The count the rule promises is the one that drops once
-        /// the roads are up.
+        /// The container sites a tick on, with the road plan standing: on
+        /// the first tick a container defers to the road it shares ground
+        /// with, and the count the rule promises is the one that drops
+        /// once the roads are up.
         Containers: Pos list
         /// Whether recalling the plan from its own memo gives back the
-        /// plan that was computed (ADR 0017). The memo path is the one
-        /// worth testing: that a pure function is pure is not news.
+        /// plan that was computed. The memo path is the one worth testing:
+        /// that a pure function is pure is not news.
         RecallsIdentically: bool
-        /// What the same room asks for after it has **built out** at the
-        /// sweep's own level and then levelled once: the clustered counts
-        /// it stood up at the sweep's own level, and what it asks for after
-        /// levelling once. The claim they carry is the one a colony cares
-        /// about and the one #341 broke — *the level-up asks for exactly
-        /// what the engine unlocks, less what stands* — stated per kind,
-        /// because the gap `gapAt` computes is per kind, and read against
-        /// `allowanceOf`'s own table rather than against a second plan: a
-        /// horizon that is wrong the same way at both levels satisfies a
-        /// plan-against-plan comparison and fails this one.
-        ///
-        /// Stated over a room that **built out** rather than over two bare
-        /// rooms at two levels, which is the distinction ADR 0063 forces.
-        /// The reservation used to be level-blind — sized at one constant
-        /// horizon whatever level the room stood at — so two bare plans at
-        /// two levels nested and the sweep could compare them directly.
-        /// Derived, they do not: a bare RCL5 room reserves two tower tiles
-        /// where a bare RCL4 room reserves one, so its extension picks
-        /// start one tile later. What survives is that a structure already
-        /// standing keeps its tile and its slot: `gapAt` subtracts the
-        /// census from the horizon's allowance and the ordering excludes
-        /// the tile outright, so the window widens at its tail.
-        ///
-        /// The tile-overlap form this replaces asserted nothing: `withBuilt`
-        /// registers a standing tile as an obstacle as well as a target,
-        /// `buildableTilesIn` drops occupied tiles from the ordering and the
-        /// router routes around obstacles, so across the whole sweep nothing
-        /// is ever planned onto a standing structure — with or without the
-        /// horizon derivation, and with or without the rampart exclusion the
-        /// old assertion carried (#341 review).
+        /// The clustered counts this room stood up at the sweep's level,
+        /// and what it asks for after levelling once with them standing.
+        /// Per kind, because `gapAt` is per kind, and read against
+        /// `allowanceOf`'s own table rather than a second plan: a horizon
+        /// wrong the same way at both levels satisfies a plan-against-plan
+        /// comparison and fails this one. Over a room that built out rather
+        /// than two bare rooms, which do not nest (the extra tower pick
+        /// shifts a bare room's extension picks by one).
         LevelUpAsks: (StructureKind * int * int) list
         /// The road tiles this room paves at the sweep's level that the
-        /// **same room, one level up with its cluster standing**, no longer
-        /// plans: pavement the colony bought and the level-up walks away
-        /// from. Zero by construction whenever the reservation is
-        /// level-blind, because the road plan is then level-blind with it —
-        /// which it was under ADR 0055's constant, was **not** under ADR
-        /// 0063's derived horizon (589 tiles over the sweep, the price that
-        /// made this field exist, #341), and is again under ADR 0064, whose
-        /// reservation is sized at `allowanceOf`'s ceiling and reads no
-        /// level at all. So the field records an invariant now rather than
-        /// a loss: not a ratchet on how much road a level-up may orphan,
-        /// but that it orphans none.
+        /// same room, one level up with its cluster standing, no longer
+        /// plans. Zero by construction while the reservation is level-blind,
+        /// so the field records an invariant rather than a loss.
         LevelUpAbandons: Pos list
     }
 
@@ -428,18 +349,11 @@ type internal Case =
 /// the same plan: re-deriving it per invariant would pay the tick's
 /// dearest step many times over for one answer.
 ///
-/// The sweep's level is **4**, and since ADR 0064 that chooses one window
-/// and not two. The *placement* is the level's own — a horizon of 5,
-/// narrower than any room the colony stands in — so the widest **placement**
-/// this bot ever makes, an RCL7 room's horizon of 8, is exercised only by
-/// the per-room ladders in `RoomLayoutInvariantTests` and
-/// `LayoutPlacementTests`, one spawn each, and never over a sweep. The
-/// *reservation* every case here routes its trunks around is already the
-/// widest one there is: sixty extensions and six towers, `allowanceOf`'s
-/// ceiling, at RCL4 exactly as at RCL8. Recorded rather than fixed: the
-/// honest lever is fewer plans per case and not more levels (ADR 0036), and
-/// a second level here would double the sweep's cost for a placement window
-/// three of the five rooms will never reach.
+/// The sweep's level is 4, so the widest placement this bot ever makes (an
+/// RCL7 room's horizon of 8) is exercised only by the per-room ladders in
+/// `RoomLayoutInvariantTests` and `LayoutPlacementTests`, one spawn each.
+/// Recorded rather than fixed: a second level would double the sweep's cost
+/// for a placement window three of the five rooms will never reach.
 let internal sweep =
     lazy
         [
@@ -455,10 +369,8 @@ let internal sweep =
                     let recalled = decide colony Map.empty Set.empty (Some first.Memo)
 
                     // This room built out at the sweep's own level and then
-                    // levelled once: the level-up a colony actually takes,
-                    // rather than the 2-to-4 jump no room makes in one tick.
-                    // The cluster that stands is this case's own plan, already
-                    // computed, so the whole ladder costs one plan.
+                    // levelled once. The cluster that stands is this case's
+                    // own plan, so the whole ladder costs one plan.
                     let standing = standingCluster placed
 
                     let levelled =
@@ -528,23 +440,17 @@ let internal violations pick =
     sweep.Value |> List.filter pick |> List.map describe
 
 /// The (source, goal) pairs a case's road plan does *not* carry, derived
-/// from the paved tiles alone (ADR 0011): the road tiles beside the source
-/// must reach the goal over roads alone, both ways a trunk goes — to the
-/// spawn, and to the controller's Upgrade Work Area. A second derivation
-/// of the same fact the Layout records for itself (#107), which is the
-/// only kind of check worth making against a record: one that agreed with
-/// itself would pin nothing (ADR 0035, ADR 0036).
+/// from the paved tiles alone: the road tiles beside the source must reach
+/// the goal over roads alone, to the spawn and to the controller's Upgrade
+/// Work Area. A second derivation of the fact the Layout records for itself;
+/// one that agreed with itself would pin nothing.
 ///
 /// Independent of the record and *not* of the plan: the roads are read off
-/// this tick's sites, which are the road gap and not the road plan (ADR
-/// 0010). A swept colony starts with no road standing and no road pending,
-/// so the two coincide — the same premise the footing-rule invariant above
-/// rests on. A sweep case that started with roads already built would seed
-/// this BFS off a hole and call every trunk lost.
-///
-/// A room the Layout cannot orient itself in plans nothing and loses
-/// nothing, so it carries nothing to check — the same gate `planLayout`
-/// opens on, stated once more here rather than assumed.
+/// this tick's sites, which are the road gap and not the road plan. A swept
+/// colony starts with no road standing or pending, so the two coincide; a
+/// case that started with roads built would seed this BFS off a hole and
+/// call every trunk lost. A room the Layout cannot orient itself in plans
+/// nothing and carries nothing to check.
 let internal unroutedByRoads (case: Case) : UnroutedTrunk list =
     match case.ControllerId with
     | None -> []
@@ -591,19 +497,13 @@ let internal unroutedByRoads (case: Case) : UnroutedTrunk list =
                 else
                     Some { Source = id; Goal = goal }))
 
-/// Whether a case's road plan carries every source both ways a trunk goes
-/// (ADR 0011): to the spawn, and to the controller's Upgrade Work Area.
-/// The shape ADR 0036's trunk invariant is stated in, kept beside the
-/// pair-wise answer it now reads off rather than flooding a second time.
+/// Whether a case's road plan carries every source both ways a trunk goes,
+/// read off the pair-wise answer rather than flooding a second time.
 let internal trunksCarryEverySource (case: Case) = List.isEmpty (unroutedByRoads case)
 
-/// The colony with the one Tuning field a horizon still has moved, which is
-/// how one horizon is compared against another (ADR 0063): the horizon
-/// itself is derived — `controller.Level + HorizonLookahead` — so the
-/// comparison is made on the lookahead, and `atLookahead 0` is the plan a
-/// room with no lookahead at all would compute. A test that wants an
-/// absolute horizon asks for it by arithmetic on the colony's own level,
-/// which is the whole point of the move: there is no constant left to set.
+/// The colony with its lookahead moved, which is how one horizon is compared
+/// against another: a test that wants an absolute horizon asks for it by
+/// arithmetic on the colony's own level, since no constant is left to set.
 let internal atLookahead lookahead (colony: ColonyView) =
     { colony with
         Tuning =
@@ -630,17 +530,12 @@ type internal Border =
         Along: Pos -> int
         /// What to add to a tile of the neighbour to read it in this
         /// room's own coordinates — a whole room's width or height, in the
-        /// direction the neighbour lies. The two rooms' grids are fifty
-        /// apart on the world map, which is what makes a Chebyshev
-        /// distance across a border a thing that can be measured at all.
+        /// direction the neighbour lies.
         Offset: Pos
-        /// How wide the band is. The server's own answer, read off the two
-        /// committed captures, and the number ADR 0041 sizes the cross-room
-        /// walk on — "a minimum over 36 additions, not 36 floods". Named
-        /// here, with the furniture the loader tests name, because the
-        /// derivation the test below runs is symmetric: recompute the band
-        /// from the same two rings and a neighbour recaptured with a
-        /// narrower exit row shrinks both sides at once, silently.
+        /// How wide the band is: the server's own answer, read off the two
+        /// committed captures. Named here because the derivation the test
+        /// runs is symmetric: a neighbour recaptured with a narrower exit
+        /// row shrinks both sides at once, silently.
         Exits: int
     }
 
@@ -670,18 +565,11 @@ let internal borders =
         }
     ]
 
-/// The Atlas over two captures' border rings **and their ground**: a Seam is
-/// answered from the border layer and from the ground behind the landing tile
-/// (ADR 0041, ADR 0062), so this is its whole input, and every tile in it is
-/// the server's own.
-///
-/// The ground used to be left out here, on the reading that *"a room with no
-/// ground at all still has its exits"*. ADR 0062 retires that reading: the
-/// engine puts a body down on the landing tile, and a room with no ground is a
-/// room every crossing into it strands a body in. It is also a room the shell
-/// cannot build — `World.ofGame` reads terrain for every room it reads a ring
-/// for — which is the same way five `ViewTests` fixtures got more faithful
-/// under ADR 0058.
+/// The Atlas over two captures' border rings and their ground: a Seam is
+/// answered from the border layer and from the ground behind the landing
+/// tile, so this is its whole input, and every tile in it is the server's
+/// own. The ground is not left out: a room with no ground is one every
+/// crossing into it strands a body in, and one the shell cannot build.
 let internal acrossFrom (near: RoomCapture) (far: RoomCapture) =
     { SpatialInfo.empty with
         Borders = Map.ofList [ near.RoomName, near.Border; far.RoomName, far.Border ]
@@ -703,9 +591,8 @@ let internal acrossFrom (near: RoomCapture) (far: RoomCapture) =
 
 /// The Atlas over two captures' ground *and* their rings, with one body
 /// standing in the near room and the far room's own sources placed under the
-/// loader's ids: the whole input a cross-room walk reads (ADR 0041).
-/// Everything geometric is the server's; the body and the ids are the test's,
-/// and no expected value comes from either room.
+/// loader's ids: the whole input a cross-room walk reads. Everything
+/// geometric is the server's; the body and the ids are the test's.
 ///
 /// Two things are the caller's, because they are the two things the fixtures
 /// that take this differ in: whether the far room's source tiles are obstacles,
@@ -745,19 +632,12 @@ let private twoCaptureAtlas
 let internal walkingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
     twoCaptureAtlas near far stand Set.empty (AtlasFixtures.worker "w")
 
-/// How far apart the cross-room sweep's stands are, and the file's second
-/// sampling knob beside `stride` above. Deliberately not that number and
-/// deliberately not that mechanism: `stride` picks tiles by coordinate and
-/// costs a lookup apiece, while a stand here costs a whole Atlas and the
-/// floods a cross-room price runs on it, so this one has to leave a
-/// handful of stands per capture rather than a hundred. It strides the
-/// room's *passable* tiles in `Pos` order — a position in that list, not a
-/// coordinate on the grid — so which tiles come back depends on how much
-/// wall precedes them; that is fine for a sweep whose whole point is that
-/// no tile was chosen for what it proves, and it is written down here so
-/// nobody widens the sweep by editing `stride` and wonders why this one
-/// did not move. Deterministic for `stride`'s own reason: a counterexample
-/// nobody can reproduce is a rumour.
+/// How far apart the cross-room sweep's stands are: a second knob beside
+/// `stride`, because a stand here costs a whole Atlas and its floods, so it
+/// leaves a handful of stands per capture rather than a hundred. It strides
+/// the room's *passable* tiles in `Pos` order — a position in that list,
+/// not a coordinate — so editing `stride` does not move it. Deterministic
+/// because a counterexample nobody can reproduce is a rumour.
 let internal crossRoomStride = 397
 
 /// Standing tiles spread over a capture's own passable ground by
@@ -808,11 +688,10 @@ let internal leadBody = [ Work; Carry; Move ]
 /// value comes from any of them.
 ///
 /// The fencing is what makes the comparison exact rather than approximate.
-/// A lead's near leg floods out of *all* the tiles beside the spawner
-/// (ADR 0026), and the Matcher's walk floods out of the one tile its creep
-/// stands on; leave the spawner a single free neighbour and the two floods
-/// are the same flood, so the lead's join and the Matcher's may be read
-/// against each other tile by tile (ADR 0030's one join, two readers).
+/// A lead's near leg floods out of *all* the tiles beside the spawner, and
+/// the Matcher's walk floods out of the one tile its creep stands on; leave
+/// the spawner a single free neighbour and the two floods are the same
+/// flood, so the two joins may be read against each other tile by tile.
 ///
 /// The far room takes whatever extra sources and obstacles the caller
 /// hands it, which is how the same fencing is played on the other side of
@@ -862,15 +741,12 @@ let internal leadingAcross
 
 /// A source laid beside one goal tile, and the obstacles that leave it no
 /// other Seat: a Harvest of it has a Work Area of exactly that tile, so
-/// `walkTicks` — which minimises over a Work Area — becomes an oracle for
-/// one goal rather than for a cluster's cheapest member. The neighbour the
-/// source stands on is the first in range in `neighbourhood`'s own order,
-/// chosen by nothing about what it proves; the fence is that neighbour's
-/// whole neighbourhood but the goal, plus its own tile the way the
-/// spawner's is fenced above — a Seat is any ground beside the source and
-/// the source's tile is beside itself for nothing, but it is ground and
-/// would be a second Seat. A goal the fence happens to seal off answers
-/// absent on both clocks and is compared all the same.
+/// `walkTicks` becomes an oracle for one goal rather than a cluster's
+/// cheapest member. The source stands on the first in-range neighbour in
+/// `neighbourhood`'s own order; the fence is that neighbour's whole
+/// neighbourhood but the goal, plus the source's own tile, which is ground
+/// and would be a second Seat. A goal the fence seals off answers absent on
+/// both clocks and is compared all the same.
 let internal probeBeside (goal: Pos) : Pos * Set<Pos> =
     let inGround (tile: Pos) =
         tile.X >= 1 && tile.X <= 48 && tile.Y >= 1 && tile.Y <= 48
@@ -883,38 +759,26 @@ let internal probeBeside (goal: Pos) : Pos * Set<Pos> =
     |> Set.ofList
     |> Set.add source
 
-/// The outposts the captures below are read with: ADR 0042's two rooms,
-/// laid in beside W12S28 the way they were when the captures were taken.
-/// Read off `Outpost.adr0042` and not off the live declaration, which
-/// moved when W13S28 stood its own spawn (ADR 0047) — the geometry these
-/// tests pin did not. This is the one place the tests join the home to
-/// its outposts; the non-emptiness guard beside each loop is what keeps a
-/// renamed pair from being checked as an empty list forever.
+/// The outposts the captures below are read with: the two rooms laid in
+/// beside W12S28 the way they were when the captures were taken. Read off
+/// `Outpost.adr0042` and not off the live declaration, which moved when
+/// W13S28 stood its own spawn; the geometry these tests pin did not. The
+/// non-emptiness guard beside each loop keeps a renamed pair from being
+/// checked as an empty list forever.
 let internal declaredOutposts = Outpost.adr0042
 
 /// The Atlas over the projection of one declared outpost on the tick the
 /// colony cannot see it: that room's committed terrain and border ring —
 /// the whole of what `Game.map.getRoomTerrain` answers without vision —
-/// with the declaration laid in by the production rule that lays it in
-/// (`Outpost.place`, ADR 0041). That is the shape the shell hands Core for
-/// a room it has never had a creep in (`World.factsOf`, then the
-/// one splice in `ColonyView.ofWorld`), and the Atlas is what prices it
-/// (CONTEXT.md keeps the two apart: the projection is the data, the Atlas
-/// the query interface over it) — so a declaration that named a tile the
-/// room walls, or an id nothing places, is priced here the way the live
-/// colony would price it.
+/// with the declaration laid in by `Outpost.place`, the production rule.
+/// Built through `place` and never by hand: a helper that typed the
+/// placement out would prove a source *placed* in the projection can be
+/// priced, and stay green through the blind room's furniture never reaching
+/// the projection at all (#148).
 ///
-/// Built through `place` and never by hand (#148): a helper that typed the
-/// placement out itself would prove that a source *placed* in the
-/// projection can be priced, which nothing ever doubted, and would stay
-/// green through the whole of the defect this ticket fixes — that the
-/// blind room's furniture never reached the projection at all.
-///
-/// The home room's name is the one the declaration is written relative to
-/// — W12S28 — and it carries no geometry, because what is under test is
-/// the outpost's own: every query below is asked of the outpost's layer
-/// and would answer the empty set for a room the projection did not carry
-/// (ADR 0004, ADR 0041).
+/// The home room, W12S28, carries no geometry, because what is under test
+/// is the outpost's own: every query is asked of the outpost's layer and
+/// would answer the empty set for a room the projection did not carry.
 let internal declaredAtlas (outpost: Outpost) =
     let capture = load outpost.RoomName
 
@@ -934,26 +798,17 @@ let internal declaredAtlas (outpost: Outpost) =
     |> AtlasFixtures.snapshotWith []
     |> ofView
 
-/// The colony ADR 0042 declares, over the committed captures: W12S28
-/// projected as the colony's own room with a spawn on the tile the live
-/// colony stands on, every declared outpost's ground and border ring laid
-/// in beside it, and the declaration's own furniture laid over that the
-/// way the shell lays it (`Outpost.place`) — under the engine's ids,
-/// because that is the vocabulary the constant is written in. The outpost
-/// rocks are pooled the way the shell pools them (`Outpost.pooledSources`),
+/// The declared colony over the committed captures: W12S28 projected as the
+/// colony's own room with a spawn on the live tile, every declared outpost's
+/// ground and border ring laid in beside it, and the declaration's furniture
+/// laid over that by `Outpost.place` and pooled by `Outpost.pooledSources`,
 /// so nothing here hand-writes a source list.
 ///
-/// Both rings, because a Seam joins two rooms and a band is empty unless
-/// the projection carries both sides (ADR 0041). A `RoomControl` entry per
-/// outpost, held by nobody: that map is one entry per *seen* room, so this
-/// is the fixture saying the colony is looking into those rooms this tick
-/// — the state a creep sent to an outpost rock puts them in, and the only
-/// state the container can be planned in, since the census that defers the
-/// plan and the `Game.rooms` lookup that executes it are both paid for by
-/// vision (ADR 0004). Held by nobody rather than reserved because the
-/// container comes before the reserver: what admits the room to the
-/// economy is the container, so nothing here may depend on the room
-/// already being in it.
+/// Both rings, because a band is empty unless the projection carries both
+/// sides. A `RoomControl` entry per outpost, held by nobody: that map is one
+/// entry per *seen* room, and vision is the only state the container can be
+/// planned in. Held by nobody rather than reserved because the container
+/// comes before the reserver.
 let internal declaredColony level =
     let loaded = project (load "W12S28") { X = 12; Y = 40 } None
 
@@ -998,11 +853,10 @@ let internal declaredColony level =
     }
 
 /// The captured room with one creep standing in it: the shape the tick's
-/// per-creep flood memo is laid for (ADR 0029), over terrain no hand-built
-/// fixture poses — walls, swamp lanes, and pockets nothing reaches. Every
-/// case below builds one of these per read order rather than sharing one,
-/// because the memo is the thing under test: what a resumable flood
-/// answers must not depend on what was asked of it before.
+/// per-creep flood memo is laid for, over terrain no hand-built fixture
+/// poses. Every case builds one of these per read order rather than sharing
+/// one, because what a resumable flood answers must not depend on what was
+/// asked of it before.
 let internal standingIn (capture: RoomCapture) (spawn: Pos) (creep: CreepInfo) (stand: Pos) =
     (project capture spawn None).Spatial
     |> withCreepsAt [ creep.Name, stand ]
@@ -1022,15 +876,14 @@ let internal nearestFirst (stand: Pos) (capture: RoomCapture) =
     |> List.sortBy (fun tile -> range stand tile, tile.X, tile.Y)
 
 /// A tile no flood can reach, wherever the creep stands: the border ring
-/// is not the projection's ground (ADR 0041), so nothing settles it and
-/// the read has to answer absent rather than "not yet".
+/// is not the projection's ground, so nothing settles it and the read has
+/// to answer absent rather than "not yet".
 let internal offTheGround = { X = 0; Y = 0 }
 
-/// The bodies the cases sweep: one at ADR 0003's fatigue parity, which
-/// walks plain ground at a tick a tile, and one below it, which pays two
-/// units a plain step and prices swamp far dearer — different step
-/// tables, so different heaps, different tie-breaks and a different
-/// settle order over the same terrain (ADR 0029).
+/// The bodies the cases sweep: one at fatigue parity, which walks plain
+/// ground at a tick a tile, and one below it, which pays two units a plain
+/// step and prices swamp far dearer — different step tables, so different
+/// heaps, tie-breaks and settle order over the same terrain.
 let internal floodBodies =
     [
         "parity", AtlasFixtures.creepWith "w" 0 [ Carry; Carry; Move; Move ]
@@ -1083,23 +936,20 @@ let internal drainTile (capture: RoomCapture) =
     |> List.find (fun (_, terrain) -> terrain = Wall)
     |> fst
 
-/// The body both readings of the walk are taken over: one
-/// fatigue-generating part to one Move (ADR 0003) and no Carry at all.
-/// Carry-less is what makes the round trip twice the one-way walk — an
-/// empty Carry generates no fatigue, so a body holding one prices its two
-/// legs under two factors — and one Work against one Move is under the
-/// Work-heavy line, so a Harvest keeps the Work Area a source's own
-/// surroundings rather than a Post it has no container for (ADR 0020).
+/// The body both readings of the walk are taken over: one fatigue-generating
+/// part to one Move and no Carry at all. Carry-less is what makes the round
+/// trip twice the one-way walk — an empty Carry generates no fatigue, so a
+/// body holding one prices its two legs under two factors — and one Work
+/// against one Move is under the Work-heavy line, so a Harvest keeps the
+/// Work Area a source's own surroundings rather than a Post.
 let internal haulBody = [ Work; Move ]
 
 /// The two captures again, with the far room's sources standing as
 /// obstacles and the creep carrying nothing: the one fixture on which the
 /// hauler quota's round trip and the Matcher's walk are the same journey.
 /// A source tile nothing may stand on makes the Harvest Work Area exactly
-/// the sink's adjacent walkable tiles, and a Carry-less body prices its
-/// loaded and its empty leg under one fatigue factor (ADR 0003), so the
-/// round trip is twice the one-way walk and nothing else. Everything
-/// geometric is still the server's.
+/// the sink's adjacent walkable tiles, and a Carry-less body prices both
+/// legs under one fatigue factor.
 let internal haulingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
     twoCaptureAtlas
         near
@@ -1108,11 +958,9 @@ let internal haulingAcross (near: RoomCapture) (far: RoomCapture) (stand: Pos) =
         (far.Sources |> List.map snd |> Set.ofList)
         (AtlasFixtures.creepWith "w" 0 haulBody)
 
-/// The creep a Verdict is about (ADR 0009): every arm names one, and the
-/// smoke tests below read the whole tick's Verdicts back through this to
-/// ask whether a creep was accounted for at all. `Observe` keeps its own
-/// copy `private`, which is where the fold reads it; this is the same
-/// total function and not a second rule.
+/// The creep a Verdict is about: every arm names one. `Observe` keeps its
+/// own copy `private`; this is the same total function and not a second
+/// rule.
 let internal verdictCreep =
     function
     | Verdict.Matched(creep, _, _)
@@ -1127,6 +975,5 @@ let internal verdictCreep =
 
 /// The three rungs of a colony's life the fixture is built at: the child
 /// as it was claimed, the child at the level the bootstrap window closes
-/// on, and the mother this bot grew up on (ADR 0052). Named once, because
-/// both lists below are read against the same three colonies.
+/// on, and the mother this bot grew up on.
 let internal colonyTiers = [ "W13S28", 1, 300; "W13S28", 3, 800; "W12S28", 5, 1800 ]

@@ -1,5 +1,5 @@
-/// The Verdicts a match, a release and a rejection are returned under
-/// (ADR 0009), and the verbose list an operator reads (ADR 0018).
+/// The Verdicts a match, a release and a rejection are returned under, and
+/// the verbose list an operator reads.
 module Fabot.Core.Tests.Decide.MatcherVerdictTests
 
 open Expecto
@@ -229,13 +229,9 @@ let sayTests =
             }
 
             test "a miner says nothing on the ticks the extractor's clock holds it" {
-                // ADR 0057 decision 2 writes the bubble out: ⛏ on the ticks it
-                // digs and **nothing on the ticks it waits**, so the one-in-six
-                // rhythm `EXTRACTOR_COOLDOWN` imposes is legible in the viewer
-                // rather than hidden behind a glyph that claims a dig every
-                // tick. Read off the same gate the act is withheld by, so the
-                // bubble and the Intent can never come to disagree. Pairwise,
-                // one number on one clock apart.
+                // Read off the same gate the act is withheld by, so the bubble
+                // and the Intent can never disagree. Pairwise, one number on
+                // one clock apart.
                 let sayingAt ticks =
                     { mineColony with
                         Creeps = [ miner "m1" ]
@@ -256,8 +252,8 @@ let extractorCooldownTests =
     testList
         "the extractor's cooldown"
         [
-            // The miner standing on its own mine [[post]], which is where the
-            // whole of this group is read: nothing here is about a walk.
+            // The miner standing on its own mine Post: nothing here is about
+            // a walk.
             let standing colony =
                 { colony with
                     Creeps = [ miner "m1" ]
@@ -289,14 +285,10 @@ let extractorCooldownTests =
             }
 
             test "a miner keeps its Task through the ticks it cannot dig" {
-                // The gate is in the **Emitter** and never in applicability,
-                // which is the distinction ADR 0013 and ADR 0025 spent two
-                // decisions on: a cooldown is five ticks long and a re-match is
-                // a flood, so a Task that vanished and returned every sixth
-                // tick would churn the pool for a body that has nowhere else to
-                // be and no way to get there. The Task exists exactly while the
-                // deposit does; what the cooldown decides is whether this
-                // tick's act is issued.
+                // The gate is in the Emitter and never in applicability: a
+                // re-match is a flood, so a Task that vanished and returned
+                // every sixth tick would churn the pool for a body that has
+                // nowhere else to be.
                 let sticky = Map.ofList [ "m1", held ]
 
                 let verdictsAt ticks =
@@ -373,7 +365,7 @@ let verdictTests =
 
             test "rank layers by target: feeding the spawn outbids feeding the tower" {
                 // The tower sits first in the pool, so only the target-layered
-                // rank (ADR 0010) — not pool order — can hand the spawn the win.
+                // rank — not pool order — can hand the spawn the win.
                 let snapshot =
                     { bareRespawn with
                         Sources = []
@@ -470,13 +462,9 @@ let verdictTests =
             }
 
             test "a repair runs to the whole line and then releases TaskGone, once per job" {
-                // ADR 0061: the rule does not stop a structure crossing its
-                // whole line, it stops it crossing in one tick. What a holder
-                // buys is the band between the two lines — released nowhere in
-                // it, released `task-gone` past it — so the count that falls is
-                // one release per repair **job** instead of one per repair
-                // **tick**. The pairwise is the two hits values and nothing
-                // else.
+                // A holder is released nowhere inside the band between the
+                // two lines and `task-gone` past it: one release per repair
+                // job instead of one per repair tick. Pairwise on the hits.
                 let repairing hits =
                     { bareRespawn with
                         Sources = []
@@ -499,17 +487,13 @@ let verdictTests =
             }
 
             test "a holder that empties inside the band is released Inapplicable, not TaskGone" {
-                // The other release of the two lines, and on the dearest
-                // decaying kind it is the **normal** one: `applicable` for a
-                // Repair is `spending && not standing`, so a body that runs dry
-                // mid-band goes `inapplicable` while its target is still
-                // pooled. The container's band is 75,000 hits — 750 energy at a
-                // hundred hits an energy — against the 600 the live worker
-                // carries, so a container entered at the hungry line ends its
-                // job around 0.74 and this is the reason its release names.
-                // Pinned because ADR 0061's own landing check reads the
-                // transition log for `task-gone` alone, and on a container it
-                // will not find one (#323, where the number is re-derived).
+                // On the dearest decaying kind this is the normal release:
+                // `applicable` for a Repair is `spending && not standing`, so
+                // a body that runs dry mid-band goes `inapplicable` while its
+                // target is still pooled. The container's band is 75,000 hits
+                // — 750 energy at a hundred hits an energy — against the 600
+                // the live worker carries, so a landing check reading the log
+                // for `task-gone` alone will not find one on a container.
                 let emptied =
                     { bareRespawn with
                         Sources = []
@@ -531,17 +515,13 @@ let verdictTests =
             }
 
             test "a Task that left a pool we can see releases; the vision grace is about looking" {
-                // #151's line, drawn from the other side. The grace holds an
-                // assignment whose target left the pool **with the vision
-                // that carried it**, and the sighting a room stamps while we
-                // are looking at it must not be mistaken for that: a Refill
-                // that filled, a store that emptied, a pile that decayed all
-                // leave the pool while their target still stands in the
-                // room's census, in full view. Holding those for 150 ticks
-                // would stall the haul cycle every time an extension filled.
-                // So what separates the two is the sighting's own tick, and
-                // this is the pair that pins it — one field of one sighting
-                // moves and nothing else.
+                // The grace holds an assignment whose target left the pool
+                // with the vision that carried it; a Refill that filled, a
+                // store that emptied, a pile that decayed all leave the pool
+                // in full view, and holding those for 150 ticks would stall
+                // the haul cycle every time an extension filled. What
+                // separates the two is the sighting's own tick: one field of
+                // one sighting moves and nothing else.
                 let snapshot =
                     { bareRespawn with
                         Sources = []
@@ -579,13 +559,10 @@ let verdictTests =
             }
 
             test "a drained source releases its harvester with TooEarly" {
-                // Issue #48: anti-thrash must not pin a creep to a dry
-                // rock. The Task stays pooled since ADR 0025, so the
-                // release is the arrival gate's rather than TaskGone's, and
-                // Inapplicable would make the transition log lie. No
-                // projection here, so the walk prices at 0 the way ADR 0004
-                // prices unplaced geometry — and the reason says so, beside
-                // the wait it was compared against (#88); the same release
+                // Anti-thrash must not pin a creep to a dry rock. The Task
+                // stays pooled, so the release is the arrival gate's rather
+                // than TaskGone's. No projection here, so the walk prices at
+                // 0 and the reason says so beside the wait; the same release
                 // on real ground is pinned under "restock dispatch".
                 let snapshot =
                     { bareRespawn with
@@ -692,8 +669,8 @@ let verdictTests =
             test "a remembered oversell releases with OverCapacity, the loser idles as NoneFree" {
                 // One Seat at the source, two creeps remembered on it — an
                 // oversell memory can carry across a redeploy. The nearer of
-                // the two keeps (#230), which here is also the
-                // alphabetically first; nothing else fits the loser.
+                // the two keeps, which here is also the alphabetically first;
+                // nothing else fits the loser.
                 let snapshot =
                     shortCorridorColony
                         [ worker "w1" 0 50; worker "w2" 0 50 ]
@@ -719,19 +696,12 @@ let verdictTests =
             }
 
             test "an oversold cap releases the furthest holder, whatever the names are" {
-                // #230: the release fold judges each remembered assignment
-                // against the ones it has already kept, so the order it walks
-                // a Task's holders in *is* the rule for who keeps the slot.
-                // In memory order that was the creep-name order, so the body
-                // already standing on the one Seat could lose it to one two
-                // tiles further down the corridor — ADR 0054 records the same
-                // price on the [[refill cluster]] and defers the fix to here,
-                // because it is the Matcher's release order for every capped
-                // Task and not that Task's rule.
-                //
-                // Pairwise on the one thing that may decide it: the two
-                // bodies swap names between the halves and stand where they
-                // stood, so a half that changes is name order deciding.
+                // The release fold judges each remembered assignment against
+                // the ones it has already kept, so the order it walks a Task's
+                // holders in is the rule for who keeps the slot; in memory
+                // order the body on the one Seat could lose it to one further
+                // down the corridor. Pairwise: the two bodies swap names
+                // between the halves and stand where they stood.
                 let releasedFrom near far =
                     let snapshot =
                         shortCorridorColony
@@ -766,15 +736,12 @@ let verdictTests =
             }
 
             test "an unplaced holder does not outrank the body standing on the Seat" {
-                // #230, the other half of the order: `Atlas.walkTicks` answers
-                // `Some 0` for a body the projection cannot place (ADR 0004's
-                // escape — unpriceable geometry never counts against a Task),
-                // which is the same number it answers for a body standing in
-                // the Work Area. Ranked on that number alone the ghost sorts
-                // level with — and by name ahead of — the body we can watch
-                // standing on the one Seat, and the cap gives the slot to the
-                // one nobody can find. A holder with no tile has no distance
-                // from anything, so it sorts behind every holder that has one.
+                // `Atlas.walkTicks` answers `Some 0` for a body the projection
+                // cannot place — the same number it answers for a body in the
+                // Work Area — so ranked on that alone the ghost sorts level
+                // with, and by name ahead of, the body on the one Seat. A
+                // holder with no tile has no distance from anything, so it
+                // sorts behind every holder that has one.
                 let releasedFrom placed ghost =
                     let snapshot =
                         shortCorridorColony
@@ -801,17 +768,13 @@ let verdictTests =
             }
 
             test "a holder the geometry disconnects sorts last under either name order" {
-                // #230's tie-break has no distance to read for a walled-off
-                // body, so it sorts behind the one it can price — the same
-                // place an unplaced body sorts, and for the same reason. What
-                // that settles is the Verdict: the cap is full by the time the
-                // walled-off body is judged, and the gate cascade gives a pair
-                // over a full cap `CapacityFull` whichever way it is read
-                // (fresh candidate or remembered assignment). Judging it
-                // *first* instead would earn it `Unreachable` and make the
-                // reason a function of where the fold sorted it, which is the
-                // kind of answer #230 exists to remove; the gate order is
-                // where reachability's precedence lives, and it is deliberate.
+                // The tie-break has no distance to read for a walled-off
+                // body, so it sorts behind the one it can price. That settles
+                // the Verdict: the cap is full by the time the walled-off body
+                // is judged, and the gate cascade answers `CapacityFull`
+                // whichever way it is read. Judging it first would earn it
+                // `Unreachable` and make the reason a function of where the
+                // fold sorted it.
                 let reasonsFrom islanded seated =
                     let terrain =
                         [
@@ -948,12 +911,11 @@ let rankTierTests =
         "rank tiers"
         [
             test "the tier order is one sequence: feeding, then surplus, then the buffer" {
-                // The Refill target layering (ADR 0010, ADR 0012) read top to
-                // bottom by one body, one step at a time: the spawn six steps
-                // away outbids the tower three away, and the tower outbids the
-                // buffer underfoot. The buffer loses the second step, which is
-                // what puts it below the surplus tier rather than beside it —
-                // a tie there would hand the win to the container it stands on.
+                // The Refill target layering read top to bottom by one body:
+                // the spawn six steps away outbids the tower three away, and
+                // the tower outbids the buffer underfoot. The buffer losing the
+                // second step is what puts it below the surplus tier rather
+                // than beside it.
                 let hungrySpawn = refillable "spawn-1" 50 BuiltKind.Spawn
                 let fullSpawn = refillable "spawn-1" 0 BuiltKind.Spawn
                 let hungryTower = refillable "tower-1" 500 BuiltKind.Tower
@@ -976,23 +938,12 @@ let rankTierTests =
             test "tower Refill, Repair and Upgrade are one surplus rung; Build stands above" {
                 // Pairwise, because the deciding factor is read off the winner
                 // and its cheapest rival alone: pool all four at once and the
-                // three-way tie hides whichever one left the tier. So each
-                // surplus Task meets the tower Refill by itself, and pool order
-                // — not rank — has to be what breaks the ties that remain.
-                //
-                // Build makes none of them any more (#234): it is the tier's
-                // own top rung, so it outranks the tower's Refill on a fixture
-                // where nothing is priceable and rank is the only thing that
-                // can separate anything. That is the one comparison the rung
-                // moves which is not Build-against-Upgrade, and it moves it for
-                // the generalists alone — the row that feeds a tower is Carry
-                // with no Work part, and no such body is applicable to a Build.
-                //
-                // The rung reads the site's room (`isHomeSite`) and this
-                // fixture places nothing, which is the total resolving toward
-                // home exactly as `isOutpostSite`'s does: absence
-                // never counts against a Task (ADR 0004). The rung's *room*
-                // is pinned where a room exists to pin it, in `OutpostTests`.
+                // three-way tie hides whichever one left the tier. Build is
+                // the tier's own top rung, so it outranks the tower's Refill
+                // on a fixture where rank is the only thing that can separate
+                // anything. The rung reads the site's room (`isHomeSite`) and
+                // this fixture places nothing, which resolves toward home; the
+                // rung's room is pinned in `OutpostTests`.
                 let verdictsFor colony = (decideOn colony).Verdicts
 
                 let tied =
@@ -1012,10 +963,8 @@ let rankTierTests =
                     [ Verdict.Matched("w1", taskId (Build "site-1"), MatchFactor.Rank) ]
                     "Build outranks the tower Refill: rank broke it, not pool order"
 
-                // An *ordinary* Repair, deliberately: a road below the rescue
-                // line has a rung of its own (#284) and would break this tie by
-                // rank, which is the one thing this test is here to say Repair
-                // does not do.
+                // An ordinary Repair, deliberately: a road below the rescue
+                // line has a rung of its own and would break this tie by rank.
                 Expect.equal
                     (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 2400 5000))
                     tied
@@ -1030,15 +979,11 @@ let rankTierTests =
                     "Upgrade ties the tower Refill: pool order broke it, not rank"
             }
 
-            // The lane a loaded generalist really stands in (#234, live
-            // t195,8xx): it fills at the [[buffer]] and is left standing in
-            // the controller's Upgrade Work Area, where the Upgrade costs it
-            // one step, applies to any load and never goes task-gone — so two
-            // colonies holding fifty construction sites between them upgraded
-            // with every worker they had. Pairwise on the pool alone: the same
-            // lane, the same worker on the same tile, the site added and taken
-            // away. The site is the **farther** of the two targets, so a win
-            // on travel cost is not a win this case would accept.
+            // The lane a loaded generalist really stands in: it fills at the
+            // buffer and is left in the controller's Upgrade Work Area, where
+            // the Upgrade costs it one step and never goes task-gone. Pairwise
+            // on the pool alone, and the site is the farther of the two
+            // targets, so a win on travel cost is not a win this case accepts.
             let siteDownTheLane sites =
                 bufferLaneColony
                     [ "site-1", { X = 20; Y = 10 }, Site BuiltKind.Extension ]
@@ -1058,32 +1003,21 @@ let rankTierTests =
             }
 
             test "a bleeding mineral container outbids the bank the body is standing on" {
-                // #306, live at t402,520 and the whole of the ticket: W13S28 had
-                // banked 485,916 energy and **no** Thorium with its mineral
-                // container standing full at 2,000 and a ground pile growing
-                // under the [[miner]], while W12S28 — the same code, an empty
-                // Storage — had banked 3,600. Both draws rank at `StockDraw`
-                // (ADR 0023, ADR 0057 decision 3), so travel cost decided, and
-                // the bank is always the nearer of the two: a healthy colony
-                // never drew its own mine, and the healthier it was the worse it
-                // got.
-                //
-                // Pairwise on the mine's stock alone, with the body put on the
-                // **Storage's** own Seat so the ore has to win on rank and can
-                // never win on distance.
+                // Live W13S28 banked 485,916 energy and no Thorium with its
+                // mineral container full: both draws ranked `StockDraw`, so
+                // travel cost decided, and the bank is always the nearer.
+                // Pairwise on the mine's stock alone, with the body on the
+                // Storage's own Seat so the ore can never win on distance.
                 let banked stock =
                     let stocked = mineHaulColony |> withMineStock stock
 
                     let colony =
                         { stocked with
                             Creeps = [ hauler "h1" 0 200 ]
-                            // A mouth for the bank: the Storage's own Withdraw
-                            // is pooled only where the colony has somewhere to
-                            // put the energy (ADR 0023). The spawn is unplaced
-                            // and its Refill unreachable, which is deliberate —
-                            // an **empty** body is applicable to neither Refill
-                            // nor cluster, so the pair this case is about is the
-                            // only pair there is.
+                            // A mouth for the bank, so its Withdraw is pooled.
+                            // The spawn is unplaced and its Refill unreachable,
+                            // deliberately: an empty body is applicable to
+                            // neither, so the pair here is the only pair.
                             Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         }
 
@@ -1114,10 +1048,8 @@ let rankTierTests =
 
             test "the downgrade deadline still outranks a site" {
                 // The rung is one step inside the surplus tier and the
-                // deadline is a whole tier above the shallowest work there is
-                // (ADR 0007, `deadlineRank`), so #234 does not reach it: a
-                // controller about to lose a level takes back the load the
-                // site had off it a tick before.
+                // deadline (`deadlineRank`) a whole tier above the shallowest
+                // work there is, so the rung does not reach it.
                 let expiring =
                     { siteDownTheLane [ { Id = "site-1"; Left = siteOwes } ] with
                         Controller =
@@ -1164,10 +1096,7 @@ let verboseScoringTests =
                                 )
                                 Candidate.Scored(taskId (Refill("spawn-1", Energy)), 0, 0, 0)
                                 // Two tiers below the flow's zero, ten rungs
-                                // apiece since #216 R5: the ladder gained
-                                // room for a Task to be ordered inside its
-                                // own tier, and `weightOfRank` divides the
-                                // rungs back out (ADR 0052 decision 6).
+                                // apiece.
                                 Candidate.Scored(taskId (Upgrade "ctrl-1"), 20, 0, 0)
                             ]
                         )
@@ -1283,24 +1212,17 @@ let resourceIdVerdictTests =
         "a Task id that names a resource"
         [
             test "the vision grace reads the store out of a Thorium Withdraw's id" {
-                // A Task id has two colons since ADR 0057 decision 3 put a
-                // resource on the [[withdraw]] and the [[refill]], and the
-                // vision grace (#151) holds an *id* and no Task — the Task it
-                // named has left the pool — so what it has to find in that id is
-                // the target the room's census files, between the first colon
-                // and the next. Neither an object id nor a room name has ever
-                // held a colon, which is what makes the reading total.
-                //
-                // Pairwise on the resource alone: the same store, the same dark
-                // room, the same grace, held under each of the two ids. Read
-                // whole, the Thorium id's target would be "can-min:Thorium",
-                // which the sighting does not hold, and the grace would quietly
-                // stop covering exactly the Tasks this ticket added.
+                // A Task id with a resource has two colons, and the vision
+                // grace holds an id and no Task, so what it has to find in
+                // the id is the target between the first colon and the next.
+                // Neither an object id nor a room name has ever held a colon,
+                // which is what makes the reading total. Pairwise on the
+                // resource alone: read whole, the Thorium id's target would be
+                // "can-min:Thorium", which the sighting does not hold.
                 let home = SpatialInfo.homeName mineHaulColony.Spatial
 
                 // The store gone from the projection, so the Task really has
-                // left the pool and the grace is the only thing that can keep
-                // its holder.
+                // left the pool and only the grace can keep its holder.
                 let gone = mineHaulColony |> withoutMineContainer
 
                 let blind =

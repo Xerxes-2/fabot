@@ -1,5 +1,4 @@
-/// The Reservation, and a stood-down outpost's place in the pool
-/// (ADR 0043).
+/// The Reservation, and a stood-down outpost's place in the pool.
 module Fabot.Core.Tests.Decide.OutpostReserveTests
 
 open Expecto
@@ -11,10 +10,7 @@ open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.OutpostFixtures
 
 /// `Observe.foldRaids` with the outpost chain's answers derived off the same
-/// view (#383). The fold takes them rather than re-deriving them, because the
-/// shell derives them once for the tick and hands the same value to both
-/// halves; a test that built its own would be exercising a shape the bot does
-/// not run.
+/// view (#383), as the shell hands the same value to both halves.
 let private foldRaidsOf alive (view: ColonyView) prior =
     Observe.foldRaids Observe.capEpisodes alive view (Planner.outpostFactsOf view) prior
 
@@ -25,11 +21,8 @@ let reserveTests =
         [
             test
                 "an outpost's controller is a Reserve; the colony's own is Upgraded, never reserved" {
-                // The pool rule (ADR 0042), read off the projection's kind
-                // census: every controller in it but ours. The colony's own
-                // is excluded by id — the engine refuses reserveController
-                // on a room it owns — so the two controllers here answer
-                // the two different Tasks a controller can carry.
+                // Every controller in the kind census but ours, excluded by id: the
+                // engine refuses reserveController on a room it owns.
                 let colony =
                     { bareRespawn with
                         Sources = []
@@ -56,12 +49,8 @@ let reserveTests =
             }
 
             test "a CLAIM body is matched to the outpost's Reserve and reserves it" {
-                // The whole path in one tick (ADR 0042): the Task is pooled
-                // off the declaration, the CLAIM body is the one body it
-                // applies to, the Matcher hands it over, and the Emitter
-                // issues the reserve. The creep stands at (10,44), one tile
-                // from the controller at (11,44) — inside the Work Area
-                // already, so the act is this tick's and not a walk's.
+                // The whole path in one tick. The creep stands at (10,44), one tile
+                // from the controller at (11,44), so the act is this tick's, not a walk's.
                 let {
                         Assignments = assignments
                         Intents = intents
@@ -91,10 +80,8 @@ let reserveTests =
             }
 
             test "a body with no CLAIM part is never matched to Reserve" {
-                // Pairwise against the test above: the same colony, the
-                // same tile beside the same controller, one body swapped.
-                // A generalist can do everything else this colony ever asks
-                // and cannot push a reservation up by a tick.
+                // Pairwise against the test above: one body swapped. A generalist
+                // cannot push a reservation up by a tick.
                 let {
                         Assignments = assignments
                         Intents = intents
@@ -114,12 +101,9 @@ let reserveTests =
             }
 
             test "a CLAIM body fits no other Task: without a Reserve it stands still" {
-                // ADR 0042's pairing rule, in as many words: every other
-                // Task gates on a Work part or a Carry part and a
-                // `[2Claim;2Move]` body has neither, so a reserver cast
-                // before this Task existed would have stood where it was
-                // born for its whole 600-tick life. It is also why the
-                // quota may not arrive before the Task (#131).
+                // Every other Task gates on a Work or Carry part and a `[2Claim;2Move]`
+                // body has neither, so a reserver cast before this Task existed would
+                // have stood where it was born for its whole 600-tick life (#131).
                 let colony =
                     { bareRespawn with
                         Sources = [ source "src-a" ]
@@ -163,16 +147,10 @@ let reserveTests =
             }
 
             test "a reserver under fire runs: Safety outranks the tier Reserve sits on" {
-                // The one comparison the tier choice actually settles
-                // today. Reserve is on the feeding tier — ADR 0042's own
-                // argument for casting the row first is that it decides
-                // whether the income is five a tick or ten — and Safety
-                // sits above every tier of work (ADR 0033), so a reserver
-                // being shot at leaves the controller. Both Tasks are in
-                // this creep's pool: the Reach takes two of the
-                // controller's three standing tiles and leaves one, so
-                // Reserve is applicable and loses on rank rather than
-                // vanishing.
+                // Reserve is on the feeding tier and Safety sits above every tier of
+                // work. Both Tasks are in this creep's pool: the Reach takes two of the
+                // controller's three standing tiles and leaves one, so Reserve loses
+                // on rank rather than vanishing.
                 let colony = reserveColony [ reserver "r1", { X = 10; Y = 44 } ]
 
                 let raided =
@@ -198,19 +176,11 @@ let reserveTests =
             }
 
             test "one reserver per controller: the second is pushed to the outpost nobody holds" {
-                // ADR 0042 casts one reserver *per posted outpost* — "two
-                // reservers at 4.33 energy a tick buy three sources their
-                // second five" — and a second body on a controller the
-                // first already holds buys nothing at all, because a
-                // reservation is capped and one body's CLAIM parts are
-                // sized to hold it. Travel cost cannot produce that on its
-                // own: both bodies stand in the west arm, both price the
-                // west controller cheapest, and `load` is only the key's
-                // third component, so it never separates two candidates
-                // whose costs differ. The per-Task cap is what does, and
-                // without it the north outpost is pooled, applicable and
-                // matched by nobody for the whole 600-tick life of both
-                // creeps — silently, since both report Matched.
+                // A second body on a controller the first already holds buys nothing.
+                // Travel cost cannot produce that: both bodies stand in the west arm
+                // and price the west controller cheapest, and `load` is only the
+                // key's third component. The per-Task cap is what does, and without
+                // it the north outpost is matched by nobody for 600 ticks, silently.
                 let colony =
                     twoOutpostColony
                         [ reserver "r1", { X = 5; Y = 26 }; reserver "r2", { X = 6; Y = 26 } ]
@@ -224,11 +194,9 @@ let reserveTests =
             }
 
             test "a Reserve holder alive at the candidate's arrival still blocks it" {
-                // ADR 0026's equality boundary remains the rule for ordinary
-                // bounded Tasks: only the Reactor relay has ADR 0069's
-                // handover window. The candidate is three ticks from the
-                // controller's ring and the incumbent has exactly three ticks
-                // left, so they would meet rather than overlap.
+                // The equality boundary holds for ordinary bounded Tasks; only the
+                // Reactor relay has a handover window. The candidate is three ticks
+                // from the ring and the incumbent has exactly three left.
                 let incumbent = reserver "a-old" |> withLife 3
                 let candidate = reserver "z-new"
 
@@ -243,18 +211,12 @@ let reserveTests =
             }
 
             test "a controller in a room this colony owns is not pooled at all" {
-                // The other half of #181's fact, at the seam it is decided
-                // on: the engine refuses reserveController on a room we
-                // own, so that room's controller is not a Task. The pool
-                // excluded the colony's own controller by *id*, which said
-                // the same thing only while home was the only room the
-                // colony owned — the tick a declared outpost is claimed it
-                // stops saying it, and a Task no body can execute is one
-                // the Matcher fills all the same.
+                // #181: the engine refuses reserveController on a room we own. The pool
+                // excluded the colony's own controller by *id*, which said the same
+                // thing only while home was the only room owned; a Task no body can
+                // execute is one the Matcher fills all the same.
                 //
-                // Pairwise on the one fact: the same declaration, the same
-                // controller, the same projection, ownership the only
-                // input that moves.
+                // Pairwise: ownership the only input that moves.
                 let pooledUnder control =
                     let colony = reserveColony []
 
@@ -275,20 +237,12 @@ let reserveTests =
             }
 
             test "the row's one reserver walks past the outpost we own to the one we do not" {
-                // #181's live shape, at the seam the bug actually bites:
-                // home, a near declared outpost the user has just claimed,
-                // and a farther one still neutral. The row hires one body
-                // — a room we own is not a room to reserve — and travel
-                // cost alone would spend it on the near controller, which
-                // is exactly the controller the engine refuses. Nothing
-                // between the pool and the Matcher reads ownership, so the
-                // pool is where that has to be settled, and this is the
-                // test that says so: with the near room owned the body
-                // must cross to the far one.
+                // #181's live shape: a near declared outpost just claimed and a farther
+                // one still neutral. The row hires one body and travel cost alone would
+                // spend it on the near controller, the one the engine refuses. Nothing
+                // between the pool and the Matcher reads ownership.
                 //
-                // Pairwise on ownership, one creep, so the cap cannot be
-                // what spreads them: the same colony with the west room
-                // neutral keeps the body on the west controller.
+                // Pairwise on ownership, one creep, so the cap cannot be what spreads them.
                 let assignedUnder control =
                     let colony = twoOutpostColony [ reserver "r1", { X = 5; Y = 26 } ]
 
@@ -310,28 +264,16 @@ let reserveTests =
             }
 
             test "a controller somebody else reserves is no Task and hires nobody" {
-                // #333, measured live at W12S27 over t411,226–t411,878. An
-                // invader core collapsed and ADR 0043's stand-down ended
-                // with it — the gate reads the *core*'s clock — but the
-                // reservation the core had taken outlives the core by
-                // `CONTROLLER_RESERVE_MAX`, 4,999 ticks. In that window
-                // `reserveController` is refused every tick, because a
-                // controller somebody else holds is not a legal target, and
-                // the row went on re-casting `[claim ×3, move ×3]` — 1,950
-                // energy a body, two of them measured over the 617 ticks the
-                // ticket watched and four or five more still to come — against
-                // a Storage holding zero energy. The reservation moved by 0.
+                // #333, measured live at W12S27 over t411,226-t411,878: a core collapsed
+                // and its stand-down ended, but the reservation it took outlives it by
+                // `CONTROLLER_RESERVE_MAX`, 4,999 ticks. `reserveController` is refused
+                // every tick against a held controller, and the row re-cast
+                // `[claim x3, move x3]` at 1,950 energy a body against an empty Storage.
                 //
-                // The same read as #181's ownership clause one fact over,
-                // and it lands in the same place for the same reason: the
-                // pool offers exactly the controllers the row hires for, or
-                // a reserver bought for the *other* outpost would be handed
-                // this one by travel cost and the refusal would buy nothing.
+                // The pool offers exactly the controllers the row hires for, or a
+                // reserver bought for the *other* outpost would be handed this one.
                 //
-                // **One holder at a time**, because a colony carrying two
-                // of them proves nothing about either: the Invader's hold
-                // is the live case and a rival's reads the same way, each
-                // pinned against its own unreserved control entry.
+                // **One holder at a time**, each pinned against its own unreserved entry.
                 let castsUnder control =
                     reserverColony [ northOutpost true ] (surplusFleet 3) [ "W1N2", control ]
                     |> decideOn
@@ -342,8 +284,7 @@ let reserveTests =
                     |> fun colony -> planTasksOn colony noThreats
                     |> reserveTasks
 
-                // The Invader's leftover hold — the room the ticket was
-                // filed on, at the ticks it was filed at.
+                // The Invader's leftover hold, at the ticks the ticket was filed at.
                 Expect.isEmpty
                     (castsUnder (coreReservedRoom 4_999))
                     "the Invader's reservation outliving its core hires no reserver"
@@ -362,11 +303,9 @@ let reserveTests =
                     [ "ctrl-W1N2" ]
                     "and its controller is the Reserve it always was"
 
-                // A rival's hold, alone, against our own. A rival's
-                // reservation is also a clocked stand-down (#165) and would
-                // withdraw the room on the *next* tick; this is the same
-                // tick, where the row used to hire and the pool used to
-                // offer.
+                // A rival's hold, alone. A rival's reservation is also a clocked
+                // stand-down (#165) and would withdraw the room on the *next* tick;
+                // this is the same tick.
                 Expect.isEmpty
                     (castsUnder (reservedRoom false 4_999))
                     "another player's reservation reads the same way — the engine refuses us alike"
@@ -387,17 +326,13 @@ let reserveTests =
             }
 
             test "a room with no control entry is still the room the row exists to go and see" {
-                // The direction this read may **not** be wrong in (#131's
-                // deadlock, restated for #333): a declared outpost nothing
-                // looked into this tick carries no `RoomControl` entry, and
-                // absence classifies nothing (ADR 0004). Read as "somebody
-                // might hold it" the row would hire nobody, nothing would
-                // walk there, no vision would arrive and the entry would
-                // never appear — the chain deadlocked on its own caution.
+                // The direction this read may **not** be wrong in (#131's deadlock): a
+                // declared outpost nothing looked into carries no `RoomControl` entry.
+                // Read as "somebody might hold it" nobody would walk there and the
+                // entry would never appear.
                 //
-                // Pinned beside the hold above because the two are one
-                // rule's two answers and a predicate written the other way
-                // round would pass every case in the test above.
+                // Pinned beside the hold above because a predicate written the other
+                // way round would pass every case in the test above.
                 let casts =
                     reserverColony [ northOutpost true ] (surplusFleet 3) []
                     |> decideOn
@@ -410,29 +345,20 @@ let reserveTests =
             }
 
             test "a hold the colony has already read is not re-bought the tick its reserver dies" {
-                // #333's actual **spend**, and the half a vision-gated read
-                // cannot stop. `RoomControl` carries this tick's vision
-                // alone, and W12S27 holds no body of ours but the reserver
-                // itself — no container, so no [[post]] and no [[miner]]. So
-                // a rule read off vision alone erases itself: the reserver
-                // arrives, the entry appears, its Task vanishes under it, the
-                // idle `[Claim; Move]` body holds the vision for the rest of
-                // its 600 ticks, and on the first dark tick after it dies the
-                // row buys the whole nine-block deficit again. One body per
-                // reserver lifetime, which is the cadence the ticket measured
-                // live: `reserver-411079`, then `reserver-411698`, 619 ticks
-                // apart, with the reservation unmoved between them.
+                // #333's actual **spend**: `RoomControl` carries this tick's vision
+                // alone and W12S27 holds no body of ours but the reserver itself, so a
+                // rule read off vision erases itself: the reserver arrives, its Task
+                // vanishes, and on the first dark tick after it dies the row buys the
+                // deficit again. Live: `reserver-411079`, then `reserver-411698`, 619
+                // ticks apart, the reservation unmoved between them.
                 //
-                // The record is what closes it. The look that saw the hold
-                // wrote it and the tick it ends on into the [[raid log]];
-                // `Observe.standDown` hands that forward every tick; and the
-                // blind ticks read it. Driven end to end from the fold rather
-                // than from a hand-built set, because the thing under test is
-                // that the two halves agree about which tick the hold ends.
+                // The record closes it: the look wrote the hold's end into the raid
+                // log, `Observe.standDown` hands it forward, the blind ticks read it.
+                // Driven from the fold because the thing under test is that the two
+                // halves agree about which tick the hold ends.
                 let log =
                     Observe.RaidState.empty
-                    // No world roster, for the reason the gate tests below
-                    // give: one tick folded off an empty log has no `Living`
+                    // No world roster: one tick folded off an empty log has no `Living`
                     // baseline, so nothing reads as a loss (#191).
                     |> foldRaidsOf
                         Set.empty
@@ -461,16 +387,12 @@ let reserveTests =
             }
 
             test "a look that finds the controller free overrules the record beside it" {
-                // Vision first and the record second, never the other way
-                // round. The record is the *previous* tick's conclusion and a
-                // control entry is this tick's fact, so a hold that ended
-                // early — somebody else's `attackController`, a server rolled
-                // back — must be allowed to open the room on the tick the
-                // look is taken rather than on the tick the record named.
+                // Vision first and the record second: the record is the *previous*
+                // tick's conclusion, so a hold that ended early (somebody else's
+                // `attackController`, a server rolled back) opens the room on the tick
+                // the look is taken.
                 //
-                // Pinned pairwise against the same stale record read blind,
-                // which is the only other input: a predicate that consulted
-                // the record first would pass the second half and fail here.
+                // Pinned pairwise against the same stale record read blind.
                 let castsUnder control =
                     { reserverColony [ northOutpost true ] (surplusFleet 3) control with
                         HeldOutposts = Set.singleton "W1N2"
@@ -495,20 +417,13 @@ let standDownGateTests =
         "a stood-down outpost in the pool"
         [
             test "a stood-down outpost pools no Task, counts in no quota and is cast for by nobody" {
-                // ADR 0043's whole claim, at the top seam: a room the gate
-                // withholds decides exactly what a room nobody declared
-                // decides. Nothing downstream was taught about stand-downs
-                // — the projection, the Task pool, the four quota rows and
-                // the Atlas each see a room that is not there, which is the
-                // semantics ADR 0004 paid for long ago.
+                // A room the gate withholds decides exactly what a room nobody declared
+                // decides; nothing downstream was taught about stand-downs.
                 //
-                // The fleet stands over every row's quota but the
-                // reserver's, so a `SpawnCreep` here is a reserver or it is
-                // a defect, and the reserver row is the one row a
-                // *declaration alone* hires for (#131): one body per
-                // declared outpost, container or no container. That makes
-                // it the row that can tell "the room left the projection"
-                // from "the room left the economy".
+                // The fleet stands over every row's quota but the reserver's, so a
+                // `SpawnCreep` here is a reserver or a defect, and the reserver row is
+                // the one row a *declaration alone* hires for (#131): it can tell "the
+                // room left the projection" from "the room left the economy".
                 let fleet = surplusFleet 4
                 let both = gatedColony [ northGated; westGated ] Set.empty fleet
                 let shut = gatedColony [ northGated; westGated ] (Set.singleton "W1N2") fleet
@@ -532,15 +447,9 @@ let standDownGateTests =
                     [ oneBlock ]
                     "and the one cast left is the other outpost's: nothing is built for a room nothing can enter"
 
-                // Everything else besides, and this one holds by
-                // construction rather than by observation: `gatedColony`
-                // subtracts the shut set before it assembles anything, so
-                // the two views below are the same value and the
-                // equality can only fail if `Outpost.worked` filters by
-                // something other than the room's name. That is worth one
-                // line and is not the criterion's quota half — a row still
-                // counting the shut room could not show up here, because
-                // there is no room here for it to count.
+                // This one holds by construction: `gatedColony` subtracts the shut set
+                // before it assembles anything, so the equality can only fail if
+                // `Outpost.worked` filters by something other than the room's name.
                 Expect.equal
                     (outcomeOf shut)
                     (outcomeOf never)
@@ -548,17 +457,9 @@ let standDownGateTests =
             }
 
             test "the quota rows stop counting the room the gate withholds" {
-                // Criterion 1's other half, and the one the equality above
-                // cannot reach: it is read on two colonies that really do
-                // differ — both declare both rooms, and only the shut set
-                // moves — so a row still folding the withheld room's
-                // furniture hires a body the colony it is actually working
-                // does not want.
-                //
-                // One row at a time, each against a fleet standing exactly
-                // at the shut colony's own quota for it while every other
-                // row is over its own, which is the pairwise reading the
-                // matcher's cheapest-rival rule asks for everywhere else.
+                // Read on two colonies that really do differ: both declare both rooms,
+                // only the shut set moves. One row at a time, each against a fleet
+                // standing exactly at the shut colony's own quota for it.
                 let castRows anchors haulers workers shut =
                     let fleet =
                         [ for i in 1..anchors -> anchor $"a{i}" 0 50 ]
@@ -573,32 +474,22 @@ let standDownGateTests =
                     castRows anchors haulers workers Set.empty,
                     castRows anchors haulers workers (Set.singleton "W1N2")
 
-                // The Anchor row counts Posts and the withheld room's
-                // standing container was one: at three Anchors the colony
-                // working both rooms is a body short and the one working
-                // the west room alone is already at its target.
+                // The Anchor row counts Posts and the withheld room's container was one.
                 Expect.equal
                     (gated 3 3 40)
                     ([ "reserver"; "reserver"; "anchor" ], [ "reserver" ])
                     "the fourth Post goes with the room, and the Anchor it would have hired goes with it"
 
-                // The workforce target counts each posted source's output
-                // and the withheld room's rock was one: at three workers
-                // the colony working both rooms hires a fourth.
+                // The workforce target counts each posted source's output.
                 Expect.equal
                     (gated 4 1 3)
                     ([ "reserver"; "reserver"; "worker" ], [ "reserver" ])
                     "the withheld rock's ten a tick leaves the income the worker row is sized off"
 
-                // The fourth row is deliberately not pinned by a cast. At
-                // ADR 0042's 1,800 capacity one hauler covers both home
-                // containers' round trips together (ADR 0049), and this
-                // colony's two home containers set the row at one either
-                // way — the outposts move it by nothing there is a body's
-                // granularity to see. What the row reads is the
-                // projection's containers, and the withheld room's is gone
-                // with the room, which the Task pool above already shows:
-                // no Withdraw names it.
+                // The fourth row is not pinned by a cast: at 1,800 capacity one hauler
+                // covers both home containers together, so the outposts move the row by
+                // nothing a body's granularity can see. The pool above already shows
+                // the withheld container gone: no Withdraw names it.
                 Expect.equal
                     (gated 4 0 40)
                     ([ "reserver"; "reserver"; "hauler" ], [ "reserver"; "hauler" ])
@@ -606,10 +497,8 @@ let standDownGateTests =
             }
 
             test "two outposts are two gates" {
-                // ADR 0043's independent gates: W12S27 standing down does
-                // not cost W13S28 its reserver. Pairwise, one room shut at
-                // a time, because a gate that withheld "the outposts"
-                // rather than a room would pass a test that shut only one.
+                // Pairwise, one room shut at a time: a gate that withheld "the
+                // outposts" rather than a room would pass a test that shut only one.
                 let shutting room =
                     let colony =
                         gatedColony [ northGated; westGated ] (Set.singleton room) (surplusFleet 4)
@@ -628,15 +517,11 @@ let standDownGateTests =
             }
 
             test "the tick the clock runs out, the outpost is back in the pool" {
-                // Re-entry is the clock running out and nothing else (ADR
-                // 0043), so the gate is read straight off the log: the two
-                // colonies below differ only in the tick `Observe.standDown`
-                // was asked at, one either side of the recorded expiry.
+                // The gate is read straight off the log: the two colonies differ only
+                // in the tick `Observe.standDown` was asked at.
                 let log =
                     Observe.RaidState.empty
-                    // No world roster: one tick folded off an empty log
-                    // has no `Living` baseline, so nothing can be read as a
-                    // loss whatever `Game.creeps` holds (#191).
+                    // No world roster: nothing can be read as a loss (#191).
                     |> foldRaidsOf
                         Set.empty
                         { incomeColony with
@@ -674,20 +559,13 @@ let standDownGateTests =
             }
 
             test "a room another player holds is withheld with no clock at all" {
-                // ADR 0043's other trigger, end to end: the fold remembers
-                // the room the tick it is seen taken (`RaidState.RivalHeld`),
-                // and the gate withholds it for ever after — there is no
-                // expiry, because a room somebody else **owns** has not been
-                // made dangerous, it has stopped being ours.
+                // The fold remembers the room the tick it is seen taken
+                // (`RaidState.RivalHeld`); a room somebody else **owns** has no expiry.
                 //
-                // Pairwise against the same room seen held by *us*, which
-                // is the ordinary steady state of every outpost: one control
-                // entry moves.
+                // Pairwise against the same room seen held by *us*.
                 let logWith control =
                     Observe.RaidState.empty
-                    // No world roster: one tick folded off an empty log
-                    // has no `Living` baseline, so nothing can be read as a
-                    // loss whatever `Game.creeps` holds (#191).
+                    // No world roster: nothing can be read as a loss (#191).
                     |> foldRaidsOf
                         Set.empty
                         { incomeColony with
@@ -718,15 +596,11 @@ let standDownGateTests =
             }
 
             test "a room another player reserved is back in the pool when that hold ends" {
-                // #165, end to end at the same seam as the two tests above:
-                // a rival's *reservation* is a clocked stand-down and not the
-                // latch beside it, so the Tasks, the furniture and the
-                // reserver row all come back on the tick the engine's own
-                // countdown reaches — with nobody having gone to look, which
-                // is the whole point of a clock (ADR 0043).
+                // #165: a rival's *reservation* is a clocked stand-down, not the latch
+                // beside it, so everything comes back on the tick the engine's own
+                // countdown reaches, with nobody having gone to look.
                 //
-                // Pairwise against the room owned outright, one control entry
-                // apart: the latch above is still a latch.
+                // Pairwise against the room owned outright.
                 let log =
                     Observe.RaidState.empty
                     // No world roster, for the reason the test above gives.
@@ -764,17 +638,10 @@ let standDownGateTests =
             }
 
             test "the look a re-check buys decides nothing" {
-                // #165's second half at the top seam. On the one tick in
-                // every `Tuning.RivalRecheck` the gate re-admits a latched
-                // room to the **scan**, the colony reads that room's control
-                // entry — and a control entry alone is what the whole
-                // re-admission amounts to: the room is in no layer, its rock
-                // is in no pool and its controller is no Task, so every
-                // reader of `RoomControl` asks it about a room the projection
-                // already carries and finds this one nowhere (ADR 0004).
-                // "Re-admitted to the scan set only, and not to the Task or
-                // quota set" is that sentence, pinned where a reader that
-                // widened it would go red.
+                // #165's second half: on the re-check tick the colony reads the room's
+                // control entry and nothing else. The room is in no layer, its rock in
+                // no pool and its controller no Task: "re-admitted to the scan set
+                // only", pinned where a reader that widened it would go red.
                 let fleet = surplusFleet 4
                 let shut = gatedColony [ northGated; westGated ] (Set.singleton "W1N2") fleet
 
@@ -804,14 +671,10 @@ let standDownGateTests =
             }
 
             test "a look the loop never took is still owed, and the room it frees comes back" {
-                // #275, end to end. The stride between looks used to be an
-                // exact-multiple test, so the gate had to be asked on one
-                // precise tick or the whole 5,000 went by again: a throw before
-                // the log was written, a tick the engine cut short with an
-                // empty bucket, or a deploy landing mid-tick cost an outpost a
-                // full stride of income, and nothing anywhere said so. The look
-                // is owed from the stride onwards instead, so the first tick
-                // the gate *is* evaluated on pays it.
+                // #275: the stride between looks used to be an exact-multiple test, so
+                // a throw before the log was written, an empty-bucket tick or a deploy
+                // landing mid-tick cost an outpost a full stride. The look is owed from
+                // the stride onwards, so the first tick the gate *is* evaluated pays it.
                 let latched =
                     Observe.RaidState.empty
                     // No world roster, for the reason the tests above give.
@@ -822,9 +685,8 @@ let standDownGateTests =
                             RoomControl = Map.ofList [ "W1N2", rivalRoom ]
                         }
 
-                // The tick the look fell due on is one the loop never ran, and
-                // so are the 1,233 after it. Nowhere near a multiple of the
-                // stride, which is exactly what the old test needed.
+                // The tick the look fell due on is one the loop never ran, and so are
+                // the 1,233 after it: nowhere near a multiple of the stride.
                 let late = 100 + Tuning.defaults.RivalRecheck + 1_234
 
                 Expect.equal
@@ -832,10 +694,8 @@ let standDownGateTests =
                     (Set.singleton "W1N2")
                     "the look the gate never got to take is still owed on the tick it is asked"
 
-                // What the shell does with that answer: it reads the room's
-                // controller and nothing else of it (`ColonyView.ofWorld`).
-                // Here the rival has gone, which is the one thing that can
-                // clear the latch.
+                // The shell reads the room's controller and nothing else of it
+                // (`ColonyView.ofWorld`). Here the rival has gone.
                 let freed =
                     latched
                     |> foldRaidsOf
@@ -845,9 +705,8 @@ let standDownGateTests =
                             RoomControl = Map.ofList [ "W1N2", neutralRoom ]
                         }
 
-                // Named apart from the `poolAt` a few tests up, which takes a
-                // control and a tick against one fixed log: one name carrying
-                // two signatures in one file reads as the same helper twice.
+                // Named apart from `poolAt` above, which takes a control and a tick
+                // against one fixed log.
                 let workedFrom log t =
                     gatedColony
                         [ northGated; westGated ]
@@ -865,17 +724,11 @@ let standDownGateTests =
             }
 
             test "the creep standing in a stood-down outpost is released, on the existing path" {
-                // ADR 0043's re-entry rule has a mirror: nothing new
-                // withdraws the creeps either. The room's Tasks stop
-                // existing, and a creep holding one is released by the
-                // release the Matcher has always spoken for an assignment
-                // whose Task is gone — no retreat act, no new Verdict, no
-                // second rule about where a creep may stand.
-                // One creep and no fleet behind it: the release is the
-                // subject, and a colony standing at its quotas would have
-                // every home Task at capacity, so the creep would read as
-                // unassigned for a reason that has nothing to do with the
-                // gate.
+                // Nothing new withdraws the creeps: the room's Tasks stop existing and
+                // the Matcher's release for a gone Task does the rest.
+                // One creep and no fleet behind it: a colony at its quotas would have
+                // every home Task at capacity, and the creep would read as unassigned
+                // for a reason that has nothing to do with the gate.
                 let colonyWith shut =
                     gatedColony [ northGated; westGated ] shut [ worker "w-out" 0 50 ]
                     |> standingIn "W1N2" ("w-out", { X = 39; Y = 41 })
@@ -910,17 +763,10 @@ let standDownGateTests =
                     ((Option.defaultValue "" rematched).Contains "W1N2")
                     "to a Task of a room the colony is still working"
 
-            // What is *not* pinned here is the walk back, and it is not
-            // pinned because it does not happen. A withheld room is not
-            // projected (ADR 0043), so it places no creep, so the creep
-            // standing in it has no tile: the rematch above is priced on
-            // ADR 0004's escape — an unplaced creep prices every Task at 0
-            // — rather than on a crossing, `Decide.resolve` builds moves
-            // only over the creeps the Atlas places, and nothing aims this
-            // one home. The release path is this ticket's claim and it
-            // holds; the journey home is a fact about an unplaced creep
-            // that ADR 0043's own gate placement makes unreachable, and it
-            // is carried out of this ticket as a finding of its own rather
-            // than pinned here as if it were the behaviour.
+            // The walk back is not pinned because it does not happen: a withheld
+            // room is not projected, so the creep standing in it has no tile, the
+            // rematch is priced on the unplaced creep's 0 and `Decide.resolve`
+            // builds moves only over the creeps the Atlas places. The journey home
+            // is carried out of this ticket as a finding of its own.
             }
         ]

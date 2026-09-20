@@ -1,10 +1,5 @@
-/// The Task pool: which Tasks a colony offers and what caps each one — the
-/// Seats, the Refill cluster that is one Task (ADR 0054), the stores a body may
-/// draw from (ADR 0019, ADR 0023), the container Posts and their body-aware
-/// capacity (ADR 0024), the piles and tombstones a Pickup names, the Repairs,
-/// and the Restock dispatch that judges a drained source at arrival (ADR 0025).
 /// The pool suite's fixtures: the colonies, stores and piles the Tasks
-/// below are pooled from.
+/// are pooled from.
 module Fabot.Core.Tests.Decide.PoolFixtures
 
 open Expecto
@@ -14,12 +9,9 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
-/// The [[refill cluster]] on open ground (ADR 0054): the spawn at (10,10)
-/// and two extensions south of it in the column x = 10, every structure
-/// tile an obstacle as the engine has it and a 3-wide plain band around
-/// them. The caller says how much room each of the three has left and where
-/// the bodies stand, which is the whole of what this Task's [[capacity]],
-/// its [[work area]] and the [[emitter]]'s pick turn on.
+/// The refill cluster on open ground: the spawn at (10,10) and two
+/// extensions south of it in the column x = 10, every structure tile an
+/// obstacle and a 3-wide plain band around them.
 let clusterColony (spawnFree, ext1Free, ext2Free) creeps positions =
     let structures =
         [
@@ -63,19 +55,16 @@ let pickups intents =
         | PickupPile(creep, pile) -> Some(creep, pile)
         | _ -> None)
 
-/// A colony around a dropped energy pile at (10, 10) on open ground, with
-/// the given creeps standing on the given tiles — `reflexColony`'s ground
-/// under the kind this reflex is about (#381).
+/// A dropped energy pile at (10,10) on open ground, with the given creeps
+/// on the given tiles.
 let pileColony creeps positions =
     reflexColony "pile-1" (Dropped Energy) creeps positions
 
-/// The same colony with a second room's layer beside its own (ADR 0041):
-/// that room's ground, the piles it names, and the creeps standing on its
-/// tiles — and its coordinates deliberately collide with `pileColony`'s.
-/// A `Pos` carries no room, so a reflex that unioned the two rooms' piles
-/// or the two rooms' creeps would pair across the border at range 0 and
-/// emit a pickup the engine answers ERR_NOT_IN_RANGE (#166). The creeps
-/// still enter `Creeps`, which is the colony's fleet and no room's.
+/// The same colony with a second room's layer beside its own, whose
+/// coordinates deliberately collide with `pileColony`'s. A `Pos` carries no
+/// room, so a reflex that unioned the two rooms' piles or creeps would pair
+/// across the border at range 0 and emit a pickup the engine answers
+/// ERR_NOT_IN_RANGE (#166).
 let internal withPileRoom room piles positions (colony: ColonyView) =
     { colony with
         Spatial =
@@ -100,11 +89,7 @@ let internal withPileRoom room piles positions (colony: ColonyView) =
             }
     }
 
-/// The stores the pool draws and the structures it fills, **in energy**: every
-/// case that reads these is about the haul cycle and its tiers, and since #262
-/// the [[storage]] carries a Thorium Refill in every colony that stands one —
-/// pooled off the Storage alone, so that a body already holding the season's ore
-/// has somewhere to put it down whatever has become of the mine behind it. The
+/// The stores the pool draws and the structures it fills, in energy. The
 /// Thorium pair has its own cases, which name it rather than counting ids.
 let withdrawTasks tasks =
     tasks
@@ -119,11 +104,8 @@ let refillTasks tasks =
         | _ -> None)
 
 /// The stock fixture: the tier corridor with the Storage standing at
-/// (16,11), between the tower and the buffer and clear of the working
-/// ground the clustered ordering excludes (ADR 0022) — the controller's
-/// Upgrade Work Area reaches back only to x = 17. It blocks its own tile
-/// the way the projection carries a built one, and nothing but the
-/// projection's kind says which structure it is.
+/// (16,11), between the tower and the buffer and clear of the controller's
+/// Upgrade Work Area, which reaches back only to x = 17.
 let stockRoom =
     tierRoom
     |> withHome (fun layer ->
@@ -133,12 +115,9 @@ let stockRoom =
     |> withTargets [ "sto-1", { X = 16; Y = 11 }, Structure BuiltKind.Storage ]
 
 /// The stock colony with the given hunger and stores: one loaded
-/// Carry-only body standing beside the Storage, so the deepest tier of all
-/// costs it nothing to reach and every shallower one — the tower one step
-/// west, the buffer one step east — costs more. Whatever outbids the
-/// stock outbids it against travel cost, and only rank can do that. Each
-/// caller leaves the stock exactly one rival, so the Verdict's factor is
-/// evidence about that pair alone.
+/// Carry-only body beside the Storage, so the deepest tier costs it
+/// nothing to reach and every shallower one costs more. Only rank can
+/// outbid the stock here, and each caller leaves it exactly one rival.
 let stockColony refillables stores =
     { bareRespawn with
         Sources = []
@@ -147,17 +126,12 @@ let stockColony refillables stores =
         Spatial = { stockRoom with Stores = stores } |> withCreepsAt [ "h1", { X = 16; Y = 10 } ]
     }
 
-/// The draw fixture: a two-row plain corridor, y = 10..11, x = 8..22, with
-/// the source walled in at (8,10) and its container on the Seat at (9,10),
-/// the Storage off the lane at (17,11), and the upgrade buffer at (21,10)
-/// beside the controller at (22,10). The stock and the controller stand as
-/// obstacles; the lane runs past both. A creep on the lane at (13,10)
-/// stands three plain steps from either store's Work Area — (10,10) beside
-/// the source container, (16,10) beside the stock — so travel cost ties
-/// the two intakes and nothing but rank can separate them; a creep further
-/// east stands inside the stock's Work Area and six steps from the
-/// container's, so travel cost points the other way and only rank can
-/// override it.
+/// The draw fixture: a two-row plain corridor, y = 10..11, x = 8..22, the
+/// source walled in at (8,10) with its container on (9,10), the Storage off
+/// the lane at (17,11), the upgrade buffer at (21,10) beside the controller
+/// at (22,10). A creep at (13,10) is three plain steps from either store's
+/// Work Area, so travel cost ties the two intakes; one further east stands
+/// inside the stock's Work Area and six steps from the container's.
 let drawRoom =
     let lane =
         [
@@ -188,11 +162,9 @@ let drawColony stores (creep: CreepInfo) pos =
     }
 
 /// The restock dispatch corridor: a one-tile lane y = 10 from x = 9 to
-/// x = 21 with the source embedded in wall at (10,10), so its Seats are
-/// (9,10) and (11,10) and the lane east of the source is the only approach
-/// to either. An empty worker-unit body pays a whole tick per plain step,
-/// so a creep at (15,10) is four steps and a walk of four ticks from the
-/// Seat it can reach (ADR 0029).
+/// x = 21 with the source in wall at (10,10). An empty worker unit pays a
+/// whole tick per plain step, so a creep at (15,10) is a walk of four ticks
+/// from the Seat it can reach.
 let restockRoom =
     spatial [] [ for x in 9..21 -> { X = x; Y = 10 }, (if x = 10 then Wall else Plain) ]
     |> withTargets [ "src-a", { X = 10; Y = 10 }, Source ]
@@ -248,12 +220,10 @@ let drawersOf assignments storeId =
         else
             None)
 
-/// The stock-crowding fixture: the same field with one Storage standing at
-/// (13,10) — an obstacle, as the projection carries a built one — and the
-/// same three haulers abreast, all three inside its Work Area. The colony keeps one hungry spawn
-/// so ADR 0023's gate stands open; the haulers are empty, so that Refill is
-/// inapplicable to every one of them and the stock's Withdraw is the only
-/// Task in the pool they can take.
+/// The stock-crowding fixture: one Storage at (13,10) and the same three
+/// haulers abreast inside its Work Area. One hungry spawn keeps the stock's
+/// draw gate open; the haulers are empty, so its Withdraw is the only Task
+/// they can take.
 let stockCrowdColony stock =
     { bareRespawn with
         Bank = bank 600 600
@@ -272,18 +242,12 @@ let stockCrowdColony stock =
                 })
     }
 
-/// The upgrade buffer's crowd (#161 under ADR 0019): the same three-row
-/// field, the controller standing at (10,10) — an obstacle, as a
-/// projected one is — with its buffer container "can-buf" at (12,10),
-/// inside the Upgrade Work Area and on no source's Seat, and an ordinary
-/// container "can-far" holding the same 900 at (30,10), far outside it.
-///
-/// The bank is 1,800 — the live RCL5 one, and where the two rows part: the
-/// cast hauler carries 1,200 a trip and the cast worker 450. Only a Work
-/// body may draw from the buffer (ADR 0019), so the three creeps on its
-/// doorstep are cast worker bodies, and they are empty, which leaves the
-/// Upgrade beside them and the buffer's own Refill inapplicable and the
-/// two Withdraws the whole of the pool they can take.
+/// The upgrade buffer's crowd: the controller at (10,10) with its buffer
+/// "can-buf" at (12,10), inside the Upgrade Work Area and on no Seat, and
+/// an ordinary container "can-far" holding the same 900 at (30,10). The
+/// bank is 1,800, where the cast hauler carries 1,200 a trip and the cast
+/// worker 450. The three creeps are empty cast worker bodies, so the two
+/// Withdraws are the whole of the pool they can take.
 let bufferCrowd =
     [ "w1", { X = 13; Y = 9 }; "w2", { X = 13; Y = 10 }; "w3", { X = 13; Y = 11 } ]
 
@@ -309,8 +273,7 @@ let bufferCrowdColony bufferStock =
                 })
     }
 
-/// The names assigned to one pile, in name order — `drawersOf`'s twin for
-/// the Pickup Task (#167).
+/// The names assigned to one pile, in name order.
 let pickersOf assignments pileId =
     assignments
     |> Map.toList
@@ -320,10 +283,10 @@ let pickersOf assignments pileId =
         else
             None)
 
-/// The same field with a tombstone at (10,10) holding the given energy and
-/// nothing else standing anywhere (#167). Deliberately not in `Obstacles`:
-/// a tombstone lies on the tile a creep died on and the engine lets
-/// another walk over it, so its Work Area includes its own tile.
+/// The same field with a tombstone at (10,10) holding the given energy.
+/// Deliberately not in `Obstacles`: a tombstone lies on the tile a creep
+/// died on and the engine lets another walk over it, so its Work Area
+/// includes its own tile.
 let tombColony energy (creeps: (string * Pos) list) =
     { bareRespawn with
         Bank = bank 150 150
@@ -337,18 +300,11 @@ let tombColony energy (creeps: (string * Pos) list) =
             |> withCreepsAt creeps
     }
 
-/// A stocked container at (10,10) with a dropped pile the case places —
-/// on the container's own tile or ten tiles down the lane — and one empty
-/// hauler on the tile beside the container (#216 R5). What separates the
-/// two Tasks here is neither capacity nor travel cost, both of which tie
-/// on the same tile, but the pool's own [[priority]].
-///
-/// The bank is the mother colony's 1,800, so the hauler row's cast carries
-/// 1,200 and the 150 on the ground is a fraction of a trip (#242). The
-/// number is load-bearing for the pairwise control below and not scenery:
-/// half a load or more of decaying energy carries a rung of its own, so at
-/// a bank whose row hauls 100 there is no pooled pile — the threshold is
-/// itself 100 — that the tile rule under test would be the only lift for.
+/// A stocked container at (10,10) with a dropped pile the case places, and
+/// one empty hauler beside the container. The bank is 1,800, so the hauler
+/// row's cast carries 1,200 and the 150 on the ground is a fraction of a
+/// trip: at a bank whose row hauls 100 there is no pooled pile that the
+/// tile rule under test would be the only lift for.
 let sameTilePileColony pilePos =
     { bareRespawn with
         Bank = bank 1800 1800
@@ -366,11 +322,9 @@ let sameTilePileColony pilePos =
             |> withCreepsAt [ "h1", { X = 10; Y = 11 } ]
     }
 
-/// A stocked container at (10,10) with the hauler standing beside it and a
-/// dropped pile five tiles down the lane (#242), each stocked by the case.
-/// The mother's 1,800 bank, so the hauler row's cast carries 1,200 and half
-/// a load is six hundred: the pile is the far Task and the near container is
-/// what travel cost hands the body unless a rung says otherwise.
+/// A stocked container at (10,10) with the hauler beside it and a dropped
+/// pile five tiles down the lane, each stocked by the case. At the 1,800
+/// bank half a load is six hundred.
 let internal pileDownTheLane containerStock pileAmount =
     { bareRespawn with
         Bank = bank 1800 1800
@@ -388,11 +342,9 @@ let internal pileDownTheLane containerStock pileAmount =
             |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
 
-/// A hungry spawn at (12,10), a half-loaded hauler on the tile beside it at
-/// (11,10), and a pile nineteen tiles down the lane (#242). No source and no
-/// store, so the pool holds the two Tasks this pairs and nothing else: the
-/// delivery half of the haul cycle against the far intake. The bank is the
-/// case's, because half the row's cast is what the pile is measured against.
+/// A hungry spawn at (12,10), a half-loaded hauler beside it at (11,10),
+/// and a pile nineteen tiles down the lane. The bank is the case's, because
+/// half the row's cast is what the pile is measured against.
 let internal pileAgainstAHungrySpawn bankEnergy pileAmount =
     { bareRespawn with
         Bank = bank bankEnergy bankEnergy
@@ -411,11 +363,8 @@ let internal pileAgainstAHungrySpawn bankEnergy pileAmount =
             |> withCreepsAt [ "h1", { X = 11; Y = 10 } ]
     }
 
-/// A tombstone holding 1,500 at (12,10), an empty hauler beside it and a pile
-/// nineteen tiles down the lane, at the mother's 1,800 bank (#242). A store
-/// that *ends* is a Withdraw like any other and takes no rung of its own —
-/// only a full container's stock does — so this is the pair that reads the
-/// pile's rung against the tier's other decaying copy.
+/// A tombstone holding 1,500 at (12,10), an empty hauler beside it and a
+/// pile nineteen tiles down the lane, at the 1,800 bank.
 let internal pileAgainstATombstone pileAmount =
     { bareRespawn with
         Bank = bank 1800 1800

@@ -1,5 +1,4 @@
-/// The Guard row (ADR 0056) and the supply floor in front of every row
-/// (ADR 0050).
+/// The Guard row and the supply floor in front of every row.
 module Fabot.Core.Tests.Decide.QuotaGuardTests
 
 open Expecto
@@ -16,11 +15,10 @@ let guardRowTests =
         "the guard row"
         [
             test "a clear outpost hires none, and one armed hostile in it hires one" {
-                // ADR 0056's first two banks of the count rule, pairwise on
-                // one fixture: the row is **0** for the whole of a colony's
-                // ordinary life, and 1 the tick a [[threat]] is seen standing
-                // in a declared outpost. Nothing is pre-cast and nothing is
-                // remembered — the quota is a per-tick fact read off vision.
+                // The row is 0 for the whole of a colony's ordinary life, and 1 the
+                // tick a threat is seen standing in a declared outpost. Nothing is
+                // pre-cast and nothing is remembered: the quota is a per-tick fact
+                // read off vision.
                 Expect.equal
                     (guardQuotaOf (guardColony [] []))
                     (Some 0)
@@ -33,22 +31,15 @@ let guardRowTests =
             }
 
             test "a raid in an outpost somebody else reserves still hires its guard" {
-                // The line #333's refusal is drawn at, pinned from the side
-                // it must **not** cross. A controller under somebody else's
-                // reservation stops being a controller this colony can
-                // reserve — the reserver row hires nobody for it and the
-                // Reserve leaves the pool — and it stops being nothing else.
-                // The room is still in the scan set, its rock is still
-                // pooled and this colony's bodies still stand in it, so a
-                // raid there is still a raid on a room the colony works.
-                //
-                // Whether such a room should stay declared at all is the
-                // architectural question #333 leaves for a human; until it
-                // is answered, a guard withdrawn here would be that question
-                // decided by accident, in the row that was only asked to
-                // stop buying reservers.
-                //
-                // Pairwise on the one control entry, the raid held fixed.
+                // The line #333's refusal is drawn at, from the side it must not
+                // cross: a controller under somebody else's reservation stops being
+                // one this colony can reserve, and stops being nothing else. The room
+                // is still in the scan set, its rock still pooled and this colony's
+                // bodies still stand in it, so a raid there is still a raid on a room
+                // the colony works. Whether such a room should stay declared is the
+                // question #333 leaves for a human; a guard withdrawn here would
+                // decide it by accident. Pairwise on the one control entry, the raid
+                // held fixed.
                 let raidedUnder control =
                     { guardColony (raidOf 0) [] with
                         RoomControl =
@@ -67,20 +58,15 @@ let guardRowTests =
             }
 
             test "the outpost the raid blinded the colony in goes on hiring the one guard" {
-                // **#366, on the live case.** W11S28's guard row fired on the
-                // raid its anchor and its reserver could see; the invader
-                // killed both, the room went dark, `view.Hostiles` emptied,
-                // this row fell back to 0 and the 15-ATTACK-part body it had
-                // already paid for stood idle at home while a 2-ATTACK-part
-                // invader kept the room. The memory (`RaidState.Threatened`
-                // through `ColonyView.ThreatenedOutposts`) is what the row
-                // reads on those ticks, and #333 is the precedent: remember the
-                // conclusion, consult it only while blind, let it expire.
-                //
-                // Pairwise on the memory alone, over one blind colony: no
-                // vision in the room in either reading, and the only thing that
-                // moves between them is whether the last look concluded
-                // anything.
+                // #366, live: W11S28's guard row fired on the raid its anchor and
+                // reserver could see; the invader killed both, the room went dark,
+                // `view.Hostiles` emptied, the row fell back to 0 and the 15-ATTACK
+                // body it had paid for stood idle at home while a 2-ATTACK invader
+                // kept the room. The memory (`RaidState.Threatened` through
+                // `ColonyView.ThreatenedOutposts`) is what the row reads while blind,
+                // #333's precedent: remember the conclusion, consult it only while
+                // blind, let it expire. Pairwise on the memory alone, over one blind
+                // colony.
                 let blind =
                     { guardColony [] [] with
                         RoomControl = (guardColony [] []).RoomControl |> Map.remove "W1N2"
@@ -143,11 +129,10 @@ let guardRowTests =
             }
 
             test "a hostile that reaches nothing is no reason to hire" {
-                // The gate is ADR 0033's [[threat]] and never "a hostile": a
-                // `smallHealer` carries neither ATTACK nor RANGED_ATTACK, so
-                // it takes no ground, kills nothing and buys no body — even
-                // though its HEAL parts are exactly what the count rule
-                // prices once something armed *is* standing beside it.
+                // The gate is the threat and never "a hostile": a `smallHealer`
+                // carries neither ATTACK nor RANGED_ATTACK, so it takes no ground,
+                // kills nothing and buys no body, even though its HEAL parts are what
+                // the count rule prices once something armed stands beside it.
                 Expect.equal
                     (guardQuotaOf (guardColony [ hostileIn "W1N2" raidTile smallHealer ] []))
                     (Some 0)
@@ -155,12 +140,10 @@ let guardRowTests =
             }
 
             test "a raid at home hires no guard" {
-                // This row is the [[outpost]]'s and nothing else (ADR 0056):
-                // a raid in the home room is the [[keep]]'s business (ADR
-                // 0034), and the home room is not a declared outpost. Read at
-                // (8,9), far enough from the spawn at (20,10) that the spawn
-                // hold is not what is answering — a held tick derives no
-                // quotas at all and this case would pass on the wrong reason.
+                // This row is the outpost's and nothing else: a raid in the home room
+                // is the keep's business, and the home room is not a declared outpost.
+                // Read at (8,9), far enough from the spawn at (20,10) that the spawn
+                // hold is not what is answering; a held tick derives no quotas at all.
                 let athome =
                     { guardColony [] [] with
                         Hostiles = [ hostileIn "W1N1" { X = 8; Y = 9 } smallMelee ]
@@ -224,20 +207,16 @@ let guardRowTests =
             }
 
             test "the count reads the raid and never our own answer to it" {
-                // #272, and the amendment's whole point. Priced against the
-                // guards *standing* in the room, the number was not monotone:
-                // 2 with one guard up and 1 the tick the second arrived, so
-                // the reinforcement the escalation had just bought was
-                // `CapacityFull`-evicted on arrival — onto a Flee whose safe
-                // set is that same room, so it never left, never swung, and
-                // held the count at 1 for as long as it lived. 750 energy for
-                // a body that does nothing, on exactly the two-healer raid the
-                // ADR buys it for. So the damage term is one block of the
-                // row's own body and nothing that stands, and the same raid
-                // answers the same number with none, one and two guards of
-                // ours in the room. Read at the colony's own live 1,800 bank,
-                // where a survivor cast at a poorer bank is exactly the body
-                // that must not veto its own reinforcement.
+                // Priced against the guards standing in the room, the number was not
+                // monotone: 2 with one guard up and 1 the tick the second arrived, so
+                // the reinforcement was `CapacityFull`-evicted on arrival onto a Flee
+                // whose safe set is that same room, and it never left, never swung,
+                // and held the count at 1 for as long as it lived (#272). So the
+                // damage term is one block of the row's own body and nothing that
+                // stands, and the same raid answers the same number with none, one and
+                // two guards of ours in the room. Read at the live 1,800 bank, where a
+                // survivor cast at a poorer bank is exactly the body that must not
+                // veto its own reinforcement.
                 let standing healers ours = guardColony (raidOf healers) ours
 
                 let standing2 = standing 2
@@ -274,11 +253,10 @@ let guardRowTests =
             }
 
             test "the count is capped at two per outpost" {
-                // The bound decision 4 rests on: two guards die, 1,500
-                // energy is spent, and the outpost falls back to ADR 0043's
-                // [[stand-down]] rather than feeding an unbounded stream of
-                // bodies into a raid we are losing. Four healers is 240
-                // against one block's 90 and still asks for two.
+                // The bound: two guards die, 1,500 energy is spent, and the outpost
+                // falls back to the stand-down rather than feeding an unbounded stream
+                // of bodies into a raid we are losing. Four healers is 240 against one
+                // block's 90 and still asks for two.
                 let raid healers = guardColony (raidOf healers) []
 
                 Expect.equal
@@ -291,18 +269,15 @@ let guardRowTests =
 
             test
                 "the damage the raid is priced against is one block, so the bank does not move the count" {
-                // The other half of "the count reads the raid" (#272): the
-                // damage term is **one `guardPattern` block**, a constant of
-                // the row, and not the whole body this bank would cast. The
-                // whole body grows with the bank while the row's `Living`
-                // counts the body that is *standing*, so a guard cast at a
-                // poorer bank would veto its own reinforcement — 120 of
-                // healing against a two-block 180 reads 1 while a 90-damage
-                // survivor holds the row's `Living` at 1 and nothing is cast.
-                // It would also take ADR 0056 decision 1's own two-healer case
-                // (120 ≥ 90 → 2) out of reach at every bank above 1,300, this
-                // colony's live 1,800 included. So the same raid answers the
-                // same number across the decision's whole bank table.
+                // The damage term is one `guardPattern` block, a constant of the row,
+                // and not the whole body this bank would cast (#272). The whole body
+                // grows with the bank while the row's `Living` counts the body that is
+                // standing, so a guard cast at a poorer bank would veto its own
+                // reinforcement: 120 of healing against a two-block 180 reads 1 while
+                // a 90-damage survivor holds `Living` at 1. It would also take the
+                // two-healer case (120 ≥ 90 → 2) out of reach at every bank above
+                // 1,300. So the same raid answers the same number across the whole
+                // bank table.
                 let raid capacity =
                     guardColony (raidOf 2) [ guard "g-1", outpostSeat ] |> banked capacity
 
@@ -349,16 +324,12 @@ let guardRowTests =
             }
 
             test "the healing the second guard is priced against is the raided room's own" {
-                // The conjunct that keeps the count room-local, in the
-                // codebase whose first hazard is room aliasing (ADR 0041): the
-                // healing term filters the raid by the room the [[threat]]
-                // stands in, and without it two healers forty tiles away in
-                // another outpost would price a fight they are not in.
-                // Pairwise, one room apart — the same melee, the same two
-                // healers, and only the healers' room moving. The other
-                // outpost holds no armed hostile of its own, so it is no
-                // guarded outpost and adds nothing to the sum from either
-                // side.
+                // The conjunct that keeps the count room-local: the healing term
+                // filters the raid by the room the threat stands in, and without it
+                // two healers forty tiles away in another outpost would price a fight
+                // they are not in. Pairwise, one room apart. The other outpost holds
+                // no armed hostile of its own, so it is no guarded outpost and adds
+                // nothing from either side.
                 let twoOutposts healerRoom healerTile =
                     let raid =
                         hostileIn "W1N2" raidTile smallMelee
@@ -389,14 +360,12 @@ let guardRowTests =
             }
 
             test "the row is cast in front of the reserver, and the raided room's seat waits for it" {
-                // The cascade slot (ADR 0056): behind the [[supply floor]]
-                // and in front of the [[reserver]]. Pairwise against the
-                // quiet tick, where the reserver is the head of the cascade
-                // exactly as ADR 0042 left it. And since #375 (ADR 0072) the
-                // raided room's own reserver seat is not bought on the tick
-                // the guard is still wanting: it was that seat, bought at 650
-                // every time the bank reached 650, that kept the bank from
-                // ever reaching the guard — eight bodies into W15S27 in 491
+                // The cascade slot: behind the supply floor and in front of the
+                // reserver. Pairwise against the quiet tick, where the reserver is the
+                // head of the cascade. Since #375 the raided room's own reserver seat
+                // is not bought on the tick the guard is still wanting: it was that
+                // seat, bought at 650 every time the bank reached 650, that kept the
+                // bank from ever reaching the guard — eight bodies into W15S27 in 491
                 // ticks, none of them a guard.
                 let castNames colony =
                     spawnIntents (decideOn colony).Intents
@@ -436,14 +405,12 @@ let guardRowTests =
             }
 
             test "the guard the row casts is the block the fight takes, not the bank" {
-                // #375 (ADR 0072). `guardBlocksBeat` already priced the raid
-                // for the *count*; the *size* read the bank alone, so the
-                // 1,800 bank `reserverColony` holds bought two blocks against
-                // a lone melee one block kills, and W15S28's 2,300 bank asked
-                // 2,250 that the reserver row spent down to 650 every tick
-                // it was reached. Now the body is the blocks the exchange
-                // takes, the bank truncating it as it truncates the reserver's
-                // claims.
+                // #375: `guardBlocksBeat` already priced the raid for the count; the
+                // size read the bank alone, so the 1,800 bank `reserverColony` holds
+                // bought two blocks against a lone melee one block kills, and W15S28's
+                // 2,300 bank asked 2,250 that the reserver row spent down to 650 every
+                // tick it was reached. Now the body is the blocks the exchange takes,
+                // the bank truncating it as it truncates the reserver's claims.
                 let castsAgainst hostiles =
                     guardCasts (decideOn (guardColony hostiles [])).Intents
 
@@ -470,12 +437,11 @@ let guardRowTests =
             }
 
             test "a bank that cannot afford a block yields the tick" {
-                // ADR 0050 through the new row: 750 is more than a 300 bank
-                // holds, so the row casts nothing and does not hold the
-                // cascade for the rows behind it — a colony this small has
-                // ADR 0043's stand-down and nothing else. Pairwise against
-                // 800, the first bank that can pay for the row at all, with
-                // the same raid standing in the same room.
+                // 750 is more than a 300 bank holds, so the row casts nothing and
+                // does not hold the cascade for the rows behind it: a colony this
+                // small has the stand-down and nothing else. Pairwise against 800, the
+                // first bank that can pay for the row, with the same raid in the same
+                // room.
                 let raided = guardColony [ hostileIn "W1N2" raidTile smallMelee ] []
 
                 let castsAt available capacity =
@@ -499,13 +465,11 @@ let guardRowTests =
             }
 
             test "a guard fills the guard row's Living and no other row's" {
-                // The row is read back off the parts like every other (ADR
-                // 0006), and an ATTACK part is the one cut no other row of
-                // this colony makes. Without the arm a `[T; A×3; M×5; H]`
-                // has neither Work nor Carry and falls through to the
-                // **generalist**, so a raid would quietly retire a worker for
-                // the guard's whole 1,500-tick life. Pairwise, one body
-                // apart.
+                // The row is read back off the parts, and an ATTACK part is the one
+                // cut no other row of this colony makes. Without the arm a
+                // `[T; A×3; M×5; H]` has neither Work nor Carry and falls through to
+                // the generalist, so a raid would quietly retire a worker for the
+                // guard's whole 1,500-tick life. Pairwise, one body apart.
                 let livingOf colony =
                     (decideOn colony).Quotas.Rows |> List.map (fun row -> row.Row, row.Living)
 
@@ -526,12 +490,10 @@ let guardRowTests =
             }
 
             test "an idle survivor keeps the row filled, so the next raid casts nothing" {
-                // ADR 0056's "no decay", read at the seam it is about: a
-                // guard that outlived its raid is pooled no work, stands
-                // idle, and goes on counting in the row's `Living` — so a
-                // second raid inside its 1,500 ticks buys nothing and waits
-                // no thirty ticks of oven for a body the colony already
-                // owns.
+                // No decay: a guard that outlived its raid is pooled no work, stands
+                // idle, and goes on counting in the row's `Living`, so a second raid
+                // inside its 1,500 ticks buys nothing and waits no thirty ticks of
+                // oven for a body the colony already owns.
                 let raid = [ hostileIn "W1N2" raidTile smallMelee ]
 
                 Expect.equal
@@ -551,20 +513,15 @@ let guardRowTests =
             }
 
             test "a guard classifies Fighter, and no other row's body does" {
-                // The [[body class]] ladder's head (ADR 0056), read the only
-                // way it is readable today: `Fighter` answers no differently
-                // from `Light` in every [[capacity]] scope but its own —
-                // `(=) Heavy`, `(<>) Heavy`, `(=) Standing` and "neither Heavy
-                // nor Standing" tell them apart nowhere — so the Guard Task's
-                // `Fighter -> quota` is the one cap that does. Pinned here
-                // because what it is guarding against is the guard falling
-                // back into `Light` beside the [[hauler unit]]s, which is
-                // silent.
-                //
-                // Both halves of one claim, so both are asserted over one
-                // fleet: the guard is a Fighter, and every other row's body
-                // at the same bank is the class it was before the arm
-                // existed.
+                // The body class ladder's head, read the only way it is readable
+                // today: `Fighter` answers no differently from `Light` in every
+                // capacity scope but its own — `(=) Heavy`, `(<>) Heavy`,
+                // `(=) Standing` and "neither" tell them apart nowhere — so the Guard
+                // Task's `Fighter -> quota` is the one cap that does. What it guards
+                // against is the guard falling back into `Light` beside the hauler
+                // units, which is silent. Both halves over one fleet: the guard is a
+                // Fighter, and every other row's body at the same bank is the class
+                // it was before the arm existed.
                 let bodies =
                     [
                         "guard", bodyFor guardPattern 800
@@ -603,15 +560,13 @@ let supplyFloorTests =
         "the supply floor, and a row that cannot be afforded"
         [
             test "#203: 361 in the bank, two Anchors, and the carrier is cast before every row" {
-                // ADR 0050's floor, at the reading it was written from.
-                // The head of the cascade wants 1,300 and the bank holds
-                // 361; every row under it prices at capacity — hauler
-                // 1,800, upgrader 1,750, worker 1,800 — and the one row
-                // cheap enough to buy with a broken bank is the Anchor's
-                // 700, whose gap is zero because the two bodies that made
-                // the deadlock are Anchors. So falling through the cascade
-                // alone still casts nothing: the floor is the half that
-                // moves.
+                // The floor, at the reading it was written from: the head of the
+                // cascade wants 1,300 and the bank holds 361; every row under it
+                // prices at capacity — hauler 1,800, upgrader 1,750, worker 1,800 —
+                // and the one row cheap enough to buy with a broken bank is the
+                // Anchor's 700, whose gap is zero because the two bodies that made the
+                // deadlock are Anchors. Falling through the cascade alone still casts
+                // nothing: the floor is the half that moves.
                 match spawnIntents (decideOn deadlockColony).Intents with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
@@ -648,18 +603,15 @@ let supplyFloorTests =
             }
 
             test "a full bank does not disarm the floor: the carrier is bought first" {
-                // Pairwise with the #203 case on the bank alone — the same
-                // two Anchors, the same two declared outposts, and 1,800 of
-                // 1,800 banked, a bank every row below can pay for. The
-                // floor is armed by the *absence* of a body that can put
-                // energy into an extension and by nothing else (ADR 0050):
-                // firing it only on a short bank was considered and
-                // rejected, because it re-opens the cheapest failure the
-                // incident showed — the reserver row takes 1,300 first and
-                // the carrier is hired out of what is left on the next
-                // tick, which is the losing race the live colony ran when
-                // the manual hauler filled the bank to 1,900 and two
-                // reserver casts took 2,600 back out of it inside 64 ticks.
+                // Pairwise with the #203 case on the bank alone: the same two
+                // Anchors, the same two declared outposts, and 1,800 of 1,800 banked.
+                // The floor is armed by the absence of a body that can put energy
+                // into an extension and by nothing else: firing it only on a short
+                // bank re-opens the cheapest failure the incident showed — the
+                // reserver row takes 1,300 first and the carrier is hired out of what
+                // is left next tick, the losing race the live colony ran when the
+                // manual hauler filled the bank to 1,900 and two reserver casts took
+                // 2,600 back out inside 64 ticks.
                 let full =
                     { deadlockColony with
                         Bank = bank 1800 1800
@@ -682,11 +634,9 @@ let supplyFloorTests =
             }
 
             test "one living hauler switches the floor off and the cascade is unchanged" {
-                // The floor is a floor and not a new head row: with one
-                // body alive that can draw from a store and deliver into
-                // an extension, the bank is fillable again and the head of
-                // the cascade is the reserver row's, exactly as ADR 0042
-                // orders it.
+                // The floor is a floor and not a new head row: with one body alive
+                // that can draw from a store and deliver into an extension, the bank
+                // is fillable again and the head of the cascade is the reserver row's.
                 let withHauler =
                     { deadlockColony with
                         Creeps = hauler "h1" 0 100 :: deadlockColony.Creeps
@@ -703,11 +653,10 @@ let supplyFloorTests =
             }
 
             test "the empty colony's disaster fallback is untouched" {
-                // ADR 0006's fallback is the floor's ancestor and not its
-                // casualty: a colony with no creep at all still casts the
-                // minimal worker unit from what is banked, because
-                // time-to-first-creep outranks every row including this
-                // one. Same colony, same 361, and only the fleet moves.
+                // The disaster fallback is the floor's ancestor and not its casualty:
+                // a colony with no creep at all still casts the minimal worker unit
+                // from what is banked, because time-to-first-creep outranks every row
+                // including this one. Same colony, same 361, and only the fleet moves.
                 match spawnIntents (decideOn { deadlockColony with Creeps = [] }).Intents with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
@@ -720,18 +669,13 @@ let supplyFloorTests =
             }
 
             test "a row the bank cannot pay for yields the tick to the row below it" {
-                // ADR 0050's other half, read where the floor is disarmed:
-                // the fleet holds four haulers, so nothing here is the
-                // supply floor. One outpost declared and unheld is a
-                // reserver gap of one at `[2Claim;2Move]` = 1,300; one
-                // Anchor against the home room's two Posts is an Anchor gap
-                // of one at `6W/1C/1M` = 700; every other row is over
-                // quota.
-                //
-                // Pairwise on the bank alone, and the second reading is why
-                // this is not "skip the reserver": at 1,300 the head row is
-                // affordable and it is cast, on the very next tick a filled
-                // extension would give it.
+                // Where the floor is disarmed: the fleet holds four haulers, so
+                // nothing here is the supply floor. One outpost declared and unheld
+                // is a reserver gap of one at `[2Claim;2Move]` = 1,300; one Anchor
+                // against the home room's two Posts is an Anchor gap of one at
+                // `6W/1C/1M` = 700; every other row is over quota. Pairwise on the
+                // bank alone, and the second reading is why this is not "skip the
+                // reserver": at 1,300 the head row is affordable and it is cast.
                 let castsAt available =
                     let colony = reserverColony [ northOutpost false ] (surplusFleet 1) []
 

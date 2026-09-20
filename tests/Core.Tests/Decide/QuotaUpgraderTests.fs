@@ -1,4 +1,4 @@
-/// The upgrader row, its lead and its quota (ADR 0046), and the colony's
+/// ADR-0046: the upgrader row, its lead and its quota, and the colony's
 /// own cast the inputs are read off.
 module Fabot.Core.Tests.Decide.QuotaUpgraderTests
 
@@ -16,22 +16,11 @@ let upgraderLeadTests =
         "the upgrader row's lead"
         [
             test "a standing body's lead is the upgrader row's, not the generalist's" {
-                // `patternOf` reads a living body back to the row it was
-                // cast from (ADR 0006), and the row is what sizes the
-                // replacement a lead prices (ADR 0026). A `11W/1C/11M` body
-                // has Work at Move and a Carry nine times short of parity,
-                // so before ADR 0046's row existed it fell through to the
-                // generalist and was priced as one.
-                //
-                // The two arithmetics at this colony's 1,800 bank: the
-                // upgrader row casts twenty-three parts, 69 ticks in the
-                // spawner, and its eleven Move carry eleven fatigue parts
-                // — an empty Carry rides free — over a plain tile in the
-                // walk's one-tick floor, 3 ticks for the three steps, a
-                // lead of 72. The generalist row at the same bank is nine
-                // whole units, twenty-seven parts: 81 ticks in the spawner
-                // and the same 3 of walking, a lead of 84. Every life
-                // between the two is where the rows disagree.
+                // `11W/1C/11M` has Work at Move and a Carry nine short of parity, so
+                // read off the generalist row it prices as one. At the 1,800 bank the
+                // upgrader row's lead is 72 (23 parts, 69 in the spawner, 3 of walking);
+                // the generalist's is 84 (27 parts). Every life between is where the
+                // rows disagree.
                 let upgraderShape = bodyFor upgraderPattern 1800
 
                 Expect.isEmpty
@@ -57,15 +46,9 @@ let upgraderLeadTests =
             }
 
             test "the row that replaces a standing body is not the upgrader row" {
-                // The lead is priced off the row and the *replacement* is
-                // hired off the quota, and the two are separate readings
-                // (ADR 0026 beside ADR 0046). This colony has no controller
-                // container, so the upgrader row's quota is zero however
-                // many standing bodies stand in it (#187, `upgraderQuota`),
-                // and the body the colony is one short of is hired from the
-                // generalist row's remainder. A `SpawnCreep` named
-                // "upgrader-" here would mean the quota had stopped reading
-                // the buffer.
+                // The lead is priced off the row and the replacement is hired off the
+                // quota. With no controller container the upgrader quota is zero, so
+                // the body the colony is short of comes from the generalist row.
                 match leadCasts (bodyFor upgraderPattern 1800) 72 with
                 | [ (_, body, creepName) ] ->
                     Expect.stringStarts
@@ -81,17 +64,9 @@ let upgraderLeadTests =
             }
 
             test "the Anchor row wins the read over the upgrader row" {
-                // `6W/1C/1M` answers to both descriptions — more Work than
-                // Move *and* a standing body — and it is the Anchor row
-                // that cast it, so that is the row it is read back to and
-                // the lead it is priced at. The arms are ordered and the
-                // order is the rule (ADR 0021 over ADR 0046).
-                //
-                // Eight parts is 24 ticks in the spawner, and six fatigue
-                // parts on one Move is six ticks a plain step: a lead of
-                // 42. Read as an upgrader it would be 72, so a life of 50
-                // sits between the two rows and casts under one of them
-                // only.
+                // `6W/1C/1M` answers to both descriptions, and the Anchor row is read
+                // first. Eight parts is 24 in the spawner plus six ticks a step on one
+                // Move: a lead of 42; read as an upgrader it would be 72.
                 Expect.isEmpty
                     (leadCasts (bodyFor anchorPattern 1800) 50)
                     "at 50 the Anchor is outside its own row's lead; read as an upgrader it would not be"
@@ -112,20 +87,9 @@ let upgraderQuotaTests =
                 spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
             test "a built buffer hires the standing row out of the surplus" {
-                // ADR 0046's whole arithmetic at the live bank, and the
-                // numbers are the ADR's own, less the hauler body ADR 0049
-                // took off the row. Twenty a tick from two posted sources
-                // over a 1,500-tick life is 30,000; the two rows hired off
-                // the ground cost 2 × 700 of Anchor and 1 × 1,800 of
-                // hauler, so the surplus is 26,800 and one standing body's
-                // eleven Work drinks 16,500 of it — a quota of one, the
-                // whole bodies the surplus buys and no part of one (#195,
-                // pinned below).
-                //
-                // The body is the row's sizing rule and not the
-                // generalist's: eleven Work, one Carry, eleven Move for
-                // 1,700 of the 1,800, where `9W/9C/9M` buys nine Work out
-                // of the same bank.
+                // 30,000 in over a life from two posted sources, less 2 × 700 of Anchor
+                // and 1,800 of hauler, is 26,800 of surplus; one standing body's eleven
+                // Work drinks 16,500 of it, so the quota is one.
                 match buffered 0 0 with
                 | [ (_, body, name) ] ->
                     Expect.stringStarts name "upgrader-" "the surplus hires the standing row"
@@ -139,25 +103,10 @@ let upgraderQuotaTests =
 
             test
                 "the quota is the whole bodies the surplus buys, and the remainder is the generalist row's" {
-                // #195, amending ADR 0046: two rows are hired out of one
-                // surplus and only one of them may round up. ADR 0037
-                // admits an oversell bounded by *one body's* lifetime
-                // drain, paid out of stock rather than income, and two
-                // rows rounding up against the same number sell that bound
-                // twice — so the rounding stays with the smaller body,
-                // which is the generalist's.
-                //
-                // 26,800 of surplus over 16,500 of drink is one and a half
-                // standing bodies. One is hired; the remainder — 10,300 of
-                // drink less the 1,700 that body costs to replace, so
-                // 8,600 — is the generalist row's, and its own rounding up
-                // (ADR 0037) turns it against a 13,500 drain into one
-                // worker, which is the number ADR 0046's own #195 bullet
-                // hands on. Rounded up here
-                // instead it was two standing bodies drinking 33,000
-                // against 26,800 of surplus — twenty-two a tick against
-                // twenty of income, the difference made up out of the
-                // storage for the whole of both lives (#187's finding).
+                // Only one of the two rows hired out of one surplus may round up, and
+                // it is the smaller body's. 26,800 over 16,500 is one and a half: one
+                // is hired, and the remainder less that body's 1,700 replacement is
+                // 8,600, which rounds up against a 13,500 drain to one worker.
                 Expect.isEmpty
                     (buffered 1 1)
                     "one standing body and one generalist are the whole of what this surplus hires"
@@ -229,13 +178,9 @@ let upgraderQuotaTests =
             }
 
             test "a bank buys nothing where the row itself is illegal" {
-                // The first draft of #385 shipped without this and a review
-                // caught it: the stock's half repeated none of the row's gate
-                // (ADR 0046 decision 3), so a colony whose buffer was still a
-                // site cast a standing body against its bank. Live that body
-                // reads `NoneApplicable` for its whole life — the row's
-                // Withdraw is shut to everything but the buffer (#206) — and
-                // the phantom quota inflates the Workforce target beside it.
+                // The stock's half must repeat the row's gate: a colony whose buffer is
+                // still a site would otherwise cast a standing body against its bank,
+                // which reads `NoneApplicable` for its whole life.
                 let pending =
                     stocking 200_000 (upgraderColony (withBuffer (Site BuiltKind.Container)))
 
@@ -250,11 +195,9 @@ let upgraderQuotaTests =
             }
 
             test "the building is charged before the mouth, as it is before the body" {
-                // The same subtraction the worker row's backlog term makes and
-                // for its reason: a row hired against a bank that empties
-                // mid-build is ADR 0039's mistake in another currency. 200,000
-                // buys a mouth on its own — 200,000 − 36,000 of floor over an
-                // 18,200 body — and does not once a site is owed 150,000 of it.
+                // The same subtraction the worker row's backlog term makes: 200,000
+                // buys a mouth on its own (200,000 − 36,000 of floor over an 18,200
+                // body) and does not once a site is owed 150,000 of it.
                 let building =
                     stocking 200_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
                     |> owing [ 150_000 ]
@@ -284,13 +227,9 @@ let upgraderQuotaTests =
             }
 
             test "a surplus of two and a half standing bodies hires two" {
-                // The pairwise on the surplus alone, one rival at a time:
-                // the same room, the same 1,800 bank, the same
-                // `11W/1C/11M`, and a third posted source. 45,000 in over
-                // a lifetime less 2,100 of Anchor and the hauler row's
-                // body is a surplus of rather over two whole standing
-                // bodies, and the quota is the two — the floor is the
-                // *quotient's* whole part and never a cap of one.
+                // A third posted source: 45,000 in less 2,100 of Anchor and the hauler
+                // body is over two whole standing bodies, and the quota is the
+                // quotient's whole part, never a cap of one.
                 let richer =
                     thirdSource (upgraderColony (withBuffer (Structure BuiltKind.Container)))
 
@@ -307,15 +246,9 @@ let upgraderQuotaTests =
             }
 
             test "a surplus short of one whole standing body hires none of the row" {
-                // The other half of the same pairwise, and the case the
-                // old rounding got most wrong: one posted source instead
-                // of two. 15,000 in less 700 of Anchor and the hauler's
-                // body is a surplus of about three quarters of the 16,500
-                // one standing body drinks. Rounded up that hired a whole
-                // eleven-Work body against three quarters of the income to
-                // feed it; rounded down the row is empty and the surplus
-                // goes to the generalist row, which is where it went
-                // before the buffer stood.
+                // One posted source: 15,000 in less 700 of Anchor and the hauler body
+                // is about three quarters of the 16,500 one standing body drinks.
+                // Rounded down the row is empty and the surplus is the generalist's.
                 let lean = oneSource (upgraderColony (withBuffer (Structure BuiltKind.Container)))
 
                 // The standing row is empty in both readings, so the fleet
@@ -339,14 +272,8 @@ let upgraderQuotaTests =
             }
 
             test "a buffer still under construction hires none, and the worker row is unmoved" {
-                // The gate, pairwise: the same room, the same bank, the
-                // same two Posts, and the buffer a site instead of a
-                // structure. A row hired against a promise would stand
-                // beside a hole with nothing to withdraw from, so the
-                // quota is zero and the surplus goes back to the
-                // generalist row — ceil((26,800 − 0) / (9 × 1,500)) = 2
-                // workers, which is the count this colony hired before the
-                // row existed.
+                // A site is no buffer: the quota is zero and the surplus goes to the
+                // generalist row, ceil((26,800 − 0) / (9 × 1,500)) = 2 workers.
                 let pending = upgraderColony (withBuffer (Site BuiltKind.Container))
 
                 Expect.stringStarts
@@ -363,24 +290,17 @@ let upgraderQuotaTests =
                     "worker-"
                     "one short of those two, the gap is a worker's"
 
-                // The third reading of the same tile, and the one the
-                // fixture existed as before this ticket: no container at
-                // the controller at all. The worker count is the site
-                // case's, which is what "the buffer is the switch" means
-                // — a pending container is not half a buffer.
+                // The third reading: no container at the controller at all answers the
+                // site case's count. A pending container is not half a buffer.
                 Expect.isEmpty
                     (casts (upgraderColony upgraderRoom) (upgraderFleet 0 2))
                     "with no container at the controller the same two generalists are the target"
             }
 
             test "the standing row is cast after the hauler row and before the generalist" {
-                // The cascade's new rung (ADR 0046, #154's shape): the
-                // three rows hired off the ground produce the surplus this
-                // one spends, so they are cast first; the generalist
-                // spends the same surplus at nine Work against eleven, so
-                // it is cast last. Pairwise, one rival at a time — the
-                // fleets below differ from the fleet above in one body
-                // each.
+                // The ground rows produce the surplus, so they are cast first; the
+                // generalist spends it at nine Work against eleven, so it is cast last.
+                // The fleets below differ from the fleet above in one body each.
                 Expect.stringStarts
                     (castName (buffered 0 0))
                     "upgrader-"
@@ -395,14 +315,10 @@ let upgraderQuotaTests =
                     "anchor-"
                     "an empty Post is filled before the buffer is manned"
 
-                // One generalist stands in this fleet where the others
-                // have none, and it is the supply floor's premise rather
-                // than this reading's (ADR 0050): with the hauler filtered
-                // out the fleet would be two Anchors, which can refill no
-                // extension, so the cast read below would be the floor's
-                // carrier — and at this bank the floor's body and the
-                // hauler row's are the same body, so the name would not
-                // say which row answered.
+                // One generalist stands in this fleet: with the hauler filtered out
+                // two Anchors alone can refill no extension, so the cast would be the
+                // supply floor's carrier, which at this bank is the hauler row's body
+                // under another name.
                 let noHauler =
                     upgraderFleetAt 1800 2 0 1 |> List.filter (fun creep -> creep.Name <> "h1")
 
@@ -420,11 +336,8 @@ let upgraderQuotaTests =
             }
 
             test "a declared outpost's reserver is cast before the standing row" {
-                // The head of the cascade keeps its place (ADR 0042): the
-                // reserver decides whether an outpost's sources are worth
-                // five a tick or ten, and the upgrader spends what they
-                // bring in. Pairwise on the one body — the same colony
-                // with the reserver alive casts the standing row.
+                // The reserver decides whether an outpost's sources are worth five a
+                // tick or ten, and the upgrader spends what they bring in.
                 let declared =
                     withDeclaredOutpost (
                         upgraderColony (withBuffer (Structure BuiltKind.Container))
@@ -446,23 +359,10 @@ let upgraderQuotaTests =
             }
 
             test "the worker row's floor is two while a Build stands in the pool and one otherwise" {
-                // ADR 0046's floor, pairwise on the pool alone: the same
-                // colony, the same fleet, one construction site between
-                // the two readings. Without the floor a colony beside a
-                // rich buffer would run no body that may build or repair
-                // at all — a standing body is shut out of all three
-                // deliveries (ADR 0046) and the hauler row has no Work
-                // part.
-                //
-                // This fixture's income term is one since #195: the
-                // remainder the standing row leaves feeds one generalist
-                // mouth, so what these readings pin is the floor's *upper*
-                // half — the step from one to two that a site in the pool
-                // buys. The lower half, the one otherwise, is pinned at
-                // the poorer bank further down ("the standing row's own
-                // replacement can eat the whole remainder"), where the
-                // income term really is zero and the floor is the only
-                // thing hiring a body that may build.
+                // Without the floor a colony beside a rich buffer would run no body
+                // that may build or repair. This fixture's income term is one, so what
+                // is pinned here is the step from one to two a site buys; the lower
+                // half is pinned at the poorer bank further down.
                 Expect.stringStarts
                     (castName (buffered 1 0))
                     "worker-"
@@ -484,29 +384,15 @@ let upgraderQuotaTests =
             }
 
             test "no surplus hires no standing body, buffer or no buffer" {
-                // ADR 0046's trap: the surplus is what the posted sources
-                // bring in less the ground rows' amortization, so a colony
-                // with no posted source has none to divide. The buffer
-                // stands, the controller is there, and the row is still
-                // not hired — the container is a *precondition* of the
-                // quota and never its cause.
+                // The surplus is what the posted sources bring in less the ground
+                // rows' amortization, so a colony with no posted source has none: the
+                // container is a precondition of the quota, never its cause. With no
+                // Post there is no amortization either, so the surplus is exactly zero;
+                // the quota's `|> max 0` covers the case this fixture cannot reach.
                 //
-                // A colony with no Post has no amortization either, so the
-                // surplus here is exactly zero rather than negative and it
-                // is the division's own answer that is being read: the
-                // quota's `|> max 0` is the floor under the case this
-                // fixture cannot reach, an amortization above income by
-                // more than one whole body's lifetime drain (integer
-                // division truncates toward zero, so a smaller shortfall
-                // answers 0 unaided).
-                //
-                // The generalist below is *not* the worker row's floor
-                // being read: with no Post there is no Anchor and no
-                // hauler either, so the sum is one body at most and
-                // `max minWorkforce` (ADR 0012) answers two whatever the
-                // floor is. ADR 0046's floor is pinned where it is
-                // separable — at the RCL4 bank below, where the ground
-                // rows carry the sum clear of two on their own.
+                // The generalist below is the colony floor of two, not the row floor:
+                // with no Post there is no Anchor and no hauler, so the sum is one body
+                // at most. The row floor is pinned at the RCL4 bank below.
                 let unposted =
                     { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
                         Sources = []
@@ -552,25 +438,11 @@ let upgraderQuotaTests =
 
             test
                 "the standing row's own replacement can eat the whole remainder, and the floor hires the generalist then" {
-                // ADR 0046's floor at its lower half, separable at last
-                // (#195). Rounding down leaves a remainder, but the
-                // remainder is bounded by one whole drink and the standing
-                // row's own replacement is charged against it before the
-                // commuting row divides — so a surplus landing just past a
-                // whole multiple of the drink leaves the generalist row
-                // asking for nothing, and only the floor keeps a body that
-                // may Build or Repair in the colony.
-                //
-                // One posted source at the RCL4 bank is that colony:
-                // 15,000 in, less 700 of Anchor and 1,200 of hauler, is
-                // 13,100 of surplus; the row's `8W/1C/8M` drinks 12,000 of
-                // it, so the quota is one and 1,100 is left — and the
-                // 1,250 that body costs to replace is more than the whole
-                // of it, so the income term is zero. The target is one
-                // Anchor, one hauler, one standing body and the floor's
-                // one generalist, which is four and clear of ADR 0012's
-                // colony floor of two: what is read here is ADR 0046's
-                // row floor and nothing else.
+                // One posted source at the RCL4 bank: 15,000 in less 700 of Anchor
+                // and 1,200 of hauler is 13,100; the row's `8W/1C/8M` drinks 12,000,
+                // so the quota is one and 1,100 is left, under the 1,250 that body
+                // costs to replace, so the income term is zero. The target is four,
+                // clear of the colony floor of two: what is read is the row floor.
                 let quiet = oneSource (atBank 1300 4)
 
                 Expect.stringStarts
@@ -585,21 +457,11 @@ let upgraderQuotaTests =
 
             test
                 "the standing row's replacement is charged before the generalist row divides the remainder" {
-                // The amortization term ADR 0046 asks `workforceTarget` to
-                // grow, which was inert while the quota rounded up and
-                // bites since #195: what the commuting row divides is the
-                // remainder *less* the standing bodies' own replacement,
-                // or the colony hires an upgrade mouth out of energy that
-                // replacement is already spending.
-                //
-                // One posted source at the RCL3 bank is where the charge
-                // is the whole of the answer: 15,000 in, less 700 of
-                // Anchor and 750 of hauler, is 13,550; the row's
-                // `5W/1C/5M` drinks 7,500, so the quota is one and 6,050
-                // is left. Charged the 800 that body costs to replace it
-                // is 5,250, and ADR 0037's rounding turns that against a
-                // 6,000 drain into one generalist. Uncharged it would be
-                // 6,050 — over the drain, and a second generalist.
+                // The standing bodies' own replacement is charged before the commuting
+                // row divides. One posted source at the RCL3 bank: 15,000 in less 700
+                // of Anchor and 750 of hauler is 13,550; `5W/1C/5M` drinks 7,500, so
+                // the quota is one and 6,050 is left. Charged the 800 replacement it is
+                // 5,250, one generalist against a 6,000 drain; uncharged it would be two.
                 let poorer = oneSource (atBank 800 3)
 
                 Expect.stringStarts
@@ -613,18 +475,12 @@ let upgraderQuotaTests =
             }
 
             test "a bank whose own cast is no standing body hires none of the row" {
-                // The gate's other half (#187, ADR 0046's amended
-                // Consequences): the row is *counted* by `patternOf`, off
-                // the parts, so at a bank where the sizing rule's own cast
-                // is read back to the generalist the quota hires nobody.
-                // Pairwise on the bank alone — 800 against 750 at the same
-                // RCL3 — because 800 is where one Carry against
-                // `floor((capacity - 50) / 150)` Work reaches four Work to
-                // the Carry.
-                // Two haulers standing, as the RCL2 arm below has: the
-                // hauler row is priced at the dearest sink it reaches, and
-                // at an 800 bank this room's two containers ask for two
-                // bodies, whose gap would be cast ahead of the upgrader's.
+                // The row is counted by `patternOf` off the parts, so at a bank where
+                // the sizing rule's own cast reads back to the generalist the quota
+                // hires nobody. 800 against 750 at RCL3, because 800 is where one Carry
+                // against `floor((capacity - 50) / 150)` Work reaches four Work.
+                // Two haulers stand because at an 800 bank this room's two containers
+                // ask for two bodies, whose gap would be cast ahead of the upgrader's.
                 Expect.stringStarts
                     (castName (casts (atBank 800 3) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
                     "upgrader-"
@@ -635,11 +491,8 @@ let upgraderQuotaTests =
                     "worker-"
                     "fifty energy poorer the same cast is `4W/1C/4M` and the row is not hired"
 
-                // The RCL2 bank's hauler body carries 300 where the 800
-                // bank's carries 500, so the two containers' summed demand
-                // comes to two bodies there and one here (ADR 0049); the
-                // reading is the row *under* the hauler's, so its own gap
-                // is filled before the case is read.
+                // The RCL2 bank's hauler body carries 300 where the 800 bank's carries
+                // 500, so the two containers ask for two bodies there and one here.
                 Expect.stringStarts
                     (castName (casts (atBank 550 2) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
                     "worker-"
@@ -684,23 +537,12 @@ let quotaInputTests =
         "the quota inputs read this colony's own cast"
         [
             test "the hauler row prices its haul to the buffer as well as to the spawn" {
-                // #216 R4's scope note, on the geometry that cost W13S28 a
-                // thousand ticks: this colony's sinks are the
-                // spawn/extension cluster **and** the controller's
-                // [[buffer]], each priced at its own round trip and the
-                // flow spread over both. Pairwise on the controller's
-                // position alone — the same rock, the same container, the
-                // same spawn, the same bank.
-                //
-                // The third number in each row is the same colony with the
-                // buffer taken out of the census, which is the sink set as
-                // it was before R4: beside the spawn the buffer's own leg
-                // is the cluster's and the answer does not move, and
-                // fifteen tiles further off it is most of the colony's haul
-                // and the row hires for it. That is the live shape — a
-                // buffer at zero, a container overflowing 2,000 with 1,859
-                // on the ground beside it, and seven mini workers walking
-                // fifty tiles for what one hauler was never hired to bring.
+                // This colony's sinks are the spawn cluster and the controller's
+                // buffer, each priced at its own round trip. Pairwise on the
+                // controller's position; the third number in each row is the same
+                // colony with the buffer out of the census. Live (#216 R4), a buffer at
+                // zero beside a container overflowing 2,000 with 1,859 on the ground
+                // and seven mini workers walking fifty tiles was the shape.
                 let withoutBuffer (colony: ColonyView) =
                     { colony with
                         Spatial =
@@ -731,15 +573,11 @@ let quotaInputTests =
             }
 
             test "a nearer sink lowers nothing: the row is sized to the dearest sink it reaches" {
-                // The mirror of the case above. Under R4's mean this read
-                // *two*: the average was a claim about proportion, and a
-                // buffer one tile from the container pulled the long haul
-                // to the cluster down. Live (W13S28, 2026-09-07) the near
-                // sink was the spawn cluster, which fills in a trip, so the
-                // flow that ran all day was the far one and the mean hired
-                // a body short while both containers stood full. The row is
-                // priced at the dearest reachable sink now, so a nearer sink
-                // never lowers the count.
+                // Under a mean this read two: a buffer one tile from the container
+                // pulled the long haul to the cluster down. Live (W13S28, 2026-09-07)
+                // the near sink filled in a trip, and the mean hired a body short while
+                // both containers stood full. The row is priced at the dearest
+                // reachable sink, so a nearer sink never lowers the count.
                 let clusterAcrossTheRoom (colony: ColonyView) =
                     let away = { X = 45; Y = 25 }
 
@@ -778,22 +616,11 @@ let quotaInputTests =
             }
 
             test "the capture the scope note was written from hires the hauler it was missing" {
-                // The ticket's own pairwise, on the room it names: W13S28
-                // at RCL3 on an 800 bank, the child whose north container
-                // held 2,000 with 1,859 decaying beside it while one hauler
-                // ran to the spawn. `RoomFixtures.colonyAt` furnishes the
-                // captured room as its Layout would have left it — a
-                // container on each source's Seat and the upgrade buffer
-                // beside the controller — so the legs here are the room's
-                // real terrain and not a lane drawn to make a point.
-                //
-                // Pairwise on the sink set alone, which is the only thing
-                // R4 moved: the same room, the same bank, the same fleet,
-                // with the buffer in the census and then out of it (the
-                // rule as it stood before R4). The numbers are the room's
-                // answer rather than a chosen value — if the fixture's own
-                // furniture moves they move with it, and what must not
-                // move is that the buffer is worth a body here.
+                // W13S28 at RCL3 on an 800 bank, the room whose north container held
+                // 2,000 with 1,859 decaying beside it while one hauler ran to the
+                // spawn. `RoomFixtures.colonyAt` furnishes the captured room as its
+                // Layout would, so the legs are real terrain. The numbers are the
+                // room's answer: what must not move is that the buffer is worth a body.
                 let colony = RoomFixtures.colonyAt (RoomFixtures.load "W13S28") 3 800
 
                 let spawnOnly =
@@ -816,14 +643,9 @@ let quotaInputTests =
             }
 
             test "the ferry is hired for a bootstrapping child and for no other stage" {
-                // #222's quota half (ADR 0052 decision 7). A mother hauls
-                // her stock into a child that is still being raised and
-                // stops the tick it is `Independent`, which is what the
-                // stage means. Pairwise on the child's stage alone: the
-                // same rooms, the same Storage, the same declaration and
-                // the same borrowing list — each of them at the one load
-                // the rule was derived at, which is now the shipped default
-                // too (#216 R5 landed the Refill half).
+                // A mother hauls her stock into a child still being raised and stops
+                // the tick it is `Independent`. Pairwise on the child's stage, at the
+                // one load the rule was derived at.
                 let lending stage =
                     ferryMother stage |> tunedBy (fun t -> { t with FerryLoads = 1 })
 
@@ -839,20 +661,15 @@ let quotaInputTests =
                     0
                     "nor for a nursery, which has no buffer to fill and no mouth to drink it"
 
-                // The shipped number **is** the derived one since #216 R5:
-                // the Refill that spends a ferried load stands beside this
-                // term now, pooled for the very tile the round trip above
-                // was priced to, so the body hired here has a Task and the
-                // two halves of the split feature ship together.
+                // The shipped default is the derived one: the Refill that spends a
+                // ferried load stands beside this term, so the body hired has a Task.
                 Expect.equal
                     (quotaOf (ferryMother Bootstrapping))
                     1
                     "and the shipped default lends the one body the rule was derived at"
 
-                // The cap is what makes the borrowing an exception rather
-                // than a second economy (ADR 0052 decision 7): what a
-                // mother lends is written down, never derived from how much
-                // the child could absorb.
+                // What a mother lends is written down, never derived from how much the
+                // child could absorb.
                 Expect.equal
                     (quotaOf (
                         ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 2 })
@@ -862,15 +679,9 @@ let quotaInputTests =
             }
 
             test "the ferry's sink is the mother's to fill and never to draw" {
-                // #222's pool half (ADR 0052 decision 7), pairwise on the
-                // child's [[stage]]. The whole of the lend is energy going
-                // one way: the buffer is a Refill target of hers while the
-                // child is being raised, and the Withdraw the same store
-                // would otherwise carry is denied her — left in, her hauler
-                // would take the load it just carried across the Seam
-                // straight back out again, the ADR 0019 cycle over a
-                // border, with the child's own upgraders drinking against
-                // her.
+                // The lend is energy going one way: the buffer is a Refill target of
+                // hers while the child is raised, and the Withdraw is denied her, or
+                // her hauler would take the load it just carried straight back out.
                 let poolFor stage =
                     planTasksOn (ferryMother stage) noThreats
 
@@ -890,16 +701,10 @@ let quotaInputTests =
                     (List.contains (Refill("can-child", Energy)) grown)
                     "an independent child feeds itself, which is what the stage means"
 
-                // And the denial does **not** ride on the lend. The two
-                // sets are not the same set: the ferry lends to a
-                // `Bootstrapping` child alone, while `Borrowed.Rooms` also
-                // holds the [[nursery]] she is raising and the child she has
-                // lost (#221) — so a Withdraw denied only where a Refill is
-                // pooled would make those rooms' stores plain Feeding-tier
-                // intakes of hers, which is the cross-Seam drain ADR 0047
-                // refuses and the exact inverse of the lend. Pairwise on
-                // the stage, over the same store the case above pools the
-                // Refill for.
+                // The denial does not ride on the lend: `Borrowed.Rooms` also holds
+                // the nursery she is raising and the child she has lost, so a Withdraw
+                // denied only where a Refill is pooled would make those stores plain
+                // intakes of hers, the inverse of the lend.
                 Expect.isFalse
                     (List.contains (Withdraw("can-child", Energy)) (poolFor Nursery))
                     "a nursery's store is not hers to draw either"
@@ -908,11 +713,8 @@ let quotaInputTests =
                     (List.contains (Withdraw("can-child", Energy)) grown)
                     "nor a grown child's: no store of a child's is ever her intake"
 
-                // What bounds the lend is the capacity and never the tier
-                // (ADR 0052 decision 6): the Refill sits on the buffer's own
-                // deep tier like her own, and `Tuning.FerryLoads` is the
-                // whole of how many bodies may cross for it — the same
-                // number the hauler row was raised by, so the quota and the
+                // The lend is bounded by capacity, never tier: `Tuning.FerryLoads` is
+                // the same number the hauler row was raised by, so the quota and the
                 // pool cannot disagree.
                 let bound =
                     poolOn (ferryMother Bootstrapping)
@@ -929,20 +731,13 @@ let quotaInputTests =
             }
 
             test "a hungry ferry sink opens the mother's stock" {
-                // ADR 0023's gate reads "some Refill target **other than
-                // the Storage** has free capacity", and a bootstrapping
-                // child's buffer is exactly one (#222). Without it counted,
-                // the two conditions were close to mutually exclusive: the
-                // ferry's Refill sits on the buffer's own deep tier, so a
-                // load reaches it only once the spawn, the extensions and
-                // the home buffer are full — which is precisely the state
-                // that leaves `refills` and `containerRefills` empty — and
-                // the body `haulerQuota` hires for the lend, priced on the
-                // round trip from this Storage to that buffer, had a sink
-                // and no intake at all.
-                //
-                // This fixture is that state by construction: no
-                // Refillables, no home buffer, and a stocked Storage.
+                // The stock gate reads "some Refill target other than the Storage has
+                // free capacity", and a bootstrapping child's buffer is one. Uncounted,
+                // the ferry's Refill on the buffer's deep tier is reached only once
+                // every home sink is full, which is exactly the state that leaves the
+                // stock shut: the body hired for the lend had a sink and no intake.
+                // This fixture is that state: no Refillables, no home buffer, a stocked
+                // Storage.
                 let stocked stage =
                     let mother = ferryMother stage
 
@@ -963,10 +758,8 @@ let quotaInputTests =
                     (List.contains (Withdraw("storage-1", Energy)) lending)
                     "so the stock it is priced from is drawable"
 
-                // The pairwise control on the one fact that decides it: the
-                // child's stage. With no lend there is no sink at all, and
-                // the gate shuts exactly as it always did — the stock is
-                // not opened against its own Refill (ADR 0023).
+                // The control: with no lend there is no sink, and the stock is not
+                // opened against its own Refill.
                 Expect.isFalse
                     (List.contains
                         (Withdraw("storage-1", Energy))
@@ -975,10 +768,8 @@ let quotaInputTests =
             }
 
             test "a mother with no stock ferries nothing" {
-                // The other half of "priced from her Storage": the stock is
-                // the only energy a mother holds that her own rows are not
-                // already hired against (ADR 0023), so a colony without one
-                // has nothing to send whatever stage its child stands at.
+                // The stock is the only energy a mother holds that her own rows are
+                // not already hired against.
                 let stockless =
                     let mother =
                         ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 1 })
@@ -994,21 +785,10 @@ let quotaInputTests =
             }
 
             test "the upgrader row's divisor carries the body as well as its drink" {
-                // #200, the ADR 0046 correction, read at the fleet. The
-                // surplus is 71,500 by construction (`upgraderBandColony`),
-                // which the drain alone divides into **four** bodies and
-                // the drain plus the body it is spent on into **three**.
-                //
-                // Read one body at a time, the way the container switch is:
-                // the colony standing at the quota casts nothing of this
-                // row and one body short casts one, so a quota that had
-                // stayed at four would show as a fourth upgrader here.
-                //
-                // What the fourth cost is the double sale #195 fixed, one
-                // order of magnitude smaller: four bodies drink 66,000 and
-                // cost 6,800 to replace, 1,300 over an income of 71,500,
-                // with the difference coming out of the Storage every tick
-                // of both lives.
+                // The surplus is 71,500 by construction (`upgraderBandColony`): the
+                // drain alone divides it into four bodies, the drain plus the body it
+                // is spent on into three. Four would drink 66,000 and cost 6,800 to
+                // replace, 1,300 over the income, out of the Storage every tick.
                 Expect.equal
                     (castRows (decideOn (upgraderBandColony 2)).Intents)
                     [ "upgrader" ]
@@ -1025,29 +805,14 @@ let quotaInputTests =
             }
 
             test "a lead is priced at the body its row will cast, not the largest it could" {
-                // #158's second half, at the seam a lead is observable
-                // from: an Anchor is expiring when its life is at or under
-                // the ticks its replacement needs to stand where it stands
-                // (ADR 0026), and an expiring one leaves its row's count so
-                // the successor is cast while it still works.
-                //
-                // Pairwise on the reservation of the room its one Post
-                // stands in, which is the only input that moves. Held, the
-                // row's ceiling is six Work and its cast is `6W/1C/1M` —
-                // eight parts, 24 ticks in the spawner and a slow walk out
-                // — and a twenty-tick-old Anchor is inside that lead. Under
-                // no reservation the rock gives five, the ceiling is three,
-                // the cast is `3W/1C/1M` — five parts and a faster walk —
-                // and the same Anchor is not.
-                //
-                // Before #158 the lead was `bodyFor`'s answer, which is the
-                // held ceiling's six Work whatever the room pays: both
-                // arms answered "expiring", the successor was cast some
-                // nine ticks plus three quarters of a walk early, and ADR
-                // 0024's arrival-priced Post capacity counted the incumbent
-                // as the holder — the fresh Anchor standing beside the
-                // spawn reading its own Post as full, which is the
-                // `IdleReason.NoneFree` ADR 0026 names as the symptom.
+                // An Anchor is expiring when its life is at or under the ticks its
+                // replacement needs to stand where it stands. Pairwise on the
+                // reservation of the room its one Post stands in: held, the cast is
+                // `6W/1C/1M`, eight parts, 24 in the spawner and a slow walk, and a
+                // twenty-tick-old Anchor is inside that lead; unheld the rock gives
+                // five, the cast is `3W/1C/1M`, and it is not. Priced at `bodyFor`'s
+                // held ceiling both arms read "expiring" and the successor stood
+                // beside the spawn reading its own Post as full (`IdleReason.NoneFree`).
                 Expect.equal
                     (castRows (decideOn (outpostPostColony true 20)).Intents)
                     [ "anchor" ]
@@ -1060,25 +825,11 @@ let quotaInputTests =
             }
 
             test "a vacant Post is cast into with a body sized for its own rock" {
-                // **ADR 0053's first half**, and the shape #158 filed:
-                // `anchorWorkCapOf` folded every posted source into one
-                // colony-wide `List.max`, and the colony's own owned room
-                // is in that fold at the held rate — so the ceiling was six
-                // Work in every state a colony with one posted home source
-                // can reach, and an outpost whose reservation had lapsed
-                // went on being garrisoned by `6W/1C/1M` against a rock
-                // giving five. Twelve a tick bought for a rock that gives
-                // five, for the whole of a 1,500-tick life.
-                //
-                // What pairs a body to a rock without giving a cast a role
-                // (ADR 0021, ADR 0006) is the **vacancy** it is filling:
-                // the row is casting into one empty Post, that Post seats
-                // one rock, and the rock's rate is a fact of the
-                // projection.
-                //
-                // Pairwise on the outpost's reservation alone — the same
-                // two Posts, the same two garrisons, the same 1,800 bank,
-                // and the outpost's Anchor the expiring one in both arms.
+                // `anchorWorkCapOf` used to fold every posted source into one
+                // colony-wide `List.max` with the home room in it at the held rate, so
+                // a lapsed outpost was garrisoned by `6W/1C/1M` against a rock giving
+                // five (#158). What pairs a body to a rock is the vacancy it fills: one
+                // empty Post seats one rock. Pairwise on the outpost's reservation.
                 Expect.equal
                     (anchorCastsBy (pairedPostColony false 1500 20))
                     [ threeWork ]
@@ -1091,39 +842,21 @@ let quotaInputTests =
             }
 
             test "an ordinary home succession is not sized off an outpost's neutral rock" {
-                // Trap (i) of #158, which is why the vacancy has to be
-                // judged at **arrival** (ADR 0026) rather than by who is
-                // standing where. The colony's own Post is garrisoned by an
-                // expiring Anchor — it is still standing on it, and will be
-                // dead before a replacement could arrive — so that Post is
-                // the vacancy and its own held rock sizes the successor.
-                //
-                // Read off who is standing instead, the home Post would
-                // read as taken, the row would fall through to the
-                // outpost's Post as the only free one, and the home room's
-                // replacement would be cast at three Work against a rock
-                // giving ten: four energy a tick lost for a whole life,
-                // which is the error ADR 0042's fold existed to prevent and
-                // the reason it could not simply be narrowed.
-                //
-                // Pairwise against the arm above, on which of the two
-                // garrisons is expiring — the outpost stands unreserved in
-                // both, so the colony's cheapest rock is the neutral one in
-                // both.
+                // The vacancy is judged at arrival, not by who is standing where: the
+                // home Post's expiring Anchor is still standing on it and will be dead
+                // before a replacement arrives, so that Post is the vacancy and its own
+                // held rock sizes the successor. Read off who is standing, the home
+                // replacement would be cast at three Work against a rock giving ten.
+                // Pairwise against the arm above on which garrison is expiring.
                 Expect.equal
                     (anchorCastsBy (pairedPostColony false 40 1500))
                     [ sixWork ]
                     "the home room's own Post is the vacancy, and its rock gives ten whatever the outpost pays"
 
-                // And again with the outpost's Post standing genuinely
-                // empty, which is the arm that makes the reading a
-                // *judgement* rather than a coincidence: with both Posts
-                // garrisoned above, a standing read finds no free Post at
-                // all and falls back to the richest ceiling, answering six
-                // Work for the wrong reason. Here it would find the
-                // outpost's hole and only that one, and cast the home
-                // room's replacement at three Work against a rock giving
-                // ten.
+                // With the outpost's Post genuinely empty a standing read would find
+                // that hole alone and cast the home replacement at three Work; above,
+                // with both garrisoned, it found none and answered six for the wrong
+                // reason.
                 Expect.equal
                     (anchorCastsBy (pairedPostColony false 40 1500 |> withoutOutpostGarrison))
                     [ sixWork ]
@@ -1132,28 +865,12 @@ let quotaInputTests =
 
             test
                 "a bank short of the dearest vacancy casts no Anchor rather than the cheapest one's body" {
-                // The hole a per-vacancy seat list opens in the cascade
-                // (ADR 0053's rejected option, ADR 0050's step-over): a
-                // spawn takes the first seat its bank can pay for and steps
-                // over the ones it cannot, so seats sized richest-first at
-                // *different* prices are cheapest-first at every bank
-                // between two of them.
-                //
-                // Both garrisons expiring, so both Posts read vacant — the
-                // held home rock at six Work and the neutral outpost's at
-                // three — and 600 available against an 1,800 capacity. The
-                // dearest vacancy's body costs 700 and the cheapest's 400.
-                // Sized one seat per vacancy, this tick buys the 400: a
-                // three-Work Anchor born beside the home spawn, a few tiles
-                // from the held Post it will be pinned to by travel cost
-                // and a Seam from the neutral one it was bought for, digging
-                // six a tick where the rock gives ten for the whole of a
-                // 1,500-tick life. Sized at the dearest vacancy the row
-                // yields the tick instead and buys the six Work the tick
-                // the bank holds 700.
-                //
-                // Pairwise on the bank alone, against the same fixture at
-                // its own 1,800.
+                // A per-vacancy seat list would let the spawn take the first seat its
+                // bank pays for: both Posts vacant, the held rock at 700 and the
+                // neutral at 400, and 600 available buys the 400, a three-Work Anchor
+                // born beside the home spawn and pinned to the held Post by travel
+                // cost, digging six a tick where the rock gives ten. Sized at the
+                // dearest vacancy the row yields the tick instead. Pairwise on the bank.
                 let atBank available =
                     let colony = pairedPostColony false 20 20
 
@@ -1174,27 +891,12 @@ let quotaInputTests =
             }
 
             test "a lead on a Post is priced at the body that Post will be cast" {
-                // #158's second half where ADR 0053 puts it: a [[lead]] is
-                // what the successor needs to stand **where this creep
-                // stands** (ADR 0026), and where an Anchor stands is its
-                // own Post — so the successor is that Post's body and not
-                // the row's largest, nor the colony's richest.
-                //
-                // Pairwise on the outpost's reservation alone, with the
-                // same 40 ticks left on the same garrison standing on the
-                // same tile a Seam away. Held, its successor is `6W/1C/1M`:
-                // eight parts, 24 ticks in the spawner and a slow crossing,
-                // a lead of 66 — so at 40 it is expiring and the row casts.
-                // Unheld, its successor is `3W/1C/1M`: five parts, 15 ticks
-                // and a faster body, a lead of 36 — and at 40 it still
-                // counts, so the tick's body goes to the generalist row.
-                //
-                // The colony's own held Post stands beside it in both arms
-                // and moves neither answer, which is the half a lead read
-                // off the colony's richest ceiling would get wrong: it
-                // would price both arms at 66 and cast a successor 30 ticks
-                // early, to stand beside the spawn reading its own Post as
-                // full (`IdleReason.NoneFree`, ADR 0026).
+                // A lead is what the successor needs to stand where this creep stands,
+                // so it is the Post's body and not the row's largest. Same 40 ticks on
+                // the same garrison a Seam away: held, `6W/1C/1M` has a lead of 66 and
+                // 40 is expiring; unheld, `3W/1C/1M` has a lead of 36 and 40 still
+                // counts. Priced at the colony's richest ceiling both arms would read
+                // 66 and cast 30 ticks early.
                 Expect.equal
                     (castRows (decideOn (pairedPostColony true 1500 40)).Intents)
                     [ "anchor" ]
@@ -1207,19 +909,11 @@ let quotaInputTests =
             }
 
             test "a rival's room hires no reserver on the tick it is first seen held" {
-                // #184. The [[stand-down]] withdraws from a room somebody
-                // else has taken (ADR 0043), but the gate reads the
-                // *previous* tick's [[raid log]] — so on the tick the
-                // colony first sees the room held it is still in the scan
-                // set, carries no reservation of ours and reads the whole
-                // 5,000-tick deficit. The row cast the bank's largest
-                // reserver body at it, 1,300 energy for a creep the engine
-                // would refuse at the controller.
-                //
-                // Pairwise on the room's owner alone — the same
-                // declaration, the same rock, the same fleet, the same
-                // bank — and closed with the same-tick fact rather than
-                // with a gate that arrives a tick late.
+                // The stand-down gate reads the previous tick's raid log, so on the
+                // tick a room is first seen held it is still in the scan set and reads
+                // the whole 5,000-tick deficit: the row cast 1,300 of reserver at a
+                // controller the engine would refuse (#184). Closed with the same-tick
+                // fact. Pairwise on the room's owner alone.
                 let castsIn control =
                     reserverColony [ northOutpost false ] (surplusFleet 2) [ "W1N2", control ]
                     |> fun colony -> decideOn colony
@@ -1236,24 +930,11 @@ let quotaInputTests =
             }
 
             test "a body in the oven fills its row's gap: two idle spawns cast one Anchor" {
-                // #156. A creep still spawning is in no `Creeps` list — it
-                // cannot act, cannot be matched and holds no tile — so
-                // every row's living count read straight past it. With one
-                // spawn that was harmless, because the spawn casting the
-                // body is busy; with two it is not: spawn one casts an
-                // Anchor for the empty Post at tick T, and at T+1 the gap
-                // is still one, spawn one is still busy, and spawn two
-                // casts a second Anchor for the same Post.
-                //
-                // ADR 0026 rejected counting a gestating body and named the
-                // reason that has since expired — "the deficit already
-                // stops double-casting through the spawn's own
-                // `IsSpawning`" — which was true of one spawn and of no
-                // other number of them.
-                //
-                // Pairwise on the oven alone: the same colony, the same
-                // fleet, the same Post, with and without the body already
-                // bought for it.
+                // A creep still spawning is in no `Creeps` list, so every row's living
+                // count read past it. With two spawns, spawn one casts an Anchor at T
+                // and spawn two casts a second for the same Post at T+1, because the
+                // spawn's own `IsSpawning` only stops one spawn double-casting (#156).
+                // Pairwise on the oven alone.
                 let colony casting =
                     { quotaColony 15 2 300 with
                         Creeps = [ worker "w1" 0 50 ]

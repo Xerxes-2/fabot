@@ -1,5 +1,5 @@
-/// The Storage as stock rather than flow (ADR 0023), and the gate on
-/// drawing from it (ADR 0019).
+/// The Storage as stock rather than flow, and the gate on drawing from it.
+/// ADR-0023
 module Fabot.Core.Tests.Decide.PoolStorageTests
 
 open Expecto
@@ -16,9 +16,8 @@ let stockTests =
         "storage stock"
         [
             test "a Storage with room is a Refill target; a full one is not" {
-                // Judged from the projection's kind, as the buffer's tier is
-                // (ADR 0023). The buffer is brimming in both colonies, so the
-                // stock is the only thing the pool can be reporting on.
+                // The buffer is brimming in both colonies, so the stock is
+                // the only thing the pool can be reporting on.
                 let hungry = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 0 ])
                 let full = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 1000000 ])
 
@@ -35,10 +34,7 @@ let stockTests =
             test "the upgrade buffer outbids the stock, however close the stock stands" {
                 // The hauler stands beside the Storage and a step short of
                 // the buffer's Work Area, so travel cost points at the stock
-                // and only rank can overrule it: surplus reaches the colony's
-                // stock once the upgrade buffer is full and not before (ADR
-                // 0023). The tier above the buffer is already pinned by the
-                // rank-tier tests, so this one step completes the sequence.
+                // and only rank can overrule it.
                 let { Verdicts = verdicts } =
                     decideOn (stockColony [] (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
 
@@ -65,10 +61,8 @@ let stockTests =
             }
 
             test "with every other sink full the stock takes the load" {
-                // Spawn and tower full, buffer brimming: the deepest tier of
-                // all is the one live Refill, and it is served by the same
-                // transfer Intent, the same bubble and the same Verdict
-                // vocabulary as every other Refill (ADR 0023).
+                // Spawn and tower full, buffer brimming: the deepest tier is
+                // the one live Refill.
                 let colony =
                     stockColony
                         [
@@ -118,13 +112,9 @@ let stockGateTests =
         "storage draw gate"
         [
             test "with every other sink full the stock pools no Withdraw" {
-                // The gate (ADR 0023): the stock is an intake only while the
-                // pool holds a Refill that is not its own. Here the spawn is
-                // full and the buffer brimming, so the stock's own Refill —
-                // pooled, because the stock has room — is the only one there
-                // is. Counting it would gate the Storage open against itself
-                // forever, and a hauler beside it would cycle energy in and
-                // out of one store.
+                // The spawn is full and the buffer brimming, so the stock's
+                // own Refill is the only one there is. Counting it would
+                // gate the Storage open against itself forever.
                 let tasks =
                     planTasksOn
                         (stockColony
@@ -141,10 +131,8 @@ let stockGateTests =
             }
 
             test "one hungry extension opens it: exactly one Storage Withdraw" {
-                // The Planner reads the refillable census, so a hungry
-                // extension anywhere in the colony is the sink the stock is
-                // drawn for — one Withdraw for the one Storage, never one
-                // per hungry sink.
+                // One Withdraw for the one Storage, never one per hungry
+                // sink.
                 let tasks =
                     planTasksOn
                         (stockColony
@@ -159,10 +147,8 @@ let stockGateTests =
             }
 
             test "the upgrade buffer counts as a sink: the stock feeds it" {
-                // Every refillable full and only the buffer with room, so the
-                // buffer's Refill is the whole reason the stock opens —
-                // stock flows to the upgrade buffer when the sources cannot
-                // keep it full (ADR 0023).
+                // Every refillable full and only the buffer with room: the
+                // buffer's Refill is the whole reason the stock opens.
                 let tasks =
                     planTasksOn
                         (stockColony
@@ -182,8 +168,7 @@ let stockGateTests =
             }
 
             test "an empty Storage pools no Withdraw, however hungry the colony" {
-                // The stock half of ADR 0012's rule, unchanged: a store with
-                // nothing in it is nobody's intake.
+                // A store with nothing in it is nobody's intake.
                 let tasks =
                     planTasksOn
                         (stockColony
@@ -204,17 +189,10 @@ let stockDrawTests =
         "storage draw"
         [
             test "the source container outbids the stock, however near the stock stands" {
-                // The tier (ADR 0023): the stock sits one tier below the
-                // source containers, so an empty hauler empties the flow's
-                // own containers first and draws on the stock only when
-                // they are dry. The buffer's own hunger is what opened the
-                // stock's Withdraw at all. Twice, because rank beating a
-                // tie and rank beating a cheaper rival are two claims: from
-                // the lane's middle it is three steps to either Work Area,
-                // and from inside the stock's the stock costs nothing at
-                // all while the container costs six — ADR 0023's own
-                // motivating case, a stock that wins every travel-cost
-                // contest and must still lose.
+                // Twice, because rank beating a tie and rank beating a
+                // cheaper rival are two claims: from the lane's middle it is
+                // three steps to either Work Area; from inside the stock's
+                // the stock costs nothing and the container six.
                 let drawFrom pos =
                     decideOn (
                         drawColony
@@ -250,15 +228,12 @@ let stockDrawTests =
                     "and it is emptied first from the stock's own doorstep too"
             }
 
-            // #374 (ADR 0071): the one exception to the tier gap above. A
-            // colony whose bank cannot afford the hauler unit it would cast
-            // — the supply floor's own body (ADR 0050) — with room in its
-            // ring is **starved**, and there the stock's draw ranks with the
-            // flow's, so travel cost decides: the body on the Storage's
-            // doorstep draws the Storage, the body at the container draws
-            // the container. The 300 bank's `4C/2M` costs 300, so a bank at
-            // 100 with fifty of room in the spawn is starved and a full bank
-            // is not.
+            // The one exception to the tier gap: a colony whose bank
+            // cannot afford the hauler unit it would cast, with room in
+            // its ring, is starved, and there the stock's draw ranks with
+            // the flow's. The 300 bank's `4C/2M` costs 300, so a bank at
+            // 100 with fifty of room in the spawn is starved and a full
+            // bank is not.
             test
                 "a starved cluster lets the stock tie the flow, and travel cost sends the near body to the stock" {
                 let starved pos =
@@ -311,11 +286,9 @@ let stockDrawTests =
 
             test
                 "the starved stock draw admits the loads the ring can take, not the loads the stock holds" {
-                // Two empty carriers on the Storage's doorstep, fifty of room
-                // in the ring and a 200 load: one draw on the stock, and the
-                // second body goes to the flow — #367's lesson read down the
-                // energy column, a lift to Feeding without a cap being every
-                // carrier in the colony draining the stock.
+                // Two empty carriers on the doorstep, fifty of room in the
+                // ring and a 200 load: one draw on the stock, the second
+                // body goes to the flow.
                 let colony =
                     { drawColony
                           (Map.ofList [ "can-src", 500; "can-ctrl", 800; "sto-1", 5_000 ])
@@ -347,13 +320,8 @@ let stockDrawTests =
             }
 
             test "topping up from the stock outbids surplus work" {
-                // The tier's other neighbour: the stock is drawn on above
-                // everything the colony merely spends energy on, so a
-                // half-loaded creep fills up before it spends. The worker
-                // stands inside the controller's Work Area and one step from
-                // the stock's, so Upgrade is the cheapest rival of the three
-                // and the Verdict's factor is evidence about that pair
-                // alone.
+                // The worker stands inside the controller's Work Area and one
+                // step from the stock's, so Upgrade is the cheapest rival.
                 let colony =
                     { drawColony
                           (Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", 500 ])
@@ -371,14 +339,11 @@ let stockDrawTests =
             }
 
             test "the flow's own Refill outbids the stock's draw" {
-                // The tier's shallow neighbour, and the price of ordering
-                // the stock under the flow (ADR 0023): there is no rank
-                // between a container's Withdraw and the spawn Refill it
-                // feeds, so a stock one tier below the containers is a tier
-                // below the spawn too. The hauler stands in the stock's own
-                // Work Area with half a load and the hungry spawn is four
-                // steps west — it carries what it has rather than topping
-                // up first.
+                // There is no rank between a container's Withdraw and the
+                // spawn Refill it feeds, so a stock a tier below the
+                // containers is a tier below the spawn too. The hauler
+                // stands in the stock's Work Area with half a load and the
+                // hungry spawn is four steps west.
                 let colony =
                     { stockColony
                           [ refillable "spawn-1" 50 BuiltKind.Spawn ]
@@ -395,14 +360,10 @@ let stockDrawTests =
             }
 
             test "both halves of the cycle pool on one tick; the tier gap closes it" {
-                // What the Planner's gate does not do (ADR 0023): with a
-                // sink other than the stock still hungry, a stocked Storage
-                // with room pools its Withdraw and its Refill on the same
-                // tick, and a part-loaded hauler beside it is applicable to
-                // both. What keeps it out of the in-and-out cycle there is
-                // the tier gap — the draw at the stock's shallow end, the
-                // Refill at the deepest end of all — so it tops up and
-                // carries the load away instead of putting it back.
+                // With another sink hungry, a stocked Storage with room
+                // pools its Withdraw and its Refill on the same tick. What
+                // keeps a part-loaded hauler out of the in-and-out cycle is
+                // the tier gap.
                 let colony =
                     { stockColony
                           [ refillable "spawn-1" 0 BuiltKind.Spawn ]
@@ -424,11 +385,8 @@ let stockDrawTests =
             }
 
             test "the containers dry, the hauler draws on the stock for the spawn" {
-                // What the stock is for (ADR 0023): the sources cannot
-                // feed the spawn, so the stock does. The hauler already
-                // stands beside it, and the ordinary withdraw Intent and the
-                // ordinary bubble serve the draw — no Intent of the stock's
-                // own, no glyph of its own.
+                // The containers dry, the stock feeds the spawn: the ordinary
+                // withdraw Intent and bubble, nothing of the stock's own.
                 let colony =
                     drawColony
                         (Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ])
@@ -470,12 +428,9 @@ let stockDrawTests =
             }
 
             test "with only the buffer hungry, the stock flows to it and never back" {
-                // The other half of the ADR 0019 question, with the stock
-                // standing where the buffer stood: the hauler draws on the
-                // stock because the buffer has room, and the tick it fills
-                // up the buffer outranks the store it just emptied — so the
-                // pair alternates instead of cycling, exactly as the source
-                // containers and the buffer do.
+                // The buffer's hunger opens the stock, and the tick the
+                // hauler fills the buffer outranks the store it just
+                // emptied: alternation, not a cycle.
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 800; "sto-1", 500 ]
                 let beside = { X = 16; Y = 10 }
 
@@ -512,14 +467,9 @@ let stockDrawTests =
             }
 
             test "beside a stock that is both its intake and its sink, a hauler idles" {
-                // The ADR 0019 loop in the shape no body gate could cure —
-                // the bodies that feed the spawn from the stock are the ones
-                // with no Work part — and the gate that closes it: with
-                // every other sink full the stock's Withdraw is not pooled
-                // at all, so the hauler that would have emptied and refilled
-                // one store tick after tick sits still instead. Idling is
-                // the honest state; the stock holds energy the colony has
-                // nowhere to put.
+                // With every other sink full the stock's Withdraw is not
+                // pooled at all, so the hauler that would empty and refill
+                // one store idles instead.
                 let idleOn stores =
                     decideOn (
                         drawColony
@@ -550,12 +500,9 @@ let stockDrawTests =
             }
 
             test "a Work body draws on the same terms; a Work-heavy body never does" {
-                // Nothing about the stock is body-specific (ADR 0023): the
-                // ordinary Withdraw gate is the whole rule, so a worker
-                // takes the stock exactly as a hauler does, and ADR 0016's
-                // comparative gate keeps the Anchor row out of it. The
-                // empty buffer is the sink that opens the draw, and holds
-                // nothing either body could prefer to it.
+                // Nothing about the stock is body-specific: the ordinary
+                // Withdraw gate is the whole rule. The empty buffer opens
+                // the draw.
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", 500 ]
 
                 let colonyFor creep =
@@ -590,11 +537,8 @@ let stockDrawTests =
             }
 
             test "the tick the last other sink fills, the holder is released task-gone" {
-                // The ADR 0013 shape (ADR 0023): the Task exists while the
-                // condition holds and is gone otherwise, so a hauler
-                // mid-trip is released through the path every vanishing Task
-                // already uses — the stock needs no release reason of its
-                // own.
+                // The Task exists while the condition holds: a hauler
+                // mid-trip is released task-gone like any vanishing Task.
                 let colonyWithBuffer buffer =
                     drawColony
                         (Map.ofList [ "can-src", 0; "can-ctrl", buffer; "sto-1", 500 ])
@@ -623,12 +567,9 @@ let stockDrawTests =
             }
 
             test "the accepted churn: a load the buffer will not take goes back to the stock" {
-                // ADR 0023 accepts one load of this rather than remembering
-                // where a load was drawn from. The hauler filled from the
-                // stock while the buffer was hungry and the buffer filled
-                // while it walked: its Refill is gone, the stock is the only
-                // sink left, and the remainder goes back where it came from
-                // rather than nowhere at all.
+                // The hauler filled from the stock while the buffer was
+                // hungry and the buffer filled while it walked: the stock is
+                // the only sink left, so the remainder goes back.
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ]
                 let loaded = creepWith "h1" 100 0 [ Carry; Carry; Move ]
 

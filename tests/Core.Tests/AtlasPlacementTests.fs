@@ -68,15 +68,9 @@ let placementQueryTests =
             }
 
             test "buildableTiles orders by X before Y, not by Y before X" {
-                // The (X, Y) order is this query's own contract — the key
-                // order the terrain layer's `Map<Pos, _>` gave before #177,
-                // which the grid's `x * roomSide + y` index reproduces. No
-                // Layout consumer leans on it: `planLayout`'s ordering
-                // re-sorts on `(range, X, Y)` and the footing candidates go
-                // through a set, so ADR 0011's determinism downstream is
-                // carried by those and this pins the contract itself. Two
-                // tiles the two orders disagree about, which the
-                // neighbouring pairs above cannot tell apart.
+                // The (X, Y) order is the query's own contract, which the
+                // grid's `x * roomSide + y` index reproduces; no Layout
+                // consumer leans on it. Two tiles the two orders disagree about.
                 let atlas =
                     spatial [] [ { X = 11; Y = 9 }, Plain; { X = 10; Y = 12 }, Plain ]
                     |> snapshotWith []
@@ -89,11 +83,8 @@ let placementQueryTests =
             }
 
             test "buildableTiles scans the home room's ground and nothing else's" {
-                // The Layout builds where it is anchored (ADR 0041), and a
-                // grid is chosen by room name before any tile is read, so
-                // the name has to be `Home` and not whichever room the
-                // projection files first. The outpost is named to sort
-                // before home and offers tiles home has not got.
+                // The outpost is named to sort before home and offers
+                // tiles home has not got.
                 let atlas =
                     { SpatialInfo.empty with
                         RoomName = Some "W2N2"
@@ -124,13 +115,8 @@ let placementQueryTests =
             }
 
             test "isSwamp reads the home room's ground and nothing else's" {
-                // The Layout's road plan asks it per tile of the Upgrade
-                // Work Area; every answer that is not "swamp here" is one
-                // answer (ADR 0004). A bare `Pos` names no room (ADR 0041),
-                // so the room has to come from `Home` and not from whichever
-                // room the projection happens to file first: the outpost
-                // here is named to sort *before* home and contradicts it on
-                // both tiles the two share.
+                // The outpost is named to sort *before* home and
+                // contradicts it on both tiles the two share.
                 let atlas =
                     { SpatialInfo.empty with
                         RoomName = Some "W2N2"
@@ -184,10 +170,8 @@ let placementQueryTests =
             }
 
             test "a swamp under a road is still swamp: isSwamp reads terrain, not the walking price" {
-                // The road pass discounts the walking grid to 1; the Layout
-                // plans its swamp roads off the ground under them, so a
-                // paved swamp must still read as swamp or the plan would
-                // stop maintaining the road it just built (ADR 0011).
+                // A paved swamp must still read as swamp or the Layout
+                // would stop maintaining the road it just built.
                 let atlas =
                     spatial [] [ { X = 10; Y = 10 }, Swamp ]
                     |> withRoads [ { X = 10; Y = 10 } ]
@@ -201,11 +185,7 @@ let placementQueryTests =
 
             test
                 "droppedEnergyIn lists a room's placed piles in id order; buildableTiles ignores them" {
-                // A pile is a target the reflex reads, not a thing standing
-                // on the tile: it never keeps a construction site off it.
-                /// The room this funnel files its geometry under: the
-                /// projection names none, so it is filed under the empty
-                /// name (`SpatialInfo.homeName`).
+                // A pile is a target, not a thing standing on the tile.
                 let home = SpatialInfo.homeName SpatialInfo.empty
 
                 let atlas =
@@ -234,10 +214,6 @@ let placementQueryTests =
             }
 
             test "a standing link is a built kind: its tile is censused and no longer buildable" {
-                // Link is a projection kind with no placeable counterpart
-                // (ADR 0022): the Layout never asks for one, it only needs
-                // to see the ones that stand, so a link on a footing does
-                // not send the footing looking for another tile.
                 let atlas =
                     { spatial
                           [ "link-1", { X = 10; Y = 10 }; "sto-1", { X = 10; Y = 11 } ]
@@ -269,8 +245,7 @@ let placementQueryTests =
 
             test
                 "a placed container is a target, not an obstacle: repairable in place, unbuildable under" {
-                // Container at (10,10) on a fully projected 7x7 plain square,
-                // carrying hits and store as the projection now does.
+                // Container at (10,10) on a fully projected 7x7 plain square.
                 let tiles =
                     [
                         for x in 7..13 do
@@ -305,8 +280,7 @@ let placementQueryTests =
             }
 
             test "an unplaced container gets the documented answers: empty area, free pricing" {
-                // Hits arrive without a position — unpriceable geometry never
-                // counts against a Task (ADR 0004).
+                // Hits arrive without a position.
                 let atlas =
                     { spatial [] [ { X = 10; Y = 10 }, Plain ] with
                         TargetKinds = Map.ofList [ "cont-1", Structure BuiltKind.Container ]
@@ -378,22 +352,10 @@ let placementQueryTests =
             }
 
             test "the kind censuses count one room's own structures and not a neighbour's (#140)" {
-                // The Layout's gap rule is `allowed at RCL − built −
-                // pending`, and the allowance is a fact about *this*
-                // room's controller — so the census subtracted from it has
-                // to be this room's. Until #216 R3 the six counts read the
-                // flat, id-keyed kind census and answered for every room
-                // the projection carried, which ADR 0052 decision 7's
-                // borrowing made reachable: a mother carries a
-                // bootstrapping child's construction sites so her workers
-                // may build them (`ColonyView.borrowed` keeps every
-                // `Site _`), and the child's extension sites came off her
-                // own allowance.
-                //
-                // Pairwise on the room the site is filed under, with the
-                // kind census flat and identical either way — that is the
-                // half ADR 0041 leaves unlayered, and the join to a named
-                // room's positions is what separates them.
+                // Before #216 R3 the counts read the flat, id-keyed kind
+                // census and a borrowed child's sites came off the mother's
+                // allowance. The kind census stays flat and identical either
+                // way; the join to a named room's positions separates them.
                 let kinds =
                     Map.ofList
                         [

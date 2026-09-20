@@ -16,12 +16,9 @@ let outpostContainerTests =
         "the outpost's source container"
         [
             test "the site lands on the Seat whose walk out to the Seam is shortest" {
-                // ADR 0042's own rule, at the seam it is decided on: an
-                // outpost has no spawn for a trunk to anchor on, so the
-                // pick is anchored on the Seam instead. Measured as a walk
-                // and never as a range — the two disagree on this floor by
-                // construction, and the Seat the range would pick is the
-                // one three swamp tiles from the border.
+                // An outpost has no spawn for a trunk to anchor on, so the pick is
+                // anchored on the Seam, measured as a walk and never a range: the Seat
+                // the range would pick is the one three swamp tiles from the border.
                 let colony =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
@@ -38,21 +35,15 @@ let outpostContainerTests =
             }
 
             test "the Intent carries the outpost's own room, never the colony's" {
-                // The trap the Layout would have walked into: a placement
-                // Intent has always carried a room name, and `planLayout`
-                // stamps the one room it plans onto every site it emits, so
-                // an outpost pick routed through that path would drop a
-                // 5,000-energy container on the *home* room's tile of the
-                // same coordinates. (11,43) is a real coordinate in both
-                // rooms and this asserts which one is named.
+                // `planLayout` stamps the one room it plans onto every site it emits,
+                // so a pick routed through it would land on the home room's tile of the
+                // same coordinates. (11,43) is a real coordinate in both rooms.
                 let colony =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
 
-                // Asserted as the whole list and never with `Expect.all`,
-                // which is vacuously true of the empty one: a rule that
-                // planned nothing would pass the room-stamping case it
-                // exists to pin.
+                // The whole list, never `Expect.all`, which is vacuously true of an
+                // empty one.
                 Expect.equal
                     (containerSites colony)
                     [ "W1N2", { X = 11; Y = 43 } ]
@@ -60,14 +51,9 @@ let outpostContainerTests =
             }
 
             test "a room the colony cannot see this tick is planned nothing" {
-                // ADR 0004 entry by entry, the same reading `sourceOutputOf`
-                // gives the same rock: with no vision the container census
-                // of that room is empty because nobody looked, not because
-                // nothing stands there, and an absence is not an answer.
-                // The Intent would also be one the Executor can only report
-                // as `ActorMissing` — `Game.rooms` holds the seen rooms
-                // alone — so a rule that fired here would file an upstream
-                // bug against itself once a tick per rock, for ever.
+                // With no vision the container census is empty because nobody looked.
+                // `Game.rooms` holds the seen rooms alone, so the Intent could only be
+                // reported as `ActorMissing`, once a tick per rock.
                 let seen =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
@@ -105,17 +91,10 @@ let outpostContainerTests =
             }
 
             test "Seats that price alike fall to the lowest (X, Y), as every tie here does" {
-                // W12S27's `16,45` has three Seats and all three are swamp,
-                // so they can price identically — and a plan that answered
-                // a different one of them on different ticks would not be
-                // one (ADR 0011's determinism). Three swamp Seats over one
-                // plain apron, so the three walks are equal by construction
-                // and only the tie-break separates them.
-                //
-                // It also pins the subtraction the walk is measured with:
-                // the Seat's own swamp step is charged to whatever walks
-                // *in* to it, so three swamp Seats over identical ground
-                // tie rather than each carrying five ticks of their own.
+                // W12S27's `16,45` has three swamp Seats over one plain apron, so the
+                // three walks are equal by construction and only the tie-break
+                // separates them. It also pins the subtraction: the Seat's own swamp
+                // step is charged to whatever walks *in* to it.
                 let ground =
                     [
                         { X = 9; Y = 45 }, Swamp
@@ -137,17 +116,10 @@ let outpostContainerTests =
             }
 
             test "a Seat's own terrain is not charged to it: the walk is the ground beyond it" {
-                // The convention every walk in this colony is measured by
-                // (ADR 0029): a walk charges the tiles a creep steps onto
-                // and never the tile it already stands on. Here it decides
-                // the pick. Two Seats over one symmetric plain apron, so
-                // the ground beyond them is identical and only their own
-                // terrain differs — the swamp one first in (X, Y) order. A
-                // rule that charged a Seat for standing on it would price
-                // the swamp Seat five ticks dearer and pick the plain one;
-                // this rule ties them and lets the tie-break answer, which
-                // is right because whoever hauls from that container starts
-                // on it and never pays to arrive.
+                // A walk charges the tiles a creep steps onto, never the tile it stands
+                // on. Two Seats over one symmetric apron differ only in their own
+                // terrain; charging a Seat for standing on it would pick the plain one.
+                // Whoever hauls from that container starts on it and never pays to arrive.
                 let ground =
                     [
                         { X = 9; Y = 45 }, Swamp
@@ -173,12 +145,8 @@ let outpostContainerTests =
             }
 
             test "a container already serving the source is planned for no second one" {
-                // ADR 0040 holds here as it does at home, and by target
-                // rather than by tile: the thing serving the rock is on
-                // (10,45), which is not the tile the plan picked, and the
-                // rock is served all the same. Standing and pending both,
-                // because the plan asks whether another must be built and a
-                // site going up answers that.
+                // By target and not by tile: the thing serving the rock is on (10,45),
+                // not the tile the plan picked. Standing and pending both.
                 let served kind =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround
@@ -196,17 +164,10 @@ let outpostContainerTests =
             }
 
             test "a Seat another kind's site already holds is no candidate at all" {
-                // #244, live in W13S29: the human paved the outpost by hand
-                // and his road sites landed on the two Seats this rule had
-                // picked, (28,6) and (15,28). The engine takes one
-                // construction site per tile, so the Executor asked for the
-                // container on a taken tile and was answered
-                // ERR_INVALID_TARGET once a tick, for ever — and with no
-                // container the rock is no Post, hires no Anchor and enters
-                // no income quota (ADR 0042), behind a road two workers
-                // finish at the surplus tier. So the pick moves to the next
-                // cheapest Seat rather than waiting on a site nobody
-                // promised to build.
+                // #244, live in W13S29: hand-placed road sites landed on the two Seats
+                // this rule had picked, (28,6) and (15,28). The engine takes one
+                // construction site per tile, so the container was refused
+                // ERR_INVALID_TARGET once a tick, for ever, and the rock was no Post.
                 let siteOn tile =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround
@@ -226,13 +187,9 @@ let outpostContainerTests =
             }
 
             test "a road that already stands is no obstruction, and is the best tile there is" {
-                // The half the clause must not subtract. One construction
-                // site per tile is the whole of the engine's rule: a
-                // *finished* structure holds no site, and a container on a
-                // paved Seat is the tile this rule would have chosen anyway,
-                // since the hauler that draws it arrives over the road. A
-                // built road prices the tile too, so it is laid in both
-                // pieces the shell lays one in (`paved`).
+                // A *finished* structure holds no site, and a container on a paved Seat
+                // is the tile the hauler arrives over anyway. A built road prices the
+                // tile too, so it is laid in both pieces the shell lays one in (`paved`).
                 let colony =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround
@@ -251,16 +208,9 @@ let outpostContainerTests =
             }
 
             test "a source whose every Seat is taken plans nothing and waits" {
-                // Waiting is the answer and it is not a self-clearing one.
-                // The colony has no vocabulary for cancelling a human's
-                // site and asking the engine for a refusal once a tick is
-                // not a plan — but nothing here promises the Seat comes
-                // back either: a road site in an outpost is a plain
-                // Surplus Build with no home rung and outside the
-                // builders' budget, which is what "an ordinary outpost
-                // site keeps its travel cost" above pins, so the human's
-                // site is the only thing that ends this. Pinned as it
-                // really is: no Intent, this tick or any other.
+                // Waiting is not self-clearing: a road site in an outpost is a plain
+                // Surplus Build outside the builders' budget, so the human's site is
+                // the only thing that ends this. No Intent, this tick or any other.
                 let bothTaken =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround
@@ -278,13 +228,9 @@ let outpostContainerTests =
             }
 
             test "a Seat a rival's site holds is no candidate either, whatever it is building" {
-                // #248, the hole #244 left: the projection's site census was
-                // read off `FIND_MY_CONSTRUCTION_SITES`, so the only sites
-                // this clause could see were ours — and out here, in a room
-                // nobody owns, another player's site is exactly the one it
-                // most needs to see. The engine takes one site per tile
-                // whoever placed it, so the refusal is the same `-7` a tick,
-                // and the pick moves the same way.
+                // #248: the site census was read off `FIND_MY_CONSTRUCTION_SITES`, and
+                // out here another player's site is the one it most needs to see. The
+                // engine takes one site per tile whoever placed it.
                 let rivalOn tile =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
@@ -295,13 +241,9 @@ let outpostContainerTests =
                     [ "W1N2", { X = 10; Y = 45 } ]
                     "the Seat the walk picked is a rival's, so the dearer Seat takes the container"
 
-                // Subtracted from the candidates and never counted as a
-                // container: the projection carries a rival's site as a tile
-                // and no kind at all, so whatever another player is raising on that Seat
-                // cannot reach ADR 0040's target clause and answer "this rock
-                // is served". A rival's container never will be ours, and a
-                // rock deferred to one would wait for a switch that never
-                // closes (ADR 0042).
+                // The projection carries a rival's site as a tile and no kind, so it
+                // never answers "this rock is served": a rival's container never will
+                // be ours.
                 Expect.equal
                     (containerSites (rivalOn { X = 10; Y = 45 }))
                     [ "W1N2", { X = 11; Y = 43 } ]
@@ -309,12 +251,9 @@ let outpostContainerTests =
             }
 
             test "a home container on the pick's coordinates defers nothing" {
-                // The room-blind census this rule would have inherited: a
-                // `Pos` carries no room (ADR 0041), so a census unioning
-                // both rooms' container tiles would read the home room's
-                // container as serving an outpost rock fifty tiles away —
-                // and would then defer the outpost's container forever,
-                // leaving the room with no switch to close (ADR 0042).
+                // A `Pos` carries no room, so a census unioning both rooms' container
+                // tiles would read the home container as serving a rock fifty tiles
+                // away and defer the outpost's container forever.
                 let colony =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
@@ -327,21 +266,10 @@ let outpostContainerTests =
             }
 
             test "the home room's Layout is not moved by an outpost joining the projection" {
-                // ADR 0042: "The outpost gets a container and nothing
-                // else. No roads, and no Layout." This rule runs beside the
-                // Layout and never inside it, so a colony that gains an
-                // outpost plans the same home room it planned without one —
-                // the same clustered picks, the same trunks, the same
-                // containers, the same footings — and gains exactly one
-                // site, in the other room.
-                // ADR 0062: a crossing into the home room lands a body on that
-                // room's ring, from which it has to step onto the room's own
-                // ground — and the trunk fixture's ground stops fourteen tiles
-                // short of its own north border, which is a room the shell
-                // never builds. The container's Seat is picked on the walk out
-                // to that border, so without this the outpost would have no
-                // band to walk toward and no container at all. Laid on
-                // **both** colonies, so the Layout comparison below stays like
+                // This rule runs beside the Layout and never inside it. The trunk
+                // fixture's ground stops fourteen tiles short of its own north border,
+                // and the container's Seat is picked on the walk out to that border, so
+                // the ground is laid on **both** colonies to keep the comparison like
                 // for like.
                 let reachingItsBorder (colony: ColonyView) =
                     colony
@@ -378,11 +306,8 @@ let outpostContainerTests =
             }
 
             test "a room home shares no border with is planned nothing" {
-                // Total (ADR 0004): the Seam is read out of the two room
-                // names, and two rooms four sectors apart have no band —
-                // so the walk that anchors the pick has no anchor, and an
-                // unpriceable rule plans nothing rather than planning
-                // arbitrarily. W5N5 is not W1N1's neighbour.
+                // Two rooms four sectors apart share no band, so the walk that anchors
+                // the pick has no anchor. W5N5 is not W1N1's neighbour.
                 let colony =
                     northBorderColony { X = 10; Y = 38 }
                     |> withOutpostGround "W5N5" detourGround [ "src-out", outpostSource, Source ]
@@ -399,16 +324,11 @@ let outpostHaulTests =
         "the outpost's container in the hauler quota"
         [
             test "an outpost container hires haul capacity, priced at its own room's rate" {
-                // ADR 0042's hauler half, which #127 could not reach: the
-                // quota folds every projected room's containers, and the
-                // round trip it prices this one at is the Seam join
-                // (`Atlas.haulRoundTripTicks`), 51 ticks over this
-                // corridor. At the 600 bank the hauler row carries 400, so
-                // held the rock ships ten a tick and hires ceil(51 x 10 /
-                // 400) = 2, and unheld it ships five and hires 1.
+                // The round trip is the Seam join (`Atlas.haulRoundTripTicks`), 51
+                // ticks over this corridor. At the 600 bank the hauler carries 400, so
+                // held the rock ships ten a tick and hires ceil(51 x 10 / 400) = 2.
                 //
-                // Pairwise, one rival at a time: the two colonies differ in
-                // who holds W1N2 and in nothing else.
+                // Pairwise: the two colonies differ in who holds W1N2 and nothing else.
                 let held control =
                     quotaOf (haulHome |> withHaulOutpost (Some control))
 
@@ -417,11 +337,9 @@ let outpostHaulTests =
                     0
                     "the premise: without the outpost there is no haul"
 
-                // The rate is read off the demand and not off the quota: since
-                // #279 a haul that crosses a Seam is floored at two bodies, so
-                // both rocks hire two and the quota can no longer see which of
-                // them ships ten a tick. What the rate moves is the sum the
-                // quota divides, and that is what this case is about.
+                // Read off the demand, not the quota: since #279 a haul across a Seam
+                // is floored at two bodies, so the quota cannot see which rock ships
+                // ten a tick.
                 let shipped control =
                     haulDemandOf (haulHome |> withHaulOutpost (Some control))
 
@@ -445,12 +363,9 @@ let outpostHaulTests =
                     2
                     "including the neutral rock, whose overflow decays the same"
 
-                // #279's floor, and the premise it rests on: a crossing worth
-                // half a load or more is never one body's to lose. What a full
-                // container at home does is wait; what a full one out here does
-                // is drop the Anchor's next fifty on the floor to decay, forty
-                // tiles from the replacement. Live it was 1,170 energy-ticks
-                // against a 1,200 load — one body at 97.5% of itself.
+                // #279's premise: a full container out here drops the Anchor's next
+                // fifty on the floor to decay. Live it was 1,170 energy-ticks against
+                // a 1,200 load, one body at 97.5% of itself.
                 Expect.isTrue
                     (shipped (reservedRoom true 4000) * 2 >= 400)
                     "the premise: the crossing is worth half a 400 load or more"
@@ -467,18 +382,10 @@ let outpostHaulTests =
             }
 
             test "two containers across the same Seam are one sum, rounded once" {
-                // Acceptance criterion 1's own geometry (#194): the
-                // arithmetic case `haulRoundingTests` carries has no Seam
-                // in it, so until here nothing pooled *two* cross-room
-                // terms and a join that mispriced the second one would
-                // have moved no number in the suite.
-                //
-                // Both rocks are held, so each ships ten a tick, and the
-                // 600 bank's hauler carries 400 — a body per 40 ticks of
-                // round trip. The two crossings below come to 51 and 63,
-                // so the colony's haul is 2.85 bodies and hires three; a
-                // ceiling apiece bought 1.275 → 2 and 1.575 → 2 and
-                // hired four.
+                // #194: `haulRoundingTests` has no Seam in it, so nothing before this
+                // pooled *two* cross-room terms. Both rocks ship ten a tick, a 400
+                // carry is a body per 40 ticks of round trip, and 51 + 63 comes to
+                // 2.85 bodies and hires three; a ceiling apiece would hire four.
                 let colony =
                     haulHome
                     |> withHaulOutpost (Some(reservedRoom true 4000))
@@ -486,11 +393,8 @@ let outpostHaulTests =
 
                 let atlas = Atlas.ofView colony
 
-                // The body the quota itself divides by — this fixture's
-                // 600 bank, not `haulRoundingBody`'s 300 (#208). Road
-                // parity holds at every size so the ticks are the same
-                // either way, and asserting them off the row's own cast is
-                // what keeps the premise and the quota one arithmetic.
+                // The body the quota itself divides by: this fixture's 600 bank, not
+                // `haulRoundingBody`'s 300 (#208). Road parity holds at every size.
                 let roundTrip from =
                     Atlas.haulRoundTripTicks
                         atlas
@@ -512,13 +416,9 @@ let outpostHaulTests =
             }
 
             test "one crossing container's longer haul moves the pair by a body" {
-                // The pairwise half of the criterion, on the shape it
-                // names: the branch container's round trip goes from 63 to
-                // 72 ticks, which is 1.575 of a body to 1.8 — its own
-                // ceiling is two either way, so under the old rule the
-                // move was invisible. Pooled, the colony goes from 2.85 to
-                // 3.075 and hires the body, because the fraction the haul
-                // grew by is now spent rather than already bought.
+                // The branch container's round trip goes 63 to 72 ticks, 1.575 of a
+                // body to 1.8: its own ceiling is two either way, so only the pooled
+                // sum, 2.85 to 3.075, sees the move.
                 let atTile tile =
                     haulHome
                     |> withHaulOutpost (Some(reservedRoom true 4000))
@@ -536,12 +436,8 @@ let outpostHaulTests =
             }
 
             test "a container in a room the projection does not carry hires nobody" {
-                // ADR 0004 at the fold's own edge: the container is in the
-                // kind census, the colony holds the room, and the
-                // projection places neither the container nor its rock —
-                // so there is no tile to flood from and no room to flood
-                // over. Nothing, and never the home room's arithmetic run
-                // over an outpost's coordinates.
+                // The container is in the census and the colony holds the room, but
+                // the projection places neither it nor its rock: no tile to flood from.
                 let seen = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
 
                 let unprojected =
@@ -557,13 +453,9 @@ let outpostHaulTests =
             }
 
             test "a quota memoised while the outpost was held is not handed back when it lapses" {
-                // #127's memo case, in the room it was written for. The
-                // hauler quota rides the census memo (ADR 0017) and now
-                // reads a *second* room's held rate, so the census
-                // signature had to widen to sign every projected room's —
-                // and this is what the widening buys. Every census input
-                // below is byte-identical between the two views: the
-                // reservation is the only thing that moved.
+                // #127's memo case: the quota reads a second room's held rate, so the
+                // census signature signs every projected room's. Every other census
+                // input is byte-identical between the two views.
                 let lapsed = haulHome |> withHaulOutpost (Some neutralRoom)
 
                 let previous =
@@ -574,11 +466,8 @@ let outpostHaulTests =
                         None)
                         .Memo
 
-                // Read off the demand and not the quota: since #279 both rates
-                // hire two bodies across a Seam, so the quota can no longer
-                // tell a recomputed answer from a handed-back one. The sum the
-                // quota divides still halves with the rate, and that is what
-                // the memo either recomputes or wrongly keeps.
+                // Read off the demand, not the quota: since #279 both rates hire two
+                // across a Seam, and only the sum the quota divides halves with the rate.
                 let shipped (memo: PlanMemo) =
                     memo.HaulerDemand |> List.sumBy (fun row -> row.Demand)
 
@@ -605,15 +494,10 @@ let outpostHaulTests =
 
             test
                 "the quota memoised before an outpost container stood is not handed back once it does" {
-                // The other half of the widening, and the one the rate
-                // above cannot reach: the census entry itself. The
-                // reservation case moves `held`, which is signed per room;
-                // this one moves nothing but whether `can-out` stands in
-                // W1N2, which only the *standing* census spanning every
-                // projected room can see. Joined against the home layer
-                // alone the two views sign one string, so the colony
-                // would recall the container-less nothing for ever and ADR
-                // 0042's switch would never fire.
+                // The census entry itself: this moves nothing but whether `can-out`
+                // stands in W1N2, which only a standing census spanning every projected
+                // room can see. Signed against the home layer alone the two views sign
+                // one string.
                 let standing = haulHome |> withHaulOutpost (Some(reservedRoom true 4000))
                 let before = standing |> beforeHaulContainer
 
@@ -647,25 +531,16 @@ let outpostSuccessionTests =
         "an outpost's Anchor and its lead"
         [
             test "an Anchor a room away is expiring, and its replacement is cast before it dies" {
-                // The reproduction #153 opens on. Until it, a lead was
-                // priced off the home room's flood alone, so a creep the
-                // home room did not place answered 0 and was never expiring
-                // — an outpost's garrison held its Post to the last tick,
-                // its successor was cast only once it was dead, and the Post
-                // stood empty for the cast plus the crossing in every
-                // 1,500-tick life while the workforce target went on hiring
-                // against the source's nominal output (ADR 0042).
+                // #153: a lead priced off the home room's flood alone answered 0 for a
+                // creep the home room did not place, so an outpost's successor was cast
+                // only once the garrison was dead.
                 //
-                // Priced over the border the lead is countable a tile at a
-                // time. The Anchor row at this 300 bank is two Work over a
-                // Carry and a Move (`anchorBodyFor`), so twelve ticks in the
-                // spawner and four cost units — two ticks — a plain step.
-                // The replacement is born on (25,9), walks eight tiles up to
-                // (25,1), steps onto the exit at (25,0), is moved to (25,49)
-                // for nothing, steps off onto (25,48) and walks seven more
-                // down to the container at (25,41): sixteen tiles of ground
-                // at two ticks each, plus the plain exit's own two — 34 of
-                // walking and a lead of 46.
+                // The Anchor row at this 300 bank is two Work over a Carry and a Move
+                // (`anchorBodyFor`): twelve ticks in the spawner and two ticks a plain
+                // step. Born on (25,9), eight tiles up to (25,1), the exit at (25,0),
+                // moved to (25,49) for nothing, off onto (25,48) and seven more down to
+                // the container at (25,41): 16 tiles at two ticks plus the exit's two,
+                // 34 of walking and a lead of 46.
                 Expect.equal
                     (castNames (outpostSuccession 1500))
                     (castNames (outpostSuccession 47))
@@ -694,13 +569,9 @@ let outpostSuccessionTests =
             }
 
             test "an outpost no crossing reaches leads nobody, however little life is left" {
-                // Total (ADR 0004) at the seam the border is joined on: with
-                // no ring in the projection the two rooms share no Seam
-                // band, so there is no walk to price and no lead — and a
-                // lead of 0 leaves the garrison counted living to its last
-                // tick, which is the answer unpriceable geometry has always
-                // had. Never an arbitrary number, and never the home room's
-                // arithmetic run over an outpost's coordinates.
+                // With no ring in the projection the two rooms share no Seam band, so
+                // there is no walk to price: a lead of 0 leaves the garrison counted
+                // living to its last tick.
                 let unbordered life =
                     let colony = outpostSuccession life
 
@@ -716,11 +587,9 @@ let outpostSuccessionTests =
                     (castNames (unbordered 1500))
                     "the same colony casts the same body whether the garrison is dying or fresh"
 
-                // A worker and not a hauler, because the same missing band
-                // leaves the container's round trip unpriceable and its
-                // haul unhired (ADR 0004, `outpostHaulTests`). What this
-                // case reads is the row it is *not*: the Anchor row is
-                // filled, so the garrison is still counted living.
+                // A worker and not a hauler, because the same missing band leaves the
+                // container's haul unhired. What this case reads is the row it is
+                // *not*: the Anchor row is filled.
                 match castNames (unbordered 1) with
                 | [ name ] ->
                     Expect.stringStarts name "worker-" "and the Anchor row reads as filled"

@@ -1,4 +1,4 @@
-/// The census signature and the plan memo it keys (ADR 0017, ADR 0044).
+/// The census signature and the plan memo it keys.
 module Fabot.Core.Tests.Decide.LayoutMemoTests
 
 open Expecto
@@ -69,9 +69,9 @@ let censusSignatureTests =
     testList
         "census signature"
         [
-            // Every census input, perturbed alone, moves the signature —
-            // the test surface ADR 0017 demands: a missed input would stall
-            // the Layout until a reset instead of failing here.
+            // Every census input, perturbed alone, moves the signature: a
+            // missed input would stall the Layout until a reset instead of
+            // failing here.
             test "a structure appearing moves the signature" {
                 let perturbed =
                     trunkColony 2
@@ -99,15 +99,10 @@ let censusSignatureTests =
             }
 
             test "a Thorium deposit appearing or leaving moves the signature" {
-                // ADR 0044's rule — the memo signs the union of its readers —
-                // read down the mineral column (ADR 0057 decision 1). The
-                // Layout reads the deposit twice, the extractor's tile being
-                // the deposit's own and the container's a Seat of it, and
-                // `Atlas.workingGroundIn` reads it at every level, so the
-                // clustered ordering itself moves with it. Leaving is the live
-                // case: the mod deletes an exhausted Thorium deposit outright,
-                // and unsigned, the memo would hand back a plan naming a
-                // container on the Seat of a rock that is gone.
+                // Leaving is the live case: the mod deletes an exhausted
+                // Thorium deposit outright, and unsigned, the memo would hand
+                // back a plan naming a container on the Seat of a rock that
+                // is gone.
                 let bare = trunkColony 6
 
                 let standing =
@@ -174,13 +169,10 @@ let censusSignatureTests =
             }
 
             test "a rival's site appearing moves the signature" {
-                // ADR 0044: the memo signs the union of its readers, and
-                // since #248 the Layout's tile clause reads the tiles
-                // somebody else's sites hold. They carry no id and no kind,
-                // so they reach the signature as tiles and not through the
-                // pending census — and unsigned they would be invisible: the
-                // memo would hand back the plan from before the rival built,
-                // which is the very `PlaceConstructionSite` the engine is
+                // Rival sites carry no id and no kind, so they reach the
+                // signature as tiles and not through the pending census.
+                // Unsigned, the memo would hand back the plan from before the
+                // rival built: the `PlaceConstructionSite` the engine is
                 // answering `-7`.
                 let perturbed =
                     trunkColony 2
@@ -196,16 +188,11 @@ let censusSignatureTests =
             }
 
             test "a rival's site outside the home room moves it too" {
-                // The rival half is signed for **every** projected room, which
-                // is deliberately wider than its one memoised reader: the
-                // Layout's tile clause plans the home room alone, and
-                // `planOutpostContainers` — the only other caller of
-                // `Atlas.collidingSiteTilesIn` — is off this memo by a rule of
-                // its own. Wide on ADR 0044's ground: over-invalidating is the
-                // cheap error, the standing and pending halves widened per room
-                // the same way, and a census stopping at the home layer is a
-                // signature gap the tick another rule joins the memo. Pinned so
-                // that narrowing it is an alarm and not a quiet saving. The
+                // The rival half is signed for every projected room, wider
+                // than its one memoised reader (the Layout's tile clause
+                // plans the home room alone): over-invalidating is the cheap
+                // error, and a census stopping at the home layer is a
+                // signature gap the tick another rule joins the memo. The
                 // neighbour stands in both colonies, or `held` would move on
                 // the room set alone and prove nothing about this half.
                 let neighbouring rivals =
@@ -243,23 +230,9 @@ let censusSignatureTests =
             }
 
             test "the controller level moves the signature" {
-                // The level was always a signature input because it gates the
-                // allowances the placement filters on. Since ADR 0063 it is a
-                // signature input **twice over**: the clustered window is sized
-                // at `controller.Level + 1`, so the level decides which tiles
-                // the cluster holds and not only which of them it places this
-                // tick. A memo not keyed on the level would hand a room that
-                // levelled up yesterday's cluster — which is #341 wearing a
-                // different hat, and is why this test's reason is worth
-                // restating rather than leaving as the allowance's.
-                //
-                // The **road** half stopped reading the level with ADR 0064:
-                // the reservation the trunks route around is sized at
-                // `allowanceOf`'s ceiling. That retires one of the level's
-                // three readings and none of the other two, so the key is
-                // exactly as tight as it was and the claim this test makes is
-                // unchanged — what moved is that it is now the *cluster*
-                // alone this key is load-bearing for.
+                // The level gates the placement's allowance and sizes the
+                // cluster; a memo not keyed on it would hand a room that
+                // levelled up yesterday's cluster (#341 through the memo).
                 Expect.notEqual
                     (censusSignature (trunkColony 3))
                     (censusSignature (trunkColony 2))
@@ -267,14 +240,9 @@ let censusSignatureTests =
             }
 
             test "a second room's standing container joins the signature under its own name" {
-                // The widening #116's forward note booked and #149 spent
-                // (ADR 0042): the hauler quota folds the containers of
-                // every projected room and prices each at the rate that
-                // room is held at, so both of those are memo inputs now
-                // and the signature that gates the memo has to carry them.
-                // #121's narrowing to the home layer was right while the
-                // memo held nothing but home's; this is the tick it stops
-                // being.
+                // The hauler quota folds the containers of every projected
+                // room and prices each at the rate that room is held at, so
+                // both are memo inputs and the signature has to carry them.
                 let colony = trunkColony 2
 
                 let ground =
@@ -300,20 +268,11 @@ let censusSignatureTests =
 
                 // The room is *in* the entry and not merely implied by the
                 // room list, because two rooms hold the same coordinates.
-                // Pairwise, one rival at a time: both sides below project
-                // W1N2 with the same ground, the same source and the same
-                // control, and carry the same container id at the same
-                // (24,25) — the only thing that moves is which room's
-                // layer places it.
+                // Pairwise: the same container id at the same (24,25), and
+                // the only thing that moves is which room's layer places it.
                 let bare =
                     colony |> withOutpost "W1N2" [ "src-out", { X = 24; Y = 24 }, Source ] ground
 
-                // The widening itself, with nothing else moving: the same
-                // room list, the same held rates, the same home layer —
-                // the container standing in W1N2 is the only difference.
-                // Joined against the home layer alone (#121's rule) these
-                // two sign the same string, and the memo hands back the
-                // quota from before the container stood.
                 Expect.notEqual
                     (censusSignature joined)
                     (censusSignature bare)
@@ -327,15 +286,10 @@ let censusSignatureTests =
                     ))
                     "the same container at the same coordinates in the other room is another census"
 
-                // And not the container kind alone. The quota prices that
-                // container by a round trip flooded over the outpost's
-                // step-weight grid, and `World.seenFacts` lays a
-                // room's `Roads` and `Obstacles` out of the same
-                // every-owner structure array the kind census comes from —
+                // And not the container kind alone: the quota prices that
+                // container by a round trip flooded over the outpost's grid,
                 // so a road paved along the haul lane, or a hostile core
-                // standing on it, moves a number the memo holds. A
-                // standing census filtered down to `Container` outside
-                // home would be ADR 0017's signature gap.
+                // standing on it, moves a number the memo holds.
                 let paved =
                     colony
                     |> withOutpost
@@ -352,10 +306,7 @@ let censusSignatureTests =
                     "a second room's road prices its haul, so it is a signature input too"
 
                 // And the room list itself, because the rate is signed per
-                // projected room: a room that joins carrying nothing is a
-                // room the quota can fold a container out of the tick one
-                // stands there, and its held rate is what that container
-                // would be priced at.
+                // projected room.
                 Expect.notEqual
                     (censusSignature (colony |> withOutpost "W1N2" [] ground))
                     (censusSignature colony)
@@ -373,11 +324,9 @@ let censusSignatureTests =
             test "the room name moves the signature" {
                 let colony = trunkColony 2
 
-                // The same geometry, carried under the new name: the layer
-                // is keyed by room (ADR 0041), so a rename that left the
-                // tiles filed under the old key would move the signature by
-                // emptying the room rather than by naming it — and the
-                // input under test would go unmeasured.
+                // The same geometry, carried under the new name: a rename
+                // that left the tiles filed under the old key would move the
+                // signature by emptying the room rather than by naming it.
                 let renamed =
                     { colony with
                         Spatial =
@@ -394,13 +343,10 @@ let censusSignatureTests =
             }
 
             test "who holds the home room moves the signature" {
-                // The hauler quota's second load-bearing input since ADR
-                // 0042: it prices each container at its source's own
-                // output, and that output is read off `RoomControl`. A
-                // vision fact riding a census memo has to be signed, or
-                // the memo hands back a quota sized for the held rate on
-                // the tick the room stops being held — the signature gap
-                // ADR 0017 names as its failure mode.
+                // The quota prices each container at its source's output,
+                // read off `RoomControl`: a vision fact riding a census memo
+                // has to be signed, or the memo hands back a quota sized for
+                // the held rate on the tick the room stops being held.
                 let colony = trunkColony 2
 
                 let holding control =
@@ -425,11 +371,9 @@ let censusSignatureTests =
             }
 
             test "the ticks left on a reservation leave the signature alone" {
-                // The half of the reservation the quota does *not* read.
-                // `TicksToEnd` decays by one every tick, so signing it
-                // would throw the Layout and the walk table away on every
-                // tick the colony holds an outpost — the memo would never
-                // survive its own input.
+                // `TicksToEnd` decays by one every tick, so signing it would
+                // throw the Layout and the walk table away on every tick the
+                // colony holds an outpost.
                 let holding control =
                     { trunkColony 2 with
                         RoomControl = homeControl |> Map.map (fun _ _ -> control)
@@ -444,12 +388,10 @@ let censusSignatureTests =
             test "everything outside the census leaves the signature alone" {
                 let colony = trunkColony 2
 
-                // The bank is perturbed in its Available alone: the
-                // Capacity beside it is a function of the standing
-                // spawn/extension census and the controller level, so it is
-                // covered rather than absent (ADR 0017) — which is what
-                // lets the successor body a lead is priced for ride this
-                // signature too (ADR 0032).
+                // The bank is perturbed in its Available alone: the Capacity
+                // beside it is a function of the standing spawn/extension
+                // census and the controller level, so it is covered rather
+                // than absent.
                 let perturbed =
                     { colony with
                         Time = colony.Time + 100
@@ -481,25 +423,17 @@ let censusSignatureTests =
                     (censusSignature colony)
                     "creeps, stores, hits, drops, hostiles, bank and tick are not census"
 
-                // ADR 0032's guard, the inverse of every test above: the
-                // spawn walks behind the leads are recalled on this
-                // signature alone, so two views it calls equal have to
-                // lay the same weight grid. A weights input the signature
-                // missed would price leads off a stale grid until a global
-                // reset, and would fail here rather than in the colony.
+                // The inverse of every test above: the spawn walks are
+                // recalled on this signature alone, so two views it calls
+                // equal have to lay the same weight grid.
                 Expect.sequenceEqual
                     (homeGridOf perturbed)
                     (homeGridOf colony)
                     "and the grid the walks flood over is bitwise the same"
 
-                // The same pairing in the room the walk table only started
-                // reading with #169: the far leg's entry is a pure function
-                // of the *outpost's* grid, so a ColonyView the signature calls
-                // equal has to lay that grid bitwise too. Perturbed out
-                // there and not at home, or the assertion would be about the
-                // home layer twice over: a creep standing in the outpost and
-                // a raider beside it are vision facts, and a grid is
-                // terrain, roads and obstacles alone.
+                // The same pairing in the outpost, whose grid the far leg is
+                // a pure function of. Perturbed out there and not at home, or
+                // the assertion would be about the home layer twice over.
                 let ground =
                     [
                         for x in 23..26 do
@@ -545,11 +479,9 @@ let censusSignatureTests =
             }
 
             // The three weights inputs beside the terrain, each perturbed
-            // alone (ADR 0032). Each test asserts the pairing rather than
-            // the signature alone: the perturbation moves the grid the
-            // recalled walks flood over, and it moves the signature they
-            // are recalled on. A census that held still through one of them
-            // would price leads off a grid the room has left.
+            // alone. Each test asserts the pairing: the perturbation moves
+            // the grid the recalled walks flood over, and it moves the
+            // signature they are recalled on.
             test "a built road moves the signature" {
                 let colony = trunkColony 2
                 let tile = { X = 22; Y = 25 }
@@ -632,19 +564,12 @@ let censusSignatureTests =
             }
 
             test "an obstacle site in an outpost moves the signature" {
-                // The fourth weights input, and the one #169 made
-                // load-bearing: the walk table's far-leg entry is a pure
-                // function of the *goal* room's grid, so every input of
-                // that grid has to be in the signature exactly as the home
-                // room's are (ADR 0032). `World.seenFacts` folds
-                // every scanned room's obstacle-kind construction sites
-                // into that room's `Obstacles` — the engine refuses a creep
-                // its own site wherever it stands — so a pending census
+                // The far-leg entry is a pure function of the goal room's
+                // grid, so every input of that grid has to be in the
+                // signature as the home room's are. The engine refuses a
+                // creep its own site wherever it stands, so a pending census
                 // read in the home layer alone would leave an outpost's
-                // closed tile unsigned, and a lead priced through ground
-                // the successor cannot cross would be recalled for the life
-                // of the census: ADR 0017's signature gap, in the room the
-                // memo has just started reading.
+                // closed tile unsigned.
                 let colony = trunkColony 2
                 let tile = { X = 24; Y = 26 }
 
@@ -713,10 +638,9 @@ let planMemoTests =
                     [ "W1N1", { X = 1; Y = 1 }, Tower ]
                     "the memo's site Intents pass through, nothing recomputes"
 
-                // Verbatim, field for field: every table on it is the census's
-                // and every one of them is the table this tick's Atlas was
-                // handed and wrote into, so there is nothing on a reused memo
-                // that has to be swapped out at the tick boundary (ADR 0070).
+                // Verbatim, field for field: every table on it is the one
+                // this tick's Atlas was handed and wrote into, so nothing on
+                // a reused memo has to be swapped out at the tick boundary.
                 Expect.equal decision.Memo memo "the memo rides out unchanged for next tick"
             }
 
@@ -753,9 +677,6 @@ let planMemoTests =
 
             test
                 "the Layout's records are census-derived: recalled with the plan, recomputed with it" {
-                // #77's record, #106's and #107's join the site Intents and
-                // the hauler quota under ADR 0017's standing invitation —
-                // same census, same losses — so none is rederived per tick.
                 // The sentinel says so in both directions: a memo whose
                 // signature holds hands its own empty records back for a
                 // room that has in fact lost a footing and reserved three,
@@ -805,13 +726,10 @@ let planMemoTests =
             }
 
             test "the unrouted trunks ride the memo with the rest of the plan" {
-                // #107's record on the same seam, over a room that has in
-                // fact lost a trunk: a matching signature hands back the
-                // memo's own empty list rather than rederiving the loss,
-                // and a moved one recomputes to exactly what a memoless
-                // tick finds. ADR 0017's guarantee is that a recalled plan
-                // reports what it reported when it was computed, and a
-                // record that quietly recomputed itself would break it.
+                // The same seam, over a room that has in fact lost a trunk:
+                // a recalled plan reports what it reported when it was
+                // computed, and a record that quietly recomputed itself
+                // would break that.
                 let colony = enclosedSourceColony 4
 
                 let dropped =
@@ -858,12 +776,7 @@ let planMemoTests =
 
                 // And the recompute is not a formality: the two levels plan
                 // differently, so a memo that survived the level-up would be
-                // observably wrong rather than merely stale (ADR 0063 — the
-                // horizon is derived from the level, so the level moving moves
-                // which tiles the cluster holds and not only the placement
-                // filter. The roads are level-blind again since ADR 0064, so
-                // the difference the recompute has to notice is the cluster's
-                // alone).
+                // observably wrong rather than merely stale.
                 Expect.notEqual
                     (placementIntents fresh.Intents)
                     (placementIntents (decideOn (trunkColony 2)).Intents)
@@ -924,11 +837,9 @@ let planMemoTests =
             }
 
             test "the spawn walks ride the memo while the census holds" {
-                // ADR 0032. The flood a lead is priced off reads nothing
-                // but the census, so the next tick under the same signature
-                // fills the table it was handed rather than one of its own:
-                // a row the first tick never priced lands beside the first
-                // tick's entry instead of in a table nobody keeps.
+                // The next tick under the same signature fills the table it
+                // was handed rather than one of its own: a row the first tick
+                // never priced lands beside the first tick's entry.
                 let heavy name =
                     creepWith name 0 50 [ Work; Work; Work; Work; Carry; Move ]
 
@@ -979,13 +890,8 @@ let planMemoTests =
             }
 
             test "a moved census drops the walk table of the rooms that moved" {
-                // ADR 0032's rule read per room (#388): a moved signature may
-                // have moved the weights the walk is priced over, and the
-                // rooms whose census moved are exactly the rooms whose
-                // weights can have. A level-up is folded into every room's
-                // signature, so it still drops the lot — and "dropped" means
-                // nothing at all rides across, not merely a stale entry
-                // priced again. The table object is the memo's own and is
+                // A level-up is folded into every room's signature, so it
+                // drops the lot. The table object is the memo's own and is
                 // evicted in place, which is why the count is what is pinned
                 // and not the reference.
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
@@ -1003,15 +909,13 @@ let planMemoTests =
             }
 
             test "an outpost's census moving keeps the home room's walks and drops the outpost's" {
-                // The whole of what #388 buys. Before it the three tables
-                // went with the one flat signature, so a road appearing in an
-                // outpost re-flooded the home room's spawn walks and every
-                // far field that never crossed that outpost: `reactor
-                // --census-every 1` ran 109,258 heap pops a tick against
-                // 9,554 quiet (2026-09-20). Per room, an entry is kept while
-                // every room it reads holds — a spawn walk to a far room reads
-                // home and the chain to it, a Seam walk its pair, a far field
-                // its chain — and dropped when one of them moves.
+                // Per room, an entry is kept while every room it reads holds
+                // — a spawn walk to a far room reads home and the chain to
+                // it, a Seam walk its pair, a far field its chain — and
+                // dropped when one of them moves. Flat, a road appearing in
+                // an outpost re-flooded everything: `reactor --census-every
+                // 1` ran 109,258 heap pops a tick against 9,554 quiet
+                // (2026-09-20, #388).
                 let held = borderedColony (Some(reservedRoom true 4000))
                 let dark = borderedColony None
 
@@ -1065,19 +969,12 @@ let planMemoTests =
             }
 
             test "the far fields ride the memo on the walk table's own terms" {
-                // `docs/research/cpu-headroom.md` §5.1: the far leg of a
-                // cross-room price reads the chain's walking grids and its
-                // Seam bands and nothing else — under every pricing, since
-                // ADR 0070 — so it is recalled and dropped under exactly the
-                // condition the spawn walks are (ADR 0032), which since #388
-                // is **per chain**: a field is kept while every room its
-                // chain names holds. The Harvest across the north border
-                // floods two fields here, one over the outpost alone and one
-                // carried home along `[W1N1; W1N2]`; a structure appearing at
-                // home moves the home room, so the carried field goes and
-                // the outpost's own stays. One seam and one signature for
-                // both tables, which is why this pins the lifetime here and
-                // leaves the field's contents to the Atlas suite.
+                // A far field is kept while every room its chain names holds.
+                // The Harvest across the north border floods two fields here,
+                // one over the outpost alone and one carried home along
+                // `[W1N1; W1N2]`; a structure appearing at home moves the home
+                // room, so the carried field goes and the outpost's own
+                // stays. The field's contents are the Atlas suite's.
                 let held = borderedColony (Some(reservedRoom true 4000))
 
                 let first = decideOn held
@@ -1126,15 +1023,11 @@ let planMemoTests =
 
             test
                 "a deferred turn stamps the tables with the census that filled them, not the plan's" {
-                // #372. On a `Waiting` turn the plan served is the stale one
-                // under its own signature (#357), while the tables on it are
-                // this tick's. Stamped with the plan's signature, a census
-                // that moved and moved back — vision leaving an outpost for a
-                // tick and returning — would recall the plan *and* the tables
-                // the dark tick flooded over a grid missing that room's
-                // roads. Stamped per room with the tick that filled them
-                // (#388), the plan is recalled and the dark tick's outpost
-                // entries are evicted.
+                // On a `Waiting` turn the plan served is the stale one under
+                // its own signature, while the tables on it are this tick's.
+                // Stamped with the plan's signature, a census that moved and
+                // moved back would recall the plan *and* the tables the dark
+                // tick flooded over a grid missing that room's roads (#372).
                 let held = borderedColony (Some(reservedRoom true 4000))
                 let dark = borderedColony None
 
@@ -1178,12 +1071,10 @@ let planMemoTests =
                          |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
                         "and nothing the dark tick flooded over the outpost is served under the returned census"
 
-                // The recalled plan restamps too. Handed on as it was, the
-                // stamp would still be the dark tick's: every held tick after
-                // this one would evict and re-flood the outpost again, and a
-                // second vision loss would find the stamp *equal* to the dark
-                // census and serve the held grid's floods on the dark tick —
-                // #372 mirrored.
+                // The recalled plan restamps too: handed on as it was, every
+                // held tick after this one would re-flood the outpost, and a
+                // second vision loss would find the stamp equal to the dark
+                // census and serve the held grid's floods on the dark tick.
                 Expect.equal
                     returned.Memo.RoomSignatures
                     (roomSignatures held)
@@ -1201,12 +1092,10 @@ let planMemoTests =
                         "so the held tick after it keeps the returned tick's outpost floods, unflooded"
             }
 
-            // #357. Four colonies re-planning in one tick measured 487 ms of
-            // the engine's 500 ms ceiling — and they arrive together by
-            // construction, since a global reset (every code upload is one)
-            // empties every memo at once. So a colony re-plans on its turn.
-            // What it serves in between is what these cases are about: the
-            // plan must be *old*, never wrong, and it must stay owed.
+            // Four colonies re-planning in one tick measured 487 ms of the
+            // engine's 500 ms ceiling, and a global reset empties every memo
+            // at once (#357). So a colony re-plans on its turn, and what it
+            // serves in between must be *old*, never wrong, and stay owed.
             test "a colony whose turn has not come serves the plan it has, and still owes a new one" {
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
 
@@ -1214,9 +1103,8 @@ let planMemoTests =
 
                 // The census moves (a level-up) and the turn is somebody
                 // else's: the stale plan stands, down to the Intents it
-                // placed, because a reservation is level-blind (ADR 0064) and
-                // a site already in the world outlives the Intent that placed
-                // it.
+                // placed, because a site already in the world outlives the
+                // Intent that placed it.
                 let waiting =
                     decideUnarbitrated
                         (staffed (trunkColony 3))
@@ -1267,12 +1155,10 @@ let planMemoTests =
                     0
                     "and no hauler is asked for: a row of zero casts no body"
 
-                // The load-bearing half. `censusSignature` composes eight
-                // fields with `|` separators, so it cannot produce the empty
-                // string — a deferred memo is therefore one no census can
-                // match, and the tick after it must plan for real. A memo
-                // stamped with the signature it declined to plan against would
-                // be served forever.
+                // `censusSignature` composes its fields with `|` separators,
+                // so it cannot produce the empty string: a deferred memo is
+                // one no census can match. A memo stamped with the signature
+                // it declined to plan against would be served forever.
                 Expect.equal
                     blind.Memo.Signature
                     ""

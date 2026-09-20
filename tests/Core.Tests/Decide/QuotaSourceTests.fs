@@ -15,21 +15,18 @@ let sourceOutputTests =
     testList
         "a source's output and the room that holds it"
         [
-            // Ten is the *reserved* rate (ADR 0042). The colony that holds
-            // W1N2 counts ten energy a tick from its rock and the colony
-            // that does not counts five, and five over a 1,500-tick
-            // lifetime is two worker places at this bank's Work drain of
-            // three. So the fleet below is sized to the *unreserved*
-            // target: the unreserved colony has no gap to cast into and
-            // the reserved one does, which is a difference no shared cap
-            // and no one-body-per-spawn limit can hide.
+            // Ten is the reserved rate: the colony that holds W1N2 counts ten a
+            // tick from its rock and the colony that does not counts five, and
+            // five over a 1,500-tick lifetime is two worker places at this bank's
+            // Work drain of three. So the fleet below is sized to the unreserved
+            // target: the unreserved colony has no gap to cast into and the
+            // reserved one does.
             //
-            // Unreserved the target is 3 Anchors — the outpost's Post
-            // hires one since #129 — + 2 haulers +
-            // ceil(((20 + 5) × 1500 − 3000) / 4500) = 8 workers = 13;
-            // reserved it is 10 workers and 15. The amortization is three
-            // Anchors at 600 and two haulers at 600, every one of them the
-            // body this 600 bank casts.
+            // Unreserved the target is 3 Anchors (the outpost's Post hires one
+            // since #129) + 2 haulers + ceil(((20 + 5) × 1500 − 3000) / 4500) = 8
+            // workers = 13; reserved it is 10 workers and 15. The amortization is
+            // three Anchors at 600 and two haulers at 600, every one the body this
+            // 600 bank casts.
             let unreservedWorkers = 8
 
             test "the same outpost source is worth twice as much reserved" {
@@ -96,13 +93,11 @@ let sourceOutputTests =
                             .Intents)
                     "another player's reservation prices the rock exactly as none at all does"
 
-                // Five and specifically not nothing. The assertion above
-                // is sized to the neutral target, so it would hold just
-                // as well if a rival's reservation made the rock
-                // *unpriceable* — the answer ADR 0004 reserves for a room
-                // with no vision. This fleet is the blind target below,
-                // which the neutral rate outgrows and the blind one does
-                // not, so the branch is pinned strictly between the two.
+                // Five and specifically not nothing. The assertion above is sized
+                // to the neutral target, so it would hold just as well if a rival's
+                // reservation made the rock unpriceable, the answer reserved for a
+                // room with no vision. This fleet is the blind target below, which
+                // the neutral rate outgrows and the blind one does not.
                 Expect.isNonEmpty
                     (spawnIntents
                         (decide
@@ -115,21 +110,17 @@ let sourceOutputTests =
             }
 
             test "a room another player owns doubles nothing of ours either" {
-                // The other half of "somebody else holds it", and the one
-                // the projection could not tell from an unowned room until
-                // #133: a rival's *ownership*. ADR 0043 withdraws from
-                // either half — since #165 the owned half is the latch and
-                // the reserved half a clock — so either has to be a fact the
-                // ColonyView can state, and stating it must not accidentally
-                // read as a hold of ours, which is what this pins.
-                //
-                // Pairwise against the neutral room, one rival at a time:
-                // same room, same rock, same container, same fleet. The
-                // engine pays ten a tick in a room a rival owns exactly as
+                // The other half of "somebody else holds it", which the projection
+                // could not tell from an unowned room until #133: a rival's
+                // ownership. The stand-down withdraws from either half — since #165
+                // the owned half is the latch and the reserved half a clock — so
+                // either has to be a fact the ColonyView can state, and stating it
+                // must not read as a hold of ours. Pairwise against the neutral
+                // room. The engine pays ten a tick in a room a rival owns exactly as
                 // in one we own (`sources/tick.js` switches on
-                // `roomController.user || roomController.reservation`); the
-                // colony prices it at five for the same reason it prices a
-                // rival's reservation at five.
+                // `roomController.user || roomController.reservation`); the colony
+                // prices it at five for the same reason it prices a rival's
+                // reservation at five.
                 Expect.isEmpty
                     (spawnIntents
                         (decide
@@ -172,21 +163,16 @@ let sourceOutputTests =
             }
 
             test "the NPC's reservation prices like a rival's and is not the same fact" {
-                // The third holder (ADR 0043). A level-0 invader core
-                // `attackController`s the room it expanded into and holds
-                // the reservation itself — the measured core two rooms
-                // from W12S27 does exactly this
-                // (docs/research/remote-mining.md §8.4) — and that
-                // reservation is the *only* readable deadline it has,
-                // because a level-0 core carries no collapse timer.
-                //
-                // ADR 0043 reads different answers off the NPC's hold and a
-                // player's: the NPC's is the clock a core's stand-down runs
-                // to under the fallback floor (#136), a player's the clock
-                // its own stand-down runs to with no floor at all (#165). So
-                // the two must price the same and must stay tellable apart.
-                // Pricing first, pairwise against the rival's reservation,
-                // one input at a time.
+                // The third holder. A level-0 invader core `attackController`s the
+                // room it expanded into and holds the reservation itself — the
+                // measured core two rooms from W12S27 does exactly this
+                // (docs/research/remote-mining.md §8.4) — and that reservation is
+                // the only readable deadline it has, because a level-0 core carries
+                // no collapse timer. The NPC's hold is the clock a core's stand-down
+                // runs to under the fallback floor (#136), a player's the clock its
+                // own stand-down runs to with no floor (#165), so the two must price
+                // the same and stay tellable apart. Pricing first, pairwise against
+                // the rival's reservation.
                 let priced control =
                     spawnIntents
                         (decide
@@ -209,13 +195,12 @@ let sourceOutputTests =
                     (priced (reservedRoom true 4000))
                     "held by us the same rock is worth ten, so the fleet above is the neutral one"
 
-                // And tellable apart, which is the whole reason the holder
-                // is a closed three-state rather than a flag. A ColonyView
-                // that answered both with one "not ours" would hand the
-                // gate ADR 0043 describes an input on which no correct
-                // answer exists: the NPC's hold read as a rival's shuts an
-                // outpost for the life of the colony, and a rival's read
-                // as the NPC's walks back into a room somebody else holds.
+                // And tellable apart, which is why the holder is a closed
+                // three-state rather than a flag: one "not ours" for both hands the
+                // stand-down gate an input on which no correct answer exists. The
+                // NPC's hold read as a rival's shuts an outpost for the life of the
+                // colony, and a rival's read as the NPC's walks back into a room
+                // somebody else holds.
                 let holderOf (control: RoomControlInfo) =
                     control.Reservation |> Option.map (fun held -> held.Holder)
 
@@ -231,19 +216,15 @@ let sourceOutputTests =
             }
 
             test "an outpost the colony cannot see this tick prices no source" {
-                // ADR 0004, entry by entry: who holds a room we cannot look
-                // into is not a fact this tick, so the source is
-                // unpriceable and enters no quota. Unpriceable is not
-                // half — half is what a room we *can* see and nobody holds
-                // is worth, and the pair below is what separates the two.
-                //
-                // What is blind here is the *control* entry alone, which is
-                // the one input this test moves. The fixture's container
-                // still stands in the projection, so its Post is still in
-                // the Anchor row and the fleet still carries `a-out` — live
-                // the two arrive and vanish together, because the shell
-                // gates the structure census and the control entry on the
-                // same `seen` list.
+                // Who holds a room we cannot look into is not a fact this tick, so
+                // the source is unpriceable and enters no quota. Unpriceable is not
+                // half: half is what a room we can see and nobody holds is worth,
+                // and the pair below separates the two. What is blind here is the
+                // control entry alone: the fixture's container still stands in the
+                // projection, so its Post is still in the Anchor row and the fleet
+                // still carries `a-out`. Live the two arrive and vanish together,
+                // because the shell gates the structure census and the control entry
+                // on the same `seen` list.
                 let blind = postedOutpostColony 6 []
 
                 Expect.isEmpty
@@ -264,23 +245,20 @@ let sourceOutputTests =
             }
 
             test "the colony's own room is priced on its owner, not on a reservation" {
-                // The trap #116's prose walks into and ADR 0042's rule does
-                // not: taken as "reserved, or half", the spawn room — which
-                // is owned and which nothing reserves — would price both its
-                // sources at five, halving the income base and the hauler
-                // quota together. The engine gives a room with an owner the
-                // same 3,000 a cycle it gives a reserved one.
+                // Taken as "reserved, or half", the spawn room — owned, and reserved
+                // by nothing — would price both its sources at five, halving the
+                // income base and the hauler quota together (#116's prose). The
+                // engine gives a room with an owner the same 3,000 a cycle it gives
+                // a reserved one.
                 //
-                // Sized to the halved target so the direction is
-                // readable, and the hauler row halves with the output it
-                // ships: 2 Anchors + 1 hauler, whose amortization is
-                // 2 × 400 + 1 × 600 = 1,400, + ceil((10 × 1500 − 1,400) /
-                // 4500) = 4 workers = 7. Held it would be 2 + 2 + 7 = 11,
-                // which is what the second half reads.
+                // Sized to the halved target so the direction is readable, and the
+                // hauler row halves with the output it ships: 2 Anchors + 1 hauler,
+                // amortization 2 × 400 + 1 × 600 = 1,400, + ceil((10 × 1500 − 1,400)
+                // / 4500) = 4 workers = 7. Held it would be 2 + 2 + 7 = 11, which is
+                // what the second half reads.
                 //
-                // The Anchors are 400 and not 600 because a neutral rock
-                // lowers the row's own ceiling as well as its output (ADR
-                // 0021 as ADR 0042 narrows it): three Work saturate a rock
+                // The Anchors are 400 and not 600 because a neutral rock lowers the
+                // row's own ceiling as well as its output: three Work saturate a rock
                 // giving five, and this bank would otherwise buy five.
                 let halved =
                     { midIncomeColony with
@@ -306,16 +284,13 @@ let sourceOutputTests =
             }
 
             test "the hauler quota prices each container at its own source's output" {
-                // The quota's other reader (ADR 0042), read here on the
-                // colony's own room: it folds every projected room's
-                // containers and prices each at *that* container's
-                // source, so moving the rate under the home room moves
-                // the home containers' half of it and nothing else. The
-                // outpost half is `outpostHaulTests`, on a fixture with a
-                // Seam to cross. The two containers' demands are summed and
-                // rounded once (ADR 0049): ceil((24 + 24) × 10 / 400) is
-                // two haulers for the pair and ceil((24 + 24) × 5 / 400)
-                // is one.
+                // The quota's other reader, on the colony's own room: it folds every
+                // projected room's containers and prices each at that container's
+                // source, so moving the rate under the home room moves the home
+                // containers' half and nothing else. The outpost half is
+                // `outpostHaulTests`, on a fixture with a Seam to cross. The two
+                // demands are summed and rounded once: ceil((24 + 24) × 10 / 400) is
+                // two haulers for the pair and ceil((24 + 24) × 5 / 400) is one.
                 Expect.equal (quotaOf midIncomeColony) 2 "the premise: the reserved rate hires two"
 
                 Expect.equal
@@ -336,16 +311,13 @@ let sourceOutputTests =
             }
 
             test "a quota memoised while the room was held is not handed back when it lapses" {
-                // ADR 0017's stated failure mode, at the seam that would
-                // ship it: the hauler quota rides the census memo, and
-                // since ADR 0042 it reads who holds the room — a per-tick
-                // vision fact, not a census one. `Main.fs` keeps the memo
-                // in heap and hands `decide` last tick's every tick, so a
-                // signature blind to the rate would recall three haulers
-                // for a room now worth half, and would size the worker
-                // row off that amortization too. Every census input here
-                // is byte-identical between the two views: the
-                // reservation is the only thing that moved.
+                // The hauler quota rides the census memo and reads who holds the
+                // room, a per-tick vision fact, not a census one. `Main.fs` keeps
+                // the memo in heap and hands `decide` last tick's every tick, so a
+                // signature blind to the rate would recall three haulers for a room
+                // now worth half, and size the worker row off that amortization too.
+                // Every census input here is byte-identical between the two views:
+                // the reservation is the only thing that moved.
                 let lapsed =
                     { midIncomeColony with
                         Creeps = incomeFleetRows 1 4
@@ -397,20 +369,15 @@ let rowGapTests =
                     "the premise: a body short of this fleet the colony is still over target"
 
             test "the tick a source unposts, the home room's empty Post is cast for anyway" {
-                // #154's reproduction, and the reason the gate moved. The
-                // colony loses vision of its outpost for one tick: the
-                // source there unposts, and its Anchor place, its haul and
-                // its income share leave the target together (ADR 0042,
-                // ADR 0004), dropping it under the living count. The home
-                // room's Post is empty across both ticks and is a fact
-                // about the ground either way — gated on the deficit it
-                // went unfilled until ordinary deaths had paid off the
-                // whole twelve-body overshoot, and the colony cast
-                // nothing at all, in its own room included, in the
-                // meantime.
-                //
-                // Pairwise, one rival at a time: the two fleets differ in
-                // the two Anchors' bodies and in nothing else.
+                // #154's reproduction. The colony loses vision of its outpost for
+                // one tick: the source there unposts, and its Anchor place, its haul
+                // and its income share leave the target together, dropping it under
+                // the living count. The home room's Post is empty across both ticks
+                // and is a fact about the ground either way; gated on the deficit it
+                // went unfilled until ordinary deaths had paid off the whole
+                // twelve-body overshoot, and the colony cast nothing at all in the
+                // meantime. Pairwise: the two fleets differ in the two Anchors'
+                // bodies and in nothing else.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
                     "with every row manned the same twelve cast nothing"
@@ -432,12 +399,11 @@ let rowGapTests =
             }
 
             test "a standing container's hauler gap is filled under the target too" {
-                // The same rule on the row beside it (ADR 0012): a source
-                // container standing wants its round trip shipped whatever
-                // the headcount is, and the tick the target fell the
-                // container did not stop standing. Both Anchors stay alive
-                // here, so the Anchor row has no gap and the hauler row is
-                // the only rival the cast can come from.
+                // The same rule on the row beside it: a source container standing
+                // wants its round trip shipped whatever the headcount is, and the
+                // tick the target fell the container did not stop standing. Both
+                // Anchors stay alive, so the hauler row is the only rival the cast
+                // can come from.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
                     "with every row manned the same twelve cast nothing"
@@ -454,13 +420,11 @@ let rowGapTests =
             }
 
             test "the worker row is the one the deficit is the quota of, and it still stops" {
-                // The half of the gate that does not move (ADR 0012): the
-                // worker row's quota *is* whatever the target has left over
-                // once the specialist rows are counted, so with nothing
-                // left over it hires nobody however far the fleet has
-                // overshot. Pairwise against the same fleet under a target
-                // that reaches it — one room's vision richer, where those
-                // twelve are the target — and one body short there is a
+                // The half of the gate that does not move: the worker row's quota is
+                // whatever the target has left once the specialist rows are counted,
+                // so with nothing left over it hires nobody however far the fleet
+                // has overshot. Pairwise against the same fleet under a target that
+                // reaches it, one room's vision richer, where one body short is a
                 // worker.
                 Expect.isEmpty
                     (casts switchUnposted switchFleet)
@@ -478,21 +442,16 @@ let rowGapTests =
             }
 
             test "a row standing over its quota still holds the worker row down" {
-                // What the deficit is and is not (ADR 0012). It gates the
-                // worker row; it is not that row's own gap, and the
-                // difference shows the tick a specialist row stands over
-                // quota. Under `switchUnposted` the Anchor row wants one
-                // and the hauler row one: a fleet of two Anchors, two
-                // haulers and two workers is six bodies exactly at the
-                // target, two of them surplus specialists, and the worker
-                // row is two short of its own quota of four. The surplus
-                // holds it there — #154 moves the specialist rows off the
-                // deficit and deliberately leaves this half of the gate
-                // standing.
-                //
-                // Pairwise against the same target with the specialist
-                // rows at quota, where the whole-fleet gap and the worker
-                // row's own gap coincide and one body short is a worker.
+                // The deficit gates the worker row; it is not that row's own gap,
+                // and the difference shows the tick a specialist row stands over
+                // quota. Under `switchUnposted` the Anchor row wants one and the
+                // hauler row one: two Anchors, two haulers and two workers is six
+                // bodies exactly at the target, two of them surplus specialists, and
+                // the worker row is two short of its own quota of four. The surplus
+                // holds it there; #154 moves the specialist rows off the deficit and
+                // leaves this half of the gate standing. Pairwise against the same
+                // target with the specialist rows at quota, where one body short is
+                // a worker.
                 let overSpecialised =
                     switchFleet
                     |> List.filter (fun creep ->
@@ -518,11 +477,10 @@ let rowGapTests =
 
             test
                 "the doorstep hold still comes first: an empty Post is no reason to cast into a Reach" {
-                // ADR 0033's gate is asked before anything is priced and
-                // this ticket does not move it (#154). The row gap that
-                // now outlives a negative deficit is exactly the case that
-                // could have walked past it — the hold is the outer
-                // question, the deficit an inner one.
+                // The threat hold is asked before anything is priced and #154 does
+                // not move it: the row gap that now outlives a negative deficit is
+                // exactly the case that could have walked past it. The hold is the
+                // outer question, the deficit an inner one.
                 let hot =
                     switchUnposted |> facing [ hostileAt "h-1" { X = 25; Y = 13 } [ Attack; Move ] ]
 

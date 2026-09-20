@@ -1,5 +1,5 @@
 /// The declared outposts against their captures, and the outpost
-/// container on real terrain (ADR 0042).
+/// container on real terrain.
 module Fabot.Core.Tests.RoomOutpostTests
 
 open Expecto
@@ -17,26 +17,15 @@ let outpostDeclarationTests =
         [
             test
                 "every outpost the live declaration names is its capture's, whichever colony declares it" {
-                // The test above reads `Outpost.adr0042`, which is the pair
-                // the real-terrain fixtures are built on and deliberately
-                // frozen at the day it was measured — so it says nothing
-                // about the declarations a human has added since (`w13s29`,
-                // `w15s28`), and a mistyped id in one of those would reach
-                // the server as a target nothing places, in silence (ADR
-                // 0004). This is the same check over the *live* constant,
-                // and it grows by itself: a declaration added to
-                // `Colony.declared` is checked here the day it is written,
-                // and the only thing it needs is its room's committed
-                // capture.
+                // `Outpost.adr0042` is frozen at the day it was measured, so it says
+                // nothing about the declarations added since (`w13s29`, `w15s28`); a
+                // mistyped id there would reach the server as a target nothing places,
+                // in silence. This is the same check over the *live* constant.
                 //
-                // Sorted, and that is the one way it differs from the pair
-                // above: what a live declaration must get right is which
-                // tile each id belongs to, never the order the pairs stand
-                // in. `w13s29` is written in the order the survey ranked
-                // its rocks and `w15s28` in the order its capture lists
-                // them, and both are correct — nothing downstream may read
-                // a source by its index (`Outpost`), so an order asserted
-                // here would be a rule invented by its own test.
+                // Sorted: what a live declaration must get right is which tile each id
+                // belongs to, never the order. `w13s29` is written in survey order and
+                // `w15s28` in capture order, and nothing downstream may read a source
+                // by its index.
                 let declared = Colony.declared |> List.collect (fun colony -> colony.Outposts)
 
                 Expect.isNonEmpty declared "a declaration nobody made is nothing to check"
@@ -66,26 +55,16 @@ let outpostDeclarationTests =
             }
 
             test "a chain of real border rings joins every declared outpost to its home" {
-                // `ViewTests` asks this of the **names** over the live
-                // constant (`Outpost.withinHopBudget`), which is all that
-                // altitude can answer; this is the other half, #259's, and
-                // it needs terrain — so it belongs here, where the captures
-                // are. The first declaration to need it is W15S28: two hops
-                // out, joined only if W14S28's two rings are both crossable,
-                // and a room the names accept while the ground refuses is
-                // projected, pooled and hired for by a row that hires per
-                // declared outpost.
+                // `ViewTests` asks this of the **names**; this half needs terrain. The
+                // first declaration to need it is W15S28: two hops out, joined only if
+                // W14S28's two rings are both crossable.
                 //
-                // `linked` is built the way the shell builds it, out of the
-                // shell's own predicate (`World.ringWalkable`) and not a copy
-                // of it: a ring tile the capture carries whose terrain is not
-                // wall and which no keeper's rock masks (ADR 0060 decision 2).
-                // A room no capture is loaded for is joined to nothing — which
-                // is what keeps the search inside the rooms the projection
-                // would hold. No room declared today is a Source Keeper room,
-                // so the mask takes nothing here; calling the real predicate is
-                // what makes that a fact about the rule rather than about the
-                // copy, which has twice had to move in lockstep with it.
+                // `linked` is built out of the shell's own predicate
+                // (`World.ringWalkable`), not a copy of it, which has twice had to move
+                // in lockstep. A room no capture is loaded for is joined to nothing,
+                // which keeps the search inside the rooms the projection would hold.
+                // No room declared today is a Source Keeper room, so the mask takes
+                // nothing here.
                 let rings =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -105,10 +84,8 @@ let outpostDeclarationTests =
                                 tile
                         | None -> false
 
-                    // The far room's ground beside the landing tile (ADR
-                    // 0062), read off the same captures and through the same
-                    // shipped predicate: a crossing the ring keeps and the
-                    // ground behind has gone from is a join no body can use.
+                    // The far room's ground beside the landing tile, through the same
+                    // shipped predicate.
                     let groundIn room tile =
                         match Map.tryFind room rings with
                         | Some(_, terrain) ->
@@ -139,21 +116,12 @@ let outpostDeclarationTests =
             }
 
             test "each declaration names its own capture's furniture, id and tile alike" {
-                // ADR 0042 declares W12S27 and W13S28 in the engine's own
-                // ids (ADR 0041's decision, pinned in the loader tests
-                // above), and this is where the constant and the committed
-                // capture are made to agree. Compared against the capture
-                // rather than against a literal: two literals of the same
-                // ids agree with each other and with nothing the server
-                // ever said, and a re-capture that moved a rock would leave
-                // both of them green.
+                // Compared against the capture rather than a literal: two literals of
+                // the same ids agree with each other and with nothing the server said.
                 //
-                // Order included, and it carries a claim: W13S28's sources
-                // are `16,7` then `18,4`, the reverse of ADR 0042's prose,
-                // so a declaration written from the prose would pair each
-                // id with the other rock. Nothing downstream may read a
-                // source by its index — the tile is the identity — and this
-                // is the line that says which tile each id is.
+                // Order included: W13S28's sources are `16,7` then `18,4`, the reverse
+                // of ADR-0042's prose, so a declaration written from the prose would
+                // pair each id with the other rock.
                 Expect.isNonEmpty declaredOutposts "a declaration nobody made is nothing to check"
 
                 for outpost in declaredOutposts do
@@ -176,19 +144,9 @@ let outpostDeclarationTests =
             }
 
             test "every declared source and controller is geometry the projection can price" {
-                // ADR 0042's first acceptance: the three outpost sources
-                // and the two outpost controllers are *in* the projection
-                // and answerable by the geometry queries — Seats for a
-                // source, an Upgrade Work Area for a controller. Both are
-                // read in the target's own room off its id (ADR 0041), so
-                // an empty answer here would be a declaration the colony
-                // can see and never work.
-                //
-                // Named as properties, never as tiles: a Seat is a
-                // walkable neighbour of its source, and a Work Area tile is
-                // walkable within the Upgrade range of its controller. The
-                // capture supplies the terrain and the test supplies no
-                // expected value (ADR 0036).
+                // Seats for a source, an Upgrade Work Area for a controller, each read
+                // in the target's own room off its id. Named as properties, never as
+                // tiles: the capture supplies the terrain and the test no expected value.
                 for outpost in declaredOutposts do
                     let capture = load outpost.RoomName
                     let atlas = declaredAtlas outpost
@@ -222,12 +180,8 @@ let outpostDeclarationTests =
                             (fun tile -> range tile pos = 1 && walkable tile)
                             $"{where}: every Seat a walkable neighbour of the rock"
 
-                        // The container is the switch that admits an
-                        // outpost into the economy (ADR 0042), and no
-                        // container stands in either room yet — so every
-                        // one of these sources is unposted, which is
-                        // exactly what makes it worth nothing to the
-                        // workforce target this ticket narrowed.
+                        // No container stands in either room yet, so every one of these
+                        // sources is unposted.
                         Expect.isEmpty
                             (postsOf atlas id)
                             $"{where}: no container stands, so the source has no Post"
@@ -254,17 +208,11 @@ let outpostDeclarationTests =
                         (fun tile -> range tile controllerPos <= 3 && walkable tile)
                         $"{where}: every Work Area tile walkable within the Upgrade range"
 
-                    // The area the reserver actually stands on (ADR 0042):
-                    // reserveController acts at range 1 and a controller's
-                    // own tile is an obstacle, so this is its walkable
-                    // neighbours and nothing else — a much narrower set
-                    // than the Upgrade area above, and W12S27's is two
-                    // tiles of swamp. Named as a property and never as
-                    // those tiles (ADR 0036): what must hold is that the
-                    // set is non-empty, because an empty one is silent —
-                    // the Task stays pooled, `threatened` reads an empty
-                    // area as unthreatened, and the reserver matched to it
-                    // is rejected as unreachable for its whole life.
+                    // reserveController acts at range 1 and a controller's own tile is an
+                    // obstacle, so this is its walkable neighbours and nothing else;
+                    // W12S27's is two tiles of swamp. An empty set is silent: the Task
+                    // stays pooled, `threatened` reads it as unthreatened, and the reserver
+                    // matched to it is rejected as unreachable for its whole life.
                     let reserveArea =
                         workArea atlas (Reserve controllerId) |> RoomPos.inRoom outpost.RoomName
 
@@ -285,19 +233,11 @@ let outpostContainerTests =
         "the outpost container on real terrain"
         [
             test "each declared source is planned one container, on the Seat nearest the Seam" {
-                // ADR 0042's placement rule, stated as a property and never
-                // as a tile: the pick is on that rock's *own* Seats, and no
-                // other Seat of that rock walks out to the Seam in fewer
-                // ticks. Both halves matter and neither implies the other —
-                // the first would hold for a rule that read another room's
-                // geometry into this one, the second for a rule that picked
-                // any tile at all.
-                //
-                // Real terrain is the counterexample generator here (ADR
-                // 0036): the two captures hold a single-Seat rock (`16,7`),
-                // a two-Seat rock split between plain and swamp (`18,4`)
-                // and a three-Seat rock of nothing but swamp (`16,45`), and
-                // no expected value below comes from any of them.
+                // Stated as a property: the pick is on that rock's *own* Seats, and no
+                // other Seat of that rock walks out to the Seam in fewer ticks. Neither
+                // half implies the other. The captures hold a single-Seat rock
+                // (`16,7`), a plain-and-swamp two-Seat rock (`18,4`) and a three-Seat
+                // rock of nothing but swamp (`16,45`).
                 let colony = declaredColony 5
                 let atlas = ofView colony
                 let home = SpatialInfo.homeName colony.Spatial
@@ -317,10 +257,8 @@ let outpostContainerTests =
                                 outpost.RoomName, id, RoomPos.pos tile
                     ]
 
-                // Everything below is derived from the declaration, and an
-                // empty one would leave this case green having checked
-                // nothing — the guard the sweep above this file uses, for
-                // the same reason.
+                // Everything below is derived from the declaration, and an empty one
+                // would leave this case green having checked nothing.
                 Expect.isNonEmpty declaredSources "a declaration nobody made is nothing to check"
 
                 Expect.hasLength
@@ -332,10 +270,8 @@ let outpostContainerTests =
                     let where = $"{room} source {id}"
                     let seats = seatTilesOf atlas id |> RoomPos.inRoom room
 
-                    // Attributed by the geometry a source container *is* —
-                    // range 1 of the rock (ADR 0012) — so that standing on
-                    // a Seat is something this asserts rather than
-                    // something it assumed to find the site.
+                    // Attributed by the geometry a source container is, range 1 of the
+                    // rock, so standing on a Seat is asserted rather than assumed.
                     let mine =
                         sites
                         |> List.filter (fun (siteRoom, tile) ->
@@ -363,19 +299,12 @@ let outpostContainerTests =
             }
 
             test "the candidate colony's controller is the pool's one Claim, on the real rooms" {
-                // ADR 0047's arrangement on the ground the colony actually
-                // stands on: W13S28 declared a colony of its own while it
-                // is still one of W12S28's outposts. The room is projected
-                // because the mother declares it, its controller is in the
-                // kind census under the engine's own id, and the tick a
-                // human writes the second entry that controller stops being
-                // a Reserve and becomes a Claim — while the *other*
-                // outpost, W12S27, is untouched beside it.
+                // W13S28 declared a colony of its own while still one of W12S28's
+                // outposts: the tick a human writes the second entry its controller
+                // stops being a Reserve and becomes a Claim, while W12S27 is untouched.
                 //
-                // Read off the declaration rather than typed out: the ids
-                // are the engine's and are pinned against the captures
-                // above, so naming one here would be a second literal
-                // agreeing with the first and with nothing the server said.
+                // Read off the declaration rather than typed out, so the ids stay
+                // pinned against the captures above.
                 let candidate = "W13S28"
 
                 let controllerOf room =
@@ -424,39 +353,22 @@ let errandDeclarationTests =
         "the declared errands against their captures"
         [
             test "a chain of real border rings joins every declared errand to its home" {
-                // The other half of the refusal, the half that needs terrain
-                // (ADR 0060 decision 1, #259): `ViewTests` asks the **names**
-                // over the live constant, which is all that altitude can
-                // answer, and this asks the ground. The declaration that
-                // needs it is the reactor's: three crossings out, joined only
-                // if W15S27's and W15S26's rings are both crossable, and a
-                // room the names accept while the ground refuses is an errand
-                // whose entire content — a walk — does not exist.
+                // `ViewTests` asks the **names**; this asks the ground. The reactor is
+                // three crossings out, joined only if W15S27's and W15S26's rings are
+                // both crossable.
                 //
-                // `linked` is built the way the shell builds it
-                // (`World.linked`): a ring tile the capture carries whose
-                // terrain is not wall, and a room no capture is loaded for is
-                // joined to nothing, which is what keeps the search inside the
-                // rooms the projection would hold.
+                // `linked` is built the way `World.linked` builds it, and a room no
+                // capture is loaded for is joined to nothing.
                 //
-                // NOTE: these rings and this ground are the **raw** captures,
-                // and that is now a deliberate control rather than a gap
-                // waiting on a ticket. The [[keeper margin]] shipped with ADR
-                // 0060 decision 2 and takes tiles out of W15S26's layers; ADR
-                // 0062 then made a band ask the far room's ground as well. Both
-                // are re-checked over the **masked** layer in `RoomSeamTests`
-                // and `ViewTests`, and what this case says is the other half:
-                // over raw terrain the live chain is joined, so a red line here
-                // is the terrain moving and a red line there is the mask
-                // moving. Over raw terrain no capture in this repo orphans a
-                // crossing at all (ADR 0062's own measurement), which is what
-                // makes this the same assertion it was before that ADR.
+                // NOTE: these rings and this ground are the **raw** captures, as a
+                // deliberate control: the keeper margin takes tiles out of W15S26's
+                // layers and is re-checked over the **masked** layer in `RoomSeamTests`
+                // and `ViewTests`. A red line here is the terrain moving and a red line
+                // there is the mask moving.
                 //
-                // The hand-rolled predicates below are #337's to delete, and
-                // this case doubled their surface rather than closing it: the
-                // outpost case above calls the shipped `World.ringWalkable` and
-                // `World.groundWalkable`, and this one cannot, because those
-                // take a margin and what is wanted here is no mask at all.
+                // The hand-rolled predicates below are #337's to delete: the outpost
+                // case above calls the shipped predicates, and this one cannot, because
+                // those take a margin and what is wanted here is no mask at all.
                 let rings =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -477,9 +389,7 @@ let errandDeclarationTests =
                         | Some(border, _) -> nonWall border tile
                         | None -> false
 
-                    // The far room's ground beside the landing (ADR 0062),
-                    // raw like the ring above it, for the reason the header
-                    // gives.
+                    // The far room's ground beside the landing, raw like the ring above it.
                     let groundIn room tile =
                         match Map.tryFind room rings with
                         | Some(_, terrain) ->
@@ -510,22 +420,16 @@ let errandDeclarationTests =
                     unreachable
                     $"""every declared errand is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
 
-                // And the chain itself, over the same rings: three crossings
-                // by W15S27 and the Source Keeper room W15S26, which is the
-                // walk ADR 0060 decision 3 measured at 154 steps and the whole
-                // reason the third colony stands where it does. Every shortest
-                // chain and not one of them (ADR 0059): a second chain the
-                // terrain admits would be a price the walker could win at, and
-                // this says there is exactly one.
+                // The chain itself: three crossings by W15S27 and the Source Keeper room
+                // W15S26, the 154-step walk the third colony stands where it does for.
+                // Every shortest chain and not one of them: this says there is exactly one.
                 Expect.equal
                     (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W15S25")
                     [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
                     "the reactor is three crossings from W15S28, by W15S27 and W15S26"
 
-                // The reason no other colony declares it, asserted rather than
-                // asserted-in-a-comment: five and six crossings, so a price
-                // into the room from either is `None` and a room in their
-                // projection would be one every rule answers nothing about.
+                // The reason no other colony declares it: five and six crossings, so a
+                // price into the room from either is `None`.
                 for home, hops in [ "W13S28", 5; "W12S28", 6 ] do
                     Expect.equal
                         (RoomName.hopsBetween home "W15S25")
@@ -538,13 +442,9 @@ let errandDeclarationTests =
             }
 
             test "every declared errand names a tile its own capture holds as ground" {
-                // What a capture can say about an errand and the only thing it
-                // can: `capture-room.mjs` takes a room's *fixed* furniture —
-                // sources, controller, mineral (ADR 0036) — and a reactor is
-                // none of those, so no committed file carries the id the
-                // declaration names. What it does carry is the ground, and a
-                // declaration whose tile the room walls is a target no Seat
-                // surrounds and no body can ever stand beside.
+                // `capture-room.mjs` takes a room's *fixed* furniture (sources,
+                // controller, mineral) and a reactor is none of those, so no committed
+                // file carries the id the declaration names; what it carries is the ground.
                 for colony in Colony.declared do
                     for errand in colony.Errands do
                         let capture = load errand.RoomName

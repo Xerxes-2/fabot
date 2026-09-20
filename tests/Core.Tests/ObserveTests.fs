@@ -1,8 +1,6 @@
-/// The Transition log (ADR 0009): what the per-creep fold records, when it
-/// records nothing, and the ring it keeps it in. The other channels folded
-/// out of this file at #335 — the raid episodes, the outpost family, the CPU
-/// line and the breach log each have their own now, and the fixtures three of
-/// them share are `ObserveFixtures`'.
+/// The Transition log: what the per-creep fold records, when it records
+/// nothing, and the ring it keeps it in. The shared fixtures are
+/// `ObserveFixtures`'.
 module Fabot.Core.Tests.ObserveTests
 
 open Expecto
@@ -265,10 +263,9 @@ let ringTests =
             }
 
             test "an unchanged Kept stays quiet even after churn evicts its match from the ring" {
-                // Movement churn under a tiny cap pushes the Matched entry off
-                // the ring; the steady Kept must still append nothing — change
-                // detection judges against the creep's story, not against
-                // whatever the ring happens to retain.
+                // Movement churn under a tiny cap pushes the Matched entry off the ring;
+                // the steady Kept must still append nothing — change detection judges
+                // against the creep's story, not against what the ring retains.
                 let state =
                     Map.empty
                     |> (fun s ->

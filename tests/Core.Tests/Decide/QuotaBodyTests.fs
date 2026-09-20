@@ -1,4 +1,4 @@
-/// The body patterns and what each casts at a given bank (ADR 0006).
+/// ADR-0006: the body patterns and what each casts at a given bank.
 module Fabot.Core.Tests.Decide.QuotaBodyTests
 
 open Expecto
@@ -111,37 +111,17 @@ let patternTableTests =
         [
             test
                 "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard and the miner are the table's rows" {
-                // The reserver joined the table the tick its quota did (ADR
-                // 0006, ADR 0042): a row arrives with the colony fact that
-                // says when it is cast, and `reserverClaimsOf` is that
-                // fact. The order here is the declaration's and not the
-                // casting order — which runs guard, reserver, Anchor,
-                // hauler, upgrader, worker — because nothing reads this list
-                // for a sequence.
-                //
-                // The upgrader row spent one ticket ahead of its quota (ADR
-                // 0046, #186) and is level with it again: #187 landed
-                // `upgraderQuota` and the cascade rung, so every row here
-                // is a row the colony casts off a colony fact. Its block is
-                // the worker unit's three parts and its rule is not — one
-                // Carry and Work/Move pairs for the rest — which is the
-                // table saying that a row is a name and a sizing rule
-                // before it is a block.
-                //
-                // The guard is the sixth row, and the one whose block is
-                // bought for a fight rather than for energy (ADR 0056): no
-                // Work and no Carry, its five Move there to carry the five
-                // that fight. Ten parts, 750 energy, and their order is the
-                // body's — TOUGH eats damage first, HEAL dies last.
-                //
-                // The [[miner]] is the seventh (ADR 0057 decision 2), and the
-                // one bought for a resource the colony does not eat: Work and
-                // Move and **no Carry at all**, which is the one shape no other
-                // row here takes and so the cut `patternOfParts` tells it from
-                // the Anchor by. Its block is three parts and its rule is not —
-                // one Move per five Work, capped at twenty Work — which is this
-                // table saying again that a row is a name and a sizing rule
-                // before it is a block.
+                // The order here is the declaration's and not the casting order
+                // (guard, reserver, Anchor, hauler, upgrader, worker), because nothing
+                // reads this list for a sequence. Every row is cast off a colony fact.
+                // The upgrader's block is the worker unit's three parts and its rule
+                // is not (one Carry and Work/Move pairs for the rest); the guard's
+                // block is bought for a fight (no Work, no Carry, five Move to carry
+                // the five that fight; ten parts, 750 energy, TOUGH first and HEAL
+                // last); the miner's is Work and Move and no Carry at all, the one
+                // shape no other row takes and the cut `patternOfParts` tells it from
+                // the Anchor by, with one Move per five Work, capped at twenty Work.
+                // A row is a name and a sizing rule before it is a block.
                 Expect.equal
                     patternTable
                     [
@@ -231,9 +211,8 @@ let patternTableTests =
             }
 
             test "the anchor row spends everything on Work beside one Carry and one Move" {
-                // 550 = the RCL2 full bank: 100 buys the Carry/Move pair,
-                // the rest is Work — no parity padding (ADR 0006 exempts
-                // the Anchor from fatigue parity).
+                // 550 = the RCL2 full bank: 100 buys the Carry/Move pair, the rest
+                // is Work; the Anchor is exempt from fatigue parity.
                 Expect.equal
                     (bodyFor anchorPattern 550)
                     [ Work; Work; Work; Work; Carry; Move ]
@@ -248,10 +227,9 @@ let patternTableTests =
             }
 
             test "the anchor row stops at source saturation plus one spare Work" {
-                // ADR 0021: a source regenerates 3,000 energy per 300 ticks
-                // and a Work digs 2 a tick, so five Work saturate it; the
-                // sixth is slack for an unmanned Post's gap. RCL4's 1,300
-                // bank would otherwise buy twelve.
+                // A source regenerates 3,000 energy per 300 ticks and a Work digs 2
+                // a tick, so five Work saturate it; the sixth is slack for an
+                // unmanned Post's gap. RCL4's 1,300 bank would otherwise buy twelve.
                 Expect.equal
                     (bodyFor anchorPattern 1300)
                     [ Work; Work; Work; Work; Work; Work; Carry; Move ]
@@ -291,14 +269,11 @@ let patternTableTests =
             }
 
             test "the reserver row builds whole blocks and nothing else" {
-                // 1,800 is the colony's live RCL5 bank (#116's deployment
-                // note) and 650 a `[Claim; Move]` block, so the bank buys
-                // two and strands 500: ADR 0042's own `[2Claim;2Move]`,
-                // the body every arithmetic in that ADR is written for.
-                // This is the bank's half of the row's rule and the body
-                // `bodyFor` answers with, which is what a lead prices its
-                // succession off (ADR 0026). What the row actually casts
-                // is `min(reservation deficit, this)`, pinned in "the
+                // 1,800 is the colony's live RCL5 bank and 650 a `[Claim; Move]`
+                // block, so the bank buys two and strands 500: `[2Claim;2Move]`. This
+                // is the bank's half of the row's rule and the body `bodyFor` answers
+                // with, which is what a lead prices its succession off. What the row
+                // actually casts is `min(reservation deficit, this)`, pinned in "the
                 // reserver row" below.
                 Expect.equal
                     (bodyFor reserverPattern 1800)
@@ -324,12 +299,11 @@ let patternTableTests =
             }
 
             test "the upgrader row buys Work/Move pairs beside one Carry" {
-                // ADR 0046's own body at the live RCL5 bank of 1,800:
-                // `floor((1800 - 50) / 150)` is eleven pairs for 1,700,
-                // against the worker row's nine Work at the same bank. The
-                // Carry stays at one however rich the bank — a body that
-                // stands beside the buffer needs one Withdraw's worth of
-                // store and nothing more.
+                // The upgrader body at the live RCL5 bank of 1,800:
+                // `floor((1800 - 50) / 150)` is eleven pairs for 1,700, against the
+                // worker row's nine Work at the same bank. The Carry stays at one
+                // however rich the bank: a body that stands beside the buffer needs
+                // one Withdraw's worth of store and nothing more.
                 Expect.equal
                     (bodyFor upgraderPattern 1800)
                     (List.replicate 11 Work @ [ Carry ] @ List.replicate 11 Move)
@@ -337,11 +311,10 @@ let patternTableTests =
             }
 
             test "the upgrader row's minimal cast is one pair beside the Carry" {
-                // The RCL1 bank, where `(300 - 50) / 150` is one before
-                // any clamp: the row's smallest body is a worker unit's
-                // parts under a different rule — and still `Work = Move`,
-                // which is what keeps ADR 0016's gate open to it at every
-                // size.
+                // The RCL1 bank, where `(300 - 50) / 150` is one before any clamp:
+                // the row's smallest body is a worker unit's parts under a different
+                // rule, and still `Work = Move`, which keeps the Heavy-Work gate open
+                // to it at every size.
                 Expect.equal
                     (bodyFor upgraderPattern 300)
                     [ Work; Carry; Move ]
@@ -362,17 +335,15 @@ let patternTableTests =
             }
 
             test "under an 800 bank the row's own cast is not a standing body" {
-                // Where the sizing rule and ADR 0046's predicate cross: one
+                // Where the sizing rule and the standing-body predicate cross: one
                 // Carry against `floor((capacity - 50) / 150)` Work meets
-                // `Carry * 4 < Work` at five pairs, so the RCL2 bank of 550
-                // casts `3W/1C/3M` — this row's body, and outside the gate
-                // the row exists for. Deliberate and not a hole: three Work
-                // against a fifty-energy load is not yet the commute the
-                // ratio prices. It is also where the quota stops: a row
-                // read back to the generalist is a row nothing could count,
-                // so `upgraderQuota` hires none at this bank (#187, ADR
-                // 0046's amended Consequences; pinned at the seam by "a
-                // bank whose cast is no standing body hires none").
+                // `Carry * 4 < Work` at five pairs, so the RCL2 bank of 550 casts
+                // `3W/1C/3M`, this row's body and outside the gate the row exists
+                // for. Deliberate: three Work against a fifty-energy load is not yet
+                // the commute the ratio prices. It is also where the quota stops: a
+                // row read back to the generalist is a row nothing could count, so
+                // `upgraderQuota` hires none at this bank (#187; pinned at the seam
+                // by "a bank whose cast is no standing body hires none").
                 Expect.equal
                     (bodyFor upgraderPattern 550)
                     [ Work; Work; Work; Carry; Move; Move; Move ]
@@ -392,16 +363,15 @@ let patternTableTests =
                     "twenty-four pairs and the Carry fill the body to 49 parts"
             }
 
-            // ADR 0056's own five banks, one at a time so each answer is
-            // read against exactly one other: 300 (the RCL1 bank, under one
-            // block), 800 and 1,300 (one block), 1,800 (two) and 2,300
-            // (three). The parts come back grouped in the **block's** order —
-            // TOUGH, MOVE, ATTACK, HEAL — and that order is the rule (#282):
-            // damage strips a body from its head, so what stands first is
-            // spent first. Live, with ATTACK second, a guard's whole damage
-            // sat inside the first four hundred hits and it reached its target
-            // disarmed. Move goes ahead of Attack because a guard that cannot
-            // walk is still a guard, and Heal stays last.
+            // The guard's five banks, one at a time: 300 (the RCL1 bank, under
+            // one block), 800 and 1,300 (one block), 1,800 (two) and 2,300
+            // (three). The parts come back grouped in the block's order — TOUGH,
+            // MOVE, ATTACK, HEAL — and that order is the rule (#282): damage
+            // strips a body from its head, so what stands first is spent first.
+            // Live, with ATTACK second, a guard's whole damage sat inside the
+            // first four hundred hits and it reached its target disarmed. Move
+            // goes ahead of Attack because a guard that cannot walk is still a
+            // guard, and Heal stays last.
             let guardBlock =
                 [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
 
@@ -426,13 +396,11 @@ let patternTableTests =
 
             test "a bank under one block still sizes to one block, and the row yields" {
                 // 300, the RCL1 bank. `wholeBlockBodyFor` floors at one block
-                // exactly as the hauler and reserver rows do, so what happens
-                // at this bank is **not** a smaller guard: it is a 750-energy
-                // body the bank cannot pay for, and the cascade's
-                // affordability check yields the tick to the rows behind it
-                // (ADR 0050). A colony this small has ADR 0043's stand-down
-                // and nothing else. The yielding itself is pinned at `decide`
-                // in "the guard row" below.
+                // exactly as the hauler and reserver rows do, so what happens at this
+                // bank is not a smaller guard: it is a 750-energy body the bank
+                // cannot pay for, and the cascade's affordability check yields the
+                // tick to the rows behind it. The yielding itself is pinned at
+                // `decide` in "the guard row" below.
                 Expect.equal
                     (bodyFor guardPattern 300)
                     guardBlock
@@ -461,8 +429,8 @@ let patternTableTests =
             }
 
             test "an RCL6 bank buys three" {
-                // 2,300, and the last of ADR 0056's five: 2,250 spent, 270
-                // damage and 36 self-heal.
+                // 2,300, the last of the five: 2,250 spent, 270 damage and 36
+                // self-heal.
                 Expect.equal
                     (bodyFor guardPattern 2300)
                     (guardBlocks 3)
@@ -479,19 +447,14 @@ let patternTableTests =
             }
 
             test "a row the generalist rule cannot size is refused, not quietly rebuilt" {
-                // The fallback counts Work, Carry and Move out of a block
-                // and emits only those, so the next table row that is not
-                // one of those three used to get a body with none of its own
-                // parts in it and no complaint from the compiler (#155). The
-                // stop names the row and the part so the fix (its own sizing
-                // rule, ADR 0006) is legible from the message alone.
-                //
-                // A **healer** and no longer the guard this case was written
-                // with: ADR 0056 landed `guard` as a real row with a sizing
-                // rule of its own, so the row that proves the stop must be
-                // one the table still does not name. The stop is what
-                // admitted it safely — the row arrived with `guardBodyFor`
-                // beside it because this gate refuses anything else.
+                // The fallback counts Work, Carry and Move out of a block and emits
+                // only those, so a table row that is not one of those three used to
+                // get a body with none of its own parts in it and no complaint from
+                // the compiler (#155). The stop names the row and the part so the
+                // fix (its own sizing rule) is legible from the message alone. A
+                // healer and no longer the guard this case was written with: `guard`
+                // is a real row with a sizing rule now, so the row that proves the
+                // stop must be one the table still does not name.
                 let healer =
                     {
                         Name = "healer"

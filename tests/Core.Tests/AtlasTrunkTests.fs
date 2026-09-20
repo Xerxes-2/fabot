@@ -1,5 +1,4 @@
-/// Trunk paths, haul round trips, and the walk table the census recalls
-/// (ADR 0032).
+/// Trunk paths, haul round trips, and the walk table the census recalls.
 module Fabot.Core.Tests.AtlasTrunkTests
 
 open Expecto
@@ -7,11 +6,9 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
-/// Corridor y = 10, x = 10..20, walled off either side: the container tile at
-/// (10,10) and the spawn structure standing at (20,10), an obstacle — so the
-/// one tile a body can be born on is (19,10), nine steps from the far end.
-/// The roads and the standing bodies are the two things a walk over it is
-/// priced against, and the two testLists below vary one each.
+/// Corridor y = 10, x = 10..20: the container tile at (10,10) and the spawn
+/// structure at (20,10), an obstacle, so the one tile a body can be born on is
+/// (19,10), nine steps from the far end.
 let private corridorWith roads creeps =
     spatial [ "spawn-1", { X = 20; Y = 10 } ] [ for x in 10..20 -> { X = x; Y = 10 }, Plain ]
     |> withHome (fun layer ->
@@ -88,9 +85,7 @@ let trunkPathTests =
             }
 
             test "prices raw terrain: a built road on a swamp does not attract the line" {
-                // The straight line crosses a swamp that already carries a
-                // road; normal pricing would make it the cheap lane, but
-                // trunk pricing reads the ground under it (ADR 0011).
+                // The straight line crosses a swamp that already carries a road.
                 let atlas =
                     corridor
                     |> withHome (fun layer ->
@@ -116,17 +111,11 @@ let trunkPathTests =
             }
 
             test "an obstacle structure is impassable, and no road on it makes it passable" {
-                // The trunk prices raw terrain, but "raw" is about the
-                // *price* and never about what blocks: a rampart or a spawn
-                // standing in the corridor is as impassable to a planned
-                // road as a wall (ADR 0011). On (12, 9) and not on the
-                // straight line through (12, 10): the flood's heap breaks
-                // its ties towards the lower index, so it walks the y = 9
-                // row of its own accord and an obstacle parked on (12, 10)
-                // proves nothing. Roaded too, against the other start the
-                // ticket floated — copying the *walking* grid and undoing
-                // the road discount, which would hand a roaded obstacle its
-                // terrain price back.
+                // On (12, 9), not the straight line through (12, 10): the
+                // flood's heap breaks ties towards the lower index and walks
+                // the y = 9 row of its own accord. Roaded too, against a
+                // copy of the *walking* grid that undoes the road discount
+                // and would hand a roaded obstacle its terrain price back.
                 let atlas =
                     corridor
                     |> withHome (fun layer ->
@@ -153,12 +142,8 @@ let trunkPathTests =
             }
 
             test "the trunk is priced off the home room's ground and nothing else's" {
-                // A trunk is a road the Layout plans, and the Layout plans
-                // at home (ADR 0041) — so the grid the copy starts from is
-                // chosen by `Home` and not by whichever room the projection
-                // files first. The outpost sorts before home and walls off
-                // every tile of home's corridor, so a copy off the wrong
-                // room reaches nothing at all.
+                // The outpost sorts before home and has no ground at all,
+                // so a copy off the wrong room reaches nothing.
                 let atlas =
                     { SpatialInfo.empty with
                         RoomName = Some "W2N2"
@@ -196,10 +181,8 @@ let trunkPathTests =
             }
 
             test "an avoided tile off the fifty-by-fifty marks nothing" {
-                // The Layout hands its reservations in as bare tiles and the
-                // grid index does no checking of its own (#173), so a tile
-                // outside the room has to fall out before it is marked
-                // rather than index off the end of the grid.
+                // The grid index does no checking of its own, so an off-room
+                // tile must fall out before it is marked.
                 let atlas = corridor |> snapshotWith [] |> ofView
 
                 Expect.equal
@@ -247,21 +230,14 @@ let haulRoundTripTests =
     testList
         "atlas haulRoundTripTicks"
         [
-            // Both tiles are the colony's own room's, and these fixtures
-            // file it under the empty name (`SpatialInfo.homeName`): since
-            // #149 the two rooms ride on the API, because a `Pos` names
-            // none (ADR 0041). Same room in and out, this is the flood the
-            // rule always ran.
+            // Both tiles in the colony's own room, filed under the empty name.
             let atHome atlas body from sink =
                 haulRoundTripTicks atlas body (at "" from) (at "" sink)
 
             test "the loaded leg out and the empty leg back sum to whole ticks" {
-                // Each leg is a walk (ADR 0029). [Carry;Carry;Move]
-                // loaded on plain: two full Carry x weight 2 over one Move
-                // is 4 units a step, ceil(4 / 2) = 2 ticks. Empty Carry
-                // rides free, so the leg back sits on the one-tick floor.
-                // Nine steps out at 2 and nine back at 1 = 27 ticks, with
-                // nothing halved on the total.
+                // Loaded on plain: two full Carry x weight 2 over one Move
+                // is 4 units a step, 2 ticks; empty rides the one-tick
+                // floor. Nine out at 2 and nine back at 1 = 27.
                 Expect.equal
                     (atHome
                         (corridorWith Set.empty [])
@@ -273,9 +249,7 @@ let haulRoundTripTests =
             }
 
             test "a road under the trunk discounts the loaded leg" {
-                // Road weight 1 halves the loaded step to 2 units, one
-                // tick; the empty leg already rides the floor. Nine steps
-                // out and nine back at a tick apiece = 18.
+                // Road weight 1 halves the loaded step to one tick: 9 + 9.
                 Expect.equal
                     (atHome
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
@@ -287,9 +261,7 @@ let haulRoundTripTests =
             }
 
             test "the pricing is traffic-blind: a standing creep never resizes the fleet" {
-                // The quota is capacity planning, not routing: the same
-                // corridor with a creep parked mid-lane prices identically
-                // — no occupancy surcharge.
+                // The same corridor with a creep parked mid-lane.
                 Expect.equal
                     (atHome
                         (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
@@ -301,12 +273,9 @@ let haulRoundTripTests =
             }
 
             test "neither leg prices below the tiles it crosses" {
-                // ADR 0029's floor, on this reader too: the round trip is
-                // two walks, so it can never price below twice the
-                // Chebyshev distance to the sink's nearest goal. The guard
-                // that makes reintroducing the trailing halve-and-round-up
-                // go red — under it the Move-surplus body below crossed
-                // eighteen tiles in nine ticks.
+                // Two walks never price below twice the Chebyshev distance
+                // to the sink's nearest goal; a trailing halve-and-round-up
+                // crossed eighteen tiles in nine ticks.
                 let floor = 2 * range { X = 10; Y = 10 } { X = 19; Y = 10 }
 
                 for body in
@@ -359,19 +328,13 @@ let castWalkTicksTests =
             /// Move, so a plain step costs 8 units.
             let anchorBody = [ Work; Work; Work; Work; Carry; Move ]
 
-            /// The room every goal below stands in. The goal's room is the
-            /// caller's since #153 — a creep is led wherever it stands, and
-            /// these cases lead one at home — and `spatial` builds from
-            /// `SpatialInfo.empty`, which names no room, so the corridor is
-            /// filed under the empty name (`SpatialInfo.homeName`).
+            /// The room every goal below stands in: `spatial` names none,
+            /// so the corridor is filed under the empty name.
             let home = SpatialInfo.homeName SpatialInfo.empty
 
             test "the walk is priced for the body given, not for any creep standing there" {
-                // The lead's whole point (ADR 0026): an empty Anchor body
-                // pays 8 units a plain step, ceil(8 / 2) = 4 ticks, so the
-                // nine steps out of the spawner cost 36. A hauler unit over
-                // the same ground carries no fatigue empty and rides the
-                // walk's one-tick floor: 9.
+                // An empty Anchor body pays 8 units a plain step, 4 ticks,
+                // 36 for nine; an empty hauler unit rides the floor: 9.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith Set.empty [])
@@ -392,12 +355,8 @@ let castWalkTicksTests =
             }
 
             test "the walk starts beside the spawner, on the tile the engine places the body on" {
-                // The step out of the spawner's own tile is one the
-                // replacement never walks: the engine puts a finished creep
-                // on a free neighbour. Charging it would buy the lead a
-                // whole plain step — 4 ticks for this body — and cast the
-                // successor that much too early to be admitted to the tile
-                // it is walking to.
+                // The engine puts a finished creep on a free neighbour, so
+                // the step out of the spawner's own tile is never walked.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith Set.empty [])
@@ -409,10 +368,8 @@ let castWalkTicksTests =
             }
 
             test "a road under the walk discounts it, as it discounts travel cost" {
-                // Road weight 1 quarters the Anchor's step to 4 units —
-                // 2 ticks — over the eight paved tiles it steps onto; the
-                // last step onto the unpaved (10,10) still costs 8 units,
-                // 4 ticks. 16 + 4 = 20.
+                // Eight paved steps at 2 ticks, the last onto unpaved
+                // (10,10) at 4: 16 + 4 = 20.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith (Set.ofList [ for x in 11..19 -> { X = x; Y = 10 } ]) [])
@@ -424,9 +381,7 @@ let castWalkTicksTests =
             }
 
             test "the pricing is traffic-blind: today's crowd never moves a succession" {
-                // A lead is planning, not routing — the same corridor with
-                // a creep parked mid-lane prices identically, with no
-                // occupancy surcharge.
+                // The same corridor with a creep parked mid-lane.
                 Expect.equal
                     (castWalkTicks
                         (corridorWith Set.empty [ "w", { X = 15; Y = 10 } ])
@@ -438,12 +393,9 @@ let castWalkTicksTests =
             }
 
             test "the cast walk prices no tile below a tick" {
-                // ADR 0029's floor, on the lead's reader too: the walk out
-                // of the spawner starts beside it, so it can never price
-                // below the Chebyshev distance from the birth tile (19,10)
-                // to the goal. The guard that makes reintroducing the
-                // trailing halving go red — under it a Move-surplus body
-                // walked nine tiles in five ticks.
+                // Never below the Chebyshev distance from the birth tile
+                // (19,10) to the goal; a trailing halving walked nine tiles
+                // in five ticks.
                 let floor = range { X = 19; Y = 10 } { X = 10; Y = 10 }
 
                 for body in [ anchorBody; [ Carry; Carry; Move ]; [ Work; Move; Move; Move ] ] do
@@ -486,9 +438,6 @@ let castWalkTicksTests =
             }
 
             test "a spawner with no free neighbour prices no walk" {
-                // The other half of ADR 0004's totality: there is nowhere
-                // for the replacement to be born, so the walk is
-                // unpriceable and the row leads nobody.
                 let walled =
                     spatial
                         [ "spawn-1", { X = 20; Y = 10 } ]
@@ -513,9 +462,7 @@ let walkRecallTests =
     testList
         "atlas walk table recall"
         [
-            // The castWalkTicks corridor: the spawn structure stands at
-            // (20,10), so (19,10) is the one tile a body is born on, and
-            // (10,10) lies nine steps further west.
+            // The castWalkTicks corridor: born on (19,10), nine steps to (10,10).
             let corridorSnapshot () =
                 spatial
                     [ "spawn-1", { X = 20; Y = 10 } ]
@@ -526,24 +473,17 @@ let walkRecallTests =
             let hauler = [ Carry; Carry; Move ]
             let spawnTile = { X = 20; Y = 10 }
 
-            /// The corridor's own room, which is where this goal stands: the
-            /// name `spatial` files an unnamed projection's layer under
-            /// (`SpatialInfo.homeName`). The cross-border half of the same
+            /// The corridor's own room; the cross-border half of the same
             /// table is `crossRoomLeadTests`.
             let home = SpatialInfo.homeName SpatialInfo.empty
             let goal = { X = 10; Y = 10 }
 
-            /// The one flood a corridor's lead pricing lays, read off the
-            /// table by value: the array itself, so a table that was read
-            /// rather than refilled is visible as the very array the first
-            /// Atlas allocated.
+            /// The one flood the lead pricing lays, as the array itself, so
+            /// a recalled table is visible by reference.
             let flood (walks: WalkTable) =
                 walks |> Seq.map (fun entry -> entry.Value) |> Seq.exactlyOne
 
             test "a table handed in is filled once and recalled by the next Atlas over it" {
-                // ADR 0032: every input of this flood is in the census, so
-                // an Atlas handed a filled table reads the entry instead of
-                // running the Dijkstra a second time.
                 let walks = WalkTable()
                 let first = corridorSnapshot () |> ofViewRecalling walks (FarFieldMemo.empty ())
 
@@ -570,9 +510,6 @@ let walkRecallTests =
             }
 
             test "an Atlas with nothing to recall floods for itself" {
-                // The other half of the seam: a table with nothing in it is
-                // flooded into, so a caller that dropped its memo prices the
-                // same lead off its own Dijkstra.
                 let fresh = WalkTable()
                 let atlas = corridorSnapshot () |> ofViewRecalling fresh (FarFieldMemo.empty ())
 
@@ -596,9 +533,8 @@ let controllerContainerTests =
         "atlas controllerContainers"
         [
             test "the buffer is a built container in the Upgrade area off every Seat" {
-                // Source at (10,10), controller at (14,10): "can-src" sits on
-                // the Seat (11,10), "can-ctrl" at (13,10) inside the Upgrade
-                // Work Area and on no Seat.
+                // "can-src" sits on the Seat (11,10), "can-ctrl" at (13,10)
+                // inside the Upgrade Work Area and on no Seat.
                 let atlas =
                     { spatial
                           [

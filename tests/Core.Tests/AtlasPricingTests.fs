@@ -1,5 +1,5 @@
-/// Travel cost and the step price table: roads, swamp, traffic (ADR 0008,
-/// ADR 0010) and the units each judgement is made in (ADR 0029).
+/// Travel cost and the step price table: roads, swamp, traffic and the units
+/// each judgement is made in.
 module Fabot.Core.Tests.AtlasPricingTests
 
 open Expecto
@@ -58,10 +58,8 @@ let travelCostTests =
             }
 
             test "a standing creep prices its tile dearer: the free swamp Seat wins" {
-                // Another creep parks on the plain Seat at (11,13). Its
-                // occupancy surcharge makes that route cost 14, so the
-                // untouched swamp Seat at 12 is now the cheapest way in —
-                // dearer, but never inapplicable, unlike an obstacle.
+                // A creep on the plain Seat at (11,13) prices that route at
+                // 14, so the untouched swamp Seat at 12 is the cheapest way in.
                 let atlas =
                     corridor [ "w", { X = 10; Y = 15 }; "b", { X = 11; Y = 13 } ]
                     |> snapshotWith [ worker "w"; worker "b" ]
@@ -108,9 +106,7 @@ let roadPricingTests =
             }
 
             test "the occupancy surcharge is worth exactly one swamp step" {
-                // Another creep parks on the plain Seat: the step onto it
-                // costs its plain weight plus the surcharge — 2 + 10, the
-                // 10 being the same price as stepping into swamp (ADR 0010).
+                // The step onto the occupied plain Seat costs 2 + 10.
                 let atlas =
                     seatPriced Plain Set.empty
                     |> withCreepsAt [ "w", { X = 10; Y = 12 }; "b", { X = 10; Y = 11 } ]
@@ -124,8 +120,7 @@ let roadPricingTests =
             }
 
             test "a road construction site is not yet a road: only Roads tiles price at 1" {
-                // A road site is projected as a target of Site kind, never
-                // into Roads — the tile keeps pricing by its terrain.
+                // A road site is a target of Site kind, never a Roads tile.
                 let atlas =
                     { seatPriced Plain Set.empty with
                         TargetKinds = Map.ofList [ "src-a", Source; "site-1", Site BuiltKind.Other ]
@@ -146,10 +141,8 @@ let roadPricingTests =
             }
 
             test "a road discounts passable ground only, and an obstacle overrides it" {
-                // The flood prices off a weight table laid once per tick,
-                // not off a per-tile query, so the three tiles where a road
-                // does not win are pinned here: on a wall (a tunnel, which
-                // the projection does not model), off the terrain
+                // The three tiles where a road does not win: on a wall (a
+                // tunnel the projection does not model), off the terrain
                 // projection, and under an obstacle.
                 let costThrough middle roads obstacles =
                     let atlas =
@@ -192,11 +185,9 @@ let travelUnitTests =
         "atlas travel units"
         [
             test "the same path costs more units for a body with fewer Move parts per part" {
-                // The corridor's cheapest path is two plain steps. The
-                // worker unit (1 fatigue part per Move) walks it in 4 units;
-                // a heavy body (5 fatigue parts per Move) needs
-                // ceil(2 × 5 / 1) = 10 units a step, 20 in all. The empty
-                // Carry rides free in both bodies (engine fatigue rules).
+                // Two plain steps: the worker unit pays 4 units, five
+                // fatigue parts on one Move pay ceil(2 × 5 / 1) = 10 a step.
+                // An empty Carry rides free (engine fatigue rules).
                 let costFor creep =
                     let atlas =
                         corridor [ "w", { X = 10; Y = 15 } ] |> snapshotWith [ creep ] |> ofView
@@ -212,11 +203,8 @@ let travelUnitTests =
             }
 
             test "a Move surplus divides the weight, ceiled, never below one unit a step" {
-                // One step onto the only Seat: on swamp (weight 10) the
-                // worker pays 10 units, three Moves under one Work pay
-                // ceil(10 × 1 / 3) = 4 — the ceil is visible — and on plain
-                // (weight 2) the same surplus-Move body pays ceil(2 / 3) =
-                // 1: the one-unit floor, never a fraction of a unit.
+                // One step onto the only Seat: swamp shows the ceil, plain
+                // the one-unit floor.
                 let costOn terrain creep =
                     let atlas = seatPriced terrain Set.empty |> snapshotWith [ creep ] |> ofView
                     travelCost atlas "w" (Harvest "src-a")
@@ -240,11 +228,9 @@ let travelUnitTests =
             }
 
             test "carried energy loads Carry parts into the fatigue count" {
-                // Deliberate choice, documented here: travel is priced from
-                // the load the creep carries right now — the engine loads
-                // Carry parts 50 energy apiece, and an empty Carry generates
-                // no fatigue. The same worker walks the two-plain-step path
-                // in 4 units empty and 8 units with its Carry full.
+                // Travel is priced from the load carried right now: the
+                // engine loads Carry parts 50 energy apiece, and an empty
+                // Carry generates no fatigue.
                 let costFor energy =
                     let atlas =
                         corridor [ "w", { X = 10; Y = 15 } ]
@@ -281,13 +267,10 @@ let stepPriceTableTests =
         "atlas step price table"
         [
             test "travel cost prices every weight the ground carries as the body's fatigue" {
-                // The flood reads a step's price off a table laid once per
-                // flood rather than by asking per relaxation (#168), so the
-                // table's whole domain is pinned here against the fatigue
-                // arithmetic it stands for: ceil(weight × fatigue parts /
-                // Move parts), never below one unit (ADR 0010, ADR 0029).
-                // Three weights — road 1, plain 2, swamp 10 — against four
-                // bodies, read off one step onto the Seat.
+                // The table's whole domain against the fatigue arithmetic:
+                // ceil(weight × fatigue parts / Move parts), never below one
+                // unit. Three weights (road 1, plain 2, swamp 10) against
+                // four bodies, one step onto the Seat.
                 let unitsOn terrain roads body =
                     let atlas =
                         seatPriced terrain roads |> snapshotWith [ creepWith "w" 0 body ] |> ofView
@@ -323,11 +306,8 @@ let stepPriceTableTests =
             }
 
             test "the walk prices the same weights in whole ticks" {
-                // The `Walk` row of the same table: two units make a tick,
-                // a part of one still costs a whole tick, and no step
-                // crosses a tile in less than one (ADR 0029). Same three
-                // weights, same four bodies, so the two rows are pinned
-                // over one domain and can be read side by side.
+                // The `Walk` row over the same domain: two units make a
+                // tick, a part of one still costs a whole tick.
                 let ticksOn terrain roads body =
                     let atlas =
                         seatPriced terrain roads |> snapshotWith [ creepWith "w" 0 body ] |> ofView
@@ -363,17 +343,11 @@ let stepPriceTableTests =
             }
 
             test "the traffic-blind route prices the same weights, and a Move surplus moves it" {
-                // The `Baseline` row (ADR 0030), whose only reader is the
-                // reroute attribution's route, so it is read as a choice
-                // rather than as a number. Two lanes to one Seat: two steps
-                // over swamp, or six over road. The worker unit pays
-                // 10 + 2 = 12 for the swamp lane and 5 × 1 + 2 = 7 for the
-                // paved one, and takes the long way round; three Moves
-                // under one part floor every road step at one unit, so the
-                // paved lane costs 5 × 1 + 1 = 6 against the swamp lane's
-                // ceil(10/3) + 1 = 5, and the same geometry sends that body
-                // the short way. The flip is the table's whole weight
-                // domain and the one-unit floor in one assertion.
+                // The `Baseline` row, read as a choice since its only reader
+                // is a route. Two lanes to one Seat: the worker unit pays
+                // 10 + 2 = 12 over swamp and 5 × 1 + 2 = 7 over road; three
+                // Moves under one part pay 5 × 1 + 1 = 6 paved against
+                // ceil(10/3) + 1 = 5 through the swamp.
                 let blindStepFor body =
                     let atlas =
                         forkedLanes [ "w", { X = 10; Y = 12 } ]
@@ -394,11 +368,8 @@ let stepPriceTableTests =
             }
 
             test "a body with no Move parts prices no weight at all, under every pricing" {
-                // The table's impassable row: `stepUnits` refuses a body
-                // the engine's move refuses, and it is written as the same
-                // -1 the weight grid marks a wall with, so one test in the
-                // flood settles both. Every weight, and all three pricings
-                // — travel cost, the walk, and the traffic-blind route.
+                // The table's impassable row is the same -1 the weight grid
+                // marks a wall with. Every weight, all three pricings.
                 let atlasOn terrain roads =
                     seatPriced terrain roads
                     |> snapshotWith [ creepWith "w" 0 [ Work; Carry ] ]
@@ -419,15 +390,10 @@ let stepPriceTableTests =
             }
 
             test "the weight grid carries no weight the price table has no slot for" {
-                // The table spans 0..`Engine.swampWeight`, and the flood reads it
-                // unchecked, so it is in range only while swamp stays the
-                // dearest ground a grid can hold (ADR 0010). A terrain
-                // priced above swamp would index past the end, which under
-                // Fable reads as a *free* step where .NET throws — the two
-                // halves of one table disagreeing. So the grid's whole
-                // weight domain is pinned here, off `stepWeights`: every
-                // terrain the projection knows, a road over one and an
-                // obstacle over another.
+                // The table spans 0..`Engine.swampWeight` and the flood
+                // reads it unchecked: a weight past the end reads as a
+                // *free* step under Fable where .NET throws. So the grid's
+                // whole weight domain is pinned off `stepWeights`.
                 let weights =
                     spatial
                         []
@@ -446,8 +412,7 @@ let stepPriceTableTests =
                         })
                     |> snapshotWith []
                     |> ofView
-                    // The projection names no room, so its ground is filed
-                    // under the empty name (ADR 0041).
+                    // The projection names no room: its ground is under the empty name.
                     |> fun atlas -> stepWeights atlas ""
 
                 let swamp = weights.[1 * 50 + 2]

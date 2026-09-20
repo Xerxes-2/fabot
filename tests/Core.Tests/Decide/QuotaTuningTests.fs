@@ -59,10 +59,10 @@ let tuningTests =
             }
 
             test "RepairWholeLine is the fraction a held decaying kind leaves the pool at" {
-                // The second of the two lines (ADR 0061), and it is read only
-                // where a creep holds the Repair — so the pairwise moves the
-                // number with the holder standing, and the unheld case beside
-                // it shows the hungry line is the one that did not move.
+                // Read only where a creep holds the Repair, so the pairwise
+                // moves the number with the holder standing, and the unheld
+                // case beside it shows the hungry line is the one that did
+                // not move.
                 let road = bareRespawn |> withHits "road-1" BuiltKind.Road 4500 5000
 
                 Expect.isEmpty
@@ -88,10 +88,9 @@ let tuningTests =
             }
 
             test "the hungry line sits under the whole line, and the whole line at or under max" {
-                // The pair is a pair or the rule is not a ratchet (ADR 0061):
-                // a whole line at or under the trigger leaves the held case
-                // dead and the churn where it was, and one over full hits
-                // leaves a structure pooled it can never reach.
+                // A whole line at or under the trigger leaves the held case
+                // dead, and one over full hits leaves a structure pooled it
+                // can never reach.
                 Expect.isLessThan
                     Tuning.defaults.RepairTrigger
                     Tuning.defaults.RepairWholeLine
@@ -109,11 +108,9 @@ let tuningTests =
             }
 
             test "RampartFloor is the hits a rampart is whole at" {
-                // Read at `Independent`, which is the only [[stage]] that
-                // keeps a rampart at all (#214): below it the covering rule
-                // and this floor are both switched off, so the number is
-                // never asked for at a 300 bank rather than answered wrongly
-                // there.
+                // Read at `Independent`, the only stage that keeps a rampart
+                // at all: below it the covering rule and this floor are both
+                // switched off.
                 let keep =
                     bareRespawn |> withLevel 5 |> withHits "ram-1" BuiltKind.Rampart 150_000 300_000
 
@@ -178,15 +175,9 @@ let tuningTests =
             }
 
             test "the keeper margin is derived from the Reach margin and never written down" {
-                // ADR 0060 decision 2. Five is the right number for survival
-                // and the wrong one for what this buys: ADR 0033's Reach is
-                // `weapon + ReachMargin`, so a tile at five from a keeper is
-                // *inside* the Reach a RANGED_ATTACK body derives, Flee is
-                // applicable to a courier crossing after all, and the decision
-                // buys nothing. The margin is one tile past that by
-                // construction, and what is pinned here is the **relation** and
-                // not the digit — a human who moved `ReachMargin` and not the
-                // margin would re-open the decision in silence.
+                // What is pinned is the relation and not the digit: a human
+                // who moved `ReachMargin` and not the margin would put a
+                // crossing courier back inside a keeper's Reach in silence.
                 let reachOf (tuning: Tuning) = Engine.rangedRange + tuning.ReachMargin
 
                 for margin in 0..5 do
@@ -212,11 +203,9 @@ let tuningTests =
             }
 
             test "StandingCarryPerWork is the line a delivery stops being work at" {
-                // Read through the supply floor (ADR 0050), which is the
-                // rule that asks whether anything the colony holds can put
-                // energy into an extension: a body over the line is a
-                // [[standing body]] and may not, so the colony hires a
-                // hauler in front of every row.
+                // Read through the supply floor: a body over the line is a
+                // standing body and cannot refill an extension, so the colony
+                // hires a hauler in front of every row.
                 let colony =
                     { bareRespawn with
                         Creeps = [ creepWith "b1" 0 50 [ Work; Work; Carry; Move; Move ] ]
@@ -302,16 +291,10 @@ let tuningTests =
             }
 
             test "HorizonLookahead is how far above its own level a room is sized at" {
-                // What the field sizes is the **clustered placement**: since
-                // ADR 0064 the reservation the trunks route around is sized at
-                // `allowanceOf`'s ceiling and reads neither the level nor this
-                // field, so the lookahead's whole reach is the window the tower
-                // and extension picks are drawn from. That window is never
-                // wider than the reservation — `allowanceOf` stops growing at
-                // the ceiling — so a positive lookahead is invisible in a
-                // *count*, the placement filter still being the current level's
-                // allowance, and the lookahead's own arithmetic is read below
-                // where it can bite: at zero, and below.
+                // The field sizes the clustered placement alone, and the
+                // placement filter is the current level's allowance either
+                // way, so a positive lookahead is invisible in a count. Its
+                // arithmetic is read where it can bite: at zero, and below.
                 let colony = atLevel 6 (openRoom 6)
 
                 let placed tuned =
@@ -329,24 +312,13 @@ let tuningTests =
 
                 Expect.equal extensions 40 "and forty extensions, which RCL6 unlocks in full"
 
-                // The shipped lookahead of one sizes this RCL6 room's cluster
-                // at seven — three towers and fifty extensions drawn from the
-                // ordering — and RCL7's third tower therefore takes a clustered
-                // pick ahead of the extensions even though no third tower may
-                // be placed yet. That is the lookahead doing its job a level
-                // early, and above zero it is invisible in a *count*: the
-                // placement filter is the level's either way, so what a
-                // positive lookahead moves is which tiles the counts land on
-                // and never how many.
                 Expect.equal
                     (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = 0 })))
                     (2, 40)
                     "no lookahead sizes the room at its own level, which RCL6 places in full — the horizon buying nothing"
 
-                // So the shipped value is read where it does move: the tiles.
-                // Without this the test distinguishes `1` from negatives only,
-                // and every lookahead from 0 upwards answers `(2, 40)` here —
-                // which would make the field look inert when it is not.
+                // The shipped value is read where it does move: the tiles.
+                // Every lookahead from 0 upwards answers `(2, 40)` above.
                 let extensionTiles tuned =
                     sitesOfKind Extension (decideOn tuned).Intents
 
@@ -355,14 +327,9 @@ let tuningTests =
                     (extensionTiles colony)
                     "and one level of lookahead moves the tiles the forty land on, which is what it buys"
 
-                // A **negative** lookahead is the stale absolute constant of
-                // ADR 0055 written relatively, and it reproduces #341 exactly:
-                // sized a level below the room, the RCL6 gap for the ten
-                // extensions RCL6 unlocked is zero and the room asks for none
-                // of them. Pinned because it is the failure the derivation
-                // exists to make unreachable — no setting of the *level* can
-                // produce it any more, only a human setting this field below
-                // zero.
+                // A negative lookahead is a stale absolute horizon written
+                // relatively, and reproduces #341: only a human setting this
+                // field below zero can produce it now.
                 Expect.equal
                     (placed (colony |> tunedBy (fun t -> { t with HorizonLookahead = -1 })))
                     (2, 30)
@@ -373,14 +340,10 @@ let tuningTests =
                     (0, 5)
                     "four levels behind reserves an RCL2 room's cluster, and the room may place no more than it planned"
 
-                // And the floor under all of it. `allowanceOf`'s catch-all is
-                // two-sided — it answers a *negative* level the sixty
-                // extensions and six towers it answers RCL8 — so a lookahead
-                // that reaches past zero would hand the youngest room the
-                // **widest** window in the table instead of the narrowest,
-                // which is backwards for a field whose whole meaning is "how
-                // far ahead". `Tuning.horizonOf` clamps at zero, and a horizon
-                // of zero allows no clustered structure at all.
+                // `allowanceOf`'s catch-all answers a negative level what it
+                // answers RCL8, so the clamp at zero is what keeps a lookahead
+                // reaching past zero from handing the youngest room the
+                // widest window.
                 Expect.equal
                     (placed (
                         atLevel 2 (openRoom 6)
@@ -391,11 +354,9 @@ let tuningTests =
             }
 
             test "OutpostBuilders is the crowd the outpost may take" {
-                // One number, two rations since #266: how many bodies may be
-                // across the Seam at once, and how many of the outpost's sites
-                // are worth crossing for — the head of the queue is exactly as
-                // long as the crowd that could work it, so a trunk is paved
-                // outward from the crossing instead of all at once.
+                // One number, two rations: how many bodies may be across the
+                // Seam at once, and how many of the outpost's sites are worth
+                // crossing for.
                 let crowd = crowdAtOutpostSite (northBorderColony { X = 10; Y = 38 })
 
                 let tally colony =
@@ -415,10 +376,8 @@ let tuningTests =
                     [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
                     "a budget of one and two of the three stay home"
 
-                // The other half of the same number, pinned where the queue is
-                // longer than it: four hand-laid road sites down one corridor,
-                // and the budget says how many of them are feeding-tier at all.
-                // The ones it names are the nearest the Seam, so what moves
+                // The other half, where the queue is longer than the budget:
+                // the sites it names are the nearest the Seam, so what moves
                 // between the two readings is which site, not only how many.
                 let trunk =
                     crowd
@@ -446,8 +405,8 @@ let tuningTests =
             }
 
             test "BootstrapLevel is the line a stage is cut at, and the one place it is read" {
-                // `Colony.stageOf`'s own pairwise (ADR 0052 decision 3):
-                // the same three facts about a room, read under two lines.
+                // `Colony.stageOf`'s own pairwise: the same three facts about
+                // a room, read under two lines.
                 Expect.equal
                     (Colony.stageOf Tuning.defaults true true (Some 3))
                     (Some Independent)
@@ -466,11 +425,8 @@ let tuningTests =
             }
 
             test "VisionGrace is how long a held Task outlives the vision that carried it" {
-                // #151's knob, pinned on the field and not on the shipped
-                // number: one colony, one dark room, one dark tick short of
-                // a hundred, read under two graces. The boundary at the
-                // shipped 150 is `OutpostTests`' own case; what this owns is
-                // that the number is read at all.
+                // Pinned on the field and not on the shipped number: the
+                // boundary at the shipped 150 is `OutpostTests`' own case.
                 let dark =
                     { bareRespawn with
                         Time = 1000
@@ -511,15 +467,10 @@ let quotasRecordTests =
         "the quotas record"
         [
             test "the cascade writes down its rows, and they sum to the target" {
-                // Observability only (ADR 0009): the record the `observe.mjs
-                // quotas` view prints. Eight rows in cascade order — the guard
-                // at the head of them since ADR 0056, behind only the supply
-                // floor, which is a floor and not a row and so has no line
-                // here; the [[miner]] between the rows that make the colony's
-                // energy and the rows that spend it since ADR 0057 decision 2;
-                // the worker row is what the target leaves after the
-                // specialists, so the quotas sum to the target; the living
-                // counts partition the fleet.
+                // Observability only: the record the `observe.mjs quotas`
+                // view prints. The supply floor is a floor and not a row and
+                // so has no line here; the worker row is what the target
+                // leaves after the specialists.
                 let { Quotas = quotas } = decideOn bareRespawn
 
                 Expect.equal

@@ -38,10 +38,9 @@ let builtKindTests =
             }
 
             test "Refill keeps the spawn, the extensions and the towers fed" {
-                // The rank layer's own kinds (ADR 0010). The controller
-                // container and the Storage are Refill targets too, but
-                // pooled off the projection's stores (ADR 0012, ADR 0023) —
-                // they never enter the Refillables list.
+                // The controller container and the Storage are Refill targets
+                // too, but pooled off the projection's stores — they never
+                // enter the Refillables list.
                 Expect.equal
                     (allBuiltKinds |> List.filter isRefillable)
                     [ BuiltKind.Spawn; BuiltKind.Extension; BuiltKind.Tower ]
@@ -53,11 +52,8 @@ let builtKindTests =
             }
 
             test "each kind is whole at its own line: half of max, a floor, or full" {
-                // The whole line per kind (ADR 0034), which is also the list
-                // of kinds whose hits the projection carries at all: the
-                // decaying roads and containers sit at a fraction of max
-                // (ADR 0010), a rampart at its floor, and the Keep at full —
-                // it does not decay, so below max means damaged. The numbers
+                // The whole line per kind, which is also the list of kinds
+                // whose hits the projection carries at all. The numbers
                 // themselves are the Repair pool's tunables and are not here.
                 Expect.equal
                     (allBuiltKinds |> List.map (fun kind -> kind, wholeLine kind))
@@ -70,21 +66,17 @@ let builtKindTests =
                         BuiltKind.Storage, Some WholeLine.Full
                         BuiltKind.Link, None
                         BuiltKind.Rampart, Some WholeLine.Floor
-                        // Nothing repairs an extractor and nothing may: it
-                        // does not decay, and its hits never reach the
-                        // projection (ADR 0057 decision 1).
+                        // Neither decays, and neither's hits reach the
+                        // projection.
                         BuiltKind.Extractor, None
-                        // Nor a terminal: it does not decay either, and
-                        // nothing reads its hits (#349).
                         BuiltKind.Terminal, None
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 
-                // The Keep is the list the other two rules hang off (the
-                // rampart covering and, from #102, safe mode), so it must be
-                // exactly the kinds repaired to full: a Keep kind repaired to
-                // half would leave the safe-mode trigger armed for every
-                // hostile that wandered through afterwards.
+                // The Keep is the list the rampart covering and safe mode
+                // hang off, so it must be exactly the kinds repaired to full:
+                // a Keep kind repaired to half would leave the safe-mode
+                // trigger armed for every hostile that wandered through.
                 Expect.equal
                     (allBuiltKinds |> List.filter isKeep)
                     (allBuiltKinds |> List.filter (fun kind -> wholeLine kind = Some WholeLine.Full))
@@ -110,9 +102,8 @@ let builtKindTests =
 
                 Expect.isFalse (isKeep BuiltKind.Other) "an unmodelled kind is no Keep structure"
 
-                // The Raid log charges damage on the Keep and its cover
-                // (ADR 0034) and on nothing else: a chewed road is the
-                // colony's ordinary decay, not a raid's cost.
+                // The Raid log charges damage on the Keep and its cover and
+                // on nothing else: a chewed road is ordinary decay.
                 Expect.equal
                     (allBuiltKinds |> List.filter isDefence)
                     [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage; BuiltKind.Rampart ]
@@ -160,11 +151,9 @@ let builtKindTests =
             }
 
             test "a placement Intent's kind widens to the built kind of the same name" {
-                // The one crossing between the two vocabularies (#75). The
-                // Executor spells a site through it and a projection rebuilt
-                // on the .NET side classifies its pending sites through it,
-                // so a transposed case would place one kind and describe
-                // another with nothing in either layer to catch it.
+                // The one crossing between the two vocabularies: a transposed
+                // case would place one kind and describe another with nothing
+                // in either layer to catch it.
                 Expect.equal
                     ([
                         Extension
@@ -210,10 +199,6 @@ let plannerTests =
             }
 
             test "a drained source pools its Harvest task all the same" {
-                // ADR 0013's gate, inverted by ADR 0025: the task no longer
-                // flickers with the source's stock, because whether a dry
-                // rock is worth walking to depends on the walker's body and
-                // position — the Matcher's knowledge, not the Planner's.
                 let snapshot =
                     { bareRespawn with
                         Sources = [ source "src-a"; drained "src-b" 120 ]
@@ -273,10 +258,6 @@ let plannerTests =
             }
 
             test "the spawn and its extensions are one Refill, under the spawn's id" {
-                // ADR 0054: the ring is one place a body walks to once, so
-                // the extensions do not each carry a Task of their own —
-                // which is what let whoever filled one first evaporate a
-                // walker's Task every tick or two.
                 let snapshot =
                     { bareRespawn with
                         Refillables =
@@ -297,10 +278,8 @@ let plannerTests =
             }
 
             test "a full cluster is pooled at all only while some member has room" {
-                // The other end of ADR 0054's whole point: `task-gone`
-                // fires when the *ring* is full, not when the extension a
-                // body happened to be aimed at is. A full spawn beside an
-                // empty extension keeps the Task standing.
+                // `task-gone` fires when the ring is full, not when the
+                // extension a body happened to be aimed at is.
                 let cluster free =
                     { bareRespawn with
                         Refillables =
@@ -328,10 +307,8 @@ let plannerTests =
             }
 
             test "extensions with no spawn to key them stay one Task apiece" {
-                // The `None` arm of `RefillCluster.ofRefillables` (ADR
-                // 0054): a room whose spawn has been destroyed has no
-                // cluster, and its extensions are pooled the way every
-                // Refillable was before there was one.
+                // The `None` arm of `RefillCluster.ofRefillables`: a room
+                // whose spawn has been destroyed has no cluster.
                 let snapshot =
                     { bareRespawn with
                         Refillables =
@@ -355,8 +332,6 @@ let plannerTests =
             }
 
             test "a tower missing energy gets a Refill task; a full tower gets none" {
-                // Same generalized Task, same free-capacity filter (ADR 0010) —
-                // a tower is just one more energy-hungry structure to the Planner.
                 let snapshot =
                     { bareRespawn with
                         Refillables =
@@ -387,29 +362,11 @@ let placementTests =
             test "RCL2 on open terrain places 5 extensions checkerboard, nearest first" {
                 let { Intents = intents } = decideOn (atLevel 2 (openRoom 3))
 
-                // The nearest checkerboard tile (24,24) is the Storage's pick
-                // and (24,26) is the one tower's — a reservation, not a site:
-                // RCL2 allows no tower, but its pick still comes first in the
-                // one ordering — so the extensions start two tiles in. A
-                // golden value of the horizon, not an assertion about the
-                // ordering: the rule is unchanged, the list moved.
-                //
-                // It moved under every horizon this number has had. Under the
-                // absolute constants of ADR 0039 and ADR 0055 an RCL2 room
-                // *drew* two tower tiles, because the horizon it read was five
-                // or six whatever level the room stood at, and the extensions
-                // started three tiles in. Derived (ADR 0063) an RCL2 room's
-                // horizon is 3, which allows one tower, so the second tower's
-                // pick — `26,24` — is an extension's again and `25,23` falls
-                // off the end. That is the derivation's other half, and the
-                // one no ticket asked for: the horizon narrows for a young room
-                // as readily as it widens for an old one.
-                //
-                // None of that is about the **reservation**, which since ADR
-                // 0064 is the same six towers and sixty extensions at RCL2 as
-                // at RCL8 — this room's trunks already dodge the tile RCL5
-                // will place a second tower on. What the narrowing costs a
-                // young room is one drawn tile, not one reserved one.
+                // (24,24) is the Storage's pick and (24,26) the one tower's
+                // — a pick, not a site: RCL2 allows no tower, but its pick
+                // still comes first in the one ordering — so the extensions
+                // start two tiles in. A golden value of the horizon, not an
+                // assertion about the ordering.
                 Expect.equal
                     (sitesOfKind Extension intents)
                     [
@@ -430,12 +387,9 @@ let placementTests =
             }
 
             test "RCL5 on open terrain plans the whole level: 30 extensions, two towers" {
-                // The current level's own filter, with the horizon a level
-                // ahead of it (ADR 0063): a room at RCL5 places what RCL5
-                // unlocks and no more, however far the reservation reaches.
-                // The room is a ring wider than the fixtures beside it because
-                // thirty extensions, two towers, the Storage and the footings
-                // want more same-colour tiles than `openRoom 3` has.
+                // A ring wider than the fixtures beside it because thirty
+                // extensions, two towers, the Storage and the footings want
+                // more same-colour tiles than `openRoom 3` has.
                 let { Intents = intents } = decideOn (atLevel 5 (openRoom 5))
 
                 Expect.hasLength
@@ -450,15 +404,8 @@ let placementTests =
             }
 
             test "RCL6 on open terrain plans the whole level: 40 extensions, two towers" {
-                // The clustered kinds are sized at the horizon and filtered at
-                // the current level, so a room standing anywhere plans
-                // everything the engine unlocked there (ADR 0011, ADR 0063). A
-                // horizon left *behind* the room computes a gap of zero here —
-                // the thirty of RCL5 already standing — and asks for none of
-                // the ten RCL6 adds, which is #341 and is what deriving the
-                // horizon off the room's own level makes unreachable. A ring
-                // wider again than the RCL5 fixture: forty extensions, two
-                // towers, the Storage and the footings want the tiles.
+                // A horizon left behind the room computes a gap of zero here
+                // and asks for none of the ten RCL6 adds (#341).
                 let { Intents = intents } = decideOn (atLevel 6 (openRoom 6))
 
                 Expect.hasLength
@@ -466,13 +413,9 @@ let placementTests =
                     40
                     "RCL6's whole extension allowance, the ten that level adds included"
 
-                // The horizon here is **7** and draws three tower tiles; what
-                // allows only two is the placement filter, which is the room's
-                // own level. That is the sized/filtered split stated where it
-                // is easiest to get backwards: the third tile is drawn and not
-                // placed. The trunks routed this tick avoid it for a reason of
-                // their own — the reservation is the ceiling's six towers (ADR
-                // 0064), so they avoid the sixth as readily as the third.
+                // The horizon is 7 and draws three tower tiles; the placement
+                // filter is the room's own level, so the third is drawn and
+                // not placed.
                 Expect.hasLength
                     (sitesOfKind Tower intents)
                     2
@@ -485,30 +428,14 @@ let placementTests =
                 Expect.hasLength (sitesOfKind Extension below) 30 "RCL5 places its own thirty"
             }
 
-            // What the ordering owes the level below it, and what a knob's own
-            // test cannot say: the plan a room *built out* under one level's
-            // horizon only ever grows when the level moves. Every step of the
-            // ladder, because ADR 0063 makes the horizon move with the room
-            // and the question "what does a level-up do to the plan" is now
-            // asked on every tick a room levels rather than on the one
-            // commit a human moved a constant.
-            //
-            // Built out is the load-bearing word, and the distinction #341's
-            // measurement turned on. Two *bare* rooms at neighbouring levels
-            // do not nest: an empty RCL6 room reserves three tower tiles where
-            // an empty RCL5 room reserves two, so its extension list starts one
-            // pick later. A room that grew through those levels has its towers
-            // and its extensions *standing*, their tiles are out of the
-            // ordering entirely, and `gapAt` subtracts them from the horizon's
-            // allowance — so the reservation widens at the tail and nothing
-            // already placed is re-planned. That is the claim a colony cares
-            // about, and it is the one asserted here.
-            // Both clustered kinds at every rung, because the tower's
-            // allowance steps on rungs the extensions' does not (0→1 at RCL3,
-            // 1→2 at RCL5, 2→3 at RCL7) and jumps 3→6 at RCL8, which is the
-            // largest step in `allowanceOf` and the one the derived horizon
-            // opens widest. A ladder that read extensions alone would let the
-            // RCL7→8 rung swallow three towers silently.
+            // The plan a room *built out* under one level's horizon only ever
+            // grows when the level moves. Built out is the load-bearing word:
+            // two bare rooms at neighbouring levels do not nest, since the
+            // extra tower pick shifts the extension list by one. Both
+            // clustered kinds at every rung, because the tower's allowance
+            // steps on rungs the extensions' does not and jumps 3→6 at RCL8;
+            // a ladder that read extensions alone would let that rung swallow
+            // three towers silently.
             for level, adds, towers in [ 2, 5, 1; 3, 10, 0; 4, 10, 1; 5, 10, 0; 6, 10, 1; 7, 10, 3 ] do
                 test $"a room built out at RCL{level} asks for exactly what RCL{level + 1} adds" {
                     let room = openRoom 8
@@ -542,10 +469,9 @@ let placementTests =
                         towers
                         $"and the {towers} tower(s) RCL{level + 1} adds, on the same ladder"
 
-                    // A **rampart** is the one kind that may share a standing
-                    // structure's tile, and is meant to: ADR 0034 covers every
-                    // Keep structure with one. Every other kind sharing a tile
-                    // would be the plan eating the colony's own buildings.
+                    // A rampart is the one kind that may share a standing
+                    // structure's tile; every other kind sharing one would be
+                    // the plan eating the colony's own buildings.
                     Expect.isEmpty
                         (placementIntents after
                          |> List.filter (fun (_, tile, kind) ->
@@ -640,17 +566,9 @@ let placementTests =
                     (List.contains { X = 24; Y = 24 } (placedTiles intents))
                     "a target's tile is never chosen"
 
-                // RCL2's cap in full, and this is the horizon's price *not*
-                // paid — the one thing the derivation gives back. ADR 0039
-                // recorded this room as the place a cramped colony pays for
-                // the lookahead at today's level: the controller's own Upgrade
-                // Work Area is working ground, so the room offers seven tiles,
-                // and under an absolute horizon of five or six *two* towers'
-                // reservations sat ahead of the extensions in the one
-                // ordering, leaving four. Derived (ADR 0063) this room's
-                // horizon is 3, which allows one tower, and the fifth
-                // extension has its tile back. A cramped room now pays for one
-                // level of lookahead and never for four.
+                // The controller's Upgrade Work Area is working ground, so the
+                // room offers seven tiles; one tower's pick sits ahead of the
+                // extensions and five are left.
                 Expect.hasLength
                     (sitesOfKind Extension intents)
                     5

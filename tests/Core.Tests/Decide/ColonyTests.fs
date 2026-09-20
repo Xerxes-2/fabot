@@ -1,7 +1,7 @@
-/// The colony as a unit (ADR 0047): its Stage, the Claim that starts one, the
-/// Nursery a mother raises through its bootstrap window, two colonies deciding
-/// side by side out of one tick, and the little of a neighbour's room a colony
-/// may borrow (ADR 0052).
+/// The colony as a unit: its Stage, the Claim that starts one, the Nursery a
+/// mother raises through its bootstrap window, two colonies deciding side
+/// by side out of one tick, and the little of a neighbour's room a colony
+/// may borrow.
 module Fabot.Core.Tests.Decide.ColonyTests
 
 open Expecto
@@ -11,9 +11,7 @@ open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
-/// The Claim tasks of a pool, by the controller each names — the Reserve
-/// reader's twin beside it, so a case reading both is reading one pool
-/// through two windows of the same shape.
+/// The Claim tasks of a pool, by the controller each names.
 let private claimTasks tasks =
     tasks
     |> List.choose (function
@@ -21,20 +19,14 @@ let private claimTasks tasks =
         | _ -> None)
 
 /// The colony of the Reserve fixtures with its north outpost declared a
-/// **candidate colony** (ADR 0047): the same room, the same controller and
-/// the same corridor, plus the two facts candidacy is made of — a human's
-/// declaration of that home, and vision saying nobody holds the room.
+/// **candidate colony**: the same room, controller and corridor, plus a
+/// human's declaration of that home and vision saying nobody holds it.
 ///
-/// The candidate is one of this colony's own outposts, and that is the
-/// arrangement ADR 0047 requires rather than a convenience here: the
-/// controller is in the projection because the mother colony declared the
-/// room as an outpost, and it stays there until the day the room stands on
-/// its own. A declared home nobody projects carries no controller and so
-/// offers nothing to claim.
+/// The candidate is one of this colony's own outposts: the controller is
+/// in the projection because the mother declared the room as an outpost.
+/// A declared home nobody projects carries no controller to claim.
 ///
-/// The home room is declared beside it, exactly as `Colony.declared`
-/// carries it: a colony's own home is in that list and is never a
-/// candidate, because the colony owns it.
+/// The home room is declared beside it, as `Colony.declared` carries it.
 let private candidateColony (creeps: (CreepInfo * Pos) list) =
     let colony = reserveColony creeps
 
@@ -43,12 +35,12 @@ let private candidateColony (creeps: (CreepInfo * Pos) list) =
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
     }
 
-/// A second [[outpost]] west of home: a container site in W2N1, the border ring
-/// that joins the two rooms, home's own western corridor made plain, and a
-/// crowd of four loaded workers standing in it. Where the crowd stands is the
-/// caller's — W2N1 lies west of W1N1, so the Seam to it is home's x = 0 edge,
-/// and whether the crowd stands *beside* that edge or one tile off it is the
-/// fact one of the two testLists that take this is about and the other is not.
+/// A second outpost west of home: a container site in W2N1, the border
+/// ring that joins the rooms, home's western corridor made plain, and a
+/// crowd of four loaded workers in it. Where the crowd stands is the
+/// caller's: the Seam to W2N1 is home's x = 0 edge, and whether the crowd
+/// stands *beside* that edge or one tile off it is what one of the two
+/// testLists that take this is about.
 let private withWestOutpost (crowdX: int) (colony: ColonyView) =
     let west =
         { RoomLayer.empty with
@@ -82,19 +74,12 @@ let claimTests =
         "claim"
         [
             test "a candidate colony's controller is a Claim, and the Reserve beside it goes" {
-                // ADR 0047's pool rule and its one-Task-per-controller
-                // trap in a single case. A controller carries exactly one
-                // of the three Tasks that act on one — ours is Upgraded, a
-                // neutral one is Reserved, a candidate colony's is Claimed
-                // — and both pooled at once would be two jobs one CLAIM
-                // body is applicable to, separated by nothing the Matcher
-                // reads: travel cost knows the tile and not the intent, so
-                // the colony would hold the reservation of the room it is
-                // trying to own.
+                // A controller carries exactly one of the three Tasks that act on one,
+                // and both pooled at once would be two jobs one CLAIM body fits,
+                // separated by nothing the Matcher reads: the colony would hold the
+                // reservation of the room it is trying to own.
                 //
-                // Pairwise on the declaration alone: the same room, the
-                // same controller, the same projection, the same neutral
-                // control entry. Only the human's sentence moves.
+                // Pairwise on the declaration alone: only the human's sentence moves.
                 let pooled (colony: ColonyView) = planTasksOn colony noThreats
 
                 let outpost =
@@ -117,25 +102,18 @@ let claimTests =
                     ([], [ "ctrl-out" ])
                     "declared a colony, the same controller is a Claim and no longer a Reserve"
 
-                // The colony's own home is in that declaration beside the
-                // candidate, and it is never claimed: we own it, which the
-                // case below reads as the general rule.
+                // The colony's own home is in that declaration beside the candidate.
                 Expect.isEmpty
                     (claimTasks candidate |> List.filter (fun id -> id <> "ctrl-out"))
                     "and the one Claim is the candidate's: a home we already own is no candidate"
             }
 
             test "the room this colony has already claimed is neither claimed nor reserved" {
-                // The tick the claim lands, read at the pool (#181, ADR
-                // 0047): the room stops being a candidate because we own
-                // it, and it does not fall back to being a Reserve —
-                // `reserveController` and `claimController` are both
-                // refused on a room with an owner, so the two exclusions
-                // have to hold at once or the pool offers a Task no body
-                // can execute.
+                // The tick the claim lands (#181): `reserveController` and
+                // `claimController` are both refused on a room with an owner, so the
+                // two exclusions have to hold at once.
                 //
-                // Pairwise on ownership, the declaration held fixed: the
-                // same candidate colony, seen unowned and seen ours.
+                // Pairwise on ownership, the declaration held fixed.
                 let pooledUnder control =
                     let colony = candidateColony []
 
@@ -159,27 +137,16 @@ let claimTests =
             }
 
             test "a room this colony cannot see, or one a rival holds, is no claim" {
-                // Both halves of "takeable" (ADR 0047), each against the
-                // Reserve that stays behind it. Vision first: a room with
-                // no control entry is one nothing is looking into, and an
-                // unseen room is not one the colony can claim — absence
-                // classifies nothing (ADR 0004). Then the rival: the
-                // engine answers ERR_INVALID_TARGET on a controller
-                // somebody else reserves, so a Claim pooled there would
-                // walk a body fifty tiles to stand still for its whole
-                // 600-tick life.
+                // Vision first: an unseen room is not one the colony can claim. Then
+                // the rival: the engine answers ERR_INVALID_TARGET on a controller
+                // somebody else reserves, so a Claim pooled there would walk a body
+                // fifty tiles to stand still for its whole 600-tick life.
                 //
-                // Where the two halves part is what is left **behind** the
-                // Claim. A blind room keeps its Reserve — absence
-                // classifies nothing, and the reserver is the creep whose
-                // walk buys the look (#131). A room somebody else reserves
-                // keeps neither, since #333: the engine refuses
-                // `reserveController` on that controller for the same
-                // ERR_INVALID_TARGET reason it refuses the claim, so the
-                // Reserve that used to stand here was a Task no body could
-                // ever execute. Which is the *same* read in both places
-                // (`RoomControlInfo.heldByOther`), asked once for the claim
-                // and once for the reservation.
+                // What is left **behind** the Claim differs. A blind room keeps its
+                // Reserve: the reserver is the creep whose walk buys the look (#131).
+                // A room somebody else reserves keeps neither, since #333: the same
+                // read (`RoomControlInfo.heldByOther`), asked once for the claim and
+                // once for the reservation.
                 let pooledWith control =
                     let colony = candidateColony []
 
@@ -205,9 +172,7 @@ let claimTests =
                     ([], [])
                     "held by a rival: nothing to claim, and nothing to reserve either"
 
-                // Our own reservation is the ordinary case and not a bar:
-                // the room the colony has been holding at ten a tick is
-                // exactly the room it means to take.
+                // Our own reservation is the ordinary case and not a bar.
                 let held =
                     let colony = candidateColony []
 
@@ -223,13 +188,9 @@ let claimTests =
             }
 
             test "a CLAIM body is matched to the Claim and claims the controller" {
-                // The whole path in one tick (ADR 0047): the Task is pooled
-                // off the declaration, the CLAIM body is the one body it
-                // applies to — the same part gate Reserve has, which is why
-                // one row casts for both — the Matcher hands it over, and
-                // the Emitter issues the claim. The creep stands at
-                // (10,44), one tile from the controller at (11,44), so the
-                // act is this tick's and not a walk's.
+                // The whole path in one tick. The same part gate Reserve has, which is
+                // why one row casts for both. The creep stands at (10,44), one tile
+                // from the controller at (11,44), so the act is this tick's.
                 let {
                         Assignments = assignments
                         Intents = intents
@@ -266,12 +227,8 @@ let claimTests =
             }
 
             test "a body with no CLAIM part is never matched to a Claim" {
-                // Pairwise against the case above: the same colony, the
-                // same tile beside the same controller, one body swapped.
-                // `claimController` is a CLAIM part's act exactly as
-                // `reserveController` is, so a generalist standing on the
-                // doorstep of a room the colony means to own can do nothing
-                // about it.
+                // Pairwise against the case above: one body swapped. `claimController`
+                // is a CLAIM part's act exactly as `reserveController` is.
                 let {
                         Assignments = assignments
                         Intents = intents
@@ -291,12 +248,9 @@ let claimTests =
             }
 
             test "one claimer per controller: a second body is left over" {
-                // The Task's capacity (ADR 0047): a room is taken by one
-                // touch of one CLAIM part, so a second body at the same
-                // controller buys nothing at all — and travel cost, which
-                // is all the Matcher reads inside a tier, would send every
-                // claimer in the colony to the nearest one. Two bodies on
-                // one tile, so nothing but the cap can separate them.
+                // A room is taken by one touch of one CLAIM part, and travel cost would
+                // send every claimer to the nearest one. Two bodies on one tile, so
+                // nothing but the cap can separate them.
                 let { Assignments = assignments } =
                     decideOn (
                         candidateColony
@@ -314,12 +268,10 @@ let claimTests =
         ]
 
 /// The north room with a **spawn** construction site of ours standing in
-/// it: the site a human places in a [[nursery]] by hand, and the one no
-/// rule of this colony's would ever place (ADR 0047). Built beside
-/// `withOutpostSite` and deliberately not out of it — the kind is the
-/// whole point of every case below, because an outpost's *container* site
-/// is already feeding-tier work (#157) and a case built on one could not
-/// tell the nursery rule apart from that one.
+/// it: the site a human places in a nursery by hand. Built beside
+/// `withOutpostSite` and not out of it, because an outpost's *container*
+/// site is already feeding-tier work (#157) and a case built on one could
+/// not tell the nursery rule apart from that one.
 let private withNorthSpawnSite (site: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -337,31 +289,23 @@ let private withNorthSpawnSite (site: Pos) (colony: ColonyView) =
     }
 
 /// The same colony with the north room declared a home of ours and still
-/// unowned: a [[candidate colony]], the tick before the claim lands. The
-/// baseline every nursery case below is read against, because it holds the
-/// human's half of the declaration fixed and leaves only the ownership to
-/// move.
+/// unowned: a candidate colony, the tick before the claim lands. Holds
+/// the human's half of the declaration fixed and leaves ownership to move.
 let private asCandidate (colony: ColonyView) =
     { colony with
         RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
     }
 
-/// The same colony with a spawn of ours standing in the north room:
-/// independence, and the end of the nursery (ADR 0047). The ColonyView fact
-/// the rule actually reads and nothing beside it — a spawn *structure* in
-/// that room's layer, which is the whole of what the tick a spawn is
-/// finished changes for this rule; the human's edit splitting
-/// `Colony.declared` in two follows that tick rather than causing it.
+/// The same colony with a spawn of ours standing in the north room: the
+/// end of the nursery. A spawn *structure* in that room's layer, which is
+/// what the tick a spawn is finished changes; the human's edit splitting
+/// `Colony.declared` follows that tick rather than causing it.
 ///
-/// Placed in the projection *and* in the room's stage, which is where the
-/// rule reads it since ADR 0052 decision 3: a spawn standing in a claimed
-/// room is what turns `Nursery` into `Bootstrapping`, the shell derives
+/// Placed in the projection *and* in the room's stage: the shell derives
 /// the pair off the world together, and the spawn structure stays in the
 /// layer because that is what the mother's pioneers walk up to. Not in
-/// `ColonyView.Spawns`, which is the colony's own spawn list since #191 —
-/// the spawns it casts from and banks for, and a room it does not run is
-/// not a room it casts in.
+/// `ColonyView.Spawns`, the colony's own spawn list since #191.
 let private withNorthSpawn (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -380,31 +324,22 @@ let private withNorthSpawn (colony: ColonyView) =
     }
 
 /// The same colony with the north room out of its scan set altogether:
-/// what the tick a bootstrapped child reaches `Tuning.BootstrapLevel` does
-/// to its mother's ColonyView (ADR 0047 decision 4). The level is not a fact
-/// any ColonyView of hers carries — it is read off the world, once, by the
-/// rule that decides which rooms she projects (`Colony.bootstrapping`) —
-/// so what RCL3 *is*, at this seam, is the whole room leaving: its layer,
-/// its border ring, the ids that layer placed, the sites vision paid for
-/// in it and the `RoomControl` entry every ownership rule reads (ADR
-/// 0004's per-entry absence, which is the shape a room nobody declared has
-/// always had).
+/// what the tick a bootstrapped child reaches `Tuning.BootstrapLevel`
+/// does to its mother's ColonyView. The level is read off the world once
+/// by `Colony.bootstrapping`, so what RCL3 *is* at this seam is the whole
+/// room leaving: its layer, its border ring, the ids that layer placed,
+/// the sites in it and the `RoomControl` entry.
 ///
-/// Subtracted whole rather than one entry at a time, because that is what
-/// the shell does: the scan set is the single gate, and a fixture that
-/// removed only the control entry would be pinning a state the projection
-/// cannot be in.
+/// Subtracted whole rather than one entry at a time, because the scan
+/// set is the single gate and a fixture that removed only the control
+/// entry would pin a state the projection cannot be in.
 let private withoutNorthRoom (colony: ColonyView) =
     let placed = (SpatialInfo.layerOf colony.Spatial "W1N2").TargetPositions
 
     { colony with
         RoomControl = Map.remove "W1N2" colony.RoomControl
-        // The stage the room left over, and it stays: `Stages` is the
-        // world's map and reaches every colony whatever it projects (ADR
-        // 0052 decision 3), so what RCL3 does to it is turn one entry
-        // `Independent` — never remove it. The room leaves this colony's
-        // *projection*, which is the subtraction below, and that is what
-        // every rule here answers off.
+        // `Stages` is the world's map and reaches every colony whatever it
+        // projects, so RCL3 turns one entry `Independent`, never removes it.
         Stages = Map.add "W1N2" Independent colony.Stages
         ConstructionSites =
             colony.ConstructionSites
@@ -425,34 +360,21 @@ let nurseryTests =
         "the nursery"
         [
             test "every site in a nursery is feeding-tier work, and no builders' budget rations it" {
-                // ADR 0047 decision 4, at the seam it decides at — both
-                // halves of it, because since #266 the second half is what
-                // discriminates. #157 lifted one site off the surplus tier
-                // and #266 lifts `Tuning.OutpostBuilders` of them, nearest
-                // the Seam, so a nursery no longer differs from an outpost
-                // in the *tier* of the one site standing in it. What it
-                // differs in is what ADR 0047 said in the same breath: the
-                // budget does not reach a claimed room. In an outpost the
-                // crowd is rationed; in a nursery every loaded Work-part
-                // body in the colony may cross, which is the price that
-                // decision was taken at.
+                // Both halves, because since #266 the second is what discriminates:
+                // #157 lifted one site off the surplus tier and #266 lifts
+                // `Tuning.OutpostBuilders` of them, so a nursery no longer differs
+                // from an outpost in the *tier* of its one site. It differs in the
+                // budget: in an outpost the crowd is rationed, in a nursery every
+                // loaded Work-part body may cross.
                 //
-                // A **spawn** site on purpose: read by kind alone it is the
-                // ordinary surplus Build every home site is, so nothing here
-                // can be #157's container rule answering under another name.
+                // A **spawn** site on purpose: read by kind alone it is the ordinary
+                // surplus Build, so nothing here can be #157's container rule.
                 //
-                // The factor is `Rank` and deliberately not `TravelCost`:
-                // the site is a Seam and forty tiles away and the colony's
-                // own controller is three, so on one tier the controller
-                // wins every loaded worker every tick — which is exactly the
-                // switch that was laid down and never closed before #157.
-                // Pairwise, one rival at a time: one Build, one Upgrade, and
-                // a home Harvest inapplicable to a body with nothing free to
-                // fill.
-                //
-                // #234's rung does not reach this comparison either way: the
-                // rung stops at the home room (`isHomeSite`), and a site past
-                // the Seam is exactly what it stops for.
+                // The factor is `Rank` and not `TravelCost`: the site is a Seam and
+                // forty tiles away and the colony's own controller is three, so on one
+                // tier the controller wins every loaded worker every tick. Pairwise,
+                // one rival at a time. #234's rung stops at the home room
+                // (`isHomeSite`), so it does not reach this comparison.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -475,26 +397,18 @@ let nurseryTests =
                     (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
                     "claimed, the same site outranks the sink and the worker crosses for it"
 
-                // The other end of the nursery, and the one fact that
-                // closes it: a spawn of ours standing in that room. Nothing
-                // waits on the human's edit to `Colony.declared` — the room
-                // is independent the tick its spawn stands, and this rule
-                // reads that tick and not the commit that follows it. The
-                // site stays feeding-tier, now by the *bootstrapping*
-                // reading (`isBootstrappingSite`): a room under RCL3 builds
-                // its bank before its controller, and the nursery's lift
-                // hands over to that one without a surplus tick between.
+                // The other end: a spawn of ours standing in that room ends the nursery
+                // the tick it stands, not the commit that follows. The site stays
+                // feeding-tier by the *bootstrapping* reading (`isBootstrappingSite`),
+                // with no surplus tick between.
                 Expect.equal
                     (matchOf (asNursery sited |> withNorthSpawn))
                     (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
                     "and a spawn standing in it ends the nursery: the site is the bootstrapping room's, still feeding-tier"
 
-                // And the half that still tells the two rooms apart, read
-                // off the crowd rather than off the tier: one more loaded
-                // body than the shipped budget of two. The outpost's site
-                // takes the budget and leaves the third at home; the
-                // nursery's takes every one of them, `cappedOutpostSites`
-                // never holding a claimed room's site.
+                // The half that still tells the two rooms apart, read off the crowd:
+                // one more loaded body than the shipped budget of two.
+                // `cappedOutpostSites` never holds a claimed room's site.
                 let crowd (colony: ColonyView) = heldBy (threeLoadedAtHome colony)
 
                 Expect.equal
@@ -509,19 +423,12 @@ let nurseryTests =
             }
 
             test "the mother's worker row rises by three while the nursery stands" {
-                // The pioneers (ADR 0047 decision 4). Read against the fleet
-                // one body at a time, the way the container switch is: a
-                // colony standing exactly at its target casts nothing and
-                // the same colony one body short casts one, so a target that
-                // moved by three shows up as three bodies rather than hiding
-                // inside a spawn's one-cast-a-tick limit.
+                // Read against the fleet one body at a time, so a target that moved by
+                // three shows up as three bodies rather than hiding inside a spawn's
+                // one-cast-a-tick limit.
                 //
-                // The home half is `switchHome`, whose whole target is
-                // thirteen — an Anchor, two haulers and ten workers — so
-                // this colony is running an economy well clear of its floor
-                // before the nursery is asked to add anything to it, and
-                // what the cases below read is a difference and never a
-                // floor.
+                // The home half is `switchHome`, whose whole target is thirteen, so
+                // the cases below read a difference and never a floor.
                 let casts colony fleet =
                     spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
@@ -552,32 +459,22 @@ let nurseryTests =
                         "one short of sixteen it casts, and the row the addend sits on is the generalist's"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                // Pairwise on each half of what a nursery is, one at a
-                // time. A room declared and not yet ours is a candidate
-                // colony hiring nobody, and reads the target back down to
-                // thirteen.
+                // Pairwise on each half of what a nursery is. A room declared and not
+                // yet ours is a candidate colony hiring nobody.
                 Expect.isEmpty
                     (casts (asCandidate switchHome) switchHomeFleet)
                     "declared and unclaimed, thirteen is the target again"
 
-                // The other half does not, and that is ADR 0047 decision
-                // 4's own sentence: the nursery ends the tick a spawn
-                // stands, and the addend runs on while the child is
-                // bootstrapped — its own `decide` running, its controller
-                // still under `Tuning.BootstrapLevel` — because what the
-                // three bodies are for is the child's first Layout as much
-                // as the spawn that ended the nursery. One addend across
-                // both states, so the fleet the colony wants is the same
-                // sixteen either side of independence.
+                // The addend runs on while the child is bootstrapped, because the three
+                // bodies are for the child's first Layout as much as the spawn that
+                // ended the nursery: sixteen either side of independence.
                 Expect.isEmpty
                     (casts (withNorthSpawn nursery) (switchHomeFleet @ pioneers))
                     "claimed with a spawn standing in it the child is bootstrapped, and sixteen is still the target"
 
-                // And tight the same way the nursery half above is: sixteen
-                // bodies cast nothing whether the target is sixteen or
-                // thirteen, so the upper bound alone would stay green with
-                // the whole bootstrap half of the addend deleted. Fifteen is
-                // the fleet the two targets answer differently about.
+                // Tight the same way: sixteen bodies cast nothing whether the target
+                // is sixteen or thirteen, so fifteen is the fleet the two answer
+                // differently about.
                 match casts (withNorthSpawn nursery) (short (switchHomeFleet @ pioneers)) with
                 | [ (_, _, name) ] ->
                     Expect.stringStarts
@@ -586,26 +483,17 @@ let nurseryTests =
                         "one short of sixteen the bootstrapped child's mother casts too, and on the same generalist row"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                // And the end of it. RCL3 reaches this ColonyView as the
-                // child's [[stage]] and is still not what closes the
-                // window: it takes the whole room out of the mother's scan
-                // set (`withoutNorthRoom`, which turns the stage
-                // `Independent` and drops the room together, the way the
-                // shell does), and every rule that read the room reads
-                // absence instead — which is what carries the addend away
-                // with the Upgrade and the Build.
+                // RCL3 takes the whole room out of the mother's scan set
+                // (`withoutNorthRoom`, which turns the stage `Independent` and drops
+                // the room together, as the shell does), and every rule that read the
+                // room reads absence instead.
                 Expect.isEmpty
                     (casts (withoutNorthRoom (withNorthSpawn nursery)) switchHomeFleet)
                     "and once the child outgrows her the room is gone from the projection: thirteen again"
 
-                // Hired off the room's state and not off the pool, which is
-                // ADR 0047's own sentence — the quota rises until the child
-                // is independent — and is visible here because this fixture
-                // projects no layer for that room at all and so pools no
-                // Build in it. The three bodies are walked toward a room
-                // that is going to need them, and the site a human places
-                // finds a crowd already across the Seam rather than one
-                // starting the fifty-tile walk on the tick it appears.
+                // Hired off the room's state and not off the pool: this fixture
+                // projects no layer for that room and so pools no Build in it. The
+                // three bodies are walked toward a room that is going to need them.
                 Expect.isEmpty
                     (planTasksOn nursery noThreats
                      |> List.filter (function
@@ -616,19 +504,12 @@ let nurseryTests =
 
             test "the builders' budget does not reach a nursery: every worker may cross" {
                 // #157 caps the crowd on an outpost's container site at
-                // `Tuning.OutpostBuilders`, a colony-wide two, because on
-                // the feeding tier the site outbids the home Upgrade for
-                // every loaded worker at once and travel cost cannot thin a
-                // crowd that is a Seam away to a tile. A nursery is the
-                // exception ADR 0047 names: the mother has already hired
-                // three more bodies for exactly this job, and what they are
-                // building is the colony the whole ticket is about.
+                // `Tuning.OutpostBuilders`, a colony-wide two, because travel cost
+                // cannot thin a crowd that is a Seam away to a tile. A nursery is the
+                // exception: the mother has already hired three more bodies for it.
                 //
-                // Read on the *container* site rather than the spawn site,
-                // so what moves between the two colonies below is the cap
-                // alone: the same site, on the same tier in both, capped in
-                // one and uncapped in the other. Pairwise on one fact —
-                // whether the room is ours yet.
+                // Read on the *container* site, so what moves between the two colonies
+                // is the cap alone. Pairwise on whether the room is ours yet.
                 let crowd = crowdAtOutpostSite
 
                 let held colony =
@@ -648,37 +529,29 @@ let nurseryTests =
             }
 
             test "a claimed room still on the outpost list takes no place in the builders' queue" {
-                // The state ADR 0047 decision 1 describes and
-                // `Colony.bootstrapping`'s own docstring spells out: while a
-                // human still names the child's room in the mother's
-                // `Outposts` list, `not (List.contains child.Home worked)`
-                // keeps it out of `BorrowedWork.Rooms`, and the room reaches
-                // the mother through the outpost reading, which asks no stage.
-                // So the borrowed-room clause `isOutpostSite` carries is not
-                // the whole of "a room this colony merely mines", and #266's
-                // queue says the rest of it itself.
+                // While a human still names the child's room in the mother's
+                // `Outposts` list, `not (List.contains child.Home worked)` keeps it
+                // out of `BorrowedWork.Rooms`, and the room reaches the mother through
+                // the outpost reading, which asks no stage. So `isOutpostSite`'s
+                // borrowed-room clause is not the whole of "a room this colony merely
+                // mines", and #266's queue says the rest.
                 //
-                // What that queue is scarce in is places and not bodies: a
-                // claimed room's sites are feeding-tier outright by their own
-                // reading and capped by nothing, so a place in the queue buys
-                // them no lift — and spends the one the mined outpost's
-                // container needed. Containers on both sides, so nothing but
-                // the room can be what separates them: the claimed room's two
-                // stand a tile and two from their own Seam and the outpost's
-                // six from its own, which is the whole of `siteOrder` and puts
-                // the outpost's site third of three against a budget of two.
+                // That queue is scarce in places, not bodies: a claimed room's sites
+                // are feeding-tier by their own reading and capped by nothing, so a
+                // place in the queue buys them no lift and spends the one the mined
+                // outpost's container needed. Containers on both sides: the claimed
+                // room's two stand a tile and two from their own Seam and the
+                // outpost's six, which puts the outpost's site third of three against
+                // a budget of two.
                 //
-                // The claimed room is left unreachable from home on purpose —
-                // no home tile joins its border — so the Matched factor below
-                // names one comparison, the outpost's site against the sink
-                // underfoot, and not some third candidate. The order the queue
-                // is built in reads `Atlas.seamWalkTicks` inside each site's
-                // own room, so it does not care either way.
+                // The claimed room is left unreachable from home on purpose, so the
+                // Matched factor names one comparison. The queue reads
+                // `Atlas.seamWalkTicks` inside each site's own room, so it does not
+                // care either way.
                 //
-                // Both stages of the claimed room, because they are two
-                // readings and not one: `isNurserySite` for a room claimed
-                // with no spawn standing, `isBootstrappingSite` for the child
-                // running its own spawn while the mother still declares it.
+                // Both stages of the claimed room: `isNurserySite` for a room claimed
+                // with no spawn standing, `isBootstrappingSite` for the child running
+                // its own spawn while the mother still declares it.
                 let withWestChild stage (colony: ColonyView) =
                     { colony with
                         RoomControl = Map.add "W2N1" ownedRoom colony.RoomControl
@@ -737,21 +610,14 @@ let nurseryTests =
             }
 
             test "a Work-heavy body still may not cross for a nursery's site" {
-                // The body gate #157 put on the one Build it lifted, and
-                // since #234 the gate every Build carries: a site a rung
-                // over the Upgrade beside it leaves no travel cost anywhere
-                // on the ladder to pin an Anchor at its Post, and a heavy
-                // body's cross-room work is a Post and never a fifty-tile
-                // delivery (ADR 0020). A nursery has
-                // Posts of its own — it is still the mother's outpost, so
-                // the container rule places a container on its source and
-                // a standing one makes that Seat a Post (`Atlas.postsIn`)
-                // — which is the reason the gate matters here rather than
-                // an exception to it: what it refuses is walking that
+                // The body gate #157 put on the one Build it lifted, and since #234 the
+                // gate every Build carries: a site a rung over the Upgrade leaves no
+                // travel cost to pin an Anchor at its Post. A nursery has Posts of its
+                // own (the container rule places one on its source, and a standing one
+                // makes that Seat a Post), so what the gate refuses is walking that
                 // room's own Anchor off its own Post.
                 //
-                // Pairwise on the body alone: the same colony, the same two
-                // Tasks, one loaded generalist against one loaded Anchor.
+                // Pairwise on the body alone.
                 let sited creeps =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -774,19 +640,13 @@ let nurseryTests =
             }
 
             test "the declaration and the home exclusion each do their own work" {
-                // `isNurseryRoom` is two facts, and the cases above move
-                // the stage through both of its inputs: ownership between
-                // `asCandidate` and `asNursery`, the spawn under
-                // `withNorthSpawn`. These are the two clauses no case above
-                // touches — the declaration inside the stage, and the home
-                // exclusion beside it — one at a time, because a rule whose
-                // guard clauses nothing reads is two weaker rules wearing
-                // one name.
+                // `isNurseryRoom` is two facts, and the cases above move the stage
+                // through both inputs. These are the two clauses no case above
+                // touches, the declaration inside the stage and the home exclusion,
+                // one at a time.
                 //
-                // The outpost half reads against the controller like the case
-                // above, for the same reason: #234's rung stops at the home
-                // room. The **home** half below cannot — that site takes the
-                // rung — so it is read against the flow instead.
+                // The outpost half reads against the controller, as #234's rung stops
+                // at the home room. The **home** half cannot, so it reads the flow.
                 let sited =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -794,17 +654,10 @@ let nurseryTests =
                     |> loaded
                     |> withHomeController { X = 10; Y = 5 }
 
-                // Owned, spawnless, projected — and **undeclared**. A human
-                // reaches this by taking a room out of `Colony.declared`
-                // while leaving it in a mother's outpost list: a rollback,
-                // or a room claimed for some reason of his own. Ownership
-                // and the spawn both answer "nursery" here, and what says
-                // otherwise is that the shell derives a stage for the
-                // declared homes alone (`World.stages`), so an
-                // undeclared room has no entry however plainly it looks
-                // like one — without which every site in that room would be
-                // uncapped feeding-tier work on the strength of a fact no
-                // human wrote down.
+                // Owned, spawnless, projected, and **undeclared**: a rollback, or a
+                // room claimed for a reason of the human's own. The shell derives a
+                // stage for the declared homes alone (`World.stages`), so an undeclared
+                // room has no entry however plainly it looks like one.
                 Expect.equal
                     (matchOf
                         { asNursery sited with
@@ -814,23 +667,15 @@ let nurseryTests =
                     (Some(taskId (Upgrade "ctrl-1"), MatchFactor.TravelCost))
                     "a room of ours nobody declared a home is an outpost still, and its site is surplus"
 
-                // And the colony's own home, excluded by name (ADR 0047).
-                // `Main.loop` runs `decide` only for a colony whose home
-                // holds a spawn, so a home at the `Nursery` stage is a
-                // ColonyView the shell does not build — which is what makes
-                // this clause a guard rather than a live rule, and why a
-                // test has to lay that ColonyView by hand for it to be read
-                // at all. Read without it, #157's "home Build is untouched
-                // and stays Surplus" would grow a condition.
+                // The colony's own home, excluded by name. `Main.loop` runs `decide`
+                // only for a colony whose home holds a spawn, so a home at the
+                // `Nursery` stage is a ColonyView the shell does not build, and a test
+                // has to lay it by hand for the clause to be read at all.
                 //
-                // This site *is* at home, so #234's rung reaches it and the
-                // controller under the creep's feet can no longer say which
-                // tier it is on. The instrument is a hungry extension placed
-                // **farther** than the site: read as a nursery's the site
-                // ties that Refill on the feeding tier and wins on price;
-                // read as the surplus it is, the Refill outranks it outright.
-                // The two readings differ in the winner and not merely in the
-                // factor.
+                // This site *is* at home, so #234's rung reaches it. The instrument is
+                // a hungry extension placed **farther** than the site: read as a
+                // nursery's the site ties that Refill on the feeding tier and wins on
+                // price; read as surplus, the Refill outranks it outright.
                 let homeSited =
                     let colony =
                         northBorderColony { X = 10; Y = 38 }
@@ -868,22 +713,15 @@ let nurseryTests =
             }
 
             test "a nursery's site leaves the builders' budget to the outposts' own" {
-                // The budget is a colony-wide two spread over the outpost
-                // container sites the pool holds, floored at one apiece
-                // (#157), and it falls to the survivors only as sites are
-                // **finished**. A nursery's site is not finished — it is
-                // standing, and drawing more builders than it ever could
-                // under the cap — so it keeps its place in the divisor and
-                // loses only its own entry. Dropped from the count instead,
-                // claiming a third room would hand a sibling outpost's site
-                // two builders where it had one, which is a #157 behaviour
-                // ADR 0047 does not move ("the budget stays behind").
+                // The budget is a colony-wide two spread over the outpost container
+                // sites the pool holds, floored at one apiece (#157), and it falls to
+                // the survivors only as sites are **finished**. Dropped from the count
+                // instead, claiming a third room would hand a sibling outpost's site
+                // two builders where it had one.
                 //
-                // Two outposts with one container site apiece, and the one
-                // fact that moves between the readings is whether the north
-                // room is ours yet. The west site is the near one, so the
-                // budget it carries is read off how many of the four
-                // workers stop there before the rest walk on.
+                // Two outposts with one container site apiece; the west site is the
+                // near one, so its budget is read off how many of the four workers
+                // stop there.
                 let twoOutposts = withWestOutpost 2
 
                 let sites control =
@@ -903,9 +741,8 @@ let nurseryTests =
                     [ taskId (Build "site-out"), 1; taskId (Build "site-west"), 1 ]
                     "two ordinary outpost sites share the colony's two builders, one apiece"
 
-                // #210 (user decision 2026-09-07): a borrowed room's site is
-                // the child's own — uncapped, and out of the divisor — so the
-                // west outpost's site has the whole budget of two.
+                // #210 (user decision 2026-09-07): a borrowed room's site is the
+                // child's own, uncapped and out of the divisor.
                 Expect.equal
                     (held (sites asNursery))
                     [ taskId (Build "site-out"), 2; taskId (Build "site-west"), 2 ]
@@ -913,28 +750,22 @@ let nurseryTests =
             }
         ]
 
-/// The two spawns of the pair below, each in its own colony's home: what
-/// the shell reads a creep's caster off (`Game.spawns`, ADR 0047 decision
-/// 2). Names the engine's own, and one is not a prefix of the other by
-/// accident — `Spawn1x` below is what pins that it could not be.
+/// The two spawns of the pair below, each in its own colony's home, what
+/// the shell reads a creep's caster off (`Game.spawns`). One is not a
+/// prefix of the other by accident: `Spawn1x` below pins that.
 let private pairSpawns = [ "Spawn1", "W1N1"; "Spawn2", "W1N2" ]
 
 /// A creep of each colony's casting, named the way `planSpawns` names one
-/// — `{pattern}-{tick}-{spawn}` — because the caster is read out of the
-/// name and a fixture creep called anything else would be testing the
-/// fallback instead of the rule.
+/// (`{pattern}-{tick}-{spawn}`), because the caster is read out of the name.
 let private motherCast = "worker-100-Spawn1"
 let private childCast = "worker-100-Spawn2"
 
-/// The declaration after a human has split it in two (ADR 0047): each
-/// colony works its own home and nothing else. The only arrangement in
-/// which a room is projected by *one* colony, and so the only one in which
-/// anybody is adopted.
+/// The declaration after a human has split it in two: each colony works
+/// its own home. The only arrangement in which a room is projected by
+/// *one* colony, and so the only one in which anybody is adopted.
 ///
-/// Neither is anybody's child: the mother of a colony still being raised
-/// is a field of its own (`Mother`, ADR 0047 decision 4), and a pair
-/// carrying one is `raisedPair` below — where the mother projects the
-/// child's room again and adoption goes inert again.
+/// Neither is anybody's child; a pair carrying a `Mother` is `raisedPair`
+/// below, where the mother projects the child's room again.
 let private splitPair =
     [
         {
@@ -954,11 +785,10 @@ let private splitPair =
     ]
 
 /// And the tick before it: the north room is the child's home and the
-/// mother's outpost at once, which is the ordinary arrangement while a
-/// [[nursery]] is being built (ADR 0047) — one room, two projections.
-/// The child names its mother here as well, which costs nothing while the
-/// outpost entry stands: a room the mother already works is worked as an
-/// outpost and never as a bootstrap layer (`Colony.bootstrapping`).
+/// mother's outpost at once, one room, two projections. The child names
+/// its mother here as well, which costs nothing while the outpost entry
+/// stands: a room the mother already works is worked as an outpost and
+/// never as a bootstrap layer (`Colony.bootstrapping`).
 let private nurseryPair =
     [
         {
@@ -984,10 +814,9 @@ let private nurseryPair =
         }
     ]
 
-/// The declaration a human writes on the day of the split, and the one the
-/// real one carries today: the child is out of its mother's outpost list
-/// and names her instead, so she goes on raising it until it reaches
-/// `Tuning.BootstrapLevel` (ADR 0047 decision 4).
+/// The declaration a human writes on the day of the split: the child is
+/// out of its mother's outpost list and names her instead, so she raises
+/// it until it reaches `Tuning.BootstrapLevel`.
 let private raisedPair =
     [
         {
@@ -1006,17 +835,14 @@ let private raisedPair =
         }
     ]
 
-/// What each colony projects, the way the shell derives it before it
-/// builds anything (`World.roomsProjected`): the home, the outposts
-/// that survive the stand-down gate (ADR 0043) and the rooms it bootstraps
-/// for a child of its own (ADR 0047 decision 4). Adoption is decided over
-/// this table and not over the declaration, so a room the gate withheld
-/// adopts nobody and a room two colonies project names no single adopter.
+/// What each colony projects, the way the shell derives it
+/// (`World.roomsProjected`): the home, the outposts that survive the
+/// stand-down gate and the rooms it bootstraps for a child. Adoption is
+/// decided over this table and not the declaration.
 ///
-/// The [[stage]]s are handed in because the bootstrap half of the union is
-/// read off them (ADR 0052 decision 3): `Map.empty` is the world in which
-/// no declared home is a colony anything can see, and every colony that
-/// names no mother projects the same rooms in it either way.
+/// The stages are handed in because the bootstrap half is read off them:
+/// `Map.empty` is the world in which no declared home is a colony
+/// anything can see.
 let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony list) =
     colonies
     |> List.map (fun colony ->
@@ -1028,10 +854,8 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
             colony.Home)
 
 /// The mother of the pair, carrying exactly the creeps the membership rule
-/// gave her, each standing on its own tile in her home layer — which is
-/// what `ColonyView.ofWorld` does with the set it is handed (#191): a colony's
-/// `Creeps` and its layers' `CreepPositions` are cut by one set, so a
-/// creep another colony holds is in neither.
+/// gave her, each on its own tile in her home layer (#191): `Creeps` and
+/// the layers' `CreepPositions` are cut by one set.
 let private motherColony (creeps: (string * Pos) list) =
     let colony = northBorderColony { X = 10; Y = 38 }
 
@@ -1040,11 +864,9 @@ let private motherColony (creeps: (string * Pos) list) =
         Spatial = colony.Spatial |> withCreepsAt creeps
     }
 
-/// The child: the north room run as a home of its own, with its own rock
-/// and its own corridor and nothing of the mother's in it. Built beside
-/// `northBorderColony` rather than out of it, because the two colonies'
-/// views are two projections and a shared one would prove nothing
-/// about which of them a Task came from.
+/// The child: the north room run as a home of its own. Built beside
+/// `northBorderColony` rather than out of it, because a shared projection
+/// would prove nothing about which colony a Task came from.
 let private childColony (creeps: (string * Pos) list) =
     { bareRespawn with
         Spawns = []
@@ -1066,22 +888,17 @@ let private childColony (creeps: (string * Pos) list) =
                 })
     }
 
-/// Which Task one named creep was matched to this tick, or none at all —
-/// which is the answer for a creep this colony's ColonyView does not carry:
-/// it is not in the fold that writes a status Verdict per living creep, so
-/// the colony decides nothing about it and holds nothing of it.
+/// Which Task one named creep was matched to this tick, or none, which is
+/// the answer for a creep this colony's ColonyView does not carry.
 let private matchedTask name (colony: ColonyView) =
     (decideOn colony).Verdicts
     |> List.tryPick (function
         | Verdict.Matched(creep, task, _) when creep = name -> Some task
         | _ -> None)
 
-/// A controller of *ours* standing in the north room, under an id of its
-/// own: the child colony's, the one target its mother borrows workers for
-/// while she is still raising it (ADR 0047 decision 4). Laid into the
-/// layer she projects the room under, because that is where every fact she
-/// has about that room lives — her own controller is `ColonyView.Controller`
-/// and is somewhere else entirely.
+/// A controller of *ours* in the north room under its own id: the child
+/// colony's, laid into the layer the mother projects the room under. Her
+/// own controller is `ColonyView.Controller`.
 let private withNorthController (pos: Pos) (colony: ColonyView) =
     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -1098,16 +915,12 @@ let private withNorthController (pos: Pos) (colony: ColonyView) =
     }
 
 /// The mother's ColonyView while she raises a child that has already stood
-/// its own spawn: the north room declared a home of ours, owned, holding a
-/// spawn of ours and a controller of ours, with the human's spawn site
-/// still standing in it. Every fact but the last is the [[nursery]]
-/// fixture's; what makes this a **bootstrapped child** instead is the
-/// spawn (`withNorthSpawn`), and the two states are read against each
-/// other on exactly that one fact throughout.
+/// its own spawn, with the human's spawn site still standing in it. What
+/// makes this a **bootstrapped child** rather than the nursery fixture is
+/// the spawn (`withNorthSpawn`).
 ///
-/// The mother's own controller stands at home beside it, because the whole
-/// question below is which of two Upgrades a loaded body takes and a
-/// fixture with one of them missing could not ask it.
+/// The mother's own controller stands at home beside it, because the
+/// question below is which of two Upgrades a loaded body takes.
 let private claimedChild =
     northBorderColony { X = 10; Y = 38 }
     |> withNorthOutpost None
@@ -1118,11 +931,9 @@ let private claimedChild =
 
 let private raisingMother = withNorthSpawn claimedChild
 
-/// The same child once its own spawn *stands*: every fact `raisingMother` has
-/// but the human's spawn site, which is a `ConstructionSite` and so a Build in
-/// the child's room. The cases below are about what a raised child's room is
-/// worked for once nothing in it is being built, so they cannot read the pair
-/// above and state this rung for themselves.
+/// The same child once its own spawn *stands*: every fact `raisingMother`
+/// has but the human's spawn site, so the cases below read a room with
+/// nothing being built in it.
 let private raisedChild =
     northBorderColony { X = 10; Y = 38 }
     |> withNorthOutpost None
@@ -1131,9 +942,8 @@ let private raisedChild =
     |> asNursery
     |> withNorthSpawn
 
-/// The one worker moved out of the home corridor into the child's room —
-/// where a [[pioneer]] that has crossed the [[seam]] actually stands, and
-/// the only place from which the child's Upgrade is the near one.
+/// The one worker moved into the child's room, the only place from which
+/// the child's Upgrade is the near one.
 let private standingNorth (pos: Pos) (colony: ColonyView) =
     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -1151,9 +961,8 @@ let private standingNorth (pos: Pos) (colony: ColonyView) =
                 }
     }
 
-/// The child running its own tick over the same room: its own home, its
-/// own rock, its own controller under the same id the mother sees it by —
-/// two colonies, two views, one target (ADR 0047 decision 1).
+/// The child running its own tick over the same room: its own controller
+/// under the same id the mother sees it by.
 let private childRunningItself =
     let colony = childColony [ "c", { X = 10; Y = 44 } ]
 
@@ -1163,9 +972,7 @@ let private childRunningItself =
                 { controllerAt 2 with
                     Id = "ctrl-child"
                 }
-        // Its own [[stage]], under its own home: a spawn of its own
-        // standing and RCL2 is `Bootstrapping` (ADR 0052 decision 3), the
-        // colony this whole window is about read from the inside.
+        // Its own stage: a spawn of its own standing and RCL2 is `Bootstrapping`.
         Stages = Map.ofList [ "W1N2", Bootstrapping ]
         Spatial =
             { colony.Spatial with
@@ -1183,16 +990,9 @@ let bootstrapTests =
         "the bootstrap window"
         [
             test "the mother's pool holds a bootstrapped child's Upgrade and its Build" {
-                // ADR 0047 decision 4's second half, at the pool it is
-                // decided in: while the child is under
-                // `Tuning.BootstrapLevel` its Upgrade and its Build are
-                // visible to the mother's workers — the one cross-colony
-                // borrowing rule there is.
-                //
-                // The Build needs no rule of its own: a site in a room the
-                // colony projects is already pooled by id (#150), so what
-                // this reads on that half is the *room* being in the
-                // projection at all.
+                // While the child is under `Tuning.BootstrapLevel` its Upgrade and its
+                // Build are visible to the mother's workers. The Build needs no rule of
+                // its own: a site in a projected room is already pooled by id (#150).
                 let pool colony =
                     planTasksOn colony noThreats |> List.map taskId |> List.sort
 
@@ -1206,12 +1006,9 @@ let bootstrapTests =
                     (taskId (Upgrade "ctrl-1"))
                     "and her own Upgrade is still hers: the borrowing adds a second, it does not replace the first"
 
-                // Pairwise on the tick the child outgrows her: what RCL3
-                // does to this ColonyView is take the whole room out of her
-                // scan set (`withoutNorthRoom`), and both Tasks leave with
-                // it, from one subtraction rather than two gates — the
-                // child's [[stage]] turning `Independent` beside it closes
-                // nothing on its own (`the colony stage` below).
+                // Pairwise on the tick the child outgrows her: RCL3 takes the whole
+                // room out of her scan set and both Tasks leave with it, from one
+                // subtraction rather than two gates.
                 let outgrown = pool (withoutNorthRoom raisingMother)
 
                 Expect.isFalse
@@ -1227,12 +1024,9 @@ let bootstrapTests =
                     (taskId (Upgrade "ctrl-1"))
                     "and her own Upgrade is untouched by either reading"
 
-                // And the other end of the window, pairwise on the one
-                // fact that separates a nursery from a bootstrapped child:
-                // with no spawn standing in it the room is a nursery, whose
-                // own Upgrade is nobody's business — an RCL1 controller has
-                // 20,000 ticks before it downgrades, which outlasts the
-                // nursery.
+                // The other end of the window: with no spawn standing the room is a
+                // nursery, whose own Upgrade is nobody's business; an RCL1 controller
+                // has 20,000 ticks before it downgrades, which outlasts the nursery.
                 Expect.isFalse
                     (pool claimedChild |> List.contains (taskId (Upgrade "ctrl-child")))
                     "a nursery's controller is not pooled: the borrowing begins the tick the child stands its own spawn"
@@ -1244,13 +1038,9 @@ let bootstrapTests =
             }
 
             test "the child pools the same Upgrade in its own tick" {
-                // Both colonies hold it, and neither is the other's: the
-                // mother reads the controller off a layer she projects, the
-                // child off its own `ColonyView.Controller`, and the one
-                // target carries one Task id in both pools. Which of them
-                // actually upgrades is travel cost's, tick by tick — each
-                // Matcher counts only its own holders, exactly as the two
-                // pools over a [[nursery]]'s room do.
+                // Both colonies hold it: the mother reads the controller off a layer
+                // she projects, the child off its own `ColonyView.Controller`, and each
+                // Matcher counts only its own holders.
                 let pool colony =
                     planTasksOn colony noThreats |> List.map taskId
 
@@ -1266,17 +1056,12 @@ let bootstrapTests =
             }
 
             test "a loaded body is sent to the child's Upgrade by rank, from wherever it stands" {
-                // #213: the child's Upgrade is feeding-tier in the mother's
-                // pool. Left in the surplus beside the home Upgrade, travel
-                // cost — a Seam and forty tiles against five — kept every
-                // pioneer at home and the addend was three more home
-                // upgraders (live, t~170,4xx: five loaded workers, four on
-                // the home controller, none across). The lift is what
-                // makes the hire a hire.
+                // #213: left in the surplus beside the home Upgrade, travel cost (a
+                // Seam and forty tiles against five) kept every pioneer at home and
+                // the addend was three more home upgraders (live, t~170,4xx: five
+                // loaded workers, four on the home controller, none across).
                 //
-                // Read without the site, so the pool holds exactly the two
-                // Upgrades and the Matched factor names that one
-                // comparison rather than reporting on some third candidate.
+                // Read without the site, so the pool holds exactly the two Upgrades.
                 let twoUpgrades = raisedChild |> loaded
 
                 Expect.equal
@@ -1291,12 +1076,9 @@ let bootstrapTests =
             }
 
             test "a child's room under safe mode shields the mother's pioneers too" {
-                // #218: safe mode shields the room it is in, whoever is
-                // looking. The mother's tick reads the child's room off
-                // `RoomControl`, so a pioneer standing there beside an
-                // armed hostile derives no Reach and keeps its work; pairwise
-                // on the room's flag alone. The mother's own controller is
-                // not under safe mode in either case.
+                // #218: safe mode shields the room it is in, whoever is looking. The
+                // mother's tick reads the child's room off `RoomControl`; pairwise on
+                // the room's flag alone.
                 let childUnder (safe: bool) =
                     let colony = raisedChild |> loaded |> standingNorth { X = 10; Y = 44 }
 
@@ -1327,11 +1109,9 @@ let bootstrapTests =
             }
 
             test "a pioneer builds the child's site before it upgrades the child's controller" {
-                // The child's extension site is feeding-tier in the
-                // mother's pool and the borrowed Upgrade drops to surplus
-                // while it stands: the loaded body takes the site by rank.
-                // Pairwise on the site alone — without it the Upgrade is
-                // the feeding-tier Task again (the test above).
+                // The child's extension site is feeding-tier in the mother's pool and
+                // the borrowed Upgrade drops to surplus while it stands. Pairwise on
+                // the site alone.
                 let withNorthSite id kind pos (colony: ColonyView) =
                     let north = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -1361,11 +1141,8 @@ let bootstrapTests =
             }
 
             test "the lift takes pioneerCount bodies and the fourth stays on the home controller" {
-                // The cap is the hire (#213): `Tuning.PioneerCount` is what the
-                // worker row rose by, so it is what the feeding-tier Upgrade
-                // may hold. A fourth loaded body is over the cap and prices
-                // the home Upgrade like any surplus body — pairwise on the
-                // count alone, same room, same two Upgrades.
+                // The cap is the hire (#213): `Tuning.PioneerCount` is what the worker
+                // row rose by, so it is what the feeding-tier Upgrade may hold.
                 let names = [ "w"; "w2"; "w3"; "w4" ]
 
                 let crowd =
@@ -1405,11 +1182,9 @@ let bootstrapTests =
             }
 
             test "a standing body never takes the child's Upgrade" {
-                // The lift must not send the home upgraders after the
-                // pioneers (#213, ADR 0046): a standing body holds no
-                // commuting body, so the borrowed Upgrade is inapplicable to
-                // it and its own controller stays the one Task it exists
-                // for. Same room as above, the body the only thing moved.
+                // The lift must not send the home upgraders after the pioneers (#213):
+                // a standing body holds no commuting body, so the borrowed Upgrade is
+                // inapplicable to it.
                 let standing = raisedChild
 
                 let upgrader =
@@ -1431,27 +1206,20 @@ let bootstrapTests =
             }
 
             test "the downgrade deadline lifts the colony's own controller and not the child's" {
-                // ADR 0007's escalation, narrowed by ADR 0047 decision 4.
-                // The deadline is read off `ColonyView.Controller`, which is
-                // this colony's alone, and since the pool can hold a second
-                // Upgrade the arm that lifts one has to say *which*: lifting
-                // the child's on the mother's timer would send her whole
-                // loaded fleet across the Seam on the tick her own
-                // controller was closest to downgrading, which is the
-                // opposite of what the escalation is for.
+                // The downgrade deadline is read off `ColonyView.Controller`, this
+                // colony's alone, and since the pool can hold a second Upgrade the arm
+                // that lifts one has to say *which*: lifting the child's on the
+                // mother's timer would send her fleet across the Seam on the tick her
+                // own controller was closest to downgrading.
                 //
-                // Read from the one tile where the two answers differ: a
-                // loaded body standing in the child's room, where travel
-                // cost picks the child's Upgrade (the case above) and only a
-                // rank can pull it home. Un-narrowed, both Upgrades would
-                // carry `deadlineRank`, the ranks would tie and travel cost
-                // would keep the body where it stands — so this case is
-                // exactly the mutation the narrowing exists to fail.
+                // Read from the one tile where the two answers differ: a loaded body
+                // in the child's room, where travel cost picks the child's Upgrade and
+                // only a rank can pull it home. Un-narrowed, both would carry
+                // `deadlineRank` and tie.
                 let twoUpgrades = raisedChild |> loaded |> standingNorth { X = 10; Y = 44 }
 
-                // Level 2's full timer is 10,000 and the deadline is half of
-                // it, so 4,000 is inside and 20,000 — `controllerAt`'s own —
-                // is the case above, outside.
+                // Level 2's full timer is 10,000 and the deadline is half of it, so
+                // 4,000 is inside and 20,000 (`controllerAt`'s own) is outside.
                 let pressed (colony: ColonyView) =
                     { colony with
                         Controller =
@@ -1479,11 +1247,9 @@ let twoColonyTests =
         "two colonies"
         [
             test "a colony runs when its home is ours and holds a spawn, and not before" {
-                // ADR 0047 decision 1's own sentence, and the two states a
-                // declaration passes through on the way to running are
-                // exactly the two ways of failing half of it. Pairwise, one
-                // fact at a time: the same declaration, owned or not, with
-                // a spawn or without.
+                // The two states a declaration passes through on the way to running
+                // are the two ways of failing half of the rule. Pairwise, one fact at
+                // a time.
                 let living owned spawned =
                     Colony.living (Set.ofList owned) spawned splitPair
                     |> List.map (fun colony -> colony.Home)
@@ -1506,17 +1272,13 @@ let twoColonyTests =
 
             test
                 "the child runs the tick its spawn stands, while its mother still declares it an outpost" {
-                // The window ADR 0047's Consequences names: decision 1's
-                // rule is a fact about the world and fires on the tick the
-                // spawn is finished; decision 4's constant is moved by a
-                // human, in a commit, some ticks later. Between the two the
-                // child is living and the mother still projects its room.
+                // The living rule is a fact about the world and fires on the tick the
+                // spawn is finished; the declaration is moved by a human, in a commit,
+                // some ticks later. Between the two the child is living and the mother
+                // still projects its room.
                 //
-                // Pinned rather than closed. Gating the child's `decide` on
-                // the human's commit would make a constant nobody has got
-                // to yet cost a colony its whole tick, which is the shape
-                // `outpostsOf` and the undeclared-spawn-room fallback both
-                // refuse.
+                // Pinned rather than closed: gating the child's `decide` on the
+                // human's commit would cost a colony its whole tick.
                 let homes =
                     Colony.living (Set.ofList [ "W1N1"; "W1N2" ]) [ "W1N1"; "W1N2" ] nurseryPair
                     |> List.map (fun colony -> colony.Home)
@@ -1544,15 +1306,12 @@ let twoColonyTests =
             }
 
             test "a mother two hops from her nursery projects the room between them" {
-                // Found live on 2026-09-10: W15S28 was claimed two hops from
-                // W13S28, so the mother's bootstrap half projected it — and
-                // nothing projected the room the walk crosses, which is what
-                // `Atlas.route` needs to price a chain at all (ADR 0058). Her
-                // two borrowed Tasks there were therefore unpriceable and no
-                // pioneer could be sent, and the only thing that hid it was a
-                // separate outpost declaration standing in the room between.
-                // A borrowed room carries its transit rooms exactly as an
-                // outpost does, and a one-hop child adds none.
+                // Found live on 2026-09-10: W15S28 was claimed two hops from W13S28 and
+                // nothing projected the room the walk crosses, which `Atlas.route`
+                // needs to price a chain at all; her two borrowed Tasks there were
+                // unpriceable, hidden only by a separate outpost declaration in the
+                // room between. A borrowed room carries its transit rooms exactly as
+                // an outpost does, and a one-hop child adds none.
                 let raising home child =
                     [
                         {
@@ -1595,13 +1354,10 @@ let twoColonyTests =
             }
 
             test "a mother goes on projecting the child that names her, until it is independent" {
-                // ADR 0047 decision 4's window, at the seam that decides
-                // how long it lasts. A child's [[stage]] is not a fact any
-                // colony's ColonyView holds for a room it does not own — and
-                // it is what decides whether that room is projected at all
-                // — so it is derived off the world once (ADR 0052 decision
-                // 3, `Colony.stageOf`) and everything downstream follows
-                // from the scan set (`Decide` reads no level of its own).
+                // A child's stage is not a fact any colony's ColonyView holds for a
+                // room it does not own, so it is derived off the world once
+                // (`Colony.stageOf`) and everything downstream follows from the scan
+                // set (`Decide` reads no level of its own).
                 let mother = List.head raisedPair
                 let child = List.item 1 raisedPair
 
@@ -1618,20 +1374,14 @@ let twoColonyTests =
                     (raising [ "W1N2", Independent ] raisedPair mother)
                     "at it she is not: the exception closes and the room leaves her projection"
 
-                // And the stage before it: a child off its mother's
-                // outpost list with no spawn of its own — one whose spawn
-                // was destroyed — is a [[nursery]] she is the only colony
-                // that can raise, and dropping it from her projection
-                // would leave a claimed room nobody builds a spawn in.
+                // The stage before it: a child off its mother's outpost list with no
+                // spawn of its own (one whose spawn was destroyed) is a nursery she is
+                // the only colony that can raise.
                 //
-                // **Wider than the level rule this replaces**, and that is
-                // the whole of what the migration moved here: a nursery is
-                // a nursery at any level (`Colony.stageOf`), where
-                // `level < bootstrapLevel` stopped at RCL3. So a child
-                // that stood its own spawn, reached RCL3 and then lost it
-                // is raised again where the level rule orphaned it — the
-                // right answer, at the nursery's own price, and recorded
-                // in ADR 0047's Consequences.
+                // **Wider than the level rule this replaces**: a nursery is a nursery
+                // at any level (`Colony.stageOf`), where `level < bootstrapLevel`
+                // stopped at RCL3, so a child that lost its spawn after RCL3 is raised
+                // again where the level rule orphaned it.
                 Expect.equal
                     (raising [ "W1N2", Nursery ] raisedPair mother)
                     [ "W1N2" ]
@@ -1650,17 +1400,12 @@ let twoColonyTests =
                     (raising [] raisedPair mother)
                     "a room that is no colony anything can see is not one she is raising — absence classifies nothing"
 
-                // The other absence, and the one that **narrows** this
-                // rule against the level it used to read: a declared child
-                // we do not own has no stage either, where a level map
-                // carried any seen controller and read a 0 that was under
-                // the line. Derived here rather than written down, so the
-                // case is the one `World.stages` would actually
-                // hand her — a candidate colony that names a mother, or a
-                // child that stops being ours, is projected by nobody, so
-                // nothing pools a Claim to take such a room and the route
-                // to one is her `Outposts` list (ADR 0047's user story and
-                // its Consequences).
+                // The other absence, which **narrows** this rule against the level it
+                // used to read: a declared child we do not own has no stage, where a
+                // level map read a 0 that was under the line. Derived rather than
+                // written down, so the case is the one `World.stages` would hand her:
+                // such a room is projected by nobody, and the route to one is her
+                // `Outposts` list.
                 let unowned = Colony.stageOf Tuning.defaults false false (Some 1)
 
                 Expect.isNone
@@ -1695,12 +1440,9 @@ let twoColonyTests =
                     [ "W1N2" ]
                     "and once it has outgrown her, in the child's alone"
 
-                // Which is what decides who holds a pioneer standing out
-                // there: a room two colonies project names no single
-                // adopter (ADR 0047 decision 2), so the bodies the mother
-                // hired for the job stay hers to match — and the tick the
-                // window closes they are the child's, like every other
-                // creep standing in a room only it projects.
+                // A room two colonies project names no single adopter, so the bodies
+                // the mother hired stay hers to match, and the tick the window closes
+                // they are the child's.
                 let holder stages =
                     Colony.creepColonies
                         (projectionsOf (Map.ofList stages) raisedPair)
@@ -1721,18 +1463,13 @@ let twoColonyTests =
 
             test
                 "a spawn room no declaration names runs on its own, and only when nothing declared does" {
-                // The colony a slip in the constant leaves behind. A home
-                // nobody declared works no outposts rather than entering a
-                // state nothing downstream has a rule for (#124), and this
-                // is that sentence one level up: without it a bot standing
-                // in a room the declaration does not mention runs no
-                // `decide` at all — nothing cast, nothing harvested,
-                // nothing moved, and no Verdict to say why — which is what
-                // a respawn and every harness stub arrive as.
+                // A home nobody declared works no outposts rather than entering a state
+                // nothing downstream has a rule for (#124); without this a bot in a
+                // room the declaration does not mention runs no `decide` at all, which
+                // is what a respawn and every harness stub arrive as.
                 //
-                // Pairwise against the case above it: the same undeclared
-                // spawn room, with and without a declared colony living
-                // beside it.
+                // Pairwise against the case above: the same undeclared spawn room, with
+                // and without a declared colony living beside it.
                 let living owned spawned =
                     Colony.living (Set.ofList owned) spawned splitPair
                     |> List.map (fun colony -> colony.Home, colony.Outposts)
@@ -1759,11 +1496,8 @@ let twoColonyTests =
 
             test
                 "a creep is its caster's, and its adopter's while it stands in that colony's room alone" {
-                // ADR 0047 decision 2 at the two seams it decides at: the
-                // membership rule the shell cuts a ColonyView with, and what
-                // `decide` then makes of the creep. One creep, one fact
-                // moved — the room it stands in — and the whole of its
-                // working life moves with it.
+                // The membership rule the shell cuts a ColonyView with, and what
+                // `decide` then makes of the creep. One creep, one fact moved.
                 let placed standing =
                     Colony.creepColonies
                         (projectionsOf Map.empty splitPair)
@@ -1781,20 +1515,14 @@ let twoColonyTests =
                     (Some "W1N2")
                     "and standing in a room only the child projects, the child adopts it for the tick"
 
-                // What that decides. The colony the rule gave the creep to
-                // matches it to a Task of its own rooms; the other one is
-                // handed a ColonyView without it and says nothing about it at
-                // all — no Verdict, no assignment, no Move.
+                // The colony the rule gave the creep to matches it; the other is handed
+                // a ColonyView without it and says nothing about it at all.
                 //
-                // Each half is asked of a colony with a fleet of its **own**
-                // standing in it, so the Matcher has actually run and a pool
-                // has actually been matched when the silence is read: asked
-                // of an empty ColonyView the same `isNone` would hold for a
-                // creep nobody had ever heard of, and would still hold with
-                // the membership cut deleted. What stays out of reach here
-                // is the other half of that cut — that `ColonyView.ofWorld`
-                // keeps an adopted body out of every layer's
-                // `CreepPositions` as well — which is App-side and has no
+                // Each half is asked of a colony with a fleet of its **own** standing
+                // in it, so a pool has actually been matched when the silence is read:
+                // on an empty ColonyView the same `isNone` would hold with the
+                // membership cut deleted. That `ColonyView.ofWorld` keeps an adopted
+                // body out of every layer's `CreepPositions` is App-side and has no
                 // seam to test through (#137).
                 Expect.equal
                     (matchedTask motherCast (motherColony [ motherCast, { X = 10; Y = 2 } ]))
@@ -1931,12 +1659,8 @@ let twoColonyTests =
             }
 
             test "each colony pools its own rooms' work and never the other's" {
-                // The whole of "one Atlas, one Layout, one pool per colony"
-                // (ADR 0047 decision 1) as it is visible from outside: two
-                // views, two pools, and no Task of one in the other.
-                // `decide` reads the projection it is handed and never the
-                // declaration, which is what makes this a property of the
-                // seam rather than of the fixtures.
+                // Two views, two pools, and no Task of one in the other. `decide` reads
+                // the projection it is handed and never the declaration.
                 let pool colony =
                     planTasksOn colony noThreats |> List.map taskId
 
@@ -1960,13 +1684,11 @@ let twoColonyTests =
             }
         ]
 
-/// One colony's [[stage]] forced to an answer, with its controller level
-/// left exactly where the fixture put it (ADR 0052 decision 3). The shell
-/// can never build such a ColonyView — it derives the one from the other
-/// (`World.stages`) — and that is what makes it the instrument
-/// here: a rule that had gone on reading `Controller.Level` would answer
-/// the same either way and every case below would stay green with the
-/// migration undone.
+/// One colony's stage forced to an answer, with its controller level left
+/// where the fixture put it. The shell can never build such a ColonyView
+/// (`World.stages` derives one from the other), which is what makes it
+/// the instrument: a rule still reading `Controller.Level` would answer
+/// the same either way.
 let private atStage stage (colony: ColonyView) =
     { colony with
         Stages = Map.add (SpatialInfo.homeName colony.Spatial) stage colony.Stages
@@ -1978,9 +1700,8 @@ let colonyStageTests =
         "the colony stage"
         [
             test "a stage is ownership, a spawn and a level, and each of the three moves it alone" {
-                // `Colony.stageOf`, the one place `Tuning.BootstrapLevel` is read
-                // (ADR 0052 decision 3). Pairwise on each input in turn,
-                // the other two held.
+                // `Colony.stageOf`, the one place `Tuning.BootstrapLevel` is read.
+                // Pairwise on each input in turn, the other two held.
                 Expect.equal
                     (Colony.stageOf Tuning.defaults false false (Some 1))
                     None
@@ -2022,10 +1743,8 @@ let colonyStageTests =
             }
 
             test "the road gate reads the stage and not the level" {
-                // #209's gate, migrated (ADR 0052 decision 3). The same
-                // RCL5 fixture the layout tests plan, with the stage moved
-                // under it: the trunks are planned whole either way and
-                // what the stage decides is whether they reach the ground.
+                // #209's gate, migrated: the same RCL5 fixture the layout tests plan,
+                // with the stage moved under it.
                 let roads colony =
                     let { Intents = intents } = decideOn colony
                     sitesOfKind Road intents
@@ -2044,11 +1763,9 @@ let colonyStageTests =
             }
 
             test "the rampart line reads the stage and not the level" {
-                // #214's floor, migrated with it. The rampart at one hit is
-                // the Repair pool's business for an independent colony and
-                // decays away for one under the line, and here the level is
-                // held at RCL2 through both — where the level-reading rule
-                // would have answered "no floor" whatever the stage.
+                // #214's floor, migrated with it: the level is held at RCL2 through
+                // both, where the level-reading rule would have answered "no floor"
+                // whatever the stage.
                 let hungry colony =
                     repairTasks (planTasksOn colony noThreats)
 
@@ -2069,18 +1786,13 @@ let colonyStageTests =
             }
 
             test "a home site's tier reads the stage and not the level" {
-                // The child's own reading of `isBootstrappingRoom`, which
-                // used to be a spawn standing plus `Controller.Level` and
-                // is now the stage those two derive (ADR 0052 decision 3).
-                // The lane is the standing-body fixture's, at one level
-                // throughout: only the stage moves, and the match factor
-                // says which tier decided.
+                // The child's own reading of `isBootstrappingRoom`, which used to be a
+                // spawn standing plus `Controller.Level`. Only the stage moves, and
+                // the match factor says which tier decided.
                 //
-                // Against the flow and not against the controller (#234):
-                // an independent colony's site outranks its own Upgrade by
-                // a rung now, so both stages win on rank over that one and
-                // only the hungry spawn at the lane's far end still tells
-                // the feeding tier from the surplus one.
+                // Against the flow and not the controller (#234): an independent
+                // colony's site outranks its own Upgrade by a rung now, so only the
+                // hungry spawn at the lane's far end tells the two tiers apart.
                 let lane stage =
                     bufferLaneFlow
                         [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
@@ -2108,16 +1820,10 @@ let colonyStageTests =
             }
 
             test "the nursery and the bootstrap predicates read the stage and not the census" {
-                // R1's pairwise criterion for the two readers ADR 0052
-                // decision 3 migrated together, and the only instrument
-                // that can show it: a fixture whose kind census and whose
-                // [[stage]] **disagree**. `raisingMother` holds a spawn
-                // structure in the child's layer — the fact both
-                // predicates used to be written on, one asserting it and
-                // the other denying it — and here the stage beside it is
-                // forced back to `Nursery`. A rule that had gone on
-                // counting spawns in the census would answer the census;
-                // these answer the stage.
+                // The only instrument that can show it: a fixture whose kind census
+                // and whose stage **disagree**. `raisingMother` holds a spawn structure
+                // in the child's layer, the fact both predicates used to be written
+                // on, and here the stage is forced back to `Nursery`.
                 let pool colony =
                     planTasksOn colony noThreats |> List.map taskId
 
@@ -2156,15 +1862,11 @@ let colonyStageTests =
             }
 
             test "the pioneer addend is flat across the stage, and reads the stage to be" {
-                // The other half of the same migration, and the trap the
-                // ticket names: the addend is flat over both stages before
-                // independence (ADR 0047), so the fleet must not move on
-                // the tick a nursery becomes a bootstrapping child. Pinned
-                // here against the *stage* alone — the census keeps the
-                // spawn structure through the flip — so a `raising` that
-                // had gone on reading the census would answer neither
-                // predicate on the `Nursery` reading and drop her target
-                // by three.
+                // The addend is flat over both stages before independence, so the
+                // fleet must not move on the tick a nursery becomes a bootstrapping
+                // child. Pinned against the *stage* alone: the census keeps the spawn
+                // structure through the flip, so a `raising` still reading the census
+                // would drop her target by three on the `Nursery` reading.
                 let casts colony fleet =
                     spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
@@ -2198,15 +1900,11 @@ let colonyStageTests =
 
             test
                 "the mother reads the child's stage, and her scan set and not the stage closes her window" {
-                // ADR 0047's Consequences, pinned against the stage that
-                // now carries the level into her ColonyView: while a human
-                // still declares the child's room one of her `Outposts`
-                // the room is in her scan set through the outpost reading,
-                // which asks no stage — so the borrowing and the addend run
-                // at any RCL until the commit takes that entry out. A
-                // predicate that read `Bootstrapping` alone would close the
-                // window on a tick no human touched, and drop her fleet by
-                // three against ADR 0047's flat addend.
+                // While a human still declares the child's room one of her `Outposts`
+                // the room is in her scan set through the outpost reading, which asks
+                // no stage, so the borrowing and the addend run at any RCL until the
+                // commit takes that entry out. A predicate reading `Bootstrapping`
+                // alone would close the window on a tick no human touched.
                 let casts colony fleet =
                     spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
@@ -2237,10 +1935,8 @@ let colonyStageTests =
                         "and tight: one short of sixteen she still casts the addend's own row"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
-                // The Upgrade half of the same borrowing, on the fixture
-                // that carries the child's controller: it stays in her pool
-                // while the room is in her scan set, and leaves with the
-                // room.
+                // The Upgrade half of the same borrowing: it stays in her pool while
+                // the room is in her scan set, and leaves with the room.
                 let pool colony =
                     planTasksOn colony noThreats |> List.map taskId
 
@@ -2268,12 +1964,10 @@ let borrowedRoomBudgetTests =
         "a borrowed room's sites and the budgets"
         [
             test "a child's container site neither draws nor dilutes the outpost builders' budget" {
-                // #210 (user decision 2026-09-07). Two container sites: one
-                // in the north room, one in the west outpost. As a candidate
-                // colony the north room is an outpost and the two sites
-                // split the budget of two, one apiece; claimed as a nursery
-                // the north site is the child's own, so the west site has
-                // the whole budget — two builders, where it had one.
+                // #210 (user decision 2026-09-07). As a candidate colony the north room
+                // is an outpost and the two sites split the budget of two; claimed as
+                // a nursery the north site is the child's own, so the west site has
+                // the whole budget.
                 let westward = withWestOutpost 1
 
                 let westBuilders control =
@@ -2303,11 +1997,9 @@ let borrowedRoomBudgetTests =
             }
 
             test "one FerryLoads budget is spread over a child room's buffers in id order" {
-                // #224 (user decision 2026-09-07): the hauler row hires
-                // FerryLoads bodies per child, so the pool admits that many
-                // per child — the first buffer by id takes the budget's
-                // share and a second one what is left. Pairwise on the
-                // budget: at two, one apiece.
+                // #224 (user decision 2026-09-07): the hauler row hires FerryLoads
+                // bodies per child, so the pool admits that many per child, the first
+                // buffer by id taking the budget's share. Pairwise on the budget.
                 let twoBuffers loads =
                     let mother = ferryMother Bootstrapping
                     let north = SpatialInfo.layerOf mother.Spatial "W1N2"

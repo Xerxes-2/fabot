@@ -1,5 +1,5 @@
-/// Seat capacity, the Refill cluster that is one Task (ADR 0054), the
-/// targets nothing reaches, and the Repairs.
+/// Seat capacity, the Refill cluster that is one Task, the targets
+/// nothing reaches, and the Repairs.
 module Fabot.Core.Tests.Decide.PoolSeatTests
 
 open Expecto
@@ -159,16 +159,11 @@ let refillClusterTests =
         "refill cluster"
         [
             test "the cluster admits bodies while its room exceeds what the holders carry" {
-                // ADR 0054's bound as #374 restated it (ADR 0071): a budget
-                // the holders' **loads** are counted against, not a count of
-                // bodies. Two carriers holding fifty apiece stand on either
-                // side of the spawn, so nothing but the budget separates
-                // them: a hundred of room takes both (the first holds
-                // nothing against it, the second finds fifty short of a
-                // hundred), forty takes one (fifty is not short of forty).
-                // Under the old `ceil(free / one load)` — a 200 load at this
-                // bank — a hundred of room admitted exactly one body whatever
-                // either carried.
+                // A budget the holders' loads are counted against, not a
+                // count of bodies. Two carriers holding fifty apiece stand
+                // either side of the spawn: a hundred of room takes both
+                // (the second finds fifty short of a hundred), forty takes
+                // one.
                 let colony free =
                     clusterColony
                         (free, 0, 0)
@@ -196,13 +191,9 @@ let refillClusterTests =
 
             test
                 "a full carrier joins a ring a light load is already aimed at, while the room covers both" {
-                // The live shape #374 was filed on: W15S28's ring at a
-                // thousand of room, a worker carrying fifty holding the one
-                // slot `ceil(1000 / 1500)` admitted, and the courier beside
-                // the Storage with a full store turned away capacity-full.
-                // Here the 300 bank's `4C/2M` carries 200: with the light
-                // body already holding, 200 of room admits the loaded one
-                // (fifty short of two hundred) and 50 of room does not.
+                // The live shape: a ring at a thousand of room, a worker
+                // carrying fifty holding the one slot, and a full courier
+                // turned away. Here the 300 bank's `4C/2M` carries 200.
                 let colony free =
                     clusterColony
                         (free, 0, 0)
@@ -231,10 +222,9 @@ let refillClusterTests =
             }
 
             test "an extension filled while a body walks costs it a neighbour, not its Task" {
-                // The churn this ADR was written against, inverted (#226):
-                // the body is aimed at the ring, not at the extension that
-                // happened to be nearest, so somebody else topping that
-                // extension up leaves its assignment exactly where it was.
+                // The body is aimed at the ring, not the nearest extension,
+                // so somebody topping that one up leaves the assignment
+                // where it was.
                 let walking free =
                     clusterColony
                         free
@@ -263,9 +253,7 @@ let refillClusterTests =
             }
 
             test "the whole ring full is what takes the Task away" {
-                // The other half of the same sentence: `task-gone` still
-                // fires, once, when there is nowhere in the cluster left to
-                // pour — which is once a fill instead of once an extension.
+                // `task-gone` fires once a fill, not once an extension.
                 let full =
                     clusterColony
                         (0, 0, 0)
@@ -287,10 +275,8 @@ let refillClusterTests =
             }
 
             test "the arriving body pours into the member beside it that has room" {
-                // h1 at (10,13) touches ext-1 (10,12) and ext-2 (10,14)
-                // alike, so the pair moves only which of them is hungry —
-                // the [[emitter]]'s pick, made at arrival off the tile the
-                // body is standing on rather than at matching time.
+                // h1 at (10,13) touches ext-1 and ext-2 alike, so only which
+                // is hungry moves: the emitter's pick, made at arrival.
                 let arrived free =
                     clusterColony
                         free
@@ -313,19 +299,11 @@ let refillClusterTests =
             }
 
             test "a load the ring no longer has room for is released capacity-full" {
-                // The price ADR 0054 records rather than removes. The ring's
-                // free energy only falls, so on the tick it falls under what
-                // the bodies aimed at it carry (#374's budget, where ADR 0054
-                // read a count of loads) one of them is released — and since
-                // #230 it is the body **furthest** from the ring, not the
-                // one whose name sorts later. `h2` is standing beside the
-                // spawn with a full store and pours this tick; `h1` is seven
-                // tiles down the column and keeps nothing.
-                //
-                // It is once per load *poured*, where a Task per extension
-                // paid a `task-gone` per extension filled, so the churn is
-                // bounded far below what #226 removed — but it is not zero,
-                // and this is where it is written down.
+                // The ring's free energy only falls, so the tick it falls
+                // under what the bodies aimed at it carry, the body furthest
+                // from the ring is released. `h2` is beside the spawn with a
+                // full store and pours this tick; `h1` is seven tiles down
+                // the column.
                 let colony free =
                     clusterColony
                         free
@@ -351,9 +329,8 @@ let refillClusterTests =
 
                     holdersOf (Refill("spawn-1", Energy)) assignments, verdicts
 
-                // Four hundred of room against two bodies carrying fifty
-                // apiece: both keep what they hold (#374: the budget counts
-                // the loads, so it is a hundred against four hundred).
+                // Four hundred of room against two loads of fifty: both
+                // keep.
                 Expect.equal
                     (fst (outcome (300, 100, 0)))
                     [ "h1"; "h2" ]
@@ -509,12 +486,10 @@ let repairTests =
             }
 
             test "a road over the hungry line stays pooled while a creep holds its Repair" {
-                // The two lines (ADR 0061): a repair tick is `Work × 100` hits
-                // whatever the structure's max, so one line makes every repair
-                // a one-tick top-up that goes `task-gone` the tick after it
-                // started and leaves the paving pinned at the line. The held
-                // fact — one boolean per candidate, off the assignment table —
-                // picks which line this structure is judged by.
+                // A repair tick is `Work × 100` hits whatever the max, so one
+                // line makes every repair a one-tick top-up that goes
+                // `task-gone` the tick after it started. The held fact picks
+                // which line this structure is judged by.
                 let at hits =
                     bareRespawn |> withHits "road-1" BuiltKind.Road hits 5000
 
@@ -538,10 +513,9 @@ let repairTests =
             }
 
             test "the held fact is spelled forward: a Withdraw on a container is no Repair on it" {
-                // The seam's own property (ADR 0061 part 3): the set is read as
-                // `Set.contains (taskId (Repair id))`, written from the
-                // candidate id in hand and never parsed out of a string, so
-                // "held" can never come to mean "somebody is drawing from it".
+                // The set is read as `Set.contains (taskId (Repair id))`,
+                // never parsed out of a string, so "held" cannot mean
+                // "drawing from it".
                 let cont = bareRespawn |> withHits "cont-1" BuiltKind.Container 150000 250000
 
                 Expect.isEmpty
@@ -555,11 +529,8 @@ let repairTests =
             }
 
             test "the two lines reach the fraction-judged kinds and no others" {
-                // ADR 0061 part 2: a rampart is judged against a floor and a
-                // Keep structure against full hits, and neither has a second
-                // number to make. Both would move if the fraction rule reached
-                // them — four fifths of a rampart's three-million max is far
-                // over its floor — so the pairwise is the whole test.
+                // A rampart is judged against a floor and a Keep structure
+                // against full hits: neither has a second line.
                 let colony =
                     bareRespawn
                     |> withLevel 5
@@ -574,10 +545,8 @@ let repairTests =
                     (repairTasks (planTasksHolding [ Repair "ram-1"; Repair "sto-1" ] colony))
                     "and holding either changes neither: the floor and full hits are one number each"
 
-                // And the same pair from under their lines, where the held set
-                // must not take a Task away either: a rampart under its floor
-                // and a dented Keep structure are pooled identically with and
-                // without a holder.
+                // And from under their lines, where the held set must not
+                // take a Task away either.
                 let ailing =
                     bareRespawn
                     |> withLevel 5
@@ -591,11 +560,9 @@ let repairTests =
             }
 
             test "the two-line rule is monotone: holding never empties the pool" {
-                // ADR 0061 part 4. The held line only ever keeps a Task pooled
-                // that would otherwise be gone, so no structure can leave the
-                // pool *earlier* because somebody is repairing it — over every
-                // hits value a road, a container, a rampart and a Keep
-                // structure can carry, in hundredths of their own max.
+                // The held line only keeps a Task pooled that would
+                // otherwise be gone, over every hits value in hundredths of
+                // max.
                 let kinds =
                     [
                         "road-1", BuiltKind.Road, 5000
@@ -636,11 +603,9 @@ let repairTests =
             }
 
             test "an assignment naming a dead creep holds nothing" {
-                // The join is over the **living** (ADR 0061 part 3):
                 // `Assignments` arrives from Memory and may name a creep that
-                // died last tick. The Matcher drops those silently, but
-                // `planTasksOn` runs first, and a colony must not hold a Task
-                // open on the strength of a body that is not there.
+                // died last tick; `planTasksOn` runs before the Matcher
+                // drops it.
                 let snapshot =
                     { bareRespawn with
                         Sources = []
@@ -666,13 +631,10 @@ let repairTests =
 
             test
                 "the ratchet is the assignment: a released holder leaves the road judged by its hits" {
-                // ADR 0061 part 4, and the correction to `Pool.fs`'s `rescued`
-                // comment: nothing in the Matcher holds a Repair to the whole
-                // line. `applicable` is `spending && not standing`, so a body
-                // that empties mid-repair is released `inapplicable` and its
-                // target is unheld the next tick — judged at the hungry line
-                // again, wherever the load ran out, with no memory of the
-                // half-finished job anywhere.
+                // Nothing in the Matcher holds a Repair to the whole line:
+                // `applicable` is `spending && not standing`, so a body that
+                // empties mid-repair is released and its target is unheld
+                // the next tick.
                 let emptied hits =
                     { bareRespawn with
                         Sources = []
@@ -709,10 +671,9 @@ let repairTests =
             }
 
             test "a road a quarter from destruction is a rescue: a rung of its own, one body" {
-                // The failure #284 was filed on: the surplus tier is ordered by
-                // travel cost, and the cluster always holds a road just under
-                // the trigger, so the one out on the trunk never wins. The
-                // rescue is the lift that ends the comparison.
+                // The surplus tier is ordered by travel cost and the cluster
+                // always holds a road just under the trigger, so the one on
+                // the trunk never wins without a lift.
                 let colony =
                     bareRespawn
                     |> withHits "road-near" BuiltKind.Road 2400 5000
@@ -743,10 +704,7 @@ let repairTests =
             }
 
             test "the rescue budget lifts the worst and leaves the rest in the surplus" {
-                // The outpost builders' budget one Task over (#157, #266):
-                // `Tuning.RepairRescues` at a time, the most damaged first, so
-                // a colony that has let a whole trunk rot still spends most of
-                // its surplus at home.
+                // `Tuning.RepairRescues` at a time, the most damaged first.
                 let colony =
                     bareRespawn
                     |> withHits "road-a" BuiltKind.Road 100 5000
@@ -770,11 +728,8 @@ let repairTests =
             }
 
             test "a damaged Keep structure is no rescue" {
-                // The lift reaches the decaying kinds alone (#284): the Keep is
-                // judged against full hits and a rampart against a floor, and
-                // neither is a thing the colony is letting rot — a Storage at
-                // one hit was shot at, and the safe-mode reflex is what answers
-                // that (ADR 0034).
+                // The lift reaches the decaying kinds alone: a Storage at
+                // one hit was shot at, and safe mode answers that.
                 let colony = bareRespawn |> withHits "sto-1" BuiltKind.Storage 1 1_000_000
 
                 Expect.equal
@@ -797,10 +752,8 @@ let repairTests =
             }
 
             test "kinds with no whole line never enter the pool on low hits" {
-                // The ColonyView projects hits on repairable kinds only, but the
-                // kind gate holds in the Planner regardless of what arrives.
-                // The extensions are deliberately outside the Keep (ADR
-                // 0034): cheap, twenty of them, and no creep lives on one.
+                // The kind gate holds in the Planner whatever arrives:
+                // extensions are outside the Keep.
                 let snapshot =
                     bareRespawn
                     |> withHits "ext-1" BuiltKind.Extension 1 5000
@@ -813,11 +766,7 @@ let repairTests =
             }
 
             test "a dented Keep structure enters the pool; a whole one does not" {
-                // The Keep is repaired to full (ADR 0034): it does not decay,
-                // so below max means it was damaged — the same fact the
-                // safe-mode arm reads, which is why a dented Keep is never
-                // left standing. This revises ADR 0023's "nothing repairs the
-                // Storage".
+                // The Keep does not decay, so below max means damaged.
                 let dented =
                     bareRespawn
                     |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
@@ -841,13 +790,9 @@ let repairTests =
             }
 
             test "a rampart is hungry below its floor and whole at it" {
-                // The floor, not half of max (ADR 0034): a rampart's max is
-                // three million at RCL4, so the decaying kinds' fraction
-                // would leave it hungry forever. The number restates the
-                // tunable, exactly as the road tests restate the half. At
-                // the level the colony keeps ramparts from (#214): below it
-                // the floor is not read at all — the pairwise test beside
-                // this one.
+                // The floor, not half of max: a rampart's max is three
+                // million at RCL4. At the level the colony keeps ramparts
+                // from; below it the floor is not read at all.
                 let floor = 100_000
                 let max = 3_000_000
 
@@ -878,12 +823,9 @@ let repairTests =
             }
 
             test "below the bootstrap level a rampart has no floor: it decays away unrepaired" {
-                // #214: a child at RCL2 raised three ramparts the tick the
-                // engine allowed them and then held four of its five loaded
-                // workers repairing them toward a floor derived for the
-                // home. Below the stage the colony keeps ramparts from
-                // (`keepsRamparts`) a standing rampart is not the pool's
-                // business; the decaying kinds and the Keep are.
+                // A child at RCL2 raised three ramparts and held four loaded
+                // workers repairing them toward the home's floor. Below
+                // `keepsRamparts` a rampart is not the pool's business.
                 let floor = 100_000
                 let max = 300_000
 

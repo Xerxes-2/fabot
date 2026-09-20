@@ -1,4 +1,4 @@
-/// Expiring creeps and capacity judged at arrival (ADR 0026).
+/// Expiring creeps and capacity judged at arrival. ADR-0026
 module Fabot.Core.Tests.Decide.AnchorArrivalTests
 
 open Expecto
@@ -15,16 +15,11 @@ let expiringTests =
         "expiring creeps"
         [
             test "an expiring creep leaves the count: the colony casts its replacement now" {
-                // ADR 0026: spawning fills the gap between the target and
-                // the creeps that will still be alive when a replacement
-                // could arrive. The W12S28 fleet is whole, but its last
-                // worker stands eight steps from the spawn at (20,10) —
-                // seven from the tile a replacement is born on. That body
-                // is five parts, so 15 ticks in the spawner, and its two
-                // Move parts carry it over a plain tile in the walk's
-                // one-tick floor: 7 ticks, one a tile (ADR 0029). A lead of
-                // 22, so at 22 ticks left the worker is out of the count
-                // and its successor is cast while it still works.
+                // The last worker stands eight steps from the spawn at
+                // (20,10), seven from the tile a replacement is born on.
+                // Five parts, so 15 ticks in the spawner, and two Move
+                // parts walk a plain tile at the one-tick floor: 7 ticks.
+                // A lead of 22.
                 let fleetWithLastWorker life =
                     { incomeColony with
                         Creeps =
@@ -55,8 +50,7 @@ let expiringTests =
                     let snapshot =
                         { successionColony with
                             // The generalist keeps the supply floor
-                            // disarmed (ADR 0050): an Anchor alone can
-                            // refill no extension.
+                            // disarmed: an Anchor alone can refill no extension.
                             Creeps = [ anchor "a1" 0 50 |> withLife life; worker "w1" 0 50 ]
                             Spatial = successionRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                         }
@@ -76,15 +70,12 @@ let expiringTests =
             }
 
             test "the lead is the replacement's own body: long for an Anchor, short for a hauler" {
-                // Nine plain steps from the spawn at (20,10) — eight from
-                // the tile a replacement is born on — for two rows of the
-                // same colony (ADR 0026). A fresh Anchor is empty and slow
-                // — 4 cost units a step, 2 ticks of walk apiece, so 16
-                // ticks of walking against 12 in the spawner: a lead of 28.
-                // A hauler unit rides the walk's one-tick floor empty: 8
-                // ticks of walking against 18 in the spawner, a lead of 26.
-                // With 27 ticks left each, only the Anchor is inside its
-                // own lead.
+                // Nine plain steps from the spawn at (20,10), eight from
+                // the birth tile. A fresh Anchor is empty and slow: 4 cost
+                // units a step, 2 ticks of walk apiece, 16 walking against
+                // 12 in the spawner, a lead of 28. A hauler unit rides the
+                // one-tick floor: 8 walking against 18 in the spawner, a
+                // lead of 26. At 27 ticks left only the Anchor is inside.
                 let fleetAtPosts life =
                     { incomeColony with
                         Creeps =
@@ -118,13 +109,10 @@ let expiringTests =
 
             test "the lead is the walk out of the spawner, not the step onto its tile" {
                 // The engine places a finished creep on a free neighbour,
-                // which for this lane is (20,10): the replacement walks
-                // nine steps, not ten. At a 600 bank the Anchor row is five
-                // Work over one Move — 10 cost units a plain step, 21 ticks
-                // in the spawner — so the lead is 21 + 45 = 66. Charging
-                // the step out of the spawner's own tile would make it 71
-                // and cast the successor five ticks early, into a Post its
-                // predecessor still reads as full.
+                // (20,10) here: nine steps, not ten. At a 600 bank the
+                // Anchor row is 5W over 1M — 10 cost units a plain step,
+                // 21 ticks in the spawner — so the lead is 21 + 45 = 66.
+                // Charging the spawner's own tile would make it 71.
                 let casts life =
                     let snapshot =
                         { rcl3Succession "a1" "a2" life with
@@ -136,9 +124,8 @@ let expiringTests =
                                         50
                                         [ Work; Work; Work; Work; Work; Carry; Move ]
                                     |> withLife life
-                                    // The supply floor's premise (ADR
-                                    // 0050) and not this case's: a lone
-                                    // Anchor can refill no extension.
+                                    // Keeps the supply floor disarmed: a
+                                    // lone Anchor can refill no extension.
                                     worker "w1" 0 50
                                 ]
                         }
@@ -161,12 +148,9 @@ let expiringTests =
             }
 
             test "an expiring creep keeps its Task, whichever name the release fold reaches first" {
-                // ADR 0026: an expiring creep is not released — anti-thrash
-                // keeps it working to the last tick. The release fold walks
-                // creep names in order, so the successor can be judged
-                // first, take the slot its predecessor's arrival-priced
-                // death frees, and leave the incumbent reading its own Post
-                // as full. Both orders keep both creeps.
+                // Whichever of the pair the release fold reaches first,
+                // the successor cannot take the slot its predecessor's
+                // death frees. Both name orders keep both creeps.
                 let bothKept incumbent successor =
                     let remembered =
                         Map.ofList
@@ -201,11 +185,9 @@ let arrivalCapacityTests =
         "capacity at arrival"
         [
             test "a holder dead before the candidate arrives holds none of the Post" {
-                // ADR 0026: the lane's one Post admits one garrison, and
-                // the incumbent has 5 ticks left against a successor nine
-                // steps — 41 ticks — up the lane. It will be gone before
-                // the successor gets there, so it holds none of the cap and
-                // the successor leaves now instead of after the death.
+                // The incumbent has 5 ticks left against a successor nine
+                // steps — 41 ticks — up the lane: gone before the successor
+                // arrives, so it holds none of the cap.
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
                 let { Assignments = assignments } = decideFrom remembered (succession "a1" "a2" 5)
@@ -217,10 +199,7 @@ let arrivalCapacityTests =
             }
 
             test "a holder that outlives the walk still fills the Post" {
-                // The other half of the same gate: a garrison that will
-                // still be standing there when the candidate arrives holds
-                // the cap exactly as ADR 0024 has it, and the candidate is
-                // turned away with nothing free.
+                // The other half: a garrison still standing at arrival holds the cap.
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
                 let {
@@ -241,19 +220,11 @@ let arrivalCapacityTests =
             }
 
             test "the succession's margin is spent: the walk and the lead price the same ground" {
-                // ADR 0026 read this margin as the occupancy surcharge on
-                // the incumbent's own tile — the lead was traffic-blind and
-                // the arrival was not, which bought the successor five
-                // ticks. ADR 0029 makes the arrival traffic-blind too, and
-                // the five ticks are gone: nine steps at five ticks a step
-                // is a walk of 45, and the lead over the same lane is 66 —
-                // 21 in the spawner and the same 45 of walking. So the
-                // incumbent has exactly 45 ticks left the tick its
-                // successor stands on the birth tile, and the window is
-                // read at equality: 44 admits it, 45 does not. The margin
-                // ADR 0026 named is no longer there to spend, and a
-                // successor born on the boundary idles the tick before the
-                // window opens.
+                // Nine steps at five ticks a step is a walk of 45, and the
+                // lead over the same lane is 66 — 21 in the spawner and the
+                // same 45 of walking — so the incumbent has exactly 45 left
+                // the tick its successor stands on the birth tile. The
+                // window is read at equality: 44 admits it, 45 does not.
                 let admits life =
                     let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -290,16 +261,11 @@ let arrivalCapacityTests =
             }
 
             test "a holder still walking when the candidate dies holds none of it either" {
-                // The window is read from both ends (ADR 0026). This
-                // garrison has 35 ticks left against a lead of 30 — it is
-                // not expiring, and nothing is being cast to replace it —
-                // while the Anchor nine steps up the lane is 41 ticks
-                // away. Neither is standing on the tile while the other
-                // is, so neither counts against the other, and the release
-                // fold reaches the pair nearest-first (#230) without that
-                // order deciding anything: a window read only from the
-                // candidate's end released whichever of the two the fold
-                // came to second.
+                // The window is read from both ends. This garrison has 35
+                // ticks left against a lead of 30 — not expiring — while
+                // the Anchor nine steps up the lane is 41 ticks away, so
+                // neither counts against the other, whichever the release
+                // fold reaches first.
                 let bothKept post far =
                     let remembered =
                         Map.ofList [ post, taskId (Harvest "src-a"); far, taskId (Harvest "src-a") ]

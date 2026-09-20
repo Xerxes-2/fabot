@@ -107,15 +107,8 @@ let tests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            // One colony, one bank, whatever room a spawn record names
-            // (ADR 0052 decision 1). This pinned the opposite until R2a:
-            // the projection carried a bank per room and a spawn filed
-            // under a second room drew a second full one — a colony with
-            // two homes, which is the shape #191 split into two colonies
-            // and ADR 0047 gave one `decide` each. The spawn below is the
-            // same shape it was and the answer is now the one the shared
-            // bank gives above: 300 buys one body, and the second spawn
-            // waits.
+            // One colony, one bank, whatever room a spawn record names: 300 buys one
+            // body, and the second spawn waits.
             test "a spawn filed under another room still draws the colony's one bank" {
                 let snapshot =
                     { bareRespawn with
@@ -350,8 +343,8 @@ let tests =
             }
 
             test "a loaded creep feeds a hungry tower once spawn and extensions are full" {
-                // Full feeders leave the pool, so the tower Refill is the one
-                // delivery on offer — the same transfer to the creep (ADR 0010).
+                // Full feeders leave the pool, so the tower Refill is the one delivery
+                // on offer — the same transfer to the creep.
                 let snapshot =
                     { bareRespawn with
                         Sources = []
@@ -556,11 +549,10 @@ let intakeRoomTests =
         "an intake needs room"
         [
             test "a nearly full hauler delivers before it picks up, and an emptier one picks up" {
-                // Live, W12S28 2026-09-07: a hauler holding 1,150 of 1,200
-                // walked forty tiles into the north room to pick fifty off
-                // a pile while the spawn stood at eighteen energy — the
-                // pile's lifted rung beat every Refill and one free slot
-                // made it applicable. An intake is for a body at least half
+                // Live, W12S28 2026-09-07: a hauler holding 1,150 of 1,200 walked forty
+                // tiles into the north room to pick fifty off a pile while the spawn stood
+                // at eighteen energy. An intake is for a body at least half empty;
+                // pairwise on the store alone, same tile, same pool.
                 // empty; pairwise on the store alone, same tile, same pool.
                 let lane energy =
                     let body = List.replicate 6 Carry @ List.replicate 3 Move
@@ -608,19 +600,15 @@ let intakeWorthTests =
         "an intake is worth the trip"
         [
             test "a container that cannot half fill the hauler is left for the stock" {
-                // Live, W12S28 2026-09-07 (#232): a 24C/12M hauler matched a
-                // source container holding ~200 at t194,906 and was released
-                // `inapplicable` forty-two ticks later, having drained the
-                // Anchor's trickle up to half a load, while the Storage held
-                // 263,803 and the spawn stood at twenty-eight energy. The
-                // Withdraw's own [[capacity]] admits a drawer to any store
-                // with one energy in it, and the tier (ADR 0023) keeps the
-                // stock behind every container that applies — so the only
+                // Live, W12S28 2026-09-07 (#232): a 24C/12M hauler matched a source
+                // container holding ~200, was released `inapplicable` forty-two ticks
+                // later having drained the Anchor's trickle up to half a load, while the
+                // Storage held 263,803 and the spawn stood at twenty-eight energy. The
+                // tier keeps the stock behind every container that applies, so the only
                 // thing that reaches the stock is a container that does not.
                 //
-                // Pairwise on the store's stock alone: one hauler, two
-                // Withdraws, and the container is the nearer of the two at
-                // every reading, so nothing but this gate can move the match.
+                // Pairwise on the store's stock alone: one hauler, two Withdraws, the
+                // container the nearer at every reading.
                 let lane stock =
                     let body = List.replicate 24 Carry @ List.replicate 12 Move
 
@@ -667,11 +655,8 @@ let intakeWorthTests =
             }
 
             test "the line is the asking body's free capacity and not one row's load" {
-                // The gate reads the pair and not the Task (#161, #196): the
-                // same store that is too thin for a twelve-hundred hauler is
-                // worth a 450-carry generalist's trip at a quarter of the
-                // stock. One store and one body here, so what the readings
-                // separate is the line itself and nothing else.
+                // The gate reads the pair and not the Task: the same store that is too
+                // thin for a twelve-hundred hauler is worth a 450-carry generalist's trip.
                 let lane stock =
                     let body =
                         List.replicate 9 Work @ List.replicate 9 Carry @ List.replicate 9 Move
@@ -713,18 +698,13 @@ let intakeDecayTests =
         "the worth-the-trip line and the stores it is off"
         [
             test "a store whose energy is going away is taken by whatever body is asking" {
-                // The [[pickup]] is outside #232's line because a pile
-                // decays (#167, #216 R5) — and a tombstone and a ruin decay
-                // too, which is the only thing CONTEXT says separates them
-                // from a container. So the exemption follows the decay and
-                // not the Task's name: a hundred and fifty is not worth a
-                // 1,200-carry hauler's trip to a *container*, because the
-                // container will still be there when a smaller body asks,
-                // and it is taken off either transient store by that same
-                // hauler, because nothing will.
+                // The [[pickup]] is outside the line because a pile decays — and a
+                // tombstone and a ruin decay too, which is the only thing CONTEXT says
+                // separates them from a container. So the exemption follows the decay and
+                // not the Task's name.
                 //
-                // Pairwise on the target's kind alone: one store, one body,
-                // a hundred and fifty in it at every reading.
+                // Pairwise on the target's kind alone: one store, one body, a hundred and
+                // fifty in it at every reading.
                 let lane kind =
                     let body = List.replicate 24 Carry @ List.replicate 12 Move
 
@@ -765,17 +745,12 @@ let intakeDecayTests =
             }
 
             test "the stock is the fall-through, so it is never the thing that refuses" {
-                // What the line buys is the fall to the tier below (ADR
-                // 0023), and there is no tier below the stock's own
-                // Withdraw. A Storage drawn down by a build — or a young
-                // RCL4 one — holding four hundred against a 1,200-carry
-                // hauler is the colony's last intake, and refusing it
-                // leaves the row idle with the spawn hungry and the energy
-                // in reach of nobody.
+                // What the line buys is the fall to the tier below, and there is no tier
+                // below the stock's own Withdraw: a Storage drawn down by a build holding
+                // four hundred against a 1,200-carry hauler is the colony's last intake.
                 //
-                // Pairwise on the store's kind alone: the same four hundred
-                // in a source container is exactly the refusal #232 asked
-                // for.
+                // Pairwise on the store's kind alone: the same four hundred in a source
+                // container is exactly the refusal above.
                 let lane kind =
                     let body = List.replicate 24 Carry @ List.replicate 12 Move
 

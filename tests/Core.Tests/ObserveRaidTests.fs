@@ -1,6 +1,6 @@
-/// The Raid log's episode fold (ADR 0028): the windows it opens and closes,
-/// the roster it unions, the closest approach it measures, the losses it keeps
-/// that the Transition log has already pruned, and the damage it charges.
+/// The Raid log's episode fold: the windows it opens and closes, the roster
+/// it unions, the closest approach it measures, the losses it keeps that the
+/// Transition log has already pruned, and the damage it charges.
 module Fabot.Core.Tests.ObserveRaidTests
 
 open Expecto
@@ -35,10 +35,8 @@ let episodeTests =
             }
 
             test "a squad that steps out and back inside the quiet gap is one episode" {
-                // #66's shape: the same creeps re-entering over and over.
-                // The gap is five ticks here, and t15 is exactly five ticks
-                // after the last sighting, so the return is still the raid
-                // that is already open.
+                // The same creeps re-entering: t15 is exactly five ticks after the last
+                // sighting, so the return is still the raid that is already open.
                 let state =
                     (RaidState.empty, [ 10..15 ])
                     ||> List.fold (fun state t ->
@@ -63,17 +61,9 @@ let episodeTests =
             }
 
             test "the quiet gap is the colony's tunable: the same six ticks are one raid or two" {
-                // `Tuning.QuietGap` (ADR 0052 decision 5), pairwise over
-                // the one field on one history: a squad seen at t10 and
-                // again at t16. At a five-tick gap the second sighting is
-                // six ticks of silence later and opens a second episode; at
-                // a seven-tick gap it is the raid that is still open.
-                //
-                // A tunable and not an engine number: what it decides is
-                // whether an absence is a squad healing off-room or a squad
-                // that has left (#66's poke-and-heal, ~220 ticks of one
-                // raid), and the fifty this bot ships with is that
-                // judgement rather than anything the server says.
+                // `Tuning.QuietGap`, pairwise over the one field on one history: a squad
+                // seen at t10 and again at t16. At a five-tick gap the second sighting
+                // opens a second episode; at a seven-tick gap it is the raid still open.
                 let episodes gap =
                     (RaidState.empty, [ 10..16 ])
                     ||> List.fold (fun state t ->
@@ -266,13 +256,10 @@ let approachTests =
             }
 
             test "one of ours in another room is not a raider at range 0" {
-                // What layering the projection would otherwise cost this
-                // record (ADR 0041): a `Pos` carries no room, so a creep of
-                // ours standing on the raider's coordinates in the outpost
-                // reads as touching it without either creep leaving its
-                // room. The raider is at the bottom exit band, 28 tiles off
-                // the spawn — the non-event the first test above uses — so
-                // a room-blind union would show up as an unmissable 0.
+                // A `Pos` carries no room, so a creep of ours standing on the raider's
+                // coordinates in the outpost would read as touching it. The raider is at
+                // the bottom exit band, 28 tiles off the spawn, so a room-blind union
+                // would show up as an unmissable 0.
                 let outpost =
                     { RoomLayer.empty with
                         CreepPositions = Map.ofList [ "w2", { X = 38; Y = 47 } ]
@@ -304,11 +291,9 @@ let approachTests =
             }
 
             test "a raider in a room the projection places nothing of ours in measures nothing" {
-                // The other half of the same rule, and the one that says
-                // the room is read off the raider rather than assumed to be
-                // the colony's: everything of ours stands in W12S28, so a
-                // raider filed under the outpost has nothing to close on —
-                // ADR 0004's absence, not a zero range.
+                // The other half: the room is read off the raider, not assumed to be the
+                // colony's. Everything of ours stands in W12S28, so a raider filed under
+                // the outpost has nothing to close on — absence, not a zero range.
                 let elsewhere =
                     { raider "TWX" "giaco" { X = 9; Y = 46 } [ Attack; Move ] with
                         Pos = RoomPos.at "W12S27" { X = 9; Y = 46 }
@@ -321,11 +306,9 @@ let approachTests =
                     [ None ]
                     "the same tile that measured range 2 at home measures nothing from the outpost"
             }
-            // #376: the approach is measured against armed hostiles alone. A
-            // `1 MOVE` scout on our creep's tile is not what separates a probe
-            // from a loss, and live it was such a scout at range 1 on the
-            // Reactor's ring that an episode named while an invader three
-            // rooms away did the killing.
+            // The approach is measured against armed hostiles alone: live, a `1 MOVE`
+            // scout at range 1 on the Reactor's ring named an episode while an invader
+            // three rooms away did the killing (#376).
             test "an unarmed scout at range 1 is no approach; the armed raider further off is" {
                 let scout = raider "SCOUT" "odiodin" { X = 9; Y = 45 } [ Move ]
 
@@ -394,11 +377,10 @@ let lossTests =
                     "the loss the Transition log prunes is the one this channel exists to keep"
             }
 
-            // #376: the tile the body last stood on rides the loss, read off
-            // the prior tick's placement — the tick it is missing the
-            // projection no longer places it. The episode names no room (ADR
-            // 0028), so this is the only way a reader can tell which of the
-            // colony's rooms a body died in.
+            // The tile the body last stood on rides the loss, read off the prior
+            // tick's placement — the tick it is missing the projection no longer
+            // places it. The episode names no room, so this is the only way a reader
+            // can tell which of the colony's rooms a body died in.
             test "a loss carries the tile the body last stood on, and none when it was never placed" {
                 let withOurs names positions =
                     { (raid squad) with
@@ -558,16 +540,10 @@ let lossTests =
             }
 
             test "a creep another colony adopted is not a loss: it left the fleet, not the world" {
-                // ADR 0047 decision 2 through this channel. Since #191 a
-                // ColonyView carries one colony's creeps, so a name can leave
-                // it two ways — its creep died, or the colony next door
-                // adopted the body for the tick it stands in a room only
-                // that colony projects. Only the first is what the raid
-                // cost, and the world's own list is what tells them apart.
-                //
-                // Pairwise against the loss above it, one fact moved: the
-                // same name gone from the same ColonyView at t11, once still
-                // in `Game.creeps` and once not.
+                // A name can leave a ColonyView two ways — its creep died, or the colony
+                // next door adopted the body for the tick — and only the first is what the
+                // raid cost. Pairwise against the loss above: the same name gone at t11,
+                // once still in `Game.creeps` and once not.
                 let crossed =
                     RaidState.empty
                     |> raidTickIn
@@ -617,10 +593,9 @@ let lossTests =
 
             test
                 "a creep crossing back and forth all raid is charged once for each death, and never for a crossing" {
-                // The shape that made this worth a rule rather than a
-                // sentence: `Losses` appends, so a hauler shuttling across
-                // the [[seam]] during a 200-tick siege would file a fresh
-                // phantom kill on every tick it left the fleet.
+                // `Losses` appends, so a hauler shuttling across the [[seam]] during a
+                // 200-tick siege would otherwise file a fresh phantom kill on every tick
+                // it left the fleet.
                 let shuttle =
                     RaidState.empty
                     |> raidTickIn
@@ -662,9 +637,8 @@ let damageTests =
         "raid fold: damage"
         [
             test "the hits lost over an episode are summed tick over tick" {
-                // What ADR 0028 deferred until a decision read hits (ADR
-                // 0034): the raid's cost in hits, folded from the previous
-                // tick's the way the losses are folded from its names.
+                // The raid's cost in hits, folded from the previous tick's the way the
+                // losses are folded from its names.
                 let state =
                     RaidState.empty
                     |> raidTick 10 (raid squad |> withHits "ram-1" BuiltKind.Rampart 100_000)
@@ -701,10 +675,8 @@ let damageTests =
             }
 
             test "the Keep and the ramparts are charged; the decaying kinds are not" {
-                // The measure is the Keep's and its cover's (ADR 0034). A
-                // road wearing down under a raid is the colony's ordinary
-                // decay, and charging it would drown the number the record
-                // exists for.
+                // The measure is the Keep's and its cover's. A road wearing down under a
+                // raid is ordinary decay, and charging it would drown the number.
                 let dented kind hits = raid squad |> withHits "s-1" kind hits
 
                 let over kind first second =
@@ -764,10 +736,8 @@ let damageTests =
             }
 
             test "the decay of a quiet gap is charged to no raid" {
-                // An episode stays open through the quiet gap, and a rampart
-                // ticks down 300 hits every 100 ticks whoever is watching.
-                // Damage is read over the window the losses are — a hostile
-                // standing there, or the tick straight after a sighting — so
+                // An episode stays open through the quiet gap, and a rampart ticks down 300
+                // hits every 100 ticks. Damage is read over the window the losses are, so
                 // the gap's own decay never lands in the record.
                 let state =
                     RaidState.empty
@@ -789,16 +759,10 @@ let damageTests =
             }
 
             test "a raid a room away opens an episode and is charged none of this room's decay" {
-                // #201 widened the sweep to every room the colony works, so
-                // an outpost's raider opens a colony episode — that is what
-                // the widening is for, and the record the operator reads it
-                // off. Damage is the one field that cannot follow it: the
-                // Keep and its ramparts stand in the colony's own room (ADR
-                // 0034), so a window held open from next door would charge
-                // 3 hits a tick per rampart of ordinary decay as what a
-                // raid that never touched the Keep cost — noise that is the
-                // whole of the number rather than the rounding error the
-                // field's own doc prices it as.
+                // An outpost's raider opens a colony episode, and damage is the one field
+                // that cannot follow it: the Keep and its ramparts stand in the colony's
+                // own room, so a window held open from next door would charge 3 hits a
+                // tick per rampart of ordinary decay as what the raid cost.
                 let decaying hostiles t =
                     raid hostiles |> withHits "ram-1" BuiltKind.Rampart (100_000 - 300 * t)
 
@@ -815,10 +779,8 @@ let damageTests =
 
                 Expect.equal (damages away) [ 0 ] "and the decay at home is charged to nobody"
 
-                // Pairwise, the same body on the same tile filed at home:
-                // the room is the only difference between the two runs, so
-                // nothing but the room the damage is measured in separates
-                // them.
+                // Pairwise, the same body on the same tile filed at home: the room is the
+                // only difference between the two runs.
                 Expect.equal
                     (damages (over squad))
                     [ 600 ]

@@ -1,4 +1,4 @@
-/// The pickup reflex and the logistics layer behind it (ADR 0012).
+/// The pickup reflex and the logistics layer behind it.
 module Fabot.Core.Tests.Decide.PoolPickupTests
 
 open Expecto
@@ -33,14 +33,11 @@ let pickupReflexTests =
             }
 
             test "a body carrying the season's ore leaves the pile alone" {
-                // #262, ADR 0057 decision 3: a body carries one resource at a
-                // time, and the reflex is the one act in the colony that runs
-                // beside the pipeline and never asks `applicable` — so free
-                // capacity alone had a laden hauler scoop energy into the store
-                // holding its Thorium, which is the mixed load the decision
-                // forbids. Pairwise against "an adjacent creep with free
-                // capacity picks up" on the ore alone: the same body, the same
-                // tile, thirty free either way.
+                // The reflex runs beside the pipeline and never asks
+                // `applicable`, so free capacity alone had a laden hauler
+                // scoop energy into the store holding its Thorium. Pairwise
+                // against "an adjacent creep with free capacity picks up" on
+                // the ore alone: the same body, the same tile, thirty free.
                 let snapshot =
                     pileColony [ worker "w1" 0 50 |> carrying 20 ] [ "w1", { X = 10; Y = 11 } ]
 
@@ -52,16 +49,11 @@ let pickupReflexTests =
             }
 
             test "a pile of the season's ore is no reflex's, whoever is standing on it" {
-                // The mirror of the case above (#311). The reflex asks nothing
-                // of `applicable`, so it cannot ask the one question the season's
-                // ore turns on — whether the body is carrying **anything** — and
-                // a reflex that swept a Thorium pile would put ore into whatever
-                // happened to be standing there, energy and all. So the census it
-                // reads is energy by kind (`Atlas.droppedEnergyIn`), and the ore
-                // on the floor is reached by the Pickup Task, which can be gated
-                // on an empty body, and by nothing else. Pairwise against "an
-                // adjacent creep with free capacity picks up" on the pile's
-                // resource alone: the same empty body, the same tile.
+                // The mirror of the case above: the reflex cannot ask whether
+                // the body is carrying anything, so the census it reads is
+                // energy by kind (`Atlas.droppedEnergyIn`) and the ore on the
+                // floor is reached by the Pickup Task alone. Pairwise on the
+                // pile's resource: the same empty body, the same tile.
                 let snapshot =
                     pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
                     |> fun colony ->
@@ -189,9 +181,7 @@ let pickupReflexTests =
             }
 
             test "a pile keeps no construction site off its tile" {
-                // Layout determinism (ADR 0011): a transient pile must not
-                // perturb the ordering, so placement with and without the
-                // pile is identical.
+                // A transient pile must not perturb the Layout's ordering.
                 let bare = atLevel 2 (openRoom 3)
 
                 let strewn =
@@ -210,12 +200,11 @@ let pickupReflexTests =
             }
 
             test "an outpost creep picks up the pile at its own feet" {
-                // The live gap (#166): an outpost's Anchor stands on its
-                // container, overflows onto the tile it stands on, and the
-                // pile is at range 0 for the hauler that comes for the
-                // container — 3,000 energy decaying on the ground at
-                // t140,810 because both sides of the pairing answered home.
-                // The home pile shares the coordinate and stays untouched.
+                // An outpost's Anchor overflows onto the tile it stands on,
+                // and the pile is at range 0 for the hauler that comes for
+                // the container; 3,000 energy once decayed there because both
+                // sides of the pairing answered home. The home pile shares
+                // the coordinate and stays untouched.
                 let snapshot =
                     pileColony [ worker "w-out" 0 50 ] []
                     |> withPileRoom
@@ -232,10 +221,9 @@ let pickupReflexTests =
             }
 
             test "a pile at home draws no creep standing in the outpost" {
-                // The pairing never crosses a border (ADR 0041): the pile
-                // and the creep are bare `Pos`es on one coordinate of two
-                // rooms, which is range 0 to `range` and out of the world
-                // to the engine.
+                // The pile and the creep are bare `Pos`es on one coordinate
+                // of two rooms: range 0 to `range`, and out of the world to
+                // the engine.
                 let snapshot =
                     pileColony [ worker "w-out" 0 50 ] []
                     |> withPileRoom "W1N2" [] [ "w-out", { X = 10; Y = 10 } ]
@@ -263,10 +251,9 @@ let pickupReflexTests =
             }
 
             test "a creep the projection places nowhere reaches no pile" {
-                // ADR 0004's absence, unchanged by the pairing going per
-                // room: a creep in the fleet and in no layer is in no
-                // group, so it is measured against nothing rather than
-                // against every room's piles at once.
+                // A creep in the fleet and in no layer is in no group, so it
+                // is measured against nothing rather than against every
+                // room's piles at once.
                 let snapshot =
                     { pileColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ] with
                         Creeps = [ worker "w1" 0 50; worker "ghost" 0 50 ]
@@ -331,12 +318,9 @@ let logisticsTests =
                 // nearest Seat four: collect beats dig. At (12,10) the Seat
                 // is one step away: dig beats collect. Same rule both ways.
                 //
-                // The source is read unposted here (ADR 0051): with the
-                // container standing, the Seat a light body may dig from is
-                // the one across the wall at (9,10) and the near one at
-                // (11,10) is the garrison's, so the dig would lose on
-                // reachability and not on price, which is not what this
-                // test is about.
+                // The source is read unposted here: with the container
+                // standing, the near Seat at (11,10) is the garrison's and
+                // the dig would lose on reachability and not on price.
                 let colonyAt pos =
                     { haulColony with
                         Creeps = [ worker "w1" 0 50 ]
@@ -374,9 +358,8 @@ let logisticsTests =
             test "a heavy-Work body never collects: the far Post's Harvest beats the near buffer" {
                 // Same geometry where the worker above picks Withdraw — at
                 // (15,10) the buffer is two steps, the nearest Seat four.
-                // Work > Move makes Withdraw inapplicable (ADR 0016), so
-                // the anchor's only feeding-tier candidate is Harvest and
-                // the unmanned Post wins regardless of distance.
+                // Withdraw is inapplicable to the heavy body, so the unmanned
+                // Post wins regardless of distance.
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 0 50 ]

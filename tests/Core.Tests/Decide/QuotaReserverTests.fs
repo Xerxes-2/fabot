@@ -1,4 +1,4 @@
-/// The Reserver row and its lead (ADR 0042).
+/// ADR-0042: the Reserver row and its lead.
 module Fabot.Core.Tests.Decide.QuotaReserverTests
 
 open Expecto
@@ -15,21 +15,11 @@ let reserverLeadTests =
         "the reserver row's lead"
         [
             test "a CLAIM body's lead is the reserver row's, not the generalist's" {
-                // `patternOf` reads a living body back to the row it was
-                // cast from (ADR 0006), and the row is what sizes the
-                // replacement a lead prices (ADR 0026). A `[Claim; Move]`
-                // body has neither Work nor Carry, so before ADR 0042's row
-                // existed it fell through to the generalist and was priced
-                // as one.
-                //
-                // The two arithmetics, at this colony's 1,300 bank: the
-                // reserver row casts `[2Claim;2Move]`, four parts, 12 ticks
-                // in the spawner, and its two Move carry its two fatigue
-                // parts over a plain tile in the walk's one-tick floor — 3
-                // ticks for the three steps, a lead of 15. The generalist
-                // row at the same bank is twenty parts: 60 ticks in the
-                // spawner and the same 3 of walking, a lead of 63. Every
-                // life between the two is where the rows disagree.
+                // A `[Claim; Move]` body has neither Work nor Carry, so read off the
+                // generalist row it prices as one. At the 1,300 bank the reserver row
+                // casts `[2Claim;2Move]`: four parts, 12 in the spawner, 3 of walking,
+                // a lead of 15. The generalist row is twenty parts, a lead of 63.
+                // Every life between is where the rows disagree.
                 let casts life =
                     spawnIntents (decideOn (leadColony life)).Intents
 
@@ -59,18 +49,10 @@ let reserverRowTests =
         "the reserver row"
         [
             test "a declared outpost hires one reserver, posted or not" {
-                // The one quota the container switch does *not* gate
-                // (#131's correction comment): gating it deadlocks the
-                // chain, because a container site needs vision, vision
-                // needs a creep in the room, and this is the only creep
-                // with a reason to go. ADR 0042's Considered Options is the
-                // authority its Consequences clause contradicts — it
-                // rejected "mine first, reserve later" precisely so the
-                // reservation is standing before the first hauler is sized.
-                //
-                // Pairwise on the one structure — same room, same rock,
-                // same controller, same reservation — because that is the
-                // only input that moves.
+                // The one quota the container switch does not gate: gating it
+                // deadlocks the chain, because a container site needs vision, vision
+                // needs a creep in the room, and this is the only creep with a reason
+                // to go (#131). Pairwise on the one structure alone.
                 let castsWith posted =
                     let fleet = surplusFleet (if posted then 3 else 2)
 
@@ -91,27 +73,16 @@ let reserverRowTests =
             }
 
             test "a candidate colony hires one body, and it is one block" {
-                // ADR 0047's casting clause, and the two things it says at
-                // once. The row is *this* row — a claimer is a
-                // `[Claim; Move]` body like a reserver, so it is cast, led
-                // and amortized where reservers are, and `patternOf` reads
-                // one back as the other. And the room hires **one** body,
-                // not two: its controller carries a Claim and no Reserve,
-                // so a reserver hired for it would arrive at a controller
-                // with no Task on it and stand there for its whole
-                // 600-tick life.
-                //
-                // The block count is where the two *demands* are told
-                // apart. A reservation sitting 4,000 ticks below its cap
-                // asks for seven blocks and takes what the 1,800 bank
-                // affords, which is two; a claim is one act by one CLAIM
-                // part and asks for one block whatever the reservation has
-                // done. Pairwise on the declaration alone — same room, same
-                // rock, same reservation, same fleet, same bank.
-                //
-                // The demand is not the cast: this room's own demand is the
-                // whole list here, so the two coincide. The test below is
-                // where they come apart.
+                // A claimer is a `[Claim; Move]` body like a reserver, so it is cast,
+                // led and amortized where reservers are, and the room hires one body,
+                // not two: its controller carries a Claim and no Reserve, so a reserver
+                // hired for it would stand at a Task-less controller for its whole
+                // 600-tick life. The block count tells the demands apart: a reservation
+                // 4,000 ticks below its cap asks for seven blocks and takes the two the
+                // 1,800 bank affords; a claim asks for one whatever the reservation has
+                // done. Pairwise on the declaration alone. This room's own demand is
+                // the whole list here, so demand and cast coincide; the test below is
+                // where they part.
                 let castsWith declared =
                     let colony =
                         reserverColony
@@ -141,22 +112,14 @@ let reserverRowTests =
             }
 
             test "a claimer beside a slipping reservation is cast at the row's largest demand" {
-                // The other half of ADR 0047's casting clause, and the half
-                // a one-outpost fixture cannot show: the claim's *entry* is
-                // one block, but every body this row casts this tick is
-                // sized at the largest demand in the list. Which controller
-                // a finished CLAIM body ends up holding is the Matcher's,
-                // priced by travel cost alone and knowing nothing about
-                // which demand paid for which body, so a claimer cast at
-                // one block could land on the reservation that has slipped
-                // and freeze that room for its whole 600-tick life. The
-                // over-buy is the safe direction, and it is the same one
-                // `reserverClaimsOf` takes for two slipping reservations.
-                //
-                // Pairwise on the second outpost alone: the candidate is
-                // the same room under the same declaration with the same
-                // reservation in both, and what moves is whether an unheld
-                // outpost stands beside it.
+                // The half a one-outpost fixture cannot show: the claim's entry is one
+                // block, but every body cast this tick is sized at the largest demand
+                // in the list. Which controller a finished CLAIM body holds is the
+                // Matcher's, priced by travel cost alone, so a claimer cast at one
+                // block could land on the slipped reservation and freeze that room for
+                // 600 ticks. The over-buy is the safe direction, the same one
+                // `reserverClaimsOf` takes for two slipping reservations. Pairwise on
+                // the second outpost alone.
                 let castsWith slippingNeighbour =
                     let outposts =
                         if slippingNeighbour then
@@ -213,10 +176,9 @@ let reserverRowTests =
             }
 
             test "two declared outposts hire two reservers, one apiece" {
-                // Never one rover: `[4Claim;4Move]` is 2,600 energy and so
-                // an RCL7 body, and two outposts diagonal to each other
-                // share no exit — a rover would spend its 600-tick life
-                // crossing the home room (ADR 0042).
+                // Never one rover: `[4Claim;4Move]` is 2,600 energy and so an RCL7
+                // body, and two outposts diagonal to each other share no exit, so a
+                // rover would spend its 600-tick life crossing the home room.
                 let colony =
                     reserverColony
                         [ northOutpost true; westOutpost true ]
@@ -279,12 +241,10 @@ let reserverRowTests =
                     "one block's worth of capacity is where the row starts hiring"
             }
 
-            // #375 (ADR 0072): a guarded room's seat waits for its guard. The
-            // row's quota is read off the ground (the reservation is at its
-            // cap, so W1N2 wants one block), and while the guard row hired
-            // for that room has a gap the seat is withheld — the body it would
-            // buy is the body the raider is eating. Standing or in the oven,
-            // the guard gives it back.
+            // A guarded room's seat waits for its guard (#375): the reservation is
+            // at its cap, so W1N2 wants one block, and while the guard row hired
+            // for that room has a gap the seat is withheld. Standing or in the
+            // oven, the guard gives it back.
             test
                 "a guarded room's reserver seat is withheld until its guard stands or is in the oven" {
                 let quotaOf colony =
@@ -324,13 +284,11 @@ let reserverRowTests =
             }
 
             test "a living reserver fills the quota; one inside its lead does not" {
-                // The quota counts bodies and not rooms (#130): which
-                // controller each body ends up holding is the Reserve
-                // Task's one-holder-per-controller capacity, so a reserver
-                // still walking to its outpost already fills the row's
-                // place. Its succession is ADR 0026's existing path and
-                // nothing new: inside its lead it leaves the count, and the
-                // replacement is cast while it still holds the reservation.
+                // The quota counts bodies and not rooms (#130): which controller each
+                // body holds is the Reserve Task's one-holder-per-controller capacity,
+                // so a reserver still walking to its outpost already fills the row's
+                // place. Inside its lead it leaves the count, and the replacement is
+                // cast while it still holds the reservation.
                 let colonyWith reservers =
                     reserverColony
                         [ northOutpost true ]
@@ -355,23 +313,16 @@ let reserverRowTests =
             }
 
             test "the reserver row casts in front of the Anchor, hauler and worker rows" {
-                // ADR 0042's ordering: the other three rows spend income
-                // and this one decides whether the income is five a tick or
-                // ten across every source of an outpost at once — and it is
-                // the cheapest body on the table, so the row it displaces
-                // for a tick waits on 650 energy.
-                //
-                // The fleet is short in every row at once: two Anchors
-                // against three Posts, no hauler against the one-body
-                // quota the two home containers come to at this bank (ADR
-                // 0049), and a whole-fleet deficit under all of it. Four
-                // idle spawns cast one body each, so the whole order is
-                // readable in one tick.
-                // The generalist in the fleet is the supply floor's
-                // premise and not this case's (ADR 0050): two Anchors are
-                // two Carry parts and still nothing that can refill an
-                // extension, so without it the row cast first would be the
-                // floor's carrier rather than the reservation's.
+                // The other three rows spend income and this one decides whether the
+                // income is five a tick or ten, and it is the cheapest body on the
+                // table. The fleet is short in every row at once: two Anchors against
+                // three Posts, no hauler against the one-body quota the two home
+                // containers come to at this bank, and a whole-fleet deficit under all
+                // of it. Four idle spawns cast one body each, so the whole order is
+                // readable in one tick. The generalist in the fleet is the supply
+                // floor's premise: two Anchors are two Carry parts and nothing that
+                // can refill an extension, so without it the row cast first would be
+                // the floor's carrier.
                 let colony =
                     reserverColony
                         [ northOutpost true ]
@@ -392,12 +343,10 @@ let reserverRowTests =
             }
 
             test "the body grows by a CLAIM part for every 600 ticks the reservation has lost" {
-                // ADR 0042's one rule, quota and sizing in the same
-                // expression: `ceil((5000 − ticks held) / 600)` CLAIM
-                // parts. No state between ticks — the deficit is read off
-                // the reservation itself, so the row shrinks to its floor
-                // in steady state and comes back bigger on its own the
-                // tick a reservation has slipped.
+                // Quota and sizing in one expression: `ceil((5000 − ticks held) / 600)`
+                // CLAIM parts, read off the reservation itself with no state between
+                // ticks, so the row shrinks to its floor in steady state and comes back
+                // bigger the tick a reservation has slipped.
                 let castFor held =
                     reserverColony
                         [ northOutpost true ]
@@ -418,12 +367,10 @@ let reserverRowTests =
             }
 
             test "the bank truncates the deficit, and the deficit truncates the bank" {
-                // The two halves of the sizing rule, each shown cutting the
-                // other off. ADR 0042 refuses the bank *as the rule*: at
-                // RCL6 a 2,300 bank would buy a third CLAIM for a
-                // reservation that caps at 5,000 anyway — which is why the
-                // pair below is read at 2,300 and not at today's 1,800,
-                // where the two rules agree.
+                // The two halves of the sizing rule, each shown cutting the other off.
+                // At RCL6 a 2,300 bank would buy a third CLAIM for a reservation that
+                // caps at 5,000 anyway, which is why the pair is read at 2,300 and not
+                // at today's 1,800, where the two rules agree.
                 let castAt capacity held =
                     let colony =
                         reserverColony
@@ -532,32 +479,22 @@ let reserverRowTests =
             }
 
             test "the reserver row is an addend of the target, amortized over a CLAIM life" {
-                // The row's two effects on the Workforce target (ADR 0042),
-                // both read off one boundary: it adds a place of its own —
-                // a CLAIM body is a creep, and a fleet counting it as a
-                // generalist would hire an upgrade mouth fewer — and its
-                // replacement cost is deducted from the income base like
-                // the Anchor and hauler rows'. Unlike theirs it is spread
-                // over a **CLAIM body's own 600 ticks** rather than the
-                // 1,500 the rest of the sum is written in: ADR 0042 prices
-                // this row at 2.17 energy a tick, and over 1,500 it would
-                // read as 0.87.
+                // The row's two effects on the Workforce target, both read off one
+                // boundary: it adds a place of its own, and its replacement cost is
+                // deducted from the income base, spread over a CLAIM body's own 600
+                // ticks rather than the 1,500 the rest of the sum is written in (2.17
+                // a tick; over 1,500 it would read 0.87).
                 //
-                // The bank is 8,000 so the deficit's whole nine blocks are
-                // affordable and the difference is a worker place wide.
-                // W1N2 is seen and held by nobody: its rock is worth five,
-                // and its reservation is on the floor, so the row asks for
-                // its largest body against its smallest income.
+                // The bank is 8,000 so the deficit's whole nine blocks are affordable
+                // and the difference is a worker place wide. W1N2 is seen and held by
+                // nobody: its rock is worth five and its reservation is on the floor.
                 //
-                // Income 10 + 10 + 5 = 25 a tick over 1,500 = 37,500.
-                // Amortization: 3 Anchors × 700 = 2,100, one hauler ×
-                // 2,400 — the two home containers' demands summed and
-                // rounded once (ADR 0049) — and one 9-block reserver at
-                // 5,850 spread over 600 and re-scaled onto 1,500 = 14,625
-                // — 19,125 in all. The surplus 18,375 over a 16-Work
-                // body's drain × 1,500 = 24,000 rounds up to one worker
-                // (ADR 0037). Charged over 1,500 instead, the same row
-                // would leave 27,150 and hire two.
+                // Income 10 + 10 + 5 = 25 a tick over 1,500 = 37,500. Amortization:
+                // 3 Anchors × 700 = 2,100, one hauler × 2,400, and one 9-block reserver
+                // at 5,850 spread over 600 and re-scaled onto 1,500 = 14,625: 19,125
+                // in all. The surplus 18,375 over a 16-Work body's drain × 1,500 =
+                // 24,000 rounds up to one worker. Charged over 1,500 instead, the same
+                // row would leave 27,150 and hire two.
                 let fleetOf workers =
                     [ for i in 1..3 -> anchor $"a{i}" 0 50 ]
                     @ [ hauler "h1" 0 100 ]
@@ -632,22 +569,14 @@ let reclaimerRowTests =
         "the re-claimer: the reserver row's third face"
         [
             test "a declared errand hires one CLAIM body of one block, and the bank gate is 650" {
-                // ADR 0057 decision 5 as ADR 0060 decision 3 re-cuts it, and
-                // the ticket's own start condition: cast the tick the colony
-                // affords 650 and a chain exists, with **no extractor, no road
-                // and no banked Thorium** — the three ADR 0057 decision 7 made
-                // the row wait for, retired because the flag on W15S25 is a
-                // rival's already and every Thorium delivered under it scores
-                // for him.
-                //
-                // One block, for the claim's reason one room further out: the
-                // reactor is taken by one touch of one CLAIM part, and the
-                // engine checks no ownership and runs no cooldown, so a second
-                // block buys a body that holds the same flag no faster.
-                //
-                // Pairwise on the declaration alone — same room, same fleet,
-                // same bank, same empty outpost list — and then pairwise on the
-                // bank alone, which is where the 650 is.
+                // The ticket's start condition: cast the tick the colony affords 650
+                // and a chain exists, with no extractor, no road and no banked Thorium,
+                // because the flag on W15S25 is a rival's already and every Thorium
+                // delivered under it scores for him. One block: the reactor is taken by
+                // one touch of one CLAIM part, and the engine checks no ownership and
+                // runs no cooldown, so a second block buys a body that holds the flag
+                // no faster. Pairwise on the declaration alone, then on the bank alone,
+                // which is where the 650 is.
                 let castsAt capacity errand =
                     let colony = reserverColony [] (surplusFleet 2) []
 
@@ -673,15 +602,11 @@ let reclaimerRowTests =
             }
 
             test "the relief is cast while the incumbent still stands, and the overlap is the knob" {
-                // The relay (ADR 0057 decision 5): a relay and never a
-                // garrison of two, and it overlaps rather than gaps because
-                // the body out there is the colony's only vision of the room
-                // and the only thing holding its flag.
-                //
-                // The threshold is the **lead plus the overlap**, and both
-                // terms are real since #379: this fixture's chain used to be
-                // unpriceable, which zeroed the lead's walk and left the case
-                // measuring the knob against nothing at all.
+                // A relay and never a garrison of two, overlapping rather than gapping
+                // because the body out there is the colony's only vision of the room
+                // and the only thing holding its flag. The threshold is the lead plus
+                // the overlap, and both terms are real since #379: this fixture's chain
+                // used to be unpriceable, which zeroed the lead's walk.
                 let colonyAt overlap life =
                     let incumbent = reserver "rc" |> withLife life
 
@@ -777,33 +702,21 @@ let reclaimerChargeTests =
         "the re-claimer is an addend of the target and a term of the surplus"
         [
             test "the seat is added to the target, and its replacement is deducted from the income" {
-                // #304's argument reaching this row verbatim, which is what the
-                // ticket asks for and what its resolve left the note about: the
-                // re-claimer is hired off a fact about the **ground** — a
-                // declaration and a chain of [[seam]]s — and it earns no energy
-                // at all, so it is an addend of the [[workforce target]] like
-                // the four rows beside it *and* a term of `surplusOverLifetime`,
-                // not the [[guard]]'s "an addend, charged nowhere else". The
-                // guard's excuse is that it is 0 for the whole of an ordinary
-                // life; a resident on a sector centre is 1 for the whole of the
-                // season.
+                // The re-claimer is hired off a fact about the ground and earns no
+                // energy, so it is an addend of the workforce target like the four rows
+                // beside it and a term of `surplusOverLifetime`, unlike the guard's "an
+                // addend, charged nowhere else" (#304). Both halves are visible, each
+                // at its own bank, because a worker unit is several CLAIM bodies wide:
                 //
-                // Both halves are visible and each at its own bank, because a
-                // worker unit is several CLAIM bodies wide and one bank
-                // therefore shows one of them:
+                // - at the RCL5 bank of 1,800 the charge falls inside a generalist's
+                //   rounding and the addend is what moves: the target rises by one;
+                // - at 1,300 it crosses one, and the charge is what moves: a generalist
+                //   is retired to pay for the body, so the target does not rise.
                 //
-                // - at the RCL5 bank of 1,800 the charge falls inside a
-                //   generalist's rounding and the **addend** is the whole of
-                //   what moves: the target rises by exactly one;
-                // - at 1,300 it crosses one, and the **charge** is what moves:
-                //   a generalist is retired to pay for the body, so the target
-                //   does not rise at all.
-                //
-                // The charge is `reserverCost`'s own expression and not a
-                // second one — the errand's entry joins `reserverClaimsOf`'s
-                // list, so the addend and the charge are one number (which is
-                // why `RowSizing` carries it) and it is scaled onto a CLAIM
-                // body's 600-tick life by the term that was already there.
+                // The charge is `reserverCost`'s own expression: the errand's entry
+                // joins `reserverClaimsOf`'s list, so addend and charge are one number
+                // (why `RowSizing` carries it), scaled onto a CLAIM body's 600-tick
+                // life.
                 let atBank capacity =
                     let plain = reserverColony [] (surplusFleet 2) []
 

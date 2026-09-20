@@ -56,9 +56,6 @@ let workAreaForTests =
             }
 
             test "a light body keeps the Seats beyond the Posts of the same source" {
-                // ADR 0051: the complement of the heavy narrowing. The Post
-                // is the garrison's tile, so a light body's area is every
-                // other Seat.
                 let atlas =
                     posted [ "w", { X = 10; Y = 11 } ] |> snapshotWith [ worker "w" ] |> ofView
 
@@ -97,10 +94,8 @@ let workAreaForTests =
                     "the full Seat set is the fallback before the first container"
             }
 
-            // The deposit's mirror of the block above: "min-a" embedded in
-            // wall at (20,20) with three open neighbours, the container on one
-            // of them. The miner is the row's block — Work-heavy with no Carry
-            // at all — so it reads through the same heavy arm the Anchor does.
+            // The deposit's mirror: "min-a" embedded in wall at (20,20) with
+            // three open neighbours, the container on one of them.
             let mined kinds creeps =
                 { spatial
                       [
@@ -127,11 +122,9 @@ let workAreaForTests =
                 ]
 
             test "a miner digs a deposit from the tile its container stands on" {
-                // ADR 0057 decision 2's Work Area: the [[post]] the mineral
-                // container makes and nothing else. The store-less body has to
-                // stand **on** the container, because a harvest with no room
-                // for the yield drops it on the creep's own tile and a drop
-                // onto a container tile lands in the container.
+                // A harvest with no room for the yield drops it on the
+                // creep's own tile, and a drop onto a container tile lands
+                // in the container.
                 let atlas =
                     mined minedKinds [ "m", { X = 21; Y = 20 } ]
                     |> snapshotWith [ minerBody "m" ]
@@ -149,13 +142,6 @@ let workAreaForTests =
             }
 
             test "a deposit with no container keeps no fallback, even at home" {
-                // Where a **source** with no Post narrows nothing at home (the
-                // case above), a deposit narrows to nothing (ADR 0057 decision
-                // 2). ADR 0020's fallback to the bare Seats is a *bootstrap*
-                // rule and the bootstrap is a source's: a dropped Thorium pile
-                // bleeds `ceil(amount / 1000)` a tick and nothing in this
-                // colony picks one up, so a deposit with no container standing
-                // has nowhere to be dug from and its Harvest reaches nobody.
                 // Pairwise against the source case, one target kind apart.
                 let atlas =
                     mined [ "min-a", Mineral ] [ "m", { X = 21; Y = 20 } ]
@@ -193,11 +179,7 @@ let workAreaForTests =
             }
 
             test "a blocked Post empties the area rather than widening back to the Seats" {
-                // An obstacle stands on the container Seat: it is still a
-                // Post by census, so the area narrows to it and stays
-                // empty — Harvest goes inapplicable, as an unreachable Work
-                // Area does for every Task (ADR 0020), instead of silently
-                // handing the heavy body every Seat back.
+                // An obstacle stands on the container Seat, still a Post by census.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
@@ -303,9 +285,8 @@ let mayActTests =
             }
 
             test "a Work-heavy body digs from its Post and nowhere else in range" {
-                // Source at (10,10) with a built container on the Seat at
-                // (9,10) — the source's only Post. The plain Seat (10,11) is
-                // in harvest range all the same.
+                // The container Seat (9,10) is the only Post; the plain
+                // Seat (10,11) is in harvest range all the same.
                 let atlasAt creepPos =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
@@ -328,7 +309,7 @@ let mayActTests =
 
             test "a creep on a tile the projection calls impassable is judged by range" {
                 // An obstacle-type site dropped under a standing creep: the
-                // engine lets it stay, and it keeps working (ADR 0004).
+                // engine lets it stay.
                 let atlas =
                     spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 10; Y = 11 }, Plain ]
                     |> withHome (fun layer ->
@@ -356,10 +337,8 @@ let dualSeatTests =
         "atlas dualSeats"
         [
             test "a Dual Seat is a Seat inside the controller's Upgrade Work Area, over all sources" {
-                // Sources at (10,10) and (16,10) flank the controller at
-                // (13,10). Each source has a Seat at range 2 of the
-                // controller (inside the Upgrade Work Area) and one at
-                // range 4 (outside); src-a's swamp Seat at (11,11) is in.
+                // Each source has a Seat at range 2 of the controller and
+                // one at range 4; src-a's swamp Seat at (11,11) is in.
                 let atlas =
                     { spatial
                           [
@@ -387,9 +366,7 @@ let dualSeatTests =
             }
 
             test "an obstacle keeps a Seat out of the Dual Seats: a creep must stand there" {
-                // The lone Seat within upgrade range carries an obstacle
-                // structure — it stays a Seat (ADR 0001) but no creep can
-                // stand on it, so the Upgrade Work Area excludes it.
+                // The lone Seat within upgrade range carries an obstacle structure.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
@@ -454,9 +431,7 @@ let postTests =
         "atlas posts"
         [
             test "posts are the Dual Seats plus Seats under built source containers" {
-                // Source at (10,10), controller at (13,10): (11,10) is a
-                // Dual Seat, (9,10) an ordinary Seat carrying a built
-                // container — both are Posts.
+                // (11,10) is a Dual Seat, (9,10) a Seat under a built container.
                 let atlas =
                     { spatial
                           [
@@ -488,15 +463,9 @@ let postTests =
             }
 
             test "a container construction site is a Post, and no standing one" {
-                // #205 inverts the rule this test used to pin. A pending
-                // container catches no overflow and pays no haul term, and
-                // that is what `standingPostsOf` still answers; but the
-                // Seat under it is a tile worth garrisoning all the same,
-                // because the body that stands there digs the rock beside
-                // it and spends what it digs into the site under its feet.
-                // The two questions the census used to answer at once —
-                // where a heavy body stands, and what a source is worth to
-                // the quotas — are what the split keeps apart.
+                // A pending container catches no overflow (`standingPostsOf`),
+                // but the body on its Seat digs the rock beside it and
+                // spends the yield into the site under its feet (#205).
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
@@ -525,12 +494,8 @@ let postTests =
             }
 
             test "a container site off any Seat is no Post" {
-                // The trap #205 names, and the reason the site half joins
-                // through the Seats rather than through the site's range:
-                // a container going up two tiles from the rock — the
-                // controller's own buffer, or a neighbouring source's Post
-                // — is nobody's garrison, and counting it would hire an
-                // Anchor for a tile it cannot dig from.
+                // A container going up two tiles from the rock (a buffer,
+                // or a neighbouring source's Post) is nobody's garrison.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 12; Y = 10 } ]
@@ -551,8 +516,7 @@ let postTests =
             }
 
             test "a built container off any Seat adds no Post" {
-                // The controller container's shape: built, but not on a
-                // Seat — range 2 of the source.
+                // The controller container's shape: built, at range 2 of the source.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 12; Y = 10 } ]
@@ -570,8 +534,7 @@ let postTests =
             }
 
             test "a room with no controller still derives container Posts" {
-                // The W12S28 shape: no Dual Seat can exist, yet the Seat
-                // under the built source container is a Post.
+                // The W12S28 shape.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "cont-1", { X = 9; Y = 10 } ]
@@ -595,10 +558,8 @@ let workingGroundTests =
         "atlas workingGround"
         [
             test "the working ground is every source's Seats plus the Upgrade Work Area" {
-                // Source at (10,10) with three projected neighbours — the
-                // wall is no Seat — and a controller at (13,10) whose
-                // Upgrade Work Area reaches (12,10), (11,10) and (10,11) —
-                // the two Seats in both halves count once.
+                // The Upgrade Work Area reaches (12,10), (11,10) and
+                // (10,11); the two Seats in both halves count once.
                 let atlas =
                     { spatial
                           [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
@@ -627,13 +588,9 @@ let workingGroundTests =
             }
 
             test "a Thorium deposit's tile and Seats are working ground, in any room" {
-                // ADR 0057 decision 1's working-ground clause. The deposit
-                // stands on its own tile — a wall, which is where the mod
-                // puts one — so the tile is in the set through the mineral
-                // and never through the terrain, and its two open
-                // neighbours are Seats by the same rule a source's are.
-                // Gated on no level: the extractor waits for RCL6 and the
-                // tile an extension would take never comes back.
+                // The deposit stands on a wall, where the mod puts one, so
+                // its tile is in the set through the mineral and never
+                // through the terrain.
                 let atlas =
                     { spatial
                           [ "min-a", { X = 20; Y = 20 } ]
@@ -655,13 +612,6 @@ let workingGroundTests =
             }
 
             test "a deposit's Seat under a container is no Post, and hires no Anchor" {
-                // The half of ADR 0057 decision 1 that says where the
-                // mineral's Seats do *not* go. They are working ground, so
-                // the Layout keeps its cluster off them; they are not in the
-                // source Seat union, so a container standing on one raises no
-                // [[post]], counts in no Anchor quota and garrisons nobody.
-                // The miner that stands there is the miner row's, and that
-                // row is ADR 0057 decision 2's — a different ticket.
                 let atlas =
                     { spatial
                           [ "min-a", { X = 20; Y = 20 }; "can-min", { X = 19; Y = 20 } ]
@@ -683,11 +633,7 @@ let workingGroundTests =
 
                 Expect.equal (postCount atlas) 0 "so no Anchor is hired to garrison it"
 
-                // What ADR 0057 decision 2 adds on the other side of that
-                // sentence: the tile is a **mine Post** all the same, read off
-                // a census of its own. The deposit's Post and the room's Posts
-                // are two answers on purpose — this one is the [[miner]]'s
-                // standing room and the other is the [[anchor]] row's quota.
+                // The deposit's Post and the room's Posts are two answers on purpose.
                 Expect.equal
                     (tilesHome atlas (postsOf atlas "min-a"))
                     (Set.singleton { X = 19; Y = 20 })
@@ -695,12 +641,7 @@ let workingGroundTests =
             }
 
             test "a deposit with no container standing has no Post at all" {
-                // The mine Post is the **built** container's and never its
-                // site: a body cast for a site Post raises the container it
-                // will later dig into (#205), and a miner carries no Carry to
-                // spend into a site with and is shut out of Build by ADR 0046.
-                // So the Post arrives the tick the container stands, and the
-                // pairwise premise is one projection entry.
+                // The pairwise premise is one projection entry.
                 let atlasWith kind =
                     { spatial
                           [ "min-a", { X = 20; Y = 20 }; "can-min", { X = 19; Y = 20 } ]
@@ -792,10 +733,8 @@ let idleGroundTests =
             }
 
             test "widening the mover's set leaves the Layout's where it was" {
-                // ADR 0022's exclusion is what pushes every clustered pick a
-                // ring out, so #268's wider set is a second function and never
-                // this one: a Storage's ring inside `workingGroundIn` would
-                // move every extension the Layout places.
+                // A Storage's ring inside `workingGroundIn` would move
+                // every extension the Layout places.
                 let atlas = ofView storeRingView
                 let home = atlasHome atlas
 
@@ -808,12 +747,9 @@ let idleGroundTests =
                     "and the mover's set strictly contains the Layout's"
             }
 
-            // A [[tower]] tucked against a wall (#277): its own tile an
-            // obstacle as the engine has it, and two walkable neighbours,
-            // which is the shape that jams — both taken, and the hauler
-            // holding its Refill never reaches range 1. No source and no
-            // controller, so the working ground is empty and whatever the
-            // idle ground holds is the stores' rings alone.
+            // A tower tucked against a wall (#277): two walkable
+            // neighbours, the shape that jams. No source and no controller,
+            // so the idle ground is the stores' rings alone.
             let towerRoom =
                 { spatial
                       [ "tow-1", { X = 10; Y = 10 } ]
@@ -827,11 +763,8 @@ let idleGroundTests =
                 |> withObstacles [ { X = 10; Y = 10 } ]
 
             test "a wall-tucked tower rings the idle ground like every other store" {
-                // #277: ADR 0010 pools a Refill on a tower, so a hauler
-                // holding one queues on its range-1 ring exactly as the
-                // Storage's does — and #268's enumeration named the cluster
-                // and held the tower out, which left that ring reading as
-                // ordinary ground for an idle body to park on.
+                // #268's enumeration named the cluster and held the tower
+                // out, leaving its ring as ground for an idle body to park on.
                 let view =
                     { snapshotWith [] towerRoom with
                         Refillables =
@@ -853,11 +786,8 @@ let idleGroundTests =
             }
 
             test "a structure of somebody else's rings nothing of ours" {
-                // The census this set is read off is the view's Refillables —
-                // ours (#277). `FIND_STRUCTURES` carries every owner's, so an
-                // abandoned room's tower stands in the kind census with no
-                // Refill of ours ever pooled on it, and no body of ours ever
-                // queues at it.
+                // `FIND_STRUCTURES` carries every owner's, so an abandoned
+                // room's tower is in the kind census with no Refill of ours.
                 let atlas = ofView (snapshotWith [] towerRoom)
 
                 Expect.equal
@@ -885,9 +815,8 @@ let consistencyTests =
         "atlas consistency"
         [
             test "travelCost, firstStep, workArea and mayAct agree from every standing tile" {
-                // Mixed ground around a source: seats on plain and swamp, a
-                // dead lane, an obstacle, and an unreachable island — the
-                // sweep stands one creep on every standing tile in turn.
+                // Seats on plain and swamp, a dead lane, an obstacle, an
+                // unreachable island; one creep on every standing tile in turn.
                 let projection =
                     spatial
                         [ "src-a", { X = 10; Y = 10 } ]
@@ -954,9 +883,7 @@ let consistencyTests =
             }
 
             test "a Harvest Work Area is the source's Seats minus obstacle-blocked tiles" {
-                // Same ground as the seats test: two terrain Seats, one
-                // under an obstacle — standing loses it, the Seat count
-                // keeps it (ADR 0001), so standing never exceeds Seats.
+                // Two terrain Seats, one under an obstacle.
                 let atlas =
                     spatial
                         [ "src-a", { X = 10; Y = 10 } ]
@@ -988,20 +915,14 @@ let keeperMaskTests =
     testList
         "atlas keeper mask"
         [
-            // The declared centres of the one Source Keeper room the chain to
-            // the sector Reactor crosses, and the margin the colony ships.
             let centres = Keepers.centresIn "W15S26"
             let margin = Tuning.keeperMargin Tuning.defaults
-            // One Atlas per case rather than one for the list: the Atlas
-            // memoises on mutable tables and Expecto runs these in parallel
-            // (#310).
+            // One Atlas per case: Expecto runs these in parallel (#310).
             let masked () = keeperRoom |> snapshotWith [] |> ofView
 
             test "every tile within the margin of a declared rock is off the walkable ground" {
-                // ADR 0060 decision 2's first acceptance criterion. The ground
-                // under this room is plain everywhere, so every tile missing
-                // from the walkable set is missing because of the mask and for
-                // no other reason.
+                // The ground under this room is plain everywhere, so every
+                // missing tile is the mask's doing.
                 let walkable = walkableTilesIn (masked ()) "W15S26"
 
                 Expect.isNonEmpty centres "W15S26's rocks are declared"
@@ -1023,11 +944,8 @@ let keeperMaskTests =
             }
 
             test "a masked tile is impassable to the grid, the ring and the ground alike" {
-                // "Impassable to every query" is one fact and not three: the
-                // mask goes on the raw ground before the walking grid is copied
-                // from it, so a Seat counted off terrain, a step priced off the
-                // walking grid and a crossing read off the border ring all
-                // answer the same way about the same tile.
+                // The mask goes on the raw ground before the walking grid
+                // is copied from it, so every query answers alike.
                 let lair = { X = 35; Y = 11 }
                 let ringTile = { X = 0; Y = 20 }
 
@@ -1060,10 +978,7 @@ let keeperMaskTests =
             }
 
             test "a room the declaration names none of keeps every tile of its ground" {
-                // The mask is keyed by room name and reaches nothing else (ADR
-                // 0004): W15S27 carries the identical invented ground and loses
-                // nothing, which is what says the missing tiles next door are
-                // the declaration's doing and not the fixture's.
+                // W15S27 carries the identical invented ground and loses nothing.
                 Expect.isEmpty (Keepers.centresIn "W15S27") "W15S27 declares no keeper rock"
 
                 Expect.equal
@@ -1078,10 +993,8 @@ let keeperMaskTests =
             }
 
             test "the bulk mask and the per-tile rule are the same rule" {
-                // The grids are laid from `maskedTilesIn` and the route search
-                // asks `masked` per ring tile; a disagreement between the two
-                // would be a tile the price walks and the scan set refuses, or
-                // the other way about.
+                // The grids are laid from `maskedTilesIn`; the route search
+                // asks `masked` per ring tile.
                 let bulk = Keepers.maskedTilesIn margin "W15S26" |> Set.ofList
 
                 let pointwise =

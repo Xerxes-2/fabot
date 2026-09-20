@@ -1,9 +1,5 @@
-/// The rows a colony casts from — hauler, worker, upgrader, Reserver — the
-/// workforce target and per-source output they are sized from (ADR 0012, ADR
-/// 0042), the body patterns they are cast with (ADR 0006), the supply floor in
-/// front of them (ADR 0050), and the Tuning knobs that price them.
-/// The quota suite's fixtures: the colonies, banks and casts the rows below
-/// are sized against.
+/// The quota suite's fixtures: the colonies, banks and casts the rows —
+/// hauler, worker, upgrader, Reserver — are sized against.
 module Fabot.Core.Tests.Decide.QuotaFixtures
 
 open Expecto
@@ -63,7 +59,7 @@ let haulerCasts intents =
 
 /// A room whose source containers are a two- and a three-step paved haul
 /// from the spawn — the live W12S28 geometry the round trip's repricing
-/// was measured against (ADR 0029), flattened onto one paved lane. Sources embedded in
+/// was measured against, flattened onto one paved lane. Sources embedded in
 /// wall at (8,10) and (17,10), their built containers on the Seats (9,10)
 /// and (16,10) — two Posts — and the spawn structure standing at (12,10),
 /// whose free neighbours are (11,10) and (13,10): two steps from the first
@@ -192,10 +188,9 @@ let richIncomeColony =
         Bank = bank 1300 1300
     }
 
-/// The rich bank's fleet at a given worker count: the rows its quotas
-/// pin — one Anchor per Post (2) beside the one hauler this bank's body
-/// clears both containers with (ADR 0049) — and as many workers as the
-/// case under it is pinning.
+/// The rich bank's fleet at a given worker count: one Anchor per Post (2),
+/// the one hauler this bank's body clears both containers with, and as
+/// many workers as the case under it is pinning.
 let richIncomeFleet workers =
     [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ]
     @ [ for i in 1..workers -> worker $"w{i}" 0 50 ]
@@ -233,10 +228,10 @@ let internal unshippedFleet = respelled [ "h-home1"; "h-out1" ] switchFleet
 /// A colony standing exactly at its Workforce target with one reserver in
 /// it: no Post, no source container and no placed rock, so the target is
 /// the floor of two and the two living creeps meet it. One body leaving
-/// the count is therefore one cast, which is what makes a lead readable
-/// (ADR 0026). The bank is 1,300 — ADR 0042's own reserver body at
-/// capacity — and the reserver stands at (25,29), three plain steps from
-/// the tile a replacement is born on.
+/// the count is therefore one cast, which is what makes a lead readable.
+/// The bank is 1,300 — the reserver body at capacity — and the reserver
+/// stands at (25,29), three plain steps from the tile a replacement is
+/// born on.
 let internal leadColony life =
     let room = atLevel 2 (openRoom 6)
 
@@ -248,16 +243,14 @@ let internal leadColony life =
             |> withCreepsAt [ "w1", { X = 25; Y = 27 }; "r1", { X = 25; Y = 29 } ]
     }
 
-/// ADR 0042's own reserver body, which a deficit of one to 1,200 ticks
-/// buys: 1,300 energy, 2.17 a tick over a CLAIM part's 600-tick life.
+/// The reserver body a deficit of one to 1,200 ticks buys: 1,300 energy,
+/// 2.17 a tick over a CLAIM part's 600-tick life.
 let internal twoBlocks = [ BodyPart.Claim; BodyPart.Claim; Move; Move ]
 
-/// Files our own bodies into one named room's layer of the projection (ADR
-/// 0041): a creep the projection places nowhere stands in no room at all, and
-/// the row's `Living` and the cases that stand a guard beside its raid both
-/// want it standing somewhere real — a guard that stands in the raided room is
-/// what the row's `Living`, the Task's holders and the Matcher all read, even
-/// though since #272 the count itself reads no body of ours at all.
+/// Files our own bodies into one named room's layer of the projection: a
+/// creep the projection places nowhere stands in no room at all, and the
+/// cases that stand a guard beside its raid want it standing somewhere
+/// real, even though since #272 the count itself reads no body of ours.
 let internal standingIn room (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
     let layer = SpatialInfo.layerOf colony.Spatial room
 
@@ -272,15 +265,14 @@ let internal standingIn room (ours: (CreepInfo * Pos) list) (colony: ColonyView)
                 }
     }
 
-/// The guard row's colony (ADR 0056): `reserverColony`'s W12S28 shape with its
-/// north outpost declared, posted and held at the reservation cap — so the
-/// reserver row wants exactly one block and the Anchor row is at quota — plus
-/// the hostiles the case names standing in that outpost and our own bodies
-/// standing there beside them.
+/// The guard row's colony: `reserverColony`'s W12S28 shape with its north
+/// outpost declared, posted and held at the reservation cap — so the
+/// reserver row wants exactly one block and the Anchor row is at quota —
+/// plus the hostiles the case names standing in that outpost and our own
+/// bodies standing there beside them.
 ///
-/// The hostiles are a parameter and not a field of the fixture, so a case reads
-/// the quiet tick and the raided one **pairwise** off one geometry: what moves
-/// between two calls is the raid and can be nothing else.
+/// The hostiles are a parameter and not a field of the fixture, so a case
+/// reads the quiet tick and the raided one pairwise off one geometry.
 let internal guardColony hostiles (ours: (CreepInfo * Pos) list) =
     let colony =
         reserverColony
@@ -304,11 +296,11 @@ let internal raidTile = { X = 40; Y = 41 }
 /// which room a body of the raid is standing in.
 let internal westSeat = { X = 21; Y = 40 }
 
-/// A raid of one `smallMelee` and the healers the case names, all in the north
-/// outpost: the [[threat]] that makes the room guarded at all (ADR 0033's own
-/// test, which a healer fails), and beside it the HEAL parts the count rule
-/// prices. Each healer carries an id of its own, a raid being a roster and not
-/// one creep.
+/// A raid of one `smallMelee` and the healers the case names, all in the
+/// north outpost: the threat that makes the room guarded at all (which a
+/// healer alone is not), and beside it the HEAL parts the count rule
+/// prices. Each healer carries an id of its own, a raid being a roster and
+/// not one creep.
 let internal raidOf healers =
     hostileIn "W1N2" raidTile smallMelee
     :: [
@@ -318,21 +310,18 @@ let internal raidOf healers =
             }
     ]
 
-/// The same colony at a named spawn capacity, for the one case that asks what
-/// the bank does to the count: 800 and 1,300 buy one guard block, 1,800 — the
-/// live RCL5 capacity `guardColony` itself banks — two, and 2,300 three (ADR
-/// 0056 decision 1's own table). The capacity moves and the 8,000 banked does
-/// not, keeping `reserverColony`'s own property: restraint in these cases comes
-/// from the rows, never from the bank running dry between two casts of one
-/// tick.
+/// The same colony at a named spawn capacity: 800 and 1,300 buy one guard
+/// block, 1,800 (the live RCL5 capacity `guardColony` banks) two, and
+/// 2,300 three. The capacity moves and the 8,000 banked does not, so
+/// restraint in these cases comes from the rows, never from the bank
+/// running dry between two casts of one tick.
 let internal banked capacity (colony: ColonyView) =
     { colony with
         Bank = bank 8000 capacity
     }
 
-/// The `guard` row of the tick's `Quotas`, which is where the cascade writes its
-/// own arithmetic down (ADR 0009) — the quota being observability and never a
-/// number anything downstream reads.
+/// The `guard` row of the tick's `Quotas`: observability, never a number
+/// anything downstream reads.
 let internal rowOf name colony =
     (decideOn colony).Quotas.Rows |> List.tryFind (fun row -> row.Row = name)
 
@@ -348,9 +337,9 @@ let internal guardCasts intents =
 /// The Anchor #203 met, spelled as the colony really held it: `6W/1C/1M`,
 /// standing full on a full container. One Carry and one Move, and yet
 /// nothing that can put a single energy into an extension — a standing
-/// body by ADR 0046's ratio (`1 × 4 < 6`) and a Work-heavy one by ADR
-/// 0016's (`6 > 1`), so Refill, Withdraw, Build and Repair are all shut to
-/// it and Harvest at its Post is the whole of its working life.
+/// body by ratio (`1 × 4 < 6`) and a Work-heavy one (`6 > 1`), so Refill,
+/// Withdraw, Build and Repair are all shut to it and Harvest at its Post
+/// is the whole of its working life.
 let internal liveAnchor name =
     creepWith name 50 0 [ Work; Work; Work; Work; Work; Work; Carry; Move ]
 
@@ -379,8 +368,8 @@ let internal deadlockColony =
 /// bank of 1,800 instead of 1,300 — no Post, no source container and no
 /// placed rock, so the target is the floor of two and the two living
 /// creeps meet it. One body leaving the count is therefore one cast, which
-/// is what makes a lead readable (ADR 0026). The body under test stands at
-/// (25,29), three plain steps from the tile a replacement is born on.
+/// is what makes a lead readable. The body under test stands at (25,29),
+/// three plain steps from the tile a replacement is born on.
 let internal upgraderLeadColony body life =
     let room = atLevel 2 (openRoom 6)
 
@@ -395,7 +384,7 @@ let internal upgraderLeadColony body life =
 let internal leadCasts body life =
     spawnIntents (decideOn (upgraderLeadColony body life)).Intents
 
-/// The buffer colony at the live RCL5 bank (ADR 0046): the W12S28
+/// The buffer colony at the live RCL5 bank: the W12S28
 /// corridor — a 3-wide plain field y = 9..11 from x = 8 to 32, the two
 /// sources embedded in wall at (10,10) and (30,10) with their built
 /// containers standing on the Seats (11,10) and (29,10), so two Posts and
@@ -446,9 +435,9 @@ let internal upgraderRoom =
 
 /// The same room with the upgrade buffer at (18,11) — two tiles inside the
 /// controller's Upgrade Work Area, on no source's Seat and within range 1
-/// of neither rock, so it is the controller's container and not a source's
-/// (ADR 0012, ADR 0019). Built or pending is the whole of what the
-/// pairwise below varies.
+/// of neither rock, so it is the controller's container and not a
+/// source's. Built or pending is the whole of what the pairwise below
+/// varies.
 let internal withBuffer kind =
     upgraderRoom |> withTargets [ "can-buf", { X = 18; Y = 11 }, kind ]
 
@@ -464,12 +453,11 @@ let internal upgraderColony room =
 
 /// The two rows the ground hires, and as many of the two surplus rows as
 /// the case wants: one Anchor per Post, the one hauler every round trip
-/// comes to together at this bank (ADR 0049), then upgraders and
-/// generalists. The bank is a parameter and not the literal 1,800 because
-/// the standing row's stand-in has to be the body *this* bank's sizing
-/// rule casts — a fixture at a poorer bank whose fleet still held
-/// `11W/1C/11M` would have `patternOf` read a row the colony could not
-/// have cast, and the row's living count is what every reading below is.
+/// comes to together at this bank, then upgraders and generalists. The
+/// bank is a parameter and not the literal 1,800 because the standing
+/// row's stand-in has to be the body *this* bank's sizing rule casts — a
+/// fixture at a poorer bank whose fleet still held `11W/1C/11M` would
+/// have `patternOf` read a row the colony could not have cast.
 let internal upgraderFleetAt capacity anchors upgraders workers =
     [ for i in 1..anchors -> anchor $"a{i}" 0 50 ]
     @ [ hauler "h1" 0 100 ]
@@ -485,7 +473,7 @@ let internal upgraderFleet upgraders workers =
 
 /// A construction site standing on the corridor's top row, out of the way
 /// of the trunk the haulers walk: what puts a Build in the pool, which is
-/// the only thing the worker row's floor reads (ADR 0046).
+/// the only thing the worker row's floor reads.
 let internal withBuildSite (colony: ColonyView) =
     { colony with
         ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
@@ -496,8 +484,8 @@ let internal withBuildSite (colony: ColonyView) =
 
 /// A declared outpost one room north: a controller in a room the colony
 /// neither owns nor holds, which is the whole of what the reserver row's
-/// quota is derived from (ADR 0042). No source and no container, so it
-/// adds a reserver place and nothing else to the target.
+/// quota is derived from. No source and no container, so it adds a
+/// reserver place and nothing else to the target.
 let internal withDeclaredOutpost (colony: ColonyView) =
     { colony with
         Spatial =
@@ -566,8 +554,7 @@ let internal castName casts =
     | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
 /// The same colony with one tunable moved — the whole of what a pairwise
-/// case on `Tuning` does, and the reason a rule reads its numbers off the
-/// [[colony view]] rather than off a module constant (ADR 0052 decision 5).
+/// case on `Tuning` does.
 let internal tunedBy (change: Tuning -> Tuning) (colony: ColonyView) =
     { colony with
         Tuning = change colony.Tuning
@@ -579,14 +566,13 @@ let internal tunedBy (change: Tuning -> Tuning) (colony: ColonyView) =
 /// (25,25) and the source's container at (21,25), so moving the controller
 /// moves the buffer's leg and nothing else about the room.
 ///
-/// The controller and its buffer move **together**, which is the one place
+/// The controller and its buffer move together, which is the one place
 /// this departs from the ticket's wording ("the buffer beside the
 /// controller against the buffer hugging the spawn"). A container is a
 /// buffer because it stands in the controller's own Upgrade Work Area
-/// (`Atlas.controllerContainers`, ADR 0019); a container parked by the
-/// spawn with the controller left across the room is no buffer at all and
-/// would leave the colony with one sink again, which is the state before
-/// the case rather than the other half of it. W13S28's own geometry is the
+/// (`Atlas.controllerContainers`); a container parked by the spawn with
+/// the controller left across the room is no buffer at all and would
+/// leave the colony with one sink again. W13S28's own geometry is the
 /// pair as written: a controller thirty tiles from the Post that feeds it.
 let internal sinkLaneColony available controllerX =
     let spawnPos = { X = 25; Y = 25 }
@@ -690,24 +676,22 @@ let internal outpostPostColony held life =
                 }
     }
 
-/// **One [[post]] on each side of a border, over two rocks the colony
-/// prices differently**: its own room's source at (10,9) with its
-/// container standing on the Seat (10,8), and `outpostPostColony`'s
-/// outpost rock at (10,45) with its container on (10,44). An Anchor
-/// garrisons each of them, standing on the Post itself, and a hauler keeps
-/// the [[supply floor]] quiet.
+/// One post on each side of a border, over two rocks the colony prices
+/// differently: its own room's source at (10,9) with its container
+/// standing on the Seat (10,8), and `outpostPostColony`'s outpost rock at
+/// (10,45) with its container on (10,44). An Anchor garrisons each of
+/// them, standing on the Post itself, and a hauler keeps the supply floor
+/// quiet.
 ///
-/// The shape ADR 0053 is about and the one no fixture could reach before
-/// it: while the home Post is in the projection an owned room prices at
-/// the held rate, so the old colony-wide `List.max` answered six Work for
-/// *both* rocks however the outpost's controller stood — which is why the
+/// While the home Post is in the projection an owned room prices at the
+/// held rate, so the old colony-wide `List.max` answered six Work for
+/// both rocks however the outpost's controller stood — which is why the
 /// only fixture that could move the number was one that deleted the home
 /// room's Posts (`withoutHomePosts`).
 ///
-/// Three dials and no others: who holds W1N2, and how long each of the two
-/// garrisons has left. The one with the shorter life is the one that goes
-/// [[expiring]] and so the one whose Post the row is casting into (ADR
-/// 0026), which is the whole of what pairs a body to a rock here.
+/// Three dials and no others: who holds W1N2, and how long each of the
+/// two garrisons has left. The one with the shorter life is the expiring
+/// one and so the one whose Post the row is casting into.
 let internal pairedPostColony held homeLife outLife =
     { bareRespawn with
         Controller = None
@@ -777,17 +761,17 @@ let internal pairedPostColony held homeLife outLife =
     }
 
 /// `pairedPostColony` with the outpost's garrison never hired, so its Post
-/// stands **genuinely** empty beside a home Post whose incumbent is still
+/// stands genuinely empty beside a home Post whose incumbent is still
 /// standing on it.
 ///
-/// Which is what makes the arrival reading discriminate at all (ADR 0026,
-/// ADR 0053 trap (i)): with both Posts garrisoned a rule that judged a
-/// vacancy by who is standing *now* finds no free Post anywhere and falls
-/// back to the richest ceiling — the same six Work arrival gives, for the
-/// wrong reason. Leave the outpost's Post empty and the two readings part:
-/// arrival counts the expiring home incumbent out and buys for its held
-/// rock, where a standing read sees only the neutral hole and buys three
-/// Work for a rock giving ten.
+/// Which is what makes the arrival reading discriminate at all: with both
+/// Posts garrisoned a rule that judged a vacancy by who is standing now
+/// finds no free Post anywhere and falls back to the richest ceiling —
+/// the same six Work arrival gives, for the wrong reason. Leave the
+/// outpost's Post empty and the two readings part: arrival counts the
+/// expiring home incumbent out and buys for its held rock, where a
+/// standing read sees only the neutral hole and buys three Work for a
+/// rock giving ten.
 let internal withoutOutpostGarrison (colony: ColonyView) =
     { colony with
         Creeps = colony.Creeps |> List.filter (fun creep -> creep.Name <> "a-out")

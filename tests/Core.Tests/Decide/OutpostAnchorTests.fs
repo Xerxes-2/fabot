@@ -1,5 +1,4 @@
-/// An Anchor between two outposts, and the heavy pin across a border
-/// (ADR 0048).
+/// An Anchor between two outposts, and the heavy pin across a border.
 module Fabot.Core.Tests.Decide.OutpostAnchorTests
 
 open Expecto
@@ -16,19 +15,11 @@ let twoOutpostAnchorTests =
         "an Anchor between two outposts"
         [
             test "an unposted outpost rock is not a rival, however near it stands" {
-                // The live failure: the colony's one container stood in the
-                // north outpost, the Anchor its Post hired was born in the
-                // spawn room, and it walked *west* — to a room with no
-                // container at all — because ADR 0020's bare-Seat fallback
-                // made those Seats reachable and travel cost had nothing
-                // left to say but "nearer".
-                //
-                // The fix is geometric and not a rank or a quota: the west
-                // rock's Work Area for this body is empty, so the Task has
-                // no travel cost and never enters the pool. The factor
-                // therefore reads `only-candidate` rather than
-                // `travel-cost`, which is the whole claim — the near rock
-                // is not a rival the far one beat, it is not a candidate.
+                // The live failure: the colony's one container stood in the north
+                // outpost and the Anchor its Post hired walked west, to a room with no
+                // container, because the bare-Seat fallback made those Seats reachable.
+                // The west rock's Work Area for this body is empty, so its Task never
+                // enters the pool: the factor reads `only-candidate`, not `travel-cost`.
                 Expect.equal
                     (anchorMatch (twoRockColony []))
                     (Some(taskId (Harvest "src-north"), MatchFactor.OnlyCandidate))
@@ -47,13 +38,8 @@ let twoOutpostAnchorTests =
             }
 
             test "a container standing on the west rock makes it a rival again, and it wins" {
-                // The other half, and the only reading under which the case
-                // above says anything: nothing here refuses an outpost, or
-                // ranks a near room behind a far one. Put a container on the
-                // west rock's Seat and that rock is posted, its Work Area is
-                // that Post, and travel cost — the one comparison left
-                // between two feeding-tier Harvests — sends the Anchor to
-                // the near one exactly as it always did.
+                // The other half: a container on the west rock's Seat posts it, and
+                // travel cost sends the Anchor to the near one as it always did.
                 Expect.equal
                     (anchorMatch (twoRockColony [ "cont-west", { X = 46; Y = 26 } ]))
                     (Some(taskId (Harvest "src-west"), MatchFactor.TravelCost))
@@ -79,14 +65,9 @@ let heavyPinAcrossTests =
         "heavy pin across a border"
         [
             test "an empty window at home does not pull an Anchor out of its outpost" {
-                // The live tick #193 reports, in two rooms: an Anchor
-                // stepped off its container by a hauler, its own rock
-                // fifty ticks from restocking, and a home Post whose rock
-                // is dry too. ADR 0025 dispatched it because an Anchor's
-                // walk covers any wait; ADR 0048 keeps it where it is,
-                // because it is in digging range of the rock it was hired
-                // for and there is nothing at the far end of that crossing
-                // it can do sooner.
+                // Live tick #193: an Anchor stepped off its container, its rock fifty
+                // ticks from restocking, the home rock dry too. It stays, in digging
+                // range of the rock it was hired for.
                 let colony = twoPostWindowColony 20 30 (anchor "a1" 0 50)
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-out") ]
 
@@ -113,13 +94,8 @@ let heavyPinAcrossTests =
             }
 
             test "the same geometry really does dispatch a light body home" {
-                // The premise of the case above, and the pairwise half of
-                // ADR 0048: nothing here is unreachable, mis-posted or out
-                // of the pool. A worker on the very tile the Anchor stands
-                // on is released from the outpost rock it is beside and
-                // crosses the Seam for the home one, because thirty-six
-                // tiles at a tick a tile cover twenty ticks of waiting —
-                // which is ADR 0025 exactly as it was written.
+                // The pairwise half: a light body on the same tile is released and
+                // crosses the Seam, because thirty-six tiles cover twenty ticks of waiting.
                 let colony = twoPostWindowColony 20 30 (worker "w" 0 50)
                 let remembered = Map.ofList [ "w", taskId (Harvest "src-out") ]
 

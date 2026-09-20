@@ -1,4 +1,4 @@
-/// Seams and cross-room walks on real terrain (ADR 0041).
+/// Seams and cross-room walks on real terrain.
 module Fabot.Core.Tests.RoomSeamTests
 
 open Expecto
@@ -57,13 +57,9 @@ let seamTests =
             }
 
             test "the bands are as wide as ADR 0041 sizes the cross-room walk on" {
-                // 36 north and 19 west are the numbers the cross-room walk
-                // is costed against — "a minimum over 36 additions, not 36
-                // floods" — so they are asserted of the query, not only of
-                // one room's ring. The test below recomputes the band from
-                // the same two rings and would follow a narrower recapture
-                // of either room down without a word; this is the line that
-                // would go red instead.
+                // The test below recomputes the band from the same two
+                // rings and would follow a narrower recapture down without
+                // a word; this is the line that would go red instead.
                 for border in borders do
                     let atlas = acrossFrom (load border.From) (load border.To)
 
@@ -74,21 +70,15 @@ let seamTests =
             }
 
             test "the band is every exit the two captures agree on, and no other" {
-                // The width is pinned above; what is pinned here is which
-                // tiles, recomputed off the committed captures rather than
-                // written down — the query drops nothing a creep could
-                // cross and admits nothing it could not.
+                // Which tiles, recomputed off the committed captures.
                 for border in borders do
                     let near = load border.From
                     let far = load border.To
                     let edge = $"{border.From} -> {border.To}"
 
-                    // A corner is on two borders at once and is a crossing
-                    // on neither, so it is not one of the exits the two
-                    // rooms agree on. Every capture walls its corners, so
-                    // this line changes nothing today; it is here so a
-                    // capture that did not would fail the width test above
-                    // rather than this one.
+                    // Every capture walls its corners, so this line changes
+                    // nothing today; a capture that did not would fail the
+                    // width test above rather than this one.
                     let corner tile =
                         border.Along tile = 0 || border.Along tile = 49
 
@@ -114,19 +104,12 @@ let seamTests =
             }
 
             test "the band reads the same from the neighbour's side, every pair swapped" {
-                // Adjacency has no preferred end **on these captures**, and
-                // since ADR 0062 that is the captures' fact and not the model's
-                // rule. A band asks the *far* room's ground behind the landing,
-                // so `seams A B` and `seams B A` are two questions about two
-                // different rooms and are free to answer differently — which on
-                // W15S26's east border they do, and `RoomSeamTests`' keeper
-                // list is where that is pinned. Not one of the pairs in
-                // `borders` is a keeper room's, and over raw terrain no capture
-                // in this repo orphans a landing at all (ADR 0062's own
-                // measurement), so every one of them is symmetric and this says
-                // so. What would go red if a re-capture ever orphaned one is
-                // this line, and the right answer then is to name the direction
-                // rather than to relax the equality.
+                // Symmetry is these captures' fact, not the model's rule:
+                // `seams A B` and `seams B A` ask two rooms' ground and are
+                // free to differ (W15S26's east border does, in the keeper
+                // list). No pair in `borders` orphans a landing over raw
+                // terrain. If a re-capture ever did, name the direction
+                // rather than relax the equality.
                 for border in borders do
                     let near = load border.From
                     let far = load border.To
@@ -141,8 +124,7 @@ let seamTests =
             }
 
             test "a room that borders none of them has no band with any of them" {
-                // W15S25 is four rooms away, so nothing joins it — and that
-                // is an empty answer, never a failure or a block (ADR 0004).
+                // W15S25 is four rooms away.
                 let stranger = load "W15S25"
 
                 for name in [ "W12S28"; "W12S27"; "W13S28" ] do
@@ -166,21 +148,11 @@ let crossRoomWalkTests =
         [
             test
                 "no cross-room walk undercuts the rooms' own distance, but for the border's free tile" {
-                // The lower bound ADR 0041's join has to respect, on real
-                // terrain and naming no tile: a creep crosses at most one
-                // tile of Chebyshev distance per tick, so a walk cannot come
-                // in under the distance between where it starts and the
-                // nearest tile it may work from — measured on the world
-                // grid, with the neighbour's coordinates shifted a room's
-                // width into this room's frame.
-                //
-                // Less exactly one tile, and the one is the crossing itself:
-                // the creep pays for stepping onto the exit tile, and the
-                // engine then relocates it onto the landing tile in the
-                // neighbouring room at the end of that tick, for no tick at
-                // all. That free tile is the whole of the slack, it is the
-                // engine's rule and not this join's, and every other tile of
-                // the journey still costs a tick at least (ADR 0029).
+                // Chebyshev distance on the world grid, the neighbour's
+                // coordinates shifted a room's width into this room's
+                // frame. Less exactly one tile: the creep pays for stepping
+                // onto the exit tile, and the engine relocates it onto the
+                // landing tile at the end of that tick for no tick at all.
                 let mutable priced = 0
 
                 for border in borders do
@@ -237,18 +209,10 @@ let crossRoomWalkTests =
             }
 
             test "a crossing that has a price has a step, and the step stays in this room" {
-                // #142's invariant, on real terrain and naming no tile. A
-                // Task the Matcher can price is a Task the Matcher will
-                // hand out, so a price without a step is a creep parked on
-                // an assignment for life — which is the defect this test
-                // exists to keep out, stated as an equivalence rather than
-                // as a route anybody checked by hand.
-                //
-                // And the step is always one of this room's own tiles: its
-                // ground, or an exit of the band toward the target's room.
-                // Never the neighbour's, which a bare `Pos` could not tell
-                // apart, and never further than one tile away, because a
-                // step is a step (ADR 0001, ADR 0041).
+                // A price without a step is a creep parked on an assignment
+                // for life (#142). The step is one of this room's own
+                // tiles: its ground, or an exit of the band toward the
+                // target's room.
                 let mutable stepped = 0
 
                 for border in borders do
@@ -256,9 +220,8 @@ let crossRoomWalkTests =
                         let near = load from
                         let far = load into
 
-                        // The band is read off the two rings and nothing
-                        // else (ADR 0041), so the tile this Atlas stands its
-                        // creep on is never looked at.
+                        // The band is read off the two rings, so the tile
+                        // this Atlas stands its creep on is never looked at.
                         let crossings =
                             seams (walkingAcross near far { X = 0; Y = 0 }) from into
                             |> List.map fst
@@ -305,25 +268,14 @@ let crossRoomWalkTests =
             }
 
             test "a cross-Seam lead prices every goal tile exactly as the Matcher's walk does" {
-                // The pin #169's far-leg memo goes in under: by ADR 0030 the
-                // lead's cross-room clock and the Matcher's are two readers
-                // of one join, so on real terrain and with one near flood
-                // between them they agree tile by tile — whatever the lead
-                // computes the answer from. A lead priced per goal tile and
-                // a lead read out of a table filled once per census are the
-                // same number here, or this test is the alarm.
-                //
-                // Two readings, because the Matcher only ever answers a
-                // minimum over a Work Area. Over a real source's Seats that
-                // is a cluster, so the lead's per-tile answers are minimised
-                // to meet it; over a probe source fenced down to one Seat
-                // (`probeBeside`) it is one named tile, and that is where a
-                // seeding that is right at a room's cheapest tile and wrong
-                // at a dearer one would show — `leadOf` reads the tile its
-                // creep happens to stand on, never the room's minimum.
-                // Absence has to line up on both: an area whose every tile
-                // is unreachable leads nobody, exactly as it walks nobody
-                // (ADR 0004).
+                // The lead's cross-room clock and the Matcher's are two
+                // readers of one join, whatever the lead computes from
+                // (#169's far-leg memo). Two readings: over a real source's
+                // Seats the Matcher answers a minimum, so the per-tile leads
+                // are minimised to meet it; over a probe source fenced to
+                // one Seat (`probeBeside`) it is one named tile, where a
+                // seeding right at the cheapest tile and wrong at a dearer
+                // one would show.
                 let mutable led = 0
                 let mutable pinned = 0
 
@@ -333,10 +285,8 @@ let crossRoomWalkTests =
                         let far = load into
 
                         for birth in standingSample near do
-                            // A neighbour of the birth tile, inside the
-                            // grid: which one is nobody's decision worth
-                            // making, since the spawner's own tile is fenced
-                            // off and never walked.
+                            // A neighbour of the birth tile, inside the grid;
+                            // the spawner's own tile is fenced off and never walked.
                             let spawn =
                                 if birth.Y < 48 then
                                     { birth with Y = birth.Y + 1 }
@@ -353,12 +303,9 @@ let crossRoomWalkTests =
                             for sourceId, _ in far.Sources do
                                 let task = Harvest sourceId
 
-                                // The body-blind area, because that is the
-                                // set the far leg of a cross-room price
-                                // floods into: `workAreaFor` hands a creep
-                                // only its *own* room's tiles (ADR 0041),
-                                // and this light body narrows nothing
-                                // anyway (ADR 0020).
+                                // The body-blind area is the set the far leg
+                                // floods into; `workAreaFor` hands a creep
+                                // only its own room's tiles.
                                 let perTile =
                                     workArea atlas task
                                     |> Set.toList
@@ -376,12 +323,8 @@ let crossRoomWalkTests =
                                     (walkTicks atlas "w" task)
                                     $"{from} -> {into}: the lead out of {spawn.X},{spawn.Y} and the walk from {birth.X},{birth.Y} price {sourceId} alike"
 
-                            // Unreachable, tile by tile, and on the same
-                            // Atlas the reachable ones were read off: the far
-                            // room's own wall is no ground, and its ring is
-                            // no ground either — both absent, never a zero
-                            // that would leave a creep counted living for
-                            // ever.
+                            // A wall and a ring tile are both absent, never a
+                            // zero that would leave a creep counted living for ever.
                             for wall in wallSample far do
                                 Expect.equal
                                     (castWalkTicks atlas leadBody spawn (RoomPos.at into wall))
@@ -395,10 +338,7 @@ let crossRoomWalkTests =
                                     $"{from} -> {into}: the exit at {exit.X},{exit.Y} is the ring, and no room's ground"
 
                         // The per-tile half, one stand per direction because
-                        // each probe is an Atlas and the floods on it. The
-                        // goals are the far room's own strided sample, so
-                        // they are scattered over the whole room rather than
-                        // gathered where a source happens to sit.
+                        // each probe is an Atlas and the floods on it.
                         for birth in standingSample near |> List.truncate 1 do
                             let spawn =
                                 if birth.Y < 48 then
@@ -442,11 +382,9 @@ let crossRoomWalkTests =
         ]
 
 /// A projection over a chain of captures: the first room is the colony's own
-/// with one body standing in it, the last carries its own sources, and every
-/// room in the list brings its terrain and its border ring — which is what the
-/// shell lays for a declared room and for the transit rooms between (ADR 0058).
-/// Which rooms are in the list is the whole of what the cases below vary: a
-/// corner the projection does not carry has no ring, so no chain turns in it.
+/// with one body standing in it, the last carries its own sources, every
+/// room brings its terrain and its ring. A corner the projection does not
+/// carry has no ring, so no chain turns in it.
 let private chainedProjection (rooms: string list) (stand: Pos) =
     let captures = rooms |> List.map load
     let home = List.head captures
@@ -487,15 +425,10 @@ let cornerChainTests =
         "multi-hop corners on real terrain"
         [
             test "the L to W14S29 is priced round whichever corner is cheaper" {
-                // #288 on the captures, and on the very pair
-                // `docs/research/multihop-outposts.md` measured (tick
-                // 302,850): W14S29 is two hops from W13S28 and both corners
-                // are real rooms — W13S29 to the south, which `adjacent`
-                // names first, and W14S28 to the west, which that survey
-                // priced the cheaper. Nothing is written down here but the
-                // room names: the captures decide the numbers, and what this
-                // pins is that the price is the smaller of the two and never
-                // the compass's by default.
+                // The pair `docs/research/multihop-outposts.md` measured
+                // (tick 302,850): W13S29 to the south, which `adjacent`
+                // names first, and W14S28 to the west, which the survey
+                // priced the cheaper. The captures decide the numbers.
                 let far = load "W14S29"
                 let stand = standingSample (load "W13S28") |> List.head
 
@@ -542,20 +475,17 @@ let keeperMaskTests =
     testList
         "the keeper mask on real terrain"
         [
-            // The three rooms of the chain from W15S28 to the sector Reactor's
-            // room, as the server has them (ADR 0036): `AtlasSeamTests`' own
-            // keeper cases run over invented plain, because the mask is keyed
-            // by room name and terrain-blind, and these are the half that only
-            // the capture can say. W15S26's mineral and its three sources are
-            // the capture's own rows, so the declaration in `Keepers` is
-            // checked against the engine here rather than trusted (#317).
+            // The chain from W15S28 to the sector Reactor's room as the
+            // server has it; `AtlasSeamTests`' keeper cases run over
+            // invented plain. W15S26's mineral and sources are the
+            // capture's own rows, so `Keepers` is checked against the
+            // engine here rather than trusted (#317).
             let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
             let keeperRoom = load "W15S26"
 
-            // The margin rides on `ReachMargin`, which is the whole point of
-            // deriving it: one plus three plus this. Five, six and seven are
-            // therefore `ReachMargin` of one, two and three, and the numbers
-            // this bot ships with are the middle one.
+            // The margin is one plus three plus `ReachMargin`: five, six and
+            // seven are `ReachMargin` of one, two and three, and the bot
+            // ships the middle one.
             let atlasAt reachMargin =
                 let captures = chain |> List.map load
 
@@ -592,9 +522,7 @@ let keeperMaskTests =
                     }
 
             // W15S26's own exit tiles on one side, as `World.linked` reads
-            // them: a ring tile the capture carries whose terrain is not wall
-            // and which no declared rock masks. No neighbour is needed — which
-            // of this room's exits survive the mask is a fact about this room.
+            // them: not wall and not masked. No neighbour is needed.
             let survivingExits margin (onSide: Pos -> bool) =
                 keeperRoom.Border
                 |> Map.toList
@@ -603,12 +531,10 @@ let keeperMaskTests =
                 |> List.map fst
 
             test "the declaration's rocks are the engine's own, tile for tile" {
-                // The one datum in `Keepers.centres` that came off a live read
-                // rather than out of a committed file, made checkable: three
-                // sources and a mineral, which is four of the eight centres.
-                // The four lairs are not here because `capture-room.mjs` keeps
-                // sources, controllers and minerals alone — widening it is
-                // #316's, and until then the lairs stay a hand-read fact.
+                // Three sources and a mineral, four of the eight centres.
+                // The four lairs are not here because `capture-room.mjs`
+                // keeps sources, controllers and minerals alone (widening it
+                // is #316's), so the lairs stay a hand-read fact.
                 let declared = Keepers.centresIn "W15S26" |> Set.ofList
 
                 for _, tile in keeperRoom.Rocks do
@@ -627,10 +553,8 @@ let keeperMaskTests =
             }
 
             test "the mask takes a third of W15S26's ground and the chain still crosses it" {
-                // ADR 0060 decision 2's first and third acceptance criteria,
-                // over the terrain the courier will actually walk. The chain is
-                // three crossings, which is `Tuning.MaxHops` exactly, so there
-                // is no slack for a detour round a room the mask closed.
+                // Three crossings is `Tuning.MaxHops` exactly: no slack for
+                // a detour round a room the mask closed.
                 let raw =
                     keeperRoom.Terrain
                     |> TerrainGrid.toList
@@ -651,10 +575,8 @@ let keeperMaskTests =
             }
 
             test "six costs the crossing nothing that five did not, and eight closes the room" {
-                // The acceptance criterion ADR 0060 left `Unverified`: only
-                // five was measured, and only against one lair. The bands are
-                // the measurement — the north one is where the mask first
-                // bites, and it does not bite at six.
+                // Only five was measured live, and only against one lair.
+                // The north band is where the mask first bites.
                 let northBand margin =
                     survivingExits margin (fun tile -> tile.Y = 0)
 
@@ -684,19 +606,10 @@ let keeperMaskTests =
                     11
                     "seven is where it starts to cost: nine of the twenty go"
 
-                // The count at eight is still *not* asserted here — that number
-                // is #327's table's, beside the decision it belongs to — but
-                // what eight does is, because ADR 0062 is read as having closed
-                // it and it has not. The note this comment used to carry said
-                // the chain at eight survives "because it reads the rings",
-                // and that reason has moved: the band asks the ground behind
-                // the landing now, and at eight the north border orphans
-                // **nothing**. The room's *interior* is what is cut in two —
-                // the two bands are open and no walk joins them — and no
-                // landing-neighbour predicate can see a severed transit room.
-                // So this is a second silent failure wearing #326's clothes,
-                // and it is the one ADR 0062 lists under what it does not
-                // decide.
+                // The count at eight is #327's table's. At eight the north
+                // border orphans nothing: the room's *interior* is cut in
+                // two, and no landing-neighbour predicate can see a severed
+                // transit room (the case below).
                 Expect.equal
                     (southBand (marginOf 3)).Length
                     20
@@ -705,19 +618,12 @@ let keeperMaskTests =
 
             test
                 "a margin that severs the room's middle leaves the chain standing and the price gone" {
-                // The hole ADR 0062 does **not** close, pinned so that a
-                // reading of that ADR cannot mistake it for closed. Eight is no
-                // knob this bot ships — `Tuning.defaults` is six and
-                // `RoomSeamTests`' own case above is why — so this asserts a
-                // shape and no count: at a margin that cuts W15S26 across the
-                // middle, every crossing the north border keeps has ground
-                // beside it, `Atlas.routes` answers the full chain, and the
-                // walk over it prices `None`.
-                //
-                // That is #243/#259's silent failure again, one layer in from
-                // the landing: ADR 0062 made the band ask whether a body can
-                // step **off** its landing, and nothing yet asks whether the
-                // two bands of a transit room are joined to each other.
+                // Eight is no knob this bot ships, so this asserts a shape
+                // and no count: every crossing the north border keeps has
+                // ground beside it, `Atlas.routes` answers the full chain,
+                // and the walk over it prices `None`. Nothing yet asks
+                // whether the two bands of a transit room are joined to
+                // each other (#243/#259's silent failure, one layer in).
                 let atlas = atlasAt 4
                 let margin = marginOf 4
 
@@ -754,22 +660,12 @@ let keeperMaskTests =
 
 
             test "a rock behind a border leaves the crossing and takes the ground it lands on" {
-                // #317's stranding, on the terrain it was found over rather
-                // than on the fixture's plain. The mineral at (38,7) is seven
-                // from the y = 0 ring and six from the y = 1 ground, so seven
-                // of the twenty north crossings survive the mask with nothing
-                // behind them; the lair at (42,39) does the same to the east
-                // border and orphans **every** exit it leaves.
-                //
-                // What is read here is the **ring** and the ground beside it,
-                // one beside the other, and that is deliberate: the two cases
-                // below take the band's own answer, and this one takes the
-                // facts the band is built out of, so a fixture that stopped
-                // exhibiting the orphan would red here rather than leave them
-                // green having checked nothing. Until ADR 0062 these two
-                // readings were the whole disagreement — the band saw the ring
-                // and only the movers asked the ground (#317). The band asks it
-                // now.
+                // #317's stranding on the terrain it was found over. The
+                // mineral at (38,7) is seven from the y = 0 ring and six
+                // from the y = 1 ground; the lair at (42,39) orphans every
+                // east exit it leaves. This case reads the ring and the
+                // ground beside it, the facts the band is built from, so a
+                // fixture that stopped exhibiting the orphan would red here.
                 let atlas = atlasAt 2
                 let margin = marginOf 2
 
@@ -801,16 +697,9 @@ let keeperMaskTests =
 
             test
                 "an orphaned crossing is no crossing: the north band drops the run and keeps the rest" {
-                // ADR 0062, over the terrain that generated it. The **ring**
-                // answer and the **band** answer are both taken here, because
-                // the whole of what that ADR changes is that they may now
-                // differ: the row of twenty exits the mask leaves open carries
-                // seven landings the mask has taken the ground from, and a
-                // landing with no ground beside it is a tile a body arrives on
-                // and never leaves.
-                //
-                // The direction is the one the landings belong to: W15S26's
-                // y = 0 row is what a crossing **out of W15S25** lands on.
+                // The ring answer and the band answer both, since they may
+                // differ. W15S26's y = 0 row is what a crossing out of
+                // W15S25 lands on.
                 let atlas = atlasAt 2
                 let margin = marginOf 2
 
@@ -826,10 +715,8 @@ let keeperMaskTests =
                     [ 20; 21; 22; 23; 24; 25; 26; 27; 28; 44; 45; 46; 47 ]
                     "and the band carries thirteen: the seven at x = 37..43 are orphans and are gone"
 
-                // The converse, said in the same breath, or the clause would
-                // be indistinguishable from one that dropped the whole band:
-                // every crossing left lands a body on ground it can step onto,
-                // and every crossing dropped was one with none.
+                // The converse, or the clause would be indistinguishable
+                // from one that dropped the whole band.
                 for x in landings do
                     Expect.isNonEmpty
                         (adjacentWalkableIn atlas "W15S26" { X = x; Y = 0 })
@@ -847,17 +734,10 @@ let keeperMaskTests =
             }
 
             test "the east band is orphaned end to end, so the model answers no band at all" {
-                // The border where the whole band goes. The lair at (42,39)
-                // masks x = 48 for y = 33..45 and stops one tile short of
-                // x = 49, so seven exits survive on the ring and not one of
-                // them has ground behind it.
-                //
-                // The neighbour across W15S26's x = 49 column is **W14S26**
-                // (`RoomName.offsetOf`; #336 corrects the name this file used
-                // to print), and no capture exists for it — so its side is
-                // given as open as a ring can be. Nothing on the near side is
-                // therefore what closes the band, and the two readings below
-                // differ in the one predicate ADR 0062 added.
+                // The lair at (42,39) masks x = 48 for y = 33..45 and stops
+                // one tile short of x = 49. The neighbour across that column
+                // is W14S26 (#336), uncaptured, so its side is given as open
+                // as a ring can be.
                 let margin = marginOf 2
                 let capture = load "W15S26"
 
@@ -882,9 +762,8 @@ let keeperMaskTests =
                     (Seam.bandBy (fun _ -> true) ringOf groundOf "W14S26" "W15S26")
                     "and with the far room's ground asked for, none of the seven is a crossing"
 
-                // The ground each of them would land on, read out, so the
-                // emptiness above is the mask's doing and not a mis-built
-                // predicate.
+                // The ground each would land on, so the emptiness above is
+                // the mask's doing and not a mis-built predicate.
                 for _, landing in ringOnly do
                     Expect.isEmpty
                         (tilesWithin 1 landing |> List.filter groundOf)
@@ -892,20 +771,11 @@ let keeperMaskTests =
             }
 
             test "the price's reader and the scan set's answer alike at that border, each way round" {
-                // ADR 0058's invariant — the scan set and the price cannot
-                // disagree about which rooms are joined — asked in **both**
-                // directions, which is what ADR 0062 made a second question.
-                // The case above takes `Seam.bandBy` by hand; this one takes
-                // the two shipped readers, `Atlas.seams`/`Atlas.routes` off the
-                // grids and `World.linked` off the border maps, and puts their
-                // answers beside each other. Without it the Atlas's half of
-                // ADR 0062 is pinned nowhere: the third predicate can be struck
-                // out of `Atlas.routes` and every other case in this repo stays
-                // green.
-                //
-                // The same geometry as above: W15S26's capture with its mask,
-                // and W14S26 across its x = 49 column invented as open as a
-                // room can be, so nothing on that side is what closes a band.
+                // The two shipped readers, `Atlas.seams`/`Atlas.routes` off
+                // the grids and `World.linked` off the border maps, side by
+                // side in both directions. Without it the third predicate
+                // can be struck out of `Atlas.routes` and every other case
+                // stays green. Same geometry as above.
                 let margin = marginOf 2
                 let capture = load "W15S26"
 
@@ -967,8 +837,8 @@ let keeperMaskTests =
 
                 let linked = World.linked margin world
 
-                // Out of the keeper room the crossing stands: the landings are
-                // W14S26's invented plain. Into it not one of the seven does.
+                // Out of the keeper room the landings are W14S26's invented
+                // plain; into it not one of the seven stands.
                 Expect.isNonEmpty
                     (seams atlas "W15S26" "W14S26")
                     "out of the keeper room the Atlas answers a band"
@@ -983,13 +853,9 @@ let keeperMaskTests =
 
                 Expect.isFalse (linked "W14S26" "W15S26") "and the world says the same"
 
-                // The table in front of it answers identically, and this pair
-                // is the case worth checking it on: `linkedBy` keys the
-                // **ordered** pair (`docs/research/cpu-headroom.md`'s candidate
-                // 2), and a table keyed on an unordered one would answer `true`
-                // backwards over the one border in this repo where the two
-                // directions genuinely differ — the mask's orphaned east band
-                // (#326, ADR 0062).
+                // `linkedBy` keys the **ordered** pair; a table keyed on an
+                // unordered one would answer `true` backwards over the one
+                // border in this repo where the two directions differ.
                 let reaches = World.linkedBy margin world
 
                 Expect.isTrue (reaches "W15S26" "W14S26") "the table agrees out of the keeper room"
@@ -998,12 +864,9 @@ let keeperMaskTests =
                     (reaches "W14S26" "W15S26")
                     "and does not reuse that answer backwards"
 
-                // The shell's own table (`JoinTable`, `World.linkedRecalling`):
-                // one entry per ordered pair under the margin, read on the
-                // second ask, and filed only for a pair the world holds both
-                // rooms of — an unheld room is joined to nothing and files
-                // nothing, because whether a room is held is this tick's fact
-                // and the table outlives the tick.
+                // `JoinTable`: one entry per ordered pair, filed only for a
+                // pair the world holds both rooms of, because whether a room
+                // is held is this tick's fact and the table outlives the tick.
                 let table = JoinTable()
                 let tabled = World.linkedRecalling table margin world
 
@@ -1019,18 +882,14 @@ let keeperMaskTests =
 
                 Expect.equal table.Count 2 "and is never filed"
 
-                // Asked twice, because a table that answered once and drifted
-                // would be worse than no table: the second reading is the
-                // stored row and it has to be the same row.
+                // Asked twice: the second reading is the stored row.
                 Expect.isTrue
                     (reaches "W15S26" "W14S26")
                     "and a second reading of a stored pair is the same"
 
                 Expect.isFalse (reaches "W14S26" "W15S26") "in both directions"
 
-                // And the chain the search builds off that relation, which is
-                // the reader ADR 0062's predicate reaches through and the one
-                // nothing else in this repo covers.
+                // The chain the search builds off that relation.
                 Expect.equal
                     (routes atlas "W15S27" "W14S26")
                     [ [ "W15S27"; "W15S26"; "W14S26" ] ]
@@ -1041,16 +900,9 @@ let keeperMaskTests =
                     []
                     "and none runs back, which is the whole of what a directed band is"
 
-                // What a colony would have done with that. `routesBy` expands
-                // away from **home** and nowhere else, so every reader that
-                // narrows a declaration was asking the half that says yes: a
-                // colony at W15S27 declaring anything in W14S26 would have been
-                // admitted, its reserver and its miners hired and walked out,
-                // while `haulRoundTripTicks` asked `routes` in the direction
-                // above that answers `[]` and priced `None`. That is #243's
-                // silent failure in the direction ADR 0062 had just taught the
-                // model to see, and `Declaration.routable` is where it is
-                // closed: a declaration buys a **round trip**.
+                // `routesBy` expands away from home only, so admission asked
+                // the half that says yes while `haulRoundTripTicks` asked
+                // the other and priced `None`; `Declaration.routable` asks both.
                 Expect.isTrue
                     (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S27" "W14S26"
                      |> List.isEmpty
@@ -1074,32 +926,19 @@ let reclaimerRelayTests =
         [
             test
                 "the walk to the Reactor's ring and the overlapping cadence fall out of the terrain" {
-                // ADR 0060 decision 3's own number, re-derived here off the
-                // committed captures instead of being written into `Tuning`
-                // (ADR 0036: real terrain is a counterexample generator, and a
-                // constant measured once is a constant nothing re-checks).
-                //
-                // The origin is the ADR's own: W15S28's Thorium seat at
-                // (29,12), which is where it measured **154 steps and three
-                // room transitions** from. That is the ADR's measurement and
-                // not a [[lead]]'s: a lead is priced from beside the spawn, and
-                // these captures are terrain only — no spawn of ours stands in
-                // any of them — so what is pinned here is the *walk* the live
-                // lead will be built on, from the tile the ADR used, to a tile
-                // adjacent to the reactor at (44,6).
-                //
-                // The arithmetic the answer feeds, which is the whole of the
-                // cadence and is why no interval is written down:
+                // The cadence re-derived off the committed captures rather
+                // than written into `Tuning`. The origin is W15S28's Thorium
+                // seat at (29,12), where 154 steps and three room
+                // transitions were measured; these captures hold no spawn of
+                // ours, so what is pinned is the walk a lead is built on.
                 //
                 //   lead      = 3 ticks a part × 2 parts + the walk
                 //   relief at = lead + Tuning.ReclaimerOverlap (25) of life
                 //   cadence   = CREEP_CLAIM_LIFE_TIME (600) − relief at
                 //
                 // `QuotaReserverTests` pins the cast threshold and
-                // `ErrandTests` pins admission at arrival; this real-terrain
-                // case ensures both are fed the same overlap.
-                //
-                // ADR 0057's 300 was the six-hop home's; this is W15S28's.
+                // `ErrandTests` admission at arrival; both must be fed the
+                // same overlap.
                 let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
                 let captures = chain |> List.map load
 
@@ -1176,24 +1015,17 @@ let reclaimerRelayTests =
 
                     let loadedWalk = walkTicks atlas courier.Name (Refill("reactor", Thorium))
 
-                    // 159 and not 318: at `Tuning.ReactorLoad` 500 (#354) the
+                    // 159 and not 318: at `Tuning.ReactorLoad` 500 the
                     // 20-Carry courier is half empty, and half a carry is no
-                    // fatigue over 10 Move parts — the loaded leg costs one
-                    // tick a step, as the empty one does. The load was chosen
-                    // for the Reactor's 1,000-unit store; this is the second
-                    // thing it bought.
+                    // fatigue over 10 Move parts.
                     Expect.equal loadedWalk (Some 159) "the loaded body clock over the real terrain"
 
-                    // #373, over the same captures: the leg as the delivery
-                    // draw's gate now prices it — from beside W15S28's Storage
-                    // at (17,29), for the body carrying `Tuning.ReactorLoad`,
-                    // to the Reactor's ring — for the courier and for the
-                    // `11W 12C 12M` worker that took two of its loads live.
-                    // The courier is at fatigue parity under 500 (10 loaded
-                    // Carry against 10 Move); the worker is 21 against 12,
-                    // two ticks a plain tile, and its **empty** walk is the
-                    // parity one — which is the number the gate used to read
-                    // for it, and half of what it went on to walk.
+                    // The leg as the delivery draw's gate prices it (#373):
+                    // from beside W15S28's Storage at (17,29), carrying
+                    // `Tuning.ReactorLoad`, for the courier and for the
+                    // `11W 12C 12M` worker that took two loads live. The
+                    // courier is at fatigue parity under 500; the worker is
+                    // 21 against 12, two ticks a plain tile.
                     let storage = RoomPos.at "W15S28" { X = 17; Y = 29 }
                     let target = RoomPos.at "W15S25" { X = 44; Y = 6 }
 
@@ -1231,14 +1063,8 @@ let reclaimerRelayTests =
                         (Some 196)
                         "the worker's empty walk, which is what the gate read for it before #373: half the leg it went on to make"
 
-                    // A `[Claim; Move]` body is one fatigue part against one
-                    // Move, so it walks a plain tile in one tick and pays
-                    // extra for a swamp. **160 ticks** against the ADR's 154
-                    // *steps* — two different units, and the gap is not six
-                    // extra steps: it is what the swamp on the way and the
-                    // [[keeper margin]]'s detour charge over the masked layer,
-                    // which is the reason to price the walk rather than to
-                    // write the ADR's number down.
+                    // 160 ticks against the measured 154 *steps*: the gap
+                    // is the swamp on the way and the keeper margin's detour.
                     Expect.equal
                         ticks
                         160
@@ -1264,20 +1090,12 @@ let reclaimerRelayTests =
                         409
                         "so the cast cadence is 409, derived rather than configured"
 
-                    // The courier's separate clock (#319, re-derived by
-                    // #354). What #354 took out of this block is the idea that
-                    // a cadence meters the delivery: the Reactor burns exactly
-                    // 1 T a tick against a 1,000-unit store, so supply is
-                    // metered by the draw gate on that store
-                    // (`Facts.reactorTakesALoad`) and `DeliveryInterval` only
-                    // keeps a body in the row. The old arithmetic here read
-                    // `ReactorLoad - DeliveryInterval` as "buffer", which is
-                    // two units subtracted from each other — Thorium less
-                    // ticks — and it is what let 999 T leave home every 636
-                    // ticks against a 1 T/tick burn.
-                    //
-                    // The three clocks that do hold, over this room's real
-                    // terrain:
+                    // The courier's clock: supply is metered by the draw gate
+                    // on the Reactor's store (`Facts.reactorTakesALoad`), not
+                    // by a cadence. The old `ReactorLoad - DeliveryInterval`
+                    // "buffer" subtracted ticks from Thorium and let 999 T
+                    // leave home every 636 ticks against a 1 T/tick burn (#354).
+                    // The three clocks that hold over real terrain:
                     let cycle = Tuning.defaults.ReactorLoad
 
                     Expect.equal

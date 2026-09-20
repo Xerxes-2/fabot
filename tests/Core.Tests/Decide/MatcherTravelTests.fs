@@ -1,5 +1,5 @@
-/// Travel-cost matching (ADR 0002), movement, and the yield arbitration
-/// that settles a contested tile (ADR 0001).
+/// Travel-cost matching, movement, and the yield arbitration that settles a
+/// contested tile.
 module Fabot.Core.Tests.Decide.MatcherTravelTests
 
 open Expecto
@@ -585,10 +585,9 @@ let arbitrationTests =
             test "a contested tile goes to the higher task rank" {
                 // One gap at (10,12): the harvester's and the upgrader's
                 // cheapest paths both step onto it. Harvest outranks Upgrade,
-                // so the gap is the harvester's — and since #219 the loser
-                // is not walled in by losing: its tail holds the tile beside
-                // the gap, which is the one the harvester just left, so it
-                // follows up the corridor it was heading along anyway.
+                // so the gap is the harvester's, and the loser's tail holds
+                // the tile the harvester just left, so it follows up the
+                // corridor.
                 let terrain =
                     [
                         { X = 10; Y = 10 }, Wall
@@ -731,11 +730,8 @@ let arbitrationTests =
                 // The upgrader's only in-area standing tile is the Seat
                 // itself: every adjacent walkable tile is outside upgrade
                 // range. Displaced, it takes the first ground beside it and
-                // leaves the area — which is the tail every stayer now
-                // carries (#219), where before R2b the only tile it could be
-                // offered was the one its displacer vacated. It upgrades
-                // this tick either way: the Emitter judges from tick-start
-                // geometry.
+                // leaves the area. It upgrades this tick either way: the
+                // Emitter judges from tick-start geometry.
                 let terrain =
                     [
                         { X = 11; Y = 12 }, Wall
@@ -772,15 +768,12 @@ let arbitrationTests =
             }
 
             test "a traveller whose step is walled steps aside where there is anywhere to" {
-                // #219, at the seam: eight creeps stood in W13S28's north
-                // corridor for ten minutes because a traveller's only
-                // candidate was its step, and the body on it was fatigued
-                // every other tick — a swap needs both parties rested on one
-                // tick, and with a queue behind each of them neither ever
-                // had a free tile to back into. The pocket at (11,11) is
-                // reachable and leads nowhere, so the occupancy surcharge
-                // will never route through it: what takes it is the Move
-                // Intent's tail.
+                // Eight creeps once stood in W13S28's north corridor for ten
+                // minutes: a swap needs both parties rested on one tick, and
+                // the body on the step was fatigued every other tick. The
+                // pocket at (11,11) is reachable and leads nowhere, so the
+                // occupancy surcharge will never route through it: what takes
+                // it is the Move Intent's tail.
                 let tired = { worker "wb" 0 50 with Fatigue = 4 }
                 let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
 
@@ -795,15 +788,11 @@ let arbitrationTests =
             }
 
             test "a chain three deep settles three bodies onto three tiles" {
-                // The injectivity #216 R2b bought, at the one shape that can
-                // lose it: a chain whose innermost creep wants the tile the
-                // chain's own initiator is claiming. The search must not
-                // hand that tile out twice — the initiator's claim is
-                // already staked when the chain is walked past it, and two
-                // bodies judged onto one tile is two `MoveCreep`s the engine
-                // resolves by deleting one in silence, which is the failure
-                // ADR 0001's Consequences say the settle was replaced to
-                // stop.
+                // Injectivity at the one shape that can lose it: a chain
+                // whose innermost creep wants the tile the chain's own
+                // initiator is claiming. Two bodies judged onto one tile is
+                // two `MoveCreep`s the engine resolves by deleting one in
+                // silence.
                 let queue positions =
                     { bareRespawn with
                         Sources = [ source "src-w"; source "src-e" ]
@@ -837,19 +826,12 @@ let arbitrationTests =
             }
 
             test "a ring creep whose step is held keeps every tile beside it" {
-                // #145's rule, which R2b generalised and must not narrow: a
-                // creep the engine put down on the border ring cannot stay
-                // where it is — "stay put" there is a bounce back across
-                // the border every other tick — so its tail is every ground
-                // tile beside it and not only the ones beside its step. The
-                // ordinary tail's narrowing buys "no way back down the lane
-                // it came up", and a ring creep has no lane behind it.
-                //
-                // Here the step is (9,1) and the ground beside the ring
-                // creep runs (9,1) (10,1) (11,1): (11,1) is two tiles from
-                // the step and would be dropped by that narrowing. With the
-                // step and (10,1) both held by bodies fatigue keeps out of
-                // the pass, (11,1) is the only tile there is.
+                // A creep on the border ring cannot stay put — that is a
+                // bounce back across the border every other tick — so its
+                // tail is every ground tile beside it, not only those beside
+                // its step. The step is (9,1) and the ground beside runs
+                // (9,1) (10,1) (11,1); with the first two held by fatigued
+                // bodies, (11,1) is the only tile there is.
                 let ring held =
                     { bareRespawn with
                         Spawns = []
@@ -905,31 +887,13 @@ let arbitrationTests =
             }
 
             test "head-on with alternating fatigue, both bodies arrive — over ticks, not one" {
-                // #219's own acceptance test, driven the way it is written:
-                // two bodies meeting head-on in a lane, tired on opposite
-                // ticks so the tick both are rested and could swap never
-                // comes, walked until they arrive or the run gives up. One
-                // tick cannot show it — the deadlock is that every tick's
-                // answer is the same one.
-                //
-                // The geometry is #219's own and not the phrase's: the live
-                // corridor had (17,1) free beside it the whole ten minutes
-                // and nobody took it. So the pocket lane is the case, and
-                // the strictly one-wide lane is the negative — with nothing
-                // to sidestep to the answer is still "wait", which is ADR
-                // 0008's and is where a single-candidate rule and this one
-                // agree.
-                //
-                // What clears it is two rules and not one: the east-bound
-                // body takes the pocket off its Move Intent's tail, because
-                // its step is a tile fatigue has walled (#219), and the
-                // west-bound one is *priced* round the body in its way,
-                // because the flood charges an occupied tile the occupancy
-                // surcharge (ADR 0008, #220). A one-tile pocket beside a
-                // one-wide lane is always both — every tile beside such a
-                // lane is diagonal to the tiles either side of it — so this
-                // test pins the pair's outcome and the test above pins the
-                // tail on its own.
+                // Two bodies meeting head-on in a lane, tired on opposite
+                // ticks so the tick both could swap never comes, walked until
+                // they arrive or the run gives up. The pocket lane is the case
+                // and the strictly one-wide lane the negative. Two rules clear
+                // it: the east-bound body takes the pocket off its tail, and
+                // the west-bound one is priced round the body in its way by
+                // the occupancy surcharge.
                 let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
 
                 let tickOf pocket tick positions =
@@ -986,11 +950,9 @@ let arbitrationTests =
             }
 
             test "a body with no Task parks off the working ground, and stays put beside it" {
-                // #241, pairwise and one tile apart: the same idle body on
-                // the first tile of the Upgrade Work Area and on the corridor
-                // tile beside it. Inside, it is standing on ground somebody
-                // works from and steps off; outside, it is standing nowhere in
-                // particular and the rule has nothing to say to it.
+                // Pairwise, one tile apart: the same idle body on the first
+                // tile of the Upgrade Work Area and on the corridor tile
+                // beside it.
                 let moved pos =
                     resolveOn (pocketColony [ upgrader "u" ] [ "u", pos ]) [] |> moveIntents
 
@@ -1003,10 +965,8 @@ let arbitrationTests =
                     (moved { X = 20; Y = 14 })
                     "one tile west, off every Work Area, it has no reason to move at all"
 
-                // And the third case, the one the rule promises costs
-                // nothing: seal the mouth and the pocket's working ground has
-                // no ground off it at all, so there is nowhere to head and the
-                // body parks exactly as it did before #241.
+                // Seal the mouth and the pocket's working ground has no
+                // ground off it at all, so the body parks.
                 let sealedPocket =
                     pocketRoom
                     |> withHome (fun layer ->
@@ -1045,18 +1005,11 @@ let arbitrationTests =
             }
 
             test "#241 the pocket jam: the hauler feeding the buffer gets in" {
-                // The live jam (W13S28, 190 ticks): the buffer empty, two
-                // upgraders with no Task parked on two of its five standing
-                // tiles, two loaded workers walking in to upgrade, and the
-                // hauler carrying the energy that would have un-idled the
-                // upgraders never getting past the pocket's mouth. The ring is
-                // that the bodies waiting on the buffer were standing where its
-                // feed had to stand.
-                //
-                // Driven over ticks, because one tick cannot show it: every
-                // tick's answer was the same one, and the two bodies fighting
-                // over the mouth traded it back and forth for as long as the
-                // scan ran.
+                // The live jam: the buffer empty, two idle upgraders parked on
+                // two of its five standing tiles, two loaded workers walking
+                // in, and the hauler carrying the energy that would have
+                // un-idled the upgraders never getting past the mouth. Driven
+                // over ticks, because one tick cannot show it.
                 let creeps =
                     [
                         upgrader "u1"
@@ -1102,14 +1055,11 @@ let arbitrationTests =
             }
 
             test "two idle bodies in the mirrored pocket settle instead of trading its mouth" {
-                // The orientation the room happens not to have (#241): the
-                // corridor running east, so the working ground sorts *below*
-                // the tile off it. `arbitrate` re-houses a displaced body on
-                // the first free tile of its list, so with an unordered tail
-                // the body shoved off the mouth lands back inside the pocket,
-                // steps out again next tick, and the pair exchanges the mouth
-                // for as long as the run lasts — the very swap the criterion
-                // above forbids, arrived at from the other side.
+                // The orientation the room happens not to have: the corridor
+                // running east, so the working ground sorts below the tile off
+                // it. With an unordered tail the body shoved off the mouth
+                // lands back inside the pocket and the pair exchanges the
+                // mouth for as long as the run lasts.
                 let creeps = [ upgrader "u1"; upgrader "u2" ]
 
                 let ticks =
@@ -1130,14 +1080,10 @@ let arbitrationTests =
             }
 
             test "#267 the full pocket: an arrived body is not evicted from its Work Area" {
-                // The other half of the W13S28 jam (#241 left it, #267 fixes
-                // it): the pocket's six tiles are the whole of the Upgrade
-                // Work Area, five upgraders and the hauler feeding the buffer
-                // stand on them, and a sixth upgrader walks up the corridor.
-                // Its step is the mouth, and before this ticket the body
-                // holding the mouth could be pushed *out* of the pocket for
-                // nothing — so the two traded (20,14) and (21,14) every tick
-                // and the body on the mouth upgraded every other one.
+                // The pocket's six tiles are the whole Upgrade Work Area, five
+                // upgraders and the hauler stand on them, and a sixth upgrader
+                // walks up the corridor onto the mouth. Once the body holding
+                // the mouth could be pushed out of the pocket for nothing.
                 let creeps = [ for n in 1..6 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
 
                 let assigned =
@@ -1173,11 +1119,9 @@ let arbitrationTests =
             }
 
             test "#267 one tile short: the chain that shuffles a body inside its area still runs" {
-                // The pairwise half. The same pocket with (23,15) empty: the
-                // displaced body has somewhere in its own Work Area to go, so
-                // the chain costs the arbitration nothing and still happens —
-                // ADR 0001's essential rule, which prices the eviction and
-                // never the shuffle.
+                // The pairwise half: the same pocket with (23,15) empty, so
+                // the displaced body has somewhere in its own Work Area to go
+                // and the chain costs the arbitration nothing.
                 let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ] @ [ hauler "h" 100 0 ]
 
                 let assigned =
@@ -1210,14 +1154,10 @@ let arbitrationTests =
             }
 
             test "#268 the storage against a wall: the idle bodies ring it and the hauler gets in" {
-                // #241's pocket, arrived at from the half of the geometry ADR
-                // 0022's set never covered. The stock has two standing tiles
-                // and no source's Seat or Upgrade tile among them, so a pair
-                // of idle bodies parked on them shut the hauler holding
-                // `Refill sto-1` out of the room's only Task exactly as the
-                // upgraders shut the buffer's feed out of W13S28 — and #241's
-                // rule, reading the working ground alone, had nothing to say
-                // to either of them.
+                // The stock has two standing tiles and no working ground
+                // among them, so a pair of idle bodies parked on them shut the
+                // hauler out of the room's only Task, and a rule reading the
+                // working ground alone had nothing to say to either of them.
                 let creeps = [ worker "u1" 0 50; worker "u2" 0 50; hauler "h" 100 0 ]
 
                 let ticks =
@@ -1235,21 +1175,17 @@ let arbitrationTests =
                 let besideStorage (positions: Map<string, Pos>) =
                     range positions["h"] { X = 10; Y = 10 } <= 1
 
-                // The ticket's own criterion, and the half the arbitration
-                // already answered: an idle body is the lightest push there
-                // is, so the hauler's chain shoves the one on (11,11) aside
-                // and takes the tile whatever rule the mover reads.
+                // An idle body is the lightest push there is, so the hauler's
+                // chain shoves the one on (11,11) aside whatever rule the
+                // mover reads.
                 Expect.isTrue
                     (ticks |> List.skip 3 |> List.forall besideStorage)
                     "the hauler is standing beside the stock by the third tick and stays there"
 
-                // The half the arbitration cannot reach on its own, and the
-                // whole of what this ticket adds: (10,11) is a dead end, so
-                // the body parked on it is in nobody's *head* candidate once
-                // the hauler holds the other tile, is never displaced, and
-                // keeps the stock's second standing tile for the rest of its
-                // life. It leaves because the rule tells it to, not because
-                // somebody pushed it.
+                // The half the arbitration cannot reach: (10,11) is a dead
+                // end, so the body parked on it is in nobody's head candidate
+                // once the hauler holds the other tile and is never displaced.
+                // It leaves because the rule tells it to.
                 let idleOnTheRing (positions: Map<string, Pos>) =
                     [ "u1"; "u2" ]
                     |> List.filter (fun name -> range positions[name] { X = 10; Y = 10 } <= 1)
@@ -1264,12 +1200,9 @@ let arbitrationTests =
             }
 
             test "#277 a wall-tucked tower: the idle bodies ring it and the hauler gets in" {
-                // The same pocket with the one store #268's enumeration held
-                // out. ADR 0010 pools a Refill on a tower, so a hauler holding
-                // one queues on its two standing tiles exactly as the stock's
-                // does — and until #277 those tiles were no store's ring, so
-                // an idle pair parked on them was parked on ordinary ground
-                // and the mover had nothing to say to it.
+                // The same pocket with a tower: a hauler holding its Refill
+                // queues on its two standing tiles exactly as the stock's
+                // does, and once those tiles were no store's ring.
                 let creeps = [ worker "u1" 0 50; worker "u2" 0 50; hauler "h" 100 0 ]
 
                 let ticks =
@@ -1320,19 +1253,10 @@ let arbitrationTests =
             }
 
             test "#267 the free tile is not adjacent: the row shuffles up and nobody leaves" {
-                // The half of #267 the full pocket cannot show, and the case
-                // its title names: the Work Area has free tiles, just none
-                // beside the body on the mouth. Four upgraders inside it with
-                // (23,14) and (23,15) empty, and a fifth walking in on the
-                // mouth.
-                // Pricing the eviction is not enough on its own — a body an
-                // earlier chain has already shuffled aside inside its area
-                // re-initiated and was paid its rank's whole weight for being
-                // put back on the tile it never chose to leave, and three of
-                // those phantom gains in one chain bought the eviction this
-                // ticket forbids. The answer is the row stepping up: the
-                // traveller takes the mouth, every body inside moves one tile
-                // deeper into the pocket, and the free tile at the back is
+                // The Work Area has free tiles, just none beside the body on
+                // the mouth: four upgraders inside with (23,14) and (23,15)
+                // empty, and a fifth walking in. The row steps up: the
+                // traveller takes the mouth and the free tile at the back is
                 // what the shuffle spends.
                 let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ]
                 let assigned = [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ]
@@ -1368,11 +1292,10 @@ let arbitrationTests =
             }
 
             test "#267 the free tile is not adjacent, in the mirrored pocket" {
-                // The same five bodies in the orientation the room happens not
-                // to have, for the reason #241 pins its own pair twice: ties
-                // fall to the lowest x then y, so one orientation can be right
-                // by accident. Here the free tiles at the back of the pocket
-                // sort *below* the mouth instead of above it.
+                // The same five bodies mirrored: ties fall to the lowest x
+                // then y, so one orientation can be right by accident. Here
+                // the free tiles at the back of the pocket sort below the
+                // mouth instead of above it.
                 let creeps = [ for n in 1..5 -> worker $"w%d{n}" 50 0 ]
                 let assigned = [ for n in 1..5 -> $"w%d{n}", Upgrade "ctrl-1" ]
 
@@ -1398,12 +1321,11 @@ let arbitrationTests =
             }
 
             test "another colony's body is an occupant this colony cannot claim" {
-                // #220: the mother's pioneer stood on (19,2) for fifteen
-                // minutes with fatigue 0, its first step the Post tile the
-                // child's Anchor was garrisoning — a tile her layer did not
-                // carry, so the flood charged it nothing and the arbitration
-                // handed it over every tick for a body the engine would
-                // never let her into.
+                // The mother's pioneer once stood for fifteen minutes with its
+                // first step the Post tile the child's Anchor was garrisoning:
+                // a tile her layer did not carry, so the arbitration handed it
+                // over every tick for a body the engine would never let her
+                // into.
                 let assigned = [ "eb", Harvest "src-e" ]
 
                 Expect.equal
@@ -1418,14 +1340,12 @@ let arbitrationTests =
             }
 
             test "a foreign body's tile is priced at the occupancy surcharge" {
-                // The other half of #220, and the half no arbitration can do
-                // (ADR 0008): the walking flood charges a foreign body's
-                // tile like any other occupied tile, so a traveller is
-                // *priced* around a garrison it can never displace. The way
-                // round here is one swamp tile at (12,11) — dearer than the
-                // lane by eight units and cheaper than the lane plus the
-                // ten-unit surcharge, so the pricing and nothing else
-                // decides which step is taken.
+                // The half no arbitration can do: the walking flood charges a
+                // foreign body's tile like any other occupied tile, so a
+                // traveller is priced around a garrison it can never
+                // displace. The way round is one swamp tile at (12,11), dearer
+                // than the lane by eight units and cheaper than the lane plus
+                // the ten-unit surcharge, so the pricing alone decides.
                 let bypass =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -1468,12 +1388,10 @@ let arbitrationTests =
             }
 
             test "a rested creep that gets none of its candidates says which kind of nothing it got" {
-                // The Verdict gap #219 recorded: a kept traveller that
-                // simply fails to move emitted nothing at all, and the
-                // timeline went quiet exactly where it was worth reading.
-                // Which Verdict it is turns on whether the pass can name the
-                // holder: one of ours on the tile is a counterpart, a
-                // foreign body is not.
+                // A kept traveller that simply fails to move once emitted
+                // nothing at all. Which Verdict it is turns on whether the
+                // pass can name the holder: one of ours on the tile is a
+                // counterpart, a foreign body is not.
                 let assigned = [ "eb", Harvest "src-e"; "wb", Harvest "src-w" ]
                 let tired = { worker "wb" 0 50 with Fatigue = 4 }
 
@@ -1489,12 +1407,10 @@ let arbitrationTests =
             }
 
             test "one pass per room arbitrates both colonies' bodies against each other" {
-                // #216 R2b: the mother and the child both work the child's
-                // room, and each `decide` used to arbitrate its own half of
-                // it with the other half read as empty. Folded into one pass
-                // the two bodies are ordinary occupants of one room, each
-                // moving on the intent its own colony registered — so the
-                // head-on pair swaps, which neither colony could have
+                // The mother and the child both work the child's room. Folded
+                // into one pass the two bodies are ordinary occupants of one
+                // room, each moving on the intent its own colony registered,
+                // so the head-on pair swaps, which neither colony could have
                 // settled alone.
                 let mother = laneWith false [] true
 
@@ -1537,14 +1453,11 @@ let arbitrationTests =
             }
         ]
 
-/// Every rank the ladder puts a Task on: each tier's own (read off the `Tier`
-/// union itself, so a tier added to the ladder joins this walk without anybody
-/// remembering to), and the downgrade deadline's beside them, which is a rank
-/// one whole tier above Feeding and no tier of its own (ADR 0007) — read off
-/// `Pool.deadlineRank` for the same reason and not re-derived here. Reading the
-/// cases off a union is `WireTests`' technique and carries its argument (#80):
-/// reflection lives in the test projects alone, so none of it reaches the Fable
-/// bundle.
+/// Every rank the ladder puts a Task on: each tier's own, read off the `Tier`
+/// union so an added tier joins the walk without anybody remembering to, and
+/// the downgrade deadline's beside them, read off `Pool.deadlineRank` rather
+/// than re-derived. Reflection lives in the test projects alone, so none of
+/// it reaches the Fable bundle.
 let private ladderRanks: (string * int) list =
     let tiers =
         FSharpType.GetUnionCases typeof<Tier>
@@ -1555,9 +1468,8 @@ let private ladderRanks: (string * int) list =
     ("the downgrade deadline", deadlineRank) :: tiers |> List.sortBy snd
 
 /// Every rung the Planner may step a Task by inside its tier, off the `Rung`
-/// union itself: a rule that wants a rung of its own has to add a case there,
-/// and the walk below then checks it against `weightOfRank`'s window without
-/// anybody remembering to widen a literal here (#237).
+/// union itself, so the walk below checks a new rung against
+/// `weightOfRank`'s window without anybody widening a literal here.
 let private ladderRungs: (string * int) list =
     FSharpType.GetUnionCases typeof<Rung>
     |> Array.toList
@@ -1575,19 +1487,10 @@ let pushWeightTests =
         "push weight"
         [
             test "#237 every rank inside a tier pushes with that tier's own weight" {
-                // The exhaustive walk the ticket asked for: every rank the
-                // window admits, which is half a tier above the shallowest tier
-                // down to half a tier below the deepest — and one rank short of
-                // that at the deep end, because a tie rounds to the *deeper*
-                // tier, so what a tier owns is `tierRungs / 2` up and
-                // `tierRungs / 2 - 1` down. The asymmetry is the point: what
-                // this walk proves is that the window is exactly one tier wide.
-                // Each rank must push with the weight of the tier it is a rung
-                // of — a rung orders Tasks *inside* a tier (ADR 0052 decision
-                // 6) and says nothing about corridors. A ladder that grows a
-                // tier, or a `tierRungs` that changes, is walked here as it
-                // stands rather than against a copy of the old numbers. The
-                // idle rank is not on the ladder and is pinned below.
+                // Every rank the window admits, one rank short at the deep
+                // end because a tie rounds to the deeper tier: a tier owns
+                // `tierRungs / 2` up and `tierRungs / 2 - 1` down. The idle
+                // rank is not on the ladder and is pinned below.
                 let half = tierRungs / 2
                 let shallowest = ladderRanks |> List.map snd |> List.min
                 let deepest = ladderRanks |> List.map snd |> List.max
@@ -1602,12 +1505,10 @@ let pushWeightTests =
             }
 
             test "#237 the boundary the ladder's rule is stated against" {
-                // Where the window ends, pinned from both sides, because it is
-                // what `Pool.tierRungs` tells the next author who wants a rung:
-                // half a tier up is still the tier's own push, and one rung
-                // beyond it is the tier above's. Every rung steps a Task up, so
-                // this is the bound a rule may take, and the reason the ladder's
-                // sentence reads "at the most" rather than "or more".
+                // Where the window ends, pinned from both sides: half a tier
+                // up is still the tier's own push, and one rung beyond it is
+                // the tier above's. Every rung steps a Task up, so this is the
+                // bound a rule may take.
                 let half = tierRungs / 2
 
                 for (shallower, above), (name, at) in List.pairwise ladderRanks do
@@ -1623,15 +1524,10 @@ let pushWeightTests =
             }
 
             test "#237 the rungs the Planner steps still push as the tier does" {
-                // The ticket's own table, named, and walked off the `Rung`
-                // union rather than off a literal: a [[pickup]] steps one rung
-                // (#216 R5, #242) and a full source container's [[withdraw]]
-                // steps two; inside Surplus a rescued Repair steps two as well
-                // (#284). Before this ticket the second rung rounded past its
-                // tier, so in a corridor a body holding a full container's
-                // Withdraw pushed harder than one holding the spawn's Refill —
-                // which the rung never claimed and the [[resolver]] must not
-                // read into it. That corridor is the case below.
+                // Walked off the `Rung` union rather than a literal. Once the
+                // second rung rounded past its tier, so in a corridor a body
+                // holding a full container's Withdraw pushed harder than one
+                // holding the spawn's Refill; that corridor is the case below.
                 for name, at in ladderRanks do
                     for rung, step in ladderRungs do
                         Expect.equal
@@ -1641,10 +1537,9 @@ let pushWeightTests =
             }
 
             test "one tier is one unit of push weight, and a body with no Task the least" {
-                // What ADR 0001's eviction price is arithmetic on (#267): a
-                // body is taken off its work only by a chain worth more than
-                // the sidestep, which is a body one *tier* up and never one
-                // rung. So the ladder's tiers must come out one apart, in
+                // A body is taken off its work only by a chain worth more than
+                // the sidestep, which is a body one tier up and never one
+                // rung, so the ladder's tiers must come out one apart, in
                 // order, and an idle body must still push with something.
                 let weights = ladderRanks |> List.map (fun (name, at) -> name, weightOfRank at)
 
@@ -1660,22 +1555,13 @@ let pushWeightTests =
             }
         ]
 
-/// The corridor #237 is written about, and the three bodies it takes to reach
-/// it. A one-tile lane y = 10 from the source container at (9,10) east to the
-/// spawn walled in at (19,10), with a single pocket tile at (12,11) to stand
-/// aside on and the controller off the lane's east end at (20,10).
-///
-/// The container holds a full 2,000, so its Withdraw takes the two rungs a full
-/// source container takes (#216 R5) and stands at Feeding − 2; the spawn is
-/// hungry, so its Refill stands on Feeding's own rank; and the controller is
-/// inside its downgrade deadline, so its Upgrade is a whole tier above both
-/// (ADR 0007). Three bodies and not two, which is the part a fixture author
-/// would not guess: `arbitrate` offers travellers in rank order, so the body
-/// holding the Withdraw is offered *before* the one holding the Refill and can
-/// never shove it off a tile it has not asked for yet. The shove needs the
-/// deadline's body behind the Refill, whose own chain moves the Refill onto the
-/// lane tile both of the others want — and only then is the Withdraw's chain
-/// priced against a body standing on the tile it asked for.
+/// The push-weight corridor: a one-tile lane y = 10 from the source
+/// container at (9,10) east to the spawn walled in at (19,10), a pocket tile
+/// at (12,11), and the controller at (20,10) inside its downgrade deadline.
+/// Three bodies and not two: `arbitrate` offers travellers in rank order, so
+/// the Withdraw's body can never shove the Refill's off a tile it has not
+/// asked for yet; the deadline's body behind the Refill moves it onto the
+/// lane tile both of the others want.
 let private fullContainerCorridor positions =
     let lane =
         spatial [] ([ for x in 9..19 -> { X = x; Y = 10 }, Plain ] @ [ { X = 12; Y = 11 }, Plain ])
@@ -1710,20 +1596,11 @@ let pushWeightCorridorTests =
         "push weight in a corridor"
         [
             test "#237 a full container's Withdraw does not shove the spawn's Refill aside" {
-                // The live symptom the arithmetic above is only half of. The
-                // Refill body stands at (11,10) heading east to the spawn, the
-                // Withdraw body at (13,10) heading west to the container, and
-                // both want the lane tile between them; the deadline's body
-                // comes up the lane behind the Refill and pushes it onto that
-                // tile. One of the two ends up on the pocket at (12,11), and
-                // which one it is was the whole of the bug: the two rungs
+                // Both bodies want the lane tile between them and the
+                // deadline's body pushes the Refill onto it. Two rungs once
                 // bought the Withdraw a push weight of 7 against the Refill's
-                // 6, so a chain that shoved the Refill off the tile it had just
-                // been moved onto scored 7 − 6 = 1 and was taken. Now both
-                // weigh 6, the chain scores 0, and it is the Withdraw that
-                // falls to its tail — a rung ordering two Tasks for one body
-                // and saying nothing about a corridor, which is what the rung
-                // has always claimed to be.
+                // 6, so the shove was taken; at 6 each the chain scores 0 and
+                // the Withdraw falls to its tail.
                 let positions =
                     [
                         "refill", { X = 11; Y = 10 }

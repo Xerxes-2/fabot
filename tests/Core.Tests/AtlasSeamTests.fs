@@ -1,4 +1,4 @@
-/// Seams between rooms and the walks that cross them (ADR 0041).
+/// Seams between rooms and the walks that cross them.
 module Fabot.Core.Tests.AtlasSeamTests
 
 open Expecto
@@ -7,9 +7,7 @@ open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
 /// The column both rooms of every fixture below are built on: x = 10, y = 10
-/// down to 17, plain and walkable. What each case varies is the ring between
-/// the two rooms and what is filed in them — never the ground, because a Seam
-/// is a fact about the ring and the two columns it joins.
+/// down to 17, plain.
 let private seamColumn =
     TerrainGrid.ofList (plainLine [ for y in 10..17 -> { X = 10; Y = y } ])
 
@@ -19,11 +17,8 @@ let seamTests =
         "atlas seams"
         [
             test "a north neighbour's band joins this room's y=0 to the neighbour's y=49" {
-                // W12S28 sits at world (-13,28) and W12S27 at (-13,27), so
-                // W12S27 is the room across the top border: the pairing the
-                // engine makes is x for x, y=0 onto y=49. A swamp exit is in
-                // the band, dearly, exactly as swamp ground is; the wall is
-                // not.
+                // W12S28 is world (-13,28) and W12S27 (-13,27): the room
+                // across the top border, paired x for x, y=0 onto y=49.
                 let atlas =
                     bordered
                         [
@@ -50,8 +45,6 @@ let seamTests =
             }
 
             test "a wall on the far side takes the pair out, as one on this side does" {
-                // The band is what a creep can cross, so both halves have to
-                // be ground: an exit onto a wall lands nowhere.
                 let atlas =
                     bordered
                         [
@@ -68,8 +61,7 @@ let seamTests =
             }
 
             test "a west neighbour's band joins x=0 to x=49" {
-                // W13S28 is world (-14,28): one room further west, so the
-                // shared border is a column, and the pairing runs y for y.
+                // W13S28 is world (-14,28): one room west, paired y for y.
                 let atlas =
                     bordered
                         [
@@ -86,9 +78,6 @@ let seamTests =
             }
 
             test "the band reads the same from the far side, every pair swapped" {
-                // The south and east borders are the north's and the west's
-                // read the other way round, which is the whole of what
-                // "adjacent" means here: one band, asked from either end.
                 let atlas =
                     bordered
                         [
@@ -112,9 +101,7 @@ let seamTests =
 
             test "rooms that share no border share no band" {
                 // Diagonal neighbours touch at a corner the engine joins
-                // nothing across, and two rooms apart touch not at all. Both
-                // answer empty rather than failing: an unpriceable Seam is
-                // no Seam, never a blocked one (ADR 0004).
+                // nothing across.
                 let ring room y =
                     room, [ { X = 10; Y = y }, Plain; { X = 0; Y = 30 }, Plain ]
 
@@ -129,22 +116,15 @@ let seamTests =
             }
 
             test "a walled border is a neighbour with no band" {
-                // The converse of the test above does **not** hold, and the
-                // pair of readings must not be mistaken for one rule at two
-                // altitudes. `RoomName.neighbouring` is over names and says
-                // a Seam *could* join these two; the band is over terrain
-                // and says whether one does. Here the shared column carries
-                // no passable tile on either side, so the names agree and
-                // the band is empty — which is what the captures already
-                // hold: `tests/Core.Tests/rooms/W12S27.room` has not one
-                // passable tile on its west column, nor W13S29 on its south
-                // row, so a declaration one axis step across either would be
-                // a neighbour this bot could still never reach (#243).
+                // `RoomName.neighbouring` is over names and says a Seam
+                // *could* join these two; the band is over terrain and says
+                // whether one does. The captures hold the case: W12S27 has
+                // not one passable tile on its west column, nor W13S29 on
+                // its south row (#243).
                 let atlas =
                     bordered
                         [
-                            // Exits on the north row of each, and nothing at
-                            // all on the column the two of them share.
+                            // Exits on the north row of each, nothing on the shared column.
                             "W12S28", [ { X = 10; Y = 0 }, Plain ]
                             "W13S28", [ { X = 10; Y = 0 }, Plain ]
                         ]
@@ -159,8 +139,7 @@ let seamTests =
                     (seams atlas "W12S28" "W13S28")
                     "and the terrain says none does: the shared column is wall end to end"
 
-                // The same pair with one tile opened either side, so the
-                // empty answer above is the wall's and not the fixture's.
+                // The same pair with one tile opened either side.
                 let opened =
                     bordered
                         [
@@ -177,14 +156,10 @@ let seamTests =
             }
 
             test "a corner tile is on two borders at once, so it is a Seam on neither" {
-                // (0,0) is the north row and the west column both. Offered
-                // as a crossing it would hand the same tile two different
-                // landings — (0,49) north and (49,0) west — and the engine
-                // makes at most one of them, so pricing a route through it
-                // would put the creep in the wrong room. Every room the
-                // engine generates walls its four corners (all four
-                // captures do), so no band on real terrain loses a tile:
-                // what is pinned is that a passable corner invents none.
+                // (0,0) would hand the same tile two landings, (0,49) north
+                // and (49,0) west, and the engine makes at most one of them.
+                // Every room the engine generates walls its corners, so what
+                // is pinned is that a passable corner invents none.
                 let atlas =
                     bordered
                         [
@@ -212,14 +187,9 @@ let seamTests =
             }
 
             test "a room the projection has no border for answers the empty band" {
-                // The outpost the colony cannot see, entry by entry (ADR
-                // 0004) — and a name the engine's grammar does not spell is
-                // the same absence, not an error. The ungrammatical name
-                // carries a ring of its own here, so the band it answers is
-                // empty for the one reason under test: the name places no
-                // room. Without the ring the missing layer would empty it
-                // first and the assertion would hold however the grammar
-                // was read.
+                // The ungrammatical name carries a ring of its own, so the
+                // band is empty for the one reason under test: the name
+                // places no room.
                 let atlas =
                     bordered
                         [
@@ -239,14 +209,9 @@ let seamTests =
             }
 
             test "an exit tile is in nothing the projection offers to stand or build on" {
-                // The prohibition ADR 0041 keeps by not admitting the border
-                // rows as ground: a source in the room's corner has its
-                // exits passable and in the Seam band, and not one of them
-                // is a Seat, a Work Area tile, a buildable tile, a walkable
-                // tile or a passable entry in the flood's weight table. The
-                // engine moves a creep that ends its tick on an exit into
-                // the next room, so a Matcher that could pick one would lose
-                // the creep out from under its Task.
+                // The engine moves a creep that ends its tick on an exit
+                // into the next room, so a Matcher that could pick one would
+                // lose the creep out from under its Task.
                 let corner =
                     { spatial
                           [ "src-a", { X = 1; Y = 1 } ]
@@ -272,10 +237,8 @@ let seamTests =
                                 ]
                     }
                     |> fun view ->
-                        // The neighbour's own ground behind its landing row
-                        // (ADR 0062): a bare ring answers no band at all now,
-                        // and what this case is about is the corner, not the
-                        // far room.
+                        // The neighbour's own ground behind its landing row:
+                        // a bare ring answers no band at all.
                         { view with
                             Rooms =
                                 view.Rooms
@@ -315,9 +278,7 @@ let seamTests =
                     (walkableTilesIn corner (atlasHome corner) |> Set.filter onTheBorder)
                     "no exit is walkable"
 
-                // The projection names no room, so its ground is filed
-                // under the empty name — the room the census signature
-                // already spells that way (ADR 0041).
+                // The projection names no room: its ground is under the empty name.
                 let weights = stepWeights corner ""
 
                 Expect.isTrue
@@ -339,11 +300,8 @@ let seamWalkTests =
         "atlas seam walk"
         [
             test "the walk is the ground to a tile beside the exit, plus the step onto it" {
-                // The near half of a cross-room price with the far leg left
-                // off (ADR 0041, #123), which is what a plan anchored on the
-                // Seam is measured with (ADR 0042). Charged the way every
-                // walk in the colony is: one tick a plain step, the tile the
-                // creep steps onto and never the one it starts on.
+                // One tick a plain step, the tile the creep steps onto and
+                // never the one it starts on.
                 let atlas = seamGround toNorthExit (northExit Plain)
 
                 Expect.equal
@@ -358,9 +316,6 @@ let seamWalkTests =
             }
 
             test "a swamp exit is not free, which is #123's narrowing of the ADR's +1" {
-                // ADR 0041 writes the crossing as `+1`; that is the price of
-                // stepping onto a *plain* exit under a body at fatigue
-                // parity, and a swamp exit costs five like any other swamp.
                 let atlas = seamGround toNorthExit (northExit Swamp)
 
                 Expect.equal
@@ -370,11 +325,8 @@ let seamWalkTests =
             }
 
             test "the tile asked at is charged nothing, whatever it costs to stand on" {
-                // The convention spelled out where it bites: a swamp tile
-                // beside a plain exit is one tick from the Seam, not six.
-                // Whoever walks *in* to that tile pays for it; the walk out
-                // of it does not, and two Seats of one source are therefore
-                // compared on the ground between them (ADR 0042's pick).
+                // A swamp tile beside a plain exit is one tick from the
+                // Seam, not six: whoever walks *in* to that tile pays for it.
                 let atlas =
                     seamGround
                         [ { X = 10; Y = 1 }, Swamp; { X = 10; Y = 2 }, Plain ]
@@ -392,19 +344,13 @@ let seamWalkTests =
             }
 
             test "no band, no ground and no path each answer with no walk at all" {
-                // Total (ADR 0004), one absence at a time. An unpriceable
-                // Seam is no Seam and never a blocked one, so each of these
-                // costs nothing and stops nothing.
+                // One absence at a time.
                 let atlas =
                     seamGround (({ X = 30; Y = 30 }, Plain) :: toNorthExit) (northExit Plain)
 
-                // The groundless room gets a projection of its own, and that
-                // is ADR 0062's doing: `seamGround` now gives every ring room
-                // the one tile of ground a band cannot be answered without, so
-                // no room in the fixture above is carried without ground any
-                // more. Here W12S27 is — its ring and nothing behind it, which
-                // is a world the shell does not build and is exactly what this
-                // clause is the totality case for.
+                // `seamGround` gives every ring room a tile of ground, so
+                // the groundless room gets a projection of its own: W12S27's
+                // ring and nothing behind it, a world the shell does not build.
                 let groundless =
                     { SpatialInfo.empty with
                         RoomName = Some "W12S28"
@@ -457,16 +403,11 @@ let roomTests =
         "atlas rooms"
         [
             test "two rooms' floods do not meet on one tile" {
-                // ADR 0041's reason for a flood table per room while the
-                // memo key keeps the three fields ADR 0029 gave it: two
-                // rooms hold the same coordinates, so two creeps of one
-                // fatigue factor standing on the same tile of different
-                // rooms key alike. One table would hand one of them the
-                // other room's distances. The two rooms' ground is shaped
-                // differently on purpose — a corridor south at home, a
-                // corridor west in the outpost — so a flood run over the
-                // wrong grid cannot reach the Work Area at all and answers
-                // None rather than a number that happens to agree.
+                // Two creeps of one fatigue factor on the same tile of
+                // different rooms key alike. The two rooms' ground is shaped
+                // differently on purpose (a corridor south at home, west in
+                // the outpost), so a flood over the wrong grid answers None
+                // rather than a number that happens to agree.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -520,17 +461,8 @@ let roomTests =
             }
 
             test "a Task in the neighbouring room is inapplicable, not mispriced" {
-                // Every flood stops at its room's border (ADR 0041), so a
-                // creep here and a target there have no priced path between
-                // them — and the honest answer is the one an unreachable
-                // Work Area in the creep's own room gets: the Task does not
-                // apply to this creep. What must never happen is a number,
-                // which is what reading the neighbour's tiles out of this
-                // room's flood would produce. Since #123 a border can be
-                // crossed for a price, but only where there is a Seam to
-                // cross at: this projection carries no border ring at all,
-                // so the band is empty, the minimum is over nothing, and
-                // the answers below are the ones they always were.
+                // This projection carries no border ring at all, so the
+                // band is empty and the minimum is over nothing.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -572,17 +504,10 @@ let roomTests =
                     (mayActFor atlas "w-home" (Harvest "src-out"))
                     "and no action reaches across one: the engine's ranges are room-local"
 
-                // The seam `decide` actually prices through. `travelCost`
-                // and `walkTicks` are the Task-shaped wrappers; the
-                // Matcher, the Emitter and the mover reach the flood with
-                // a bare tile set, taken from `workAreaFor`. Were that set
-                // the neighbour's ground, this room's flood would answer
-                // it a number and a first step off *home* terrain — a
-                // creep priced on ground it is not standing on and walked
-                // seven tiles inside its own room. So the creep-aware Work
-                // Area is empty across a border while the body-blind one
-                // above is not, and #123 left it that way: the price
-                // crosses the border, the standing tiles do not.
+                // The Matcher, the Emitter and the mover reach the flood
+                // with a bare tile set from `workAreaFor`. Were that set the
+                // neighbour's ground, this room's flood would answer a
+                // number and a step off *home* terrain.
                 let area = workAreaFor atlas "w-home" (Harvest "src-out")
 
                 Expect.isEmpty
@@ -606,13 +531,9 @@ let roomTests =
             }
 
             test "one room's traffic never surcharges another room's flood" {
-                // The occupancy half of the per-room split (ADR 0008's
-                // surcharge inside ADR 0041's layering). Both rooms hold
-                // the same corridor, and the outpost parks a creep partway
-                // down the coordinate the home creep must cross. One
-                // shared occupancy grid would price that step ten dearer —
-                // a one-wide corridor has no detour — and reprice a home
-                // creep off a creep it can never meet.
+                // Both rooms hold the same corridor, and the outpost parks
+                // a creep partway down the coordinate the home creep must
+                // cross; a one-wide corridor has no detour.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -649,12 +570,8 @@ let roomTests =
             }
 
             test "a target in a room the projection does not carry is absent, entry by entry" {
-                // ADR 0004 read a room at a time: a room with no layer and a
-                // room whose every container is empty are one answer, and it
-                // is the answer an unplaced target has always had — not
-                // priceable, counted against no Task, blocking no action.
-                // Both shapes are asserted because the layer admits both and
-                // nothing may tell them apart.
+                // A room with no layer and a room whose every container is
+                // empty are one answer; the layer admits both shapes.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -691,14 +608,10 @@ let roomTests =
             }
 
             test "one coordinate standing in two rooms is no Post and no Dual Seat" {
-                // The bleed a `Set<Pos>` invites, refused where the sets are
-                // built (ADR 0041): the outpost's controller puts (10,10)
-                // inside an Upgrade area and its container stands on that
-                // tile, while at home (10,10) is one of a source's Seats.
-                // Unioned across rooms that coordinate would read as a Dual
-                // Seat and as a container Post — a Post nothing stands on,
-                // an Anchor place nothing can fill, and a source reading as
-                // posted with no container of its own.
+                // The outpost's controller puts (10,10) inside an Upgrade
+                // area and its container stands on that tile, while at home
+                // (10,10) is one of a source's Seats. Unioned across rooms
+                // the coordinate would read as a Dual Seat and a container Post.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -771,14 +684,8 @@ let roomTests =
             }
 
             test "two rooms' Posts on one coordinate are two Posts, not one" {
-                // The Anchor row's quota crosses the border since ADR 0042
-                // — an outpost's Post hires an Anchor exactly as a home
-                // Post does — and this is the shape that decides whether
-                // it may be counted by unioning the rooms' tiles. It may
-                // not: a `Pos` carries no room, so these two garrison
-                // tiles are a room apart at one coordinate, and a union
-                // would hire one Anchor to stand on both. Counted room by
-                // room they are two.
+                // Two garrison tiles a room apart at one coordinate: a
+                // union would hire one Anchor to stand on both.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -826,14 +733,8 @@ let roomTests =
             }
 
             test "an outpost's Dual Seat is no Post: the colony upgrades one controller" {
-                // The Dual Seat half of a Post presumes a controller the
-                // colony upgrades, and it upgrades its own room's alone —
-                // an outpost's controller it reserves (ADR 0042). Taken
-                // across the border the intersection would name a tile
-                // nobody ever upgrades from, and that tile would be a Post:
-                // an Anchor place and an income share for an outpost source
-                // with no container standing under it, which is exactly the
-                // switch the container is supposed to be.
+                // Taken across the border the intersection would name a
+                // tile nobody ever upgrades from, and that tile would be a Post.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -875,13 +776,10 @@ let roomTests =
             }
 
             test "droppedEnergyIn answers each room's own piles on one coordinate" {
-                // The pickup reflex's geometry since #166: it measures a
-                // bare pile `Pos` against a bare creep `Pos`, so the two
-                // have to come out of one layer or a pile at home and a
-                // creep in the outpost on the same coordinate read as range
-                // 0 (ADR 0041). The kind census stays flat and world-unique
-                // — both ids are Dropped Energy here — and it is the join to a
-                // *named* room's positions that separates them.
+                // The pickup reflex measures a bare pile `Pos` against a
+                // bare creep `Pos`, so both must come out of one layer. The
+                // kind census stays flat; the join to a *named* room's
+                // positions separates them.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -915,13 +813,9 @@ let roomTests =
             }
 
             test "placedCreeps files each creep under its own room, in ColonyView order" {
-                // The Resolver's list since #145: arbitration runs once per
-                // room, each over that room's creeps and tiles alone (ADR
-                // 0041's Consequences), so the grouping is the seam that
-                // keeps two rooms' coordinates from ever meeting in one
-                // `Map<Pos, string>`. Within a group the order is the
-                // ColonyView's, as every per-creep derivation's is; a creep
-                // the projection places nowhere is in no group (ADR 0004).
+                // The Resolver's list: arbitration runs once per room, and
+                // the room on each tile keeps two rooms' coordinates from
+                // meeting in one `Map<Pos, string>`.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -947,10 +841,6 @@ let roomTests =
                         [ worker "b-home"; worker "w-out"; worker "a-home"; worker "ghost" ]
                     |> ofView
 
-                // One flat list in view creep order since #216 R3, each
-                // tile carrying its own room (ADR 0052 decision 2) where
-                // the answer used to be grouped by room name — the
-                // grouping *was* the join.
                 Expect.equal
                     (placedCreeps atlas)
                     [
@@ -977,10 +867,8 @@ let heavyPinJoinTests =
         "atlas heavy pin joins"
         [
             test "standsAtSource is the engine's harvest range, and it is one tile" {
-                // What the empty-window reprieve asks (ADR 0048): not
-                // whether the tile catches overflow — `catchesOverflow`
-                // answers that — but whether the body could dig the tick
-                // the energy lands, which the engine measures at range 1.
+                // Not whether the tile catches overflow (`catchesOverflow`)
+                // but whether the body could dig the tick the energy lands.
                 let atlas =
                     pinnedTwoRooms [ "beside", { X = 10; Y = 9 }; "two-out", { X = 10; Y = 8 } ] []
                     |> snapshotWith [ worker "beside"; worker "two-out"; worker "ghost" ]
@@ -1002,11 +890,9 @@ let heavyPinJoinTests =
             }
 
             test "standsAtSource measures range and never Seat membership" {
-                // Why the range and not `seatTilesOf` (ADR 0048's third
-                // rejected option, and ADR 0004's totality): the Seats are
-                // read off the projection's ground, and a creep the engine
-                // has put on ground the projection carries none for is in
-                // position all the same. (11,10) is such a tile here.
+                // A creep the engine has put on ground the projection
+                // carries none for is in position all the same; (11,10) is
+                // such a tile here.
                 let atlas =
                     pinnedTwoRooms [ "off-grid", { X = 11; Y = 10 } ] []
                     |> snapshotWith [ worker "off-grid" ]
@@ -1022,10 +908,7 @@ let heavyPinJoinTests =
             }
 
             test "standsAtSource never joins two rooms on one coordinate" {
-                // ADR 0041, the same guard `catchesOverflow` carries: a
-                // `Pos` names no room, so a creep at home on the
-                // coordinate an outpost source seats is a border away from
-                // it and in position for nothing.
+                // The same guard `catchesOverflow` carries.
                 let atlas =
                     pinnedTwoRooms
                         [ "home-body", { X = 10; Y = 9 } ]
@@ -1043,11 +926,8 @@ let heavyPinJoinTests =
             }
 
             test "standsOnDualSeat answers for the colony's own room alone" {
-                // `postsIn`'s reason (ADR 0042): the colony upgrades one
-                // controller, so a Seat beside an outpost's is a tile
-                // nobody ever upgrades from — and reading it as a Dual Seat
-                // would subtract the outpost Anchor from ADR 0048's
-                // reprieve and leave it holding nothing at all.
+                // Reading an outpost Seat as a Dual Seat would subtract the
+                // outpost Anchor from the empty-window reprieve.
                 let atlas =
                     pinnedTwoRooms
                         [ "home-dual", { X = 10; Y = 11 }; "home-plain", { X = 10; Y = 9 } ]
@@ -1083,9 +963,8 @@ let routeTests =
         "room routes"
         [
             test "the name grid steps four ways, in the order that breaks a tie" {
-                // The route search's whole tie-break, so it is pinned before
-                // anything reads it: north, east, south, west, off the world
-                // coordinates the names spell (W12S28 is (-13, 28)).
+                // The route search's tie-break: north, east, south, west
+                // (W12S28 is (-13, 28)).
                 Expect.equal
                     (RoomName.adjacent "W12S28")
                     [ "W12S27"; "W11S28"; "W12S29"; "W13S28" ]
@@ -1109,9 +988,7 @@ let routeTests =
             }
 
             test "transitBetween is the rectangle's interior, and it is empty for a neighbour" {
-                // What decides which rooms are projected as transit layers:
-                // every room a shortest chain could pass through, both ends
-                // left out.
+                // Every room a shortest chain could pass through, both ends left out.
                 Expect.equal
                     (RoomName.transitBetween "W13S28" "W15S29" |> List.sort)
                     [ "W13S29"; "W14S28"; "W14S29"; "W15S28" ]
@@ -1128,8 +1005,8 @@ let routeTests =
             }
 
             test "routeBy crosses the fewest borders the links allow" {
-                // `linked` is total here: every grid neighbour is joined, so
-                // the search is measuring its own breadth and its tie-break.
+                // `linked` is total, so the search measures its own breadth
+                // and tie-break.
                 let anywhere _ _ = true
 
                 Expect.equal
@@ -1172,13 +1049,9 @@ let routeTests =
             }
 
             test "routesBy answers every chain of the fewest hops, and routeBy is its first" {
-                // #288: at one hop the chain is unique, and at two it is
-                // not — an L-shaped target is reached round either corner
-                // for the same number of borders and not for the same
-                // number of ticks. The search hands every one of them out
-                // and the price picks (`Atlas.routes`); what `adjacent`'s
-                // order still decides is only the order they come in, which
-                // is what keeps `routeBy` the answer it always was.
+                // An L-shaped target is reached round either corner for the
+                // same number of borders and not the same number of ticks
+                // (#288); `adjacent`'s order decides only the order they come in.
                 let anywhere _ _ = true
 
                 Expect.equal
@@ -1230,27 +1103,18 @@ let keeperSeamTests =
     testList
         "seams over the keeper mask"
         [
-            // The margin the colony ships, and the room it is declared for.
             let margin = Tuning.keeperMargin Tuning.defaults
-            // One Atlas per case rather than one for the list: the Atlas
-            // memoises on mutable tables and Expecto runs these in parallel
-            // (#310).
+            // One Atlas per case: Expecto runs these in parallel (#310).
             let masked () = keeperRoom |> snapshotWith [] |> ofView
 
-            // The crossings of one of W15S26's four borders, by the coordinate
-            // that runs along it.
+            // The crossings of one of W15S26's borders, by the coordinate along it.
             let band into along =
                 seams (masked ()) "W15S26" into |> List.map (fst >> along) |> Set.ofList
 
             test "the chain's two borders lose no crossing to the mask" {
-                // The acceptance criterion ADR 0060 decision 2 flags as the one
-                // that could bite: masking *ground* can take exit tiles out of a
-                // band, so a chain that exists over raw terrain may not exist
-                // over masked terrain. It does not here, and the reason is a
-                // fact about the declaration rather than about the terrain —
-                // the nearest rock to either the north or the south ring is
-                // further than the margin — which is why the invented plain
-                // ring under the real name is enough to say it.
+                // The nearest rock to either the north or the south ring is
+                // further than the margin: a fact about the declaration, so
+                // the invented plain ring under the real name is enough to say it.
                 let alongX (tile: Pos) = tile.X
 
                 Expect.equal
@@ -1272,14 +1136,9 @@ let keeperSeamTests =
             }
 
             test "the chain from W15S28 to the Reactor's room still exists over the masked layer" {
-                // ADR 0060 decision 2's third acceptance criterion, asked of
-                // the query every price is chosen with (`Atlas.routes`, ADR
-                // 0058): three crossings by way of W15S27 and the keeper room,
-                // which is `Tuning.MaxHops` exactly and leaves no slack for a
-                // detour. The rooms' rings are the fixture's and the mask over
-                // the middle one is the declaration's, so what this pins is
-                // that the mask does not cut the chain — the terrain's own say
-                // arrives with the captures (#316).
+                // Three crossings, `Tuning.MaxHops` exactly, so no slack for
+                // a detour. The rings are the fixture's and the mask is the
+                // declaration's; the terrain's own say is `RoomSeamTests`'.
                 Expect.equal
                     (routes (masked ()) "W15S28" "W15S25")
                     [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
@@ -1292,18 +1151,10 @@ let keeperSeamTests =
             }
 
             test "a rock near a border does take exit tiles out of that band" {
-                // The consequence stated rather than discovered, and it is
-                // real one border over: the west lair at (6,17), the west
-                // source at (4,33) and the south-west lair at (5,36) each reach
-                // the x = 0 ring, so two runs of it stop being crossings. The
-                // band survives; a chain that had needed one of those tiles
-                // would not. What is pinned here is the mask's own reach over a
-                // ring that is plain end to end, which is the half that is true
-                // of the declaration whatever the ground turns out to be. What
-                // the server's own terrain does with it is `RoomSeamTests`',
-                // over the capture: eight of this border's forty-eight exits
-                // survive and none of them is orphaned, against the east
-                // border's seven surviving and all seven orphaned.
+                // The west lair at (6,17), the west source at (4,33) and the
+                // south-west lair at (5,36) each reach the x = 0 ring. The
+                // mask's reach over a plain ring; what the server's terrain
+                // does with it is `RoomSeamTests`'.
                 let alongY (tile: Pos) = tile.Y
 
                 let lost = Set.difference (Set.ofList [ 1..48 ]) (band "W16S26" alongY)
@@ -1319,26 +1170,16 @@ let keeperSeamTests =
             }
 
             test "the mask narrows a band the same way for the route search and for the price" {
-                // `World.linked` reads the world's own border maps before any
-                // grid exists and `Atlas.seams` reads the ring grids; both mask
-                // the same tiles, so the scan set cannot admit a chain the
-                // flood refuses to walk (ADR 0058's invariant, ADR 0060's
-                // second consequence). Pinned against the ring the Atlas was
-                // laid from, which is the only input either reader has.
+                // `World.linked` reads the border maps before any grid
+                // exists and `Atlas.seams` reads the ring grids; both must
+                // mask the same tiles.
                 let crossable room tile =
-                    // The shell's own reading, less the mask: `World.linked`'s
-                    // `walkableIn`, spelled over the fixture's ring.
+                    // `World.linked`'s `walkableIn`, spelled over the fixture's ring.
                     Map.containsKey tile (Map.find room keeperRoom.Borders)
                     && not (Keepers.masked margin room tile)
 
-                // And the far room's ground behind the landing (ADR 0062), the
-                // world's own reading of it: the layer's terrain, less the
-                // mask. The third predicate the band now takes, spelled here as
-                // `World.groundWalkable` spells it — over a fixture whose every
-                // terrain entry is Plain, so "the layer carries this tile" and
-                // the shipped predicate's "the layer carries it and it is not
-                // wall" are the same question, exactly as the ring predicate
-                // above takes the same latitude.
+                // `World.groundWalkable`, spelled over a fixture whose every
+                // terrain entry is Plain.
                 let grounded room tile =
                     TerrainGrid.containsKey tile (SpatialInfo.layerOf keeperRoom room).Terrain
                     && not (Keepers.masked margin room tile)
@@ -1355,29 +1196,19 @@ let keeperSeamTests =
                         $"W15S26 -> {into}: one band, whichever layer answers it"
             }
 
-            // A body standing in the room north of the keeper room, walking
-            // south toward W15S27 — #316's leg, taken the way the vision grace
-            // takes it: no price, because the room it is aimed at is dark.
+            // A body north of the keeper room walking south toward W15S27
+            // the way the vision grace does: no price, the room aimed at is dark.
             let walkingSouthFrom tile =
                 keeperRoomStanding "W15S25" tile |> snapshotWith [ worker "w" ] |> ofView
 
             test
                 "a crossing the mask orphans is no crossing at all, and the compass never aims at one" {
-                // #317's stranding, reproduced and then closed at the model
-                // (ADR 0062). The mineral at (38,7) is seven tiles from the
-                // north exit row, so the **ring** keeps that row — and six
-                // from the ground row behind it, so the ground behind eleven
-                // of those crossings is gone. A body the engine lands on one
-                // of them has no walkable neighbour in any direction and no
-                // step out of the room for the rest of its life.
-                //
-                // Until ADR 0062 the band said such a pair was a crossing and
-                // three readers each had to remember the far side for
-                // themselves; now the band itself drops it, and this is where
-                // the ring's answer and the band's are shown to differ.
-                // Standing where all three crossings it could step onto are
-                // orphaned, so the mover's answer cannot be one of them by
-                // accident of the band's (X, Y) order.
+                // #317's stranding. The mineral at (38,7) is seven tiles
+                // from the north exit row, so the ring keeps that row, and
+                // six from the ground row behind it, so the ground behind
+                // eleven of those crossings is gone. Standing where all
+                // three crossings it could step onto are orphaned, so the
+                // mover's answer cannot be one by accident of (X, Y) order.
                 let atlas = walkingSouthFrom { X = 38; Y = 48 }
 
                 for x in 37..39 do
@@ -1409,12 +1240,7 @@ let keeperSeamTests =
             }
 
             test "every crossing the compass aims at lands a body on ground it can leave" {
-                // The rule rather than the instance, swept across the run the
-                // mask orphans and a tile either side of it: whatever the mover
-                // answers, a body that obeys it can take a step the tick after.
-                // This is the far side's own reading, and it is the one the
-                // priced walk has always taken (`joinedAcross`) — what #317
-                // fixed is that the one mover with no price to take it did not.
+                // Swept across the run the mask orphans and a tile either side.
                 for x in 31..45 do
                     let atlas = walkingSouthFrom { X = x; Y = 48 }
 
@@ -1434,19 +1260,11 @@ let landingTests =
         [
             test
                 "a landing whose ground is built over is still a crossing, and the grace mover still drops it" {
-                // The half of #317's filter ADR 0062 does **not** absorb, and
-                // the reason `Atlas.stepTowardRoom` keeps one.
-                //
-                // The band reads the far room's **raw ground**, deliberately:
-                // a band is geometry, and if a road laid or a rampart raised
-                // this tick could change which rooms are joined, the scan set
-                // would move with the furniture. So a landing whose only ground
-                // neighbours are held by obstacle structures is a crossing
-                // still — and it is one no body can step off all the same.
-                // `joinedAcross` drops it on the far leg, there being nothing
-                // for the flood to be reached at; the vision-grace mover has no
-                // far leg, its target room being dark, so it asks the walking
-                // grid itself.
+                // The band reads the far room's raw ground, so a landing
+                // whose only ground neighbours are held by obstacle
+                // structures is a crossing still. `joinedAcross` drops it on
+                // the far leg; the vision-grace mover has no far leg and asks
+                // the walking grid itself.
                 let projection =
                     bordered
                         [

@@ -1,4 +1,4 @@
-/// The Anchor and the heavy pin that ties it to its own rock (ADR 0048).
+/// The Anchor and the heavy pin that ties it to its own rock. ADR-0048
 module Fabot.Core.Tests.Decide.AnchorPinTests
 
 open Expecto
@@ -15,12 +15,8 @@ let anchorTests =
         "anchor"
         [
             test "an Anchor on a plain Seat walks to the Post instead of digging there" {
-                // The W12S28 bug (ADR 0020): controller far from every Seat,
-                // a built container on the Seat at (9,10) — the source's one
-                // Post — and the Anchor standing on the plain Seat (10,11).
-                // Harvesting there would fill its single Carry in four ticks
-                // and hand it to Upgrade, five tiles away; instead it holds
-                // its dig and walks.
+                // Controller far from every Seat, a built container on the
+                // Seat at (9,10), and the Anchor on the plain Seat (10,11).
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 0 50 ]
@@ -68,20 +64,10 @@ let anchorTests =
             }
 
             test "an Anchor that is already full off-Post commutes nowhere: it walks to its Post" {
-                // The deployment path ADR 0020 names, with ADR 0016's
-                // accepted detour closed (ADR 0048). The controller four
-                // tiles away is no longer a candidate: a Work-heavy body
-                // takes Upgrade only where it can already act on it. ADR
-                // 0016 called this one commute; it was one *per release*,
-                // and the room paid the walk out and the walk home every
-                // time a hauler bumped the Anchor or its source ran dry.
-                // What is left is the walk that was always the point — a
-                // full store off the Post catches no overflow, but the
-                // body is not digging there, it is walking, so Harvest
-                // holds it and travel cost puts it back on the tile that
-                // does catch it. A heavy body never empties (ADR 0016, ADR
-                // 0046, ADR 0048): full is its ordinary condition, and it
-                // is the Post and not the store that ends the walk.
+                // The controller four tiles away is not a candidate: a
+                // Work-heavy body takes Upgrade only where it can already
+                // act on it, and a full store off the Post is a walk, not a
+                // release.
                 let room =
                     { spatial
                           [
@@ -127,9 +113,7 @@ let anchorTests =
                     (digIntentsFor "a1" intents)
                     "and digs nothing on the way: the overflow reprieve is still the container's alone"
 
-                // The tick after the walk, on the Post it was walking to —
-                // the state the step above produces, and the one the empty
-                // window's reprieve is written for (ADR 0024).
+                // The tick after the walk, on the Post it was walking to.
                 let arrived =
                     { full with
                         Spatial = full.Spatial |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
@@ -237,9 +221,8 @@ let anchorTests =
             }
 
             test "a capped Anchor is cast the tick its bank holds the body's cost, not a full bank" {
-                // ADR 0021: at RCL4 the bank caps at 1,300 but the Anchor
-                // row prices at 700 (6W1C1M); waiting for a full bank would
-                // hold every Anchor replacement past RCL3 for nothing.
+                // At RCL4 the bank caps at 1,300 but the Anchor row prices
+                // at 700 (6W1C1M).
                 let snapshot =
                     { dualSeatColony with
                         Bank = bank 700 1300
@@ -273,15 +256,8 @@ let anchorTests =
 
             test "the Anchor quota counts Posts: a Dual Seat plus a container Seat want two" {
                 // One living Anchor covers the Dual Seat; the built
-                // container on the other Seat is a second Post, so the
-                // remaining gap is cast from the anchor row, not generalist.
-                //
-                // The generalist beside it is what keeps the supply floor
-                // disarmed (ADR 0050): an Anchor holds a Carry and can
-                // still put nothing into an extension, so a fleet of
-                // Anchors alone is a colony hiring a carrier before every
-                // row and this case would read that row instead of the
-                // Anchor's.
+                // container on the other Seat is a second Post. The
+                // generalist keeps the supply floor disarmed.
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
@@ -307,10 +283,7 @@ let anchorTests =
             }
 
             test "a living Anchor fills the quota: the remaining gap goes generalist" {
-                // The second body is the supply floor's premise and not
-                // the case's: a fleet of Anchors alone can refill no
-                // extension, and the floor would answer before the Anchor
-                // row (ADR 0050).
+                // The generalist keeps the supply floor disarmed.
                 let snapshot =
                     { dualSeatColony with
                         Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
@@ -365,14 +338,11 @@ let anchorTests =
             }
 
             test "planned creeps never exceed the workforce target" {
-                // One Post and four income workers make a target of five
-                // (ADR 0012, the worker row rounded up by ADR 0037: the
-                // Post's 6,000 of lifetime income — four a tick, which is
-                // what the `2W/1C/1M` Anchor this 300 bank casts digs out
-                // of it, #208 — less the Anchor's 300 of amortization over
-                // 1 × 1500 is 3.8); four living leave one gap — the second
-                // idle spawn must stay quiet even with energy banked for
-                // it.
+                // One Post and four income workers make a target of five:
+                // the Post's 6,000 of lifetime income (four a tick, what the
+                // `2W/1C/1M` this 300 bank casts digs) less the Anchor's 300
+                // of amortization over 1500 is 3.8, rounded up. Four living
+                // leave one gap; the second idle spawn must stay quiet.
                 let snapshot =
                     { dualSeatColony with
                         Spawns = [ spawn; secondSpawn ]
@@ -469,11 +439,8 @@ let anchorTests =
                     })
 
             test "a distant Build flows to the generalist; the Anchor upgrades in place" {
-                // What holds the Anchor here is the body gate and no longer
-                // the distance (#234): a site outranks the Upgrade beside it
-                // by a rung now, so a heavy body offered one would walk to it
-                // at any price. The case below is the same claim with the
-                // distance taken away.
+                // What holds the Anchor here is the body gate, not the
+                // distance: the case below takes the distance away.
                 let snapshot =
                     { dualSeatColony with
                         ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
@@ -497,22 +464,9 @@ let anchorTests =
             }
 
             test "a site one step off the rock is still not the Anchor's" {
-                // #234 closed the Build gate over the whole tier, and this
-                // is the case that says why it had to. Travel cost was what
-                // pinned a heavy body on its rock while a home site was
-                // ordinary surplus work; a rung above the Upgrade beside it,
-                // no distance decides between the two any more, and the
-                // Anchor would walk off its Post for fifty carried energy at
-                // four to seven ticks a step. What refuses it is the
-                // prohibition ADR 0020 and ADR 0048 already wrote for the
-                // feeding-tier site, now asked of every one: a heavy body's
-                // work is its Post and never a delivery, however short the
-                // delivery is. The site is one step away here, so nothing in
-                // the answer can be the distance.
-                //
-                // #205's exception is untouched and is the pair: a container
-                // site on the body's **own** Post is built where it stands,
-                // and its own cases are below.
+                // The site is one step away, so nothing in the answer can
+                // be the distance. A container site on the body's own Post
+                // is the exception, and has its own cases.
                 let snapshot =
                     { dualSeatColony with
                         ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
@@ -575,14 +529,9 @@ let heavyPinTests =
         "heavy pin"
         [
             test "bumped one tile off the Post, a heavy body keeps its drained source" {
-                // ADR 0048's widening of ADR 0025's exemption. A hauler
-                // taking the container's load swaps the Anchor onto the
-                // Seat beside it; on ADR 0024's container-only condition
-                // that one step ended the garrison, released the Anchor
-                // TooEarly, and freed the Post for whatever was released
-                // elsewhere in the colony. The tile is still inside the
-                // source's digging range, which is the whole of what the
-                // window asks of it: it digs the tick the energy lands.
+                // A hauler taking the container's load swaps the Anchor
+                // onto the Seat beside it. The tile is still inside the
+                // source's digging range: it digs the tick the energy lands.
                 let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 11; Y = 11 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -604,11 +553,8 @@ let heavyPinTests =
             }
 
             test "the same tile releases a light body: the exemption reads the body" {
-                // The pairwise half of the rule (ADR 0016's shape, ADR
-                // 0048's clause): what the window forgives is a body that
-                // has nowhere else worth being. A worker beside a dry rock
-                // is released exactly as ADR 0013 released it and goes and
-                // does something else with the fifty ticks.
+                // The pairwise half: a light body beside a dry rock has
+                // somewhere else worth being.
                 let colony = pinnedColony 50 (worker "w1" 0 50) { X = 11; Y = 11 }
                 let remembered = Map.ofList [ "w1", taskId (Harvest "src-a") ]
 
@@ -631,14 +577,9 @@ let heavyPinTests =
             }
 
             test "a heavy body two tiles out is no longer in position, and is released" {
-                // Where ADR 0048 draws the line, and it is the engine's own
-                // harvest range and not a distance from the Post: a body
-                // that would have to take a step before it could dig has a
-                // walk, and a walk is what ADR 0025 judges — on the same
-                // arithmetic and the same numbers a light body is judged
-                // on since #258. Four ticks of walk cover no part of fifty
-                // ticks of wait, so it waits the window out where it
-                // stands.
+                // The line is the engine's harvest range, not a distance
+                // from the Post: a body that must step before it can dig
+                // has a walk, and four ticks of walk cover no part of fifty.
                 let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 12; Y = 10 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -662,13 +603,10 @@ let heavyPinTests =
                     (Verdict.Unassigned("a1", IdleReason.NoneInTime))
                     "and nothing else in the pool is a heavy body's work"
 
-                // It holds its *place in the queue* and takes no walk — but
-                // it does take the one step #268 asks of every idle body:
-                // (12,10) is the corridor mouth, inside the Post container's
-                // range-1 ring, so a body waiting a restock out there is
-                // standing where the hauler drawing that container has to
-                // stand. The step is off the ring and not toward the
-                // controller, which is the distinction this case is about.
+                // It takes the one step every idle body takes: (12,10) is
+                // inside the Post container's range-1 ring, where the hauler
+                // drawing it has to stand. Off the ring, not toward the
+                // controller.
                 Expect.equal
                     (moveIntentsFor "a1" intents)
                     [ MoveCreep("a1", Right) ]
@@ -676,17 +614,9 @@ let heavyPinTests =
             }
 
             test "a distant heavy body is dispatched when its walk covers the wait" {
-                // #258 retires ADR 0048's heavy arm and #193's refusal
-                // with it. What that arm cured was an Anchor walking half
-                // a room onto a Post another Anchor was standing on, and
-                // that is a **capacity** question — closed by the Post
-                // count since ADR 0024 and ADR 0051, and closed a second
-                // time for a body still walking by the pair below. What it
-                // cost was the dispatch rule itself: an Anchor pays four
-                // ticks a plain step, so twenty-four tiles of lane are a
-                // walk of ninety-six, and a rock twenty ticks from its
-                // restock has long since refilled by the time this body
-                // arrives. There is nothing to wait for.
+                // An Anchor pays four ticks a plain step, so twenty-four
+                // tiles of lane are a walk of ninety-six, and a rock twenty
+                // ticks from restock has refilled long before it arrives.
                 let colony = pinnedColony 20 (anchor "a1" 0 50) { X = 35; Y = 10 }
 
                 let {
@@ -706,15 +636,10 @@ let heavyPinTests =
             }
 
             test "what refuses the same walk onto a held Post is the cap, not the restock" {
-                // The other half of the case above, and the one #193's
-                // test used to carry: with the heavy arm gone, the rule
-                // that keeps an Anchor off a Post another Anchor is
-                // standing on is the **Post count** (ADR 0024 as ADR 0051
-                // sharpened it), counted against a holder whose stay
-                // overlaps this body's arrival (ADR 0026). The same drained
-                // rock, the same ninety-six ticks of lane, one garrison
-                // added: the pair is offered and the cap refuses it, so
-                // the Verdict names crowding and never earliness.
+                // The same walk with one garrison added: what refuses it is
+                // the Post count, counted against a holder whose stay
+                // overlaps this body's arrival, so the Verdict names
+                // crowding and never earliness.
                 let colony =
                     pinnedCrowd
                         50
@@ -748,15 +673,11 @@ let heavyPinTests =
             }
 
             test "the drained rock is not taken off a heavy body half way there" {
-                // The live case (user, 2026-09-08), which is the same rule
-                // read as a release rather than as a dispatch. An Anchor
-                // ninety-odd ticks from an outpost Post had its rock dug
-                // out from under it in mid-walk; the heavy arm released it
-                // `too-early: walk 90, wait 50`, it went `none-in-time`,
-                // and the next tick it matched a home source another
-                // Anchor was standing on and walked the border back. The
-                // walk covers the wait by nearly two to one, so there is
-                // no release to start that chain.
+                // The live case (2026-09-08): an Anchor ninety-odd ticks
+                // from an outpost Post had its rock dug out mid-walk, was
+                // released `too-early: walk 90, wait 50`, and next tick
+                // matched a home source another Anchor stood on. The walk
+                // covers the wait by nearly two to one.
                 let colony = pinnedColony 50 (anchor "a1" 0 50) { X = 35; Y = 10 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -778,11 +699,8 @@ let heavyPinTests =
             }
 
             test "a distant light body is dispatched exactly as ADR 0025 has it" {
-                // The pairwise rival of the case above, one body apart:
-                // one dispatch rule for both bodies since #258, and how
-                // many ticks a tile costs each of them is already in the
-                // walk the rule reads. A worker crosses the same lane at a
-                // tick a tile and still spends the window on the road.
+                // The pairwise rival: one dispatch rule for both bodies, and
+                // a worker crosses the lane at a tick a tile.
                 let colony = pinnedColony 20 (worker "w1" 0 50) { X = 35; Y = 10 }
 
                 let {
@@ -802,15 +720,9 @@ let heavyPinTests =
             }
 
             test "the bumped body is full, and that is the state the report was filed on" {
-                // The pairwise store half of the case above, and the one
-                // the colony actually reaches: a garrison digs twelve a
-                // tick into a fifty store and the overflow falls into the
-                // container, so a body standing on its Post is full nearly
-                // every tick of its life (ADR 0012, ADR 0024) — and a
-                // hauler drawing that container bumps a *full* body onto
-                // the Seat beside it. The empty-window reprieve has to
-                // reach that body or it reaches nothing the report
-                // describes.
+                // A garrison digs twelve a tick into a fifty store, so a
+                // body on its Post is full nearly every tick, and the hauler
+                // drawing the container bumps a full body off it.
                 let colony = pinnedColony 50 (anchor "a1" 50 0) { X = 11; Y = 11 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -842,24 +754,9 @@ let heavyPinTests =
             }
 
             test "a full heavy body off its Post walks back to it, never to the controller" {
-                // ADR 0016's last accepted detour, closed (ADR 0048). It
-                // was written as one commute — a full Anchor spends its
-                // load at the controller once and converges — but every
-                // release put the same body back at the same gate, so the
-                // colony paid the walk out and the walk home every time a
-                // hauler bumped it or its source ran dry. Its Carry is
-                // fifty energy against four Work: there is nothing at the
-                // far end worth the trip.
-                //
-                // And closing that walk leaves the walk that was always
-                // the point. A Work-heavy body never empties — nothing in
-                // the pipeline spends its store any more — so if a full
-                // store also ended its Harvest it would hold no Task, take
-                // no step, and stand there for the rest of its life beside
-                // a stocked rock: #193's own symptom, made by the cure.
-                // ADR 0048's Consequence says it "stands where it is until
-                // it can dig again", and this is the walk that gets it
-                // there.
+                // A Work-heavy body never empties, so if a full store also
+                // ended its Harvest it would hold no Task and stand beside
+                // a stocked rock for the rest of its life.
                 let colony = pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 11 }
 
                 let {
@@ -888,9 +785,7 @@ let heavyPinTests =
 
             test "arrived on the Post, the full body stays and digs" {
                 // The tick the step above lands, driven from the state it
-                // produces rather than from a hand-built creep: ADR 0024's
-                // own condition takes over, the overflow falls into the
-                // container underfoot, and the walk home is over.
+                // produces.
                 let colony = pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 10 }
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
@@ -914,17 +809,11 @@ let heavyPinTests =
             }
 
             test "the walk home is refused onto a Post another garrison is standing on" {
-                // #258's second half. ADR 0048 offers a full Work-heavy
-                // body the walk wherever the source has a Post, on the
-                // argument that a Post is a tile the arriving body has
-                // something to do on — and the Post cap that would refuse
-                // the pair is counted at arrival (ADR 0026), so a walk
-                // long enough to outlast the incumbent reads every
-                // garrisoned Post in the colony as free. Live at 204,966
-                // an Anchor that had just lost its own rock crossed a
-                // border home on exactly that reading and stood beside an
-                // Anchor with hundreds of ticks left. The offer is now the
-                // Post standing empty *this* tick.
+                // The Post cap is counted at arrival, so a walk long enough
+                // to outlast the incumbent reads every garrisoned Post as
+                // free; live at 204,966 an Anchor crossed a border on that
+                // reading and stood beside one with hundreds of ticks left.
+                // The offer is the Post standing empty this tick.
                 let colony =
                     pinnedCrowd
                         0
@@ -958,12 +847,8 @@ let heavyPinTests =
             }
 
             test "a light body on the same tile leaves the Post vacant, and the walk is offered" {
-                // The pairwise half, one body apart on the same tile: what
-                // holds a Post is a garrison, and ADR 0051 keeps every
-                // light body off it — one standing there is squatting the
-                // Post, not working it — so the gate reads the body
-                // exactly as `hasSpareRate` reads it (#235). The Anchor
-                // still has somewhere to go.
+                // A light body standing on a Post is squatting it, not
+                // holding it.
                 let colony =
                     pinnedCrowd
                         0
@@ -987,11 +872,8 @@ let heavyPinTests =
             }
 
             test "with no Harvest in the pool, a heavy body outside the Work Area has nothing" {
-                // The Upgrade gate on its own (ADR 0048's third clause),
-                // with the source taken out of the pool so what is left is
-                // the one comparison: a Work-heavy body one room's width
-                // from the controller is not a candidate for Upgrade at
-                // all, and there is nothing else its body can take.
+                // With the source out of the pool, the Upgrade gate is the
+                // one comparison left.
                 let colony =
                     { pinnedColony 0 (anchor "a1" 50 0) { X = 11; Y = 11 } with
                         Sources = []
@@ -1014,22 +896,16 @@ let heavyPinTests =
                     (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
                     "and it is its body that says so, not a restock or a distance"
 
-                // The one step it does take is off the Seat it has no work
-                // on and onto the corridor tile beside it (#241): a body
-                // with no Task parks off the idle ground, and this body's
-                // tile is a Seat of the source the pool no longer carries.
-                // What the gate refuses is the *walk* — the width of the
-                // room, east down the corridor — so the step is one tile
-                // and never a commute.
+                // The one step it takes is off the Seat and onto the
+                // corridor tile beside it: a body with no Task parks off
+                // idle ground, one tile and never a commute.
                 Expect.equal
                     (moveIntentsFor "a1" intents)
                     [ MoveCreep("a1", TopRight) ]
                     "it steps off the Seat, and nothing walks it the width of the room"
 
-                // One tile further east than #241 left it: (12,10) is inside
-                // the Post container's range-1 ring, which is store ground
-                // the mover now vacates too (#268), so the tile it settles
-                // on is the first one past that ring.
+                // (12,10) is inside the Post container's range-1 ring,
+                // which the mover vacates too.
                 Expect.equal
                     (moveIntentsFor
                         "a1"
@@ -1045,12 +921,9 @@ let heavyPinTests =
                     [ MoveCreep("a1", Right) ]
                     "and there it steps once more, clear of the container's ring, still not a commute"
 
-                // And there it stops: (13,10) is off every Seat, off the
-                // container's ring and still a room from the controller, so
-                // the widened set costs the body one tile and not a walk.
-                // This is the assertion that tells a one-tile step from a
-                // commute — without it a ground that receded a tile a tick
-                // would pass the two above.
+                // (13,10) is off every Seat and the container's ring, so it
+                // stops: the assertion that tells a one-tile step from a
+                // commute.
                 Expect.isEmpty
                     (moveIntentsFor
                         "a1"
@@ -1067,13 +940,9 @@ let heavyPinTests =
             }
 
             test "the same body inside the Upgrade Work Area still upgrades in place" {
-                // The half the gate must not take away (ADR 0046, ADR
-                // 0020): a heavy body standing where it can already spend
-                // — a Dual Seat Anchor, an upgrader beside the buffer —
-                // upgrades from the tile it is on. What ADR 0048 refuses
-                // is the walk, so the gate is Work-Area membership and not
-                // a body-shaped ban on the Task. Same colony, same body,
-                // same empty pool as the case above: one tile apart.
+                // A heavy body standing where it can already spend upgrades
+                // from the tile it is on: same colony, same body, one tile
+                // apart.
                 let colony =
                     { pinnedColony 0 (anchor "a1" 50 0) { X = 38; Y = 10 } with
                         Sources = []
@@ -1097,12 +966,8 @@ let heavyPinTests =
             }
 
             test "a light body still walks the whole corridor to Upgrade" {
-                // The pairwise rival again: the gate reads part arithmetic
-                // and nothing else (ADR 0006). On the very tile where the
-                // full Anchor takes the one step back onto its Post, the
-                // generalist — whose full store really does end its dig
-                // (ADR 0024) — takes the far Upgrade and walks the
-                // corridor for it.
+                // The pairwise rival: the generalist's full store really
+                // does end its dig, and it walks the corridor.
                 let colony = pinnedColony 0 (worker "w1" 50 0) { X = 11; Y = 11 }
 
                 let {

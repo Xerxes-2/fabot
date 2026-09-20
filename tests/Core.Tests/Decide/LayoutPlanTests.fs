@@ -1,5 +1,5 @@
-/// The Layout itself: the Storage, the Link footings (ADR 0038) and the
-/// trunks that carry a source (ADR 0011).
+/// The Layout itself: the Storage, the Link footings and the trunks that
+/// carry a source.
 module Fabot.Core.Tests.Decide.LayoutPlanTests
 
 open Expecto
@@ -10,11 +10,10 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.LayoutFixtures
 
-/// The premise the two collision cases below perturb (#246, #248): the RCL4
-/// trunk colony with its roads standing, and the one tile that tick's plan asks
-/// for the source container on. Asserted here rather than in each case, because
-/// a case that blocks a tile the plan never wanted would pass for the wrong
-/// reason.
+/// The premise the two collision cases below perturb: the RCL4 trunk colony
+/// with its roads standing, and the one tile that tick's plan asks for the
+/// source container on. A case that blocked a tile the plan never wanted
+/// would pass for the wrong reason.
 let private sourceContainerPick () =
     let colony = withRoadsBuilt (trunkColony 4)
 
@@ -41,14 +40,9 @@ let layoutTests =
                     3
                     "only the gap against the two built extensions is placed"
 
-                // The gate on road sites (#209 amending ADR 0011): the
-                // trunks are planned whole at every level and placed only
-                // for a colony past the bootstrap line (`placesRoads`, ADR
-                // 0052 decision 3). Below it the pavement costs the level
-                // that would make the body bigger, which is worth more than
-                // the half tick a loaded step it buys (ADR 0010, narrowed
-                // by that gate). Pairwise against the test below, same
-                // fixture one level on.
+                // The trunks are planned whole at every level and placed only
+                // past the bootstrap line (`placesRoads`). Pairwise against
+                // the test below, same fixture one level on.
                 Expect.isEmpty (sitesOfKind Road intents) "no road site below the road level"
             }
 
@@ -80,8 +74,8 @@ let layoutTests =
                 let { Intents = intents } = decideOn (trunkColony 3)
 
                 // (24,24) is the ordering's first free tile and the Storage's
-                // reservation (ADR 0022); the tower takes the one after it,
-                // and the fixture's two built extensions hold (24,26)/(26,24).
+                // reservation; the tower takes the one after it, and the
+                // fixture's two built extensions hold (24,26)/(26,24).
                 Expect.equal
                     (sitesOfKind Tower intents)
                     [ { X = 26; Y = 26 } ]
@@ -108,32 +102,20 @@ let layoutTests =
             }
 
             test "trunks route around the whole reservation, ceiling-wide" {
-                // Read from the road gate up, where the sites are placed
-                // (#209): below it the plan is still routed whole but
-                // nothing of it reaches the ground, so the road *sites* are
-                // the same at every level the gate lets through and this
-                // pair is RCL3 against the horizon's own RCL4.
+                // Read from the road gate up, where the sites are placed:
+                // below it the plan is routed whole but nothing reaches the
+                // ground.
                 let rcl3 = decideOn (trunkColony 3)
                 let rcl4 = decideOn (trunkColony 4)
                 let roads = sitesOfKind Road rcl3.Intents |> Set.ofList
 
-                // Read off the level where the whole **reservation** stands,
-                // which since ADR 0064 is `allowanceOf`'s ceiling and not the
-                // horizon: an RCL7 room places sixty extensions and six
-                // towers, and that is every tile the router dodged. Read at
-                // RCL6 — the level this checked while the two windows were the
-                // same one — the cluster is 41 tiles against a 65-tile
+                // Read at the level where the whole reservation is placed:
+                // at RCL6 the cluster is 41 tiles against a 65-tile
                 // reservation and 24 reserved tiles go unchecked, so the
                 // weaker form passes a reservation narrowed under the
-                // placement (#344 review).
+                // placement.
                 let cluster = clusterTiles (decideOn (trunkColony 8)).Intents
 
-                // True by construction since ADR 0064 and not by luck: the
-                // reservation the router dodges is sized at `allowanceOf`'s
-                // ceiling and reads no level, so two levels of the same room
-                // route the same trunks. Under ADR 0063's derived reservation
-                // this pair happened to agree on featureless ground while real
-                // terrain churned 589 tiles across the capture sweep (#344).
                 Expect.equal
                     (sitesOfKind Road rcl4.Intents |> Set.ofList)
                     roads
@@ -200,8 +182,8 @@ let layoutTests =
             }
 
             test "without a source only the Work Area swamps are paved, never plain" {
-                // At the road gate, the stage the sites reach the ground from
-                // (#209): below it the answer is empty whatever the plan is.
+                // At the road gate: below it the answer is empty whatever the
+                // plan is.
                 let { Intents = intents } = decideOn (noSourceColony 3)
 
                 Expect.equal
@@ -232,8 +214,8 @@ let layoutTests =
             }
 
             test "each source gets one container on the Seat where its trunk starts" {
-                // Roads stand from the road gate up (#209), so the level that
-                // has a trunk to seat the container beside is RCL3.
+                // Roads stand from the road gate up, so the level that has a
+                // trunk to seat the container beside is RCL3.
                 let colony = withRoadsBuilt (trunkColony 3)
                 let { Intents = intents } = decideOn colony
 
@@ -252,10 +234,8 @@ let layoutTests =
             test "a container never shares a tile with a planned road site" {
                 // One construction site per tile (engine rule): on a fresh
                 // plan the source container defers to the trunk road site
-                // under it and drops only once that road stands. At
-                // the road gate, where there is a road site to collide with —
-                // below it none is placed and the clause has nothing to say
-                // (#209).
+                // under it. At the road gate, where there is a road site to
+                // collide with.
                 let { Intents = intents } = decideOn (trunkColony 3)
                 let roads = sitesOfKind Road intents |> Set.ofList
 
@@ -266,16 +246,12 @@ let layoutTests =
             }
 
             test "a site of another kind on the pick is waited on, not asked for again" {
-                // #246: the tile clause subtracted the road sites alone, so a
-                // Tower, Extension or Rampart site a human had put on the
-                // container's own pick was invisible to it — the plan
-                // re-issued `PlaceConstructionSite` onto that tile every tick
-                // and the Executor answered ERR_INVALID_TARGET until somebody
-                // built it. Only a hand can make the collision: the Layout's
-                // own picks are pairwise disjoint. The container kind stays
-                // out of the census this reads, a container site on the pick
-                // being the target clause's business one rule above (ADR
-                // 0040).
+                // Only a hand can make the collision: the Layout's own picks
+                // are pairwise disjoint. Unsubtracted, the plan re-issues
+                // `PlaceConstructionSite` every tick and the Executor answers
+                // ERR_INVALID_TARGET until somebody builds it (#246). The
+                // container kind stays out of the census this reads: a
+                // container site on the pick is the target clause's business.
                 let colony, pick = sourceContainerPick ()
 
                 let blocked =
@@ -290,24 +266,13 @@ let layoutTests =
             }
 
             test "a rival's site on the pick is waited on the same way" {
-                // #248, the other half of #246's hole: the tile clause read a
-                // census built from `FIND_MY_CONSTRUCTION_SITES`, so the only
-                // sites it could collide with were our own. One site per tile
-                // is the engine's rule whoever placed the site, so a rival's
-                // refuses the pick exactly as a hand-placed Tower of ours does,
-                // and the plan waits rather than asking again.
-                //
-                // The window at home is **narrow** and not zero, which is why
-                // this half is worth having and why it is not urgent:
-                // `createConstructionSite` answers ERR_RCL_NOT_ENOUGH in a room
-                // another player owns, so nobody starts one here — but a site
-                // placed while the room was still *neutral* survives into the
-                // room we then claim, so a freshly claimed [[nursery]] is the
-                // window. Inside it the container pick is the only one that
-                // waits: the road, clustered, tower and rampart gaps still pick
-                // blind onto a colliding tile, which is #291 and not this
-                // ticket — widening them changes what those plans consider
-                // owed.
+                // One site per tile is the engine's rule whoever placed the
+                // site. The window at home is narrow and not zero:
+                // `createConstructionSite` answers ERR_RCL_NOT_ENOUGH in a
+                // room another player owns, but a site placed while the room
+                // was still neutral survives into the room we then claim.
+                // Only the container pick waits; the other gaps still pick
+                // blind onto a colliding tile (#291).
                 let colony, pick = sourceContainerPick ()
 
                 let blocked =
@@ -322,7 +287,7 @@ let layoutTests =
 
             test "the controller container lands in the Work Area beside a trunk" {
                 // At the road gate: the trunk it is judged against is a road
-                // site, and those are placed from RCL3 up (#209).
+                // site, and those are placed from RCL3 up.
                 let { Intents = intents } = decideOn (trunkColony 3)
                 let controllerPos = { X = 35; Y = 25 }
 
@@ -343,18 +308,11 @@ let layoutTests =
             }
 
             test "containers have no RCL gate — level 1 already places both kinds, on no road" {
-                // The tile clause (ADR 0040) defers a container to a road
-                // *site* on its tile, because two sites cannot share one.
                 // Below the road gate no road site is placed, so there is
-                // nothing to collide with and nothing to wait for (#209):
-                // read off the whole road *plan* instead, this fixture's
-                // source container would sit on the trunk's own first tile
-                // and be held back until RCL3, and a container site on a
-                // Seat is the [[post]] that hires the [[anchor]] (#205)
-                // whose income the gate exists to protect. Nothing stands
-                // in this fixture, so what the containers coexist with is
-                // the empty placement and not a built road — the standing
-                // road's own case is the RCL3 tests below.
+                // nothing to collide with: read off the whole road *plan*
+                // instead, this fixture's source container would be held back
+                // until RCL3, and a container site on a Seat is the Post that
+                // hires the Anchor whose income the gate exists to protect.
                 let { Intents = intents } = decideOn (trunkColony 1)
 
                 Expect.isEmpty (sitesOfKind Road intents) "the premise: RCL1 places no road"
@@ -366,15 +324,11 @@ let layoutTests =
             }
 
             test "the road the level withheld is never asked for onto a pending container" {
-                // The mirror of the tile clause (ADR 0040), in the
-                // direction the level gate opened (#209): the source
-                // container drops on the trunk's first tile at RCL1
-                // because no road site is placed there to collide with,
-                // and it is still a *site* — 5,000 energy of progress —
-                // when the colony reaches the road gate. That tile is still in
-                // the road gap, so a road site would be asked for on top
-                // of it and the engine would refuse it every tick until
-                // the container finished.
+                // The mirror of the tile clause: the source container drops on
+                // the trunk's first tile at RCL1 and is still a *site* when
+                // the colony reaches the road gate, so a road site asked for
+                // on top of it would be refused every tick until the container
+                // finished.
                 let rcl1 = decideOn (trunkColony 1)
 
                 let trunkRoads =
@@ -413,8 +367,7 @@ let layoutTests =
 
             test "a one-Seat source gets its container on that Seat" {
                 // From the road gate up, where `withRoadsBuilt` has a road
-                // set to stand (#209): below it the plan places none and
-                // the fixture would carry an empty premise.
+                // set to stand.
                 let { Intents = intents } = decideOn (withRoadsBuilt (pocketColony 3))
 
                 Expect.contains
@@ -424,9 +377,6 @@ let layoutTests =
             }
 
             test "built containers and pending container sites are never placed again" {
-                // From the road gate up, so the roads `withRoadsBuilt`
-                // stands are the plan's own and the containers are read
-                // beside a real road census (#209).
                 let colony = withRoadsBuilt (trunkColony 3)
                 let planned = decideOn colony
 
@@ -459,8 +409,7 @@ let layoutTests =
             test "a container off its source's pick serves that source (#74)" {
                 // The pick moves when the trunk moves, and the container
                 // standing on the old pick is still the only container this
-                // source has (ADR 0040). The target is served wherever the
-                // thing serving it sits, so no second site drops beside it.
+                // source has.
                 let srcPos = { X = 15; Y = 25 }
                 let colony = withRoadsBuilt (trunkColony 4)
                 let planned = decideOn colony
@@ -528,7 +477,7 @@ let layoutTests =
             test "a pending container site off the pick serves the source too (#74)" {
                 // A site is already going up: judging the target from
                 // standing containers alone would drop a second site beside
-                // a site, the same defect one tick earlier (ADR 0040).
+                // a site, the same defect one tick earlier.
                 let srcPos = { X = 15; Y = 25 }
                 let colony = withRoadsBuilt (trunkColony 4)
                 let orphan = { X = 14; Y = 24 }
@@ -602,7 +551,7 @@ let layoutTests =
             test "a container on its own pick is served, not deferred (#74)" {
                 // The coinciding case: the plan wants exactly the tile the
                 // container stands on, so nothing is lost and the record
-                // stays empty (ADR 0040).
+                // stays empty.
                 let colony = withRoadsBuilt (trunkColony 4)
                 let planned = decideOn colony
 
@@ -624,29 +573,14 @@ let layoutTests =
             }
 
             test "a spawn the projection files in another room plans nothing here (#191)" {
-                // The accident ADR 0052 decision 2 is written against, and
-                // the one the Layout was carrying until #216 R3: `Spawns`
-                // is a list, and the second entry's tile used to be read
-                // onto the *home* grid whatever room the projection filed
-                // it under. On the live colony that was Spawn2 standing in
-                // the child room, setting this room's cluster parity, its
-                // ordering distance and a trunk goal out of a coordinate
-                // fifty tiles and a border away.
-                //
-                // Pairwise on the room and on nothing else: the same
-                // spawn, the same id, the same coordinate, filed once in
-                // the neighbour and once at home. The neighbour's changes
-                // no site; home's changes several — which is what says the
-                // fixture could have shown a difference, so the first
-                // assertion is a rule holding rather than a coordinate
-                // that happened not to matter.
-                //
-                // The neighbour half is hand-built and has to be:
-                // `ColonyView.ofWorld` cuts `Spawns` from the home room's
-                // facts alone since R2a, so no view the shell can cut puts
-                // a spawn of this colony's in another room's layer. The
-                // guard closes the shape at the site that reads the tile;
-                // the narrowing that closes the live path is upstream.
+                // `Spawns` is a list, and the second entry's tile used to be
+                // read onto the *home* grid whatever room the projection
+                // filed it under: Spawn2 standing in the child room set this
+                // room's cluster parity out of a coordinate a border away.
+                // Pairwise on the room: the same spawn, id and coordinate,
+                // filed once in the neighbour and once at home. The neighbour
+                // half is hand-built and has to be, since `ColonyView.ofWorld`
+                // cuts `Spawns` from the home room's facts alone.
                 let colony = trunkColony 4
                 let stray = { X = 12; Y = 34 }
 
@@ -663,9 +597,8 @@ let layoutTests =
                         Spawns = view.Spawns @ [ secondSpawn ]
                     }
 
-                // The neighbour's layer, laid by hand: `withOutpost` is
-                // defined below this list, and the whole of what this case
-                // needs is the id filed under another room's name.
+                // The neighbour's layer, laid by hand: the whole of what this
+                // case needs is the id filed under another room's name.
                 let elsewhere =
                     { casting colony with
                         Spatial =
@@ -708,23 +641,11 @@ let layoutTests =
 
             test "a neighbour's extension site is no charge against this room's allowance (#140)" {
                 // The gap rule is `allowed at RCL - built - pending`, and
-                // the allowance is *this* controller's — so the census
-                // subtracted from it has to be this room's. The six kind
-                // counts read the flat, id-keyed census until #216 R3 and
-                // answered for every room the projection carried, and ADR
-                // 0052 decision 7's borrowing is what made that reachable:
-                // a mother carries a bootstrapping child's construction
-                // sites so her workers may build them
-                // (`ColonyView.borrowed` keeps every `Site _`), so the
-                // child's extension sites came off her own allowance and
-                // she placed that many fewer, for the whole bootstrap
-                // window.
-                //
-                // Pairwise on the room the site is filed under: the same
-                // id at the same coordinate, once in the neighbour's layer
-                // and once in this room's. The neighbour's takes nothing;
-                // this room's takes exactly one slot — which is what says
-                // the fixture could have shown a difference.
+                // the allowance is *this* controller's, so the census
+                // subtracted has to be this room's. A mother carries a
+                // bootstrapping child's sites so her workers may build them,
+                // so a flat census took the child's extension sites off her
+                // own allowance. Pairwise on the room the site is filed under.
                 let colony = atLevel 2 (openRoom 3)
                 let stray = { X = 30; Y = 30 }
 
@@ -777,11 +698,10 @@ let extractorTests =
         "the extractor and the mineral container"
         [
             test "the extractor is planned on the deposit's own tile, from RCL6 and not before" {
-                // ADR 0057 decision 1: `CONTROLLER_STRUCTURES.extractor` is 1
-                // at RCL6, 7 and 8 and 0 below, and the Layout filters at the
-                // **current** level rather than drawing it at the horizon —
-                // the deposit is a wall tile off the clustered checkerboard,
-                // so there is no window an extension can take.
+                // `CONTROLLER_STRUCTURES.extractor` is 1 at RCL6, 7 and 8 and
+                // 0 below, and the Layout filters at the current level rather
+                // than drawing it at the horizon: the deposit is a wall tile
+                // off the clustered checkerboard.
                 for level in 1..5 do
                     Expect.isEmpty
                         (sitesOfKind
@@ -801,8 +721,7 @@ let extractorTests =
             test "a standing extractor is never asked for again, nor is a pending site" {
                 // The engine takes one extractor per room and refuses a
                 // second `createConstructionSite`, so a plan that could not
-                // see the one already there would ask once a tick for ever —
-                // #244's failure, in the one kind whose tile can never move.
+                // see the one already there would ask once a tick for ever.
                 let colony = mineralColony 6
 
                 for kind in [ Structure BuiltKind.Extractor; Site BuiltKind.Extractor ] do
@@ -817,17 +736,12 @@ let extractorTests =
             }
 
             test "the deposit's container takes the Seat nearest the Storage's trunk" {
-                // ADR 0057 decision 1's own sentence, and the whole of what
-                // distinguishes it from "nearest any trunk": the container is
-                // seated on the Seat nearest **the Storage's** trunk, because
-                // the haul leg this container exists for ends at the Storage
-                // and the Storage stands beside the spawn (ADR 0023). The
-                // fixture is built where the two readings disagree — a deposit
-                // whose north-west Seat stands **on** the source→controller
-                // arc, which leaves the spawn behind and runs the other way,
-                // and whose south-west Seat is one step off the source→spawn
-                // leg. Priced against every paved tile the arc wins at range 0;
-                // priced against the line the load is carried down, it loses.
+                // The fixture is built where "nearest the Storage's trunk"
+                // and "nearest any trunk" disagree: a deposit whose north-west
+                // Seat stands *on* the source→controller arc and whose
+                // south-west Seat is one step off the source→spawn leg. Priced
+                // against every paved tile the arc wins at range 0; priced
+                // against the line the load is carried down, it loses.
                 let colony = mineralColonyAt trunkSplitMineralPos 6
                 let { Intents = intents } = decideOn colony
                 let seats = mineralSeats colony
@@ -854,10 +768,8 @@ let extractorTests =
             }
 
             test "a container already serving the deposit defers the pick and records it" {
-                // ADR 0040's target clause, read down the mineral column: the
-                // deposit is served when a container stands within range 1 of
-                // it wherever that container sits, so a moved pick costs a
-                // worse tile and never a second container.
+                // The target clause read down the mineral column: a moved pick
+                // costs a worse tile and never a second container.
                 let colony = mineralColony 6
                 let seats = mineralSeats colony
 
@@ -891,11 +803,8 @@ let extractorTests =
             }
 
             test "the deposit holds no Link footing: a link carries energy alone" {
-                // ADR 0022's count is one per planned source container, one
-                // for the controller container and one for the Storage. ADR
-                // 0057 names no footing for the mineral container and there
-                // is none to name — a link transfers energy and nothing else
-                // — so the deposit must not widen the reservation.
+                // A link transfers energy and nothing else, so the deposit
+                // must not widen the reservation.
                 let bare = decideOn (trunkColony 6)
                 let mined = decideOn (mineralColony 6)
 
@@ -937,13 +846,11 @@ let extractorTests =
             }
 
             test "a site standing on the deposit's tile defers the extractor" {
-                // The tile clause (ADR 0040), owed by the extractor like every
-                // other placed kind and subtracted rather than asserted away
-                // (#248). The engine allows a **road** on a natural wall — a
-                // tunnel — so the deposit's tile is not beyond reach of a site,
-                // and it is the one kind whose tile can never move to dodge
-                // one: unsubtracted, the plan asks for the extractor and eats
-                // `ERR_INVALID_TARGET` once a tick for ever.
+                // The engine allows a road on a natural wall — a tunnel — so
+                // the deposit's tile is not beyond reach of a site, and it is
+                // the one kind whose tile can never move to dodge one:
+                // unsubtracted, the plan eats `ERR_INVALID_TARGET` once a tick
+                // for ever.
                 let colony = mineralColony 6
 
                 let tunnelled =
@@ -964,13 +871,12 @@ let extractorTests =
             }
 
             test "a deposit seated on a rock's container tile is asked for one container, not two" {
-                // The picks are made per **target** and judged independently
-                // (ADR 0040), so a deposit close enough to a rock can be seated
-                // on the very tile that rock's container was picked for — and
-                // on the tick before either site stands both targets are
-                // unserved. Two `PlaceConstructionSite` on one tile in one tick
-                // is one site and one `ERR_INVALID_TARGET`; one container
-                // within range 1 of both is what ADR 0040 says serves both.
+                // The picks are made per target and judged independently, so
+                // a deposit close enough to a rock can be seated on the very
+                // tile that rock's container was picked for. Two
+                // `PlaceConstructionSite` on one tile in one tick is one site
+                // and one `ERR_INVALID_TARGET`; one container within range 1
+                // of both serves both.
                 let colony = mineralColonyAt { X = 17; Y = 25 } 6
                 let { Intents = intents } = decideOn colony
                 let containers = sitesOfKind Container intents
@@ -982,11 +888,9 @@ let extractorTests =
             }
 
             test "the deposit's ground is off the clustered ordering at every level" {
-                // ADR 0057 decision 1's working-ground clause, which is ADR
-                // 0022's and is gated on no level at all: an extension
-                // landing on the one accessible tile at a wall mouth would
-                // cost the room its whole deposit, and it would land there
-                // long before the extractor is unlocked.
+                // Gated on no level at all: an extension landing on the one
+                // accessible tile at a wall mouth would cost the room its
+                // whole deposit, long before the extractor is unlocked.
                 for level in 1..8 do
                     let colony = mineralColony level
                     let atlas = Atlas.ofView colony
@@ -1008,11 +912,9 @@ let storageTests =
         "storage"
         [
             test "RCL4 places one Storage on the ordering's first pick, the tower next" {
-                // The cluster's nearest same-colour tile is the Storage's at
-                // every level (ADR 0022) — the tower and the extensions take
-                // the picks after it. The terminal's own pick is the second
-                // nearest from RCL5 (#349), one level before the engine
-                // unlocks it and not four; at RCL4 the tower still has it.
+                // The terminal's own pick is the second nearest from RCL5,
+                // one level before the engine unlocks it; at RCL4 the tower
+                // still has it.
                 let { Intents = intents } = decideOn (atLevel 4 (openRoom 3))
 
                 Expect.equal
@@ -1032,12 +934,10 @@ let storageTests =
                         "the Storage's pick comes before every extension in the one ordering"
             }
 
-            // The terminal (#349). Sized at the horizon rather than from level
-            // 0: the Storage's "its tile never comes back" is true here too and
-            // still not enough, because holding a tile four levels early is the
-            // lookahead ADR 0011 bargained away — and the room that pays is the
-            // cramped one, which loses an extension it could build now for a
-            // terminal it cannot build until RCL6.
+            // The terminal is sized at the horizon rather than from level 0:
+            // holding a tile four levels early costs a cramped room an
+            // extension it could build now for a terminal it cannot build
+            // until RCL6.
             test "the terminal's tile is held a level early and placed at RCL6" {
                 let at level = decideOn (atLevel level (openRoom 3))
 
@@ -1063,11 +963,9 @@ let storageTests =
                     [ { X = 24; Y = 26 } ]
                     "RCL6 places one, on the tile held for it"
 
-                // The point of the pick, in one number (#349): the terminal
-                // lands two tiles from the Storage's own — the nearest this
-                // checkerboard allows — so moving the ore from the one store to
-                // the other is the shortest walk in the cluster and not a
-                // second errand.
+                // The point of the pick: two tiles from the Storage is the
+                // nearest this checkerboard allows, so moving the ore between
+                // the stores is the shortest walk in the cluster.
                 Expect.equal
                     (sitesOfKind Storage (at 6).Intents
                      |> List.map (fun tile -> range tile { X = 24; Y = 26 }))
@@ -1096,9 +994,9 @@ let storageTests =
             }
 
             test "RCL3 places no Storage yet still holds its tile against the cluster" {
-                // The reservation is level-blind (ADR 0022): once an extension
-                // takes that tile it never comes back, so it is held from the
-                // first tick, levels before the engine allows the Storage.
+                // Once an extension takes that tile it never comes back, so it
+                // is held from the first tick, levels before the engine allows
+                // the Storage.
                 let { Intents = intents } = decideOn (atLevel 3 (openRoom 3))
 
                 Expect.isEmpty
@@ -1127,9 +1025,8 @@ let storageTests =
                     (Set.contains { X = 24; Y = 24 } (clusterTiles intents))
                     "a standing structure's tile is not buildable: no cluster pick lands on it"
 
-                // The one thing that is planned onto it: its rampart. A
-                // rampart is no footprint, so the Storage's own tile is where
-                // it belongs (ADR 0034).
+                // The one thing that is planned onto it: its rampart, which
+                // is no footprint.
                 Expect.contains
                     (sitesOfKind Rampart intents)
                     { X = 24; Y = 24 }
@@ -1154,13 +1051,10 @@ let storageTests =
 
             test "the trunks and both container picks keep off the Storage tile" {
                 // (24,24) is this fixture's cheapest last step from the
-                // source into the spawn: unreserved, the trunk takes it. The
-                // reservation is impassable before the trunks are priced, so
+                // source into the spawn: unreserved, the trunk takes it, so
                 // the lane ends on (24,25) instead. The container picks miss
-                // it by construction (ADR 0022): the Storage comes from the
-                // clustered ordering, which excludes the working ground,
-                // while both container picks draw only from working ground —
-                // the Seats and the Upgrade Work Area.
+                // it by construction: both draw only from working ground,
+                // which the clustered ordering excludes.
                 let colony = withRoadsBuilt (trunkColony 4)
                 let { Intents = intents } = decideOn colony
 
@@ -1183,7 +1077,7 @@ let storageTests =
                 // The recomputation that can move something: a standing
                 // Storage leaves the ordering and frees its slot at once, so
                 // the tower and every extension keep the picks they had
-                // while the tile was only reserved (ADR 0022).
+                // while the tile was only reserved.
                 let planned = decideOn (atLevel 4 (openRoom 3))
 
                 let storageTile =
@@ -1211,11 +1105,8 @@ let storageTests =
             }
 
             test "a standing Storage changes neither the hauler quota nor the trunk plan" {
-                // The spawn stays the trunk hub (ADR 0022): the Storage sits
-                // beside it by construction and hires no haul capacity of its
-                // own — the quota counts source containers (ADR 0012). One
-                // stands on the source's trunk Seat, so the quota is a real
-                // number on both sides of the comparison.
+                // One source container stands on the source's trunk Seat, so
+                // the quota is a real number on both sides of the comparison.
                 let colony =
                     { trunkColony 4 with
                         Spatial =
@@ -1269,21 +1160,17 @@ let linkFootingTests =
             test "every target served records nothing: the empty list is the guarantee holding" {
                 // Both of `footingRoom`'s targets get their tile, so the
                 // record is empty — and empty is an answer rather than an
-                // absence: it is what the Layout channel says while ADR
-                // 0022 and ADR 0027's one-footing-per-target still holds
-                // (#77, ADR 0035).
+                // absence.
                 let { Memo = memo } = decideOn (atLevel 4 footingRoom)
 
                 Expect.isEmpty memo.UnservedFootings "both footings stand; nothing is lost"
             }
 
             test "a served target names the tile the fold reserved for it" {
-                // The other half of the record (#106): the fold holds the
-                // target, its kind and the tile in scope at the instant it
-                // reserves one, and hands all three back. A bare set of
-                // tiles would leave the target-to-tile pairing to be
-                // rederived by hand — the second derivation the record
-                // exists to remove (ADR 0035).
+                // The fold holds the target, its kind and the tile at the
+                // instant it reserves one, and hands all three back: a bare
+                // set of tiles would leave the pairing to be rederived by
+                // hand.
                 let { Memo = memo } = decideOn (atLevel 4 footingRoom)
 
                 Expect.equal
@@ -1311,12 +1198,9 @@ let linkFootingTests =
             }
 
             test "the sealed room's four targets split three served to one unserved" {
-                // `sealedPocketColony`'s four targets split three to one:
-                // the sealed source container is the loss (#77) and the
-                // other three stand. Neither list is the whole story alone
-                // — the shortfall says which guarantee went and the served
-                // record says which tiles the rest hold — and no target is
-                // in both, because the fold visits each exactly once.
+                // The sealed source container is the loss and the other three
+                // stand; no target is in both lists, because the fold visits
+                // each exactly once.
                 let { Memo = memo } = decideOn (sealedPocketColony 4)
 
                 let served = memo.ServedFootings |> List.map (fun footing -> footing.Target)
@@ -1330,21 +1214,13 @@ let linkFootingTests =
                     "no target is both served and unserved"
 
                 // And the same split at every level the fixture can be run
-                // at, which is the premise the whole #77 record rests on and
-                // which nothing used to state. The seal only records a
-                // shortfall while the trunk still reaches the pocket: let a
-                // reservation claim the corridor out and the source is *cut
-                // off* rather than sealed, there is no container pick, no
-                // footing target and no shortfall to fall short of — a
-                // fixture that has gone silent while every assertion above it
-                // stays green. It is not hypothetical: under ADR 0063's
-                // derived reservation the orthogonal `22,30` exit this fixture
-                // used to leave by was claimed from RCL6 up, one level above
-                // the only level anything instantiated it at. `22,29` is on
-                // the other checkerboard colour and no reservation at any
-                // level can take it (ADR 0064) — stated here as the behaviour
-                // and not as the arithmetic, so moving the spawn to an odd
-                // tile reds this rather than emptying it.
+                // at. The seal only records a shortfall while the trunk still
+                // reaches the pocket: let a reservation claim the corridor
+                // out and the source is *cut off* rather than sealed, with
+                // no shortfall to fall short of — a fixture gone silent while
+                // every assertion above it stays green. Stated as behaviour
+                // and not arithmetic, so moving the spawn to an odd tile reds
+                // this rather than emptying it.
                 for level in 3..8 do
                     let { Memo = memo } = decideOn (sealedPocketColony level)
 
@@ -1356,16 +1232,12 @@ let linkFootingTests =
 
             test "a target with no candidate is recorded by tile and kind, never dropped" {
                 // W12S28's `10,43`, synthesised: the pocket source's
-                // container pick has wall on four sides, its own source on
-                // the fifth, the trunk road out on the sixth and a standing
-                // extension on each of the last two, so the fold has nothing
-                // to reserve for it — the count `sealedPocketColony`'s own
-                // doc gives, which this said differently until #344. That used to fall through to `taken`
-                // and leave the room three footings where the ADRs promise
-                // four, with no signal anywhere (#77). The room's other
-                // three targets are absent from the list, which is the
-                // other half of the claim: the fold still reserves
-                // everything it can, and only what it cannot is recorded.
+                // container pick has every neighbour spoken for, so the fold
+                // has nothing to reserve for it. That used to fall through to
+                // `taken` and leave the room three footings where four are
+                // promised, with no signal anywhere (#77). The other three
+                // targets are absent from the list: only what the fold cannot
+                // reserve is recorded.
                 let { Memo = memo } = decideOn (sealedPocketColony 4)
 
                 Expect.equal
@@ -1378,12 +1250,8 @@ let linkFootingTests =
                     ]
                     "one entry: the sealed source container's pick, and nothing else"
 
-                // And the seal is the whole cause. The same room with its
-                // pocket open serves all four targets and records nothing,
-                // so sealing one pick costs exactly that one footing: the
-                // fold reserves everything it still can, which is the other
-                // half of the claim above and cannot be read off a list
-                // that only ever names losses.
+                // And the seal is the whole cause: the same room with its
+                // pocket open serves all four targets and records nothing.
                 let { Memo = control } = decideOn (pocketColony 4)
 
                 Expect.isEmpty
@@ -1392,12 +1260,10 @@ let linkFootingTests =
             }
 
             test "no site lands on a Link footing, at any level" {
-                // The footings are held from level 0, levels before the
-                // engine unlocks links, because the tile never comes back
-                // once an extension takes it — and past RCL4, where links
-                // would be allowed, nothing is placed on them either: Link
-                // is a built kind with no placeable counterpart, so the
-                // Layout emits no site for one at any level (ADR 0022).
+                // The footings are held from level 0, because the tile never
+                // comes back once an extension takes it — and past RCL4
+                // nothing is placed on them either: Link is a built kind with
+                // no placeable counterpart.
                 for level in 1..8 do
                     let { Intents = intents } = decideOn (atLevel level footingRoom)
 
@@ -1433,10 +1299,9 @@ let linkFootingTests =
                 "a footing may sit on a Seat: the working ground is off-limits to the cluster alone" {
                 // This source's trunk leaves by the Seat at (24,22), so that
                 // Seat is the container pick and the footing beside it wants
-                // (24,23) — another Seat. A footing is the one structure
-                // footing allowed on working ground (ADR 0022); were it to
-                // dodge Seats the way the ordering does, it would fall
-                // through to (25,23) and cost the cluster that tile.
+                // (24,23) — another Seat. Were a footing to dodge Seats the
+                // way the ordering does, it would fall through to (25,23) and
+                // cost the cluster that tile.
                 let colony =
                     atLevel
                         4
@@ -1558,11 +1423,9 @@ let linkFootingTests =
             test "no clustered structure and no trunk want the same tile" {
                 // A footing takes one of the cluster's own picks, so the
                 // cluster draws one more tile in behind it — and the
-                // reservation the trunk flood was routed around is widened
-                // by the footing count for exactly that (ADR 0027), so the
-                // drawn-in tile is still ground no trunk was allowed to
-                // cross. ADR 0011's precedence survives the push: a road
-                // never sits where a structure will.
+                // reservation the trunk flood was routed around is widened by
+                // the footing count for exactly that, so the drawn-in tile is
+                // still ground no trunk was allowed to cross.
                 let { Intents = intents } = decideOn (atLevel 4 crossedRoom)
 
                 Expect.isNonEmpty (sitesOfKind Road intents) "the trunks are paved"
@@ -1573,15 +1436,12 @@ let linkFootingTests =
             }
 
             test "the footings survive the placement burst: the next tick asks for nothing" {
-                // RCL4 places everything its own level unlocks in one
-                // burst, so the tick after it every gap at that level is
-                // zero and the tiles it took are carried by the sites
-                // themselves — except the footings, which no site ever
-                // stands on. The widened window is what still holds
-                // them (ADR 0027); without it the trunk flood is free to
-                // take a footing the moment the cluster is placed, and the
-                // Layout emits a road on the tile it had been reserving
-                // since level 0, orphaning the roads it just moved off.
+                // The tick after the burst every gap at that level is zero and
+                // the tiles it took are carried by the sites themselves —
+                // except the footings, which no site ever stands on. Without
+                // the widened window the trunk flood is free to take a footing
+                // the moment the cluster is placed, orphaning the roads it
+                // just moved off.
                 let { Intents = intents } = decideOn (withPlanPending (atLevel 4 crossedRoom))
 
                 Expect.isEmpty
@@ -1597,22 +1457,18 @@ let unroutedTrunkTests =
         [
             test "every trunk routed records nothing: the empty list is the guarantee holding" {
                 // The trunk fixture's one source reaches both goals, so the
-                // record is empty — and empty is an answer rather than an
-                // absence, exactly as it is for the footing shortfall it
-                // rides beside (#107, ADR 0035).
+                // record is empty — an answer rather than an absence, as for
+                // the footing shortfall it rides beside.
                 let { Memo = memo } = decideOn (trunkColony 4)
 
                 Expect.isEmpty memo.UnroutedTrunks "both trunks route; nothing is lost"
             }
 
             test "a source that loses one goal and keeps the other records exactly one entry" {
-                // The detail a careless record gets wrong. The goals are
-                // collected per source, so the loss is per (source, goal):
-                // with the controller walled off, `src-a` loses its line to
-                // the Upgrade Work Area and keeps the one to the spawn.
-                // W12S27 from 6,18 is the live counterexample the other way
-                // round (#105), and a record keyed on the source alone
-                // would be false in both.
+                // The loss is per (source, goal): with the controller walled
+                // off, `src-a` loses its line to the Upgrade Work Area and
+                // keeps the one to the spawn. W12S27 from 6,18 is the live
+                // counterexample the other way round (#105).
                 let colony = severedControllerColony 4
                 let { Memo = memo; Intents = intents } = decideOn colony
 
@@ -1635,11 +1491,10 @@ let unroutedTrunkTests =
             }
 
             test "a source no goal is reachable from records both its goals" {
-                // `src-b` walled in on all eight sides: the router hands
-                // back the empty path for each goal in turn, and each is an
-                // entry of its own. The spawn carries its id because the
-                // spawn list is a list (RCL7 adds a second one), where the
-                // Upgrade Work Area is the controller's alone.
+                // `src-b` walled in on all eight sides: each goal is an entry
+                // of its own. The spawn carries its id because RCL7 adds a
+                // second one, where the Upgrade Work Area is the controller's
+                // alone.
                 let { Memo = memo } = decideOn (enclosedSourceColony 4)
 
                 Expect.equal
@@ -1657,8 +1512,7 @@ let unroutedTrunkTests =
                     "both goals, and only the enclosed source's"
 
                 // The open source is the control: sealing one source costs
-                // exactly that source's trunks, and the same room with the
-                // pocket's Seat open loses nothing at all.
+                // exactly that source's trunks.
                 let { Memo = control } = decideOn (pocketColony 4)
 
                 Expect.isEmpty control.UnroutedTrunks "unsealed, every source reaches every goal"

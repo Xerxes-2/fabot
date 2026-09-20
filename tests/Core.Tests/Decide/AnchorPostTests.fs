@@ -1,5 +1,5 @@
 /// A Post's occupancy, what its garrison digs, and the Work ceiling its
-/// source saturates at (ADR 0021, ADR 0051).
+/// source saturates at.
 module Fabot.Core.Tests.Decide.AnchorPostTests
 
 open Expecto
@@ -16,16 +16,11 @@ let postGarrisonTests =
         "a manned Post is never vacant"
         [
             test "a heavy body standing on the one Post holds it while holding nothing" {
-                // #269, and the older half of it — the mechanism predates
-                // #258's widening. `CapScope.Garrisons` counted the Post's
-                // *holders*, so a rock whose garrison happened to hold no
-                // Task this tick read as an empty Post to every heavy body
-                // in the colony, and the Matcher walks its candidates in
-                // view order: the body ninety-six ticks of lane away is
-                // offered the Post first and takes it, and the body already
-                // standing on it is told `none-free` and moves off. The cap
-                // reads the tiles now, so the census answers where a body
-                // *is* rather than what it was assigned last tick.
+                // `CapScope.Garrisons` once counted the Post's holders, so a
+                // garrison holding no Task this tick read as an empty Post,
+                // and the Matcher walks candidates in view order: the body
+                // ninety-six ticks away was offered the Post first. The cap
+                // reads the tiles.
                 let colony =
                     pinnedCrowd
                         0
@@ -57,13 +52,8 @@ let postGarrisonTests =
             }
 
             test "one tile off the Post it holds nothing, and the walk is offered" {
-                // The pairwise rival, one tile apart: what the census reads
-                // is the Post itself and not the ground around it (ADR
-                // 0024). The same body on (11,11) is beside the Post rather
-                // than on it, the rock reads vacant, and the distant Anchor
-                // is dispatched exactly as it was before #269 — which is
-                // also what keeps the bumped-garrison window of ADR 0048
-                // from locking the rock against its own successor.
+                // The pairwise rival, one tile apart: the census reads the
+                // Post itself, not the ground around it.
                 let colony =
                     pinnedCrowd
                         0
@@ -87,15 +77,11 @@ let postGarrisonTests =
             }
 
             test "the garrison of a bare Dual Seat holds its Post through an Upgrade" {
-                // The live shape #269 was filed on, and the window ADR 0025's
-                // gate names and declines to cure. A drained rock releases
-                // its Dual Seat Anchor `too-early` — the empty-window
-                // reprieve subtracts a bare Dual Seat (ADR 0048) — and the
-                // controller is two tiles away, so the released body spends
-                // the window upgrading from the very tile it will dig from
-                // in sixty ticks. Counting Harvest's holders alone, the Post
-                // read vacant for those sixty ticks and a second Anchor
-                // twenty tiles down the lane was dispatched onto it.
+                // The live shape: a drained rock releases its Dual Seat
+                // Anchor `too-early` — a bare Dual Seat carries no reprieve
+                // — and it spends the window upgrading from the very tile
+                // it will dig from. Counting Harvest's holders alone, the
+                // Post read vacant and a second Anchor was dispatched onto it.
                 let colony =
                     dualSeatLaneColony
                         60
@@ -140,14 +126,9 @@ let postGarrisonTests =
             }
 
             test "an expiring garrison still hands its Post on" {
-                // The half of ADR 0026 the widened census must not eat. The
-                // discount is for an incumbent that will be **dead** when
-                // the candidate arrives, and the tile census takes it at
-                // arrival like every other holder: a garrison with ten
-                // ticks left against a walk of ninety-six is not standing
-                // there when the successor lands, so the Post reads vacant
-                // and the succession the row cast for goes through. Pairwise
-                // against the first case above, one field apart.
+                // The discount is for an incumbent dead when the candidate
+                // arrives: ten ticks left against a walk of ninety-six, so
+                // the Post reads vacant and the succession goes through.
                 let colony =
                     pinnedCrowd
                         0
@@ -165,14 +146,9 @@ let postGarrisonTests =
             }
 
             test "a rock with a Post to spare admits a second garrison" {
-                // The union, and the reason the widened census is not a sum
-                // (#269). On a standing container the garrison holds the
-                // Harvest it is standing on — ADR 0024's overflow reprieve
-                // keeps it applicable through a full store — so the holder
-                // list and the tile census name the same body. Added, that
-                // body would spend both of this rock's Posts and the second
-                // would read full while it stands empty; unioned, it counts
-                // once and the second Post hires.
+                // The union, not a sum: the garrison holds the Harvest it is
+                // standing on, so the holder list and the tile census name
+                // the same body. Added, it would spend both Posts.
                 let colony =
                     twoPostCrowd
                         [
@@ -191,10 +167,8 @@ let postGarrisonTests =
             }
 
             test "both Posts manned, the third heavy body is refused" {
-                // The pairwise rival of the case above, one body apart: the
-                // widened census still counts, and a rock whose every Post
-                // carries a standing heavy body is full whatever those
-                // bodies hold.
+                // The pairwise rival: every Post carrying a standing heavy
+                // body is full whatever those bodies hold.
                 let colony =
                     twoPostCrowd
                         [
@@ -227,20 +201,15 @@ let anchorDigTests =
         "a Post is worth what its garrison digs"
         [
             test "at a 300 bank the rock's rate is a ceiling nothing reaches" {
-                // #208's live defect, pinned at the fixture that always
-                // held it. `heldRateOf` prices this owned room's rocks at
-                // ten a tick, and the Anchor row's cast at a 300 bank is
-                // `2W/1C/1M`, which digs four: a Post yields what the body
-                // garrisoning it takes out of the rock, and the rate is
-                // only the ceiling on that. Read at the rate the colony
-                // counted 20 a tick, hired 19 workers and 3 haulers, and
-                // stood 12 of them idle beside a spawn already full.
-                //
-                // Two readings of one number, and both move together
-                // (ADR 0042): the income base is 8 a tick, so the worker
-                // row is ceil((8 × 1500 − 900) / 1500) = 8, and the hauler
-                // row ships 8 rather than 20 — ceil((24 + 24) × 4 / 200) =
-                // one body where the rate hired three.
+                // `heldRateOf` prices this owned room's rocks at ten a
+                // tick, and the Anchor row's cast at a 300 bank is
+                // `2W/1C/1M`, which digs four: the rate is only the ceiling.
+                // Read at the rate the colony counted 20 a tick, hired 19
+                // workers and 3 haulers, and stood 12 idle. The income base
+                // is 8 a tick, so the worker row is
+                // ceil((8 × 1500 − 900) / 1500) = 8, and the hauler row is
+                // ceil((24 + 24) × 4 / 200) = one body where the rate hired
+                // three.
                 Expect.equal
                     (quotaOf incomeColony)
                     1
@@ -278,12 +247,9 @@ let anchorDigTests =
             }
 
             test "under that ceiling the room's own rate moves nothing" {
-                // The cap, pinned as a cap: one input moves — who holds
-                // the spawn room — and at a bank whose Anchor digs four
-                // the answer does not, because four is under the neutral
-                // five as well as under the held ten. A rule that took the
-                // room's rate, or the smaller of the two only sometimes,
-                // would part these two colonies here.
+                // One input moves — who holds the spawn room — and at a bank
+                // whose Anchor digs four the answer does not: four is under
+                // the neutral five as well as the held ten.
                 let neutralised =
                     { incomeColony with
                         Creeps = incomeFleet
@@ -301,18 +267,12 @@ let anchorDigTests =
             }
 
             test "at an 1800 bank the cast outruns the rock and the rate is the answer again" {
-                // The other half of the pair, and the reason the rule is
-                // `min` and not a discount: the same geometry at a bank
-                // whose Anchor row casts six Work digs twelve a tick, over
-                // the ten an owned rock pays and over the five a neutral
-                // one does — so the ceiling binds, the rate is the answer,
-                // and neutralising the room moves the target by a body
-                // where at 300 it moved nothing.
-                //
-                // Sized to the neutral target — 2 Anchors of three Work
-                // each, 1 hauler, and ceil((10 × 1500 − 1,400 − 1,800) /
-                // (9 × 1500)) = 1 worker — so the neutral colony has no
-                // gap and the owned one does.
+                // At a bank whose Anchor row casts six Work it digs twelve a
+                // tick, over the owned rock's ten and the neutral five, so
+                // the ceiling binds and neutralising the room moves the
+                // target by a body. Sized to the neutral target — 2 Anchors
+                // of three Work, 1 hauler, and
+                // ceil((10 × 1500 − 1,400 − 1,800) / (9 × 1500)) = 1 worker.
                 let neutralised =
                     { richestIncomeColony with
                         Creeps = richestIncomeFleet 1
@@ -343,15 +303,11 @@ let anchorWorkCapTests =
         "the Anchor row's Work ceiling"
         [
             test "the same rock caps the Anchor row at six Work reserved and three unreserved" {
-                // ADR 0021's rule, ADR 0042's number: the ceiling is a
-                // source's saturation plus one spare, and a source under no
-                // reservation regenerates 1,500 over 300 ticks instead of
-                // 3,000. Five Work saturate the held rock and two the
-                // neutral one, so the ceilings are six and three — and the
-                // 1,300 bank standing behind both would buy twelve.
-                //
-                // One rock, one field, one fleet: only who holds W1N2 moves
-                // between the two calls.
+                // The ceiling is a source's saturation plus one spare, and a
+                // source under no reservation regenerates 1,500 over 300
+                // ticks instead of 3,000: five Work saturate the held rock
+                // and two the neutral one. The 1,300 bank would buy twelve.
+                // Only who holds W1N2 moves between the two calls.
                 Expect.equal
                     (anchorCastBy (anchorCapColony false [ "W1N2", reservedRoom true 4000 ]))
                     sixWork
@@ -364,34 +320,14 @@ let anchorWorkCapTests =
             }
 
             test "a neutral outpost Post does not shrink the ceiling the home room asks for" {
-                // The direction the pairing is wrong in, pinned pairwise
-                // against the case above: the same neutral W1N2, the same
-                // rock, the same field — the colony's own two Posts are the
-                // only thing added, and the fleet is one worker, so all
-                // three Posts stand empty and the row is three bodies short.
-                //
-                // Every cast this tick is bought under the **dearest
-                // vacancy's** rock (ADR 0053), because a cast is a body and
-                // not a posting: travel cost pins the finished body on
-                // whichever Post is nearest once it is alive (ADR 0021's own
-                // rejection of sizing by the Post), so with several
-                // vacancies open the colony cannot steer any of these
-                // bodies and buys every one of them for the dearer rock.
-                // Under-sizing an Anchor for a held rock loses four energy a
-                // tick for the body's whole life; over-sizing one for a
-                // neutral rock wastes 300 energy once in 1,500 ticks and
-                // still digs everything the rock has.
-                //
-                // Two spawns and a 1,300 bank buy exactly one of the three:
-                // 700 for a home Post's six Work, and the 600 left cannot
-                // pay for a second six-Work body — so the second spawn
-                // yields the seat (ADR 0050) rather than spending 400 on the
-                // neutral Post's `3W/1C/1M`. Which is the whole of why the
-                // ceiling is the dearest vacancy's and not each vacancy's
-                // own: both of this colony's held Posts are a few tiles from
-                // the spawns and the neutral one is a Seam away, so a body
-                // bought for the outpost's hole lands on a held rock and
-                // digs six where the rock gives ten.
+                // The same neutral W1N2 with the colony's own two Posts
+                // added and a fleet of one worker: three Posts empty. Every
+                // cast is bought under the dearest vacancy's rock, since
+                // travel cost pins the finished body on whichever Post is
+                // nearest. Two spawns and a 1,300 bank buy exactly one: 700
+                // for six Work, and the 600 left cannot pay a second, so the
+                // second spawn yields the seat rather than spend 400 on the
+                // neutral Post's `3W/1C/1M`.
                 Expect.equal
                     (anchorCastsBy (anchorCapColony true [ "W1N2", neutralRoom ]))
                     [ sixWork ]
@@ -399,11 +335,9 @@ let anchorWorkCapTests =
             }
 
             test "the colony's own room is capped exactly where it always was" {
-                // The regression ADR 0042 promises: "unchanged as a rule and
-                // changed as a number", and the colony's own number does not
-                // move. Owned, with no outpost in the projection at all —
-                // the case every existing Anchor test is written on, read
-                // here for the ceiling alone.
+                // Owned, with no outpost in the projection: the shape every
+                // existing Anchor test is written on, read for the ceiling
+                // alone.
                 Expect.equal
                     (anchorCastBy
                         { incomeColony with
@@ -415,16 +349,10 @@ let anchorWorkCapTests =
             }
 
             test "a Post the colony cannot price this tick leaves the ceiling where it was" {
-                // ADR 0004, entry by entry, and the same separation the
-                // source rate keeps: unpriceable is not half. W1N2 carries
-                // no control entry here, so nobody knows who holds it —
-                // the rock contributes no saturation to the fold rather
-                // than the neutral one, and a fold with nothing priceable
-                // in it answers the held ceiling, which is the largest the
-                // rule gives and the safe direction to be wrong in.
-                //
-                // Pinned strictly against the neutral case above: seen and
-                // held by nobody the same rock casts three Work.
+                // Unpriceable is not half: W1N2 carries no control entry, so
+                // the rock contributes no saturation to the fold, and a fold
+                // with nothing priceable answers the held ceiling — the
+                // largest, and the safe direction to be wrong in.
                 Expect.equal
                     (anchorCastBy (anchorCapColony false []))
                     sixWork
@@ -432,21 +360,12 @@ let anchorWorkCapTests =
             }
 
             test "the row is charged the body it would cast, not the held one" {
-                // The other half of #132's landing note — "the price the row
-                // is charged must be the body the row is cast at" — and the
-                // half no cast body can show: `workforceTarget` deducts the
-                // Anchor row's replacement cost from the income before the
-                // surplus is divided into worker places (ADR 0012, ADR
-                // 0042), so charging six Work for a row that casts three
-                // hires an upgrade mouth fewer than the income really feeds.
-                //
-                // Read as the income base's cases are read, pairwise across
-                // one fleet: three Anchors and nineteen workers is the whole
-                // of what this colony's 15 energy a tick pays for, so the
-                // tick casts nothing; one worker short of it, the row that
-                // is short is the worker row and the tick says so. Charged
-                // at the held ceiling the target is 21 instead of 22, and
-                // the fleet of 21 below has no gap at all.
+                // `workforceTarget` deducts the Anchor row's replacement cost
+                // from income before the surplus is divided into worker
+                // places, so charging six Work for a row that casts three
+                // hires one mouth fewer than the income feeds. Three Anchors
+                // and nineteen workers spend this colony's 15 a tick;
+                // charged at the held ceiling the target is 21, not 22.
                 let casts workers =
                     spawnIntents (decideOn (anchorChargeColony false workers)).Intents
                     |> List.map (fun (_, _, name) -> name)
@@ -465,32 +384,12 @@ let anchorWorkCapTests =
             }
 
             test "the charge is one body a Post and not the quota times one ceiling" {
-                // **ADR 0053's other half.** The test above is written on a
-                // colony whose Posts agree — three neutral rocks, one
-                // ceiling between them — where a quota times that ceiling
-                // and a sum over the Posts are the same number. This is the
-                // colony they part on: the same three neutral rocks with
-                // the colony's own two held Posts kept beside them, five
-                // Posts over two rates. Post by Post the row is charged
-                // 2 x 700 + 3 x 400 = 2,600; the quota times its richest
-                // ceiling charges 5 x 700 = 3,500, and the 900 between them
-                // is an upgrade mouth the income really feeds.
-                //
-                // At a 1,600 bank because the target is an integer: the
-                // surplus is divided into worker places of a whole body's
-                // Work drain over a lifetime (ADR 0037), which is 12,000
-                // energy here, and 900 moves the target only where it
-                // straddles one. It does here — 11 against the 10 the
-                // aggregate charge answers — and at 1,400, the bank the
-                // test above is written at, it does not.
-                //
-                // Pairwise on the outpost room's reservation alone, which
-                // is what makes the reading a pairing and not a number:
-                // held, all five Posts saturate at six Work, the two
-                // readings are the same sum by construction, and the target
-                // is 12. The arms differ by more than the charge — a held
-                // rock also pays twice the income — and it is the neutral
-                // arm that carries the discrimination.
+                // Five Posts over two rates: Post by Post the row is charged
+                // 2 × 700 + 3 × 400 = 2,600; the quota times its richest
+                // ceiling charges 5 × 700 = 3,500. At a 1,600 bank a worker
+                // place is 12,000 of lifetime drain and the 900 straddles
+                // one: 11 against 10. Held, all five saturate at six Work
+                // and the two readings agree at 12.
                 let target held =
                     let colony = anchorChargeColony true 3
 

@@ -1,15 +1,11 @@
-/// The shell boundary, under test (ADR 0052 decision 8, #137): a `World`
-/// built by hand, and the [[colony view]] each colony is cut from it
-/// (`ColonyView.ofWorld`). What used to be reachable only by deploying —
-/// which rooms a colony works, which bodies are its own, what it may
-/// borrow of a child's — is a pure function here, and every case below is
-/// a world a live server can produce.
+/// The shell boundary, under test: a `World` built by hand, and the colony
+/// view each colony is cut from it (`ColonyView.ofWorld`). Every case below
+/// is a world a live server can produce.
 ///
-/// The fixture is the **pair**: a mother at RCL5 with one declared
-/// [[outpost]], and the child colony she is still raising, with its own
-/// spawn standing at RCL2 (ADR 0047 decision 4). Two colonies over three
-/// rooms is the smallest world in which the answers differ by who is
-/// looking, which is the whole of decision 1.
+/// The fixture is the pair: a mother at RCL5 with one declared outpost, and
+/// the child colony she is still raising, with its own spawn standing at
+/// RCL2. Two colonies over three rooms is the smallest world in which the
+/// answers differ by who is looking.
 module Fabot.Core.Tests.ViewTests
 
 open Expecto
@@ -23,15 +19,9 @@ let private child = "W13S28"
 
 /// A ten-by-ten patch of plain ground: enough for a tile to be placed on
 /// and for the borrowed layer's geometry to be visibly kept — with the inner
-/// frame of the room laid plain beside it.
-///
-/// The frame is ADR 0062's: a crossing lands a body on the far room's ring and
-/// the body has to step off it onto that room's own ground, so a room whose
-/// ground stops ten tiles in is a room every crossing but the handful beside
-/// the patch strands a body in, and the shell never builds one — terrain is
-/// read for every projected room whether or not there is vision. It is the
-/// row behind each exit row and nothing more, so what the patch is for is
-/// untouched.
+/// frame of the room laid plain beside it, since a room whose ground stops
+/// ten tiles in is one every crossing but the handful beside the patch
+/// strands a body in, and the shell never builds one.
 let private ground =
     TerrainGrid.ofList
         [
@@ -46,10 +36,8 @@ let private ground =
         ]
 
 /// The border ring every room in a real world carries, because terrain is read
-/// for every projected room whether or not there is vision (ADR 0031, ADR 0041)
-/// — so a fixture room without one models a world the shell cannot produce, and
-/// since ADR 0058 the scan set reads it: a room joined to nothing by its ring
-/// is a room no chain reaches.
+/// for every projected room whether or not there is vision. The scan set
+/// reads it: a room joined to nothing by its ring is a room no chain reaches.
 let private ring =
     Map.ofList
         [
@@ -83,13 +71,11 @@ let private roomOf name owner (targets: (string * Pos * TargetKind) list) =
         Control = Some(control owner)
     }
 
-/// A declared room the colony cannot see, as the **shell** builds one: terrain
+/// A declared room the colony cannot see, as the shell builds one: terrain
 /// and a border ring, and not one fact vision pays for (`World.factsOf`'s
-/// blind branch, ADR 0004, ADR 0031). Removing the room from the world
-/// entirely would model a state `World.ofGame` cannot produce — every declared
-/// room is read for terrain whether or not `Game.rooms` answers for it — and
-/// since ADR 0058 the difference is load-bearing: the scan set reads the ring
-/// to know which rooms a chain can cross.
+/// blind branch). Removing the room from the world entirely would model a
+/// state `World.ofGame` cannot produce, and the scan set reads the ring to
+/// know which rooms a chain can cross.
 let private unseen name (rooms: Map<string, RoomFacts>) =
     rooms
     |> Map.add
@@ -142,11 +128,11 @@ let private withCreeps (creeps: (string * Pos) list) (name, facts: RoomFacts) =
             }
     }
 
-/// A room with the season's furniture standing in it (ADR 0057): a Thorium
-/// deposit under its own target kind, the extractor over it with a cooldown on
-/// it, and the deposit's remaining amount beside the container's Thorium in the
-/// second store map. Applied to a room a world has already built, because what
-/// these tests ask is what a *narrowing* leaves of it.
+/// A room with the season's furniture standing in it: a Thorium deposit
+/// under its own target kind, the extractor over it with a cooldown on it,
+/// and the deposit's remaining amount in the second store map. Applied to a
+/// room a world has already built, because what these tests ask is what a
+/// *narrowing* leaves of it.
 let private withThorium (world: World) (room: string) : World =
     { world with
         Rooms =
@@ -168,11 +154,8 @@ let private withThorium (world: World) (room: string) : World =
                             |> Map.add $"ext-{room}" (Structure BuiltKind.Extractor)
                         Thorium = Map.ofList [ $"min-{room}", 22_000 ]
                         Cooldowns = Map.ofList [ $"ext-{room}", 3 ]
-                        // And an owner on the extractor (#318), so the cut can
-                        // be asked about the per-object ownership as well as
-                        // about the stores: whose an object standing here is is
-                        // a fact an Emitter gates an act on, and a room we
-                        // merely cross holds nothing of ours to act on.
+                        // And an owner on the extractor, so the cut can be asked
+                        // about per-object ownership as well as the stores.
                         Owners = Map.ofList [ $"ext-{room}", Ownership.Ours ]
                     }))
     }
@@ -226,7 +209,7 @@ let private creep name room : WorldCreep =
 
 /// The declaration the fixture world is read under: the mother with her
 /// one outpost, and the child that has left her outpost list and names her
-/// as its [[mother colony]] (ADR 0047).
+/// as its mother colony.
 let private declared: Colony list =
     [
         {
@@ -358,18 +341,16 @@ let private terminalWorld =
                             }
                         TargetKinds =
                             Map.add "term-home" (Structure BuiltKind.Terminal) facts.TargetKinds
-                        // The two stores a send is priced against, and they
-                        // travel in **different** tables: energy under
-                        // `Stores`, ore under `Thorium` (ADR 0057 decision 3).
-                        // A fixture that wrote both into one would agree with a
-                        // rule reading either, which is the shape #354's first
-                        // gate was green against.
+                        // The two stores a send is priced against travel in
+                        // different tables: a fixture that wrote both into one
+                        // would agree with a rule reading either, which is the
+                        // shape #354's first gate was green against.
                         Stores = Map.add "term-home" 4_000 facts.Stores
                         Thorium = Map.add "term-home" 19_848 facts.Thorium
                         Owners = Map.add "term-home" Ownership.Ours facts.Owners
                         // And a site of the same kind still going up beside it,
-                        // carrying the live arithmetic of W13S28's: 3,836 paid
-                        // of 100,000 (#364).
+                        // carrying W13S28's live arithmetic: 3,836 paid of
+                        // 100,000.
                         ConstructionSites =
                             [
                                 {
@@ -399,8 +380,7 @@ let private viewUnder colonies world home =
 let private viewOf world home = viewUnder declared world home
 
 /// The same world with the child's spawn pulled down: the room is still
-/// ours and still claimed, and it is a [[nursery]] again (ADR 0052
-/// decision 3).
+/// ours and still claimed, and it is a nursery again.
 let private spawnlessWorld =
     { pairWorld with
         Rooms =
@@ -442,15 +422,11 @@ let roomPosTests =
         "a tile that carries its room"
         [
             test "range is a measure inside one room, and None across a border" {
-                // ADR 0052 decision 2: two rooms' coordinate systems are
-                // not one metric space, so the answer across a border is
-                // an absence and never a number. Pairwise on the room
-                // alone — the same two coordinates, once in one room and
-                // once in two — because every reader that got this wrong
-                // got it wrong by measuring a distance that does not
-                // exist: a raider in an [[outpost]] at range 0 from home
-                // (#204), a Threat reaching a coordinate of the wrong room
-                // (#138), a container "serving" a source a border away.
+                // Pairwise on the room alone — the same two coordinates,
+                // once in one room and once in two — because every reader
+                // that got this wrong measured a distance that does not
+                // exist: a raider in an outpost at range 0 from home (#204),
+                // a Threat reaching a coordinate of the wrong room (#138).
                 let here = RoomPos.at mother
                 let there = RoomPos.at child
 
@@ -549,13 +525,10 @@ let worldTests =
             }
 
             test "a world no declaration describes runs the first owned spawn room by name" {
-                // The fallback ADR 0047 keeps for a slip in the constant:
-                // one room and no outposts, so a bot standing in a room
-                // the declaration does not name still has a tick. Which
-                // room, when two owned rooms hold spawns, is the world's
-                // own order and not an engine enumeration's — room-name
-                // order (`World.spawnRooms`, #216 R2a), which is what a
-                // test can state and `Game.spawns` order was not.
+                // The fallback for a slip in the constant: one room and no
+                // outposts. Which room, when two owned rooms hold spawns, is
+                // room-name order (`World.spawnRooms`), which is what a test
+                // can state and `Game.spawns` order was not.
                 let fallback = World.living [] pairWorld
 
                 Expect.equal
@@ -605,7 +578,7 @@ let worldTests =
             test "a body in a room only another colony projects is adopted" {
                 // The same creep, cast by the child's spawn, standing in
                 // the mother's outpost: one projector, and it is not the
-                // caster (ADR 0047 decision 2).
+                // caster.
                 let wandered =
                     { pairWorld with
                         Creeps = pairWorld.Creeps @ [ creep "hauler-960-Spawn2" outpost ]
@@ -618,11 +591,9 @@ let worldTests =
             }
 
             test "what the world saw before is laid under what it sees now" {
-                // The one thing the world carries across ticks (#151), and
-                // the merge that carries it: the shell reads `Game.rooms`
-                // and stamps a sighting for every room that answered, and
-                // this lays the previous tick's map under that answer. Three
-                // rooms, three fates, one call.
+                // The one thing the world carries across ticks, and the merge
+                // that carries it: this lays the previous tick's map under
+                // this tick's sightings. Three rooms, three fates, one call.
                 let sighting tick targets =
                     {
                         Tick = tick
@@ -645,13 +616,10 @@ let worldTests =
                         thisTick
 
                 // Compared field by field and not as a record: a sighting's
-                // ids are behind a `Lazy` now (#371), and F#'s structural
-                // equality compares two `Lazy` cells by reference — so
-                // `Expect.equal` on the record would pass or fail on which
-                // object the two came from rather than on what they say. This
-                // is the only place either side of the wire compared whole
-                // sightings; `recalling` merges them by room name and the two
-                // readers ask about one field each.
+                // ids are behind a `Lazy`, and F#'s structural equality
+                // compares two `Lazy` cells by reference, so `Expect.equal`
+                // on the record would pass or fail on which object the two
+                // came from rather than on what they say.
                 let read =
                     Map.tryFind mother recalled.Sightings
                     |> Option.map (fun seen -> seen.Tick, seen.Targets.Value)
@@ -698,9 +666,9 @@ let colonyViewTests =
             }
 
             test "the mother carries the child's controller, site and spawn" {
-                // The whole of what she may work there (ADR 0047 decision
-                // 4): the controller her workers upgrade, the site they
-                // build, and the spawn tile they walk up to.
+                // The whole of what she may work there: the controller her
+                // workers upgrade, the site they build, and the spawn tile
+                // they walk up to.
                 let kinds = (viewOf pairWorld mother).Spatial.TargetKinds
 
                 Expect.isTrue (Map.containsKey "ctrl-W13S28" kinds) "the child's controller"
@@ -730,14 +698,11 @@ let colonyViewTests =
             }
 
             test "of the child's stores she carries the buffer alone, and its stock with it" {
-                // The [[ferry]]'s sink (#222, ADR 0052 decision 7): what a
-                // mother hauls her stock into is the child's upgrade
-                // buffer, so she has to be able to see how much room is
-                // left in it — and it is the only store of the child's she
-                // may see at all. Pairwise on the two containers standing
-                // in that one room, told apart by geometry alone: "buf-child"
-                // is inside the controller's own Upgrade area and on no
-                // Seat, "can-child" is the source container beside the rock.
+                // The ferry's sink is the only store of the child's she may
+                // see at all. Pairwise on the two containers standing in that
+                // one room, told apart by geometry alone: "buf-child" is
+                // inside the controller's own Upgrade area and on no Seat,
+                // "can-child" is the source container beside the rock.
                 let spatial = (viewOf pairWorld mother).Spatial
 
                 Expect.isTrue
@@ -761,11 +726,10 @@ let colonyViewTests =
             }
 
             test "the mother carries none of the child's Thorium, and no deposit to hang it on" {
-                // A child's deposit is the child's (ADR 0057): `borrowable`
-                // drops `Mineral`, so if the amount rode on it would be a fact
-                // keyed by an id the borrowed layer no longer places — the
-                // shape ADR 0004 forbids — and the [[ferry]]'s exemption does
-                // not reach it either, a ferry carrying energy.
+                // `borrowable` drops `Mineral`, so if the amount rode on it
+                // would be a fact keyed by an id the borrowed layer no longer
+                // places; and the ferry's exemption does not reach it either,
+                // a ferry carrying energy.
                 let world = withThorium pairWorld child
                 let spatial = (viewUnder declared world mother).Spatial
 
@@ -794,23 +758,14 @@ let colonyViewTests =
             }
 
             test "a tombstone's ore in a room she owns rides whole: kind, tile and amount" {
-                // #359's projection half for a room this colony **owns**, which
-                // is the shape every rule-side fixture of that ticket
-                // hand-writes: `PoolWithdrawTests` pools a `Withdraw` off it and
-                // `ObserveTests` alarms on it, and both would be green against a
-                // shape `ofWorld` never builds if this case did not stand beside
-                // them (#355, #356 — twice in one day). The errand room's own,
-                // narrowed, half is pinned in `errandTests` below.
-                //
-                // A tombstone holding **only** ore, because that is what an
-                // energy-shaped projection dropped: the shell's transient filter
-                // read the energy column alone, so this object reached the view
-                // with no kind, no tile and no amount and did not exist. That
-                // filter is `World.ofGame`'s and untestable from here — the shell
-                // has no test project — so what this case can pin is the half
-                // `Core` owns: the facts travel through the cut unchanged, so a
-                // rule that reads kind and `Thorium` together reads what the
-                // shell files.
+                // The projection half of #359 for a room this colony owns:
+                // `PoolWithdrawTests` and `ObserveTests` hand-write this
+                // shape, and would be green against one `ofWorld` never
+                // builds if this case did not stand beside them. A tombstone
+                // holding only ore, because the shell's transient filter read
+                // the energy column alone and dropped it; that filter is
+                // `World.ofGame`'s and untestable from here, so what this
+                // pins is that the facts travel through the cut unchanged.
                 let facts = pairWorld.Rooms.[mother]
 
                 let world =
@@ -896,9 +851,7 @@ let colonyViewTests =
             test "the bank is the home room's account and no other room's" {
                 // Pairwise over the one pair the world offers: the mother's
                 // 1,800 is not lowered by the 300 she projects, and the
-                // child's 300 is not raised by the 1,800 beside it — which
-                // is what the cross-room fold could not say (ADR 0052
-                // decision 1).
+                // child's 300 is not raised by the 1,800 beside it.
                 Expect.equal (viewOf pairWorld mother).Bank.Capacity 1800 "the mother's own bank"
                 Expect.equal (viewOf pairWorld child).Bank.Capacity 300 "the child's own bank"
             }
@@ -953,7 +906,7 @@ let colonyViewTests =
             test "a stood-down outpost leaves the view whole" {
                 // The gate narrows the declaration, and the scan set, the
                 // furniture and the pooled rocks narrow with it — three
-                // consequences of one subtraction (ADR 0043).
+                // consequences of one subtraction.
                 let colony = declared |> List.head
 
                 let shut =
@@ -975,13 +928,11 @@ let colonyViewTests =
 
                 Expect.isFalse (Map.containsKey outpost shut.RoomControl) "and nothing prices it"
 
-                // The fourth consequence, and #151's rule leans on it: the
-                // world remembers what it last saw in that room whatever the
-                // gate says, and the colony that has withdrawn from it must
-                // not. A withheld room carried here would hold every creep
-                // that was working it to a Task for the whole vision grace,
-                // which is the opposite of the withdrawal ADR 0043 spells
-                // through `task-gone`.
+                // The fourth consequence: the world remembers what it last
+                // saw in that room whatever the gate says, and the colony
+                // that has withdrawn from it must not, or every creep that
+                // was working it would be held to a Task for the whole vision
+                // grace.
                 Expect.isTrue
                     (Map.containsKey outpost pairWorld.Sightings)
                     "the world's own sighting of the room stands: the gate is the colony's, not the world's"
@@ -992,14 +943,10 @@ let colonyViewTests =
             }
 
             test "a re-checked room is looked into and worked no more than before" {
-                // #165's re-admission, and its whole extent: on the one tick
-                // in every `Tuning.RivalRecheck` the gate hands a latched room
-                // back to the **scan**, the colony reads that room's
-                // controller — the one fact the next [[raid log]] needs to
-                // drop a latch the rival has walked away from — and reads
-                // nothing else of it. Pairwise against the same room shut
-                // without a recheck above: one field of the gate moves, and
-                // one entry of the view moves with it.
+                // On the one tick in every `Tuning.RivalRecheck` the gate
+                // hands a latched room back to the scan, the colony reads
+                // that room's controller and nothing else of it. Pairwise
+                // against the same room shut without a recheck above.
                 let colony = declared |> List.head
 
                 let looked =
@@ -1033,12 +980,11 @@ let colonyViewTests =
             }
 
             test "a re-checked room the colony cannot see adds no entry at all" {
-                // ADR 0004 through the same door: the look is a look, not a
-                // conclusion. A latched room nothing has vision into answers
-                // with no control entry, so the fold reads no evidence either
-                // way and the latch survives to the next stride (#165) — the
-                // live case, because the gate's own withdrawal is what took
-                // the vision away.
+                // The look is a look, not a conclusion: a latched room
+                // nothing has vision into answers with no control entry, so
+                // the latch survives to the next stride — the live case,
+                // because the gate's own withdrawal is what took the vision
+                // away.
                 let colony = declared |> List.head
 
                 let blind =
@@ -1066,15 +1012,12 @@ let colonyViewTests =
             }
 
             test "the remembered raid rides the view, and the guard row reads it off one" {
-                // **The projection-side half of #366**, and the lesson of
-                // #355/#356: a rule green against a hand-built `ColonyView` is
-                // green against a shape `ColonyView.ofWorld` may never build.
-                // So the chain is walked end to end here — a `RaidState`
-                // carrying the memory, through `Observe.standDown`, through
-                // `ofWorld`, into `Planner.guardedOutposts` and
-                // `Quota.guardsWanted` — over a world whose outpost is **dark**,
-                // which is the world the raid leaves behind when it kills the
-                // anchor and the reserver.
+                // The projection-side half of #366: the chain is walked end to
+                // end — a `RaidState` carrying the memory, through
+                // `Observe.standDown`, through `ofWorld`, into
+                // `Planner.guardedOutposts` and `Quota.guardsWanted` — over a
+                // world whose outpost is dark, which is the world the raid
+                // leaves behind when it kills the anchor and the reserver.
                 let blind =
                     { pairWorld with
                         Rooms = unseen outpost pairWorld.Rooms
@@ -1142,11 +1085,10 @@ let colonyViewTests =
             }
 
             test "a room the colony works carries its sighting, dark or not" {
-                // The other side of the same narrowing: an [[outpost]] is
-                // worked whether or not this tick could see into it, so its
-                // sighting rides on the view — the one fact carried across
-                // ticks about a room, and what the Matcher's vision grace
-                // reads (#151).
+                // The other side of the same narrowing: an outpost is worked
+                // whether or not this tick could see into it, so its sighting
+                // rides on the view, which is what the Matcher's vision grace
+                // reads.
                 let blind =
                     { pairWorld with
                         Rooms = unseen outpost pairWorld.Rooms
@@ -1172,15 +1114,12 @@ let colonyViewTests =
             }
 
             test "a room a mother borrows is never one she remembers in the dark" {
-                // #271 asked whether the [[borrowed work]] cut has to travel
-                // to the sighting too — whether the mother's grace can hold a
-                // hauler to `withdraw:can-child`, a Task the borrowing takes
-                // out of her pool (ADR 0047 decision 4). It cannot, and this
-                // is why: the grace reads a room only while it is **dark**
-                // (`lastSeenIn` asks for `Tick < Time`), and a room reaches
-                // the borrowed cut only through a [[stage]] or an ownership,
-                // both read off a control entry vision pays for. So the memory
-                // she carries of the child's room is always this tick's.
+                // Whether the mother's grace can hold a hauler to
+                // `withdraw:can-child`, a Task the borrowing takes out of her
+                // pool (#271). It cannot: the grace reads a room only while it
+                // is dark (`lastSeenIn` asks for `Tick < Time`), and a room
+                // reaches the borrowed cut only through a stage or an
+                // ownership, both read off a control entry vision pays for.
                 Expect.equal
                     ((viewOf pairWorld mother).Sightings
                      |> Map.tryFind child
@@ -1188,10 +1127,9 @@ let colonyViewTests =
                     (Some pairWorld.Time)
                     "the room she borrows was seen this tick, so no grace reads its memory"
 
-                // And the tick it does go dark it is not narrowed here at all:
-                // with no control entry there is no stage, the room leaves her
-                // scan set outright, and its memory leaves with it — which is
-                // the same withdrawal the [[stand-down]] gets above.
+                // And the tick it does go dark: with no control entry there
+                // is no stage, the room leaves her scan set outright, and its
+                // memory leaves with it.
                 let blind =
                     { pairWorld with
                         Rooms = unseen child pairWorld.Rooms
@@ -1209,10 +1147,8 @@ let colonyViewTests =
             }
 
             test "an unseen outpost still carries its declared furniture" {
-                // The half ADR 0041 refuses to make vision wait for: a
-                // source's id and tile are declared, so the Harvest that
-                // sends the first creep there exists before the vision
-                // does (#148).
+                // A source's id and tile are declared, so the Harvest that
+                // sends the first creep there exists before the vision does.
                 let blind =
                     { pairWorld with
                         Rooms = unseen outpost pairWorld.Rooms
@@ -1248,13 +1184,10 @@ let colonyViewTests =
             }
 
             test "a declared child that stops being ours is projected by its mother, for the Claim" {
-                // #221: a [[stage]] is `None` for a room we do not own, so
-                // the subtraction that stopped a mother raising a room
-                // nobody claimed also stopped her raising one she had
-                // *lost* — the room left every projection there was, no
-                // Claim was pooled anywhere, and only a human's edit could
-                // take it back. Pairwise on the one fact that decides it,
-                // the ownership the world reads off the room.
+                // A stage is `None` for a room we do not own, so the
+                // subtraction that stopped a mother raising a room nobody
+                // claimed also stopped her raising one she had *lost* (#221).
+                // Pairwise on the ownership the world reads off the room.
                 let taken = viewOf (lostWorld Ownership.Unowned) mother
 
                 Expect.contains
@@ -1293,10 +1226,8 @@ let colonyViewTests =
 
             test "a lost child's rocks and stores stay out of the mother's pool" {
                 // The reclaim rides the borrowing's own narrowing and widens
-                // it by nothing (ADR 0052 decision 7): the controller, the
-                // sites and the spawn tile reach her, and the room's rocks,
-                // containers and stores do not — or she would hire an
-                // Anchor for a Post in a room she does not hold.
+                // it by nothing, or she would hire an Anchor for a Post in a
+                // room she does not hold.
                 let taken = viewOf (lostWorld Ownership.Unowned) mother
 
                 Expect.isFalse
@@ -1307,16 +1238,11 @@ let colonyViewTests =
                     (Map.containsKey "can-child" taken.Spatial.Stores)
                     "and its container's stock is nobody's to withdraw"
 
-                // The [[ferry]]'s sink is the one store the narrowing lets
-                // through, and it is let through for the lend and for
-                // nothing else (#222): there is no lend to a room we do not
-                // own, so there is no store either. Named here because the
-                // source container above is excluded by the *geometry* —
-                // it stands beside the rock — and would have gone on
-                // passing this test while the buffer beside the controller
-                // walked straight into her pool as a Feeding-tier Withdraw,
-                // her haulers crossing the Seam to bring a lost colony's
-                // upgrade energy home to her Storage.
+                // The ferry's sink is let through for the lend and nothing
+                // else, and there is no lend to a room we do not own. Named
+                // here because the source container above is excluded by the
+                // geometry and would have gone on passing while the buffer
+                // walked into her pool as a Feeding-tier Withdraw.
                 Expect.isFalse
                     (Map.containsKey "buf-child" taken.Spatial.Stores)
                     "and neither is the buffer beside its controller"
@@ -1334,14 +1260,10 @@ let colonyViewTests =
             }
 
             test "a nursery's buffer is no store of the mother's either" {
-                // The same sentence at the [[stage]] on the other side of
-                // the lend (#222): the [[ferry]] hires for a
-                // `Bootstrapping` child alone — a nursery has no
-                // [[upgrader]] to drink a buffer and no rule of the
-                // mother's fills one — so a nursery's buffer is a store she
-                // carries for no reader, and a store carried for no reader
-                // is a Withdraw waiting to happen. Pairwise against the
-                // bootstrapping case above, which does carry it.
+                // The ferry hires for a `Bootstrapping` child alone, so a
+                // nursery's buffer is a store she carries for no reader, and
+                // a store carried for no reader is a Withdraw waiting to
+                // happen. Pairwise against the bootstrapping case above.
                 let raising = viewOf spawnlessWorld mother
 
                 Expect.contains raising.Borrowed.Rooms child "the room is still hers to raise"
@@ -1369,12 +1291,8 @@ let colonyViewTests =
         ]
 
 /// The room the declaration below reaches for and cannot: W16S28 is four
-/// steps west of the mother's W12S28, one past `Tuning.MaxHops` (ADR 0058).
-/// A room the hop budget refuses has no chain to price over — `Atlas.route`
-/// answers `None` for it whatever the terrain says — so everything here
-/// follows: no route, no crossing price, and by ADR 0004 no Task in it that
-/// any body can ever be matched to. One past the budget and not ten, so what
-/// the test pins is the boundary rather than a far-away room.
+/// steps west of the mother's W12S28, one past `Tuning.MaxHops`, so what the
+/// test pins is the boundary rather than a far-away room.
 let private tooFar = "W16S28"
 
 /// The mother's declaration with that room added beside her real outpost.
@@ -1416,10 +1334,9 @@ let private overreachingWorld =
 
 /// A two-hop declaration and the room a chain to it crosses: the mother
 /// declares W10S28, two hops west, so W11S28 is in her scan set for the walk
-/// alone (`Outpost.roomsProjected`, ADR 0058). Both rooms are **seen and
-/// furnished** — which is the whole point, because a transit room's promise is
-/// trivially kept while it is blind, and #286 is what happens the tick a
-/// pioneer walks through one.
+/// alone. Both rooms are seen and furnished, because a transit room's
+/// promise is trivially kept while it is blind, and #286 is what happens the
+/// tick a pioneer walks through one.
 let private twoHop = "W10S28"
 let private crossed = "W11S28"
 
@@ -1539,8 +1456,7 @@ let transitTests =
                 // container and hauled from — 2,020 of a 2,540-energy haul
                 // demand for a room no declaration names — because our own
                 // pioneers walking through it were the vision that filed its
-                // furniture. ADR 0058 decision 2's promise ("terrain and a
-                // border ring and nothing else") is kept per colony, here.
+                // furniture.
                 let view = viewUnder twoHopDeclaration twoHopWorld mother
 
                 Expect.isEmpty
@@ -1577,9 +1493,8 @@ let transitTests =
                     "and its container is no store to haul from — the 2,020-demand row that started this"
 
                 // Beside it, the declaration two hops out is untouched: its
-                // furniture is laid in without vision (ADR 0041), which is
-                // what makes the room above a transit room and not a
-                // refusal.
+                // furniture is laid in without vision, which is what makes
+                // the room above a transit room and not a refusal.
                 Expect.isTrue
                     (Map.containsKey "src-two" view.Spatial.TargetKinds)
                     "the two-hop outpost's own rock is placed off the declaration"
@@ -1648,12 +1563,11 @@ let transitTests =
 
             test
                 "and its deposit, its Thorium and its extractor's clock go with the rest of the work" {
-                // The two maps ADR 0057 adds, held to `transiting`'s own test:
-                // what goes is every id a Task could name, and the test is
-                // whether the field is *work*. A deposit's remaining amount is
-                // what the miner row's quota reads and an extractor's cooldown
-                // is what its Emitter gates on — both work by any reading, and
-                // a colony that only walks through the room works neither.
+                // Held to `transiting`'s own test, whether the field is
+                // *work*: a deposit's remaining amount is what the miner row's
+                // quota reads and an extractor's cooldown is what its Emitter
+                // gates on, and a colony that only walks through the room
+                // works neither.
                 let world = withThorium twoHopWorld crossed
                 let view = viewUnder twoHopDeclaration world mother
 
@@ -1675,21 +1589,15 @@ let transitTests =
             }
 
             test "and a room the chain crosses is remembered no more than it is worked" {
-                // #271, and the only case of it a running colony can reach.
-                // Here the mother declares **both** rooms, so `crossed` is an
-                // outpost of hers one hop out and `twoHop` is one hop further
-                // through it. The [[stand-down]] gate shuts `crossed` (ADR
-                // 0043): it leaves her outpost list — its rock, its container
-                // and the Withdraw they pool go out with it — but the chain to
-                // `twoHop` keeps it in her scan set, so it arrives here as a
-                // **transit** room.
-                //
-                // The scan-set narrowing #151 wrote cannot see that, and the
-                // room's memory rode on: `withdraw:cont-crossed`, a Task the
-                // withdrawal had just taken out of the pool, answered the
-                // [[vision grace]] the tick the room went dark, and the mother's
-                // hauler was Kept and walked back into the room the stand-down
-                // had withdrawn it from for a whole `Tuning.VisionGrace`.
+                // The mother declares both rooms, so `crossed` is an outpost
+                // of hers one hop out and `twoHop` one hop further through
+                // it. Shut, `crossed` leaves her outpost list but the chain to
+                // `twoHop` keeps it in her scan set, so it arrives as a
+                // transit room. Before #271 its memory rode on:
+                // `withdraw:cont-crossed` answered the vision grace the tick
+                // the room went dark, and the mother's hauler was Kept and
+                // walked back into the room the stand-down had withdrawn it
+                // from for a whole `Tuning.VisionGrace`.
                 let walked =
                     { twoHopWorld with
                         Sightings =
@@ -1750,15 +1658,11 @@ let declarationTests =
         "an outpost declared across a border its home has not got"
         [
             test "every outpost a human has declared is inside the hop budget" {
-                // The invariant #243 exists for, over the live constant
-                // (ADR 0041's "declared, not discovered") and now at ADR
-                // 0058's altitude: a colony's [[outpost]] is a room its home
-                // reaches in at most `Tuning.MaxHops` crossings, because that
-                // is how long a chain the price is joined over. Red here
-                // rather than live, which is the whole of the ticket — a
-                // declaration past the budget is accepted by every rule
-                // downstream and worked by none of them, and the bodies
-                // bought for it stand by the spawn for their whole lives.
+                // The invariant #243 exists for, over the live constant: red
+                // here rather than live, because a declaration past the
+                // budget is accepted by every rule downstream and worked by
+                // none of them, and the bodies bought for it stand by the
+                // spawn for their whole lives.
                 Expect.isNonEmpty Colony.declared "a declaration nobody made is nothing to check"
 
                 Expect.isNonEmpty
@@ -1813,15 +1717,12 @@ let declarationTests =
             }
 
             test "a declared outpost inside the budget that no chain reaches is refused too" {
-                // #259, and the case ADR 0058 would have reopened #243 with:
-                // the room is two hops out, so the **names** say it is a
-                // declaration a route could join — and the terrain says
-                // otherwise, because the rooms between it and home carry no
-                // border a creep can cross. Refused on the walk and not on the
-                // arithmetic, which is the difference `Outpost.routable` exists
-                // for: accepted, it would be projected, its rock pooled, and a
-                // reserver hired for it every tick by the row that hires per
-                // declared outpost, for a room no body can reach.
+                // The room is two hops out, so the names say it is a
+                // declaration a route could join, and the terrain says
+                // otherwise: the rooms between it and home carry no border a
+                // creep can cross. Refused on the walk and not on the
+                // arithmetic, which is what `Outpost.routable` exists for
+                // (#259).
                 let walledIn =
                     { overreachingWorld with
                         Rooms =
@@ -1859,17 +1760,13 @@ let declarationTests =
             }
 
             test "a declared outpost past the hop budget is refused, and said out loud" {
-                // #243's live shape at ADR 0058's altitude: the room is
-                // declared, seen, furnished and unowned — every reason to
-                // work it that a room inside the budget would have — and the
-                // one thing it has not got is a chain short enough to price.
-                // Accepted, it would be projected, its rock pooled, its
-                // controller pooled as a Reserve and one reserver body
-                // hired for it per tick by the row that hires per *declared*
-                // outpost (ADR 0042), all of it for a room no body can
-                // reach. So the view refuses it, and names it: silence is
-                // what the ticket was filed against. What moved with ADR 0058
-                // is where the line falls, never that there is one.
+                // #243's live shape: the room is declared, seen, furnished
+                // and unowned, and the one thing it has not got is a chain
+                // short enough to price. Accepted, its rock would be pooled,
+                // its controller pooled as a Reserve and one reserver hired
+                // per tick, all for a room no body can reach. So the view
+                // refuses it, and names it: silence is what the ticket was
+                // filed against.
                 let view = viewUnder overreaching overreachingWorld mother
 
                 Expect.equal
@@ -1904,30 +1801,28 @@ let declarationTests =
 
                 Expect.isTrue (List.contains "src-out" (idsOf view)) "and its rock is still pooled"
 
-                // The healthy answer rides the channel too (ADR 0035): a
-                // reader has to be able to tell "nothing refused" from
-                // "this bundle does not record refusals".
+                // The healthy answer rides the channel too: a reader has to
+                // be able to tell "nothing refused" from "this bundle does
+                // not record refusals".
                 Expect.isEmpty
                     (viewUnder declared pairWorld mother).Refused
                     "a declaration a Seam reaches refuses nothing, and says so"
             }
         ]
 
-// ---- the errand: a declared room with no controller (ADR 0060) ------------
+// ---- the errand: a declared room with no controller ------------------------
 
 /// A room two crossings south of the mother, and the room a shortest chain to
-/// it crosses. Two hops rather than one deliberately: an errand's room and its
-/// transit rooms enter the scan set by the same union an outpost's do (ADR 0058
-/// as ADR 0060 widens it), and a one-hop errand would project no transit room
-/// at all and so prove nothing about the half of the rule that carries the
-/// walk.
+/// it crosses. Two hops rather than one deliberately: a one-hop errand would
+/// project no transit room at all and so prove nothing about the half of the
+/// rule that carries the walk.
 let private errandRoom = "W12S30"
 let private errandCrossed = "W12S29"
 
-/// The one object the declaration names, and the tile it names it on. An id and
-/// a tile and nothing else, which is the whole of an `Errand` — what the object
-/// *is* and what it holds are the projection's to answer where there is vision
-/// (ADR 0004), and the declaration says neither.
+/// The one object the declaration names, and the tile it names it on. An id
+/// and a tile and nothing else, which is the whole of an `Errand`: what the
+/// object *is* and what it holds are the projection's to answer where there
+/// is vision.
 let private reactor = "reactor-far"
 let private reactorTile = { X = 6; Y = 6 }
 
@@ -1970,16 +1865,13 @@ let private errandSeen =
                 "site-errand", { X = 4; Y = 4 }, Site BuiltKind.Extension
                 reactor, reactorTile, Structure BuiltKind.Container
                 // Ore on that room's floor, and beside it a pile of energy, so
-                // the one admitted census entry (#356) is tested against the
-                // one that stays out.
+                // the one admitted census entry is tested against the one that
+                // stays out.
                 "pile-errand", { X = 5; Y = 3 }, Dropped Thorium
                 "pile-energy", { X = 5; Y = 4 }, Dropped Energy
-                // And the same pair one object over (#359): a courier of ours
-                // that died in that room with ore aboard, and a tombstone
-                // holding energy alone beside it. `Tombstone` names no
+                // And the same pair one object over: `Tombstone` names no
                 // resource, so which of the two is admitted can only be read
-                // off the store — which is what makes the second one the
-                // adjacent case worth pinning.
+                // off the store.
                 "tomb-errand", { X = 5; Y = 5 }, Tombstone
                 "tomb-spent", { X = 5; Y = 6 }, Tombstone
             ]
@@ -1992,16 +1884,15 @@ let private errandSeen =
         Thorium =
             Map.ofList [ reactor, 400; "can-errand", 90; "pile-errand", 915; "tomb-errand", 175 ]
         Cooldowns = Map.ofList [ reactor, 7; "can-errand", 3 ]
-        // Whose the declared target is, which is the fact #318 added and the
-        // one the [[reclaim]]'s act is gated on. A rival's, because that is the
-        // live board: W15S25 is `Odiodin`'s and every Thorium delivered under
-        // his flag scores for him.
+        // Whose the declared target is, which the reclaim's act is gated on.
+        // A rival's, because that is the live board: W15S25 is `Odiodin`'s
+        // and every Thorium delivered under his flag scores for him.
         Owners = Map.ofList [ reactor, Ownership.Rival; "can-errand", Ownership.Ours ]
     }
 
 /// The pair world with the chain to that room in it, both rooms seen and
-/// furnished. The crossing carries a controller and a rock of its own, which is
-/// what a transit room's promise is about (ADR 0058 decision 2, #286).
+/// furnished. The crossing carries a controller and a rock of its own, which
+/// is what a transit room's promise is about.
 let private errandWorld =
     { pairWorld with
         Rooms =
@@ -2023,7 +1914,7 @@ let private errandWorld =
 
 /// The same chain with no vision anywhere on it: terrain and a border ring and
 /// nothing else, which is what the shell reads for a declared room it has never
-/// had a creep in (`World.factsOf`'s blind branch, ADR 0031, ADR 0041).
+/// had a creep in (`World.factsOf`'s blind branch).
 let private blindErrandWorld =
     { pairWorld with
         Rooms = pairWorld.Rooms |> unseen errandCrossed |> unseen errandRoom
@@ -2031,10 +1922,9 @@ let private blindErrandWorld =
 
 /// The courier standing under the flag, carrying the body the season's row
 /// actually casts (`Bodies.courierPattern`: twenty Carry, ten Move) and filed
-/// into the errand room. Written for the running-dry alarm (#361), which reads
-/// a courier off its **shape** — so what has to reach the view is not that a
-/// creep of ours is out there but that its parts survive the projection's
-/// errand narrowing.
+/// into the errand room. The running-dry alarm reads a courier off its shape,
+/// so what has to reach the view is that its parts survive the errand
+/// narrowing.
 let private courierWorld =
     let courier = creep "courier-900-Spawn1" errandRoom
 
@@ -2064,11 +1954,9 @@ let errandTests =
         [
             test
                 "what a site still owes reaches the view, which is what tells a road from a terminal" {
-                // The projection-side counterpart of #364's backlog term. The
-                // rule is a division by this number, so a projection that
-                // dropped it — as it did until this slice, `ConstructionSiteInfo`
-                // being `{ Id }` alone — leaves the row unable to tell a road's
-                // 300 from the terminal that held 16,464 T of score behind it.
+                // The projection-side counterpart of the backlog term: a
+                // projection that dropped what a site owes leaves the row
+                // unable to tell a road's 300 from a terminal's 100,000.
                 let view = viewUnder consigning terminalWorld mother
 
                 Expect.equal
@@ -2078,11 +1966,10 @@ let errandTests =
             }
 
             test "a terminal's two stores and the consignment it is for both reach the view" {
-                // The projection-side counterpart of #349's consignment rules,
-                // written with them for #355's and #356's reason. Three facts
-                // have to survive `ofWorld` for `planConsignment` to be worth
-                // anything: the terminal's kind, its **two** stores in their
-                // two separate tables, and the declaration naming the far end.
+                // Three facts have to survive `ofWorld` for `planConsignment`
+                // to be worth anything: the terminal's kind, its two stores in
+                // their two separate tables, and the declaration naming the
+                // far end.
                 let view = viewUnder consigning terminalWorld mother
 
                 Expect.equal
@@ -2120,14 +2007,10 @@ let errandTests =
 
             test
                 "the courier under the flag reaches the view as a body with parts, and the home it walked from is named" {
-                // The projection-side half of #361's running-dry alarm, written
-                // with it for the reason #355 and #356 were both filed: the
-                // rule was green in `ObserveTests` against a hand-written view,
-                // and what that cannot say is whether `ofWorld` builds the
-                // shape it assumes. Here that shape is three facts — a creep of
-                // ours standing in an **errand** room (the census cut that
-                // silenced #356 lived exactly here), its body's parts, and the
-                // home room name the lead time is measured from.
+                // The projection-side half of the running-dry alarm: three
+                // facts, a creep of ours standing in an errand room, its
+                // body's parts, and the home room name the lead time is
+                // measured from.
                 let view = viewUnder errandDeclared courierWorld mother
 
                 let courier =
@@ -2153,11 +2036,9 @@ let errandTests =
                     [ errandRoom ]
                     "against the errand's own room, which is the other end of that hop count"
 
-                // The projection-side half of #362's draw gate, which reads the
-                // ore afloat off exactly this field. A body three rooms out
-                // carrying a load is the case that stranded one: if the
-                // narrowing dropped its `Thorium` the gate would read 0 afloat
-                // and open behind every carrier already walking.
+                // The draw gate reads the ore afloat off exactly this field:
+                // if the narrowing dropped its `Thorium` the gate would read 0
+                // afloat and open behind every carrier already walking.
                 Expect.equal
                     (courier |> Option.map (fun creep -> creep.Thorium))
                     (Some 500)
@@ -2165,13 +2046,11 @@ let errandTests =
             }
 
             test "the declared target is placed before any body of ours has stood there" {
-                // ADR 0060 decision 1's first question, and ADR 0041's
-                // deadlock one declaration kind wider: a courier has to hold
-                // `Deliver of reactorId` before there is vision, vision needs
-                // a creep there, a creep goes there because a Task exists, and
-                // the Task exists because the target is in the projection. So
-                // the id and the tile are the declaration's and wait for
-                // nothing.
+                // A courier has to hold `Deliver of reactorId` before there
+                // is vision, vision needs a creep there, a creep goes there
+                // because a Task exists, and the Task exists because the
+                // target is in the projection. So the id and the tile are the
+                // declaration's and wait for nothing.
                 let view = viewUnder errandDeclared blindErrandWorld mother
 
                 Expect.isEmpty view.Refused "the premise: a two-hop errand is not refused"
@@ -2199,14 +2078,9 @@ let errandTests =
             }
 
             test "nothing else in the errand room is work, however much vision answers" {
-                // The second half of ADR 0060 decision 1's first answer, and
-                // the narrowing that makes an errand **less** than an outpost.
-                // #286's live failure was a reserver hired against a
-                // controller no declaration names and an Anchor on a rock
-                // nobody declared, because our own bodies walking through were
-                // the vision that filed the room's furniture; this room has
-                // three rocks, a stocked container and a site of its own, and
-                // the colony may work none of them.
+                // The narrowing that makes an errand less than an outpost:
+                // this room has rocks, a stocked container and a site of its
+                // own, and the colony may work none of them.
                 let view = viewUnder errandDeclared errandWorld mother
 
                 Expect.isFalse
@@ -2235,21 +2109,15 @@ let errandTests =
             }
 
             test "ore on the errand room's floor is the one thing beside the declaration that rides" {
-                // #356. #354 widened `Facts.ourThoriumPiles` to reach an
-                // errand room's floor and it reached nothing: this narrowing
-                // had already taken the pile's kind and amount out, so the
-                // `Pickup` it added could never be pooled, and the 915 T that
-                // reached W15S25's floor stayed unnamed by anything. The unit
-                // test agreed with the rule because its fixture wrote the pile
-                // straight into the projection — a shape `ofWorld` never built.
-                // A rule and the projection it reads are checked together or
-                // not at all.
-                //
-                // The ore is ours by the errand's own argument: nobody owns the
-                // room, no other colony walks a body to it, and the pile decays
-                // at 1 T a tick. What stays out is everything else — the
-                // container's kind, the rock, the site — so this is one
-                // resource on the floor and not a door for `Dropped` things.
+                // #354 widened `Facts.ourThoriumPiles` to reach an errand
+                // room's floor and it reached nothing: this narrowing had
+                // already taken the pile's kind and amount out, and the unit
+                // test agreed because its fixture wrote the pile straight into
+                // the projection (#356). The ore is ours by the errand's own
+                // argument: nobody owns the room, no other colony walks a body
+                // to it, and the pile decays at 1 T a tick. Everything else
+                // stays out, so this is one resource on the floor and not a
+                // door for `Dropped` things.
                 let view = viewUnder errandDeclared errandWorld mother
 
                 Expect.equal
@@ -2273,26 +2141,14 @@ let errandTests =
             }
 
             test "and the ore in a tombstone on that floor rides on the same argument" {
-                // #359, which is #356 one object over: a courier that dies
-                // loaded leaves its ore in its tombstone rather than on the
-                // floor, and W15S25 had 175 T standing in one at (43,6) in the
-                // declared Reactor room. Every word of #356's argument carries
-                // — nobody owns the room, no other colony walks a body to it,
-                // the ore is bleeding — and the clock is shorter: a tombstone
-                // drops its whole store as piles when it decays
+                // #356 one object over: a courier that dies loaded leaves its
+                // ore in its tombstone, and W15S25 had 175 T standing in one
+                // at (43,6). The clock is shorter: a tombstone drops its whole
+                // store as piles when it decays
                 // (`processor/intents/tombstones/tick.js`), so what the pile
-                // case catches is this ore later and smaller.
-                //
-                // **This case is the projection half of a pair.** The rules
-                // that answer this ore are pinned in `PoolWithdrawTests` (the
-                // Withdraw and its rung), `ErrandTests` (the draw the TTL
-                // clause must not refuse, and where the load goes) and
-                // `ObserveTests` (the breach), each against a hand-written
-                // `ColonyView`; this is what says the projection can build the
-                // shape those assume — kind, tile and amount together. #355 and
-                // #356 were both the pair written apart, a rule green against a
-                // shape `ofWorld` never builds, so the two were written
-                // together here.
+                // case catches is this ore later and smaller. The projection
+                // half of a pair whose rules are pinned in `PoolWithdrawTests`,
+                // `ErrandTests` and `ObserveTests` against hand-written views.
                 let view = viewUnder errandDeclared errandWorld mother
 
                 Expect.equal
@@ -2319,12 +2175,10 @@ let errandTests =
                     (Map.containsKey "tomb-spent" view.Spatial.TargetKinds)
                     "a tombstone holding energy alone is nobody's errand: the admission is read off the ore and not off the object"
 
-                // The energy column stays the declaration's. What the tombstone
-                // is admitted **for** is its ore, and an errand room is not a
-                // place this colony hauls a dead creep's energy home from:
-                // `Stores` is what an energy Withdraw's own filter reads, so
-                // leaving it out is what keeps that Task unpooled three
-                // crossings from home.
+                // What the tombstone is admitted for is its ore: `Stores` is
+                // what an energy Withdraw's own filter reads, so leaving it
+                // out is what keeps that Task unpooled three crossings from
+                // home.
                 Expect.equal
                     (Map.tryFind "tomb-errand" view.Spatial.Stores)
                     None
@@ -2339,12 +2193,10 @@ let errandTests =
             test "and the one target it names is: its store rides, its kind does not" {
                 // The changing half of the declared object — its store, its
                 // Thorium — is vision-paid and absent entry by entry where
-                // there is none (ADR 0004), which is why the body standing
-                // there is the colony's only eye on the room. What does *not*
-                // ride is the kind: every pool is built by sweeping
-                // `TargetKinds`, so an id classified by nothing is priceable
-                // by a Task that names it — the errand's own — and
-                // enumerable by no pool at all.
+                // there is none. What does *not* ride is the kind: every pool
+                // is built by sweeping `TargetKinds`, so an id classified by
+                // nothing is priceable by a Task that names it and enumerable
+                // by no pool at all.
                 let seen = viewUnder errandDeclared errandWorld mother
                 let blind = viewUnder errandDeclared blindErrandWorld mother
 
@@ -2375,11 +2227,9 @@ let errandTests =
                     (Map.tryFind reactor seen.Spatial.Hits)
                     "and its hit count with it, a Repair being pooled off one"
 
-                // The owner is the third changing entry and the one #318 put
-                // there: the act that takes the flag back is gated on it, so it
-                // is work by the same test the store and the Thorium pass, and
-                // it rides for the **declared** id and for nothing else in that
-                // room — the container beside it carries one and does not.
+                // The owner is the third changing entry: the act that takes
+                // the flag back is gated on it, and it rides for the declared
+                // id and for nothing else in that room.
                 Expect.equal
                     (Map.tryFind reactor seen.Spatial.Owners)
                     (Some Ownership.Rival)
@@ -2395,14 +2245,10 @@ let errandTests =
             }
 
             test "the errand is projected by the colony that declares it and by no other" {
-                // ADR 0060 decision 1's second question. The room the live
-                // errand names is five and six crossings from the other two
-                // homes, so a price into it from either is `None` and a room
-                // in their projection would be one every rule answers nothing
-                // about — #243's silent failure with a bigger body standing
-                // beside the spawn. The rule is not "the near colony gets it":
-                // it is that a room's name in one colony's list is what makes
-                // it that colony's (ADR 0047).
+                // The room the live errand names is five and six crossings
+                // from the other two homes, so a price into it from either is
+                // `None`. The rule is not "the near colony gets it": a room's
+                // name in one colony's list is what makes it that colony's.
                 let hers = viewUnder errandDeclared errandWorld mother
                 let his = viewUnder errandDeclared errandWorld child
 
@@ -2422,10 +2268,8 @@ let errandTests =
                     (List.contains "src-errand" (idsOf his))
                     "and pools nothing that stands in it"
 
-                // And the list itself, which is what the Task pool and the
-                // re-claimer's seat are read off (#318): one colony carries the
-                // declaration and the other carries none, so no rule of his can
-                // name a target three crossings past his own budget.
+                // And the list itself, which the Task pool and the re-claimer's
+                // seat are read off.
                 Expect.equal
                     (hers.Errands |> List.map (fun errand -> errand.RoomName))
                     [ errandRoom ]
@@ -2482,15 +2326,12 @@ let errandTests =
                     "so the same unchanged declaration remains projected"
             }
 
-            // ADR 0074, the one carve-out from the line above (#382). ADR 0066
-            // is right that a stand-down does not propagate through a route:
-            // what the gate ordinarily withholds is *work in a room*, which a
-            // crossing body does not do. A **stronghold** is the case that
-            // reasoning does not cover — four towers under million-hit
-            // ramparts reach every tile, and the loss is the walk rather than
-            // the withheld work. Live, a `bunker4` in W15S26 killed two
-            // 650-energy re-claimers on the same entry tile 161 ticks apart
-            // while the gate had that room correctly shut.
+            // The one carve-out from the line above: a stronghold's four
+            // towers under million-hit ramparts reach every tile, so the loss
+            // is the walk rather than the withheld work. Live, a `bunker4` in
+            // W15S26 killed two 650-energy re-claimers on the same entry tile
+            // 161 ticks apart while the gate had that room correctly shut
+            // (#382).
             test
                 "a stronghold on the only route withholds the errand, where an ordinary stand-down does not" {
                 let viewWith gate =
@@ -2543,13 +2384,7 @@ let errandTests =
             }
 
             test "an errand no chain reaches leaves the scan set and is named, with its kind" {
-                // ADR 0060 decision 1's third question. Carrying an
-                // unreachable errand is strictly worse than carrying an
-                // unreachable outpost — an outpost with no chain wastes a
-                // reserver and an errand with no chain wastes the whole
-                // programme, the errand's entire content being a walk — so it
-                // is refused exactly as #243 refuses an outpost, and the
-                // refusal says *which kind* it refused, because "W12S30"
+                // The refusal says *which kind* it refused, because "W12S30"
                 // under a heading that reads "declared outposts" is a second
                 // silence wearing the first one's clothes.
                 let walledIn =
@@ -2593,8 +2428,7 @@ let errandTests =
 
                 // Pairwise against the same declaration over an unwalled
                 // world: what refuses the room is the terrain and not the
-                // declaration's shape, which is #259's distinction one
-                // declaration kind wider.
+                // declaration's shape.
                 Expect.isEmpty
                     (viewUnder errandDeclared errandWorld mother).Refused
                     "an errand a chain reaches refuses nothing, and says so"
@@ -2638,11 +2472,9 @@ let errandTests =
 
             test "the room a chain to an errand crosses is a transit room and nothing more" {
                 // An errand room is more than a transit room; the rooms on the
-                // way to it are not. This is the line that says the widening
-                // stops at the declared room — ADR 0058 decision 2's promise
-                // is untouched by ADR 0060, and a rule that narrowed the whole
-                // chain the errand's way would pool a crossing's controller
-                // for a colony that declared nothing there.
+                // way to it are not. A rule that narrowed the whole chain the
+                // errand's way would pool a crossing's controller for a colony
+                // that declared nothing there.
                 let view = viewUnder errandDeclared errandWorld mother
 
                 Expect.isTrue
@@ -2661,12 +2493,10 @@ let errandTests =
             }
 
             test "every errand a human has declared is inside the hop budget" {
-                // The invariant #243 exists for, over the live constant and at
-                // ADR 0060's altitude: red here rather than live, because a
-                // declaration past the budget is accepted by every rule
-                // downstream and worked by none of them. The other half —
-                // whether the terrain leaves a chain — needs the captures and
-                // is asked where they are (`RoomOutpostTests`).
+                // Red here rather than live, because a declaration past the
+                // budget is accepted by every rule downstream and worked by
+                // none of them. The other half — whether the terrain leaves a
+                // chain — needs the captures (`RoomOutpostTests`).
                 Expect.isNonEmpty
                     (Colony.declared |> List.collect (fun colony -> colony.Errands))
                     "a declaration nobody made is nothing to check"
@@ -2687,13 +2517,11 @@ let errandTests =
             }
 
             test "every declared errand names a tile of its own room" {
-                // ADR 0052 decision 2: a tile carries the room it is a tile
-                // of, and one filed under another room's name is dropped
-                // rather than written onto this room's coordinate — which
-                // would place the target nowhere and price it at 0, ADR 0004's
-                // escape, so it would *win* its tier. Dropped, the errand has
-                // no target at all, which is the quieter of the two failures
-                // and still one only this line catches.
+                // A tile filed under another room's name is dropped rather
+                // than written onto this room's coordinate, which would place
+                // the target nowhere, price it at 0 and *win* its tier.
+                // Dropped, the errand has no target at all, the quieter
+                // failure and one only this line catches.
                 for colony in Colony.declared do
                     for errand in colony.Errands do
                         let _, tile = errand.Target
@@ -2705,25 +2533,15 @@ let errandTests =
             }
 
             test "no room is declared as both an outpost and an errand" {
-                // The invariant `ColonyView.ofWorld`'s branch order rests on,
-                // asserted rather than assumed. The chain there is `bootstrap →
-                // transit → errand → worked`, so a room in both lists takes the
-                // errand branch and is **narrowed** where the outpost wanted it
-                // widened: its source container loses its kind and its store, no
-                // Withdraw, Refill or Repair is pooled on it and its site leaves
-                // `ConstructionSites`, while the reserver row goes on hiring one
-                // body a tick for a room whose haul chain has silently gone —
-                // #243's and #286's silence in reverse, and with nothing on
-                // `Refused` to say so, because no chain is missing.
-                //
-                // The two kinds are disjoint by their own definitions and not by
-                // luck: `Outpost.Controller` is mandatory and an errand exists
-                // for the room that has no controller at all (ADR 0060 decision
-                // 1). So a room in both lists is a human writing a
-                // contradiction, and a contradiction in the constant is caught
-                // where every other one is — here, red before it is deployed,
-                // which is the whole reason `Colony.declared` has tests at this
-                // altitude at all.
+                // The invariant `ColonyView.ofWorld`'s branch order rests on:
+                // the chain is `bootstrap → transit → errand → worked`, so a
+                // room in both lists takes the errand branch and is narrowed
+                // where the outpost wanted it widened, while the reserver row
+                // goes on hiring for a room whose haul chain has silently gone
+                // and nothing on `Refused` says so. The two kinds are disjoint
+                // by definition — `Outpost.Controller` is mandatory and an
+                // errand exists for the room with none — so a room in both is
+                // a human writing a contradiction, caught red before deploy.
                 for colony in Colony.declared do
                     let outposts = colony.Outposts |> List.map (fun o -> o.RoomName) |> Set.ofList
                     let errands = colony.Errands |> List.map (fun e -> e.RoomName) |> Set.ofList
@@ -2732,11 +2550,9 @@ let errandTests =
                         (Set.intersect outposts errands |> Set.toList)
                         $"{colony.Home}: a room declared as both would be narrowed to the errand's one target and mined by nobody"
 
-                // And across colonies, for the same reason one altitude up: the
-                // room would be widened by its declaring colony and narrowed by
-                // the other, and the two projections of it would disagree about
-                // what is in it — which is the disagreement ADR 0047 says one
-                // room projected by two colonies must never have.
+                // And across colonies: the room would be widened by its
+                // declaring colony and narrowed by the other, and the two
+                // projections would disagree about what is in it.
                 let allOutposts =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -2754,13 +2570,13 @@ let errandTests =
             }
         ]
 
-// ---- the scan set over the masked layer (ADR 0060 decision 2, #317) -------
+// ---- the scan set over the masked layer (#317) -----------------------------
 
-/// The chain the live errand walks, as the server has it (ADR 0036): W15S28,
-/// the two rooms a shortest walk crosses, and the sector centre the Reactor
-/// stands in. Real terrain, because what every case below turns on is what the
-/// [[keeper margin]] does to a **border ring**, and W15S26 is the one room
-/// this repo declares keeper rocks for (`Keepers.centres`, `rooms/W15S26.room`).
+/// The chain the live errand walks, as the server has it: W15S28, the two
+/// rooms a shortest walk crosses, and the sector centre the Reactor stands
+/// in. Real terrain, because what every case below turns on is what the
+/// keeper margin does to a border ring, and W15S26 is the one room this repo
+/// declares keeper rocks for (`Keepers.centres`, `rooms/W15S26.room`).
 let private liveChain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
 
 /// The Source Keeper room the mask is declared in, and the sector centre
@@ -2769,31 +2585,21 @@ let private keeperRoom = "W15S26"
 let private reactorRoom = "W15S25"
 
 /// The home the declarations below are declared from — the one room in this
-/// world whose ground is invented, and the reason the cases can be read at the
-/// margin the bot actually ships.
+/// world whose ground is invented, and the reason the cases can be read at
+/// the margin the bot ships. Why not W15S28, the live home: at the shipped
+/// six the mask reaches exactly one of W15S26's four rings. The north ring's
+/// nearest declared centre is the mineral at (38,7) and the east ring's the
+/// lair at (42,39), both seven away; the south ring's nearest is ten away;
+/// the west ring loses y ∈ 11..23 and 27..42 to the lairs at (6,17) and
+/// (5,36) and the source at (4,33). So the shipped margin closes no crossing
+/// of the live chain (the `List.pairwise` loop below asserts that), and the
+/// one border six can close is W15S26's west one, facing W16S26.
 ///
-/// **Why not W15S28, the live home.** At the shipped six the mask reaches
-/// exactly one of W15S26's four rings. The north ring's nearest declared
-/// centre is the mineral at (38,7) and the east ring's is the lair at (42,39),
-/// both **seven** away; the south ring's nearest is ten away; and the west
-/// ring loses y ∈ 11..23 and 27..42 to the lairs at (6,17) and (5,36) and the
-/// source at (4,33) (`AtlasSeamTests`, "a rock near a border does take exit
-/// tiles out of that band"). So the shipped margin closes no crossing of the
-/// live chain — the `List.pairwise` loop below asserts exactly that, and it is
-/// the line that goes red if a re-capture or a new rock ever changes it — and
-/// the single border at which six can close one is W15S26's **west** one,
-/// which faces W16S26 (`RoomName.offsetOf`; the x = 49 column faces W14S26,
-/// #336).
-///
-/// W16S26 has no capture, so its ring is written here rather than loaded. That
-/// is this repo's own idiom for the mask and not a licence taken: the margin is
-/// declared by **room name** and is terrain-blind by construction, which is
-/// what lets invented ground under a real name say something true about the
-/// real declaration (`AtlasFixtures.keeperRoom` says the same in its own
-/// words). What the invention buys is the whole point of it: the disagreement
-/// between the raw and the masked reading lands at `Tuning.defaults`, so every
-/// refusal below is the one this bot ships, and the knob is only ever the
-/// control.
+/// W16S26 has no capture, so its ring is written here. The margin is
+/// declared by room name and is terrain-blind by construction, which is what
+/// lets invented ground under a real name say something true about the real
+/// declaration; the disagreement lands at `Tuning.defaults`, so every refusal
+/// below is the one this bot ships and the knob is only ever the control.
 let private keeperHome = "W16S26"
 
 /// That invented ring: W16S26's east column — the one `Seam.pairsAcross` pairs
@@ -2812,21 +2618,15 @@ let private homeRing: Map<Pos, Terrain> =
         ]
 
 /// The world those five rooms make: a border ring and the ground behind it
-/// apiece, and nothing else at all. Both are what the shell reads for a
-/// declared or transit room whether or not there is vision (ADR 0031, ADR
-/// 0041), and since ADR 0062 `scanOf` reads both — the ring for whether the
-/// engine lands a body across the border, the ground for whether the body can
-/// then step off the landing — so a world carrying a tick or a census would
-/// only be a world with more to get wrong.
+/// apiece, and nothing else at all — `scanOf` reads both, the ring for
+/// whether the engine lands a body across the border, the ground for whether
+/// the body can then step off the landing. The captures bring their own
+/// ground; `keeperHome`'s is invented plain, like its ring.
 ///
-/// The captures bring their own ground; `keeperHome`'s is invented plain, like
-/// its ring, and for the same reason.
-///
-/// A **function**, and not because #310's rule reaches it: that rule is an
-/// Atlas's, and a `World` is `Map` and `list` the whole way down, so a
-/// module-level one would be safe to share and `ParallelSafetyTests` would have
-/// nothing to say about it. It is a function so the four captures are read by
-/// the tests that ask for them instead of at module load.
+/// A function, and not because #310's rule reaches it: a `World` is `Map`
+/// and `list` the whole way down, so a module-level one would be safe to
+/// share. It is a function so the four captures are read by the tests that
+/// ask for them instead of at module load.
 let private keeperWorld () : World =
     { World.empty with
         Rooms =
@@ -2870,13 +2670,11 @@ let private reachingTuning = { Tuning.defaults with ReachMargin = 1 }
 /// The same room declared as each kind, so the two cases below differ in the
 /// clause of `scanOf` that reads them and in nothing else.
 ///
-/// The errand is the **live** one. The outpost is not and could not be: W15S25
-/// is a sector centre with no controller, which is the vocabulary hole ADR 0060
-/// decision 1 opened the `Errand` kind for — so this is that room written into
-/// `Outposts` by a human's hand, which is the slip the two kinds exist to keep
-/// apart, and it carries the capture's own rocks with a controller the fixture
-/// names because the room has none to name. Neither half is read by the
-/// narrowing: `Outpost.routable` asks the room name.
+/// The errand is the live one. The outpost is not and could not be: W15S25
+/// is a sector centre with no controller, so this is that room written into
+/// `Outposts` by a human's hand, carrying the capture's own rocks with a
+/// controller the fixture names because the room has none. Neither half is
+/// read by the narrowing: `Outpost.routable` asks the room name.
 let private reactorAsOutpost () : Outpost =
     let capture = RoomFixtures.load reactorRoom
 
@@ -2895,11 +2693,11 @@ let private reactorAsOutpost () : Outpost =
     }
 
 /// Every room the scan set carries when the declaration is admitted: the home,
-/// the declared room, and **both** rooms a shortest two-hop walk could pass
-/// through. W16S25 is the second of those and this world holds no facts for it
-/// — which is right and is ADR 0058's own rule: the transit set is answered off
-/// the names, because the route needs the rooms' terrain and the terrain needs
-/// them projected (`RoomName.transitBetween`).
+/// the declared room, and both rooms a shortest two-hop walk could pass
+/// through. W16S25 is the second of those and this world holds no facts for
+/// it, which is right: the transit set is answered off the names, because
+/// the route needs the rooms' terrain and the terrain needs them projected
+/// (`RoomName.transitBetween`).
 let private admittedScan =
     [ keeperHome; reactorRoom; keeperRoom; "W16S25" ] |> List.sort
 
@@ -2934,19 +2732,14 @@ let scanSetMaskTests =
         "the scan set is narrowed over the layer the price is taken over"
         [
             test "the keeper mask closes at the shipped margin a crossing the raw rings leave open" {
-                // Everything below rests on this, so it is asserted rather than
-                // assumed: a fixture that stopped exhibiting the disagreement
-                // would leave every case green having checked nothing.
-                //
-                // `World.linked` is the one predicate `scanOf` narrows both
-                // declaration kinds by, and the margin is its first argument —
-                // which is the whole of #317: the routable question has to be
-                // asked over the **same** masked layer every price is taken
-                // over, or the scan set admits a chain the flood cannot walk.
-                // That the price half reads the same mask is `AtlasSeamTests`'
-                // ("the mask narrows a band the same way for the route search
-                // and for the price"); what is pinned here is the wiring, at
-                // `scanOf`'s own altitude.
+                // Everything below rests on this: a fixture that stopped
+                // exhibiting the disagreement would leave every case green
+                // having checked nothing. `World.linked` is the one predicate
+                // `scanOf` narrows both declaration kinds by, and the routable
+                // question has to be asked over the same masked layer every
+                // price is taken over, or the scan set admits a chain the
+                // flood cannot walk (#317). The price half is
+                // `AtlasSeamTests`'; what is pinned here is the wiring.
                 let world = keeperWorld ()
 
                 Expect.isTrue
@@ -2965,15 +2758,11 @@ let scanSetMaskTests =
                     (World.linked (Tuning.keeperMargin Tuning.defaults) world keeperRoom reactorRoom)
                     "the rest of the way is open at the shipped margin, so the closed crossing is the first alone"
 
-                // Zero is the raw reading here and not merely a small margin:
-                // it masks the eight declared centres themselves and no other
-                // tile, and not one of them lies on a ring of its room.
-                //
-                // The live chain, said out loud beside the invented crossing:
-                // no border of it is the mask's at six, which is why the
-                // disagreement had to be built against an invented far side and
-                // is also the line that would go red if a re-capture or a new
-                // keeper rock ever closed the chain the errand really walks.
+                // Zero is the raw reading: it masks the eight declared centres
+                // themselves and no other tile, and none lies on a ring. The
+                // live chain beside the invented crossing: the line that goes
+                // red if a re-capture or a new keeper rock ever closes the
+                // chain the errand really walks.
                 for near, far in List.pairwise liveChain do
                     Expect.isTrue
                         (World.linked (Tuning.keeperMargin Tuning.defaults) world near far)
@@ -2981,17 +2770,12 @@ let scanSetMaskTests =
             }
 
             test "an outpost the raw ring reaches and the masked layer does not leaves the scan set" {
-                // `scanOf`'s **outpost** clause, at its own altitude and at the
-                // shipped margin. The room is inside the hop budget and every
-                // chain to it is joined over raw terrain, so a narrowing that
-                // asked the raw layer would admit it — and admitted, it would
-                // be projected, its rocks pooled and a reserver hired for it
-                // every tick by the row that hires per declared outpost (ADR
-                // 0042), for a room whose price is `None` because the flood the
-                // price is taken over cannot cross the ring the mask closed.
-                //
-                // The declaration carries no errand, so this case is the
-                // outpost clause's and no other's.
+                // `scanOf`'s outpost clause, at the shipped margin. The room
+                // is inside the hop budget and every chain to it is joined
+                // over raw terrain, so a narrowing that asked the raw layer
+                // would admit it, and a reserver would be hired every tick for
+                // a room whose price is `None`. The declaration carries no
+                // errand, so this case is the outpost clause's alone.
                 let colony = declaringOutpost (reactorAsOutpost ())
                 let scan = scanUnder Tuning.defaults colony
 
@@ -3004,13 +2788,11 @@ let scanSetMaskTests =
                     [ keeperHome ]
                     "so the scan set is the home alone: no outpost room, and no crossing on the way to one"
 
-                // The other half of "refuse it loudly", and the third call site
-                // that reads this margin: `ColonyView.Refused` is built off its
-                // own `World.linked (Tuning.keeperMargin tuning)`
-                // (`Views.fs`), so a margin dropped there would leave the room
-                // out of the scan set **and** out of the channel that names what
-                // was refused — the silent failure ADR 0060 decision 1 exists
-                // to rule out, wearing the first one's clothes.
+                // The third call site that reads this margin:
+                // `ColonyView.Refused` is built off its own `World.linked
+                // (Tuning.keeperMargin tuning)`, so a margin dropped there
+                // would leave the room out of the scan set *and* out of the
+                // channel that names what was refused.
                 Expect.equal
                     (viewUnder [ colony ] (keeperWorld ()) keeperHome).Refused
                     [
@@ -3040,14 +2822,9 @@ let scanSetMaskTests =
             }
 
             test "an errand the raw ring reaches and the masked layer does not leaves the scan set" {
-                // `scanOf`'s **errand** clause, the same case one clause over —
-                // and the kind for which it matters more, because an outpost
-                // with no chain wastes a reserver and an errand with no chain
-                // wastes the whole programme, the errand's entire content being
-                // a walk (ADR 0060 decision 1, `RefusedDeclaration`).
-                //
-                // The live declaration, and the declaration carries no outpost,
-                // so this case is the errand clause's and no other's.
+                // `scanOf`'s errand clause, the same case one clause over. The
+                // live declaration, carrying no outpost, so this case is the
+                // errand clause's alone.
                 let colony = declaringErrand Errand.w15s25
                 let scan = scanUnder Tuning.defaults colony
 
@@ -3060,11 +2837,9 @@ let scanSetMaskTests =
                     [ keeperHome ]
                     "so nothing of the Reactor's room, and nothing of the way to it, is projected"
 
-                // This is the sentence ADR 0060 decision 1 leans on when it
-                // calls an unreachable errand "refused loudly": the loudness is
-                // `ColonyView.Refused`'s, and the refusing is `scanOf`'s — and
-                // the two read the same margin off the same tuning or the room
-                // vanishes in silence.
+                // The loudness is `ColonyView.Refused`'s and the refusing is
+                // `scanOf`'s, and the two read the same margin off the same
+                // tuning or the room vanishes in silence.
                 Expect.equal
                     (viewUnder [ colony ] (keeperWorld ()) keeperHome).Refused
                     [
@@ -3089,25 +2864,18 @@ let scanSetMaskTests =
             }
 
             test "a join whose every landing is orphaned is no join, and `linked` now says so" {
-                // ADR 0062 at `World.linked`'s own altitude, over the border
-                // where the mask takes the whole band: W15S26's x = 49 column,
-                // which faces **W14S26** (`RoomName.offsetOf`; #336 corrects
-                // the name `RoomSeamTests` used to print). The lair at (42,39)
+                // At `World.linked`'s own altitude, over the border where the
+                // mask takes the whole band: W15S26's x = 49 column, which
+                // faces W14S26 (`RoomName.offsetOf`, #336). The lair at (42,39)
                 // masks x = 48 for y = 33..45 and stops one tile short of
                 // x = 49, so seven exits survive on the ring with nothing at
-                // all behind them.
+                // all behind them. Read off the rings alone this answered
+                // true, and the flood then priced `None`: the #243/#259 silent
+                // failure through a join the scan set had asserted.
                 //
-                // Before that ADR this answered **true**: `linked` read the two
-                // rings, `Atlas.routes` returned a chain through it, and the
-                // flood then priced `None` because `joinedAcross` dropped every
-                // crossing of the band — the #243/#259 silent failure, arriving
-                // through a join the scan set had asserted.
-                //
-                // The far side is the capture's, mask and all. The near side is
-                // invented as open as a room can be, exactly as `keeperHome`'s
-                // is and for the same reason: nothing on this side may be what
-                // closes the band, or the case would prove nothing about the
-                // far side's ground.
+                // The far side is the capture's, mask and all. The near side
+                // is invented as open as a room can be: nothing on this side
+                // may be what closes the band.
                 let capture = RoomFixtures.load keeperRoom
 
                 let openRoom: RoomFacts =
@@ -3171,25 +2939,21 @@ let scanSetMaskTests =
                     (World.linked margin world "W14S26" keeperRoom)
                     "and every one of the seven lands a body where it can never step again, so the rooms are not joined"
 
-                // The other way round is a different question and keeps its own
-                // answer: those same exits are W15S26's to leave, and the room
-                // they land in has ground behind its ring. A band is directed
-                // since ADR 0062, because the ground it asks about is the far
-                // room's.
+                // The other way round is a different question: those same
+                // exits are W15S26's to leave, and the room they land in has
+                // ground behind its ring. A band is directed, because the
+                // ground it asks about is the far room's.
                 Expect.isTrue
                     (World.linked margin world keeperRoom "W14S26")
                     "the crossing out of the keeper room is still a crossing: the far side there has ground"
             }
         ]
 
-/// The projection's terrain container in its own right (#278). `TerrainGrid`
-/// replaced a `Map<Pos, Terrain>` at forty-odd call sites on the promise that
-/// it answers exactly what the map answered, so the three answers that promise
-/// turns on are pinned here: absence, the off-grid guard, and the order the
-/// tiles come back in. The off-grid cases are the ones that were never true of
-/// the code this replaced — `Atlas.gridOf`'s `Map.iter` wrote whatever tile the
-/// projection held straight into a 2,500-slot array, so a tile off the grid
-/// wrote past the end of it, which Fable does silently and .NET throws on.
+/// `TerrainGrid` replaced a `Map<Pos, Terrain>` on the promise that it answers
+/// exactly what the map answered: absence, the off-grid guard, and the order
+/// the tiles come back in. The off-grid cases were never true of the code
+/// this replaced: a tile off the grid wrote past the end of a 2,500-slot
+/// array, which Fable does silently and .NET throws on.
 [<Tests>]
 let terrainGridTests =
     testList

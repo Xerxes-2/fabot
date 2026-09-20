@@ -1,9 +1,8 @@
-/// Loads the committed room captures (ADR 0036). Real terrain, taken off
-/// the season server once by `scripts/capture-room.mjs`, reviewed as text
-/// and committed — so the suite can test whole-room geometry without ever
-/// touching the API. Real terrain is a counterexample generator here, not
-/// a source of expected values: nothing in this module knows a tile the
-/// Layout is supposed to pick.
+/// ADR-0036
+/// Loads the committed room captures: real terrain, taken off the season
+/// server once by `scripts/capture-room.mjs`, reviewed as text and
+/// committed, so the suite tests whole-room geometry without touching the
+/// API. A counterexample generator, never a source of expected values.
 module Fabot.Core.Tests.RoomFixtures
 
 open System
@@ -16,59 +15,41 @@ open Fabot.Core.Types
 type RoomCapture =
     {
         RoomName: string
-        /// The shard and tick the capture was taken at — provenance, so a
-        /// fixture can be re-captured later with confidence. Terrain never
+        /// Provenance, so a fixture can be re-captured later. Terrain never
         /// changes; the furniture is what the tick pins.
         Shard: string
         Tick: int
-        /// Terrain per tile over x,y in 1..48 — the same window
-        /// `World.terrainOf` projects as ground, with the exit rows
-        /// dropped, in the same flat grid the shell hands the projection
-        /// (#278).
+        /// Terrain per tile over x,y in 1..48 — the window `World.terrainOf`
+        /// projects as ground, exit rows dropped, in the shell's flat grid.
         Terrain: TerrainGrid
-        /// Terrain on the border ring, x or y of 0 or 49 — the rows the
-        /// window above drops, delivered beside it and never inside it,
-        /// exactly as the shell delivers them (ADR 0041): the Seam's own
-        /// terrain, the engine's verbatim, and never a tile to stand on.
+        /// Terrain on the border ring (x or y of 0 or 49): the rows the
+        /// window drops, delivered beside it as the shell delivers them, and
+        /// never a tile to stand on.
         Border: Map<Pos, Terrain>
-        /// The room's sources in the capture's order, each under the
-        /// readable id the projection knows it by.
+        /// The room's sources in the capture's order, under readable ids.
         Sources: (string * Pos) list
         /// The controller, when the room has one. A three-source room —
         /// sector centre or Source Keeper room — has none, and cannot be
         /// owned.
         Controller: (string * Pos) option
-        /// The room's **Thorium** deposits, each under a readable id, as the
-        /// sources are (ADR 0057 decision 1). The capture records every
-        /// mineral the server answered with and this is the cut the shell
-        /// makes — `World.ofGame` filters `FIND_MINERALS` on `mineralType` —
-        /// so the room's ordinary ore is loaded, ignored and never projected.
-        /// A sector centre has none.
+        /// The room's Thorium deposits under readable ids. `World.ofGame`
+        /// filters `FIND_MINERALS` on `mineralType`, so the room's ordinary
+        /// ore is loaded, ignored and never projected. A sector centre has
+        /// none.
         Minerals: (string * Pos) list
-        /// The same sources, in the same order, under the ids the *engine*
-        /// gave them — what the capture actually recorded, before the
-        /// rename above made it readable. Beside the readable ids rather
-        /// than instead of them, because the two answer different
-        /// questions: a test that names a tile reads better with `src-0`,
-        /// and a test that has to match an outpost declaration has no
-        /// choice at all. An outpost is declared in the engine's ids
-        /// (`Outpost`), because that is what a live projection keys every
-        /// target by, so these are the ids a ColonyView built to meet one
-        /// has to carry (ADR 0041, ADR 0042).
+        /// The same sources under the engine's own ids, beside the readable
+        /// ones: an outpost is declared in the engine's ids, so a ColonyView
+        /// built to meet one has to carry them.
         RealSources: (string * Pos) list
         /// The controller under the engine's own id, as `RealSources` is.
         RealController: (string * Pos) option
         /// The Thorium deposits under the engine's own ids, as
         /// `RealSources` is.
         RealMinerals: (string * Pos) list
-        /// Every **rock** the capture found, whatever it is made of: each
-        /// source and each mineral, ordinary ore included, under the engine's
-        /// own ids. The one list above that is not a cut the shell makes —
-        /// `Minerals` drops the room's ordinary ore because no rule projects
-        /// it, and a Source Keeper is pinned to it all the same
-        /// (`Keepers.centres`, ADR 0060 decision 2). What this exists for is
-        /// to make the declared keeper centres checkable against the server
-        /// instead of against the hand that typed them (#317).
+        /// Every rock the capture found, ordinary ore included, under the
+        /// engine's ids: a Source Keeper is pinned to ore no rule projects,
+        /// and this makes `Keepers.centres` checkable against the server
+        /// instead of against the hand that typed them.
         Rocks: (string * Pos) list
     }
 
@@ -81,8 +62,7 @@ type LoadedRoom =
         SourceIds: string list
         ControllerId: string option
         /// The Thorium deposits the projection carries, in the capture's
-        /// order (ADR 0057 decision 1) — empty for a room the mod put none
-        /// in, which is what a sector centre is.
+        /// order; empty for a sector centre.
         MineralIds: string list
     }
 
@@ -92,10 +72,9 @@ let private roomSide = 50
 /// same way whatever the runner's working directory happens to be.
 let private roomsDirectory = Path.Combine(AppContext.BaseDirectory, "rooms")
 
-/// The engine's own terrain mask, classified into the Core's three states
-/// exactly as `World.terrainAt` classifies it — wall bit first, then
-/// swamp. These two must agree or the fixture describes a room the bot
-/// never sees, which is #75's argument one level up.
+/// The engine's terrain mask, classified exactly as `World.terrainAt`
+/// classifies it — wall bit first, then swamp. The two must agree or the
+/// fixture describes a room the bot never sees.
 let private terrainOfMask mask =
     if mask &&& 1 <> 0 then Wall
     elif mask &&& 2 <> 0 then Swamp
@@ -140,11 +119,10 @@ let load (roomName: string) : RoomCapture =
     then
         failwithf "%s: terrain is not %d rows of %d characters" path roomSide roomSide
 
-    // The file holds the room verbatim so a re-capture diffs cleanly, and
-    // these are the lines that split it the way the shell splits it: the
-    // window the projection stands on, and the border ring beside it that
-    // only the Seam reads (ADR 0036, ADR 0041). Rows are the capture's own
-    // row-major order — `rows.[y].[x]`.
+    // The file holds the room verbatim so a re-capture diffs cleanly; these
+    // lines split it the way the shell does: the window the projection
+    // stands on, and the border ring only the Seam reads. Rows are the
+    // capture's own row-major order — `rows.[y].[x]`.
     let terrainAt x y =
         terrainOfMask (int rows.[y].[x] - int '0')
 
@@ -171,17 +149,10 @@ let load (roomName: string) : RoomCapture =
     | Some "id\ttype\tx\ty\tresource" -> ()
     | _ -> failwithf "%s: the objects section has no id/type/x/y/resource column header" path
 
-    // The capture keeps the API's real ids, which is what makes it
-    // traceable; the projection's keys are the test's own vocabulary — and
-    // since an outpost is declared in the engine's ids, both are carried
-    // out rather than one being thrown away here.
-    // The resource column is the one thing a row carries that its
-    // coordinates do not say and a rule depends on: the season mod stands a
-    // Thorium deposit beside the room's ordinary ore, and the shell projects
-    // only the Thorium one (ADR 0057). It is keyed on with the kind, so an
-    // ordinary-ore row is loaded here and reaches no list below — which is
-    // the cut `World.ofGame` makes, restated once in the loader that stands
-    // in for it.
+    // Both the API's real ids and the readable ones are carried out. The
+    // resource column is keyed on with the kind: the season mod stands a
+    // Thorium deposit beside the room's ordinary ore and the shell projects
+    // only the Thorium one, so an ordinary-ore row reaches no list below.
     let objects =
         objectRows
         |> Array.skip 1
@@ -244,11 +215,9 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
             for id, pos in Option.toList controllerTarget do
                 yield id, pos, Controller
 
-            // The Thorium deposits (ADR 0057 decision 1). Projected like any
-            // other target and blocking their tile the way the shell does — a
-            // mineral is one of Screeps' OBSTACLE_OBJECT_TYPES — which costs
-            // nothing on these captures, every season deposit standing on a
-            // wall tile already.
+            // A mineral is one of Screeps' OBSTACLE_OBJECT_TYPES, so it
+            // blocks its tile; free on these captures, every season deposit
+            // standing on a wall tile already.
             for id, pos in capture.Minerals do
                 yield id, pos, Mineral
         ]
@@ -257,9 +226,6 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some capture.RoomName
-                // The captured room's geometry under the captured room's
-                // name, which is the shape `buildSpatial` produces and the
-                // only shape there is (ADR 0041).
                 Rooms =
                     Map.ofList
                         [
@@ -268,10 +234,8 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                                 Terrain = capture.Terrain
                                 TargetPositions =
                                     targets |> List.map (fun (id, pos, _) -> id, pos) |> Map.ofList
-                                // The obstacle rule is the shell's, read off
-                                // the Core's own table rather than restated:
-                                // a structure a creep cannot stand on blocks
-                                // its tile, and so does the controller.
+                                // The obstacle rule is read off the Core's
+                                // own table rather than restated.
                                 Obstacles =
                                     targets
                                     |> List.choose (fun (_, pos, kind) ->
@@ -283,13 +247,9 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                                     |> Set.ofList
                             }
                         ]
-                // Beside the ground, never inside it, exactly as the shell
-                // delivers it (ADR 0041): one room's ring under its own
-                // name, which is the shape `buildSpatial` produces. One
-                // capture is one room, so this projection answers no band
-                // by itself — a Seam joins two rooms, and a projection that
-                // can answer one is composed by merging two captures'
-                // rings, as `RoomInvariantTests.acrossFrom` does.
+                // One capture is one room, so this projection answers no
+                // Seam by itself; `RoomInvariantTests.acrossFrom` merges two
+                // captures' rings for that.
                 Borders = Map.ofList [ capture.RoomName, capture.Border ]
                 TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
             }
@@ -336,10 +296,8 @@ let private neighboursOf (pos: Pos) =
 
 /// The nearest tile to `origin` that is ground, unclaimed, and reachable
 /// from it across ground. Reachable rather than merely near: a container
-/// placed across a wall would be a target nothing can serve, and the
-/// fixture would describe a colony that cannot work. Real terrain is a
-/// counterexample generator (ADR 0036), so this fails loudly rather than
-/// guessing when the room has no such tile.
+/// placed across a wall would be a target nothing can serve. Fails loudly
+/// rather than guessing when the room has no such tile.
 let private nearestFree (capture: RoomCapture) (taken: HashSet<Pos>) (origin: Pos) : Pos =
     let seen = HashSet<Pos>([ origin ])
     let queue = Queue<Pos>([ origin ])
@@ -401,11 +359,9 @@ let private routeBetween (capture: RoomCapture) (blocked: HashSet<Pos>) (from: P
 
     unwind goal []
 
-/// The room's working ground (ADR 0022): every source's Seats plus the
-/// controller's Upgrade Work Area. The Layout keeps its clustered
-/// structures off it — a structure there eats a tile an Anchor or an
-/// upgrader stands on — so the fixture's cluster steps over it too, or it
-/// furnishes a room this colony's own Layout would never have built.
+/// The room's working ground: every source's Seats plus the controller's
+/// Upgrade Work Area. The fixture's cluster steps over it as the Layout
+/// does, or it furnishes a room the Layout would never have built.
 let private workingGround (capture: RoomCapture) (controller: Pos) =
     let ground = HashSet<Pos>()
 
@@ -432,7 +388,7 @@ let private workingGround (capture: RoomCapture) (controller: Pos) =
 /// x+y parity matches the spawn's and never the working ground above. The
 /// parity is load-bearing and not tidiness — those kinds are all obstacles,
 /// so thirty of them packed nearest-first would wall the spawn in, and one
-/// parity leaves the lane lattice a real clustered plan leaves (ADR 0039).
+/// parity leaves the lane lattice a real clustered plan leaves.
 let private clusterTiles (capture: RoomCapture) (spawn: Pos) count (taken: HashSet<Pos>) reserved =
     let parity = (spawn.X + spawn.Y) % 2
     let tiles = ResizeArray<Pos>()
@@ -466,18 +422,15 @@ let private clusterTiles (capture: RoomCapture) (spawn: Pos) count (taken: HashS
     List.ofSeq tiles
 
 /// Where a fleet row's body stands against the tile its work is at:
-/// `Exactly` on that tile, which is what a row holding a *place* takes —
-/// the Anchor on its Post, the only footing a work-heavy body's Harvest
-/// offers it (ADR 0020, ADR 0051) — or `Nearby`, the nearest free ground
-/// outward from it, which is what a row pooling over a place takes.
+/// `Exactly` on that tile (the Anchor on its Post) or `Nearby`, the nearest
+/// free ground outward from it.
 type private Station =
     | Exactly
     | Nearby
 
 /// A creep of the given body, freshly cast and filled to the given
 /// fraction of its carry. A full Screeps CREEP_LIFE_TIME to live, so no
-/// fixture creep is expiring and no lead has to be priced to read a test
-/// (ADR 0026).
+/// fixture creep is expiring.
 let private castCreep name (body: BodyPart list) fill : CreepInfo =
     let capacity = (body |> List.filter ((=) Carry) |> List.length) * carryCapacity
     let carried = int (round (float capacity * fill))
@@ -492,53 +445,37 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
             }
         Fatigue = 0
         Energy = carried
-        // No fixture carries Thorium: the season's ore reaches a body only
-        // through the mine leg (ADR 0057 decision 3), and a captured room's
-        // creeps are the colony's energy fleet.
+        // No fixture carries Thorium: a captured room's creeps are the
+        // colony's energy fleet.
         Thorium = 0
         FreeCapacity = capacity - carried
         Moved = false
         Body = body |> List.countBy id |> Map.ofList
     }
 
-/// A whole colony's ColonyView, built on a captured room at one rung of its
-/// life: the room furnished as its Layout would have left it by `level`,
-/// the bank that level's extensions add up to, and a fleet cast from
-/// `Decide`'s own body rules at that bank. The three rungs the suite runs
-/// are RCL1 with a 300 bank, RCL3 with 800 and RCL5 with 1,800 — a young
-/// colony, one that has just crossed `Tuning.BootstrapLevel`, and the
-/// mother this bot grew up on (ADR 0052).
+/// A whole colony's ColonyView on a captured room at one rung of its life:
+/// the room furnished as its Layout would have left it by `level`, the
+/// bank that level's extensions add up to, and a fleet cast from `Decide`'s
+/// own body rules at that bank. The suite runs RCL1 with a 300 bank, RCL3
+/// with 800 and RCL5 with 1,800.
 ///
-/// What the level moves, and all it moves: the extension, tower and
-/// Storage counts come off the engine's own allowance table, and the roads
-/// and ramparts appear only from `Tuning.BootstrapLevel` up, because a
-/// room under it places neither (#209, #214). Containers stand at every
-/// rung — one on each source's Seat, which is what makes it a Post, and
-/// the upgrade buffer beside the controller (ADR 0046). The buffer is a
-/// fact about the room and not about the level: the container plan is
-/// "RCL-gated by nothing" (`Decide.planLayout`), so a Layout run to
-/// completion has one at RCL1 too. That is where this fixture and
-/// `scripts/profile.mjs`'s `young` scenario deliberately part company —
-/// `young` models the live W13S28, which has built its two source
-/// containers and no buffer yet, and this models the room its Layout
-/// would have finished — so a test that reads the upgrader gate off one
-/// of them is not reading the other's room. Nothing here names a tile:
-/// every position is derived from the captured terrain, so this fixture
-/// is a counterexample generator like the rest of the file and never a
-/// source of expected values.
+/// The level moves the extension, tower and Storage counts (off the engine's
+/// allowance table) and whether roads and ramparts stand (from
+/// `Tuning.BootstrapLevel` up). Containers stand at every rung, the upgrade
+/// buffer included: the container plan is RCL-gated by nothing, so a Layout
+/// run to completion has a buffer at RCL1 too. That is where this fixture
+/// and `scripts/profile.mjs`'s `young` scenario part company — `young`
+/// models the live W13S28 with its two source containers and no buffer —
+/// so a test reading the upgrader gate off one is not reading the other's
+/// room. Nothing here names a tile.
 ///
-/// Two things it is deliberately **not**. It is the colony's **home room
-/// alone**: a declared outpost's terrain layer, which `World.ofGame`
-/// reads with or without vision (ADR 0041, ADR 0042), is not here, so
-/// the RCL5 rung prices W12S28 as the one-room colony it is not — a test
-/// that needs the outpost has to add it. And the fleet pins **body
-/// sizing** at this bank and never row counts: the bodies are
-/// `Decide.Bodies.bodyFor`'s own at `bank`, the counts are this fixture's (see
-/// `fleetRows`), so nothing here reproduces the [[workforce target]].
+/// It is the home room alone — no outpost layer, so the RCL5 rung prices
+/// W12S28 as a one-room colony — and the fleet pins body sizing at this
+/// bank, never row counts: the counts are this fixture's (see `fleetRows`).
 ///
 /// `bank` is checked against the level rather than believed: extensions
-/// stand full here, so a bank that is not what this level's extensions
-/// add up to describes a room the engine cannot report.
+/// stand full here, so any other bank describes a room the engine cannot
+/// report.
 let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
     let levelBank = spawnCapacity + extensionAllowance[level] * extensionCapacity
 
@@ -563,10 +500,8 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         taken.Add pos |> ignore
         pos
 
-    // The spawn stands on the ground nearest the room's own furniture —
-    // the mean of its sources and its controller — which is roughly where
-    // a Layout wants the Keep and, more to the point here, is derived from
-    // the capture rather than written down per room.
+    // The spawn stands on the ground nearest the mean of the sources and
+    // the controller: derived from the capture, not written down per room.
     let anchors = controllerPos :: (capture.Sources |> List.map snd)
 
     let centroid =
@@ -605,9 +540,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
     let towerTiles = clustered |> List.skip extensions |> List.truncate towers
     let storageTiles = clustered |> List.skip (extensions + towers)
 
-    // Roads and ramparts from `Tuning.BootstrapLevel` up and never below
-    // it: a room earning eight a tick places no road site (#209) and keeps
-    // no rampart (#214).
+    // Roads and ramparts from `Tuning.BootstrapLevel` up and never below.
     let furnishesDefence = level >= Tuning.defaults.BootstrapLevel
 
     let roadTiles =
@@ -622,13 +555,8 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
             |> List.distinct
             |> List.map claim
 
-    // The ramparts the Layout places, which is a set and not a structure:
-    // over every Keep structure — the spawn, every tower and the Storage
-    // (ADR 0034) — and over every Post a container stands on, which are
-    // ramparted with the Keep without being of it. Walkable, so each
-    // shares the tile of the thing it covers the way the engine lets it,
-    // and a three-source room ramparts three Posts because the set is the
-    // rule's.
+    // Ramparts over every Keep structure and over every Post a container
+    // stands on. Walkable, so each shares the tile of the thing it covers.
     let ramparts =
         if not furnishesDefence then
             []
@@ -667,22 +595,16 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                 yield id, pos, Structure BuiltKind.Rampart
         ]
 
-    // The fleet, cast from Decide's own rules at this bank and stood where
-    // its row works: an Anchor **on** each Post, a hauler at the spawn it
-    // shuttles from, two workers at the controller, and — only where the
-    // bank buys a standing body (ADR 0046, #187) — an upgrader at the
-    // buffer it drinks from. The counts are the fixture's and deliberately
-    // small: what this fleet is for is that every row of the pattern table
-    // is in the pool, not that the Workforce target is reproduced here.
+    // The fleet, stood where its row works: an Anchor on each Post, a
+    // hauler at the spawn, two workers at the controller, and an upgrader
+    // at the buffer where the bank buys one. The counts are the fixture's
+    // and deliberately small: every row of the pattern table is in the
+    // pool, nothing more.
     //
-    // The Anchor's tile is the source container's own and is taken
-    // `Exactly`, not resolved outward: a container is walkable, standing on
-    // one is what garrisoning a Post *is* (ADR 0020, ADR 0051), and Harvest
-    // offers a work-heavy body no other footing — so an Anchor placed on
-    // the nearest free tile beside its Post would be a body on a walk in
-    // every rung of the fixture. On W13S28's `16,7` the point is forced:
-    // its one Seat is the container's, so "beside" is range 2 from the
-    // rock and out of digging range altogether.
+    // The Anchor takes its container's tile `Exactly`: standing on one is
+    // what garrisoning a Post is, so an Anchor beside its Post would be a
+    // body on a walk. On W13S28's `16,7` the point is forced: its one Seat
+    // is the container's, so "beside" is out of digging range altogether.
     let fleetRows =
         [
             for index, (_, pos) in List.indexed sourceContainers do
@@ -731,8 +653,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
 
     let hitsOf (id: string) =
         if id.StartsWith "road-" then
-            // A road in every eighth tile below half hits, so the Repair
-            // family is in the pool rather than empty (ADR 0010).
+            // Every eighth road below half hits, so Repair is in the pool.
             let index = int (id.Substring 5)
 
             if index % 8 = 3 then
@@ -742,8 +663,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         elif id.StartsWith "cont-" then
             { Hits = 4000; HitsMax = 5000 }
         elif id.StartsWith "rampart-" then
-            // Whole at the floor ADR 0034 derives, so the fixture's one
-            // rampart is not a Repair task at every rung it stands in.
+            // Whole at the rampart floor, so it is not a Repair task.
             { Hits = 100_000; HitsMax = 300_000 }
         elif id = "spawn-1" then
             { Hits = 5000; HitsMax = 5000 }
@@ -859,41 +779,27 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                     |> Map.ofList
             }
         Declared = [ capture.RoomName ]
-        // The rung as a [[stage]] (ADR 0052 decision 3): owned, a spawn
-        // standing, and the level above — so RCL1 and RCL3 are one stage
-        // apart and the road, the rampart and the feeding-tier rules read
-        // that and not the number. Derived and never written down beside
-        // the level, so a rung cannot be furnished as one colony and
-        // decided as another.
+        // The stage is derived from the level, never written beside it, so
+        // a rung cannot be furnished as one colony and decided as another.
         Stages =
             match Colony.stageOf Tuning.defaults true true (Some level) with
             | Some stage -> Map.ofList [ capture.RoomName, stage ]
             | None -> Map.empty
-        // One colony over one captured room: every body in it is this
-        // colony's, so there is nobody else's to carry (ADR 0052 decision
-        // 1), and it raises no child, so it borrows nothing.
+        // One colony over one captured room: nobody else's bodies, nothing
+        // borrowed, and every hand-declared outpost borders its home.
         Foreign = Set.empty
         Borrowed = { Rooms = [] }
-        // These fixtures declare their outposts by hand and every one of
-        // them borders its home, so nothing is refused (#243).
         Refused = []
-        // And no [[errand]]: an errand is a room a human declared because
-        // one named object out there has to be acted on (ADR 0060 decision
-        // 1), and this fixture declares none — so no Reclaim is pooled and
-        // no seat of the reserver row is the re-claimer's (#318).
+        // No errand, so no Reclaim is pooled and no reserver seat is the
+        // re-claimer's.
         Errands = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []
-        // And nothing remembered of a room it cannot see: these captures
-        // are ticks with vision in every room they carry (#151).
+        // These captures are ticks with vision in every room they carry.
         Sightings = Map.empty
-        // The numbers this bot ships with (ADR 0052 decision 5): a
-        // fixture starts from them and the tests that are *about* a
-        // tunable move the one field they are about.
+        // A test that is about a tunable moves the one field it is about.
         Tuning = Tuning.defaults
-        // Nothing in the oven: a fixture's rows count what is alive, and
-        // the casting cascade's own tests are the ones that put a body
-        // here (#156).
+        // Nothing in the oven: a fixture's rows count what is alive.
         Casting = []
     }

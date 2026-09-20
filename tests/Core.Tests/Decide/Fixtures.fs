@@ -21,9 +21,8 @@ let spawn =
         IsSpawning = false
     }
 
-/// The colony's bank holding the given energy against the given capacity
-/// (ADR 0052 decision 1): one account, its home room's, and no longer a
-/// map keyed by room — every spawn a colony casts from stands in its home.
+/// The colony's bank holding the given energy against the given capacity:
+/// one account, its home room's.
 let bank energy capacity : RoomEnergy =
     {
         Available = energy
@@ -41,9 +40,7 @@ let controllerAt level =
     }
 
 /// A room this colony owns: the spawn room's control entry, and the rate
-/// every source in it is priced at (ADR 0042). Owned and not reserved —
-/// the two halves the engine gives the same 3,000 a cycle — because that
-/// is what the colony's own room is.
+/// every source in it is priced at.
 let ownedRoom: RoomControlInfo =
     {
         Owner = Ownership.Ours
@@ -53,11 +50,8 @@ let ownedRoom: RoomControlInfo =
     }
 
 /// A room another player has taken: seen, owned, and owned by somebody
-/// else (ADR 0043). The third answer to one question, which is why it is a
-/// fixture of its own beside the two around it rather than a flag on
-/// either — and since #165 the one control entry that **latches** a
-/// [[stand-down]], where a rival's reservation runs a clock. Shared since
-/// #165, when the gate's own suite came to want it beside the quota rows.
+/// else. The one control entry that latches a stand-down, where a rival's
+/// reservation runs a clock.
 let rivalRoom: RoomControlInfo =
     {
         Owner = Ownership.Rival
@@ -67,8 +61,7 @@ let rivalRoom: RoomControlInfo =
     }
 
 /// A neutral room nobody holds: seen, and worth half. Not the same fact as
-/// a room with no entry at all, which is one the colony cannot see and so
-/// cannot price (ADR 0004).
+/// a room with no entry at all, which is one the colony cannot see.
 let neutralRoom: RoomControlInfo =
     {
         Owner = Ownership.Unowned
@@ -98,10 +91,9 @@ let reservedRoom ours ticksToEnd : RoomControlInfo =
     }
 
 /// A neutral room whose reservation the NPC Invader holds — what a
-/// level-0 invader core leaves behind it when it `attackController`s a
-/// room it expanded into (ADR 0043). The third holder, and a fixture of
-/// its own because it prices exactly as a rival's does and, under ADR
-/// 0043, withdraws on the opposite rule.
+/// level-0 invader core leaves behind when it `attackController`s a room
+/// it expanded into. A fixture of its own because it prices exactly as a
+/// rival's does and withdraws on the opposite rule.
 let coreReservedRoom ticksToEnd : RoomControlInfo =
     {
         Owner = Ownership.Unowned
@@ -115,40 +107,27 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
         Sign = None
     }
 
-/// The [[stage]] map of a colony that declares itself and nothing else
-/// (ADR 0052 decision 3), standing at the given controller level. Keyed by
-/// the room its projection is filed under, which is the name every reader
-/// looks a home up by — and by that name **alone**, unlike `homeControl`
-/// below: a control entry prices a room, where a stage entry says a colony
-/// of ours lives there, so a second name here would be a second colony,
-/// and the fixtures' home room would have a [[nursery]] beside it hiring
-/// [[pioneer]]s.
-///
-/// Owned, with a spawn standing, because that is what `Main.loop` runs
-/// `decide` for (ADR 0047 decision 1). Derived through `Colony.stageOf`
-/// from the level the fixture's own controller carries, and never written
-/// down beside it: a fixture that spelled a stage out could spell a colony
-/// the shell can never build — an RCL5 room the roads are gated out of, an
-/// RCL1 one that keeps ramparts — and every rule that used to read the
-/// level reads this.
+/// The stage map of a colony that declares itself and nothing else, at the
+/// given controller level. Keyed by the home name alone, unlike
+/// `homeControl` below: a stage entry says a colony of ours lives there, so
+/// a second name would be a second colony hiring pioneers. Derived through
+/// `Colony.stageOf` and never written down: a fixture that spelled a stage
+/// out could spell a colony the shell can never build.
 let homeStages (spatial: SpatialInfo) level =
     match Colony.stageOf Tuning.defaults true true (Some level) with
     | Some stage -> Map.ofList [ SpatialInfo.homeName spatial, stage ]
     | None -> Map.empty
 
-/// The control map for a colony holding its own room and nothing else.
-/// Both names the fixtures below file a home layer under: `SpatialInfo.empty`
-/// and the `spatial` funnel leave `RoomName` unset and file under the empty
-/// name, `openRoom` names the room "W1N1", and the control map is keyed by
-/// room like every other room-keyed fact (ADR 0041). Holding both keeps one
-/// default honest for either funnel; an entry for a room the fixture has no
-/// layer for is read by nothing.
+/// The control map for a colony holding its own room and nothing else, under
+/// both names the fixtures file a home layer under: `SpatialInfo.empty` and
+/// the `spatial` funnel file under the empty name, `openRoom` under "W1N1".
+/// An entry for a room the fixture has no layer for is read by nothing.
 let homeControl = Map.ofList [ "", ownedRoom; "W1N1", ownedRoom ]
 
-/// A stocked source: a restock of zero, ready to dig now (ADR 0025).
+/// A stocked source: a restock of zero, ready to dig now.
 let source id : SourceInfo = { Id = id; TicksToRestock = 0 }
 
-/// A drained source, the given number of ticks from its restock (ADR 0025).
+/// A drained source, the given number of ticks from its restock.
 let drained id ticks : SourceInfo = { Id = id; TicksToRestock = ticks }
 
 /// An energy-hungry structure of the given kind with the given free capacity.
@@ -175,59 +154,37 @@ let bareRespawn =
         Hostiles = []
         InvaderCores = []
         Spatial = SpatialInfo.empty
-        // No colony declared but the one this ColonyView is: a **candidate
-        // colony** is a declared home the colony does not own yet (ADR
-        // 0047), so an empty list is every fixture that claims nothing —
-        // which is every fixture but the claim tests' own.
+        // No colony declared but this one, which claims nothing.
         Declared = []
-        // And no [[stage]] for it either (ADR 0052 decision 3), which is
-        // deliberate and is the same sentence: this fixture's home is
-        // `SpatialInfo.empty`'s unnamed room, and a fixture that named a
-        // room of its own — `openRoom`'s "W1N1" — would inherit a stage
-        // filed under the wrong name and read as a colony of ours standing
-        // beside it, hiring [[pioneer]]s for it. So a stage arrives with
-        // the room: `atLevel` and `withLevel` file one under the home the
-        // fixture actually has, and a colony with none answers every stage
-        // rule the way one whose controller cannot be placed does.
+        // No stage either, deliberately: this fixture's home is
+        // `SpatialInfo.empty`'s unnamed room, and a stage filed under
+        // `openRoom`'s "W1N1" would read as a second colony of ours
+        // standing beside it, hiring pioneers. A stage arrives with the
+        // room: `atLevel` and `withLevel` file one under the home the
+        // fixture actually has.
         Stages = Map.empty
-        // One colony in the world, so every body standing in its rooms is
-        // its own: another colony's creeps are the ones this one cannot
-        // move and does not price (ADR 0052 decision 1), and the fixtures
-        // that need one put it here by name.
+        // One colony in the world: every body is its own, it raises no
+        // child, declares no errand, and every tick has vision. "W1N2"
+        // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
-        // And nothing borrowed: this colony raises no child, so no room's
-        // Upgrade and Build are hers to take (ADR 0047 decision 4).
         Borrowed = { Rooms = [] }
-        // And nothing refused: "W1N2" borders "W1N1", so the declaration
-        // this colony is cut from is one a Seam reaches (#243).
         Refused = []
-        // And no [[errand]]: an errand is a room a human declared because
-        // one named object out there has to be acted on (ADR 0060 decision
-        // 1), and this fixture declares none — so no Reclaim is pooled and
-        // no seat of the reserver row is the re-claimer's (#318).
         Errands = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []
-        // And nothing remembered of a room it cannot see (#151): a fixture
-        // is a tick with vision wherever it lays a fact, so an empty
-        // sighting map is what every case here decides under, and the
-        // vision grace is inert until a test puts a room in the dark on
-        // purpose (`goneDark`).
         Sightings = Map.empty
-        // The numbers this bot ships with (ADR 0052 decision 5): a
-        // fixture starts from them and the tests that are *about* a
-        // tunable move the one field they are about.
+        // The tests that are *about* a tunable move the one field they are
+        // about.
         Tuning = Tuning.defaults
-        // Nothing in the oven: a fixture's rows count what is alive, and
-        // the casting cascade's own tests are the ones that put a body
-        // here (#156).
+        // Nothing in the oven: the casting cascade's own tests put a body
+        // here.
         Casting = []
     }
 
 /// A creep with the given body's part counts, freshly cast: a full
 /// Screeps CREEP_LIFE_TIME to live, so no fixture creep is expiring and no
-/// lead has to be priced to read a test (ADR 0026).
+/// lead has to be priced to read a test.
 let creepWith name energy freeCapacity body =
     {
         Name = name
@@ -240,7 +197,7 @@ let creepWith name energy freeCapacity body =
         Fatigue = 0
         Energy = energy
         // Energy unless a case says otherwise: `carrying` below is the one
-        // builder that puts the season's ore in a body (ADR 0057 decision 3).
+        // builder that puts the season's ore in a body.
         Thorium = 0
         FreeCapacity = freeCapacity
         Moved = false
@@ -248,7 +205,7 @@ let creepWith name energy freeCapacity body =
     }
 
 /// The same creep with the given ticks left to live — what puts it inside
-/// its row's lead and makes it expiring (ADR 0026).
+/// its row's lead and makes it expiring.
 let withLife ticks (creep: CreepInfo) = { creep with TicksToLive = ticks }
 
 /// A generalist worker-unit creep: one Work, one Carry, one Move.
@@ -312,9 +269,8 @@ let sitesOfKind kind intents =
     |> List.choose (fun (_, pos, k) -> if k = kind then Some pos else None)
 
 /// The colony at one controller level: the level its controller carries
-/// and the [[stage]] that level puts it at, moved together (ADR 0052
-/// decision 3), because they are one fact of the world read twice and a
-/// fixture that moved one alone would be a colony the shell cannot build.
+/// and the stage that level puts it at, moved together, because a fixture
+/// that moved one alone would be a colony the shell cannot build.
 let atLevel level room =
     { bareRespawn with
         Controller = Some(controllerAt level)
@@ -330,7 +286,7 @@ let withLevel level (colony: ColonyView) =
         Stages = homeStages colony.Spatial level
     }
 
-/// The trunk fixture (ADR 0011): a broad plain field with the spawn at
+/// The trunk fixture: a broad plain field with the spawn at
 /// (25,25), the controller at (35,25), one source embedded in wall terrain
 /// at (15,25), two swamps inside the controller's Upgrade Work Area, one
 /// far swamp off every trunk line, and two extensions already built on the
@@ -395,7 +351,7 @@ let trunkColony level =
     }
 
 /// The clustered structures of a plan: the Storage, the tower and every
-/// extension, the tiles one ordering rule picks (ADR 0011, ADR 0022).
+/// extension, the tiles one ordering rule picks.
 let clusterTiles intents =
     sitesOfKind Storage intents
     @ sitesOfKind Tower intents
@@ -408,14 +364,11 @@ let withTarget id pos kind colony =
         Spatial = colony.Spatial |> withTargets [ id, pos, kind ]
     }
 
-/// The same colony with a second room's geometry beside its own: one more
-/// entry in `Rooms`, under that room's name (ADR 0041). The kind census
-/// stays unlayered and world-unique, exactly as the projection keeps it —
-/// which is what makes these fixtures able to ask whether a reader joins a
-/// kind to the right room's tile. It adds the outpost's entry and never
-/// replaces the map, so the colony's own layer survives it and the helper
-/// is order-blind: a `withTarget` composed either side of it is still
-/// read.
+/// The same colony with a second room's geometry beside its own. The kind
+/// census stays unlayered and world-unique, as the projection keeps it,
+/// which is what lets these fixtures ask whether a reader joins a kind to
+/// the right room's tile. Adds the outpost's entry and never replaces the
+/// map, so the helper is order-blind.
 let withOutpost room targets tiles (colony: ColonyView) =
     { colony with
         Spatial =
@@ -489,14 +442,12 @@ let decideOn colony = decide colony Map.empty Set.empty None
 /// test varies.
 let decideFrom assigned colony = decide colony assigned Set.empty None
 
-/// `planTasksOn` over a colony **whose assignment table holds nothing** — the
-/// tick's pool as a colony with no repair in progress derives it (ADR 0061).
-/// The held set is the one argument all but the held-line tests pass empty and
-/// mean it. Named `…On` like `decideOn` and `poolOn` beside it rather than
-/// shadowing `Planner.planTasks`: a shadow resolves by open order, and the day
-/// the Planner gains a fourth fact the tempting repair is to default it here
-/// and leave every call site compiling with two facts it never named. A test
-/// *about* the two lines calls `planTasksHolding` below.
+/// `planTasksOn` over a colony whose assignment table holds nothing. Named
+/// `…On` like `decideOn` rather than shadowing `Planner.planTasks`: a shadow
+/// resolves by open order, and the day the Planner gains a fourth fact the
+/// tempting repair is to default it here and leave every call site compiling
+/// with two facts it never named. A test *about* the two lines calls
+/// `planTasksHolding` below.
 let planTasksOn view threats =
     Planner.planTasks
         view
@@ -505,9 +456,8 @@ let planTasksOn view threats =
         HeldTaskFacts.empty
         (Planner.outpostFactsOf view)
 
-/// `planTasksOn` over a colony whose living creeps hold these Tasks (ADR 0061):
-/// the held set spelled the way the pool reads it, forward through `taskId`,
-/// so a test names the Task and never a string.
+/// `planTasksOn` over a colony whose living creeps hold these Tasks, spelled
+/// forward through `taskId` so a test names the Task and never a string.
 let planTasksHolding (holding: Task list) view =
     Planner.planTasks
         view
@@ -530,8 +480,7 @@ let planTasksHoldingThorium (holding: Task list) view =
         (Planner.outpostFactsOf view)
 
 /// This tick's pool with its priorities and capacities, over the
-/// snapshot's own Atlas — what the Matcher and the mover are both handed
-/// (ADR 0052 decision 6).
+/// snapshot's own Atlas — what the Matcher and the mover are both handed.
 let poolOn snapshot =
     planPool snapshot (Atlas.ofView snapshot) (planTasksOn snapshot noThreats)
 
@@ -580,8 +529,7 @@ let sayIntents intents =
         | _ -> None)
 
 /// Project one structure of the given built kind carrying the given hits
-/// onto a snapshot — position-less: unpriceable geometry never counts
-/// against a Task (ADR 0004), so the pool and matching are exercised
+/// onto a snapshot — position-less, so the pool and matching are exercised
 /// without terrain.
 let withHits id kind hits hitsMax (snapshot: ColonyView) =
     { snapshot with
@@ -628,35 +576,27 @@ let activations intents =
         | ActivateSafeMode id -> Some id
         | _ -> None)
 
-/// A hostile creep of the given body standing on the given tile. Its
-/// owner and its room are both immaterial to the reflexes — the Raid log
-/// is the only reader of either (ADR 0028, ADR 0041) — and the room is
-/// spelled the empty string, the name `SpatialInfo.homeName` gives a
-/// projection that names none, which is what the colonies assigning
-/// `Hostiles` directly here are built on (`bareRespawn`, `spatial`,
-/// `towerColony`). A colony that *does* name its room gets that name
-/// stamped on by `facing`, so no fixture files a hostile in a room its
-/// own projection has no layer for.
+/// A hostile creep of the given body standing on the given tile. Its owner
+/// and its room are immaterial to the reflexes; the room is the empty
+/// string, the name a projection that names none files under, which is
+/// what the colonies assigning `Hostiles` directly here are built on. A
+/// colony that names its room gets that name stamped on by `facing`.
 let hostileAt id pos body : HostileInfo =
     {
         Id = id
         Owner = "raider"
         Pos = RoomPos.at "" pos
         Body = body
-        // A full Invader life. The one reader is ADR 0043's clock for a raid
-        // with no core in it (#257), and a fixture that said otherwise would
-        // be making a claim about the stand-down rather than about the raid.
+        // A full Invader life: a fixture that said otherwise would be
+        // making a claim about the stand-down rather than about the raid.
         TicksToLive = Engine.creepLifetime
     }
 
-/// The same colony with the given hostiles standing in its room — in
-/// **its** room, which is why the name is stamped on here rather than left
-/// to `hostileAt` (ADR 0041). The colonies this composes onto are built on
-/// `openRoom`, which names its projection "W1N1"; a hostile carrying the
-/// empty name would be filed in a room those projections hold no layer
-/// for, so every reader that joins a hostile to the geometry around it —
-/// the Raid log's closest approach today, the reflexes' Reach at #117 —
-/// would measure it against nothing.
+/// The same colony with the given hostiles standing in its own room, the
+/// name stamped on here. A hostile carrying the empty name would be filed
+/// in a room an `openRoom` projection holds no layer for, so every reader
+/// that joins it to the geometry around it would measure it against
+/// nothing.
 let facing hostiles (snapshot: ColonyView) =
     { snapshot with
         Hostiles =
@@ -696,22 +636,20 @@ let moveIntentsFor name intents =
         | _ -> false)
 
 /// The dig Intents a creep is issued this tick — what tells a body the
-/// Matcher kept on Harvest from one the Emitter actually lets dig (ADR
-/// 0020, ADR 0024).
+/// Matcher kept on Harvest from one the Emitter actually lets dig.
 let digIntentsFor name intents =
     intents
     |> List.filter (function
         | HarvestSource(creep, _) -> creep = name
         | _ -> false)
 
-/// The tile the mine fixture's Thorium deposit stands on, and the mine
-/// [[post]] beside it: the deposit is embedded in wall where the mod puts one,
-/// and the container on its east Seat is the tile the [[miner]] stands on (ADR
-/// 0057 decision 2).
+/// The tile the mine fixture's Thorium deposit stands on, and the mine post
+/// beside it: the deposit is embedded in wall where the mod puts one, and
+/// the container on its east Seat is the tile the miner stands on.
 let minePos = { X = 10; Y = 10 }
 let minePost = { X = 11; Y = 10 }
 
-/// The mine fixture (ADR 0057 decision 2): a plain corridor y = 10, x = 8..20
+/// The mine fixture: a plain corridor y = 10, x = 8..20
 /// with the deposit "min-a" embedded in wall at (10,10) and the spawn standing
 /// at (15,10). The extractor "ext-a" stands on the deposit's **own tile** —
 /// which is the placement rule, the extractor's tile being its target's — and
@@ -800,24 +738,21 @@ let onCooldown ticks (colony: ColonyView) =
 /// so it has neither energy nor free capacity to report.
 let miner name = creepWith name 0 0 [ Work; Work; Move ]
 
-/// The same body with `units` of **Thorium** aboard (ADR 0057 decision 3), out
-/// of the free room it was built with: a creep's store is general, so what the
-/// ore takes it takes off the whole store's free capacity and not off an energy
-/// share of it. The one builder that puts the season's ore in a body — a mixed
-/// load is exactly what the decision forbids, so a case that wants one says
-/// both fields by hand.
+/// The same body with `units` of Thorium aboard, out of the free room it was
+/// built with: a creep's store is general, so what the ore takes it takes off
+/// the whole store's free capacity. The one builder that puts the season's
+/// ore in a body; a case that wants a mixed load says both fields by hand.
 let carrying units (creep: CreepInfo) =
     { creep with
         Thorium = units
         FreeCapacity = max 0 (creep.FreeCapacity - units)
     }
 
-/// The mine fixture with the colony's [[storage]] standing at (14,10) — an
+/// The mine fixture with the colony's Storage standing at (14,10) — an
 /// obstacle, as the projection carries a built one — and 600 Thorium in the
-/// mineral container (ADR 0057 decision 3). The whole of the mine-to-Storage leg
-/// in one colony: the deposit, the extractor, the container the [[miner]] drops
-/// into, and the free warehouse the load is carried to, the Storage being the
-/// one store the contact penalty never reaches because nothing can stand on it.
+/// mineral container: the whole of the mine-to-Storage leg in one colony, the
+/// Storage being the one store the contact penalty never reaches because
+/// nothing can stand on it.
 ///
 /// The corridor is one tile wide, so the stand is forced and legible: the
 /// container's only Seat is (12,10) and the Storage's is (13,10), one step
@@ -834,17 +769,12 @@ let mineHaulColony =
             |> withTargets [ "sto-1", { X = 14; Y = 10 }, Structure BuiltKind.Storage ]
     }
 
-/// The same colony under a **named** home room, geometry and all. Every fixture
-/// built on `SpatialFixtures.spatial` carries its layer under the empty name
-/// (that funnel's own docstring says so, and warns to name the room first and
-/// build second), which is invisible until a rule reads the name — and
-/// `planConsignment` reads it, because the fee is priced over the distance from
-/// this room to the consignee's.
-///
-/// So this moves the layer rather than setting the field: naming the room and
-/// leaving the geometry where it was is exactly the quiet mistake the funnel
-/// warns about, with the target-keyed queries still answering and every
-/// room-keyed one falling back to `RoomLayer.empty`.
+/// The same colony under a named home room, geometry and all. Every fixture
+/// built on `SpatialFixtures.spatial` carries its layer under the empty name,
+/// which is invisible until a rule reads the name, and `planConsignment`
+/// does. This moves the layer rather than setting the field: naming the room
+/// and leaving the geometry where it was leaves every room-keyed query
+/// falling back to `RoomLayer.empty`.
 let named room (colony: ColonyView) =
     let layer = SpatialInfo.layerOf colony.Spatial (SpatialInfo.homeName colony.Spatial)
 
@@ -959,7 +889,7 @@ let withMinePile units (colony: ColonyView) =
             |> withTargets [ "pile-min", minePost, Dropped Thorium ]
     }
 
-/// The haul fixture (ADR 0012): a plain corridor y = 10, x = 9..21; the
+/// The haul fixture: a plain corridor y = 10, x = 9..21; the
 /// source embedded in wall at (10,10) with Seats (9,10) and (11,10), the
 /// controller standing at (20,10); the source container "can-src" on the
 /// Seat (11,10) and the controller container "can-ctrl" at (18,10),
@@ -994,14 +924,10 @@ let hauler name energy freeCapacity =
 /// on it sits one step from the near store's Work Area and seventeen or
 /// more from the far one, so travel cost points the whole crowd at one
 /// container and only a capacity can send any of it to the other. Three
-/// rows and not one, so a waiting hauler is never in another's path: the
-/// occupancy surcharge (ADR 0008) prices a queue on a one-tile lane at a
-/// swamp step apiece, and a crowd that thins itself by standing in its own
-/// way would prove the cap without the cap.
-///
-/// Two containers and not a container and a Storage, because the two must
-/// sit on the *same* tier: a rank between them (ADR 0023) would decide the
-/// split before capacity was ever asked.
+/// rows and not one, so a waiting hauler is never in another's path: a
+/// crowd that thins itself by standing in its own way would prove the cap
+/// without the cap. Two containers and not a container and a Storage,
+/// because the two must sit on the same tier.
 let crowdField =
     [
         for x in 5..35 do
@@ -1084,7 +1010,7 @@ let haulDemandOf snapshot =
     let { Quotas = quotas } = decideOn snapshot
     quotas.HaulerDemand |> List.sumBy (fun row -> row.Demand)
 
-/// The W12S28 shape (ADR 0012): a 3-wide plain field y = 9..11 from x = 8
+/// The W12S28 shape: a 3-wide plain field y = 9..11 from x = 8
 /// to 32, two sources embedded in wall at (10,10) and (30,10) with their
 /// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual
 /// Seat — and the spawn structure at (20,10), eight steps from either
@@ -1133,42 +1059,26 @@ let incomeColony =
         Spatial = incomeRoom
     }
 
-/// The income-based fleet the W12S28 shape pins (ADR 0012), at the 300
-/// bank this fixture banks and therefore at the Anchor body that bank buys
-/// (#208): the row casts `2W/1C/1M`, which digs 4 a tick, so each of the
-/// two owned Posts is worth **four** and not the ten the room would pay a
-/// body big enough to take it. One Anchor per Post (2), the throughput
-/// quota (1 hauler — each container's round trip is 16 ticks out loaded
-/// and 8 back empty since ADR 0029 priced each leg as a walk, and the
-/// colony's demand is ceil((24 + 24) × 4 / 200) = 1, rounded once for the
-/// colony and not once per container, ADR 0049), and the income workers —
-/// 2 posted sources × 4 e/tick × the 1500-tick lifetime = 12,000, minus
-/// the anchor and hauler rows' replacement amortization (2 × 300 + 1 × 300
-/// = 900), over one worker body's Work drain × lifetime (1 × 1500) →
-/// ceil(7.4) = 8 (ADR 0037).
-///
-/// This is the live defect #208 was filed on, at the fixture that always
-/// held it: read at the room's rate the same colony counted 20 a tick,
-/// hired 19 workers and 3 haulers off it, and left most of them idle
-/// beside a spawn already full. `richIncomeColony` below is the other half
-/// of the pair — the same geometry at a bank whose cast outruns the rock,
-/// where the rate is the answer again and nothing moves.
+/// The income-based fleet the W12S28 shape pins at its 300 bank, and so at
+/// the Anchor body that bank buys: `2W/1C/1M` digs 4 a tick, so each Post is
+/// worth four and not the room's ten (#208). One Anchor per Post (2), the
+/// throughput quota (1 hauler: each round trip is 16 ticks out loaded and 8
+/// back empty, and ceil((24 + 24) × 4 / 200) = 1, rounded once for the
+/// colony), and the income workers: 2 × 4 e/tick × 1500 = 12,000, minus the
+/// anchor and hauler rows' amortization (900), over one worker's Work drain
+/// × lifetime (1500) → ceil(7.4) = 8. Read at the room's rate the same
+/// colony hired 19 workers and 3 haulers and left most of them idle.
 let incomeFleet =
     [ anchor "a1" 0 50; anchor "a2" 0 50; hauler "h1" 0 100 ]
     @ [ for i in 1..8 -> worker $"w{i}" 0 50 ]
 
-/// The same geometry again at the 1,800 bank of an RCL5 room, with four
-/// bodies' worth of energy standing in it so a target that wanted two
-/// casts could take them. Two cases read it and both are about a number
-/// that is only visible here.
-///
-/// The bank makes every row's body the largest the rule gives: Anchor
-/// `6W/1C/1M` = 700 and digging twelve, hauler 24C/12M = 1,800 carrying
-/// 1,200, worker `9W/9C/9M` = 1,800 at a Work drain of nine. The Anchor's
-/// twelve is over the ten an owned rock pays, so the cap #208 put on a
-/// Post's worth is not binding and each of the two Posts is worth the
-/// room's rate — which is the *upper* half of that ticket's pair, and the
-/// half that says the rule is a cap and not a discount.
+/// The same geometry at the 1,800 bank of an RCL5 room, with four bodies'
+/// worth of energy standing in it. The bank makes every row's body the
+/// largest the rule gives: Anchor `6W/1C/1M` = 700 digging twelve, hauler
+/// 24C/12M = 1,800 carrying 1,200, worker `9W/9C/9M` = 1,800 at a Work drain
+/// of nine. The Anchor's twelve is over the ten an owned rock pays, so the
+/// cap on a Post's worth is not binding: the rule is a cap and not a
+/// discount.
 let richestIncomeColony =
     { incomeColony with
         Bank = bank 7200 1800
@@ -1184,8 +1094,7 @@ let richestIncomeFleet workers =
 /// it: three Seats, all Plain, and nothing else within reach of it. The
 /// field is written relative to the rock so the same shape can be dropped
 /// into the home room and into an outpost, and the only difference between
-/// the two fixtures is which room's layer it lands in — which is the whole
-/// of what ADR 0042's narrowing turns on.
+/// the two fixtures is which room's layer it lands in.
 let threeSeatField (rock: Pos) =
     [
         { rock with X = rock.X - 1 }, Plain
@@ -1234,25 +1143,17 @@ let incomeFleetRows haulers workers =
 /// hauler carries 400 and the pair of containers asks 1.2 of a body.
 let incomeFleetOf workers = incomeFleetRows 2 workers
 
-/// The W12S28 colony with a **posted** outpost source beside it: the same
-/// rock in the same three-Seat field the unposted case above leaves out of
-/// every quota, with a container standing on one of its Seats — the switch
-/// that admits an outpost into the economy (ADR 0042). The fleet is the
-/// caller's, and so is who holds W1N2: everything else is `incomeColony`,
-/// unmoved, so a difference between two calls is the reservation and
-/// nothing else.
+/// The W12S28 colony with a posted outpost source beside it: the same rock
+/// in the same three-Seat field, with a container standing on one of its
+/// Seats. The fleet is the caller's, and so is who holds W1N2; everything
+/// else is `incomeColony`, unmoved.
 ///
-/// Its hauler quota is the home room's either way: the quota does fold
-/// this container since #149, but W1N2 arrives here with no border ring,
-/// so the two rooms share no Seam band, the haul has no price and the
-/// container hires nobody (ADR 0004) — the quota's own outpost case is
-/// `outpostHaulTests`, on a fixture that lays the rings. Its Anchor row
-/// is *three* since #129: the container standing on that Seat makes the
-/// rock a Post, and one Anchor per Post counts every projected room's
-/// Posts (ADR 0042), so the fleet below carries the outpost's Anchor
-/// beside the home room's two. Which leaves the income base as the one
-/// addend a reservation moves, and a worker count as the whole reading of
-/// it.
+/// Its hauler quota is the home room's either way: W1N2 arrives with no
+/// border ring, so the haul has no price and the container hires nobody
+/// (`outpostHaulTests` lays the rings). Its Anchor row is three, one per
+/// Post across every projected room. Which leaves the income base as the
+/// one addend a reservation moves, and a worker count as the whole reading
+/// of it.
 let postedOutpostColony workers (control: (string * RoomControlInfo) list) =
     let rock = { X = 40; Y = 40 }
 
@@ -1279,28 +1180,22 @@ let postedOutpostColony workers (control: (string * RoomControlInfo) list) =
 /// Intents. The row is read off the creep name the casting step stamps, so
 /// a tick that cast some other row shows as an empty list here rather than
 /// quietly asserting about a worker.
-///
-/// A list since ADR 0053, because the row no longer casts one body: a
-/// colony with two vacancies of different ceilings and two idle spawns
-/// buys the dearer first and the cheaper out of what is left.
 let anchorCastsBy colony =
     spawnIntents (decideOn colony).Intents
     |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
     |> List.map (fun (_, body, _) -> body)
 
-/// The anchor row's body under either of the two ceilings a [[reservation]]
+/// The anchor row's body under either of the two ceilings a reservation
 /// decides: five Work saturate a held rock and two a rock nobody holds, so
-/// the ceilings are six and three (ADR 0021, ADR 0042). Written once
-/// because the cast, the charge and the [[lead]] are all read against them.
+/// the ceilings are six and three. Written once because the cast, the
+/// charge and the lead are all read against them.
 let sixWork = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
 
 let threeWork = [ Work; Work; Work; Carry; Move ]
 
-/// The Reach of one tick, read at the seam its three readers share (ADR
-/// 0033) — the Threats are derived once from the ColonyView and the Atlas,
-/// and this is that derivation, not a second one. The home room's share,
-/// since the Reach is filed by room (#138) and these colonies stand their
-/// hostiles at home.
+/// The Reach of one tick, read at the seam its three readers share: this is
+/// that derivation, not a second one. The home room's share, since these
+/// colonies stand their hostiles at home.
 let reachIn snapshot =
     Threats.reachIn
         (threatsOf snapshot (Atlas.ofView snapshot))
@@ -1312,14 +1207,13 @@ let facingBody pos body =
 
 /// A plain corridor down one column, the shape a two-room fixture needs
 /// twice: geometry a reader can count steps along, in a room the flood
-/// must not leave (ADR 0041).
+/// must not leave.
 let corridor x y0 y1 =
     [ for y in y0..y1 -> { X = x; Y = y }, Plain ]
 
-/// A plain border ring. The Seam query reads the border layer and nothing
-/// else (ADR 0041), so a projection without one answers an empty band and
-/// prices no crossing at all — which is what the two fixtures above rest
-/// on and what the ones below must not. Plain the whole way round, so no
+/// A plain border ring. A projection without one answers an empty band and
+/// prices no crossing at all, which is what the two fixtures above rest on
+/// and what the ones below must not. Plain the whole way round, so no
 /// crossing is picked out by its terrain.
 let plainRing =
     Map.ofList
@@ -1359,23 +1253,15 @@ let northBorderColony (homeSource: Pos) =
 
 /// The same colony with its outpost beside it, one room north: W1N2's
 /// y = 49 row lands on W1N1's y = 0 row, and `Atlas.seams` reads that join
-/// out of the two room names alone (ADR 0041) — no fixture here declares
-/// an edge, because a declared edge is a second fact that can disagree
-/// with the first. The outpost's corridor runs to its own y = 48, so the
-/// tile a crossing lands a creep on opens onto ground.
+/// out of the two room names alone, so no fixture here declares an edge.
+/// The outpost's corridor runs to its own y = 48, so the tile a crossing
+/// lands a creep on opens onto ground.
 ///
 /// `None` is the room before anything is laid into it: the whole of what
-/// `World.factsOf` builds for a room with no vision — its terrain
-/// and its border ring, because `Game.map.getRoomTerrain` needs neither —
-/// and not one entry more, because everything vision pays for is absent
-/// entry by entry until vision returns (ADR 0004).
-///
-/// That is not the whole of what the shell hands Core for a *declared*
-/// room it cannot see: `Outpost.place` lays the declared sources and
-/// controller in afterwards, with no vision at all (ADR 0041, #148). So
-/// this is the baseline the declaration is added to and never a blind
-/// outpost as the colony really projects one — the tests below that want
-/// one build it by calling `place`, as the shell does.
+/// `World.factsOf` builds for a room with no vision, terrain and border
+/// ring, and not one entry more. `Outpost.place` lays the declared sources
+/// and controller in afterwards, so this is the baseline the declaration is
+/// added to and never a blind outpost as the colony really projects one.
 let withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
     { colony with
         Sources = colony.Sources @ [ for _ in Option.toList outpostSource -> source "src-out" ]
@@ -1399,14 +1285,12 @@ let withNorthOutpost (outpostSource: Pos option) (colony: ColonyView) =
     }
 
 /// The sites standing in the outpost, as many as the caller names, each under
-/// its own id: the container rule is the only thing *this colony* ever places
-/// out there (ADR 0042), so every site of another kind laid here is a human's
-/// hand — the **trunk** #244 recorded and #266's budget queues (`withNorthSpawnSite`
-/// below is the other way one gets there, which the nursery cases are built on).
-/// Each arrives in the three pieces the shell hands Core a site in: the id-keyed
-/// kind census, the outpost layer's own tile, and the `ConstructionSites` entry
-/// vision pays for (#150). Merges into whatever layer `withNorthOutpost` already
-/// laid, so the two compose in either order.
+/// its own id: the container rule is the only thing this colony ever places
+/// out there, so every site of another kind laid here is a human's hand.
+/// Each arrives in the three pieces the shell hands Core a site in: the
+/// id-keyed kind census, the outpost layer's own tile, and the
+/// `ConstructionSites` entry vision pays for. Merges into whatever layer
+/// `withNorthOutpost` already laid, so the two compose in either order.
 let withOutpostTrunk (sites: (string * BuiltKind * Pos) list) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -1430,15 +1314,9 @@ let withOutpostTrunk (sites: (string * BuiltKind * Pos) list) (colony: ColonyVie
     }
 
 /// One site out there under the frozen id every case that wants a single one
-/// names — `withOutpostTrunk`'s one-site case and never a second spelling of
-/// it, the three pieces above being the shell's contract and this file the one
-/// place it is written.
-///
-/// The kind is a parameter because #205's gates read it: a Seat's
-/// *container* site is a Post and reopens Build to the body standing on
-/// it, and a site of any other kind on the same tile is the ordinary
-/// surplus work it always was. Pairwise cases below swap the kind and
-/// nothing else.
+/// names: `withOutpostTrunk`'s one-site case. The kind is a parameter because
+/// a Seat's *container* site is a Post and reopens Build to the body standing
+/// on it, where a site of any other kind is ordinary surplus work.
 let withOutpostSiteOf (kind: BuiltKind) (site: Pos) (colony: ColonyView) =
     withOutpostTrunk [ "site-out", kind, site ] colony
 
@@ -1483,7 +1361,7 @@ let outcomeOf (colony: ColonyView) =
     decision.Intents, decision.Assignments, decision.Verdicts
 
 /// Which Task won the one worker, and what separated it from its closest
-/// rival (ADR 0009's Matched Verdict).
+/// rival, off the Matched Verdict.
 let matchOf (colony: ColonyView) =
     let { Verdicts = verdicts } = decideOn colony
 
@@ -1496,7 +1374,7 @@ let matchOf (colony: ColonyView) =
 /// it: the rival every loaded worker in the real colony always has, and
 /// the one the fixtures above leave out so that their Matched factor can
 /// name a single comparison. Level 2 and far from its downgrade deadline,
-/// so nothing here is ADR 0007's deadline rank in disguise.
+/// so nothing here is the deadline rank in disguise.
 let withHomeController (pos: Pos) (colony: ColonyView) =
     { colony with
         Controller = Some(controllerAt 2)
@@ -1511,22 +1389,14 @@ let withHomeController (pos: Pos) (colony: ColonyView) =
     }
 
 /// The same colony with one hungry extension of ours standing where the
-/// caller puts it: the **Feeding**-tier rival a *home* site's Build is
-/// measured against since #234.
-///
-/// The controller `withHomeController` adds cannot do that work for a home
-/// site any more. Such a site outranks the Upgrade beside it by a rung now
-/// (`isHomeSite`), so it wins on rank whichever tier it is on and the
-/// factor stops naming the tier. The flow still names it, because the rung
-/// never leaves the surplus tier: a site lifted onto the flow (ADR 0042,
-/// ADR 0047) *ties* this Refill and the nearer of the two wins, while a
-/// surplus one is outranked by it outright however near it stands. Place
-/// it **farther** than the site and the two readings differ in the winner
-/// and not merely in the factor, which is what the cases below do.
-///
-/// A site past the Seam needs none of this: the rung stops at the home
-/// room, so the controller is still the instrument there and the cases
-/// about an outpost's site go on reading it.
+/// caller puts it: the Feeding-tier rival a home site's Build is measured
+/// against. The controller `withHomeController` adds cannot do that work
+/// for a home site: such a site outranks the Upgrade beside it by a rung
+/// (`isHomeSite`), so the factor stops naming the tier. A site lifted onto
+/// the flow *ties* this Refill and the nearer wins, while a surplus one is
+/// outranked by it however near it stands; place it farther than the site
+/// and the two readings differ in the winner. A site past the Seam needs
+/// none of this: the rung stops at the home room.
 let withHungryExtension (pos: Pos) (colony: ColonyView) =
     { colony with
         Refillables = colony.Refillables @ [ refillable "ext-1" 50 BuiltKind.Extension ]
@@ -1607,7 +1477,7 @@ let switchUnposted =
     }
 
 /// And the tick the switch closes: the container standing on the outpost
-/// rock's one Seat, and nothing else in the world different (ADR 0042).
+/// rock's one Seat, and nothing else in the world different.
 let switchPosted =
     let outpost = SpatialInfo.layerOf switchUnposted.Spatial "W1N2"
 
@@ -1627,38 +1497,29 @@ let switchPosted =
     }
 
 /// The home room's whole target, one row at a time: its one Post's Anchor,
-/// the one hauler its container's round trip to the spawn hires, and the
-/// four workers the Post's output feeds once the two rows above are
-/// amortized — ceil((4 × 1500 − 2 × 300) / 1500) = 4 (ADR 0012, ADR 0037).
-/// Six bodies, and every case below reads against it.
-///
-/// Four a tick and not ten because this fixture banks 300 (#208): the
-/// Anchor row's cast there is `2W/1C/1M`, and a Post is worth what its
-/// garrison digs under the rock's own rate. The switch these cases are
-/// about is unmoved by that — what a container standing does is add a row
-/// of each kind, whatever the bank prices the rock at.
+/// the one hauler its container's round trip hires, and the four workers
+/// the Post's output feeds once those are amortized —
+/// ceil((4 × 1500 − 2 × 300) / 1500) = 4. Four a tick and not ten because
+/// this fixture banks 300: the Anchor row casts `2W/1C/1M` there, and a
+/// Post is worth what its garrison digs under the rock's own rate.
 let switchHomeFleet =
     [ anchor "a-home" 0 50; hauler "h-home1" 0 100 ]
     @ [ for i in 1..4 -> worker $"w{i}" 0 50 ]
 
 /// What the outpost's container adds, and nothing else: one Anchor for the
-/// Post it makes, the one hauler its own round trip across the Seam adds
-/// to the colony's pool at its own source's output, and its income
-/// share — the worker row goes from four to eight, because eight a tick
-/// less the four rows' amortization over one worker's Work drain is
-/// ceil((8 × 1500 − 4 × 300) / 1500) = 8. Six more bodies, which is the
-/// whole of ADR 0042's switch stated as a fleet.
-///
-/// One hauler and not two because the pool is rounded once (ADR 0049): the
-/// home container's 0.54 of a body and the outpost's 1.02 come to 1.56 and
-/// hire two, where a ceiling apiece hired one and two.
+/// Post it makes, the one hauler its own round trip across the Seam adds,
+/// and its income share — the worker row goes from four to eight, since
+/// ceil((8 × 1500 − 4 × 300) / 1500) = 8. One hauler and not two because
+/// the pool is rounded once: the home container's 0.54 of a body and the
+/// outpost's 1.02 come to 1.56 and hire two, where a ceiling apiece hired
+/// one and two.
 let switchOutpostRows =
     [ anchor "a-out" 0 50; hauler "h-out1" 0 100 ]
     @ [ for i in 5..8 -> worker $"w{i}" 0 50 ]
 
 /// A hostile filed under the room it stands in — the field `facing`
 /// stamps with the home name, set by hand here because these fixtures
-/// put a hostile in either room (ADR 0041).
+/// put a hostile in either room.
 let hostileIn room pos body =
     { hostileAt "h-1" pos body with
         Pos = RoomPos.at room pos
@@ -1666,23 +1527,19 @@ let hostileIn room pos body =
 
 /// The engine's own `smallMelee`: two TOUGH, five MOVE, a RANGED_ATTACK, a
 /// WORK and an ATTACK — 1,000 hits and 40 damage at range 1, and the body
-/// nine remote raids in ten arrive as (ADR 0056,
-/// `docs/research/remote-invader-defence.md`). Written part for part rather
-/// than reduced to "something armed", because the parts are what every rule
-/// reads: the ATTACK is what makes it a [[threat]] at all (ADR 0033), the
-/// RANGED_ATTACK beside it is what sets its [[reach]] at 3 plus the margin
-/// rather than 1 plus it — which is the whole of how much ground a raid takes
-/// — and it carries **no HEAL**, which is what keeps the guard row's count at
-/// one against it.
+/// nine remote raids in ten arrive as
+/// (`docs/research/remote-invader-defence.md`). Written part for part
+/// because the parts are what every rule reads: the ATTACK makes it a
+/// threat, the RANGED_ATTACK sets its reach at 3 plus the margin, and it
+/// carries no HEAL, which keeps the guard row's count at one against it.
 let smallMelee =
     [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
 
 /// The engine's own `smallHealer`: five MOVE and five HEAL, 60 hits a tick at
-/// range 1 unboosted. No ATTACK and no RANGED_ATTACK, so it is a [[hostile]]
-/// the [[raid log]] records and no [[threat]] at all — no [[reach]], no ring,
-/// and no reason of its own to buy a body — and it is exactly what the guard
-/// row's count rule prices, one 750-energy guard's 90 damage standing against
-/// one of these and losing to two (ADR 0056).
+/// range 1 unboosted. No ATTACK and no RANGED_ATTACK, so it is a hostile the
+/// raid log records and no threat at all, and it is exactly what the guard
+/// row's count rule prices: one 750-energy guard's 90 damage stands against
+/// one of these and loses to two.
 let smallHealer = [ Move; Move; Move; Move; Move; Heal; Heal; Heal; Heal; Heal ]
 
 /// The ranged half of a two-creep raid, as the engine casts it: two TOUGH,
@@ -1714,9 +1571,9 @@ let guard name =
 
 /// The outpost the Reserve tests hold: one room across the north border,
 /// its controller declared under the engine's own id and laid into the
-/// projection the way the shell lays one (`Outpost.place`, ADR 0041) — so
-/// it is in the pool with no vision at all, and its tile is an obstacle,
-/// which is what puts the reserver beside the controller and never on it.
+/// projection the way the shell lays one (`Outpost.place`) — so it is in
+/// the pool with no vision at all, and its tile is an obstacle, which puts
+/// the reserver beside the controller and never on it.
 ///
 /// No rock declared. The pool these fixtures want is the one Reserve and
 /// nothing else, because the Matcher scores a winner against its cheapest
@@ -1735,9 +1592,7 @@ let reserveDeclaration =
 
 /// The colony the Reserve tests run in: the home corridor with no Task in
 /// it at all, the declared outpost across the border, and the creeps the
-/// test names standing in that outpost — filed under its own layer,
-/// because a creep is placed in the room it stands in and nowhere else
-/// (ADR 0041).
+/// test names standing in that outpost, filed under its own layer.
 let reserveColony (creeps: (CreepInfo * Pos) list) =
     let colony = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
     let spatial = Outpost.place [ reserveDeclaration ] colony.Spatial
@@ -1756,7 +1611,7 @@ let reserveColony (creeps: (CreepInfo * Pos) list) =
                 }
     }
 
-/// ADR 0042's own reserver: two CLAIM parts and two Move, 1,300 energy.
+/// The reserver: two CLAIM parts and two Move, 1,300 energy.
 /// Carrying nothing and with nowhere to put anything — a CLAIM body has no
 /// Carry part — so no gate below can be passing on an energy state.
 let reserver name =
@@ -1768,24 +1623,19 @@ let reserveTasks tasks =
         | Reserve controllerId -> Some controllerId
         | _ -> None)
 
-/// And the tick after: the same declaration, the same room, ours now
-/// (ADR 0047 decision 4). One fact apart from `asCandidate` — who holds
-/// the controller — which is the whole of what turns a candidate into a
-/// **nursery**, there being no spawn of ours in that room in any fixture
-/// here until `withNorthSpawn` puts one there.
+/// And the tick after: the same declaration, the same room, ours now. One
+/// fact apart from `asCandidate` — who holds the controller — which is the
+/// whole of what turns a candidate into a nursery, there being no spawn of
+/// ours in that room until `withNorthSpawn` puts one there.
 let asNursery (colony: ColonyView) =
     { colony with
         RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
-        // The shell's `ColonyView.ofWorld` borrows a nursery for the
-        // mother the tick it is claimed; the pool's budget reads that
-        // field (#210), so the fixture carries it as the shell would.
+        // The shell borrows a nursery for the mother the tick it is
+        // claimed; the pool's budget reads that field.
         Borrowed = { Rooms = [ "W1N2" ] }
         // Declared and owned with no spawn of ours standing in it is the
-        // whole of the [[stage]] `Nursery` (ADR 0052 decision 3), so the
-        // shell would derive exactly this entry for the room; the
-        // ownership above is what makes the room *this* colony's to raise
-        // and stays beside it.
+        // whole of `Nursery`, so the shell would derive exactly this entry.
         Stages = Map.add "W1N2" Nursery colony.Stages
     }
 
@@ -1815,12 +1665,11 @@ let withOutpostRoom room (rock: Pos) posted (colony: ColonyView) =
         (threeSeatField rock)
 
 /// The reserver row's colony: the W12S28 shape at the live RCL5 bank of
-/// 1,800 — the level ADR 0042's `[2Claim;2Move]` is priced against — with
-/// the named outposts standing beside it and the named holder on each
-/// room. Everything else is `incomeColony`, unmoved, so a difference
-/// between two calls is the outposts, the fleet or the reservation and
-/// nothing else. The bank holds 8,000 against that capacity: restraint in
-/// these cases must come from the rows, never from the bank running dry.
+/// 1,800 — the level `[2Claim;2Move]` is priced against — with the named
+/// outposts standing beside it and the named holder on each room.
+/// Everything else is `incomeColony`, unmoved. The bank holds 8,000 against
+/// that capacity: restraint in these cases must come from the rows, never
+/// from the bank running dry.
 let reserverColony outposts creeps control =
     let colony =
         ({ incomeColony with
@@ -1837,8 +1686,8 @@ let reserverColony outposts creeps control =
     }
 
 /// The north outpost and the west one, diagonal to each other as W12S27
-/// and W13S28 are (ADR 0042) — two rooms, so "one reserver per declared
-/// outpost" can be told apart from "one reserver".
+/// and W13S28 are — two rooms, so "one reserver per declared outpost" can
+/// be told apart from "one reserver".
 let northOutpost posted = "W1N2", { X = 40; Y = 40 }, posted
 let westOutpost posted = "W2N2", { X = 20; Y = 40 }, posted
 
@@ -1864,16 +1713,12 @@ let reserverCasts intents =
 /// is one.
 let oneBlock = [ BodyPart.Claim; Move ]
 
-/// The [[errand]] the suites in this directory run: W1N2, and the sector
-/// Reactor standing at (25,44) in it under the engine id a declaration names
-/// (ADR 0060 decision 1). **One** crossing rather than the live three, because
-/// no case in `Decide` is about the walk — `RoomSeamTests` prices that over the
-/// committed captures, which is the only place it can be priced honestly.
-///
-/// One spelling for the two domains that read it (#318): `ErrandTests` asks
-/// what the declaration *buys* — the Task, who may hold it, the act it fires —
-/// and `QuotaReserverTests` asks what it *costs*. A second spelling of the same
-/// room is a fixture that can drift away from the rule it stands in for.
+/// The errand the suites in this directory run: W1N2, and the sector Reactor
+/// standing at (25,44) in it under the engine id a declaration names. One
+/// crossing rather than the live three, because no case in `Decide` is
+/// about the walk — `RoomSeamTests` prices that over the committed captures.
+/// One spelling for the two domains that read it: `ErrandTests` asks what
+/// the declaration *buys* and `QuotaReserverTests` what it *costs*.
 let reactorErrand: Errand =
     {
         RoomName = "W1N2"
@@ -1898,17 +1743,15 @@ let private errandFloor =
     ]
 
 /// The colony with that errand declared and its room's floor laid, the target
-/// placed **kind-less** the way `Errand.place` places it — which is what keeps
-/// it enumerable by no pool that sweeps a kind. Nothing else of the programme
-/// stands: no extractor, no road, no banked Thorium, which is ADR 0060 decision
-/// 3's whole re-ordering — the rival's flag is already on the reactor, so the
-/// claim is the first act of the delivery and not its last.
+/// placed kind-less the way `Errand.place` places it, so no pool that sweeps
+/// a kind enumerates it. Nothing else of the programme stands: the claim is
+/// the first act of the delivery and not its last. Merges into whatever
+/// layer that room already carries, so bodies may be stood in it before or
+/// after.
 ///
-/// Merges into whatever layer that room already carries, so bodies may be stood
-/// in it before or after.
-/// The declaration on the floor it was first written with, which **cannot
-/// price its crossing** (#379). Asked for through `bareDeliveryColony` below
-/// by the one case whose subject is what a rule does with no price at all.
+/// On the floor it was first written with, which cannot price its crossing
+/// (#379): asked for through `bareDeliveryColony` below by the one case
+/// whose subject is what a rule does with no price at all.
 let internal withBareReactorErrand (colony: ColonyView) =
     let existing = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
 
@@ -1934,29 +1777,19 @@ let private wholeFloor =
             for y in 1..48 -> { X = x; Y = y }, Plain
     ]
 
-/// The same declaration with its one crossing **priceable** (#379), which is
-/// what `withReactorErrand` now hands out and what the suites reading it
-/// mostly want.
+/// The same declaration with its one crossing priceable (#379). The bare
+/// fixture cannot price a cross-room walk for two reasons at once: its
+/// errand floor stops at y 47 and its home floor is a corridor, so neither
+/// side of the crossing has ground behind the landing tile and
+/// `Atlas.routes` answers `[]`; and the `spatial` funnel files home under
+/// the empty name, which has no sector coordinates to be adjacent by. Every
+/// cross-room price out of it is therefore `None` and every rule that reads
+/// one takes its permissive branch, so three suites were exercising the
+/// delivery on the branch where the walk has no price.
 ///
-/// The bare fixture cannot price a cross-room walk at all, and for two
-/// reasons at once. Its errand floor stops at y 47 and its home floor is a
-/// corridor, so neither side of the crossing has ground behind the tile it
-/// lands on (ADR 0062) and `Atlas.routes` answers `[]`. And the `spatial`
-/// funnel files home under the **empty** name, which has no sector coordinates
-/// to be adjacent by, so no chain out of it can exist however the ground is
-/// laid. Every cross-room price out of it is therefore `None`, and every rule
-/// that reads one takes its permissive branch (ADR 0004) — so three suites
-/// were exercising the delivery, the one thing in this bot that walks three
-/// rooms, on the branch where the walk has no price. `ErrandTests` carried a
-/// `paved` funnel to buy a real price back for the handful of cases that could
-/// not do without one; this inverts that, and `withBareReactorErrand` above is
-/// what the cases that genuinely want the unpriced branch ask for by name.
-///
-/// **Lays its ground over whatever was there**: the home layer's terrain and
-/// both rooms' borders are replaced rather than merged, so a colony that
-/// walled something at home before declaring the errand loses the wall. Every
-/// caller today declares on open ground; a case that wants both lays its walls
-/// after this.
+/// Lays its ground over whatever was there: the home layer's terrain and
+/// both rooms' borders are replaced rather than merged, so a case that wants
+/// walls at home lays them after this.
 let private priced (colony: ColonyView) =
     let home = SpatialInfo.homeName colony.Spatial
     let errandLayer = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
@@ -1999,9 +1832,8 @@ let private priced (colony: ColonyView) =
 let withReactorErrand (colony: ColonyView) =
     colony |> withBareReactorErrand |> priced
 
-/// Our own bodies standing in the errand room, filed into its layer (ADR
-/// 0041): a creep the projection places nowhere stands in no room at all, and a
-/// re-claimer that stands nowhere holds no Task and makes no act.
+/// Our own bodies standing in the errand room, filed into its layer: a
+/// re-claimer the projection places nowhere holds no Task and makes no act.
 let standingInErrand (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
     let layer = SpatialInfo.layerOf colony.Spatial reactorErrand.RoomName
 
@@ -2018,9 +1850,8 @@ let standingInErrand (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
     }
 
 /// And whose the declared target is this tick, which is the fact the
-/// [[reclaim]]'s act is gated on (#318). `None` leaves the entry out
-/// altogether, which is what a gapped relay reads and what the act treats as
-/// *not ours* (ADR 0004).
+/// reclaim's act is gated on. `None` leaves the entry out altogether, which
+/// is what a gapped relay reads and what the act treats as *not ours*.
 let withReactorOwner owner (colony: ColonyView) =
     { colony with
         Spatial =
@@ -2053,18 +1884,16 @@ let withReactorOwner owner (colony: ColonyView) =
             | None -> []
     }
 
-/// The delivering colony (ADR 0067): `mineHaulColony`'s mine and Storage with
-/// the sector Reactor declared as an [[errand]], a re-claimer standing on its
-/// ring and a bank that can buy a courier. Two domains read it — `ErrandTests`
-/// asks what the declaration buys, and the projection sweep asks whether it is
-/// a shape `World.ofGame` could build (#355) — which is what puts it here
-/// rather than in the suite that used to own it.
+/// The delivering colony: `mineHaulColony`'s mine and Storage with the sector
+/// Reactor declared as an errand, a re-claimer standing on its ring and a
+/// bank that can buy a courier. Shared because `ErrandTests` and the
+/// projection sweep both read it.
 ///
-/// **The Reactor's own store is not written into `Spatial.Thorium`** (#355):
-/// the sweep files it in `RoomFacts.Reactors` and gives the object neither a
-/// tile nor a kind, so an entry here would be the shape that cost #354 its 915
-/// T — the gate read the store out of this map and the projection answered 0
-/// for a store holding 999. `withReactorOwner` stands the row it really rides.
+/// The Reactor's own store is not written into `Spatial.Thorium`: the sweep
+/// files it in `RoomFacts.Reactors` and gives the object neither a tile nor a
+/// kind, so an entry here would be the shape that cost #354 its 915 T (the
+/// gate read this map and the projection answered 0 for a store holding
+/// 999). `withReactorOwner` stands the row it really rides.
 let private deliveryColonyWith declare owner =
     let resident = creepWith "relay" 0 0 [ BodyPart.Claim; Move ]
 
@@ -2087,23 +1916,14 @@ let private deliveryColonyWith declare owner =
 let deliveryColony owner =
     deliveryColonyWith withReactorErrand owner
 
-/// And the same colony on the **unpriceable** floor, for the cases whose
-/// subject is what a rule does when the walk has no price at all (ADR 0004).
-/// Asked for by name since #379, where it used to be what every case got by
-/// default and most of them were not asking for it.
+/// And the same colony on the unpriceable floor, for the cases whose subject
+/// is what a rule does when the walk has no price at all.
 let bareDeliveryColony owner =
     deliveryColonyWith withBareReactorErrand owner
 
-/// What the declared Reactor's store holds (#354). Beside `withReactorOwner`
-/// and never instead of it: no vision, no row, and a colony that cannot see the
-/// Reactor draws nothing towards it.
-///
-/// The store is set **here**, on the Reactor's row, and not in
-/// `SpatialInfo.Thorium` — which carries every store a Task can name and
-/// deliberately not this one. #354's draw gate was written against the wrong
-/// map and its first test agreed with it, because the test wrote the store
-/// where the gate looked: 999 T in the projection read as 0, the gate never
-/// closed in flight, and the ore reached the Reactor room's floor anyway.
+/// What the declared Reactor's store holds, set on the Reactor's row and not
+/// in `SpatialInfo.Thorium` (see `deliveryColonyWith`). Beside
+/// `withReactorOwner` and never instead of it: no vision, no row.
 let withReactorStore (held: int) (colony: ColonyView) =
     { colony with
         Reactors =
@@ -2115,20 +1935,15 @@ let withReactorStore (held: int) (colony: ColonyView) =
                     reactor)
     }
 
-/// The buffer lane (ADR 0046): a plain corridor three rows deep, the
-/// controller standing at (10,10) — an obstacle, as a projected one is —
-/// and its upgrade buffer "can-buf" at (13,10), the outermost tile of the
-/// controller's Upgrade Work Area and so a container the Planner pools as
-/// the buffer.
+/// The buffer lane: a plain corridor three rows deep, the controller
+/// standing at (10,10) as an obstacle, and its upgrade buffer "can-buf" at
+/// (13,10), the outermost tile of the controller's Upgrade Work Area.
 ///
-/// A creep beside the buffer at (14,10) stands one step *outside* that
-/// Work Area and *inside* the Work Area of anything at (15,10), which is
-/// where each case below puts its delivery. So Upgrade costs a step and
-/// the delivery costs nothing, the two share the Surplus tier, and travel
-/// cost alone would take every body to the delivery: what separates them
-/// is the gate and nothing else (ADR 0046). Which is the whole reason the
-/// gate is a prohibition rather than a price — the work a standing body
-/// must not walk to is the work standing closest to it.
+/// A creep beside the buffer at (14,10) stands one step outside that Work
+/// Area and inside the Work Area of anything at (15,10), which is where
+/// each case puts its delivery. So Upgrade costs a step and the delivery
+/// costs nothing, the two share the Surplus tier, and what separates them
+/// is the gate and nothing else.
 let bufferLaneField =
     [
         for x in 5..20 do
@@ -2146,12 +1961,11 @@ let bufferLane =
         ]
     |> withObstacles [ { X = 10; Y = 10 } ]
 
-/// The lane with one creep on the buffer's doorstep and the given
-/// furniture wherever the case wants it — (15,10), a step out, for ADR
-/// 0046's own cases. No source, no hungry spawn and no Storage, so the
-/// pool is exactly the controller's Upgrade, the buffer's own Withdraw and
-/// Refill, and whatever the case stands beside the creep — the smallest
-/// pool that can hold ADR 0046's question. The bank is the live RCL5
+/// The lane with one creep on the buffer's doorstep and the given furniture
+/// wherever the case wants it — (15,10), a step out, for the gate's own
+/// cases. No source, no hungry spawn and no Storage, so the pool is exactly
+/// the controller's Upgrade, the buffer's own Withdraw and Refill, and
+/// whatever the case stands beside the creep. The bank is the live RCL5
 /// 1,800, which is the capacity both bodies below are cast at.
 let bufferLaneColony furniture sites creep =
     { bareRespawn with
@@ -2246,8 +2060,7 @@ let ferryMother stage =
     }
 
 /// The row each of this tick's casts was bought for, in casting order —
-/// the row name the caster writes into the creep's name (ADR 0006:
-/// observability only, and this is the observation).
+/// the row name the caster writes into the creep's name.
 let castRows intents =
     spawnIntents intents
     |> List.map (fun (_, _, name: string) -> (name: string).Split('-') |> Array.head)

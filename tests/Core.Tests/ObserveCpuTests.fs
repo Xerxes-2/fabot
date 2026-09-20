@@ -1,5 +1,5 @@
-/// The CPU line (ADR 0041): the per-tick sample, where the tick's cost went,
-/// and the revisit trigger the totals are read against.
+/// The CPU line: the per-tick sample, where the tick's cost went, and the
+/// revisit trigger the totals are read against.
 module Fabot.Core.Tests.ObserveCpuTests
 
 open Expecto
@@ -12,14 +12,13 @@ let private line (state: CpuState) =
     state.Ticks |> List.map (fun sample -> sample.Tick, sample.Ms)
 
 /// Each row's phase split, oldest first — `None` for a row written by a
-/// bundle that did not measure the boundaries (#170).
+/// bundle that did not measure the boundaries.
 let private splits (state: CpuState) =
     state.Ticks |> List.map (fun sample -> sample.Phases)
 
 /// A tick that cost `ms` in total and whose boundaries were all read at the
-/// end of it. The total is the last reading, so the rows these tests fold
-/// carry exactly the costs they carried before the phases arrived, and the
-/// window's shape stays the one the trigger is judged over.
+/// end of it, so the rows carry exactly the costs they carried before the
+/// phases arrived.
 let private costing (ms: float) =
     {
         AtEntry = 0.0
@@ -38,8 +37,8 @@ let private costing (ms: float) =
         ColonyFloods = []
     }
 
-/// The same reading with a bucket and a replan count of its own, which is what
-/// the coarse spans keep beside the milliseconds (#386).
+/// The same reading with a bucket and a replan count of its own, which is
+/// what the coarse spans keep beside the milliseconds.
 let private costingAt (ms: float) bucket replans =
     { costing ms with
         Bucket = bucket
@@ -59,11 +58,9 @@ let cpuSpanTests =
         "observe fold: the CPU line's coarse spans"
         [
             test "a span carries the worst tick of its window, not its mean" {
-                // The field the whole record exists for. The engine's per-tick
-                // ceiling is 500 ms and it is a wall: a tick over it is
-                // terminated whatever the bucket holds. So a window whose mean
-                // is comfortable and whose worst tick is not is exactly the
-                // shape a post-mortem is looking for, and a mean alone hides it.
+                // The engine's per-tick ceiling is 500 ms and a wall, so a window whose
+                // mean is comfortable and whose worst tick is not is exactly the shape a
+                // post-mortem is looking for.
                 let state =
                     folded
                         [ for t in 1..10 -> t, costingAt (if t = 7 then 480.0 else 20.0) 10_000 0 ]
@@ -81,15 +78,10 @@ let cpuSpanTests =
             }
 
             test "a span keeps the lowest bucket it saw" {
-                // A span whose floor is the full 10,000 never spent more than
-                // the allowance; one whose floor is near zero is the shape an
-                // outage leaves behind, and it is the difference between "the
-                // ticks were long" and "the script was being killed".
-                // The bucket **dips and recovers** inside the window, so the
-                // floor and the last reading are different numbers: 10,000 then
-                // 2,000 then 9,000. Read as the last, this span would say the
-                // colony never came close, which is the reading an outage hides
-                // behind.
+                // A span whose floor is the full 10,000 never spent more than the
+                // allowance; one whose floor is near zero is the shape an outage leaves
+                // behind. The bucket dips and recovers inside the window — 10,000 then
+                // 2,000 then 9,000 — so the floor and the last reading differ.
                 let state =
                     folded
                         [
@@ -116,10 +108,8 @@ let cpuSpanTests =
             }
 
             test "the record reaches back hours where the fine ring reaches minutes" {
-                // `capCpuTicks` holds a hundred ticks, about five minutes. Two
-                // outages in two days were hours old before anyone read the
-                // channel, and both had to be inferred from emailed timeout
-                // stacks because this is what the record did not hold.
+                // `capCpuTicks` holds a hundred ticks, about five minutes; two outages
+                // were hours old before anyone read the channel.
                 Expect.isGreaterThan
                     (spanTicks * capCpuSpans)
                     (capCpuTicks * 100)
@@ -127,10 +117,8 @@ let cpuSpanTests =
             }
 
             test "a tick behind the open span opens a fresh one rather than widening it" {
-                // A global reset with a stale leaf, or a hand-edited one: the
-                // span would otherwise claim to cover a window it never
-                // measured, and `Ticks` against `To - From` is how a reader
-                // tells a gap from a run.
+                // A global reset with a stale leaf, or a hand-edited one: `Ticks` against
+                // `To - From` is how a reader tells a gap from a run.
                 let state = folded [ 1, costing 20.0; 2, costing 20.0; 1, costing 20.0 ]
 
                 Expect.equal
@@ -140,9 +128,7 @@ let cpuSpanTests =
             }
 
             test "the spans survive the trim that shortens the fine ring" {
-                // The two records are kept to their own lengths: a fine ring
-                // trimmed to a hundred rows says nothing about how many spans
-                // a leaf may hold.
+                // The two records are kept to their own lengths.
                 let state = folded [ for t in 1..150 -> t, costingAt 20.0 10_000 0 ]
 
                 Expect.equal (List.length state.Ticks) capCpuTicks "the fine ring is trimmed"
@@ -160,9 +146,8 @@ let cpuTests =
         "observe fold: the CPU line"
         [
             test "every tick writes a row, quiet or not, oldest first" {
-                // Unlike the Transition log there is no change detection:
-                // two ticks that cost the same are two rows, because the
-                // distribution is the whole point (ADR 0041).
+                // Unlike the Transition log there is no change detection: two ticks that
+                // cost the same are two rows, because the distribution is the point.
                 let state =
                     CpuState.empty
                     |> foldCpu capCpuTicks 100 (costing 21.0)
@@ -175,9 +160,8 @@ let cpuTests =
             }
 
             test "a tick that finished no loop leaves a gap, not a row" {
-                // The row carries its own tick, so a tick the loop threw on
-                // — writing nothing — is visible as a missing number rather
-                // than as a cheap tick that never happened.
+                // The row carries its own tick, so a tick the loop threw on is visible as
+                // a missing number rather than as a cheap tick that never happened.
                 let state =
                     CpuState.empty
                     |> foldCpu capCpuTicks 100 (costing 21.0)
@@ -201,9 +185,8 @@ let cpuTests =
             }
 
             test "a cost is kept to the microsecond" {
-                // Finer than the profiler's own 100µs sampling interval, so
-                // nothing a reader could act on is lost; the digits past it
-                // are Memory paid for noise.
+                // Finer than the profiler's own 100µs sampling interval; the digits past
+                // it are Memory paid for noise.
                 let state =
                     CpuState.empty
                     |> foldCpu capCpuTicks 100 (costing 21.2345674)
@@ -216,13 +199,9 @@ let cpuTests =
             }
 
             test "each colony's decide is differenced against the boundary before it (#370)" {
-                // The live shape the day this was built: four colonies, the
-                // `decide` phase running from 15.3 to 56.3 ms, and a reader
-                // who could not say which of the four a 140 ms spike had come
-                // out of. The readings arrive cumulative — one
-                // `Game.cpu.getUsed` after each colony — so the first is
-                // differenced against the phase's own start and each of the
-                // rest against the colony before it.
+                // The readings arrive cumulative — one `Game.cpu.getUsed` after each
+                // colony — so the first is differenced against the phase's own start and
+                // each of the rest against the colony before it.
                 let state =
                     CpuState.empty
                     |> foldCpu
@@ -251,11 +230,9 @@ let cpuTests =
                     [ [ "W12S28", 12.0; "W13S28", 10.8; "W11S29", 6.9; "W15S28", 10.9 ] ]
                     "the first against `AtSnapshot`, each of the rest against the colony before it"
 
-                // And the remainder is readable rather than hidden: what the
-                // phase cost less what the colonies did is the movement
-                // arbitration and the two Memory reads `decide` is handed, so
-                // neither number is derived from the other and a reader can
-                // subtract them.
+                // The remainder is readable rather than hidden: the phase less what the
+                // colonies did is the movement arbitration and the two Memory reads, so
+                // neither number is derived from the other.
                 let phases = state.Ticks |> List.exactlyOne |> (fun sample -> sample.Phases)
 
                 Expect.equal
@@ -265,11 +242,9 @@ let cpuTests =
             }
 
             test "the flood counts are differenced per colony from the tick's reset" {
-                // #389. The shell zeroes `Grid.Counters` before the first
-                // colony decides and reads them after each, so the first
-                // reading is differenced against zero and each of the rest
-                // against the colony before it — `ColonyDecides`' fold, on
-                // three integers.
+                // The shell zeroes `Grid.Counters` before the first colony decides and
+                // reads them after each, so the counts are differenced like the
+                // milliseconds — `ColonyDecides`' fold, on three integers.
                 let state =
                     CpuState.empty
                     |> foldCpu
@@ -313,8 +288,8 @@ let cpuTests =
 
             test
                 "the span's worst pops is the max over its ticks, and an older span folds on at its own" {
-                // The coarse record's reading of #389, kept the way `Max`
-                // is: the largest single tick, never a mean.
+                // The coarse record's reading, kept the way `Max` is: the largest single
+                // tick, never a mean.
                 let counting pops =
                     { costing 20.0 with
                         ColonyFloods = [ "W12S28", { Floods = 1; Free = 1; Pops = pops } ]
@@ -341,12 +316,10 @@ let cpuTests =
 
             test
                 "a bundle that measured no colony writes no split, which is what an older row reads as" {
-                // `Phases` needs its `option` because a measured zero and an
-                // unmeasured phase are different claims. This does not: the
-                // empty list is the right answer both for a row written before
-                // the split existed and for a tick in which no colony decided,
-                // and the split is only ever read against `Phases.Decide`,
-                // which says whether there was anything to attribute.
+                // `Phases` needs its `option` because a measured zero and an unmeasured
+                // phase are different claims. This does not: the empty list is the right
+                // answer both for a row written before the split existed and for a tick
+                // in which no colony decided.
                 let state = CpuState.empty |> foldCpu capCpuTicks 100 (costing 21.0)
 
                 Expect.equal
@@ -357,14 +330,10 @@ let cpuTests =
 
 
             test "the snapshot's rooms are differenced from the prelude" {
-                // The rooms' counterpart to the colonies' split, and it starts
-                // one boundary earlier: `snapshot` begins where the prelude's
-                // reading was taken, because nothing runs between them. A
-                // reader that differenced the first room against `AtSnapshot`
-                // would price it against the *end* of its own phase and report
-                // a negative millisecond — which is the shape of mistake the
-                // colonies' split could not make, since `AtSnapshot` really is
-                // the boundary before the first colony.
+                // The rooms' split starts one boundary earlier: `snapshot` begins where
+                // the prelude's reading was taken, because nothing runs between them. A
+                // reader that differenced the first room against `AtSnapshot` would report
+                // a negative millisecond.
                 let state =
                     CpuState.empty
                     |> foldCpu
@@ -392,26 +361,19 @@ let cpuTests =
                     [ [ "W15S28", 5.0; "W15S27", 3.5; "W15S26", 5.5 ] ]
                     "each room against the room swept before it, the first against `AtRooms`"
 
-                // And they sum to **less** than the phase, on purpose: 18.0 -
-                // 3.0 is 15.0 while 5.0 + 3.5 + 5.5 is 14.0, and the missing
-                // 1.0 is the head the sweep does before the first room —
-                // enumerating `Game.rooms`, grouping every creep by the room it
-                // stands in, reading the declarations. Charging that head to
-                // whichever room happened to be swept first is what this
-                // reading did on its first live window: it priced W11S28, an
-                // outpost with one rock, at 2.35 ms against the four-spawn home
-                // room beside it at 1.23. The remainder is left readable rather
-                // than folded into a room, exactly as `decide`'s is.
+                // They sum to **less** than the phase, on purpose: 18.0 - 3.0 is 15.0
+                // while 5.0 + 3.5 + 5.5 is 14.0, and the missing 1.0 is the head the
+                // sweep does before the first room. Charging it to whichever room was
+                // swept first priced W11S28, an outpost with one rock, at 2.35 ms against
+                // the four-spawn home room beside it at 1.23.
                 Expect.equal
                     (state.Ticks |> List.collect (fun sample -> sample.Rooms) |> List.sumBy snd)
                     14.0
                     "the rooms sum to the sweep, and the sweep is less than the phase"
 
-                // And the head is carried rather than left to be inferred: 4.0
-                // - 3.0. A reader handed only `snapshot` and the rooms could
-                // subtract head and tail *together* and would not know which of
-                // the two to go after — and on the first live window the head
-                // alone was 1.9 ms, more than any single room.
+                // The head is carried rather than inferred: 4.0 - 3.0. A reader handed
+                // only `snapshot` and the rooms could not tell head from tail, and on the
+                // first live window the head alone was 1.9 ms, more than any single room.
                 Expect.equal
                     (state.Ticks |> List.map (fun sample -> sample.SweepHead))
                     [ 1.0 ]
@@ -419,12 +381,10 @@ let cpuTests =
             }
 
             test "the readings are differenced into phases, the entry alone" {
-                // The shape of a live tick the day the split was built: an
-                // engine prelude already spent before `loop` runs, then the
-                // ColonyView, `decide`, the Memory writes and the Executor's
-                // intents (#170). The engine's counter is cumulative and
-                // every phase is a difference — except the entry, which is
-                // the prelude itself and is carried as it was read.
+                // An engine prelude already spent before `loop` runs, then the ColonyView,
+                // `decide`, the Memory writes and the Executor's intents. The counter is
+                // cumulative and every phase a difference — except the entry, which is the
+                // prelude itself and is carried as read.
                 let state =
                     CpuState.empty
                     |> foldCpu
@@ -437,10 +397,8 @@ let cpuTests =
                             AtSave = 46.0
                             AtExecute = 49.4
                             Intents = 44
-                            // The margin and the replan count ride the same
-                            // row (#357): a full bucket and a tick that kept
-                            // every colony's plan, which is the shape a phase
-                            // split is read against.
+                            // The margin and the replan count ride the same row: a full bucket and a
+                            // tick that kept every colony's plan.
                             Bucket = 9_872
                             Replans = 0
                             ColonyDecides = []
@@ -475,10 +433,8 @@ let cpuTests =
             }
 
             test "a phase is kept to the microsecond, like the total" {
-                // The differences are rounded the same way the total is, so
-                // a phase never arrives with the float noise of a
-                // subtraction: the digits Memory pays for are the ones a
-                // reader could act on.
+                // The differences are rounded the same way the total is, so a phase never
+                // arrives with the float noise of a subtraction.
                 let state =
                     CpuState.empty
                     |> foldCpu
@@ -491,9 +447,7 @@ let cpuTests =
                             AtSave = 2.0015
                             AtExecute = 3.9999996
                             Intents = 1
-                            // Neither of these is a duration, so neither is
-                            // rounded: an integer count of banked milliseconds
-                            // and an integer count of colonies.
+                            // Neither of these is a duration, so neither is rounded.
                             Bucket = 4_213
                             Replans = 2
                             ColonyDecides = []
@@ -523,10 +477,9 @@ let cpuTests =
             }
 
             test "a tick the engine took no intent on says nothing was taken" {
-                // Zero is a measurement here, unlike an absent phase group:
-                // a tick with no accepted intent is the one shape that
-                // proves the engine's 0.2-per-intent charge is not what the
-                // tick cost.
+                // Zero is a measurement here, unlike an absent phase group: a tick with no
+                // accepted intent is what proves the engine's 0.2-per-intent charge is not
+                // what the tick cost.
                 let state = CpuState.empty |> foldCpu capCpuTicks 100 (costing 21.0)
 
                 Expect.equal
@@ -536,12 +489,10 @@ let cpuTests =
             }
 
             test "a row written before the phases keeps its absence" {
-                // What the ring holds for the first hundred ticks after the
-                // split is deployed, and what a rollback puts back in it.
-                // The old row keeps its total — the window the trigger is
-                // read over never shortens — and its phases stay absent
-                // rather than being filled with zeros, which would say the
-                // ColonyView cost nothing rather than that nobody measured it.
+                // What the ring holds for the first hundred ticks after the split is
+                // deployed, and what a rollback puts back. The old row keeps its total and
+                // its phases stay absent rather than filled with zeros, which would say
+                // the ColonyView cost nothing rather than that nobody measured it.
                 let unsplit =
                     {
                         Spans = []

@@ -1,7 +1,7 @@
-/// The threat reflexes: what a colony reaches and what it flees (ADR 0033), the
-/// attack-only towers that fire (ADR 0014), the Ramparts that cover the keep
-/// (ADR 0034), the spawn hold, and the safe-mode reflex of last resort with the
-/// downgrade deadline beside it (ADR 0007, ADR 0015).
+/// The threat reflexes: what a colony reaches and what it flees, the
+/// attack-only towers that fire, the Ramparts that cover the keep, the spawn
+/// hold, and the safe-mode reflex of last resort with the downgrade deadline
+/// beside it.
 module Fabot.Core.Tests.Decide.ThreatTests
 
 open Expecto
@@ -12,10 +12,10 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 
 /// A room with the whole Keep standing and a Post container at each of
-/// the two sources — what the rampart rule covers (ADR 0034). The spawn
-/// stands at (25,25) from `openRoom`, the tower and the Storage beside it,
-/// and each source's container on the Seat between the source and the
-/// spawn, which is working ground and covered all the same.
+/// the two sources. The spawn stands at (25,25) from `openRoom`, the tower
+/// and the Storage beside it, and each source's container on the Seat
+/// between the source and the spawn, which is working ground and covered
+/// all the same.
 let keepRoom =
     openRoom 6
     |> withTargets
@@ -45,10 +45,7 @@ let rampartTests =
         "ramparts"
         [
             test "every standing Keep structure and Post container is covered, and nothing else" {
-                // The rule, whole (ADR 0034): the spawn, the tower and the
-                // Storage because they are what a raid is for, the Post
-                // containers because a work-heavy body cannot flee its Post.
-                // Not the extensions, not the room at large — the equality
+                // The rule, whole: the Keep and the Post containers, and the equality
                 // is what says no rampart lands anywhere else.
                 let { Intents = intents } = decideOn (atLevel 4 keepRoom)
 
@@ -59,11 +56,8 @@ let rampartTests =
             }
 
             test "the working-ground exclusion does not reach a rampart" {
-                // A Post container stands on a Seat, which the clustered
-                // ordering never offers (ADR 0022). A rampart is no
-                // footprint — walkable, blocking nothing, taking no tile from
-                // the Post it covers — so it is placed there regardless,
-                // while the cluster still keeps off (ADR 0034 revising 0022).
+                // A Post container stands on a Seat, which the clustered ordering never
+                // offers. A rampart is no footprint, so it is placed there regardless.
                 let { Intents = intents } = decideOn (atLevel 4 keepRoom)
                 let seats = Set.ofList [ { X = 21; Y = 25 }; { X = 29; Y = 25 } ]
 
@@ -165,12 +159,9 @@ let rampartTests =
             }
 
             test "the cover waits for the bootstrap level and then never grows" {
-                // The rule is placed the tick the thing it covers stands, from
-                // the level the colony keeps ramparts at (#214): the engine
-                // allows one from RCL2, and the Layout waits one level more,
-                // because a room earning eight a tick cannot hold a
-                // 100,000-hit floor and buy its extensions too (ADR 0034 as
-                // #214 amends it, ADR 0047's own line for "bootstrapped").
+                // The rule is placed the tick the thing it covers stands, from the
+                // level the colony keeps ramparts at: the engine allows one from RCL2,
+                // and the Layout waits one level more (#214).
                 let at level =
                     let { Intents = intents } = decideOn (atLevel level keepRoom)
 
@@ -192,7 +183,7 @@ let governedBy controller (snapshot: ColonyView) =
         Controller = Some controller
     }
 
-/// A colony whose whole Keep stands at full hits (ADR 0034).
+/// A colony whose whole Keep stands at full hits.
 let wholeKeep =
     bareRespawn
     |> withHits "spawn-1" BuiltKind.Spawn 5000 5000
@@ -264,9 +255,9 @@ let safeModeTests =
             }
 
             test "a claimer beyond reach holds the stock — the towers get their window" {
-                // attackController is range 1 and judged from tick-start
-                // position, so a claimer 4 tiles out cannot tap for at
-                // least 3 more ticks; holding costs nothing (ADR 0015).
+                // attackController is range 1 and judged from tick-start position, so
+                // a claimer 4 tiles out cannot tap for at least 3 more ticks; holding
+                // costs nothing.
                 let snapshot =
                     { bareRespawn with
                         Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
@@ -278,8 +269,8 @@ let safeModeTests =
             }
 
             test "a claimer at the reach deadline fires safe mode" {
-                // Range 3 = the precise deadline (2) plus one tile of margin
-                // for a skipped tick (ADR 0015).
+                // Range 3 = the precise deadline (2) plus one tile of margin for a
+                // skipped tick.
                 let snapshot =
                     { bareRespawn with
                         Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
@@ -291,9 +282,9 @@ let safeModeTests =
             }
 
             test "a hostile without CLAIM parts does not spend the activation while a tower stands" {
-                // The tower is the answer to a fighter (ADR 0014); the stock
-                // is for the controller and the Keep. Without a tower the
-                // undefended arm fires instead (#217, the test below).
+                // The tower is the answer to a fighter; the stock is for the controller
+                // and the Keep. Without a tower the undefended arm fires instead (the
+                // test below).
                 let snapshot =
                     { bareRespawn with
                         Spatial =
@@ -341,10 +332,9 @@ let safeModeTests =
             }
 
             test "a dented Keep with a hostile in the room fires" {
-                // The second arm (ADR 0034), and it stands on its own: this
-                // hostile carries no CLAIM, so the first arm holds its peace
-                // and only the damage speaks. Each of the three in turn —
-                // the tower is the dismantler test below.
+                // The second arm stands on its own: this hostile carries no CLAIM, so
+                // only the damage speaks. Each of the three in turn; the tower is the
+                // dismantler test below.
                 let fires snapshot =
                     let { Intents = intents } =
                         decideOn (snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
@@ -396,11 +386,10 @@ let safeModeTests =
             }
 
             test "a hungry Post container and a hungry rampart are not the Keep" {
-                // Invaders chew containers as a matter of routine, and the
-                // stock is not for that (ADR 0034). The rampart matters more:
-                // one sits below its floor for most of its life — it decays
-                // there — so a Keep arm that read every hungry structure
-                // would spend the stock on the first hostile to wander past.
+                // Invaders chew containers as a matter of routine, and the stock is not
+                // for that. A rampart sits below its floor for most of its life, so a
+                // Keep arm that read every hungry structure would spend the stock on the
+                // first hostile to wander past.
                 let snapshot =
                     wholeKeep
                     |> withHits "cont-1" BuiltKind.Container 1 125_000
@@ -639,15 +628,11 @@ let threatTests =
         "threats"
         [
             test "a fixture's hostiles stand in the room its own projection names" {
-                // ADR 0041 joins a hostile to the geometry around it by room
-                // name, and the join is silent when it misses: a hostile
-                // filed under a name the projection carries no layer for
-                // measures against nothing at all (ADR 0004) rather than
-                // failing. These colonies are built on `openRoom`, which
-                // names its projection, so the empty default `hostileAt`
-                // carries for the unnamed fixtures would be wrong here —
-                // wrong today only in the Raid log, and in every reflex the
-                // tick #117 gives the Reach a room to read.
+                // A hostile is joined to the geometry by room name, and the join is
+                // silent when it misses: a hostile filed under a name the projection
+                // carries no layer for measures against nothing. These colonies are
+                // built on `openRoom`, which names its projection, so the unnamed
+                // default `hostileAt` carries would be wrong here.
                 let colony = facingBody { X = 25; Y = 22 } [ Attack; Move ]
 
                 Expect.equal
@@ -662,10 +647,8 @@ let threatTests =
             }
 
             test "a Threat is read off the parts: ATTACK or RANGED_ATTACK, nothing else" {
-                // ADR 0033: nothing but those two hurts a creep, so nothing
-                // else has a Reach. A healer, a scout, a claimer and a
-                // dismantler are hostiles the fire reflex shoots and the Raid
-                // log records, and they gate no Task.
+                // Nothing but those two hurts a creep, so nothing else has a Reach: a
+                // healer, a scout, a claimer and a dismantler gate no Task.
                 let reachOf body =
                     reachIn (facingBody { X = 25; Y = 30 } body)
 
@@ -686,8 +669,8 @@ let threatTests =
             }
 
             test "the owner is not consulted: an invader and a raider reach the same tiles" {
-                // Same body, same tile, different username: the damage per
-                // part is the engine's, not the owner's (ADR 0033).
+                // Same body, same tile, different username: the damage per part is the
+                // engine's, not the owner's.
                 let raider = hostileAt "h-1" { X = 25; Y = 30 } [ Attack; Move ]
                 let invader = { raider with Owner = "Invader" }
 
@@ -728,10 +711,9 @@ let threatTests =
 
             test
                 "a tile under one of our standing ramparts is in no Reach; a foreign one covers nothing" {
-                // Ownership is readable off the projection's hits alone: it
-                // carries them for an ownable kind only when it is ours (ADR
-                // 0034), and a rampart somebody else left standing in a room
-                // we took covers no creep of ours.
+                // The projection carries hits for an ownable kind only when it is
+                // ours, so a rampart somebody else left standing covers no creep of
+                // ours.
                 let room =
                     openRoom 8
                     |> withTargets [ "ramp-1", { X = 25; Y = 28 }, Structure BuiltKind.Rampart ]
@@ -781,8 +763,8 @@ let laneColony creeps positions =
         Spatial = raidLane positions
     }
 
-/// The same lane with a built container standing on the Seat: the Post a
-/// Work-heavy body garrisons (ADR 0012, ADR 0020).
+/// The same lane with a built container standing on the Seat: the Post
+/// a Work-heavy body garrisons.
 let postLane creeps positions =
     let colony = laneColony creeps positions
 
@@ -865,14 +847,11 @@ let threatGateTests =
             }
 
             test "an idle body does not step off the working ground into a Reach" {
-                // #241 read against ADR 0033: the idle rule wants this body
-                // off the Seats it has no work on, and the one tile off them
-                // is inside an attacker's Reach. A [[work-heavy body]] has no
-                // Flee — "it stays and works", and its Post's rampart is its
-                // defence — so a step into the Reach is one nothing walks
-                // back, and the goal set is taken less the Reach exactly as
-                // every tasked candidate already is. Nowhere safe off the
-                // ground is nowhere to go, and it parks.
+                // The idle rule wants this body off the Seats it has no work on, and
+                // the one tile off them is inside an attacker's Reach. A work-heavy body
+                // has no Flee, so a step into the Reach is one nothing walks back: the
+                // goal set is taken less the Reach, and nowhere safe off the ground is
+                // nowhere to go, so it parks (#241).
                 let standing = seatPocketColony [ garrison "a1" ] [ "a1", { X = 11; Y = 11 } ]
 
                 let movesOf colony =
@@ -919,9 +898,8 @@ let threatGateTests =
             }
 
             test "a Work-heavy body on a ramparted Post keeps digging with a Threat beside it" {
-                // ADR 0034's exemption, read through the Reach: the tile under
-                // our rampart is in no Reach, so the Post is still standing
-                // room and the narrowed Work Area is not empty.
+                // The tile under our rampart is in no Reach, so the Post is still
+                // standing room and the narrowed Work Area is not empty.
                 let colony =
                     postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 20 } ]
                     |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
@@ -955,8 +933,8 @@ let threatGateTests =
             }
 
             test "the same body on a bare Post is released Threatened, and is not matched to Flee" {
-                // A crawling Anchor neither escapes nor digs (ADR 0033), so
-                // Flee is inapplicable to it: it loses the Task and waits.
+                // A crawling Anchor neither escapes nor digs, so Flee is inapplicable
+                // to it: it loses the Task and waits.
                 let colony =
                     postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 20 } ]
                     |> facing [ hostileAt "h-1" { X = 25; Y = 22 } [ Attack; Move ] ]
@@ -1094,12 +1072,10 @@ let hotCornerTests =
         [
             test
                 "an area with one hot corner stays applicable, and the mover is handed the cold tiles" {
-                // ADR 0033's middle case: neither "any tile hot" (which would
-                // stop all upgrading over one corner) nor "every tile hot"
-                // (which would send the creep to the hot one). The Threat at
-                // (27,25) covers the near way in at (25,28) and leaves the far
-                // one at (23,28), so the creep turns the corner instead of
-                // walking up the lane.
+                // Neither "any tile hot" (which would stop all upgrading over one
+                // corner) nor "every tile hot" (which would send the creep to the hot
+                // one): the Threat at (27,25) covers the near way in at (25,28) and
+                // leaves the far one at (23,28), so the creep turns the corner.
                 let {
                         Intents = quiet
                         Assignments = before
@@ -1152,9 +1128,8 @@ let fleeTests =
         "flee"
         [
             test "a creep standing in a Reach flees, outbidding even a deadline Upgrade" {
-                // Safety ranks beneath the downgrade deadline's -1 (ADR 0033):
-                // nothing the colony wants done matters while the creep doing
-                // it is being killed.
+                // Safety ranks beneath the downgrade deadline's -1: nothing the colony
+                // wants done matters while the creep doing it is being killed.
                 let colony =
                     { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
@@ -1181,17 +1156,12 @@ let fleeTests =
             }
 
             test "a holder the vision grace would keep still flees out of a Reach" {
-                // The vision grace keeps an assignment whose Task left the
-                // pool with its room's vision (#151), and it is the one keep
-                // in the cascade no gate below can judge: a Task in no pool
-                // has no Work Area, so `threatened` — which reads the
-                // *Task's* tiles — answers false for it whatever stands
-                // where. The question ADR 0033 puts above all other work has
-                // to be asked of the **creep** instead, or a graced body
-                // stands in the Reach until the grace or the body runs out.
-                //
-                // Pairwise on the hostile and on nothing else: the same dark
-                // room, the same held Refill, the same body on the same tile.
+                // The vision grace keeps an assignment whose Task left the pool with
+                // its room's vision (#151), and no gate below can judge it: a Task in
+                // no pool has no Work Area, so `threatened`, which reads the Task's
+                // tiles, answers false whatever stands where. The question has to be
+                // asked of the creep instead, or a graced body stands in the Reach
+                // until the grace or the body runs out. Pairwise on the hostile alone.
                 let held = taskId (Refill("spawn-1", Energy))
 
                 let dark hostiles =
@@ -1308,21 +1278,12 @@ let fleeTests =
 
             test
                 "a Fighter does not run from its own target: an ATTACK part is inapplicable to Flee" {
-                // ADR 0056 decision 3, and ADR 0033's [[work-heavy body]]
-                // clause restated for the opposite reason: not that the body
-                // cannot run, but that it will not — a body carrying an ATTACK
-                // part does not run from the creep it was cast to kill, which
-                // is the same part test the engine's own `findAttack.js` splits
-                // its invaders on. Read off the [[body class]] and not off the
-                // row's name, so a fighting body the colony was handed answers
-                // it exactly as one the [[guard]] row cast does.
-                //
-                // Pairwise on the body and on nothing else: the same lane, the
-                // same tile two steps from the Threat, the same Reach over both
-                // of them. The **home room** on purpose — no Guard is pooled
-                // here (ADR 0056 casts none for a raid at home), so what the
-                // second reading shows is Flee's own gate refusing, and not a
-                // fight outbidding it on travel cost.
+                // A body carrying an ATTACK part does not run from the creep it was
+                // cast to kill, the same part test the engine's own `findAttack.js`
+                // splits its invaders on. Read off the body class and not the row's
+                // name. Pairwise on the body alone, in the home room on purpose: no
+                // Guard is pooled for a raid at home, so the second reading shows Flee's
+                // own gate refusing and not a fight outbidding it on travel cost.
                 let assignmentOf body =
                     (decide
                         (laneColony [ body ] [ "c1", { X = 25; Y = 22 } ]
@@ -1379,9 +1340,9 @@ let fleeTests =
             }
 
             test "the tick it stands outside the Reach it is released Inapplicable and rematches" {
-                // Flee ends by its own applicability (ADR 0033): the Threat is
-                // still in the room, so the Task is still pooled — this creep
-                // is simply no longer inside its Reach.
+                // Flee ends by its own applicability: the Threat is still in the room,
+                // so the Task is still pooled; this creep is simply no longer inside its
+                // Reach.
                 let colony =
                     { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 28 } ] with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
@@ -1410,10 +1371,9 @@ let fleeTests =
             }
 
             test "the Threat leaving takes Flee out of the pool, and its holder with it" {
-                // The other half of Flee's ending: no Reach, no Flee — the
-                // Task exists while the condition holds (ADR 0013's shape),
-                // so a room the raiders have left releases the runner as
-                // task-gone and the transition log tells the two apart.
+                // The other half of Flee's ending: no Reach, no Flee, so a room the
+                // raiders have left releases the runner as task-gone and the transition
+                // log tells the two apart.
                 let colony = laneColony [ worker "w1" 0 100 ] [ "w1", { X = 25; Y = 22 } ]
 
                 let {
@@ -1440,7 +1400,7 @@ let spawnHoldTests =
         "the spawn hold"
         [
             test "a Threat beside the spawn holds the cast; one across the room does not" {
-                // A creep born into a Reach is a kill delivered (ADR 0033).
+                // A creep born into a Reach is a kill delivered.
                 let staffed room =
                     { atLevel 2 room with
                         Creeps = [ worker "w1" 0 100 ]
@@ -1523,12 +1483,11 @@ let layeredThreatTests =
     testList
         "threats by room"
         [
-            // The Reach follows the projection's layering (#138, ADR 0041):
-            // a hostile's `RoomName` is what its Reach is filed under, and
-            // each creep is judged against its own room's share. A room
-            // with no entry has an empty Reach, which blocks nothing (ADR
-            // 0004) — so the quiet tick is the yardstick every case below
-            // is measured against, byte for byte.
+            // The Reach follows the projection's layering (#138): a hostile's
+            // `RoomName` is what its Reach is filed under, and each creep is judged
+            // against its own room's share. A room with no entry has an empty
+            // Reach, so the quiet tick is the yardstick every case below is
+            // measured against, byte for byte.
             test "a home Threat digs no hole in the outpost: the coordinate is another room's" {
                 // The ticket's trace: one melee hostile at (10,45) in W1N1, a
                 // tile the home corridor does not even cover, shares its
@@ -1551,15 +1510,12 @@ let layeredThreatTests =
             }
 
             test "the Reach is filed under the room the hostile's own tile names" {
-                // The join written as the tile's type since #216 R3 (ADR
-                // 0052 decision 2), where it used to be a `RoomName` field
-                // beside a bare `Pos` that nothing made agree with it.
-                // Pairwise on the room and on nothing else: the same body
-                // on the same coordinate, filed once in each room, and the
-                // Reach that comes out is that room's and empty in the
-                // other. The two `decide`-level cases either side of this
-                // one say what that costs a creep; this one says where the
-                // tiles went.
+                // The join is written as the tile's type (#216 R3), where it used to
+                // be a `RoomName` field beside a bare `Pos` that nothing made agree
+                // with it. Pairwise on the room alone: the same body on the same
+                // coordinate, filed once in each room. This case says where the tiles
+                // went; the `decide`-level cases either side say what that costs a
+                // creep.
                 let reachIn room hostiles =
                     Threats.reachIn
                         (let colony = twoRoomColony hostiles
@@ -1632,9 +1588,8 @@ let layeredThreatTests =
 
             test
                 "the spawn hold reads the spawn's own room: an outpost Threat beside its coordinate holds nothing" {
-                // ADR 0033's hold, pairwise: the same hostile on the same
-                // coordinate beside the spawn, first filed under the
-                // outpost, then under the home room.
+                // The hold, pairwise: the same hostile on the same coordinate beside
+                // the spawn, first filed under the outpost, then under the home room.
                 let room =
                     atLevel 2 (openRoom 6)
                     |> withOutpost
@@ -1668,15 +1623,13 @@ let layeredThreatTests =
             }
 
             test "an outpost Threat takes that room's Harvest out of the pool, and only that room's" {
-                // ADR 0033's applicability gate, read in an outpost now
-                // that the sweep behind `Hostiles` reaches one (#201). A
-                // melee Threat at (10,49) of W1N2 reaches y 46..52, which
-                // covers both walkable tiles beside `src-out` at (10,47)
-                // and neither the outpost worker at (10,45) nor any tile
-                // the home corridor holds. So the Task loses every tile it
-                // could be worked from while its holder is running from
-                // nothing: this is the gate, not Flee, and the release
-                // names the raid rather than a Task that vanished.
+                // The applicability gate, read in an outpost now that the sweep behind
+                // `Hostiles` reaches one (#201). A melee Threat at (10,49) of W1N2
+                // reaches y 46..52, covering both walkable tiles beside `src-out` at
+                // (10,47) and neither the outpost worker at (10,45) nor any home tile.
+                // The Task loses every tile it could be worked from while its holder
+                // runs from nothing: this is the gate, not Flee, and the release names
+                // the raid.
                 let held =
                     Map.ofList
                         [ "wh", taskId (Harvest "src-home"); "wo", taskId (Harvest "src-out") ]
@@ -1711,17 +1664,11 @@ let layeredThreatTests =
             }
 
             test "the safe-mode reflex reads the home room alone: an outpost claimer spends nothing" {
-                // ADR 0007's stock buys one room's controller a thousand
-                // ticks of immunity, and the room is the one the spawns
-                // stand in — an outpost has no controller of ours for a
-                // claimer to tap. Until #201 the question could not be
-                // asked, the list holding the spawn rooms only; now it can,
-                // and `hostilesAtHome` is the answer.
-                //
-                // Pairwise, the same CLAIM body on the same tile two off
-                // the controller: the room is the only difference between
-                // the two runs, so nothing but the room filter can separate
-                // them.
+                // The stock buys one room's controller a thousand ticks of immunity,
+                // and the room is the one the spawns stand in: an outpost has no
+                // controller of ours for a claimer to tap. `hostilesAtHome` is the
+                // filter. Pairwise on the room alone: the same CLAIM body on the same
+                // tile two off the controller.
                 let colony =
                     atLevel
                         2
@@ -1754,14 +1701,10 @@ let layeredThreatTests =
             }
 
             test "the Keep arm reads it too: an outpost dismantler spends nothing" {
-                // The reflex's *other* arm (ADR 0034), narrowed by the same
-                // `hostilesAtHome` and pinned separately, because either
-                // one left wide spends the stock on its own. It fires on
-                // any hostile — a WORK-only dismantler is the case it
-                // exists for — and what arms it is a dented Keep, which is
-                // the spawn, the tower and the Storage and stands in the
-                // colony's own room. A raider a border away is beside
-                // nothing this arm could be about.
+                // The reflex's other arm, narrowed by the same `hostilesAtHome` and
+                // pinned separately, because either one left wide spends the stock on
+                // its own. A raider a border away is beside nothing this arm could be
+                // about.
                 let colony =
                     atLevel
                         2
@@ -1795,14 +1738,11 @@ let layeredThreatTests =
             }
 
             test "the fire reflex reads the home room alone: no tower shoots across a border" {
-                // ADR 0014 pairs every tower with the hostile nearest to
-                // it, and both halves are the colony's own room's:
-                // `Atlas.placedTowers` has always answered home alone, and
-                // #201 narrows the other half to match. A `Pos` carries no
-                // room (ADR 0041), so an unnarrowed pairing would measure
-                // an outpost raider by its bare coordinates, hand the
-                // engine a target a border away, and spend the tick on a
-                // shot it can only refuse.
+                // Both halves of the tower pairing are the colony's own room's:
+                // `Atlas.placedTowers` has always answered home alone, and #201 narrows
+                // the hostiles to match. A `Pos` carries no room, so an unnarrowed
+                // pairing would hand the engine a target a border away and spend the
+                // tick on a shot it can only refuse.
                 let colony =
                     atLevel
                         3
@@ -1839,17 +1779,11 @@ let keeperTests =
     testList
         "keepers"
         [
-            // The Source Keeper room the chain to the sector Reactor crosses,
-            // as a colony that merely walks through it sees it: **beside** the
-            // colony's own home and never as it, because a room with no
-            // controller is a room no colony can ever be homed in (ADR 0047,
-            // ADR 0052) and the whole subject here is the room we pass through.
-            // It is the layering that makes the difference say anything — a
-            // Reach is filed by the room its Threat stands in (ADR 0041), and
-            // the rampart subtraction ADR 0033 grants is a fact about a room we
-            // own, which this is not. The ground is the test's and the **name**
-            // is the declaration's, which is all the mask reads (`Keepers`, ADR
-            // 0060 decision 2); the room's real terrain is
+            // The Source Keeper room the chain to the sector Reactor crosses, as a
+            // colony that walks through it sees it: beside the colony's own home,
+            // never as it, since a room with no controller is no colony's home. The
+            // ground is the test's and the name is the declaration's, which is all
+            // the mask reads (`Keepers`); the room's real terrain is
             // `AtlasSeamTests`'s, over the capture (`rooms/W15S26.room`).
             let crossing hostiles =
                 let colony = atLevel 2 (openRoom 8)
@@ -1877,29 +1811,21 @@ let keeperTests =
                 let colony = crossing hostiles
                 threatsOf colony (Atlas.ofView colony)
 
-            // A keeper's body, as `keepers/pretick.js` casts it: the ranged
-            // weapon is the one that decides the Reach (ADR 0033), and it is
-            // the longest thing about it.
+            // A keeper's body, as `keepers/pretick.js` casts it: the ranged weapon
+            // is the one that decides the Reach.
             let keeper at =
                 hostileIn "W15S26" at [ Tough; Move; Attack; RangedAttack; Heal ]
 
             test
                 "no walkable tile of a keeper room is inside the Reach of a keeper the engine has pinned" {
-                // ADR 0060 decision 2's second acceptance criterion, pinned
-                // **pairwise**: one keeper at a time, on every tile the engine
-                // could pin it to — within range 1 of each declared rock — and
-                // the Reach it derives against the ground the colony would
-                // actually walk. This is the whole of what the mask buys: Flee
-                // is inapplicable out here by geometry and not by exempting
-                // the courier or the re-claimer from ADR 0033.
-                //
-                // **Pinned**, which is the steady state and not every tick, and
-                // the title says so: a keeper cast on its lair adopts a rock
-                // within five and walks to range 1 of it, and the sweep below
-                // covers none of the tiles on that walk. It is not an omission
-                // to be widened here — over W15S26's real terrain 24 of those
-                // tiles do reach ground we walk, and no larger margin crosses
-                // the room at all (#327).
+                // Pinned pairwise: one keeper at a time, on every tile the engine
+                // could pin it to (within range 1 of each declared rock), and the Reach
+                // it derives against the ground the colony would walk. Flee is
+                // inapplicable out here by geometry, not by exemption. Pinned is the
+                // steady state: a keeper cast on its lair walks to range 1 of a rock
+                // within five, and the sweep covers none of the tiles on that walk.
+                // Over W15S26's real terrain 24 of those tiles do reach ground we walk,
+                // and no larger margin crosses the room at all (#327).
                 let walkable = Atlas.walkableTilesIn (Atlas.ofView (crossing [])) "W15S26"
 
                 Expect.isNonEmpty walkable "the room is ground a body can cross at all"
@@ -1915,11 +1841,9 @@ let keeperTests =
 
             test
                 "the keeper is still a Threat and still derives a Reach: the ground changed, not the list" {
-                // The override of #286's reasoning is for the ground and for
-                // nothing else (ADR 0060 decision 2). A keeper is still a
-                // hostile, still derives a Reach and is still the [[raid
-                // log]]'s business — what changed is that the Reach covers no
-                // tile of ours, so there is nothing left for Flee to answer.
+                // The override is for the ground and nothing else: a keeper is still a
+                // hostile, still derives a Reach and is still the raid log's business;
+                // the Reach just covers no tile of ours.
                 let lair = { X = 35; Y = 11 }
                 let threats = threatsIn [ keeper lair ]
 

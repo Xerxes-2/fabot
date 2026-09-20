@@ -16,15 +16,11 @@ let withdrawCapacityTests =
         "withdraw capacity"
         [
             test "a container that fills one hauler takes one; the rest walk to the full one" {
-                // The defect (#161): the matching key puts cost ahead of
-                // `load` (ADR 0002), so without a capacity every empty
-                // hauler picks the *nearest* stocked container whatever is
-                // in it — three bodies onto 400 energy, two of them home
-                // empty, while 1,800 stands unvisited seventeen tiles away.
-                // The stock is the cap: `ceil(400 / 400)` is one seat. The
-                // far store is 1,800 and not a full 2,000: a full source
-                // container is lifted a rung of its own (its overflow is
-                // going to the ground), and this test is about the cap.
+                // The matching key puts cost ahead of load, so without a
+                // capacity every empty hauler picks the nearest stocked
+                // container. The stock is the cap: `ceil(400 / 400)` is one
+                // seat. The far store is 1,800 and not a full 2,000, because
+                // a full source container is lifted a rung of its own.
                 let { Assignments = split } = decideOn (crowdColony 400 1800 crowdOfThree)
 
                 Expect.equal
@@ -37,11 +33,8 @@ let withdrawCapacityTests =
                     [ "h2"; "h3" ]
                     "and the crowd it turns away walks to the store that can fill it"
 
-                // The pairwise control: the same three creeps on the same
-                // tiles, with nothing changed but the near store's stock.
-                // Travel cost still says near for all three, and now the
-                // capacity lets it — so the split above is the stock's
-                // doing and not the geometry's.
+                // The pairwise control: nothing changed but the near store's
+                // stock.
                 let { Assignments = whole } = decideOn (crowdColony 2000 2000 crowdOfThree)
 
                 Expect.equal
@@ -51,11 +44,8 @@ let withdrawCapacityTests =
             }
 
             test "the cap rounds up: one load exactly is one seat, one energy more is two" {
-                // The `ceil` (#161), pinned at the boundary the arithmetic
-                // turns on: 400 is exactly the cast hauler's load and admits
-                // one body, and 401 — a fraction of a second trip — admits
-                // the second, because the fraction a floor would drop is
-                // energy nobody would be sent for.
+                // 400 is exactly the cast hauler's load; 401 is a fraction of
+                // a second trip nobody would be sent for.
                 let seatsAt stock =
                     let { Assignments = assignments } =
                         decideOn (crowdColony stock 1800 (List.truncate 2 crowdOfThree))
@@ -76,12 +66,9 @@ let withdrawCapacityTests =
             }
 
             test "a hauler still walking holds its seat: the second is turned away" {
-                // Counted at arrival like every other cap (ADR 0026): the
-                // holder is fourteen steps out and has not touched the
-                // store, and the candidate is standing on its doorstep. A
-                // cap counting only the creeps already on the tile would let
-                // the near one in and land both on 400 energy — which is the
-                // defect with an extra tick in it.
+                // Counted at arrival: the holder is fourteen steps out and
+                // the candidate on the doorstep. A cap counting only creeps
+                // on the tile would land both on 400 energy.
                 let {
                         Assignments = assignments
                         Verdicts = verdicts
@@ -127,13 +114,9 @@ let withdrawCapacityTests =
             }
 
             test "the Storage is not special-cased: the same formula, and at 130k no cap" {
-                // ADR 0023's stock is one more store and gets one more
-                // reading of the same rule (#161) — a Storage down to one
-                // trip's worth admits one drawer, exactly as a container
-                // does. What keeps that from starving the haul cycle is the
-                // number and not an exemption: a real stock divides into
-                // hundreds of trips, so the cap is there and is never the
-                // thing that binds.
+                // A Storage down to one trip's worth admits one drawer, as a
+                // container does; a real stock divides into hundreds of
+                // trips, so the cap never binds.
                 let { Assignments = thin } = decideOn (stockCrowdColony 400)
 
                 Expect.equal
@@ -150,14 +133,10 @@ let withdrawCapacityTests =
             }
 
             test "the upgrade buffer divides by the worker row that draws from it" {
-                // Which row draws is a fact about the store (ADR 0019): no
-                // body without a Work part may take the buffer, so its
+                // No body without a Work part may take the buffer, so its
                 // drawers are the worker row and its 900 is two cast
-                // workers' loads at this bank. Priced by the hauler the
-                // colony would cast instead — 1,200 a trip — the same 900
-                // reads `ceil(900 / 1200)` = one seat and sends the second
-                // upgrader back to a rock while the energy it came to
-                // spend stands beside it (#161).
+                // workers' loads. Priced by the hauler's 1,200 a trip the
+                // same 900 would be one seat.
                 let { Assignments = split } = decideOn (bufferCrowdColony 900)
 
                 Expect.equal
@@ -165,17 +144,14 @@ let withdrawCapacityTests =
                     [ "w1"; "w2" ]
                     "two worker loads standing in the buffer admit two workers"
 
-                // The same 900 in a store the haul cycle owns, judged for
-                // the same three bodies: the divisor is the store's and
-                // never the candidate's, so the ordinary container admits
-                // one and takes the worker the buffer turned away.
+                // The divisor is the store's and never the candidate's: the
+                // ordinary container admits one hauler load.
                 Expect.equal
                     (drawersOf split "can-far")
                     [ "w3" ]
                     "and an ordinary container's 900 is one hauler load, however the body that walks to it is built"
 
-                // The pairwise control: nothing changed but the buffer's
-                // stock, three loads instead of two.
+                // The pairwise control: three loads instead of two.
                 let { Assignments = whole } = decideOn (bufferCrowdColony 1350)
 
                 Expect.equal
@@ -185,19 +161,10 @@ let withdrawCapacityTests =
             }
 
             test "the buffer's two rows are capped apart, each by its own load" {
-                // #196, landed as ADR 0052 decision 6's per-[[body class]]
-                // capacity. One store, two rows, two loads: the generalist
-                // the colony casts at this bank carries 450 and the
-                // [[standing body]] beside the buffer carries fifty, so a
-                // 400-energy buffer is one trip for the first and eight for
-                // the second. Divided by the generalist's load alone — the
-                // one number the store used to answer — the row #187 hired
-                // to *live* at that store took one seat between the three
-                // of them and the rest walked to a rock they are the worst
-                // body in the colony at digging.
-                //
-                // Pairwise on the class of the three bodies and nothing
-                // else: the same tiles, the same 400, the same pool.
+                // One store, two rows, two loads: the generalist carries 450
+                // at this bank and the standing body fifty, so a 400 buffer
+                // is one trip for the first and eight for the second.
+                // Pairwise on the class alone.
                 let standingCrowd =
                     { bufferCrowdColony 400 with
                         Creeps =
@@ -223,11 +190,9 @@ let withdrawCapacityTests =
             }
         ]
 
-/// The tombstone field with `units` of the season's ore in the store beside
-/// whatever energy it holds (#359) — a courier that died loaded. The kind is
-/// already `Tombstone` and stays so: `Tombstone` names no resource, so what
-/// makes this a case about ore is the Thorium map alone, which is the shape
-/// `ViewTests` pins the projection building.
+/// The tombstone field with `units` of the season's ore beside its energy.
+/// `Tombstone` names no resource, so the Thorium map alone makes this a
+/// case about ore.
 let private withTombOre units (colony: ColonyView) =
     { colony with
         Spatial =
@@ -242,15 +207,10 @@ let pickupTaskTests =
         "the pile and the tombstone"
         [
             test "a pile worth a whole trip outbids the container underfoot; a smaller one does not" {
-                // The live shape's other half (#242, user 2026-09-07):
-                // "worker 和 hauler 在不满的 container 和地上的能量中会优先
-                // 选择前者". Nothing but travel cost separates a pile from a
-                // half-full container once they are apart, and the container
-                // is the one the body is standing on, so the ground kept its
-                // energy until it decayed. A pile holding half a [[hauler
-                // unit]]'s load or more is a trip of its own, and the copy
-                // that is going away is the one to take — so it steps up the
-                // rung the pile on a drawable tile already had.
+                // Nothing but travel cost separates a pile from a half-full
+                // container once apart, so the ground kept its energy until
+                // it decayed. A pile holding half a hauler unit's load or
+                // more is a trip of its own.
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -264,12 +224,9 @@ let pickupTaskTests =
                     (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
                     "half the row's load five tiles off beats eight hundred at its feet"
 
-                // The pairwise control: the same colony, the same distance,
-                // one energy under the line. A hundred energy is not a trip,
-                // and a [[priority]] is a colony-wide scalar — lifting every
-                // pile is what would send this body five tiles for a
-                // mouthful and, in the live room, forty tiles past the 1,500
-                // under its feet.
+                // The pairwise control: one energy under the line. A
+                // priority is a colony-wide scalar, so lifting every pile
+                // would send this body five tiles for a mouthful.
                 Expect.equal
                     (matched (pileDownTheLane 800 599))
                     (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
@@ -280,12 +237,9 @@ let pickupTaskTests =
                     (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
                     "and a pile at the threshold is still the distance's to decide"
 
-                // Pairwise on the container's stock alone: a **full** source
-                // container is two rungs up (#216 R5) against the pile's one,
-                // because its income is going away too — the engine drops a
-                // garrison's overflow onto its tile only once it is full —
-                // and the pickup reflex takes what lies there for free while
-                // the body draws.
+                // Pairwise on the stock: a full source container is two
+                // rungs up against the pile's one, because the engine drops
+                // a garrison's overflow onto its tile only once it is full.
                 Expect.equal
                     (matched (pileDownTheLane Engine.containerCapacity 600))
                     (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.Rank))
@@ -293,13 +247,9 @@ let pickupTaskTests =
             }
 
             test "the whole trip's rung is a rung over the whole feeding tier" {
-                // What the rung reaches, pinned pairwise because a rank is a
-                // colony-wide scalar and not a pairing (#242 review): the
-                // Pickup steps up against *every* Feeding Task and not the
-                // container Withdraws the ticket named, so the consequence is
-                // read here as a decision rather than met later as a surprise.
-                // Each colony below holds exactly two Tasks, and the rival is
-                // the one standing under the body's feet.
+                // A rank is a colony-wide scalar: the Pickup steps up
+                // against every Feeding Task. Each colony holds exactly two
+                // Tasks, the rival under the body's feet.
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -308,10 +258,8 @@ let pickupTaskTests =
                         | Verdict.Matched("h1", task, factor) -> Some(task, factor)
                         | _ -> None)
 
-                // The delivery half of the cycle: a half-loaded hauler one
-                // step from a spawn with 300 free walks nineteen tiles for
-                // the pile instead, and no distance saves the spawn because
-                // rank is settled before a price is asked.
+                // The delivery half: a half-loaded hauler one step from a
+                // spawn with 300 free walks nineteen tiles for the pile.
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 1800 600))
                     (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
@@ -322,10 +270,8 @@ let pickupTaskTests =
                     (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
                     "one energy under the line the spawn is the near Task again"
 
-                // And the other copy that is going away: a tombstone is a
-                // Withdraw like any other and only a *full* container's stock
-                // carries a rung, so the pile outranks 1,500 in a store that
-                // ends outright.
+                // A tombstone is a Withdraw like any other and only a full
+                // container carries a rung.
                 Expect.equal
                     (matched (pileAgainstATombstone 600))
                     (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
@@ -339,15 +285,10 @@ let pickupTaskTests =
 
             test
                 "under a bank of 450 the line is the pooling threshold and every pile takes the rung" {
-                // The line's own regime (#242 review). `haulerLoad` is
-                // `100 * (bank / 150)`, so half a load is a hundred at RCL1's
-                // bank of 300 — `Tuning.PickupThreshold` itself — and the
-                // smallest pile the pool will hold is already a whole trip
-                // for the row that bank casts. The distance-only rung the
-                // rule is written around therefore begins at RCL2, and a
-                // bootstrapping colony lifts every pile it pools. Pinned so
-                // the regime is a fact of the code and not of a fixture's
-                // bank.
+                // `haulerLoad` is `100 * (bank / 150)`, so half a load is a
+                // hundred at RCL1's bank of 300 — `Tuning.PickupThreshold`
+                // itself — and the smallest pooled pile is already a whole
+                // trip. The distance-only rung begins at RCL2.
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -368,15 +309,10 @@ let pickupTaskTests =
             }
 
             test "a pile on a container's own tile is taken before the container" {
-                // The live shape (user, 2026-09-07): a hauler standing at a
-                // full container ignored the 1,859 energy lying on it. The
-                // two Tasks share the feeding tier, the tile and therefore
-                // the travel cost, so pool order decided — and the pool
-                // order had the container first. What separates them is
-                // decay: the pile loses `ceil(amount / 1000)` a tick and the
-                // container loses nothing, so the copy that is going away is
-                // the one to take (ADR 0052 decision 6, the [[priority]]
-                // ladder's own rung of slack).
+                // The live shape (2026-09-07): a hauler at a full container
+                // ignored the 1,859 lying on it. Same tier, tile and travel
+                // cost, so pool order decided. The pile loses
+                // `ceil(amount / 1000)` a tick and the container nothing.
                 let { Assignments = together } = decideOn (sameTilePileColony { X = 10; Y = 10 })
 
                 Expect.equal
@@ -385,12 +321,9 @@ let pickupTaskTests =
                     "one tile, two stores: the decaying one first"
 
                 // The pairwise control: the same hauler, the same container,
-                // the same pile, ten tiles down the lane. The Withdraw is on
-                // its own tier again — the step is a claim about *this*
-                // store and never about piles in general — and travel cost
-                // says what it always said. A hundred and fifty is an eighth
-                // of the row's load here, so the other lift a pile can carry
-                // (#242) is not what this reads either.
+                // The pairwise control: the pile ten tiles down the lane. 150
+                // is an eighth of the row's load, so the trip rung is not
+                // what this reads.
                 let { Assignments = apart } = decideOn (sameTilePileColony { X = 20; Y = 10 })
 
                 Expect.equal
@@ -399,10 +332,8 @@ let pickupTaskTests =
                     "a pile ten tiles off moves nothing: the container underfoot is still the flow"
 
                 // And a *full* container outranks the pile on its own tile
-                // (live, W12S28 2026-09-07): the garrison is overflowing, the
-                // 2,000 is the flow, and the pickup reflex takes the pile
-                // off the same tile for free while the body draws. Pairwise
-                // on the stock alone.
+                // And a full container outranks the pile on its own tile: the
+                // 2,000 is the flow, and the reflex takes the pile for free.
                 let full =
                     let colony = sameTilePileColony { X = 10; Y = 10 }
 
@@ -423,19 +354,11 @@ let pickupTaskTests =
             }
 
             test "the piled container keeps its place against every other store" {
-                // Which of the pair carries the rung is not a matter of
-                // taste (#216 R5 review). A [[priority]] is a scalar the
-                // whole tier is ordered by and travel cost never overturns
-                // it (ADR 0002), so stepping the *Withdraw* down put that
-                // container behind every other store in the colony at any
-                // distance — and the engine drops an [[anchor]]'s overflow
-                // onto a container's tile only once the container is
-                // **full**, so the demotion switched on exactly when the
-                // store most needed emptying. Two haulers, a piled near
-                // container and an unpiled far one: the first takes the
-                // decaying copy, and the second must still take the four
-                // hundred at its feet rather than walk twenty tiles past
-                // it.
+                // Travel cost never overturns a priority, so stepping the
+                // Withdraw down put that container behind every other store
+                // at any distance — switched on exactly when the container
+                // is full and most needs emptying. Two haulers, a piled near
+                // container and an unpiled far one.
                 let colony =
                     { bareRespawn with
                         Bank = bank 150 150
@@ -462,10 +385,8 @@ let pickupTaskTests =
                     (Some(taskId (Pickup("pile-a", Energy))))
                     "the pile's own hauler still takes the decaying copy first"
 
-                // The pile's capacity is its amount over one load — one
-                // body — so the second hauler is over capacity there and
-                // has the two containers to choose between. Only travel
-                // cost may decide that, which is the whole of the fix.
+                // The pile's capacity is one body, so the second hauler
+                // chooses between the containers on travel cost alone.
                 Expect.equal
                     (Map.tryFind "h2" assignments)
                     (Some(taskId (Withdraw("can-near", Energy))))
@@ -473,10 +394,8 @@ let pickupTaskTests =
             }
 
             test "a pile past the threshold hires a hauler ten tiles off; one under it hires nobody" {
-                // The live gap's second half (#167): 193 energy of death
-                // drop at W13S28 36,21 with nobody near enough for the
-                // reflex ever to reach it. A pile at or over the threshold
-                // is a Task and gets walked to.
+                // 193 energy of death drop at W13S28 36,21 with nobody near
+                // enough for the reflex to reach it.
                 let walk = decideOn (pileTaskColony 150 [ "h1", { X = 20; Y = 10 } ])
 
                 Expect.equal
@@ -503,9 +422,8 @@ let pickupTaskTests =
             }
 
             test "the threshold is inclusive: a hundred exactly is worth the trip" {
-                // Where the tunable turns, pinned on both sides of it: two
-                // CARRY parts' worth is the smallest load that pays for a
-                // walk made for the pile alone.
+                // Two CARRY parts' worth is the smallest load that pays for
+                // a walk made for the pile alone.
                 let assignmentAt amount =
                     let { Assignments = assignments } =
                         decideOn (pileTaskColony amount [ "h1", { X = 20; Y = 10 } ])
@@ -521,15 +439,9 @@ let pickupTaskTests =
             }
 
             test "the pile that arrives is picked up once, and the bubble says so" {
-                // The Task's own action Intent, at range 1 where the Atlas
-                // permits it. The reflex asks for the same act on this
-                // tick — its rule is the same range and the same free
-                // capacity — so the count is the assertion and not the
-                // membership: an arriving picker satisfies both producers,
-                // and one creep's one pickup spelt twice would over-report
-                // the CPU line's accepted-intent column tick after tick
-                // (#167). Two *adjacent creeps* both reaching for one pile
-                // stay two asks; this is one creep asking twice.
+                // The reflex asks for the same act on this tick, so the
+                // count is the assertion: one creep's one pickup spelt twice
+                // would over-report the CPU line's accepted-intent column.
                 let {
                         Intents = intents
                         Assignments = assignments
@@ -554,15 +466,9 @@ let pickupTaskTests =
 
             test
                 "the creep beside a hired picker still asks: the pair is deduplicated, not the pile" {
-                // The other side of the count above (#167): what the
-                // deduplication drops is one creep's own Intent spelt
-                // twice, and nothing else. Two haulers stand at one pile
-                // of exactly a hundred, so its capacity is one body: h1 is
-                // hired and h2 is not, and h2's reflex pickup is energy
-                // the colony recovers for free. A filter written over the
-                // pile rather than over the (creep, pile) pair would drop
-                // it — which is why the assertion is both names and not a
-                // count.
+                // The deduplication drops one creep's Intent spelt twice,
+                // nothing else: the pile's capacity is one body, and h2's
+                // reflex pickup is free energy.
                 let { Intents = intents } =
                     decideOn (
                         pileTaskColony 100 [ "h1", { X = 10; Y = 11 }; "h2", { X = 11; Y = 10 } ]
@@ -575,14 +481,9 @@ let pickupTaskTests =
             }
 
             test "a pile decaying under the threshold releases the hauler still walking to it" {
-                // The accepted loss, pinned so it stays a decision
-                // (`Tuning.PickupThreshold`, #167). The threshold gates
-                // persistence as well as entry, because the pool is
-                // rebuilt creep-blind every tick: a pile at 100 holds its
-                // holder, and the same pile one energy lighter — a
-                // hundredth of the decay a pile spends on its own, or the
-                // first of two hired haulers arriving — is gone, and the
-                // walk already spent bought nothing.
+                // The threshold gates persistence as well as entry, because
+                // the pool is rebuilt creep-blind every tick: one energy
+                // under the line and the walk already spent bought nothing.
                 let held = Map.ofList [ "h1", taskId (Pickup("pile-a", Energy)) ]
 
                 let standing = decideFrom held (pileTaskColony 100 [ "h1", { X = 20; Y = 10 } ])
@@ -605,10 +506,8 @@ let pickupTaskTests =
             }
 
             test "the pile's amount is its capacity: 150 admits two of the three haulers" {
-                // The Withdraw rule over a pile (#161 read by #167):
-                // `ceil(150 / 100)` is two bodies, and travel cost cannot
-                // thin the crowd because all three stand one step from the
-                // pile's Work Area.
+                // `ceil(150 / 100)` is two bodies, and all three stand one
+                // step from the pile's Work Area.
                 let { Assignments = split } = decideOn (pileTaskColony 150 crowdOfThree)
 
                 Expect.equal
@@ -627,10 +526,8 @@ let pickupTaskTests =
             }
 
             test "a Work-heavy body never picks a pile up (ADR 0016)" {
-                // The gate that keeps an Anchor at its rock, read over the
-                // ground as well as over a container: a heavy body's
-                // intake is digging, and a pile is not a dig. Pairwise on
-                // the body alone — the same parts, one Move more.
+                // A heavy body's intake is digging, and a pile is not a dig.
+                // Pairwise on the body alone.
                 let bodied body =
                     let colony = pileTaskColony 150 [ "a1", { X = 12; Y = 10 } ]
 
@@ -651,10 +548,9 @@ let pickupTaskTests =
             }
 
             test "a tombstone is a store: its 408 is withdrawn, and an empty one pools nothing" {
-                // The live gap's first half (#167): 408 energy standing in
-                // a tombstone in the home room while the colony dug. The
-                // Intent is the container's own — the engine's `withdraw`
-                // is one method over every store.
+                // 408 energy in a tombstone in the home room while the colony
+                // dug. The engine's `withdraw` is one method over every
+                // store.
                 let {
                         Intents = intents
                         Assignments = assignments
@@ -679,20 +575,12 @@ let pickupTaskTests =
             }
 
             test "and the season's ore in one is drawn the same way; an energy-only one offers none" {
-                // #359. The line above pooled a tombstone's **energy** and
-                // nothing else, so a courier that died with ore aboard left
-                // 175 T in a store no rule of this colony could name — W15S25's
-                // tombstone at (43,6), in the declared Reactor room, decaying.
-                // The engine's `withdraw` takes a tombstone or a ruin for any
-                // resource (`@screeps/engine` `src/game/creeps.js`: its target
-                // test names `globals.Tombstone` and `globals.Ruin`), so this is
-                // the same sentence one column over.
-                //
-                // The projection half of this case — that a tombstone really
-                // reaches a view with a kind, a tile and a Thorium amount and no
-                // energy entry — is `ViewTests`' "a tombstone's ore in a room she
-                // owns rides whole", written with it: #355 and #356 were both a
-                // rule green against a shape `ofWorld` never builds.
+                // A courier that died with ore aboard left 175 T in a store
+                // no rule could name. The engine's `withdraw` takes a
+                // tombstone or a ruin for any resource (`@screeps/engine`
+                // `src/game/creeps.js` names `globals.Tombstone` and
+                // `globals.Ruin`). The projection half is `ViewTests`' "a
+                // tombstone's ore in a room she owns rides whole".
                 let ore = tombColony 0 [ "h1", { X = 11; Y = 10 } ] |> withTombOre 175
 
                 let {
@@ -711,11 +599,9 @@ let pickupTaskTests =
                     (WithdrawFromStore("h1", "tomb-1", Thorium, None))
                     "and the act names the ore and no amount: the 999-unit load is the Storage draw's alone"
 
-                // The cap is the store's own holding divided by the row's cast
-                // at this bank — 150 energy buys `[2 Carry; 1 Move]`, a hundred
-                // — so 175 T is two trips, exactly as 175 in a container would
-                // be. Read off the pool rather than asserted as a number, so the
-                // case moves with the row it is priced on.
+                // The cap is the holding over the row's cast at this bank —
+                // 150 buys `[2 Carry; 1 Move]`, a hundred — read off the pool
+                // so it moves with the row.
                 Expect.equal
                     (partCountIn (bodyFor haulerPattern ore.Bank.Capacity) Carry
                      * Engine.carryPartCapacity)
@@ -732,10 +618,8 @@ let pickupTaskTests =
                     (Some 2)
                     "capped by what it holds of the resource named, like every other Withdraw: 175 is two trips"
 
-                // The pairwise control: the same tombstone holding the 408
-                // energy of the case above and no ore at all. `Tombstone`
-                // carries no resource, so it is the holding that admits the
-                // Task, and a store with none of the ore offers none of it.
+                // The pairwise control: energy only. `Tombstone` carries no
+                // resource, so it is the holding that admits the Task.
                 Expect.isFalse
                     (planTasksOn (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) noThreats
                      |> List.contains (Withdraw("tomb-1", Thorium)))
@@ -744,17 +628,11 @@ let pickupTaskTests =
 
             test
                 "a tombstone's ore takes the pile's rung, where a container's under the cliff takes none" {
-                // #359 reading #306 and #311. The draw sits on the
-                // [[storage]]'s own tier (ADR 0057 decision 3) and so does the
-                // bank's energy Withdraw, so a rungless ore draw loses every
-                // travel-cost tie to a Storage in the middle of the home room —
-                // which is #306's live W13S28, 486k banked and the mine not
-                // drawn once in 700 ticks. A tombstone is further away than any
-                // mine (the live one is three crossings out) and on a shorter
-                // clock than any pile: it drops its **whole** store as piles
-                // when it decays, and those piles then bleed.
-                //
-                // Pairwise on the kind of store alone: the same resource, the
+                // The draw sits on the Storage's tier and so does the bank's
+                // energy Withdraw, so a rungless ore draw loses every
+                // travel-cost tie to a Storage in the middle of the room. A
+                // tombstone drops its whole store as piles when it decays.
+                // Pairwise on the kind of store alone.
                 // same 175 units, under the contact cliff both times.
                 let rankOf colony task =
                     poolOn colony
@@ -775,10 +653,9 @@ let pickupTaskTests =
             }
 
             test "a tombstone keeps no construction site off its tile" {
-                // Layout determinism (ADR 0011), the rule the piles already
-                // had (#167): a tombstone stands wherever a creep happened
-                // to die, and a plan that moved with it would be a function
-                // of that accident.
+                // A tombstone stands wherever a creep happened to die, and a
+                // plan that moved with it would be a function of that
+                // accident.
                 let bare = atLevel 2 (openRoom 3)
 
                 let littered =
@@ -796,22 +673,11 @@ let pickupTaskTests =
             }
 
             test "a pile ties a container: one tier, and the tie goes to the pile" {
-                // The tier (#167): a pile is the haul cycle's own energy
-                // lying where it fell, so it feeds on the containers' tier
-                // and the choice between the two is travel cost's. Equal
-                // cost is the way to read that off one match — a rank
-                // either way would have decided it before the price was
-                // asked, and the factor says which happened.
-                //
-                // Which way an exact tie falls is the pool's order, and
-                // since #242 the piles stand in it before the Withdraws
-                // (user: "worker 和 hauler 在不满的 container 和地上的能量
-                // 中会优先选择前者"). A container keeps what it holds and a
-                // pile loses `ceil(amount / 1000)` a tick, so where nothing
-                // else separates them the decaying copy is the one to take.
-                // The bank is the mother's, so 150 on the ground is well
-                // under half the row's 1,200 load and carries no rung of
-                // its own: what this reads is pool order and nothing else.
+                // Equal cost is how to read the tier off one match. The
+                // piles stand in pool order before the Withdraws: a
+                // container keeps what it holds and a pile loses
+                // `ceil(amount / 1000)` a tick. At the 1,800 bank 150 is
+                // well under half the row's load and carries no rung.
                 let colony =
                     { bareRespawn with
                         Bank = bank 1800 1800
@@ -844,12 +710,8 @@ let pickupTaskTests =
             }
 
             test "a pile outranks the stock underfoot" {
-                // The other half of the tier, and the one that has a rank
-                // in it (ADR 0023): the Storage is drawn a tier below the
-                // flow, so a pile sixteen tiles away beats a stock the
-                // creep is standing beside. A pile decays at a thousandth
-                // a tick and a stock does not, which is the reason the
-                // ordering is right as well as inherited.
+                // The Storage is drawn a tier below the flow, so a pile
+                // sixteen tiles away beats a stock the creep stands beside.
                 let colony =
                     { bareRespawn with
                         Bank = bank 150 150
@@ -881,12 +743,10 @@ let pickupTaskTests =
             }
 
             test "an outpost's pile pools by the rule the home room's does" {
-                // The declared outpost is a room of the projection like any
-                // other (ADR 0041, ADR 0042): the pool is read off the kind
-                // census and the amount, neither of which knows a border.
-                // The home pile keeps its own coordinate and no amount, so
-                // it stays the reflex's and proves the pairing is not
-                // crossing (#166).
+                // The pool is read off the kind census and the amount,
+                // neither of which knows a border. The home pile keeps its
+                // coordinate and no amount, so it proves the pairing is not
+                // crossing.
                 let colony =
                     pileColony [ hauler "h-out" 0 100 ] []
                     |> withPileRoom
@@ -931,13 +791,11 @@ let fullContainerTests =
         "a full source container"
         [
             test "a full source container is drawn before a half-full one nearer to hand" {
-                // One lane, two posted sources: can-a three tiles from the
-                // hauler at 1,000, can-b twelve tiles away at 2,000 (full,
-                // so its garrison's overflow is going to the ground). The
-                // full one wins by rank; pairwise on can-b's stock alone,
-                // at 1,000 the near one wins by travel cost, which is the
-                // nearest-first dispatch that let W13S28's north container
-                // overflow for hours (#198).
+                // can-a three tiles from the hauler at 1,000, can-b twelve
+                // tiles away at 2,000 (full, so its garrison's overflow is
+                // going to the ground). Pairwise on can-b's stock alone:
+                // nearest-first dispatch let W13S28's north container
+                // overflow for hours.
                 let lane stockB =
                     let room =
                         { spatial
@@ -991,12 +849,9 @@ let thoriumLegTests =
         "the Thorium leg's pool"
         [
             test "the mineral container is a Withdraw and the Storage a Refill, both in Thorium" {
-                // ADR 0057 decision 3: the mine-to-[[storage]] leg is the
-                // existing pair with a resource on it, so what the pool gains is
-                // two entries and not two Task kinds. The intake is the
-                // container the store-less [[miner]] drops into; the sink is the
-                // Storage, the one store nothing can stand on and so the one the
-                // contact penalty never reaches.
+                // The mine-to-Storage leg is the existing pair with a
+                // resource on it. The Storage is the one store nothing can
+                // stand on, so the contact penalty never reaches it.
                 let tasks = planTasksOn mineHaulColony noThreats
 
                 Expect.contains
@@ -1016,12 +871,10 @@ let thoriumLegTests =
             }
 
             test "an empty mineral container is drawn by nobody, and the sink stands anyway" {
-                // Pairwise, one number apart. The Withdraw follows the stock the
-                // way every other store's does; the Refill follows the *ground*,
-                // because the Planner is creep-blind (ADR 0013) and what it can
-                // see is that this colony has a mine at all — a hauler walking
-                // home with a load must still have somewhere to put it on the
-                // tick the container it drew from reads zero.
+                // The Withdraw follows the stock; the Refill follows the
+                // ground, because a hauler walking home with a load must
+                // have somewhere to put it the tick the container reads
+                // zero.
                 let tasks = planTasksOn (mineHaulColony |> withMineStock 0) noThreats
 
                 Expect.isFalse
@@ -1035,17 +888,12 @@ let thoriumLegTests =
             }
 
             test "a colony with no mineral container draws nothing, and still has a sink" {
-                // The intake is the mine's and the sink is the **Storage's**
-                // (#262). The draw is read off `ourDeposits` and the container
-                // standing on the deposit's Seat (#261), so a deposit whose
-                // container is not up yet is a mine with no store to come to.
-                // The Refill is read off the Storage alone: a body already
-                // holding the ore is applicable to that Task and to nothing else
-                // in the colony, so gating the sink on the intake's own ground
-                // left a hauler mid-haul with no applicable Task at all for the
-                // whole of the window the Layout takes to re-place a destroyed
-                // container — and the row's census, counting it living, cast no
-                // replacement.
+                // The draw is read off `ourDeposits` and the container on
+                // the deposit's Seat; the Refill off the Storage alone. A
+                // body holding ore is applicable to that Task and nothing
+                // else, so a sink gated on the intake's ground stranded a
+                // hauler mid-haul for the window the Layout takes to
+                // re-place a destroyed container.
                 let tasks = planTasksOn (mineHaulColony |> withoutMineContainer) noThreats
 
                 Expect.isFalse
@@ -1059,14 +907,11 @@ let thoriumLegTests =
             }
 
             test "the Thorium pair ranks at the Storage's tier, one resource apart" {
-                // ADR 0057 decision 3 reading ADR 0023. Pairwise on the
-                // **resource alone**: the same container, holding 600 of each,
-                // yields a Feeding-tier draw in energy and a StockDraw one in
-                // Thorium — so what moves the rank is the resource and not the
-                // store's kind, which is a container either way. Read on the
-                // container's own tier the mine would be Feeding work, and an
-                // empty hauler beside it would take the season's ore ahead of
-                // the energy the spawn is waiting on.
+                // Pairwise on the resource alone: the same container yields
+                // a Feeding-tier draw in energy and a StockDraw one in
+                // Thorium. On the container's own tier an empty hauler
+                // would take the ore ahead of the energy the spawn is
+                // waiting on.
                 let colony =
                     { mineHaulColony with
                         Spatial =
@@ -1097,26 +942,15 @@ let thoriumLegTests =
             }
 
             test "past the contact cliff the mine's draw takes the full container's two rungs" {
-                // #306, amending ADR 0057 decision 3. Decision 3 ranked the
-                // draw at `StockDraw` so that the season's ore never went ahead
-                // of the energy the spawn is waiting on — and the **Storage's
-                // own energy Withdraw sits on that same tier** (ADR 0023), so a
-                // rungless mine loses the travel-cost tie to the bank in the
-                // middle of the room every tick a colony has energy banked.
-                // Live at t402,520 that is W13S28: 486k of energy, no Thorium,
-                // and a container standing at its 2,000 cap.
-                //
-                // The rung the energy tier already has for exactly this — a full
-                // [[container]] whose income is going away — read down the ore's
-                // column, and fired at the **contact cliff** rather than at the
-                // cap, because at a thousand the tile has already turned
-                // `p = 3` and the [[miner]] over it is burning a fourth tick of
-                // life a tick. Pairwise on the stock alone, one unit either side
-                // of the line.
-                // The bank, and a mouth for it: the Storage's own Withdraw is
-                // pooled only where the colony has somewhere to put the energy
-                // (ADR 0023), which is the shape of every colony this ticket is
-                // about — W13S28 has a whole refill cluster.
+                // The Storage's own energy Withdraw sits on the same tier,
+                // so a rungless mine loses the travel-cost tie to the bank
+                // every tick a colony has energy banked; live at t402,520
+                // W13S28 had 486k banked and a container at its 2,000 cap.
+                // The lift fires at the contact cliff, not the cap: at a
+                // thousand the tile has turned `p = 3` and the miner burns
+                // a fourth tick of life a tick. The Storage's Withdraw is
+                // pooled only where the colony has somewhere to put the
+                // energy, hence the hungry spawn.
                 let banked =
                     { mineHaulColony with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
@@ -1150,10 +984,9 @@ let thoriumLegTests =
                     (Some(priorityOfTier StockDraw))
                     "and what the lift steps over is the bank's own draw, rungless on that tier"
 
-                // The line the lift does **not** cross, which is the one
-                // decision 3 actually drew: every energy Task the spawn is
-                // waiting on is Feeding-tier, a whole tier shallower, and a rung
-                // never leaves its tier.
+                // The line the lift does not cross: every energy Task the
+                // spawn waits on is Feeding-tier, and a rung never leaves
+                // its tier.
                 Expect.isGreaterThan
                     (priorityOfTier StockDraw + rankOfRung TwoRungsUp)
                     (priorityOfTier Feeding)
@@ -1161,12 +994,9 @@ let thoriumLegTests =
             }
 
             test "the Thorium draw is capped by its own column and not by the energy one" {
-                // #161's cap read down ADR 0057 decision 3's second column: the
-                // store answers the number its holding of *that* resource
-                // divides into loads. The row's cast at this bank is
-                // `[4 Carry; 2 Move]` — 200 — so 600 Thorium is three seats and
-                // the energy the same container holds none of is no seats at
-                // all. Pairwise on the stock alone.
+                // The row's cast at this bank is `[4 Carry; 2 Move]` — 200 —
+                // so 600 Thorium is three seats, and the energy the
+                // container holds none of is none.
                 let seatsAt units =
                     poolOn (mineHaulColony |> withMineStock units)
                     |> List.tryPick (fun pooled ->
@@ -1186,14 +1016,8 @@ let thoriumLegTests =
             }
 
             test "the acts the leg emits name the resource, and the Withdraw names no amount" {
-                // The Intents behind the pair (ADR 0057 decision 3): the
-                // engine's `withdraw` and `transfer` have taken a resource
-                // argument all along, and what this ticket changed is that the
-                // colony says which rather than passing energy implicitly. The
-                // **amount** is `None` — take as much as the body has room for,
-                // which is what every Withdraw here has always meant; the one
-                // place a number is ever named is the delivery's 999-unit load,
-                // and that is decision 4's.
+                // The amount is `None` — as much as the body has room for;
+                // the one named number is the delivery's 999-unit load.
                 let intentsFor load tile =
                     let colony =
                         { mineHaulColony with
@@ -1215,11 +1039,8 @@ let thoriumLegTests =
             }
         ]
 
-/// `Fixtures.withMinePile`'s pile in **energy** rather than in the season's ore,
-/// one fact apart: the same tile, the same amount, filed under the energy column
-/// the kind now names. The pairwise premise for the case about where a Thorium
-/// pile ranks, and private to it — the shared tier is for what a second *domain*
-/// reads, and the one question this answers is a pool question.
+/// `Fixtures.withMinePile`'s pile in energy rather than ore: the same tile
+/// and amount under the energy column.
 let private withMineEnergyPile units (colony: ColonyView) =
     { colony with
         Spatial =
@@ -1235,13 +1056,10 @@ let thoriumPileTests =
         "the Thorium pile's pool"
         [
             test "the ore on the ground is a Pickup, and the energy pile's id is untouched" {
-                // #311: a mineral container caps at 2,000 and the [[miner]]
-                // stands on it, so every tick the haul lags the next dig lands
-                // on the floor of that same tile as a dropped pile — 630 on
-                // W12S28's mine tile and ~300 on W13S28's at t401,850, decaying
-                // at `ceil(amount / 1000)` a tick, with no Task in the colony
-                // that could name one. Pairwise on the ground alone: the same
-                // colony without the pile pools no Pickup at all.
+                // A mineral container caps at 2,000 and the miner stands on
+                // it, so every tick the haul lags the next dig lands on the
+                // floor as a pile, decaying `ceil(amount / 1000)` a tick.
+                // Pairwise on the ground alone.
                 let piled = planTasksOn (mineHaulColony |> withMinePile 630) noThreats
 
                 Expect.contains
@@ -1271,26 +1089,15 @@ let thoriumPileTests =
 
             test
                 "a Thorium pile is drawn on the Storage's tier, one rung up; the energy pile is flow" {
-                // Where the pile ranks, pairwise on the **resource alone**: the
-                // same tile, the same 630, the same body. ADR 0057 decision 3
-                // put the Thorium *container* at `StockDraw` so that an empty
-                // hauler beside the mine never takes the season's ore ahead of
-                // the energy the spawn is waiting on, and a pile is that
-                // container's next dig lying on the floor — one intake of one
-                // resource, so ranking the two apart by *tier* would be the
-                // colony saying that where the ore sits changes what it is
-                // worth.
-                //
-                // The **rung** it takes inside that tier is #306's, and it is
-                // neither of the energy pile's two clauses: it inherits no
-                // same-tile clause (`drawableTiles` holds Feeding-tier
-                // Withdraws alone) and no worth-a-trip line (which this pile
-                // would fail at a hundred units). It is one sentence about the
-                // resource — ore on the floor bleeds `ceil(amount / 1000)` a
-                // tick, nothing else on this tier bleeds at all, and there is
-                // no second copy of season score. Rungless it tied the
-                // Storage's own energy draw and lost every travel-cost tie to
-                // it, which is #306's starvation read from the floor's end.
+                // Pairwise on the resource alone. A pile is the container's
+                // next dig lying on the floor: one intake of one resource,
+                // ranked on the same tier. The rung inside it is neither of
+                // the energy pile's clauses (`drawableTiles` holds
+                // Feeding-tier Withdraws alone, and a hundred units fails
+                // the worth-a-trip line): ore on the floor bleeds
+                // `ceil(amount / 1000)` a tick and nothing else on this tier
+                // bleeds. Rungless it lost every travel-cost tie to the
+                // Storage's own energy draw.
                 let rankIn colony task =
                     poolOn colony
                     |> List.tryPick (fun pooled ->
@@ -1306,15 +1113,11 @@ let thoriumPileTests =
                     (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
                     "and the season's ore is drawn on the Storage's tier, one rung over the bank"
 
-                // The rung is **unconditional**, and this is the case that says
-                // so rather than a word in a comment: neither of the energy
-                // pile's two clauses would grant it here. There is no mineral
-                // container at all — so nothing drawable lies under the pile,
-                // and the ore is ours by the **room**, which is also how a
-                // hauler dying mid-route leaves one on a road tile — and a
-                // hundred units is well under half a [[hauler unit]]'s load at
-                // the 2,300 bank a colony standing an extractor has, which is
-                // the line the energy column refuses the rung at.
+                // The rung is unconditional: no mineral container, so
+                // nothing drawable lies under the pile and the ore is ours
+                // by the room, and a hundred units is under half a hauler
+                // unit's load at the 2,300 bank a colony with an extractor
+                // has.
                 let atMineBank (colony: ColonyView) = { colony with Bank = bank 2300 2300 }
 
                 Expect.equal
@@ -1326,19 +1129,11 @@ let thoriumPileTests =
             }
 
             test "the full container is drawn before the pile it overflowed onto" {
-                // The order inside the mine's own tile, and it is #242's lesson
-                // read down the ore's column: with the pile above the full
-                // container the haulers chased the small copy all day and never
-                // drew the store beside it, so every pickup bred the next pile.
-                // Two rungs against one says the same thing here — draining the
-                // container is what *stops* the floor filling, and the pile is
-                // a finite remainder that the next body takes.
-                //
-                // Pairwise on the container's stock alone: the same pile, the
-                // same body on the same tile, the container either side of the
-                // contact cliff. Under it the pair no longer ties at all — the
-                // pile's own rung decides, and the copy that is going away is
-                // taken first.
+                // With the pile above the full container the haulers chased
+                // the small copy all day and never drew the store: draining
+                // the container is what stops the floor filling. Pairwise
+                // on the container's stock, either side of the contact
+                // cliff.
                 let matchIn colony =
                     let colony =
                         { colony with
@@ -1367,11 +1162,9 @@ let thoriumPileTests =
             }
 
             test "a pile past the threshold is pooled; one under it is left to decay" {
-                // `Tuning.PickupThreshold`, the energy pile's own number read
-                // down the second column (#167, #311): one threshold and not a
-                // second knob, because what it prices is the **trip** and not
-                // the cargo. Inclusive at the line, like the energy pile's.
-                // Pairwise on the amount alone.
+                // `Tuning.PickupThreshold`, one threshold and not a second
+                // knob: it prices the trip, not the cargo. Inclusive at the
+                // line.
                 let pooled units =
                     planTasksOn (mineHaulColony |> withMinePile units) noThreats
                     |> List.contains (Pickup("pile-min", Thorium))
@@ -1381,11 +1174,9 @@ let thoriumPileTests =
             }
 
             test "the pile's capacity is counted off its own column" {
-                // #161's cap, read the way the Thorium Withdraw beside it reads
-                // it: the amount of *that* resource over one [[hauler unit]]'s
-                // load, which is 200 at this bank. The energy the pile holds
-                // none of admits nobody, which is why the pile never reaches the
-                // energy Pickup's pool at all.
+                // The amount of that resource over one hauler unit's load,
+                // 200 at this bank; the energy the pile holds none of
+                // admits nobody.
                 let seatsAt units =
                     poolOn (mineHaulColony |> withMinePile units)
                     |> List.tryPick (fun pooled ->
@@ -1399,12 +1190,10 @@ let thoriumPileTests =
             }
 
             test "a pile in a room somebody else owns is nobody's" {
-                // Whose the ore is, is whose the room is (#261, #311). A pile
-                // carries no owner at all, and `FIND_DROPPED_RESOURCES` answers
-                // for every player's — but an extractor needs an **owned** RCL6
-                // room, so the only Thorium that can be lying in a room we own
-                // is Thorium a miner of ours dug. Pairwise on the room's owner
-                // alone: the same pile, the same amount, filed one room over.
+                // A pile carries no owner and `FIND_DROPPED_RESOURCES`
+                // answers for every player's, but an extractor needs an
+                // owned RCL6 room, so Thorium lying in a room we own is
+                // ours. Pairwise on the room's owner alone.
                 let withPileIn room control =
                     { mineHaulColony with
                         RoomControl = Map.add room control mineHaulColony.RoomControl
