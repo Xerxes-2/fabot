@@ -270,16 +270,39 @@ let loop () =
     // from.
     let atDecide = Game.cpu.getUsed ()
 
-    // How many colonies threw their plan memo away this tick, counted against
-    // the memo each one was handed, before the table is overwritten (#357). A
-    // `decide` six times its own mean is either a replan or a pricing storm,
-    // and the CPU line could not tell those apart.
+    // How many colonies **paid for a plan** this tick, counted against the memo
+    // each one was handed, before the table is overwritten (#357). A `decide`
+    // six times its own mean is either a replan or a pricing storm, and the CPU
+    // line could not tell those apart — which is the job, and the reason this
+    // counts what was paid rather than what was dropped (#387). The two are the
+    // same number on every tick but the one after a global reset, and that is
+    // the tick the count was most wrong about and most read.
+    //
+    // Whose turn it was, by the same index the loop above handed `ReplanTurn` on
+    // — read here rather than carried through the decision tuple, which is four
+    // wide already and is destructured in five other places.
+    let payingHome =
+        views
+        |> List.tryItem turn
+        |> Option.map (fun (colony: Colony, _) -> colony.Home)
+
     let replans =
         decisions
         |> List.filter (fun (colony, _, decision, _) ->
             match Map.tryFind colony.Home planMemos with
+            // A memo that stood is the same memo, and a **deferred** plan keeps
+            // the stale signature on purpose ("the plan is owed and the next
+            // turn pays it"), so both compare equal here and neither is a
+            // replan. Only the colony that paid carries this tick's census.
             | Some prior -> prior.Signature <> decision.Memo.Signature
-            | None -> true)
+            // No prior at all — a global reset, and every code upload is one.
+            // **Only the colony whose turn it was paid for a plan** (#387):
+            // the rest were handed `PlanMemo.deferred` and did the same work a
+            // waiting colony always does. Counted as four, this column said
+            // "four colonies re-planned" for a tick in which one did, and then
+            // counted the other three again over the next three ticks as their
+            // turns came — the same four re-plans reported eight times.
+            | None -> Some colony.Home = payingHome)
         |> List.length
 
     planMemos <-
