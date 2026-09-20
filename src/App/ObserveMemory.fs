@@ -1284,6 +1284,39 @@ let private decodeCpuSplit (raw: obj) (key: string) : (string * float) list =
         |> Seq.map (fun name -> name, unbox<float> split?(name))
         |> List.ofSeq
 
+/// The flood split off one CPU row (#389): `{ home: [floods, free, pops] }`,
+/// three integers per colony under one sub-object, read the way
+/// `decodeCpuSplit` reads the millisecond splits — absent or malformed is the
+/// empty list, and a colony whose triple is not three numbers is left out
+/// rather than read as zeros.
+let private decodeCpuFloods (raw: obj) : (string * FloodCounts) list =
+    let split = raw?floods
+
+    if jsTypeof split <> "object" || isNull split then
+        []
+    else
+        JS.Constructors.Object.keys split
+        |> Seq.choose (fun name ->
+            let triple = split?(name)
+
+            if JS.Constructors.Array.isArray triple && (unbox<obj[]> triple).Length = 3 then
+                let cells = unbox<obj[]> triple
+
+                match numberValue cells.[0], numberValue cells.[1], numberValue cells.[2] with
+                | Some floods, Some free, Some pops ->
+                    Some(
+                        name,
+                        {
+                            Floods = floods
+                            Free = free
+                            Pops = pops
+                        }
+                    )
+                | _ -> None
+            else
+                None)
+        |> List.ofSeq
+
 /// The phase split off one CPU row, or `None` when the row carries none.
 /// Absent and malformed answer alike: a row that predates the split has no
 /// phase keys, and one whose keys will not decode was measured by nobody,
@@ -1372,6 +1405,7 @@ let loadCpu () : CpuState =
                                 Colonies = decodeCpuSplit raw "colonies"
                                 Rooms = decodeCpuSplit raw "rooms"
                                 Projects = decodeCpuSplit raw "projects"
+                                Floods = decodeCpuFloods raw
                                 // A bare number and not a group, so it decodes
                                 // on its own: a row from a bundle that did not
                                 // measure the head reads 0.0, which is what a
@@ -1411,6 +1445,12 @@ let loadCpu () : CpuState =
                                 Sum = unbox<float> raw?sum
                                 Bucket = numberOf raw "b"
                                 Replans = numberOf raw "r"
+                                // Absent from a span written before #389,
+                                // and zero is what that says: no tick of
+                                // it was counted. Present and not a number
+                                // costs the span, as `b` and `r` do.
+                                MaxPops =
+                                    if jsTypeof raw?p = "undefined" then 0 else numberOf raw "p"
                             }
                     else
                         None)
@@ -1454,6 +1494,20 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     writeSplit "rooms" sample.Rooms
     writeSplit "projects" sample.Projects
 
+    // The flood counts (#389), a triple per colony under one key for the
+    // same collision reason, and as an array rather than three keys because
+    // a hundred rows pay for every character of every key.
+    if not (List.isEmpty sample.Floods) then
+        let split = createEmpty<obj>
+
+        for home, counts in sample.Floods do
+            // Boxed, so Fable emits a plain array and not an `Int32Array`,
+            // which `JSON.stringify` — Memory's own serialiser — writes as
+            // an object keyed "0", "1", "2".
+            split?(home) <- [| box counts.Floods; box counts.Free; box counts.Pops |]
+
+        o?floods <- split
+
     if sample.SweepHead > 0.0 then
         o?head <- sample.SweepHead
 
@@ -1462,7 +1516,7 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 /// Write the CPU line back under `Memory.fabot.observe.cpu`, leaving the rest
 /// of the observe subtree alone the way `saveRaids` does — the whole line,
 /// every row. What `appendCpu` below falls back to.
-/// One coarse span on the wire (#386): seven numbers under short keys, because
+/// One coarse span on the wire (#386): eight numbers under short keys, because
 /// two hundred of these ride in the same leaf as the fine ring and every
 /// character of every key is paid for two hundred times.
 let private encodeCpuSpan (span: CpuSpan) =
@@ -1474,6 +1528,7 @@ let private encodeCpuSpan (span: CpuSpan) =
     o?sum <- span.Sum
     o?b <- span.Bucket
     o?r <- span.Replans
+    o?p <- span.MaxPops
     o
 
 let saveCpu (state: CpuState) =
@@ -1548,6 +1603,36 @@ let appendCpu (state: CpuState) =
                 emitJsStatement rows "$0.shift()"
 
             emitJsStatement (rows, encodeCpuSample newest) "$0.push($1)"
+
+            // The coarse spans ride the same append (#390): the open span is
+            // rewritten every tick and a span that just opened is pushed,
+            // against a leaf whose span array is the state's but the newest
+            // — one row a tick against the two hundred the whole write does.
+            // Before this, `spans` was written by `saveCpu` alone, once per
+            // upload, and the record #386 sized for five hours reached
+            // Memory frozen at the first tick. A leaf that disagrees — no
+            // array, a length the fold could not have produced — is written
+            // whole, as the rows are.
+            let spans = cpu?spans
+
+            match List.rev state.Spans with
+            | open' :: closed when JS.Constructors.Array.isArray spans ->
+                let held = (unbox<obj[]> spans).Length
+                let count = List.length closed
+
+                if held = count + 1 then
+                    emitJsStatement (spans, held - 1, encodeCpuSpan open') "$0[$1] = $2"
+                elif held = count then
+                    // A span opened this tick; the one before it was last
+                    // written a tick ago, closed. At the cap the fold
+                    // dropped the oldest, and so does the leaf.
+                    if held = capCpuSpans then
+                        emitJsStatement spans "$0.shift()"
+
+                    emitJsStatement (spans, encodeCpuSpan open') "$0.push($1)"
+                else
+                    cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
+            | _ -> cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
         else
             saveCpu state
     | _ -> saveCpu state

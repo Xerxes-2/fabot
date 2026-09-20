@@ -97,6 +97,9 @@ let loop () =
     // every tick: ADR 0041 is measured, not budgeted, and a measurement that
     // switches itself off is one whose absences a reader has to explain.
     let atEntry = Game.cpu.getUsed ()
+    // The flood counters start the tick at zero (#389), so each colony's
+    // reading below is cumulative from here and `foldCpu` can difference it.
+    Grid.Counters.reset ()
 
     // The tick's World: every room we declared or can see and every creep we
     // own, read out of the engine once (ADR 0052 decision 1). Every other line
@@ -254,14 +257,24 @@ let loop () =
             let whose = if index = turn then ReplanTurn.Now else ReplanTurn.Waiting
 
             let decision = decideUnarbitrated view assignments verbose memo whose
-            colony, view, decision, Game.cpu.getUsed ())
+
+            // And the flood counters at the same boundary (#389): what this
+            // colony's decision flooded, cumulative like the clock beside it.
+            let flooded: Observe.FloodCounts =
+                {
+                    Floods = Grid.Counters.floods
+                    Free = Grid.Counters.free
+                    Pops = Grid.Counters.pops
+                }
+
+            colony, view, decision, Game.cpu.getUsed (), flooded)
 
     // The one movement pass of the tick: every colony's Move Intents folded
     // together and arbitrated once per room, over every creep of ours standing
     // in it, each moving on the intent its own colony registered (ADR 0001 —
     // this is that pure Resolver taking the whole room as its argument).
     let moveIntents, moveVerdicts =
-        resolveRooms (decisions |> List.map (fun (_, _, decision, _) -> decision.Movement))
+        resolveRooms (decisions |> List.map (fun (_, _, decision, _, _) -> decision.Movement))
 
     // The decision boundary, and every colony's `decide` is inside it: the
     // column is what the tick spent deciding and not what one colony did (ADR
@@ -288,7 +301,7 @@ let loop () =
 
     let replans =
         decisions
-        |> List.filter (fun (colony, _, decision, _) ->
+        |> List.filter (fun (colony, _, decision, _, _) ->
             match Map.tryFind colony.Home planMemos with
             // A memo that stood is the same memo, and a **deferred** plan keeps
             // the stale signature on purpose ("the plan is owed and the next
@@ -307,7 +320,7 @@ let loop () =
 
     planMemos <-
         decisions
-        |> List.map (fun (colony, _, decision, _) -> colony.Home, decision.Memo)
+        |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo)
         |> Map.ofList
 
     // The one sector Reactor programme's global observation (#320). The
@@ -316,7 +329,7 @@ let loop () =
     // hands `None` to the pure fold and retains the last sample unchanged.
     let reactorReading =
         decisions
-        |> List.tryPick (fun (colony, _, decision, _) ->
+        |> List.tryPick (fun (colony, _, decision, _, _) ->
             colony.Errands
             |> List.tryPick (fun errand ->
                 let reactorId = fst errand.Target
@@ -362,7 +375,7 @@ let loop () =
     // union is the whole map.
     saveAssignments (
         (Map.empty, decisions)
-        ||> List.fold (fun acc (_, _, decision, _) ->
+        ||> List.fold (fun acc (_, _, decision, _, _) ->
             (acc, decision.Assignments)
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
     )
@@ -391,7 +404,7 @@ let loop () =
             Observe.capPerCreep
             Game.time
             living
-            ((decisions |> List.collect (fun (_, _, decision, _) -> decision.Verdicts))
+            ((decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
              @ moveVerdicts)
             priorLog
 
@@ -406,7 +419,7 @@ let loop () =
 
     observeLog <- Some log
 
-    for colony, view, decision, _ in decisions do
+    for colony, view, decision, _, _ in decisions do
         // The Raid log's own channel (ADR 0028): colony-level and episodic,
         // because the fold above prunes a creep's whole timeline the tick it
         // dies — the one event a raid record has to keep. Written every tick
@@ -482,7 +495,7 @@ let loop () =
     // executed in one pass: the engine is one world and the phase is the tick's
     // whole execution cost (ADR 0047).
     let executionPlan =
-        (decisions |> List.collect (fun (_, _, decision, _) -> decision.Intents))
+        (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
         @ moveIntents
         |> Fabot.Core.IntentPlan.create
         |> function
@@ -516,7 +529,9 @@ let loop () =
             Intents = accepted
             Bucket = Game.cpu.bucket
             Replans = replans
-            ColonyDecides = decisions |> List.map (fun (colony, _, _, at) -> colony.Home, at)
+            ColonyDecides = decisions |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
+            ColonyFloods =
+                decisions |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
             // Read off `World`'s own heap slot rather than threaded through the
             // world record: a measurement of the shell is not a fact about the
             // game, and `World` is a Core type (#370).

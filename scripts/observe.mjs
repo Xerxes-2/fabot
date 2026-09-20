@@ -1546,16 +1546,46 @@ if (command === "console") {
     // measured that phase, which is a different statement from measuring
     // it at nothing.
     const absent = "—".padStart(8);
+    // The flood counts (#389): `{ home: [floods, free, pops] }` per row,
+    // summed here into one `pops` column because pops are the flood's unit
+    // of work and the one number that says whether a `decide` spike was
+    // flooding at all. Per colony they are reported below with the other
+    // splits. A row without the key is a row an older bundle wrote, and
+    // prints the dash for the split's reason.
+    const isTriple = (triple) =>
+      Array.isArray(triple) && triple.length === 3 && triple.every((n) => typeof n === "number");
+    const floodsOf = (row) =>
+      row.floods && typeof row.floods === "object"
+        ? Object.values(row.floods)
+            .filter(isTriple)
+            .reduce(
+              (total, [floods, free, pops]) => ({
+                floods: total.floods + floods,
+                free: total.free + free,
+                pops: total.pops + pops,
+              }),
+              { floods: 0, free: 0, pops: 0 },
+            )
+        : null;
+    const popsCell = (row) => {
+      const counted = floodsOf(row);
+      return counted ? String(counted.pops).padStart(8) : absent;
+    };
     const cells = (row) =>
       isSplit(row)
-        ? [...PHASES.map((key) => ms(row[key])), ...COUNTS.map((key) => String(row[key]).padStart(8))]
-        : COLUMNS.map(() => absent);
+        ? [
+            ...PHASES.map((key) => ms(row[key])),
+            ...COUNTS.map((key) => String(row[key]).padStart(8)),
+            popsCell(row),
+          ]
+        : [...COLUMNS.map(() => absent), popsCell(row)];
 
     console.log(
       [
         "tick".padStart(width),
         "total ms".padStart(8),
         ...COLUMNS.map((key) => key.padStart(8)),
+        "pops".padStart(8),
       ].join("  "),
     );
 
@@ -1694,6 +1724,45 @@ if (command === "console") {
         );
       }
 
+      // What each colony's decision flooded (#389), printed the way the
+      // millisecond splits are and never summed into one line, for the same
+      // reason: the reading exists to say *which* colony a spike came out
+      // of. A tick's pops several times the window's floor is a flood
+      // storm in that colony; pops flat across a spike is a spike that was
+      // not flooding, and the phase split says where else to look.
+      const counted = split.filter((row) => floodsOf(row));
+
+      if (counted.length === 0) {
+        console.log(
+          "no row carries flood counts: the deployed bundle predates the reading (#389), or " +
+            "nothing has been decided since it landed",
+        );
+      } else {
+        const homes = [...new Set(counted.flatMap((row) => Object.keys(row.floods)))];
+        console.log(
+          `floods by colony over ${counted.length} counted row${counted.length === 1 ? "" : "s"}` +
+            `${counted.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+        );
+        for (const home of homes) {
+          const triples = counted.map((row) => row.floods[home]).filter(isTriple);
+          if (triples.length === 0) continue;
+          const mean = (i) => triples.reduce((total, t) => total + t[i], 0) / triples.length;
+          const maxPops = Math.max(...triples.map((t) => t[2]));
+          const worst = counted.find((row) => isTriple(row.floods[home]) && row.floods[home][2] === maxPops);
+          console.log(
+            `  ${home}  floods ${mean(0).toFixed(1)} (${mean(1).toFixed(1)} free)  ` +
+              `pops mean ${mean(2).toFixed(0)}  max ${maxPops} at t${worst.t}  ` +
+              `over ${triples.length} tick${triples.length === 1 ? "" : "s"}`,
+          );
+        }
+        console.log(
+          "  a flood is one Dijkstra over a room's grid and a pop is its unit of work; free floods " +
+            "start at a creep's own tile, the rest are seeded — a far field, a Seam walk, a cast " +
+            "leg. Pops several times the mean on a spike tick is the spike; pops flat is a spike " +
+            "that was not flooding",
+        );
+      }
+
       report(
         "projects",
         "colony",
@@ -1787,6 +1856,20 @@ if (command === "console") {
         `  lowest bucket ${floor.b.toLocaleString()} in t${floor.f.toLocaleString()}-${floor.t.toLocaleString()}`,
       );
 
+      // The worst tick's pops (#389), from the spans that carry them: a span
+      // an older bundle wrote has no `p`, and is left out rather than read as
+      // a tick that ran no flood.
+      const popped = spans.filter((s) => typeof s.p === "number");
+
+      if (popped.length > 0) {
+        const worstPops = popped.reduce((a, b) => (b.p > a.p ? b : a));
+        console.log(
+          `  most heap pops in one tick ${worstPops.p.toLocaleString()} in ` +
+            `t${worstPops.f.toLocaleString()}-${worstPops.t.toLocaleString()}` +
+            `${popped.length < spans.length ? ` (${popped.length} of ${spans.length} spans counted)` : ""}`,
+        );
+      }
+
       const loud = spans.filter((s) => s.max >= 100).slice(-12);
 
       if (loud.length > 0) {
@@ -1796,7 +1879,8 @@ if (command === "console") {
           console.log(
             `    t${String(s.f).padStart(7)}-${String(s.t).padEnd(7)} ` +
               `max ${s.max.toFixed(0).padStart(4)} ms  mean ${(s.sum / Math.max(1, s.n)).toFixed(0).padStart(3)} ms  ` +
-              `bucket floor ${String(s.b).padStart(6)}  replans ${s.r}`,
+              `bucket floor ${String(s.b).padStart(6)}  replans ${s.r}` +
+              (typeof s.p === "number" ? `  max pops ${String(s.p).padStart(6)}` : ""),
           );
         }
       } else {

@@ -1331,6 +1331,40 @@ let foldRaids
                 Map.empty
     }
 
+/// One reading of `Grid.Counters` (#389): floods built, how many of them
+/// free-origin, and heap pops. Cumulative over the tick where the shell reads
+/// it, differenced per colony by `foldCpu`, and carried per colony on the
+/// row — the reading that says what a `decide` spike with no replan in it was
+/// doing.
+type FloodCounts = { Floods: int; Free: int; Pops: int }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module FloodCounts =
+    let zero = { Floods = 0; Free = 0; Pops = 0 }
+
+    let private less (a: FloodCounts) (b: FloodCounts) =
+        {
+            Floods = a.Floods - b.Floods
+            Free = a.Free - b.Free
+            Pops = a.Pops - b.Pops
+        }
+
+    /// The tick's pops over its colonies — the one sum a reader takes, for
+    /// the span's worst tick.
+    let totalPops (rows: (string * FloodCounts) list) =
+        rows |> List.sumBy (fun (_, c) -> c.Pops)
+
+    /// Cumulative readings per colony, in decision order, differenced
+    /// against the one before — the first against zero, because the shell
+    /// resets the counters before the first colony decides.
+    let differenced (readings: (string * FloodCounts) list) =
+        readings
+        |> List.fold
+            (fun (spent, at) (home, reading) -> (home, less reading at) :: spent, reading)
+            ([], zero)
+        |> fst
+        |> List.rev
+
 /// What `Game.cpu.getUsed()` answered at each of the loop's phase boundaries,
 /// in the order the tick ran them, plus the intents the engine accepted (#170).
 /// Cumulative, every one of them, because that is what the engine's counter is:
@@ -1399,6 +1433,10 @@ type CpuReadings =
         /// 14.9 ms phase stood after the last room was swept (#370).
         AtProjects: float
         ColonyProjects: (string * float) list
+        /// `Grid.Counters` as each colony finished deciding, in decision order
+        /// (#389) — cumulative from the tick's reset, differenced by `foldCpu`
+        /// like `ColonyDecides` beside it.
+        ColonyFloods: (string * FloodCounts) list
     }
 
 /// One tick's cost, split at the loop's phase boundaries: the engine's prelude
@@ -1464,6 +1502,11 @@ type CpuSample =
         SweepHead: float
         /// Each colony's projection, differenced the way its decision is.
         Projects: (string * float) list
+        /// What each colony's decision flooded (#389): floods, free-origin
+        /// floods and heap pops, differenced the way `Colonies` is. Off
+        /// `CpuPhases` for `Colonies`' reason, and the empty list for a row a
+        /// bundle wrote before the count existed.
+        Floods: (string * FloodCounts) list
     }
 
 /// The whole persisted CPU line: oldest first, capped, exactly as the
@@ -1508,6 +1551,11 @@ type CpuSpan =
         Bucket: int
         /// How many colonies re-planned across the span.
         Replans: int
+        /// The most heap pops any one tick of the span ran (#389), beside
+        /// `Max` for the same reason `Max` is here: an incident hours old has
+        /// to say whether its worst tick was flooding, and a mean of pops
+        /// would hide that the way a mean of milliseconds hides the spike.
+        MaxPops: int
     }
 
 type CpuState =
@@ -1614,6 +1662,9 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 
     let ms = toMicrosecond readings.AtExecute
 
+    let floods = FloodCounts.differenced readings.ColonyFloods
+    let pops = FloodCounts.totalPops floods
+
     // The coarse record (#386). The span still filling is the last of the list
     // and is folded into in place; it closes when it has covered `spanTicks`,
     // and a tick whose number is *behind* the open span's — a global reset with
@@ -1631,6 +1682,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Sum = open'.Sum + ms
                     Bucket = min open'.Bucket readings.Bucket
                     Replans = open'.Replans + readings.Replans
+                    MaxPops = max open'.MaxPops pops
                 }
             ]
         | _ ->
@@ -1644,6 +1696,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Sum = ms
                     Bucket = readings.Bucket
                     Replans = readings.Replans
+                    MaxPops = pops
                 }
             ]
             |> trim capCpuSpans
@@ -1660,6 +1713,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Rooms = swept
                     SweepHead = toMicrosecond (readings.AtRooms - readings.AtEntry)
                     Projects = projects
+                    Floods = floods
                 }
             ]
             |> trim cap

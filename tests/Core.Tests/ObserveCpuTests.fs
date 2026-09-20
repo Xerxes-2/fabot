@@ -35,6 +35,7 @@ let private costing (ms: float) =
         AtRooms = 0.0
         AtProjects = 0.0
         ColonyProjects = []
+        ColonyFloods = []
     }
 
 /// The same reading with a bucket and a replan count of its own, which is what
@@ -242,6 +243,7 @@ let cpuTests =
                             AtRooms = 0.0
                             AtProjects = 0.0
                             ColonyProjects = []
+                            ColonyFloods = []
                         }
 
                 Expect.equal
@@ -260,6 +262,81 @@ let cpuTests =
                     (phases |> Option.map (fun p -> p.Decide))
                     (Some 41.0)
                     "the phase stays the tick's own, 41.0 ms against the colonies' 40.6"
+            }
+
+            test "the flood counts are differenced per colony from the tick's reset" {
+                // #389. The shell zeroes `Grid.Counters` before the first
+                // colony decides and reads them after each, so the first
+                // reading is differenced against zero and each of the rest
+                // against the colony before it — `ColonyDecides`' fold, on
+                // three integers.
+                let state =
+                    CpuState.empty
+                    |> foldCpu
+                        capCpuTicks
+                        100
+                        { costing 40.0 with
+                            ColonyFloods =
+                                [
+                                    "W12S28", { Floods = 12; Free = 9; Pops = 9_554 }
+                                    "W13S28",
+                                    {
+                                        Floods = 15
+                                        Free = 12
+                                        Pops = 10_366
+                                    }
+                                    "W11S29",
+                                    {
+                                        Floods = 15
+                                        Free = 12
+                                        Pops = 10_366
+                                    }
+                                ]
+                        }
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Floods))
+                    [
+                        [
+                            "W12S28", { Floods = 12; Free = 9; Pops = 9_554 }
+                            "W13S28", { Floods = 3; Free = 3; Pops = 812 }
+                            "W11S29", FloodCounts.zero
+                        ]
+                    ]
+                    "each colony's own flooding, and a colony that flooded nothing reads as zero, not as the total"
+
+                Expect.equal
+                    (state.Spans |> List.map (fun span -> span.MaxPops))
+                    [ 10_366 ]
+                    "the span keeps the tick's total pops as its worst"
+            }
+
+            test
+                "the span's worst pops is the max over its ticks, and an older span folds on at its own" {
+                // The coarse record's reading of #389, kept the way `Max`
+                // is: the largest single tick, never a mean.
+                let counting pops =
+                    { costing 20.0 with
+                        ColonyFloods = [ "W12S28", { Floods = 1; Free = 1; Pops = pops } ]
+                    }
+
+                let state =
+                    CpuState.empty
+                    |> foldCpu capCpuTicks 100 (counting 9_000)
+                    |> foldCpu capCpuTicks 101 (counting 91_920)
+                    |> foldCpu capCpuTicks 102 (counting 9_500)
+
+                Expect.equal
+                    (state.Spans |> List.map (fun span -> span.Ticks, span.MaxPops))
+                    [ 3, 91_920 ]
+                    "one span, three ticks, the spike's pops kept"
+
+                let uncounted = CpuState.empty |> foldCpu capCpuTicks 100 (costing 20.0)
+
+                Expect.equal
+                    (uncounted.Spans |> List.map (fun span -> span.MaxPops))
+                    [ 0 ]
+                    "a tick that read no counter is a span at zero pops"
             }
 
             test
@@ -306,6 +383,7 @@ let cpuTests =
                             AtRooms = 4.0
                             AtProjects = 0.0
                             ColonyProjects = []
+                            ColonyFloods = []
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -370,6 +448,7 @@ let cpuTests =
                             AtRooms = 0.0
                             AtProjects = 0.0
                             ColonyProjects = []
+                            ColonyFloods = []
                         }
 
                 Expect.equal
@@ -422,6 +501,7 @@ let cpuTests =
                             AtRooms = 0.0
                             AtProjects = 0.0
                             ColonyProjects = []
+                            ColonyFloods = []
                         }
 
                 Expect.equal
@@ -475,6 +555,7 @@ let cpuTests =
                                     Rooms = []
                                     SweepHead = 0.0
                                     Projects = []
+                                    Floods = []
                                 }
                             ]
                     }

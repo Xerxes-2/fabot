@@ -247,6 +247,47 @@ let private push (flood: Flood) (key: int) =
 
     setHeapAt hole heap key
 
+/// How much flooding one tick ran, as three integers: every flood built
+/// (`floodFromAllSeeded`, which every flood passes through), how many of
+/// those started **free** — every origin seeded at zero: a creep's own flood
+/// (`floodPriced`), a clock's walk (`walkFloodFromAll`), a trunk's
+/// (`floodFrom`) — rather than seeded at a cost carried in from elsewhere (a
+/// far field, a Seam walk, a cast leg over a border, `floodPricedInto`), and
+/// every heap pop (`pop`, the flood's unit of work). Free is judged on the
+/// seeds and not on the caller, because the caller that looked like the
+/// free one (`floodFromAll`) is not where a creep's flood comes from.
+///
+/// Why a count and not a clock (#389, AGENTS.md § Code hygiene): a live
+/// `decide` spike with **zero replans** — 45 ms against a 16 ms floor at
+/// t617394, 2026-09-20 — is unreadable off the phase split, which says the
+/// tick spent it deciding and nothing about what deciding did. Every CPU
+/// question this month that the clock could not settle was settled by a
+/// count, and every one of those counts was a throwaway patch of the bundle.
+/// These are the same three, made permanent: the shell reads them at each
+/// colony's boundary (`Main`, beside `Game.cpu.getUsed`), `Observe.foldCpu`
+/// differences them, and the CPU line carries them per colony.
+///
+/// A module-level mutable, like `World.roomCosts`: a measurement of the run
+/// and not a fact of the game, so it rides no record the decision reads. The
+/// increments are integers on the hottest path there is — 9,554 pops a tick
+/// on `reactor --level 7` in the harness and 9,464 by #370's live probe,
+/// both 2026-09 — and too small for the clock to see; what they cost is what
+/// counting costs. `dotnet test` runs suites in parallel and two tests may
+/// increment at once, which loses a count: harmless, because no test reads
+/// these (#310's rule is enforced over the test assembly's statics, and the
+/// hazard it names is a torn read that a test *does* read).
+module Counters =
+    let mutable floods = 0
+    let mutable free = 0
+    let mutable pops = 0
+
+    /// Back to zero, which the shell does once per tick before the first
+    /// colony decides.
+    let reset () =
+        floods <- 0
+        free <- 0
+        pops <- 0
+
 /// The mirror of `push`: the root is the answer, the last entry becomes the key
 /// looking for a home, and the cheaper child of each pair is pulled up while it
 /// undercuts that key. No two keys in the heap are ever equal — a tile is
@@ -254,6 +295,7 @@ let private push (flood: Flood) (key: int) =
 /// tiles at one cost — so pop order, and with it every path the flood picks
 /// between equal costs, is fixed by the key encoding.
 let private pop (flood: Flood) =
+    Counters.pops <- Counters.pops + 1
     let heap = flood.Heap
     let top = heapAt 0 heap
     flood.Size <- flood.Size - 1
@@ -309,6 +351,11 @@ let internal floodFromAllSeeded
     (stepPrices: int[])
     (starts: (Pos * int) list)
     : Flood =
+    Counters.floods <- Counters.floods + 1
+
+    if starts |> List.forall (fun (_, seed) -> seed = 0) then
+        Counters.free <- Counters.free + 1
+
     let flood =
         {
             Dist = Array.create tileCount unreached

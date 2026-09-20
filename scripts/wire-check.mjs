@@ -208,11 +208,82 @@ wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", as
   saveCpu(loadCpu());
   assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a line written before the spans keeps its ticks");
 
-  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
+  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920 };
 
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [span] });
   saveCpu(loadCpu());
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span]), "and one that has them round-trips key for key");
+
+  // A span written before #389 has no `p`; it reads as zero pops and is
+  // written back with the key, which is what "no tick of it was counted" says.
+  const { p, ...older } = span;
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [older] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([{ ...older, p: 0 }]), "a span without pops reads as zero");
+
+  // Present and not a number costs the span, as every other span field does.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [{ ...older, p: "x" }] });
+  saveCpu(loadCpu());
+  assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a span whose pops will not read is dropped");
+});
+
+wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", async () => {
+  const { loadCpu, appendCpu } = await import(MODULE);
+
+  const row = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
+  const span = (f, t, n) => ({ f, t, n, max: 1.5, sum: 1.5 * n, b: 10000, r: 0, p: 0 });
+
+  // Each state is read off a leaf through `loadCpu`, so it has Core's own
+  // types (an F# list is not a JS array); the leaf is then reset to what the
+  // previous tick left and the state appended onto it. The fold is Core's
+  // and tested there; this is the codec's append.
+  const stateOf = (ticks, spans) => {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks, spans });
+    return loadCpu();
+  };
+
+  // A third tick folded into the open span, against a leaf holding two rows and that span.
+  const withThird = stateOf([row(1), row(2), row(3)], [span(1, 3, 3)]);
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2)], spans: [span(1, 2, 2)] });
+  appendCpu(withThird);
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span(1, 3, 3)]), "the open span is rewritten in place");
+  assert.equal(globalThis.Memory.fabot.observe.cpu.ticks.length, 3, "and the row was appended as before");
+
+  // A fourth tick that opened a second span: the leaf holds one span, the state two.
+  const withSecond = stateOf([row(1), row(2), row(3), row(4)], [span(1, 3, 3), span(4, 4, 1)]);
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2), row(3)], spans: [span(1, 3, 3)] });
+  appendCpu(withSecond);
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span(1, 3, 3), span(4, 4, 1)]), "a span that opened this tick is pushed");
+
+  // A leaf whose spans disagree with the state is written whole.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2), row(3)], spans: [] });
+  appendCpu(withSecond);
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span(1, 3, 3), span(4, 4, 1)]), "a disagreeing leaf is rewritten whole");
+});
+
+
+wire("cpu: the flood counts ride the row per colony, and a malformed triple is left out", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const base = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
+  const counted = { ...base, floods: { W12S28: [12, 9, 9554], W13S28: [3, 3, 812] } };
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [counted], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable(counted), "the triples round-trip per colony");
+
+  // A row an older bundle wrote carries no `floods` at all, and stays that way.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(Object.hasOwn(globalThis.Memory.fabot.observe.cpu.ticks[0], "floods"), false, "no counts, no key");
+
+  // A colony whose triple is off the wire shape is dropped, not read as zeros.
+  globalThis.Memory = rootMemoryWith("cpu", {
+    ticks: [{ ...base, floods: { W12S28: [12, 9, 9554], W13S28: [3, "x", 812], W15S28: [1, 1] } }],
+    spans: [],
+  });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0].floods), stable({ W12S28: [12, 9, 9554] }), "only the well-formed colony survives");
 });
 
 wire("cpu: a span with a field off the shape costs its span and not the line", async () => {
