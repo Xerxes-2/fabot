@@ -9,6 +9,61 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.LayoutFixtures
 
+/// The flood arrays in a memo's three tables whose keys read `room` — a
+/// spawn walk toward it, a Seam walk on either side of it, a far field whose
+/// chain crosses it. Read by reference below: a flood the memo hands on is
+/// the same array, and one it evicted and re-ran is a new one.
+let private touchingRoom (room: string) (memo: PlanMemo) : int[] list =
+    [
+        for KeyValue((_, _, goalRoom), flood) in memo.Walks do
+            if goalRoom = room then
+                flood
+        for KeyValue((fromRoom, toRoom), flood) in memo.SeamWalks do
+            if fromRoom = room || toRoom = room then
+                flood
+        for KeyValue((chain, _, _, _, _, _), flood) in memo.FarFields do
+            if List.contains room chain then
+                flood
+    ]
+
+/// The spawn walks flooded over the home room alone.
+let private homeWalks (memo: PlanMemo) : int[] list =
+    [
+        for KeyValue((_, _, goalRoom), flood) in memo.Walks do
+            if goalRoom = "W1N1" then
+                flood
+    ]
+
+/// The north-border colony with its outpost rock across the Seam and a spawn
+/// back at home, so one tick fills both halves of the memo's tables: a spawn
+/// walk over the home room alone, and the far fields of the Harvest across
+/// the border, whose chains name the outpost. `control` is the outpost's
+/// entry in `RoomControl`, the one census input the cases below move — a
+/// reservation's rate against no vision at all — which moves the outpost's
+/// signature and not the home room's.
+let private borderedColony (control: RoomControlInfo option) =
+    let colony =
+        northBorderColony { X = 10; Y = 38 }
+        |> withNorthOutpost (Some { X = 10; Y = 46 })
+
+    { colony with
+        Spawns = [ spawn ]
+        Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
+        RoomControl =
+            match control with
+            | Some holder -> Map.add "W1N2" holder colony.RoomControl
+            | None -> Map.remove "W1N2" colony.RoomControl
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "spawn-1" (Structure BuiltKind.Spawn) colony.Spatial.TargetKinds
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions = Map.add "spawn-1" { X = 10; Y = 3 } layer.TargetPositions
+                })
+    }
+
 [<Tests>]
 let censusSignatureTests =
     testList
@@ -923,28 +978,90 @@ let planMemoTests =
                     "a recalled walk decides exactly what a fresh flood decides"
             }
 
-            test "a moved census drops the whole walk table" {
-                // The Layout's own granularity (ADR 0032): a moved
-                // signature may have moved the weights or the body the walk
-                // is priced for, and telling which is a dependency tracker
-                // the memo does not have.
+            test "a moved census drops the walk table of the rooms that moved" {
+                // ADR 0032's rule read per room (#388): a moved signature may
+                // have moved the weights the walk is priced over, and the
+                // rooms whose census moved are exactly the rooms whose
+                // weights can have. A level-up is folded into every room's
+                // signature, so it still drops the lot — and "dropped" means
+                // nothing at all rides across, not merely a stale entry
+                // priced again. The table object is the memo's own and is
+                // evicted in place, which is why the count is what is pinned
+                // and not the reference.
                 let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
 
                 let first = decideOn (staffed (trunkColony 2))
 
-                let levelled =
-                    decide (staffed (trunkColony 3)) Map.empty Set.empty (Some first.Memo)
+                Expect.isNonEmpty first.Memo.Walks "the premise: the first tick flooded a walk"
 
-                Expect.isFalse
-                    (obj.ReferenceEquals(levelled.Memo.Walks, first.Memo.Walks))
-                    "a level-up gets a table of its own"
-
-                // The same moved census over a colony with no creep to lead
-                // shows what "dropped whole" means: nothing at all rides
-                // across, not merely a stale entry priced again.
                 let emptied = decide (trunkColony 3) Map.empty Set.empty (Some first.Memo)
 
-                Expect.equal emptied.Memo.Walks.Count 0 "the memo's table went with its signature"
+                Expect.equal
+                    emptied.Memo.Walks.Count
+                    0
+                    "a level-up moves every room, and the table went with them"
+            }
+
+            test "an outpost's census moving keeps the home room's walks and drops the outpost's" {
+                // The whole of what #388 buys. Before it the three tables
+                // went with the one flat signature, so a road appearing in an
+                // outpost re-flooded the home room's spawn walks and every
+                // far field that never crossed that outpost: `reactor
+                // --census-every 1` ran 109,258 heap pops a tick against
+                // 9,554 quiet (2026-09-20). Per room, an entry is kept while
+                // every room it reads holds — a spawn walk to a far room reads
+                // home and the chain to it, a Seam walk its pair, a far field
+                // its chain — and dropped when one of them moves.
+                let held = borderedColony (Some(reservedRoom true 4000))
+                let dark = borderedColony None
+
+                Expect.notEqual
+                    (Map.find "W1N2" (roomSignatures dark))
+                    (Map.find "W1N2" (roomSignatures held))
+                    "the premise: vision leaving the outpost moves its room's signature"
+
+                Expect.equal
+                    (Map.find "W1N1" (roomSignatures dark))
+                    (Map.find "W1N1" (roomSignatures held))
+                    "and not the home room's"
+
+                let first = decideOn held
+
+                // Read off the first tick's tables **before** the second runs
+                // over them: the tables are the memo's own and are evicted and
+                // refilled in place, so a read afterwards sees the second
+                // tick's contents under the first tick's name.
+                let outpostFloods = touchingRoom "W1N2" first.Memo
+                let homeFloods = homeWalks first.Memo
+
+                Expect.isNonEmpty
+                    outpostFloods
+                    "the premise: the first tick flooded something that reads the outpost"
+
+                Expect.isNonEmpty homeFloods "and a spawn walk over home alone"
+
+                let second = decide dark Map.empty Set.empty (Some first.Memo)
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(second.Memo.Walks, first.Memo.Walks))
+                    "the table handed on is the memo's own"
+
+                for flood in homeFloods do
+                    Expect.isTrue
+                        (homeWalks second.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "every home-room walk the first tick laid is still there, unflooded"
+
+                for flood in outpostFloods do
+                    Expect.isFalse
+                        (touchingRoom "W1N2" second.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and nothing that read the outpost survived its census moving"
+
+                Expect.equal
+                    second.Intents
+                    (decideOn dark).Intents
+                    "a recalled home walk decides exactly what a fresh flood decides"
             }
 
             test "the far fields ride the memo on the walk table's own terms" {
@@ -952,26 +1069,136 @@ let planMemoTests =
                 // cross-room price reads the chain's walking grids and its
                 // Seam bands and nothing else — under every pricing, since
                 // ADR 0070 — so it is recalled and dropped under exactly the
-                // condition the spawn walks are (ADR 0032). One seam and one
-                // signature for both tables, which is why this pins the
-                // lifetime here and leaves the field's contents to the Atlas
-                // suite, where a border is cheap to draw.
-                let staffed = staffedColony [ worker "w1" 0 50 ] [ "w1", { X = 22; Y = 25 } ]
+                // condition the spawn walks are (ADR 0032), which since #388
+                // is **per chain**: a field is kept while every room its
+                // chain names holds. The Harvest across the north border
+                // floods two fields here, one over the outpost alone and one
+                // carried home along `[W1N1; W1N2]`; a structure appearing at
+                // home moves the home room, so the carried field goes and
+                // the outpost's own stays. One seam and one signature for
+                // both tables, which is why this pins the lifetime here and
+                // leaves the field's contents to the Atlas suite.
+                let held = borderedColony (Some(reservedRoom true 4000))
 
-                let first = decideOn (staffed (trunkColony 2))
+                let first = decideOn held
 
-                let held = decide (staffed (trunkColony 2)) Map.empty Set.empty (Some first.Memo)
+                let chained (memo: PlanMemo) =
+                    [
+                        for KeyValue((chain, _, _, _, _, _), field) in memo.FarFields do
+                            chain, field
+                    ]
+
+                let carried =
+                    chained first.Memo |> List.filter (fun (chain, _) -> List.contains "W1N1" chain)
+
+                let outpostOnly =
+                    chained first.Memo |> List.filter (fun (chain, _) -> chain = [ "W1N2" ])
+
+                Expect.isNonEmpty carried "the premise: a far field is carried home along the chain"
+                Expect.isNonEmpty outpostOnly "and one is flooded over the outpost alone"
+
+                let again = decide held Map.empty Set.empty (Some first.Memo)
 
                 Expect.isTrue
-                    (obj.ReferenceEquals(held.Memo.FarFields, first.Memo.FarFields))
+                    (obj.ReferenceEquals(again.Memo.FarFields, first.Memo.FarFields))
                     "an unchanged census hands the same table on"
 
-                let levelled =
-                    decide (staffed (trunkColony 3)) Map.empty Set.empty (Some first.Memo)
+                let homeMoved =
+                    decide
+                        (held
+                         |> withTarget "ext-3" { X = 10; Y = 20 } (Structure BuiltKind.Extension))
+                        Map.empty
+                        Set.empty
+                        (Some first.Memo)
 
-                Expect.isFalse
-                    (obj.ReferenceEquals(levelled.Memo.FarFields, first.Memo.FarFields))
-                    "and a moved one gets a table of its own, as the walks do"
+                for _, field in carried do
+                    Expect.isFalse
+                        (chained homeMoved.Memo
+                         |> List.exists (fun (_, kept) -> obj.ReferenceEquals(kept, field)))
+                        "a field whose chain crosses the room that moved is gone"
+
+                for _, field in outpostOnly do
+                    Expect.isTrue
+                        (chained homeMoved.Memo
+                         |> List.exists (fun (_, kept) -> obj.ReferenceEquals(kept, field)))
+                        "and a field over the outpost alone rides on, unflooded"
+            }
+
+            test
+                "a deferred turn stamps the tables with the census that filled them, not the plan's" {
+                // #372. On a `Waiting` turn the plan served is the stale one
+                // under its own signature (#357), while the tables on it are
+                // this tick's. Stamped with the plan's signature, a census
+                // that moved and moved back — vision leaving an outpost for a
+                // tick and returning — would recall the plan *and* the tables
+                // the dark tick flooded over a grid missing that room's
+                // roads. Stamped per room with the tick that filled them
+                // (#388), the plan is recalled and the dark tick's outpost
+                // entries are evicted.
+                let held = borderedColony (Some(reservedRoom true 4000))
+                let dark = borderedColony None
+
+                let planned = decideOn held
+
+                let waiting =
+                    decideUnarbitrated
+                        dark
+                        Map.empty
+                        Set.empty
+                        (Some planned.Memo)
+                        ReplanTurn.Waiting
+
+                Expect.equal
+                    waiting.Memo.Signature
+                    planned.Memo.Signature
+                    "the plan served on the dark tick is the stale one, under its signature"
+
+                Expect.equal
+                    waiting.Memo.RoomSignatures
+                    (roomSignatures dark)
+                    "while the tables are stamped with the dark tick's own rooms"
+
+                let darkFloods = touchingRoom "W1N2" waiting.Memo
+
+                Expect.isNonEmpty
+                    darkFloods
+                    "the premise: the dark tick flooded something that reads the outpost"
+
+                let returned =
+                    decideUnarbitrated held Map.empty Set.empty (Some waiting.Memo) ReplanTurn.Now
+
+                Expect.equal
+                    returned.Memo.SiteIntents
+                    planned.Memo.SiteIntents
+                    "the census is back, so the plan is recalled"
+
+                for flood in darkFloods do
+                    Expect.isFalse
+                        (touchingRoom "W1N2" returned.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and nothing the dark tick flooded over the outpost is served under the returned census"
+
+                // The recalled plan restamps too. Handed on as it was, the
+                // stamp would still be the dark tick's: every held tick after
+                // this one would evict and re-flood the outpost again, and a
+                // second vision loss would find the stamp *equal* to the dark
+                // census and serve the held grid's floods on the dark tick —
+                // #372 mirrored.
+                Expect.equal
+                    returned.Memo.RoomSignatures
+                    (roomSignatures held)
+                    "the returned tick stamps the tables with its own rooms, recalled plan or not"
+
+                let returnedFloods = touchingRoom "W1N2" returned.Memo
+
+                let settled =
+                    decideUnarbitrated held Map.empty Set.empty (Some returned.Memo) ReplanTurn.Now
+
+                for flood in returnedFloods do
+                    Expect.isTrue
+                        (touchingRoom "W1N2" settled.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "so the held tick after it keeps the returned tick's outpost floods, unflooded"
             }
 
             // #357. Four colonies re-planning in one tick measured 487 ms of

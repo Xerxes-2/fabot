@@ -376,6 +376,27 @@ type HaulDemandRow =
 type PlanMemo =
     {
         Signature: string
+        /// The census signature **per projected room** the three walk tables
+        /// below were filled under (#388): `Decide.roomSignatures`, the
+        /// per-room half of `Signature` with the colony-wide inputs (home,
+        /// level) folded into every entry. The plan above keys on the whole
+        /// census; a walk table entry reads the grids of the rooms it names
+        /// and nothing else, so it is kept while *those* rooms' entries hold
+        /// and dropped the tick one of them moves (`Atlas.evictRooms`). A
+        /// replan used to throw every table away and re-flood the lot:
+        /// measured by count 2026-09-20 (`docs/profiling.md`),
+        /// `reactor --level 7 --census-every 1` ran 109,258 heap pops a tick
+        /// against 9,554 quiet, and the per-room drop took the perturbed
+        /// tick to 91,920 with the harness moving the home room — the rest
+        /// of the difference is the plan's own floods and the walks a moved
+        /// home genuinely owes.
+        ///
+        /// Stamped with the tick the tables were filled on, *not* with the
+        /// plan's signature: on a deferred turn (#357) the plan served is
+        /// stale while the tables are this tick's, and stamping them with the
+        /// stale signature was #372's hazard — a census that moved and moved
+        /// back would recall tables flooded under the intermediate one.
+        RoomSignatures: Map<string, string>
         SiteIntents: Intent list
         /// The footing targets this plan left unserved (#77), derived from
         /// the same census as the site Intents. Empty is the healthy answer
@@ -456,14 +477,18 @@ module PlanMemo =
     /// them is a fact this tick paid for: a deferred colony declines to
     /// **plan**, not to price. Handing in an empty table here would throw away
     /// the tick's own walks, Seam walks and far fields (ADR 0032,
-    /// `docs/research/cpu-headroom.md`).
+    /// `docs/research/cpu-headroom.md`). The per-room signatures come with
+    /// them for the same reason: they say which census the tables were
+    /// filled under, and that is this tick's, whatever the plan's is (#372).
     let deferred
+        (roomSignatures: Map<string, string>)
         (walks: WalkTable)
         (seamWalks: SeamWalkTable)
         (farFields: FarFieldTable)
         : PlanMemo =
         {
             Signature = ""
+            RoomSignatures = roomSignatures
             SiteIntents = []
             UnservedFootings = []
             ServedFootings = []

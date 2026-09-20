@@ -323,6 +323,7 @@ let staffedColony creeps positions colony =
 let sentinelMemo snapshot =
     {
         Signature = censusSignature snapshot
+        RoomSignatures = roomSignatures snapshot
         SiteIntents = [ PlaceConstructionSite(RoomPos.at "W1N1" { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
         ServedFootings = []

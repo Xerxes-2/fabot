@@ -517,6 +517,28 @@ control flow around it, and the one change that *did* move it (#278's flat
   `decide` line is the reading, taken with the intent count beside it: the
   probe on #370 counted about five far re-floods a tick, 9,464 heap pops, a
   third of every flood the tick ran, and that is what should vanish.
+- **2026-09-20, #388 (the walk tables are dropped per room).** A replan used
+  to empty all three census tables on the memo and re-flood the lot, because
+  they were recalled whole or dropped whole on the one flat signature. Now the
+  signature is built per room first (`Decide.roomSignatures`) and the memo
+  carries that map beside the plan's, and `Atlas.evictRooms` drops only the
+  entries whose rooms moved — a spawn walk to a far room reads home and the
+  chain to it, a Seam walk its pair, a far field its chain. Measured by count
+  and not by the clock, per this page's rules (a throwaway patch of
+  `dist/main.js` counting `floodFromAllSeeded`, `floodFromAll` and heap `pop`
+  calls over 300 ticks): quiet `reactor --level 7` counts identical, 9.10
+  seeded floods and 9,554 pops a tick before and after; `--census-every 1`,
+  which paves a **home** tile — the worst room to move, every chain runs
+  through it — 67.8 → 56.7 seeded floods and 109,258 → 91,920 pops a tick
+  (−16%), the 27.5 unseeded floods of the plan itself unmoved. An outpost's
+  census moving (a raid's container or site, the live case) keeps everything
+  that never chains through that room, and the harness has no lever to move
+  an outpost tile, so that number is by construction and not measured. Report
+  diff semantically identical on `reactor`, `pair`, `outpost` and
+  `pair --raided`, each with `--census-every 3`. Closes #372 with it: the
+  tables are stamped with the room signatures of the tick that filled them,
+  not the plan's, so a deferred turn (#357) can no longer carry a dark tick's
+  floods under a recalled plan.
 
 The baseline moved with the world it measures, and older numbers do not
 compare with today's: #144 furnished the room and derived the fleet; #163

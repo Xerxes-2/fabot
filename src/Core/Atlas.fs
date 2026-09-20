@@ -1715,6 +1715,72 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
             fromRoom
             toRoom)
 
+/// Drop, from the three census-keyed tables this Atlas was handed, every
+/// entry that read a room whose census moved (#388) — in place, because the
+/// tables are the plan memo's and this tick's readers write into them next.
+/// The memo used to be recalled whole or dropped whole on the one flat
+/// signature; per room, an outpost losing a road keeps the home room's spawn
+/// walks and every far field that never crossed it. What each table reads:
+///
+/// - a spawn walk (`castTable`) floods the home grid and, for a goal across a
+///   border, is carried along every chain `routes` answers between home and
+///   the goal — so it reads home and every room of every such chain. The
+///   chains are terrain (rings and raw ground, ADR 0062), so this tick's
+///   `routes` answers the chains the entry was carried along **while the
+///   projection still carries every room of them**: a room that left the
+///   projection is joined to nothing, and a chain through it is no longer
+///   answered. So a departed room — one in `moved` the projection no longer
+///   has — drops every cross-room spawn walk, on ADR 0044's rule again;
+/// - a Seam walk (`seamWalkFlood`) floods its first room's grid out to the
+///   band joining the pair. The band is terrain, so the second room is not
+///   strictly read — it is evicted on it all the same, on ADR 0044's rule
+///   that over-invalidating is the cheap error;
+/// - a far field is flooded along its chain and reads exactly those rooms.
+///
+/// Keys are collected before anything is removed: a `Dictionary` may not be
+/// mutated under its own enumeration.
+let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
+    let touches (rooms: string list) = rooms |> List.exists moved.Contains
+
+    let departed =
+        moved |> Set.exists (fun room -> not (Map.containsKey room atlas.Spatial.Rooms))
+
+    let staleWalks = ResizeArray()
+
+    for KeyValue((_, _, goalRoom) as key, _) in atlas.Walks do
+        let stale =
+            if goalRoom = atlas.Home then
+                moved.Contains atlas.Home
+            else
+                departed
+                || touches (
+                    atlas.Home :: goalRoom :: List.concat (routes atlas atlas.Home goalRoom)
+                )
+
+        if stale then
+            staleWalks.Add key
+
+    for key in staleWalks do
+        atlas.Walks.Remove key |> ignore
+
+    let staleSeams = ResizeArray()
+
+    for KeyValue((fromRoom, toRoom) as key, _) in atlas.SeamWalks do
+        if touches [ fromRoom; toRoom ] then
+            staleSeams.Add key
+
+    for key in staleSeams do
+        atlas.SeamWalks.Remove key |> ignore
+
+    let staleFields = ResizeArray()
+
+    for KeyValue((chain, _, _, _, _, _) as key, _) in atlas.FarFields.PerCensus do
+        if touches chain then
+            staleFields.Add key
+
+    for key in staleFields do
+        atlas.FarFields.PerCensus.Remove key |> ignore
+
 /// The first of those chains, or `None` where there is none — what a reader
 /// with no price to choose one with takes (`stepTowardRoom`, whose room is
 /// dark and prices nothing, and which is therefore the one mover that can
