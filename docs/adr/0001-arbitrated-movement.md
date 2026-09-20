@@ -1,5 +1,7 @@
 # Movement is an arbitrated intent, not an executor side effect
 
+> **Status:** accepted
+
 A creep that finished harvesting would upgrade the controller in place, squatting the mining Seat and blocking the next harvester — because standing tiles were represented nowhere: movement happened only as the Executor's `moveTo` fallback on `ERR_NOT_IN_RANGE`. We decided that no movement is ever issued outside a pure per-room Resolver: every creep's Move Intent (candidate standing tiles derived from its Task's Work Area, plus a priority reusing the task rank) is collected each tick and arbitrated once — priority descending, most-constrained first, swap when contested — following screeps-cartographer's semantics. The essential rule this buys: a creep with slack in its Work Area yields to a creep without.
 
 ## Considered Options

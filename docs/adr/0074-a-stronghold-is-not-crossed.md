@@ -1,5 +1,7 @@
 # A stronghold is not crossed
 
+> **Status:** accepted
+
 > **Accepted 2026-09-19** on #382; the decision is the user's ("窄修法做吧"), taken after the wider one it replaces was built and reverted. Implemented by the change that accepted it.
 
 ADR 0043's [[stand-down]] withdraws the work a colony declared in one room. ADR 0065 then held that a hostile in a **transit-only** room opens no stand-down at all, such a room having no task, no quota and no guard row to withhold. ADR 0066 held that a stand-down **does not propagate through a route**: an [[errand]] is withheld when its own target room is shut and not when one of its [[transit room]]s is, because *"propagating the outpost's coarse clock to the route would instead stop Reactor supply for as long as unrelated work in a crossing room is withdrawn"*.

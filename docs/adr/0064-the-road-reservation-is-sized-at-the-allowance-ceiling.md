@@ -1,5 +1,7 @@
 # The reservation is sized at the allowance ceiling and the level sizes only the placement: one ordering, two windows
 
+> **Status:** accepted
+
 ADR 0063 derived the clustered horizon from the controller level, `controller.Level + 1`, and it was right about what #341 broke: a room standing at its horizon computes a gap of zero and asks for none of what the engine unlocked. What it did not separate is that `Layout.fs` truncates the one clustered ordering **twice** — once as `clustered`/`reserved`, the window the trunk router dodges, and once as `clusterPicks`, the window the tower and extension tiles are drawn from — and it sized both at `Tuning.horizonOf`. The cluster needed the level. The **road reservation never did**, and the road reservation is where the entire cost of the derivation landed: 589 paved tiles abandoned across the sweep's level-ups, ten source-container picks moved out from under standing containers, and upkeep for ever on every orphan (#342).
 
 **We decided the reservation is sized at the level `allowanceOf` stops growing and the horizon sizes the placement alone.** The reservation is then a function of the terrain and the census and of no level at all, so a bare room's road plan is identical at every level *by construction* — which is ADR 0027's determinism invariant, the one ADR 0039 raised against a derived horizon and ADR 0063 priced rather than met.

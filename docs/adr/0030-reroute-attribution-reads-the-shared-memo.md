@@ -1,5 +1,7 @@
 # Reroute attribution reads the shared flood memo, under a baseline pricing of its own
 
+> **Status:** accepted
+
 ADR 0018 made reroute attribution verbose-only on two grounds, and they are not the same kind of ground. One is about **cost**: attributing a detour takes a second, traffic-blind flood per creep, and *"it is the only unmemoisable flood — each creep's tile is a unique key, so ADR 0004's memo cannot help"*. The other is about **audience**: the label serves observability alone, no decision reads it, and a Verdict whose evidence must be manufactured is pay-per-use (ADR 0009). ADR 0029 falsified the first: the flood memo's key became `(tile, fatigue factor, pricing)`, and a placed creep's own tile is exactly what it is keyed on.
 
 Falsified, but not thereby served. ADR 0029's traffic-blind entry is the **[[walk]]'s**, priced in whole ticks, and `firstStepIgnoringTraffic` compares its route against `firstStep`'s, which is priced in [[travel cost]]'s units. A route read off whole ticks is a different route: the walk's per-step floor collapses the road/plain distinction for any body whose plain step already prices at or under two units — precisely the fast bodies the [[trunk]] exists for. Three paved steps price at 3 units and 3 ticks, two bare steps at 4 units and 2 ticks; the ranking price takes the trunk and the clock takes the short lane. Reading the walk's entry would have changed the answer rather than where it comes from, and would have attributed to traffic a difference that was really the granularity.

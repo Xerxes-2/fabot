@@ -1,5 +1,7 @@
 # Link footings are a built kind the reservation counts, not a placeable kind reserved per Post
 
+> **Status:** amended by 0035, 0038
+
 > **Answered by ADR 0038** on this ADR's last consequence — "RCL5 inherits an unchanged question. Which footings are filled, in what order, and what the links send where is still undecided". RCL5's answer is none, in this room, on arithmetic recorded there — and the destination the question assumed, the controller, is the wrong end of the two it weighs. Every rule below stands unrevised, `Link` as a built kind and nothing else included: a placement Intent for a link is still not expressible, and the footings this ADR stabilised are still reserved.
 
 > **Revised by ADR 0035**: "one footing per target" and "this ADR only guarantees the tiles are there" are conditional, and W12S28 was already outside the condition when this was written. A target whose every range-1 tile is gone reserves nothing — the fold had no candidate and said nothing about it (#77). The rule below is unchanged; what ADR 0035 adds is that the shortfall is now recorded on a channel of its own instead of degrading in silence, so "the tiles are there" is a claim a reader can check rather than assume.

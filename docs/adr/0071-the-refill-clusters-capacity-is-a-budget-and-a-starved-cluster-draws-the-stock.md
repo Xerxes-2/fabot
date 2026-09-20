@@ -1,5 +1,7 @@
 # The refill cluster's capacity is a budget the holders' loads are counted against, and a starved cluster draws the stock
 
+> **Status:** accepted
+
 > **Accepted 2026-09-18** on #374, the decision the user's ("同意，就这样做" on options A + C). Implemented by the change that accepted it.
 
 ADR 0054 made the spawn and its extensions one Task and bounded it at `ceil(free / one hauler load)` bodies — *"as many bodies as the ring's free energy divides into loads, so a second one joins only while what stands empty exceeds what the first is carrying"*. The second half of that sentence is what the rule meant; the first half is what it computed, and the two come apart the moment the holder is not carrying a hauler's load. At W15S28 the hauler unit carries 1,500 and the whole cluster is 2,300, so the Task admitted two bodies only under 35% full and one the rest of the time — and *which* one was whoever got there first. Live at t549,000 a worker carrying 530 from across the room held the slot, a courier that had been matched to the ring yielded its tile three times to other bodies, and the courier beside the Storage with 718 aboard was released `capacity-full` and went to refill the controller buffer. The ring sat at 1,214 of 2,000, the spawn at 6 of 300 and not casting, with 234,360 energy in the Storage one tile from the ring.

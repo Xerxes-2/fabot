@@ -1,5 +1,7 @@
 # The Raid log is colony-level and episodic, because the per-creep log prunes the dead
 
+> **Status:** amended by #80, #201, #216 R4, #376
+
 > **Amended by #376** on two of the episode's fields, and on nothing it decides. A loss carries the tile the body last stood on (`Loss.Where`, read off the prior tick's placement the fold now keeps beside `Living`), because a colony-level episode that names no room left a reader inferring the room of a death from its walk time — and inferring it wrong. And the closest approach is measured against **armed** hostiles alone: a `1 MOVE` scout on our re-claimer's tile at the Reactor ring was named as an episode's approach while an invader three rooms away killed 33 bodies. The scouts stay on the roster; the episode stays the colony's. The placement baseline is carried only while an episode is open, like `Living`, at some forty bytes a body — a few kilobytes on a raid tick against the ring's own ten — and over the worked rooms the projection carries, so a death on a walk through a transit room is stamped with no tile.
 
 > **Amended by #216 R4** on where the quiet gap comes from, and on nothing it decides. The fifty ticks is `Tuning.QuietGap` on the [[colony view]] (ADR 0052 decision 5), read by `foldRaids` rather than handed to it, because it is a judgement about how long an absence has to run before it is a departure — a colony's choice — where the ring's depth beside it is a Memory-leaf budget and stays the caller's. The number, the poke-and-heal argument for it and every rule it gates are unchanged.

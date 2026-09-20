@@ -1,5 +1,7 @@
 # The world enumerates the chains; the walker's price picks the one it walks
 
+> **Status:** accepted
+
 ADR 0058 decision 1 ends with a sentence that was true of every declaration in force on the day it was written and is false today:
 
 > `RoomName.adjacent`'s fixed north-east-south-west order breaks ties, so the chain is a function of the world and not of the search.

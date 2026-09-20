@@ -1,5 +1,7 @@
 # Reroute attribution is computed only for verbose creeps
 
+> **Status:** amended by 0030
+
 Profiling (#50) showed the rerouted Verdict costs 13% of the tick: attributing a detour to the occupancy surcharge takes a second, traffic-blind Dijkstra flood per assigned creep per tick (ADR 0008's two-flood comparison), it is the only unmemoisable flood — each creep's tile is a unique key, so ADR 0004's memo cannot help — and the label serves observability alone: no decision reads it. We decided **the reroute comparison runs only for creeps on the verbose list**: everyone else's Transition log simply carries no rerouted entries, exactly as ADR 0009 already prices full candidate scoring — attribution that needs real work is pay-per-use, flipped on from the terminal mid-investigation without a redeploy, while conclusion-level Verdicts that fall out of work already done (matched, kept, released, grounded, yielded) stay always-on. ADR 0009's contract narrows from "every Verdict always-on, scoring verbose-only" to "a Verdict whose evidence must be *manufactured* is verbose-only"; the two-flood attribution mechanism of ADR 0008 is untouched — it just runs on demand.
 
 ## Considered Options

@@ -1,5 +1,7 @@
 # Traffic re-prices a route; fatigue grounds a creep
 
+> **Status:** accepted
+
 A live jam: builders stalled behind seated harvesters while the console
 spammed `MoveCreep failed: -11` (ERR_TIRED) every tick. ADR 0001's
 arbitration (as sharpened by the movers-before-stayers fix) kept planning

@@ -1,5 +1,7 @@
 # The last load is drawn whole, ore beside the Reactor is the delivery's, and the gates that send a body carry margin
 
+> **Status:** accepted
+
 > **Accepted 2026-09-18** on #378; the decision is the user's ("做吧", on the four parts as filed). Implemented by the change that accepted it.
 
 Read live at t559,469, after the user found the streak about to break for the third time in a day. The Reactor held 295 T and burned 1 a tick. W15S28's Storage held **376 T**. `hauler-558190`'s tombstone in W15S25 — the Reactor's own room — held **500 T**, decaying. The colony's only courier was hauling energy out of a W15S27 container. Every deposit we own was mined out but W11S29's, which needs RCL6. So the season's whole remaining accessible stock was about a thousand units, none of it moving, with the multiplier at 4 and 295 ticks left on the clock.

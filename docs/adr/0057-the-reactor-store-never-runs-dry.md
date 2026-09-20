@@ -1,5 +1,7 @@
 # The reactor's store never runs dry: a store-less miner over the mineral container, 999 a trip down a declared route, and a resident re-claimer
 
+> **Status:** amended by 0060, 0067, 0069, 0073, #306
+
 > **Amended by #378** (ADR 0073) on decision 3's tiering and decision 4's load. Ore lying in the declared errand room ranks `Feeding` at a capacity of one and is poured into the Reactor beside it rather than carried home; the delivery's load is the remainder once no more ore is coming; and the life gate that sends a body onto the loaded leg carries `Tuning.DeliveryLifeMargin` over its own arithmetic.
 
 > **Amended by #329** (ADR 0069) on decision 5's relay timing. The re-claimer now has a derived lead plus a 25-tick handover window on both casting and `Reclaim` capacity: the relief may arrive while its expiring incumbent still holds the one permanent seat. On W15S28's committed route the threshold is 191 ticks and the cast cadence is 409, not the historical fixed interval or the later handover-at-death interpretation below.

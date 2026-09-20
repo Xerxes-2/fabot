@@ -1,5 +1,7 @@
 # A crossing is only a crossing when the landing has ground beside it
 
+> **Status:** accepted
+
 ADR 0058 made the [[seam]] band one definition read by two holders of terrain, and said so in its own Consequences:
 
 > `Seam.bandBy` / `Seam.joinedBy` now hold that geometry once, and the two callers differ only in where they keep their terrain — `Atlas.seams` over the ring grids it lays per tick, `World.linked` over the border maps themselves. One definition, so the scan set and the price cannot disagree about which rooms are joined.

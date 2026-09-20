@@ -1,5 +1,7 @@
 # Safe mode fires on sight of CLAIM; the downgrade timer is a hard deadline
 
+> **Status:** amended by 0015, #201
+
 > **Amended by #201** on the room, and on nothing else: "any CLAIM-part hostile in a spawn room" is read as **the [[home room]]**. The sweep behind `Snapshot.Hostiles` stopped being the spawn rooms' that ticket, so "a hostile" and "a hostile here" became two questions, and this reflex asks the second — the stock is spent on a controller of ours and an [[outpost]] has none for a claimer to tap. The two sets are the same one room today; the reflex reads `Decide.hostilesAtHome`, which is the one that stays right when they part. The deadline, the gates and the downgrade half are untouched.
 
 > **Revised by ADR 0015**: the trigger now holds until a claimer stands within range 3 of the controller; "on sight" survives only as the fallback when the projection cannot place the controller. The downgrade-deadline half stands unchanged.

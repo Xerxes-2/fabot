@@ -1,5 +1,7 @@
 # The refill cluster is one Task
 
+> **Status:** amended by 0071, #230
+
 > **Amended by #374** (ADR 0071) on the bound. `ceil(free / one hauler load)` was one body for any ring under a load and a half of room — W15S28's whole 2,300 cluster above 35% full — held by whoever got there first, a fifty-energy worker against a full courier. The bound is now a **budget**: the ring's free energy, against which the Matcher reads what the holders already carry, which is the sentence below ("a second one joins only while what stands empty exceeds what the first is carrying") computed rather than approximated. The cluster's identity, its Work Area, the Emitter's pick and the `capacity-full` release are untouched.
 
 > **Amended by #230** on the release this ADR's Consequences priced and declined to cure, and on nothing it decided: when a cap shrinks, the holder released is the one with the largest `Atlas.walkTicks` — the body furthest from the Task — and no longer the one whose name sorts later. The fix was filed separately for the reason recorded below, that it is the Matcher's release order for **every** capped Task and not this one's rule, and that is where it landed. The bound, the cluster's identity, its Work Area and the Emitter's pick are all untouched, and so is the release's *cadence*: what moves is which of the converging bodies pays, and the one already standing beside a member with a full store now keeps the Task and pours.

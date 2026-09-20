@@ -1,5 +1,7 @@
 # A paved controller buffer outranks its Link footing
 
+> **Status:** accepted
+
 ADR 0012 placed the controller container on an Upgrade Work Area tile beside a trunk and off the road plan. W15S28 from its live spawn at `18,30` exposed the empty-set case (#331): its useful swamp tiles are all paved, while its remaining plain tiles are beside paving but not beside a trunk. The same mechanism left every swept W12S27 plan without a controller buffer (#104). Without that buffer the dedicated upgrader row cannot exist, so W15S28's growth toward RCL6 and the seasonal extractor chain stalls.
 
 **We decided to preserve the strict pick wherever one exists, then fall back to a candidate that may share the Work Area's swamp paving only when the strict set is empty.** The fallback keeps every other part of the candidate rule: the tile is in the Upgrade Work Area, is not itself a trunk tile, and is beside a trunk. A road construction site wins the shared tile first under ADR 0040; once that road stands, the controller container site is requested on it.

@@ -1,5 +1,7 @@
 # Work-heavy bodies harvest only from a Post
 
+> **Status:** amended by 0045, 0048, 0051
+
 > **Revised by ADR 0051** on the rejected option "cap a posted source's Harvest at its Post count": overturned in a narrower form. A light body's Harvest Work Area is the source's Seats *less* its Posts, and its capacity the Seats beyond the Posts — the complement of this ADR's heavy narrowing, so the two kinds of body stand on disjoint tiles. The failure mode the rejection feared (a light crowd with no rock at RCL2–3) ran the other way live: the light crowd kept the Post empty and the Anchor hired for it never got in (#212).
 
 > **Revised by ADR 0045** on one Consequence: "the fallback to the full Seat set is what carries RCL1–2" is the **home room's** alone from #159 onward. It is a *bootstrap* rule, and an outpost bootstraps through a reserver and a light builder raising the container instead (ADR 0042, #157) — so an unposted source outside the home room offers a Work-heavy body no tile at all: its Work Area is empty and its Harvest inapplicable to one. The narrowing to a source's Posts where it has any, and the inseparable half that a creep may act only from inside its Work Area, stand unchanged in every room.

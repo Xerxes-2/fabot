@@ -1,5 +1,7 @@
 # Safe mode holds until a claimer can reach the controller
 
+> **Status:** accepted
+
 ADR 0007 fired safe mode on *sight* of a CLAIM-part hostile, reasoning that the tap it was about to land would itself block activation for 1,000 ticks. With towers now shooting (ADR 0014) that turns out to be over-proved: `attackController` is a **range-1** act judged from tick-start position, and a creep steps at most one tile a tick, so a claimer seen at range 2 cannot land its tap before an activation issued the same tick takes effect. The precise deadline is range 2; sight was just its most conservative approximation. We decided the reflex **holds while every claimer is farther than range 3 of the controller** — the exact deadline plus one tile of margin so a single skipped tick (CPU bucket exhaustion) cannot slip a claimer past the boundary unseen — and fires the tick one closes to 3 or nearer. The hold is free: activation still always wins the race, and every held tick is a tick the fire reflex may kill the claimer en route, saving the stock outright. No damage arithmetic, no tower coordination, no CLAIM-priority targeting is needed — safety does not depend on the towers hitting anything, so ADR 0014's nearest-first rule stands untouched. A controller the projection cannot place has no deadline to measure and falls back to firing on sight (the Atlas totality discipline, ADR 0004). The measure is the claimer's position against the controller's tile, both facts the Snapshot already carries since ADR 0014 — the projection widens by nothing.
 
 ## Considered Options

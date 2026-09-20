@@ -1,5 +1,7 @@
 # A relay overlaps without widening its seat
 
+> **Status:** accepted
+
 The Reactor's re-claimer is both the colony's only vision of its errand room and the body that restores ownership. ADR 0057 therefore required a 25-tick overlap, but ADR 0026's ordinary capacity rule admitted the relief only when its incumbent would be dead at arrival. Live hostile losses made that one-tick handover gap an avoidable break in the relay (#329).
 
 **We decided that a `Reclaim` capacity carries a 25-tick handover window while its permanent cap remains one.** A holder consumes the permanent seat only when it will live beyond the candidate's arrival plus that window. Equality admits the relief: if its walk takes 166 ticks and the incumbent has 191 left, it arrives with 25 ticks of overlap. Two fresh bodies already at the Reactor still compete for one seat.

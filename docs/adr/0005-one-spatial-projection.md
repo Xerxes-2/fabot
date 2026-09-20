@@ -1,5 +1,7 @@
 # One spatial projection; placement is derived in Core
 
+> **Status:** accepted
+
 Two adapters projected the same room: `buildSpatial` for movement and matching, `buildPlacement` for construction — each scanning structures, sites and terrain, each classifying independently, and already disagreeing (entity lists swept every spawn's room while `buildPlacement` covered only the first). We decided the Snapshot carries **one** spatial projection. It gained what placement needs to be derivable: the room's name (`RoomName`, per-entry absent per ADR 0004) and what each target is (`TargetKinds`, a projection vocabulary of `TargetKind`/`BuiltKind` kept separate from the Intent vocabulary `StructureKind`). `SpawnInfo` gained its structure `Id`, so the colony list can locate its spawns in the projection. Everything `PlacementInfo` pre-computed — walkable tiles, occupied tiles, extension counts, the spawn anchor — is now derived in Core behind Atlas queries (`roomName`, `positionOf`, `buildableTiles`, `builtExtensions`, `pendingExtensions`); `PlacementInfo`, `Snapshot.Placement` and `buildPlacement` are deleted.
 
 ## Considered Options

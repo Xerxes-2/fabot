@@ -1,5 +1,7 @@
 # A Layout guarantee that degrades says so on a colony channel, because a footing has no creep
 
+> **Status:** accepted
+
 ADR 0022 and ADR 0027 promise one [[link footing]] per target — one beside each planned source [[container]], one beside the controller container, one beside the [[storage]] — and the [[layout]] delivered that promise with a fold that quietly did nothing when a target had no candidate tile left. W12S28 had already fallen through it (#77, found by #65's live verification): the RCL4 placement burst was planned by a bundle that predated #64's reservation and built an extension on `11,43`, the last tile within range 1 of the `10,43` source container. The room holds three footings where the ADRs promise four, and nothing anywhere says so — no [[verdict]], no census, no line. A guarantee that can degrade in silence is not a guarantee, and that is the part worth fixing independently of the room.
 
 We decided **a footing target the Layout cannot serve is recorded on a colony-level observe channel of its own**, the way the [[raid log]] is (ADR 0028), read from the terminal with `observe.mjs layout`.

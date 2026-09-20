@@ -1,5 +1,7 @@
 # Fire reflex — towers attack only, nearest hostile, no gate
 
+> **Status:** accepted
+
 At RCL3 the layout's tower stood built and fed (Refill keeps it topped at surplus tier) but the code held no tower action at all — the colony's only defence was the safe-mode reflex, which spends on CLAIM parts alone, so a claw-less hostile could dismantle roads and containers unopposed (issue #49). We decided towers fire through a **colony reflex** in the safe-mode/pickup family — condition→Intent in `Decide.fs`, outside the Task/Matcher pipeline, no Verdict, no chat bubble: every tower, independently, shoots the hostile **nearest to itself**, every tick one is in the room. The rule is deliberately minimal, and the exclusions are the decision:
 
 - **Attack only — no tower repair, no tower heal.** Tower repair restores 800→200 hits per 10 energy against a creep's 100 hits per energy per Work part — 4–50× less efficient — and the creep Repair task already covers decay; every tower-repair spend is a surplus-tier Refill trip re-run. Heal has no customer: nothing damages our creeps but the hostiles this reflex shoots, and the workforce target replaces cheap bodies anyway. Single-purpose also dissolves the one-action-per-tick arbitration question before it exists.

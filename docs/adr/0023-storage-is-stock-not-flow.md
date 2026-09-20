@@ -1,5 +1,7 @@
 # Storage is stock, not flow: deepest Refill, second-tier Withdraw, pooled only while another sink is hungry
 
+> **Status:** amended by 0071, #216 R5, #232
+
 > **Amended by #374** (ADR 0071) with one exception to the second-tier Withdraw: while the colony is **starved** at its refill cluster — room in the ring and a bank that cannot afford the hauler unit it would cast — the Storage's energy draw ranks with the containers' and travel cost decides, capped at the loads the ring can take. At RCL4–6 that condition holds whenever the ring is not full, so at those levels the exception is the steady state of a colony with a stocked Storage; the deepest-tier Refill, the hungry-sink gate and the tier gap that closes the cycle stand as written below.
 
 > **Amended by #216 R5** on where the two orderings live: the Storage's deepest-Refill and second-tier-Withdraw layering is now a `Priority` the Planner sets on the pooled Task, not a tier the Matcher derives (ADR 0052 decision 6). The ordering is unchanged, and the pooling gate keeps its rule and gains a third sink to count: the [[ferry]]'s (#222) — a bootstrapping child's upgrade [[buffer]] is a Refill target that is not the Storage, which is the whole of the condition, and it is the one target the stock is explicitly hired against. The "so the in-and-out cycle has no tick in which both its halves are applicable" clause is still false for the reason #82 gives, and the tier gap is still what actually closes the cycle.

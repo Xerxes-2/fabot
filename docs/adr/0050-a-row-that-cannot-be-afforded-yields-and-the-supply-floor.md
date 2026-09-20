@@ -1,5 +1,7 @@
 # A row that cannot be afforded yields the tick, and a colony that cannot refill an extension hires the body that can
 
+> **Status:** amended by 0072, #216 R4
+
 > **Amended by #375** (ADR 0072) at the seam this ADR's fourth rejected option pointed to. The yield stands; what it let happen — the reserver row buying a 650 body into a raided room every time the bank reached 650, while the guard priced at 2,250 never cast — is closed from the other side: a guarded room's reserver seat is withheld while the guard row has a gap, and the guard is sized to its fight rather than to the bank.
 
 > **Amended by #216 R4** on what the supply floor counts. A body **still in an oven** answers the floor's question too (#156): the rule asks whether the colony holds anything that can ever put energy into an extension again, and a hauler nine ticks from standing answers yes — buying a second one out of the same stranded bank is the oversell this row exists to make exactly once. The gate is unchanged (`canRefill`'s three clauses, read over a body's parts rather than over a living creep's), and so is the fallback in front of it.

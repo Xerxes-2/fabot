@@ -1,5 +1,7 @@
 # The far leg of a cross-room price is traffic-blind
 
+> **Status:** accepted
+
 > **Accepted 2026-09-18** out of the CPU round on #370; the numbers below are that round's and the decision is the user's. Implemented by the change that accepted it.
 >
 > Two things the document left open, answered by the build. The red test it could not name is `AtlasCrossRoomTests`' *"the traffic-aware far field is recalled for as long as the crowd stands still"* — one body standing in an outpost corridor, priced at 36 + the surcharge — and it is now the pin of this decision instead: the same body costs the empty corridor's 36, while a body in the creep's **own** room still costs 46. And the one far-field table left keeps its name, `PerCensus`, because what it says is now true of every far field rather than of two pricings out of three.

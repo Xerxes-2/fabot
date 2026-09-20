@@ -1,5 +1,7 @@
 # The container plan defers to a target, not a tile: a moved pick keeps the container that stands, and the loss is recorded
 
+> **Status:** amended by #209, #260
+
 > **Amended by #260** on the target vocabulary and on nothing else: `ContainerTarget` gains a **mineral** beside the source and the controller (ADR 0057 decision 1), and the clause this ADR wrote is read down that column unchanged — a Thorium deposit is *served* when a container stands or a site is pending within range 1 of it, wherever that container happens to sit, so a moved pick costs a worse tile and never a second container, and the deferral is recorded under the mineral's own target naming both tiles. The tile clause reaches one kind further with it: the **extractor**, whose tile is its target's and can never move to dodge a site, is subtracted from the same census the containers are.
 
 > **Amended by #209** on the tile clause alone: it reads the road **sites the Layout actually places** and no longer the whole road gap. Below `roadLevel` (RCL3, ADR 0011 as #209 amends it) no road site is placed, so a pick on an unpaved trunk tile has nothing to collide with and nothing to wait for — the reason the clause exists, one construction site per tile, simply does not arise. The clause is symmetric from here: the road placement subtracts the pending container census the same way, so the tile the container took below the gate is not asked for a road at RCL3 while that container is still a site. The target clause and everything else below are untouched.

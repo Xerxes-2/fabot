@@ -1,5 +1,7 @@
 # Worker bodies spend the remainder at fatigue parity
 
+> **Status:** accepted
+
 `workerBodyFor` replicated the `[Work; Carry; Move]` unit whole, stranding up to 150 energy at odd capacities — RCL2's 550 built a 400-energy body. We decided the remainder is spent on Carry/Move under a **fatigue-parity** invariant: the padded body is never slower than the pure-unit body, empty (Move ≥ Work) or loaded (Work + Carry ≤ 2 × Move), and within that bound buys as much Carry as possible — extra haul per trip is the payoff, speed loss is the cost we refuse. Concretely: a 50 remainder buys a Move, 100 buys a Carry/Move pair, 150 buys Carry/Carry/Move. Work stays at one per unit, and bodies cap at the engine's 50-part MAX_CREEP_SIZE (16 units plus a pair), which whole-unit replication would have overrun from capacity 3400 up.
 
 ## Considered Options

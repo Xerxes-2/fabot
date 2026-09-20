@@ -1,5 +1,7 @@
 # Colonies are first-class, and a colony has a stage
 
+> **Status:** accepted
+
 Two days of live deploys of the second colony (W13S28, ADR 0047) broke one rule after another that had been written for the one RCL5 home the bot grew up in: pricing every row at the bank's capacity (#203), a posted source worth the room's rate rather than what the Anchor row digs at a 300 bank (#208), road and rampart sites at RCL1–2 in a room earning eight a tick (#209, #214), a trunk priced at a creep's swamp weight (#211), a standing body crossing a Seam for a pile (#206), the Post's Seat filled by the light crowd (#212), pioneers hired for the child and kept home by the tier they were pooled in (#213), and before all of these a second spawn casting into a colony-wide cascade and a Layout reading that spawn as home coordinates (#191). None was a defect in the rule's own terms; every one was a hidden constant of the single home — its level, its bank, its room — spelled as if it were a colony fact. The user's verdict (2026-09-06): "从一开始商量的时候我就不应该和你妥协，前提直接从多殖民地、多 remote 开始定".
 
 We decided the premise is rewritten, not patched further. **The skeleton stands** — the layered Atlas and its flood tables (ADR 0041), a `decide` derived fresh every tick from facts, a pure Core under Expecto, the Verdicts and `observe.mjs` — and **the model under it is rewritten around two facts: a colony is the unit everything is computed for, and a colony has a stage.**

@@ -1,5 +1,7 @@
 # The reactor is a declared errand, a keeper lair is terrain, and the programme is W15S28's
 
+> **Status:** accepted
+
 ADR 0057 was written on 2026-09-07 against `docs/research/thorium-reactor.md` at tick 202,041. Its **rules** are still the authority and were re-verified against `mod-season5` (`da59118`) on 2026-09-13; its **world** is gone. `docs/research/thorium-season-plan.md` is that re-read, at ticks 396,515–396,757, and it lists every number of its predecessor that has moved. Three things moved far enough to need a decision rather than a correction:
 
 - **The room the programme runs from.** ADR 0057 assumes W12S28, which is **six** crossings from the reactor and outside `Tuning.MaxHops`. Its decision 4 answered that with a hand-written `Tuning.ReactorRoute` and set the test of its own workaround: *"landing #243 should delete `Tuning.ReactorRoute` and change no rule."* ADR 0058 and ADR 0059 landed the derived chain, so the constant need never be written — but only from a home that can reach the room in three.

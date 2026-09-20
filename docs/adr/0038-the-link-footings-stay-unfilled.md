@@ -1,5 +1,7 @@
 # The Link footings stay unfilled at RCL5: the hauler row is already at its floor, and a link cannot go below a floor
 
+> **Status:** amended by 0049; re-measured by #245, the refusal stands
+
 > **Re-measured at RCL6 and RCL7 (#245, 2026-09-19) and the refusal stands — in every colony, by a wide margin.** ADR 0055 owed this the day a mother reached RCL6; two are RCL7 now and a third is RCL6, and the answer did not move. A controller link takes the **buffer** out of the hauler's menu, so each source's `output × max(sink trip)` falls back to `max(cluster, storage)`. Measured off the live demand rows:
 >
 > | colony | load | demand now | bodies | demand with a link | bodies |

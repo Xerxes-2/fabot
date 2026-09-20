@@ -1,5 +1,7 @@
 # The worker row's quota rounds up, because a floor drops a whole body's Work
 
+> **Status:** amended by 0049, #216 R4
+
 > **Amended by #216 R4** on the *remainder* this row divides and on nothing else in its own rule. The upgrader row's quota now divides the surplus by one standing body's whole lifetime cost — its drain **plus** the body it is spent on (#200) — so the remainder that reaches this row is what is genuinely left after the row above it has been paid for, where before a body's price was deducted afterwards out of exactly this term and could take more than the whole of it. The direction of this row's rounding, the one-body oversell bound and the argument for both are untouched.
 
 > **Revised by ADR 0049** on the *hauler* row this ADR takes its precedent from, never on the worker row's own rule: the hauler quota still rounds up, but once over the colony's summed demand rather than once per source [[container]]. The precedent survives the correction intact — the worker row's quota was always one division over one colony-wide surplus, which is exactly the grain ADR 0049 moves the hauler row to.
