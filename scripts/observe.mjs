@@ -1759,6 +1759,50 @@ if (command === "console") {
     }
 
     console.log(cpuReport(ticks));
+
+    // The coarse spans (#386): the fine window above is a hundred ticks, about
+    // five minutes, and two outages in two days were hours old before anyone
+    // read this channel. What these answer is *when* — a span whose `max` went
+    // large, or whose bucket floor fell, against one that did not.
+    //
+    // `max` leads because the engine's per-tick ceiling is a wall: a tick over
+    // 500 ms is terminated whatever the bucket holds, so the first question is
+    // never the average.
+    const spans = Array.isArray(stored.spans) ? stored.spans.filter((s) => s && typeof s.max === "number") : [];
+
+    if (spans.length > 0) {
+      const worst = spans.reduce((a, b) => (b.max > a.max ? b : a));
+      const floor = spans.reduce((a, b) => (b.b < a.b ? b : a));
+      const covered = spans.reduce((total, s) => total + s.n, 0);
+
+      console.log(
+        `\nthe long record: ${spans.length} spans over ${covered} ticks, ` +
+          `t${spans[0].f.toLocaleString()}-${spans[spans.length - 1].t.toLocaleString()}`,
+      );
+      console.log(
+        `  worst single tick ${worst.max.toFixed(1)} ms in t${worst.f.toLocaleString()}-${worst.t.toLocaleString()}` +
+          ` (the engine terminates a tick over 500)`,
+      );
+      console.log(
+        `  lowest bucket ${floor.b.toLocaleString()} in t${floor.f.toLocaleString()}-${floor.t.toLocaleString()}`,
+      );
+
+      const loud = spans.filter((s) => s.max >= 100).slice(-12);
+
+      if (loud.length > 0) {
+        console.log("  spans whose worst tick reached 100 ms:");
+
+        for (const s of loud) {
+          console.log(
+            `    t${String(s.f).padStart(7)}-${String(s.t).padEnd(7)} ` +
+              `max ${s.max.toFixed(0).padStart(4)} ms  mean ${(s.sum / Math.max(1, s.n)).toFixed(0).padStart(3)} ms  ` +
+              `bucket floor ${String(s.b).padStart(6)}  replans ${s.r}`,
+          );
+        }
+      } else {
+        console.log("  no span's worst tick reached 100 ms");
+      }
+    }
   }
 } else {
   // ---- tasks / timeline: reads over the Transition log ------------------

@@ -1463,13 +1463,59 @@ type CpuSample =
 /// The whole persisted CPU line: oldest first, capped, exactly as the
 /// other two rings are. A record rather than a bare list so the leaf can
 /// grow a second key without moving the one that is there.
-type CpuState = { Ticks: CpuSample list }
+/// One **span** of ticks, summarised (#386): the coarse record beside the fine
+/// one, cheap enough to keep for hours.
+///
+/// The fine ring holds a hundred ticks — about five minutes — because that is
+/// what ADR 0041's trigger needs and no more (`capCpuTicks`). Twice in two days
+/// that has been the wrong size for the only other question anyone asks of this
+/// channel: *what happened at three o'clock*. Both times the answer had to be
+/// inferred from emailed timeout stacks.
+///
+/// `Max` is the field this exists for, and the one a mean hides. The engine's
+/// per-tick ceiling is **500 ms** and it is a wall, not an allowance: a tick
+/// over it is terminated whatever the bucket holds, and the bucket's own limit
+/// is the separate, smaller number. So the first thing a post-mortem needs is
+/// when a *single* tick got large, and only then what the average was.
+///
+/// `Replans` rides along because the shell already records it and it is the
+/// one thing known to make a tick several times its neighbours: a re-planning
+/// tick averages 209 ms against a mean of 84, and the tick that re-planned
+/// four colonies at once cost 487 of the 500 (`Main.fs`, #357).
+type CpuSpan =
+    {
+        /// The first tick the span covers, and the last: a gap between two
+        /// spans is ticks this bot did not run, which is itself the record.
+        From: int
+        To: int
+        /// How many ticks were folded in — not `To - From + 1`, which counts
+        /// the ticks the bot missed as though it had measured them.
+        Ticks: int
+        /// The worst single tick of the span, in milliseconds.
+        Max: float
+        /// Their sum, so a reader divides by `Ticks` for the mean and no
+        /// rounding is carried across spans.
+        Sum: float
+        /// The lowest bucket seen. A span whose floor is 10,000 never spent
+        /// more than the allowance; one whose floor is near zero is the shape
+        /// an outage leaves behind.
+        Bucket: int
+        /// How many colonies re-planned across the span.
+        Replans: int
+    }
+
+type CpuState =
+    {
+        Ticks: CpuSample list
+        /// Closed spans, oldest first, and the one still filling at the end.
+        Spans: CpuSpan list
+    }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CpuState =
     /// The empty CPU line — what an absent, malformed or foreign-shaped
     /// leaf reads as, the way `RaidState.empty` is.
-    let empty = { Ticks = [] }
+    let empty = { Ticks = []; Spans = [] }
 
 /// The CPU line's ring cap. ADR 0041 states the condition to revisit the
 /// layered projection as two numbers — a mean tick above 50 ms, or any single
@@ -1479,6 +1525,16 @@ module CpuState =
 /// neighbours; at twenty rows that recompute is a twentieth of the mean, and at
 /// a hundred it is a percent.
 let capCpuTicks = 100
+
+/// How many ticks one coarse span covers, and how many spans are kept (#386).
+/// A hundred and two hundred: 20,000 ticks, which at the live rate of about
+/// 1,120 ticks an hour is **five hours** — long enough that an incident noticed
+/// over lunch is still in the record after it. The cost is two hundred rows of
+/// seven numbers against the hundred rows of a dozen fields the fine ring
+/// writes, so the coarse record is the cheaper of the two by some way.
+let spanTicks = 100
+
+let capCpuSpans = 200
 
 /// The measured cost, kept to the microsecond. The engine hands back a float
 /// with more digits than anyone reads and Memory pays for every one of them; a
@@ -1550,13 +1606,49 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
         |> fst
         |> List.rev
 
+    let ms = toMicrosecond readings.AtExecute
+
+    // The coarse record (#386). The span still filling is the last of the list
+    // and is folded into in place; it closes when it has covered `spanTicks`,
+    // and a tick whose number is *behind* the open span's — a global reset with
+    // a stale leaf, or a hand-edited one — opens a fresh span rather than
+    // widening the old one over a window it did not measure.
+    let spans =
+        match List.tryLast prior.Spans with
+        | Some open' when open'.Ticks < spanTicks && tick >= open'.To ->
+            List.truncate (List.length prior.Spans - 1) prior.Spans
+            @ [
+                { open' with
+                    To = tick
+                    Ticks = open'.Ticks + 1
+                    Max = max open'.Max ms
+                    Sum = open'.Sum + ms
+                    Bucket = min open'.Bucket readings.Bucket
+                    Replans = open'.Replans + readings.Replans
+                }
+            ]
+        | _ ->
+            prior.Spans
+            @ [
+                {
+                    From = tick
+                    To = tick
+                    Ticks = 1
+                    Max = ms
+                    Sum = ms
+                    Bucket = readings.Bucket
+                    Replans = readings.Replans
+                }
+            ]
+            |> trim capCpuSpans
+
     {
         Ticks =
             prior.Ticks
             @ [
                 {
                     Tick = tick
-                    Ms = toMicrosecond readings.AtExecute
+                    Ms = ms
                     Phases = Some phases
                     Colonies = colonies
                     Rooms = swept
@@ -1565,6 +1657,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                 }
             ]
             |> trim cap
+        Spans = spans
     }
 
 /// What one live invariant check found broken this tick (#355). The fourth

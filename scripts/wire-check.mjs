@@ -169,10 +169,11 @@ wire("cpu: an absent leaf reads empty, and a well-formed one round-trips", async
 
   globalThis.Memory = rootMemoryWith("cpu", undefined);
   saveCpu(loadCpu());
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu), stable({ ticks: [] }));
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu), stable({ ticks: [], spans: [] }));
 
   const sample = {
     ticks: [{ t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 }],
+    spans: [],
   };
 
   globalThis.Memory = rootMemoryWith("cpu", sample);
@@ -192,9 +193,42 @@ for (const [name, leaf] of [
 
     globalThis.Memory = rootMemoryWith("cpu", leaf);
     saveCpu(loadCpu());
-    assert.equal(stable(globalThis.Memory.fabot.observe.cpu), stable({ ticks: [] }));
+    assert.equal(stable(globalThis.Memory.fabot.observe.cpu), stable({ ticks: [], spans: [] }));
   });
 }
+
+wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const sample = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
+
+  // A leaf written before #386 has no `spans` key at all, and absent is the
+  // empty record rather than a throw that would cost the ticks beside it.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample] });
+  saveCpu(loadCpu());
+  assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a line written before the spans keeps its ticks");
+
+  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [span] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span]), "and one that has them round-trips key for key");
+});
+
+wire("cpu: a span with a field off the shape costs its span and not the line", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const good = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
+
+  for (const key of ["f", "t", "n", "max", "sum", "b", "r"]) {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [{ ...good, [key]: {} }, good] });
+    saveCpu(loadCpu());
+    const spans = globalThis.Memory.fabot.observe.cpu.spans;
+
+    assert.equal(spans.length, 1, `a span whose ${key} is not a number is dropped`);
+    assert.equal(spans[0].f, 100, "and the well-formed one beside it is kept");
+  }
+});
 
 wire("cpu: a row that will not decode costs its row and not the line", async () => {
   const { loadCpu, saveCpu } = await import(MODULE);

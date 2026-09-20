@@ -1386,6 +1386,34 @@ let loadCpu () : CpuState =
                             }
                     else
                         None)
+            // The coarse spans (#386), absent from a leaf written before they
+            // existed and an empty list being what that says: the fine ring
+            // beside them is untouched, and the first tick after a deploy
+            // opens the first span.
+            Spans =
+                cpu?spans
+                |> rowsOf (fun raw ->
+                    if
+                        jsTypeof raw?f = "number"
+                        && jsTypeof raw?t = "number"
+                        && jsTypeof raw?n = "number"
+                        && jsTypeof raw?max = "number"
+                        && jsTypeof raw?sum = "number"
+                        && jsTypeof raw?b = "number"
+                        && jsTypeof raw?r = "number"
+                    then
+                        Some
+                            {
+                                From = numberOf raw "f"
+                                To = numberOf raw "t"
+                                Ticks = numberOf raw "n"
+                                Max = unbox<float> raw?max
+                                Sum = unbox<float> raw?sum
+                                Bucket = numberOf raw "b"
+                                Replans = numberOf raw "r"
+                            }
+                    else
+                        None)
         })
 
 /// One CPU row as the wire carries it: `{ t, ms }`, the phase keys when the
@@ -1434,9 +1462,24 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 /// Write the CPU line back under `Memory.fabot.observe.cpu`, leaving the rest
 /// of the observe subtree alone the way `saveRaids` does — the whole line,
 /// every row. What `appendCpu` below falls back to.
+/// One coarse span on the wire (#386): seven numbers under short keys, because
+/// two hundred of these ride in the same leaf as the fine ring and every
+/// character of every key is paid for two hundred times.
+let private encodeCpuSpan (span: CpuSpan) =
+    let o = createEmpty<obj>
+    o?f <- span.From
+    o?t <- span.To
+    o?n <- span.Ticks
+    o?max <- span.Max
+    o?sum <- span.Sum
+    o?b <- span.Bucket
+    o?r <- span.Replans
+    o
+
 let saveCpu (state: CpuState) =
     let cpu = createEmpty<obj>
     cpu?ticks <- state.Ticks |> List.map encodeCpuSample |> List.toArray
+    cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
     writeObserveLeaf "cpu" cpu
 
 /// Whether the leaf holds a line at all — a `ticks` array with a row in it

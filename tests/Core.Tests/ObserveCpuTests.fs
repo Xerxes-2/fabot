@@ -37,6 +37,122 @@ let private costing (ms: float) =
         ColonyProjects = []
     }
 
+/// The same reading with a bucket and a replan count of its own, which is what
+/// the coarse spans keep beside the milliseconds (#386).
+let private costingAt (ms: float) bucket replans =
+    { costing ms with
+        Bucket = bucket
+        Replans = replans
+    }
+
+/// Fold a run of ticks, one reading each, from an empty line.
+let private folded readings =
+    readings
+    |> List.fold
+        (fun state (tick, reading) -> foldCpu capCpuTicks tick reading state)
+        CpuState.empty
+
+[<Tests>]
+let cpuSpanTests =
+    testList
+        "observe fold: the CPU line's coarse spans"
+        [
+            test "a span carries the worst tick of its window, not its mean" {
+                // The field the whole record exists for. The engine's per-tick
+                // ceiling is 500 ms and it is a wall: a tick over it is
+                // terminated whatever the bucket holds. So a window whose mean
+                // is comfortable and whose worst tick is not is exactly the
+                // shape a post-mortem is looking for, and a mean alone hides it.
+                let state =
+                    folded
+                        [ for t in 1..10 -> t, costingAt (if t = 7 then 480.0 else 20.0) 10_000 0 ]
+
+                match state.Spans with
+                | [ span ] ->
+                    Expect.equal span.Max 480.0 "the worst tick stands on its own"
+                    Expect.equal span.Ticks 10 "ten ticks folded in"
+
+                    Expect.equal
+                        span.Sum
+                        (9.0 * 20.0 + 480.0)
+                        "and the sum is kept whole, so the mean is the reader's to take"
+                | other -> failtest $"expected one open span, got %A{other}"
+            }
+
+            test "a span keeps the lowest bucket it saw" {
+                // A span whose floor is the full 10,000 never spent more than
+                // the allowance; one whose floor is near zero is the shape an
+                // outage leaves behind, and it is the difference between "the
+                // ticks were long" and "the script was being killed".
+                // The bucket **dips and recovers** inside the window, so the
+                // floor and the last reading are different numbers: 10,000 then
+                // 2,000 then 9,000. Read as the last, this span would say the
+                // colony never came close, which is the reading an outage hides
+                // behind.
+                let state =
+                    folded
+                        [
+                            1, costingAt 20.0 10_000 0
+                            2, costingAt 20.0 2_000 0
+                            3, costingAt 20.0 9_000 0
+                        ]
+
+                match state.Spans with
+                | [ span ] -> Expect.equal span.Bucket 2_000 "the floor and not the last reading"
+                | other -> failtest $"expected one open span, got %A{other}"
+            }
+
+            test "a span closes at its width and the next one opens" {
+                let state = folded [ for t in 1 .. spanTicks + 3 -> t, costingAt 20.0 10_000 0 ]
+
+                match state.Spans with
+                | [ closed; opening ] ->
+                    Expect.equal closed.Ticks spanTicks "the first span is full"
+                    Expect.equal closed.From 1 "and it is the older one"
+                    Expect.equal opening.Ticks 3 "the rest are in the one still filling"
+                    Expect.equal opening.From (spanTicks + 1) "which opens on the tick after"
+                | other -> failtest $"expected one closed span and one open, got %A{other}"
+            }
+
+            test "the record reaches back hours where the fine ring reaches minutes" {
+                // `capCpuTicks` holds a hundred ticks, about five minutes. Two
+                // outages in two days were hours old before anyone read the
+                // channel, and both had to be inferred from emailed timeout
+                // stacks because this is what the record did not hold.
+                Expect.isGreaterThan
+                    (spanTicks * capCpuSpans)
+                    (capCpuTicks * 100)
+                    "the coarse record covers two orders of magnitude more ticks than the fine one"
+            }
+
+            test "a tick behind the open span opens a fresh one rather than widening it" {
+                // A global reset with a stale leaf, or a hand-edited one: the
+                // span would otherwise claim to cover a window it never
+                // measured, and `Ticks` against `To - From` is how a reader
+                // tells a gap from a run.
+                let state = folded [ 1, costing 20.0; 2, costing 20.0; 1, costing 20.0 ]
+
+                Expect.equal
+                    (List.length state.Spans)
+                    2
+                    "the tick that went backwards starts its own span"
+            }
+
+            test "the spans survive the trim that shortens the fine ring" {
+                // The two records are kept to their own lengths: a fine ring
+                // trimmed to a hundred rows says nothing about how many spans
+                // a leaf may hold.
+                let state = folded [ for t in 1..150 -> t, costingAt 20.0 10_000 0 ]
+
+                Expect.equal (List.length state.Ticks) capCpuTicks "the fine ring is trimmed"
+
+                Expect.equal
+                    (state.Spans |> List.sumBy (fun s -> s.Ticks))
+                    150
+                    "and no tick is lost from the coarse one"
+            }
+        ]
+
 [<Tests>]
 let cpuTests =
     testList
@@ -348,6 +464,7 @@ let cpuTests =
                 // ColonyView cost nothing rather than that nobody measured it.
                 let unsplit =
                     {
+                        Spans = []
                         Ticks =
                             [
                                 {
