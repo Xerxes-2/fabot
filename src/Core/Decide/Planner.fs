@@ -7,25 +7,20 @@ module Fabot.Core.Decide.Planner
 open Fabot.Core
 open Fabot.Core.Types
 
-/// The source container geometry (ADR 0012): a tile within range 1 of the given
-/// source is that source's container tile — the Seat-standing kind the Layout
-/// places, which harvest overflow fills. The one range this colony calls a
-/// source container, asked of one source. Since ADR 0057 the Layout asks it of
-/// a **Thorium deposit** too: served is a container standing or pending within
-/// range 1, and that is one rule over two kinds of rock. Named for the source
-/// because every other caller here is a source's, and a deposit's own readers
-/// say which rock they meant (`servingRock`).
+/// The source container geometry: a tile within range 1 of the given rock is
+/// that rock's container tile. One rule over two kinds of rock — the Layout
+/// asks it of a Thorium deposit too. Named for the source because every other
+/// caller here is a source's, and a deposit's own readers say which rock they
+/// meant (`servingRock`).
 let internal servesSource (rockPos: Pos) (tile: Pos) = range tile rockPos <= 1
 
 /// The source a tile of the named room is a container's for: the placed source
-/// **standing in that same room** within range 1 of it, or None where there is
-/// none. The one geometry judgement behind both rules that care about a source
-/// container — the Planner keeps them out of Refill, the hauler quota counts
-/// them. Unplaced geometry classifies nothing (ADR 0004). The source's identity
-/// and not merely its existence, because since ADR 0042 the hauler quota prices
-/// a container at *that* source's own output: a room's reservation decides
-/// whether the rock under a container is worth ten a tick or five. Of several
-/// sources within range 1 the first in view order answers.
+/// standing in that same room within range 1 of it, or None. The one geometry
+/// judgement behind both rules that care about a source container — the
+/// Planner keeps them out of Refill, the hauler quota counts them. The source's
+/// identity and not merely its existence, because the hauler quota prices a
+/// container at that source's own output. Of several sources within range 1
+/// the first in view order answers.
 let internal sourceContainerServes (view: ColonyView) (room: string) (pos: Pos) : string option =
     view.Sources
     |> List.tryFind (fun s ->
@@ -34,45 +29,38 @@ let internal sourceContainerServes (view: ColonyView) (room: string) (pos: Pos) 
         | None -> false)
     |> Option.map (fun s -> s.Id)
 
-/// Whether a tile of the named room is a source container's at all — the
-/// half of the rule above that the Refill pool asks, which needs to know
-/// that the tile is spoken for and never which rock spoke for it.
+/// Whether a tile of the named room is a source container's at all — the half
+/// of the rule above that the Refill pool asks.
 let private isSourceContainerTile (view: ColonyView) (room: string) (pos: Pos) =
     sourceContainerServes view room pos |> Option.isSome
 
-/// Whether this colony owns the named room. Read by the rules that mean *ours*
-/// — a [[nursery]] of this colony's, a child it is bootstrapping — where whose
-/// room it is decides whose business it is (ADR 0047 decision 4). A room with no
-/// control entry is one the colony cannot see, and an unseen room is not one it
-/// owns (ADR 0004).
+/// Whether this colony owns the named room. A room with no control entry is
+/// one the colony cannot see, and an unseen room is not one it owns.
 let private colonyOwns (view: ColonyView) room =
     view.RoomControl
     |> Map.tryFind room
     |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
-/// Whether the named room carries an **owner at all** — one spelling for the
-/// two rules of the reserver's that read it. `reserveController` answers
+/// Whether the named room carries an owner at all — one spelling for the two
+/// rules of the reserver's that read it. `reserveController` answers
 /// ERR_INVALID_TARGET on a controller with an owner, *whoever* it is, so the
 /// Reserve pool must not carry its controller and the row must not hire against
-/// it: one sentence rather than two gates free to disagree. A rival's counts
-/// too, because ADR 0043's stand-down reads the *previous* tick's raid log and
-/// the one tick between first sight and the withdrawal cast the bank's whole
-/// reserver body at a room the engine refuses.
+/// it. A rival's counts too, because the stand-down reads the *previous* tick's
+/// raid log and the one tick between first sight and the withdrawal cast the
+/// bank's whole reserver body at a room the engine refuses.
 let private roomHasOwner (view: ColonyView) room =
     view.RoomControl
     |> Map.tryFind room
     |> Option.exists (fun control -> control.Owner <> Ownership.Unowned)
 
 /// The controllers a Claim is pooled for this tick, each with the room it
-/// stands in (ADR 0047) — one spelling for the two rules that read it: the Task
-/// pool offers exactly these and the reserver row hires one body for each, so
-/// the row and its Task cannot disagree (ADR 0006). A **candidate colony** is a
-/// declared home this colony does not own yet, and both halves are needed: the
-/// declaration, because claiming a room is a human's decision and no projected
-/// fact distinguishes a room we mean to own from a neighbour we merely mine;
-/// and the ownership, because the tick the claim lands the room stops being a
-/// candidate and this pool empties itself, with no state kept. A room nothing
-/// looked into is not one it can claim (ADR 0004).
+/// stands in — one spelling for the two rules that read it: the Task pool
+/// offers exactly these and the reserver row hires one body for each. A
+/// candidate colony is a declared home this colony does not own yet, and both
+/// halves are needed: the declaration, because no projected fact distinguishes
+/// a room we mean to own from a neighbour we merely mine; and the ownership,
+/// because the tick the claim lands this pool empties itself, with no state
+/// kept.
 let internal claimTargets (view: ColonyView) : (string * string) list =
     let takeable room =
         match Map.tryFind room view.RoomControl with
@@ -90,33 +78,24 @@ let internal claimTargets (view: ColonyView) : (string * string) list =
         | Some tile when candidate tile.Room -> Some(id, tile.Room)
         | _ -> None)
 
-/// Whether the named room is this colony's **nursery**: a declared colony of
-/// ours that has been claimed and has no spawn of its own yet (ADR 0047
-/// decision 4). Its home goes on being projected as this colony's [[outpost]],
-/// and three rules read that state — every site in it is feeding-tier work, the
-/// concurrent-builder budget does not reach those sites, and the worker row
-/// hires `Tuning.PioneerCount` more bodies — so it is one spelling and not
-/// three gates free to disagree. Two facts: the room's **stage** is `Nursery`
-/// (ADR 0052 decision 3), which carries the declaration, the ownership and the
-/// missing spawn in one derivation, and **this colony projects the room**
-/// (`colonyOwns`), which is what keeps a second declarer from hiring
-/// [[pioneer]]s for a child it never projects.
+/// Whether the named room is this colony's nursery: a declared colony of ours
+/// that has been claimed and has no spawn of its own yet. Three rules read that
+/// state — every site in it is feeding-tier work, the concurrent-builder budget
+/// does not reach those sites, and the worker row hires `Tuning.PioneerCount`
+/// more bodies — so it is one spelling and not three gates free to disagree.
+/// Two facts: the room's stage is `Nursery`, and this colony projects the room
+/// (`colonyOwns`), which is what keeps a second declarer from hiring pioneers
+/// for a child it never projects.
 let internal isNurseryRoom (view: ColonyView) room =
     room <> SpatialInfo.homeName view.Spatial
     && colonyOwns view room
     && roomStage view room = Some Nursery
 
-/// Whether the named room is a child colony this one is still **bootstrapping**
-/// (ADR 0047 decision 4): a declared colony of ours that stands its own spawn —
-/// so it runs its own `decide` and is nobody's [[nursery]] any more — and that
-/// this colony is nonetheless projecting. Two rules read it: the child's
-/// controller joins this colony's Upgrade pool, and the worker row keeps hiring
-/// `Tuning.PioneerCount` bodies. `isNurseryRoom`'s two facts with the stage
-/// inverted, so the two are complements over one room. **Both standing
-/// stages**, because what closes the borrowing is the scan set and never a
-/// level read here (ADR 0047's Consequences): while a human still declares the
-/// child's room as one of this colony's `Outposts` the room is in the scan set
-/// through the outpost reading, which asks no stage.
+/// Whether the named room is a child colony this one is still bootstrapping: a
+/// declared colony of ours that stands its own spawn, and that this colony is
+/// nonetheless projecting. `isNurseryRoom`'s two facts with the stage inverted,
+/// so the two are complements over one room. Both standing stages, because
+/// what closes the borrowing is the scan set and never a level read here.
 let internal isBootstrapRoom (view: ColonyView) room =
     room <> SpatialInfo.homeName view.Spatial
     && colonyOwns view room
@@ -126,20 +105,17 @@ let internal isBootstrapRoom (view: ColonyView) room =
         | Some Nursery
         | None -> false)
 
-/// Whether an Upgrade in this pool is **borrowed**: its controller is not this
-/// colony's own, so it is a bootstrapped child's, pooled by `planTasks` for the
-/// pioneers (ADR 0047 decision 4).
+/// Whether an Upgrade in this pool is borrowed: its controller is not this
+/// colony's own, so it is a bootstrapped child's, pooled for the pioneers.
 let internal isBorrowedUpgrade (view: ColonyView) controllerId =
     view.Controller |> Option.exists (fun c -> c.Id = controllerId) |> not
 
-/// The [[ferry]]'s sinks (ADR 0052 decision 7): the upgrade buffers of the
-/// children this colony is **bootstrapping**. Three readers must name the same
-/// store or the colony hires a body for a Task nobody pooled — the hauler
-/// quota's ferry term, `planTasks`' Refill, and `planPool`'s bound. Read off
-/// what the view carries and not off the geometry again: the one store of a
-/// child's a mother's view holds is this one (`ColonyView.ferrySink`), and the
-/// join cannot be respelled here because it subtracts the tiles beside the
-/// child's **sources**, which the same narrowing drops. Total (ADR 0004).
+/// The ferry's sinks: the upgrade buffers of the children this colony is
+/// bootstrapping. Three readers must name the same store or the colony hires a
+/// body for a Task nobody pooled — the hauler quota's ferry term, `planTasks`'
+/// Refill, and `planPool`'s bound. Read off what the view carries and not off
+/// the geometry again: the join cannot be respelled here because it subtracts
+/// the tiles beside the child's sources, which the same narrowing drops.
 let internal ferryBuffers (view: ColonyView) : Set<string> =
     let rooms =
         view.Borrowed.Rooms
@@ -152,28 +128,26 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
         view.Spatial.Stores
         |> Map.toList
         |> List.map fst
-        // A container and not merely a store: a buffer is one, and the
-        // kind is the one half of the join that survives the narrowing, so
-        // asking it costs nothing and keeps a tombstone or a pile lying in
-        // that room out of a Refill it could never be filled through.
+        // A container and not merely a store: the kind is the one half of the
+        // join that survives the narrowing, and it keeps a tombstone or a pile
+        // lying in that room out of a Refill it could never be filled through.
         |> List.filter (fun id ->
             Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
             && (SpatialInfo.roomOf view.Spatial id
                 |> Option.exists (fun room -> Set.contains room rooms)))
         |> Set.ofList
 
-/// The controllers of the rooms this colony works as [[outpost]]s: every
-/// controller the projection carries that is not this colony's home, stands in
-/// no room somebody owns, and is no [[candidate colony]]'s — whose controller
-/// carries a Claim rather than a Reserve (ADR 0047). The engine refuses
+/// The controllers of the rooms this colony works as outposts: every controller
+/// the projection carries that is not this colony's home, stands in no room
+/// somebody owns, and is no candidate colony's. The engine refuses
 /// `reserveController` on an owned room, so an owned room's controller is one
 /// this colony is withdrawing from rather than mining.
 ///
-/// **Ids and not rooms**, because a controller the projection does not place
-/// names no room and is still ours to reserve (ADR 0004) — it is the Reserve
-/// pool that reads it that way, while `declaredOutposts` takes the rooms and
-/// loses the unplaced one. One scan for all three readers, or the rows and the
-/// pool could disagree about which rooms are ours to work.
+/// Ids and not rooms, because a controller the projection does not place names
+/// no room and is still ours to reserve — it is the Reserve pool that reads it
+/// that way, while `declaredOutposts` takes the rooms and loses the unplaced
+/// one. One scan for all three readers, or the rows and the pool could
+/// disagree about which rooms are ours to work.
 let private outpostControllers (view: ColonyView) : string list =
     let home = view.Controller |> Option.map (fun c -> c.Id)
     let claimed = claimTargets view |> List.map fst |> Set.ofList
@@ -184,151 +158,79 @@ let private outpostControllers (view: ColonyView) : string list =
         && not (Set.contains id claimed)
         && not (SpatialInfo.roomOf view.Spatial id |> Option.exists (roomHasOwner view)))
 
-/// Those of them this colony may actually hold a [[reserve]] on this tick: the
-/// ones **nobody else's CLAIM parts are holding** (#333). The engine refuses
-/// `reserveController` on a controller anybody but us reserves, exactly as it
-/// refuses one anybody owns, so a body hired for such a room walks there to
-/// stand adjacent and be refused for the whole of its 600-tick life — which is
-/// what W12S27 cost, at 1,950 energy a body, for the 4,999 ticks an invader
-/// core's reservation outlived the core ADR 0043's [[stand-down]] was clocked
-/// off. The hold moved by 0.
+/// Those of them this colony may actually hold a reserve on this tick: the ones
+/// nobody else's CLAIM parts are holding (#333). The engine refuses
+/// `reserveController` on a controller anybody but us reserves, so a body hired
+/// for such a room stands adjacent and is refused for its whole 600-tick life.
+/// One read for the row and the pool, so a reserver bought for the colony's
+/// *other* outpost cannot be handed this controller by travel cost.
 ///
-/// One read for the row and the pool, which is #181's ownership clause said
-/// again about the other half of the same refusal: the Reserve pool offers
-/// exactly these ids and the reserver row hires exactly one body per room they
-/// stand in, so a reserver bought for the colony's *other* outpost cannot be
-/// handed this controller by travel cost and spend its life on it anyway.
-///
-/// **Two reads and not one, because vision is the thing the refusal takes
-/// away.** `RoomControl` carries only the rooms vision answered for this tick,
-/// and in a room like W12S27 — no container, so no [[post]] and no [[miner]] —
-/// the reserver is the only body that ever stands there. Read off vision alone
-/// the rule is self-erasing: the reserver arrives, the entry appears, the Task
-/// vanishes under it, and the idle body holds the vision until it dies, at
-/// which point the room goes dark and the row hires the whole nine-block
-/// deficit again. That is one body per reserver lifetime, which is the cadence
-/// #333 measured live — `reserver-411079` then `reserver-411698`, 619 ticks
-/// apart — and it is the spend the ticket was filed about, not the intent.
-///
-/// So the order is: **a tick with vision decides the room either way**, and a
-/// tick without it reads what the last look concluded (`view.HeldOutposts`,
-/// `RaidState.Holds` through `StandDown`). Vision first and never the record
-/// first: the record is the previous tick's, so a look that finds the
-/// controller free — somebody `attackController`ed it, or our own reserver got
-/// there first — must be allowed to open the room on the tick it takes.
-///
-/// A room with **no control entry and no record** is reservable, and that
-/// direction is load-bearing: it is a declared outpost nothing looked into and
-/// nothing has ever concluded anything about, and the reserver is the creep
-/// whose walk buys the look (#131's deadlock, ADR 0004 — absence classifies
-/// nothing). Read the other way round the row would hire nobody, nothing would
-/// walk there, and the entry would never arrive. What #131 asks for is that the
-/// *unknown* room is walked to; a room the colony has looked into and written
-/// an end tick for is not unknown, and the engine's own countdown retires the
-/// record with no look needed (`Observe.standDown`).
-///
-/// What this does **not** narrow is `declaredOutposts`. The guard row and the
-/// scan set read that one, and a room somebody else reserves is still a room
-/// this colony mines: its rock is pooled and its bodies stand in it, so a raid
-/// there is still a raid on a room the colony works. Whether such a room should
-/// stay declared at all is the question #333 leaves for a human, and it is not
-/// this rule's to answer by omission.
+/// Two reads, because vision is the thing the refusal takes away: in a room
+/// with no container the reserver is the only body that ever stands there, so
+/// read off vision alone the rule is self-erasing — the entry appears, the
+/// Task vanishes, the idle body holds the vision until it dies, and the row
+/// hires again. A tick with vision decides the room either way; a tick without
+/// it reads the last look's record (`view.HeldOutposts`). Vision first, so a
+/// look that finds the controller free opens the room on the tick it takes.
+/// A room with no entry and no record is reservable, because the reserver is
+/// the creep whose walk buys the look (#131's deadlock). `declaredOutposts` is
+/// not narrowed: a room somebody else reserves is still a room this colony
+/// mines.
 let private reservableControllersOf (view: ColonyView) (controllers: string list) : string list =
     controllers
     |> List.filter (fun id ->
         match SpatialInfo.roomOf view.Spatial id with
         // A controller the projection does not place names no room, and a room
-        // name is what both reads below are keyed by — so it stays pooled (ADR
-        // 0004), exactly as it did before either read existed.
+        // name is what both reads below are keyed by — so it stays pooled.
         | None -> true
         | Some room ->
             match Map.tryFind room view.RoomControl with
             | Some control -> RoomControlInfo.heldByOther control |> Option.isNone
             | None -> not (Set.contains room view.HeldOutposts))
 
-/// The declared [[outpost]]s this colony works this tick — the rooms the
-/// [[guard]] row is hired per and the rooms the reserver row starts from,
-/// written once because a paraphrase would let the two disagree about which
-/// rooms are ours to work (ADR 0042, ADR 0056). A room qualifies by carrying
-/// **a controller of its own in the projection** that is not this colony's
-/// home: an outpost's declaration names
-/// its controller and a room with none is no candidate outpost at all. It must
-/// be unowned — a room somebody holds is one this colony is withdrawing from,
-/// not mining — and it must not be a [[candidate colony]]'s, whose controller
-/// carries a Claim rather than a Reserve.
+/// The declared outposts this colony works this tick — the rooms the guard row
+/// is hired per and the rooms the reserver row starts from, written once so
+/// the two cannot disagree. A room qualifies by carrying a controller of its
+/// own in the projection that is not this colony's home, unowned, and not a
+/// candidate colony's.
 ///
-/// **Declared and not posted**, which is where #131's correction overrides ADR
-/// 0042's "one reserver per posted outpost" clause: gating on a standing
-/// container deadlocks the outpost chain, since the container needs vision,
-/// vision needs a creep, and the reserver is the only creep with a reason to
-/// go. The scan set is the gate that remains, and two things narrow it, both
-/// inside `World.scanOf`: ADR 0043's stand-down, and the declaration's own
-/// geometry — its `Outpost.withinHopBudget` filter (#243, ADR 0058) — a room further
-/// from its home than `Tuning.MaxHops` crossings is joined by no chain of
-/// [[seam]]s, so a body hired for it could never walk there, and the room is
-/// out of the scan set before anything here counts it. What *says* so is `Outpost.refused` on the [[layout record]]; what
-/// narrows the set is the filter.
+/// Declared and not posted (#131): gating on a standing container deadlocks
+/// the outpost chain, since the container needs vision, vision needs a creep,
+/// and the reserver is the only creep with a reason to go. The scan set is the
+/// gate that remains, narrowed inside `World.scanOf` by the stand-down and by
+/// `Outpost.withinHopBudget`; what *says* so is `Outpost.refused` on the
+/// layout record.
 ///
 /// Off the projection itself (`SpatialInfo.placementOf`) and not off the
-/// [[atlas]]'s join of it, which answers alike: the [[guard]]'s own Task is
-/// pooled by `planTasks`, and the Planner's first half is handed the view and
-/// no Atlas (ADR 0056 decision 2). One derivation under the two rows and the
-/// pool, or the three of them could disagree about which rooms are ours — and
-/// where they *do* differ since #333, they differ by one named narrowing and
-/// not by a second scan.
-///
-/// The derivation itself is `outpostControllers`: this takes its rooms, the
-/// Reserve pool takes its ids once `reservableControllers` has dropped the
+/// Atlas's join of it: the Planner's first half is handed the view and no
+/// Atlas. The derivation itself is `outpostControllers`: this takes its rooms,
+/// the Reserve pool takes its ids once `reservableControllers` has dropped the
 /// controllers somebody else holds, and the reserver row takes the rooms of
-/// *that*. One scan, narrowed once, so no reader can be looking at a different
-/// set of outposts than its neighbour.
+/// *that*.
 let internal declaredOutposts (view: ColonyView) : string list =
     outpostControllers view
     |> List.choose (SpatialInfo.roomOf view.Spatial)
     |> List.distinct
 
-/// The declared [[outpost]]s the reserver row hires for: `declaredOutposts`
-/// less the rooms whose controller somebody else's CLAIM parts hold — this
-/// tick's vision where there is any, and the last look's standing record where
-/// there is none (#333).
-/// The rooms of `reservableControllers`, which is what makes the row and the
-/// Reserve pool one answer rather than two — the row hires one body per room
-/// the pool offers a controller in, and no more.
+/// The declared outposts the reserver row hires for: the rooms of
+/// `reservableControllers`, which is what makes the row and the Reserve pool
+/// one answer rather than two.
 let private reservableOutpostsOf (view: ColonyView) (reservable: string list) : string list =
     reservable |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
-/// The declared [[outpost]]s a [[threat]] stands in this tick (ADR 0056): the
-/// rooms the guard row hires a body for, and the rooms `planTasks` pools a
-/// Guard in. One derivation for both halves, which is decision 2's "one number
-/// computed once and read as both the row's quota and the Task's cap" stated
-/// for the rooms that number is summed over: pooled where nothing is hired, the
-/// Guard would hold a body a raided room needs elsewhere; hired where nothing
-/// is pooled, the cast body would stand idle in the oven's shadow.
+/// The declared outposts a threat stands in this tick: the rooms the guard row
+/// hires a body for, and the rooms `planTasks` pools a Guard in — one
+/// derivation, or a Guard is pooled with no body bought or a body cast with no
+/// Task. A Threat and never "a hostile".
 ///
-/// ADR 0033's own Threat test and never "a hostile": a scout or a healer alone
-/// reaches nothing, takes no ground and is no reason to buy a body.
-///
-/// **Vision is no longer the whole of what it reads** (#366), and that is the
-/// same correction #333 made to the reserver row one function up. ADR 0056 says
-/// "vision in a guarded outpost is the guard", which is circular while the
-/// guard is still in the oven: the vision in an *unguarded* outpost is the
-/// anchor, the hauler and the reserver, and those are precisely what a raid
-/// kills. Live W11S28 — the guard row fires on t506514, the anchor dies on
-/// t506583 and the reserver on t506605, the room goes dark, this list empties,
-/// the Guard leaves the pool, and a 15-ATTACK-part body stands idle at home
-/// while a 2-ATTACK-part invader holds the room for a thousand ticks more.
-///
-/// So the order is #333's, word for word: **a tick with vision decides the room
-/// either way**, and a tick with no vision in that room reads what the last
-/// look concluded (`view.ThreatenedOutposts`, `RaidState.Threatened` through
-/// `StandDown`). A room whose look shows it clear leaves this list on the tick
-/// of that look — which is what the arriving guard's own vision does, on the
-/// same tick it lands — and the memory ends by its own clock otherwise
-/// (`Tuning.ThreatMemory`), because nothing in the engine counts a raid down.
-///
-/// A declared outpost that has never been looked into is in **neither** half
-/// and asks for no guard, which is ADR 0004 unchanged: absence classifies
-/// nothing, and this rule buys a body rather than a look.
+/// Vision is not the whole of what it reads (#366): the vision in an
+/// *unguarded* outpost is the anchor, the hauler and the reserver, which are
+/// precisely what a raid kills, and read off vision alone the Guard left the
+/// pool while the cast body stood idle at home. So a tick with vision decides
+/// the room either way, and a tick without reads the last look's record
+/// (`view.ThreatenedOutposts`), which ends by its own clock
+/// (`Tuning.ThreatMemory`) because nothing in the engine counts a raid down. A
+/// room never looked into is in neither half: this rule buys a body, not a look.
 let private guardedOutpostsOf (view: ColonyView) (declared: string list) : string list =
     if List.isEmpty view.Hostiles && Set.isEmpty view.ThreatenedOutposts then
         []
@@ -347,46 +249,12 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
             || (Set.contains room view.ThreatenedOutposts
                 && not (Map.containsKey room view.RoomControl)))
 
-/// Planner: rebuild this tick's full Task pool from the colony view. Pure and
-/// from scratch every tick — Tasks are never persisted.
-///
-/// `held` is the narrow pair of facts this half reads about the colony's own
-/// assignment table (ADR 0061, ADR 0067): all task ids living creeps hold, and
-/// the subset whose holder still carries Thorium, derived once in `Entry`
-/// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line;
-/// a partially poured delivery reads the second so it cannot move to a
-/// different carrier when its empty holder releases it.
-///
-/// **What it changes is not the Repair line alone**, because the pool this
-/// half returns is read further down: `Quota.workerFloor` stands the worker row
-/// at two while anything at all stands in the Build or Repair pool, so a held
-/// road between the two lines keeps that floor where an empty pool would have
-/// dropped it to one. Masked at the shipped tuning, where `MinWorkforce`
-/// binds first, and true whatever the tuning — a fact the pool carries is a
-/// fact every reader of the pool carries. It narrows ADR
-/// 0025's creep-blindness clause to what that clause's own reason was about —
-/// the Planner still sees no body, position or name, only task ids and whether
-/// their holders have any delivery resource left; the facts keep that boundary
-/// where the `Assignments` map would not.
-/// The outpost chain's answers for this tick, derived once and carried (#383).
-///
-/// Every field below was a function of the view that its readers re-entered
-/// whole. Measured on `--scenario reactor --level 7`: `claimTargets` ran 11.4
-/// times a tick, `outpostControllers` 9.1, `declaredOutposts` 6.8 and
-/// `guardedOutposts` 4.6 — and `outpostControllers` runs a `claimTargets`
-/// inside it, so the kind census was walked for `Controller` nineteen times a
-/// tick where the colony has one answer. `declaredOutposts` above already
-/// promised "one scan, narrowed once, so no reader can be looking at a
-/// different set of outposts than its neighbour"; this makes that true of the
-/// readers and not only of the derivation.
-///
-/// The shape is `RowSizing`'s and `HeldTaskFacts`' — "X's answer this tick",
-/// derived at the top of the tick and threaded — because that is the pattern
-/// this codebase already trusts for exactly this, and because it needs no
-/// mutable table and so no rule about when that table goes stale. Eager and
-/// not lazy: every field is read on a quiet tick as well as a loud one, and
-/// the one that is not, `Guarded` on a tick with no hostile anywhere,
-/// short-circuits before it walks anything.
+/// The outpost chain's answers for this tick, derived once and carried (#383):
+/// re-entered per reader, the `Controller` census was walked nineteen times a
+/// tick on `--scenario reactor --level 7`. The shape is `RowSizing`'s and
+/// `HeldTaskFacts`', because it needs no mutable table and so no staleness
+/// rule. Eager: every field is read on a quiet tick, and the one that is not,
+/// `Guarded` with no hostile anywhere, short-circuits before it walks anything.
 type OutpostFacts =
     {
         /// `claimTargets`' answer: each candidate colony's controller, with
@@ -400,7 +268,7 @@ type OutpostFacts =
         /// The rooms of those controllers, which is what the reserver row
         /// hires per — one body per room the pool offers a controller in.
         ReservableRooms: string list
-        /// The declared outposts a [[threat]] stands in (ADR 0056).
+        /// The declared outposts a threat stands in.
         Guarded: string list
     }
 
@@ -425,6 +293,22 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Guarded = guardedOutpostsOf view declared
     }
 
+/// Planner: rebuild this tick's full Task pool from the colony view. Pure and
+/// from scratch every tick — Tasks are never persisted.
+///
+/// `held` is the narrow pair of facts this half reads about the colony's own
+/// assignment table (ADR-0061, ADR-0067): all task ids living creeps hold, and
+/// the subset whose holder still carries Thorium, derived once in `Entry`
+/// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line; a
+/// partially poured delivery reads the second so it cannot move to a different
+/// carrier when its empty holder releases it. The Planner still sees no body,
+/// position or name.
+///
+/// What the held Repairs change is not the Repair line alone: `Quota.workerFloor`
+/// stands the worker row at two while anything stands in the Build or Repair
+/// pool, so a held road between the two lines keeps that floor where an empty
+/// pool would have dropped it to one. Masked at the shipped tuning, where
+/// `MinWorkforce` binds first.
 let planTasks
     (view: ColonyView)
     atlas
@@ -432,55 +316,33 @@ let planTasks
     (held: HeldTaskFacts)
     (outposts: OutpostFacts)
     : Task list =
-    // Flee exists while a Reach does (ADR 0033): one Task for the whole
-    // colony, at the head of the pool as its Safety tier is at the head of
-    // the ranking. No Reach, no Flee — a quiet tick's pool is the pool it
-    // always was.
+    // Flee exists while a Reach does: one Task for the whole colony, at the
+    // head of the pool as its Safety tier is at the head of the ranking.
     let flees = if Map.isEmpty threats.Reach then [] else [ Flee ]
 
-    // One Guard per declared [[outpost]] a [[threat]] stands in (ADR 0056),
-    // keyed on the room: the same list the guard row hires against, so the body
-    // the cascade buys has a Task waiting for it and no Task waits for a body
-    // nobody bought. Beside Flee at the head of the pool — the two Tasks of the
-    // Safety tier, disjoint by [[body class]], so nothing ever asks how they
-    // order.
+    // One Guard per declared outpost a threat stands in, keyed on the room:
+    // the same list the guard row hires against, so the body the cascade buys
+    // has a Task waiting for it and no Task waits for a body nobody bought.
     let guards = outposts.Guarded |> List.map Guard
 
-    // Harvest exists for every source, drained or not (ADR 0013, revised by
-    // ADR 0025): the task no longer flickers with the source's stock, because
-    // whether a dry rock is worth walking to depends on the walker's body and
-    // position — the Matcher's knowledge, and none of this half's. That is a
-    // claim about a **body**, and it is the whole of what ADR 0025's clause
-    // said: since ADR 0061 the Planner does read one fact about the assignment
-    // table — which Repairs are held, above — so "the creep-blind Planner" is
-    // no longer true of the Planner in general and stays exactly true here.
+    // Harvest exists for every source, drained or not (ADR-0025): whether a
+    // dry rock is worth walking to depends on the walker's body and position —
+    // the Matcher's knowledge, and none of this half's.
     let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
 
-    // And one Harvest per Thorium deposit beside them (ADR 0057 decision 2):
-    // the same act, the same Intent and the same Task kind, widened from a
-    // source to a mineral — which is ADR 0054's own test for refusing a new
-    // kind, so every exhaustive match over `Task` grows no arm. **The Task
-    // exists exactly while the deposit does**, and that is the whole of its
-    // lifecycle: the mod deletes an exhausted deposit outright, so the target
-    // leaves the projection and this list shortens on the same tick the miner
-    // row's quota falls to zero. What the extractor's cooldown decides is not
-    // whether the Task exists but whether this tick's act is issued, and that
-    // gate is the Emitter's — a Task that vanished and returned every sixth
-    // tick would churn the pool for a body that has nowhere else to be.
-    //
-    // **A deposit of ours and never a neighbour's** (#261): `FIND_MINERALS`
-    // carries every owner's and a scanned neighbour arrives with its own
-    // deposit, extractor and container, which the projection cannot tell from
-    // ours by their shape. `harvest` refuses a mineral whose extractor is
-    // somebody else's, so a Task pooled for one is a body dispatched across the
-    // map to answer `ERR_NOT_OWNER` once a tick for a life. `ourDeposits` is
-    // that join, read here and by the [[miner]] row's quota alike.
+    // One Harvest per Thorium deposit beside them: the same Task kind, so
+    // every exhaustive match over `Task` grows no arm. The Task exists exactly
+    // while the deposit does — the mod deletes an exhausted deposit outright —
+    // and the extractor's cooldown decides only whether this tick's act is
+    // issued (the Emitter's gate). A deposit of ours and never a neighbour's
+    // (#261): `FIND_MINERALS` carries every owner's, `harvest` refuses a
+    // mineral whose extractor is somebody else's, and nothing in the shape of
+    // a deposit, extractor and container says whose they are. `ourDeposits`
+    // is that join, read here and by the miner row's quota alike.
     let deposits = ourDeposits view |> List.map Harvest
 
-    // The flow's sink, as **one** Task (ADR 0054): the [[refill cluster]] — the
-    // colony's spawn and every extension of it — is pooled under the spawn's id
-    // and stands while any member has room, so `task-gone` fires when the whole
-    // ring is full instead of once per extension somebody else got to first.
+    // The flow's sink, as one Task (ADR-0054): the refill cluster is pooled
+    // under the spawn's id and stands while any member has room.
     let cluster = Atlas.cluster atlas
 
     let clustered =
@@ -499,27 +361,20 @@ let planTasks
 
     let builds = view.ConstructionSites |> List.map (fun site -> Build site.Id)
 
-    // A Repair per repairable structure below its kind's line, in id order (ADR
-    // 0010, ADR 0034) — and for the decaying kinds that is two lines since ADR
-    // 0061, the hungry one for a structure nobody holds and the whole one for a
-    // structure somebody is already repairing.
+    // A Repair per repairable structure below its kind's line, in id order —
+    // two lines for the decaying kinds, the hungry one for a structure nobody
+    // holds and the whole one for a structure somebody is already repairing.
     let repairs = hungryStructures view held.All |> List.map (fst >> Repair)
 
-    // The ids of one projected kind, in id order. The containers, the
-    // Storage and the controllers are all pooled by the projection's kind
-    // — never by position, never by name — so the rule is written once.
-    // Off the Atlas's inverted census and not a walk of the view's: same ids,
-    // same order (`Atlas.idsOfKind`).
+    // The ids of one projected kind, in id order, off the Atlas's inverted
+    // census and not a walk of the view's: same ids, same order.
     let idsOfKind kind = Atlas.idsOfKind atlas kind
 
     // The colony's own controller, and the controller of every child it is
-    // still bootstrapping (ADR 0047 decision 4) — half of the one cross-colony
-    // borrowing rule there is: a loaded worker of the mother's may cross the
-    // Seam and spend into the child's controller until that controller reaches
+    // still bootstrapping: a loaded worker of the mother's may cross the Seam
+    // and spend into the child's controller until it reaches
     // `Tuning.BootstrapLevel`. Surplus tier, like the home Upgrade it stands
-    // beside, so the mother's own flow is fed first and nothing but travel cost
-    // separates the two — which is what leaves the child's to the bodies
-    // already standing in its room.
+    // beside, so nothing but travel cost separates the two.
     let upgrades =
         let own = view.Controller |> Option.toList |> List.map (fun c -> c.Id)
 
@@ -530,77 +385,56 @@ let planTasks
 
         own @ children |> List.map Upgrade
 
-    // One Claim per candidate colony's controller (ADR 0047), read off
-    // the one rule that says which those are (`claimTargets`).
+    // One Claim per candidate colony's controller (`claimTargets`).
     let claims = outposts.Claims |> List.map (fst >> Claim)
 
-    // One Reclaim per declared [[errand]] (ADR 0057 decision 5, ADR 0060
-    // decision 3), read off the **declaration** and off no kind census at all.
-    // That is the narrowing said in the pool rather than as a rule each sweep
-    // has to remember: `Errand.place` lays the target under its engine id with
-    // no `TargetKind`, so every pool built by sweeping kinds passes it over,
-    // and the one list that can name it is the errand list this view carries.
-    // A refused errand is already out of that list (`World.scanOf`), so a room
-    // no chain of [[seam]]s reaches pools nothing and hires nobody.
+    // One Reclaim per declared errand, read off the declaration and off no
+    // kind census at all: `Errand.place` lays the target under its engine id
+    // with no `TargetKind`, so every pool built by sweeping kinds passes it
+    // over. A refused errand is already out of that list (`World.scanOf`).
     let reclaims = view.Errands |> List.map (fun errand -> Reclaim(fst errand.Target))
 
-    // One Reserve per projected controller that is not the colony's own (ADR
-    // 0042): a neutral controller held by CLAIM parts pays its room's sources
-    // ten a tick instead of five, and the hold decays by one a tick, so the
-    // Task stands whatever the reservation has left on it — the ticks remaining
-    // size the body, not the pool. Read off the projection's kind census and
-    // never off the declared outposts (ADR 0041), so a room a stand-down keeps
-    // out of the scan set (ADR 0043) leaves this pool with it rather than
-    // through a second gate free to disagree. The colony's own controller is
-    // excluded by id, and two reads drop the rest, both of them the reserver
-    // row's own so the pool and the row cannot disagree (`roomHasOwner` and
-    // `heldByOther`, through `reservableControllers`): the engine refuses
-    // reserveController on any owned room, and equally on a controller
-    // somebody else's CLAIM parts are holding (#333) — the second read off
-    // this tick's vision where there is any and off the last look's record
-    // where there is none. A controller the projection does not place names no
-    // room and stays pooled (ADR 0004).
+    // One Reserve per reservable outpost controller. The Task stands whatever
+    // the reservation has left on it — the ticks remaining size the body, not
+    // the pool. Read off the projection's kind census and never off the
+    // declared outposts, so a room a stand-down keeps out of the scan set
+    // leaves this pool with it rather than through a second gate free to
+    // disagree. The engine refuses `reserveController` on any owned room, and
+    // equally on a controller somebody else's CLAIM parts hold (#333). A
+    // controller the projection does not place names no room and stays pooled.
     let reserves = outposts.ReservableControllers |> List.map Reserve
 
-    // The haul cycle's intake (ADR 0012), shaped over the projection's
-    // stores rather than energy's name: every stocked container yields a
-    // Withdraw, at feeding tier beside Harvest — whether to dig or to
-    // collect is travel cost's call, never a rule's.
+    // The haul cycle's intake, shaped over the projection's stores rather than
+    // energy's name: every stocked container yields a Withdraw, at feeding tier
+    // beside Harvest — whether to dig or to collect is travel cost's call.
     let stored id = SpatialInfo.storedIn view.Spatial id
 
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)
 
-    // The room left in a [[storage]], over **both** resources it holds (ADR
-    // 0057 decision 3). A store's capacity is one number and the Thorium banked
-    // for the delivery is counted against it exactly as the energy is, so the
-    // energy sink and the Thorium sink read one free-capacity question rather
-    // than two that can each be satisfied by ignoring the other. With no
-    // Thorium standing this is the `stored id < capacity` it has always been.
+    // The room left in a Storage, over both resources it holds: a store's
+    // capacity is one number, so the energy sink and the Thorium sink read one
+    // free-capacity question rather than two that can each be satisfied by
+    // ignoring the other.
     let storageRoom id =
         Engine.storageCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
 
     // A tombstone and a ruin are stores the same way, so they pool through the
-    // same line: a store with energy in it yields a Withdraw, and what will
-    // become of the thing holding it is not this pool's question. The engine's
-    // `withdraw` takes either object, and the cap and the tier are read off the
-    // stock and the kind exactly as a container's are.
-    //
-    // This list is the **energy** column of that sentence, and it was the whole
-    // of it until #359: one holding the season's ore is drawn by `tombstoneOre`
-    // below, off the same objects and the same argument, one resource over.
+    // same line: the engine's `withdraw` takes either object, and the cap and
+    // the tier are read off the stock and the kind exactly as a container's
+    // are. This list is the energy column; `tombstoneOre` below is the same
+    // sentence one resource over.
     let tombstones = idsOfKind Tombstone
 
-    // The [[ferry]]'s sink is the one store in this pool a body of this
-    // colony's may fill and may never draw: it is a child's, and the whole of
-    // the lend is energy going one way. Left in, the mother's hauler would take
-    // the load she just carried across the Seam straight back out — the ADR 0019
-    // cycle over a border.
+    // The ferry's sink is the one store in this pool a body of this colony's
+    // may fill and may never draw: it is a child's, and the whole of the lend
+    // is energy going one way. Left in, the mother's hauler would take the
+    // load she just carried across the Seam straight back out.
     let ferrySinks = ferryBuffers view
 
-    // **No store of a child's is hers to draw, at any [[stage]]** (ADR 0047
-    // decision 1): what one colony may take of another is the explicit list
-    // `BorrowedWork` carries, and no store is on it.
+    // No store of a child's is hers to draw, at any stage: what one colony may
+    // take of another is the explicit list `BorrowedWork` carries, and no store
+    // is on it.
     let borrowedRooms = Set.ofList view.Borrowed.Rooms
 
     let inABorrowedRoom id =
@@ -615,18 +449,16 @@ let planTasks
     // The piles worth walking to: a dropped pile at or over
     // `Tuning.PickupThreshold` is a Feeding-tier Task, and every smaller one is
     // left to the reflex that costs nothing. The amount and nothing else:
-    // whether the pile is at somebody's feet already is a fact about a creep,
-    // and the Planner is creep-blind by construction (ADR 0013).
+    // whether the pile is at somebody's feet already is a fact about a creep.
     let pickups =
         idsOfKind (Dropped Energy)
         |> List.filter (fun id -> stored id >= view.Tuning.PickupThreshold)
         |> List.map (fun id -> Pickup(id, Energy))
 
     // The haul cycle's outflow: the controller container is one more Refill
-    // target (ADR 0010's target layering, widened by ADR 0012). Which container
-    // is the controller's is judged by geometry — it stands inside the Upgrade
-    // Work Area the Layout picked it from, while a source container's tile is
-    // never a Refill target.
+    // target, judged by geometry — it stands inside the Upgrade Work Area the
+    // Layout picked it from, while a source container's tile is never a Refill
+    // target.
     let containerRefills =
         view.Controller
         |> Option.bind (fun c -> SpatialInfo.placementOf view.Spatial c.Id)
@@ -646,26 +478,19 @@ let planTasks
             |> List.map (fun id -> Refill(id, Energy)))
         |> Option.defaultValue []
 
-    // The colony's stock is the outflow's last stop (ADR 0023): a standing
-    // Storage with room is one more Refill target, on the deepest tier of all.
+    // The colony's stock is the outflow's last stop: a standing Storage with
+    // room is one more Refill target, on the deepest tier of all.
     let storageRefills =
         storages
         |> List.filter (fun id -> storageRoom id > 0)
         |> List.map (fun id -> Refill(id, Energy))
 
-    // **The mine-to-[[storage]] leg** (ADR 0057 decision 3): the one pair of
-    // Tasks in this colony that is not about energy. The intake is the mineral
-    // [[container]] under the [[miner]]'s feet, whose Thorium the store-less dig
-    // drops into; the sink is the Storage, which is the free warehouse — an
-    // obstacle nothing can stand on, so the contact penalty that costs a body a
-    // tick of life per decade of Thorium on its tile never reaches it.
-    //
-    // Read off `ourDeposits` and never off a container census (#261): a scanned
-    // neighbour arrives in the projection with its own deposit, its own
-    // extractor and its own container, and nothing in the shape of those three
-    // says whose they are. The room is the join, and the same borrowed-room
-    // filter the energy Withdraws carry is read over it — no store of a child's
-    // is the mother's to draw, at any [[stage]] (ADR 0047 decision 1).
+    // The mine-to-Storage leg (ADR-0057 decision 3): the one pair of Tasks in
+    // this colony that is not about energy. The intake is the mineral container
+    // under the miner's feet; the sink is the Storage, an obstacle nothing can
+    // stand on, so the contact penalty never reaches it. Read off
+    // `ourDeposits` and never off a container census (#261), with the same
+    // borrowed-room filter the energy Withdraws carry.
     let mineralContainers =
         ourMineralContainers view |> List.filter (inABorrowedRoom >> not)
 
@@ -674,130 +499,55 @@ let planTasks
         |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
         |> List.map (fun id -> Withdraw(id, Thorium))
 
-    // **And the same intake off the floor** (#311). A mineral container caps at
-    // 2,000 and refills in ~600 ticks at a full [[miner]]'s 3.33 a tick, so
-    // every tick the haul lags the next dig lands on the ground instead — a
-    // pile that decays at `ceil(amount / 1000)` a tick and that, until this
-    // list existed, no Task in the colony could name. Live at ~t401,850 that
-    // was ~630 on W12S28's mine tile and ~300 on W13S28's, bleeding, with a
-    // hauler row standing by.
-    //
-    // The energy Pickup's own two rules, read down the Thorium column: our
-    // ground (`ourThoriumPiles`), and an amount at or over
-    // `Tuning.PickupThreshold` — one threshold and not a second knob, on that
-    // field's own argument in `Rules.fs`, which is where it is made. What is
-    // this list's to say is the consequence: a Thorium pile under the line is
-    // left where it lies and is gone inside `amount` ticks by its own decay.
-    // The [[pickup reflex]] is no fallback for it either — the reflex is
-    // energy-only by construction (`Atlas.droppedEnergyIn`), a body carrying
-    // one resource at a time being a rule a reflex cannot ask about.
-    //
-    // **No borrowed-room filter beside it**, where `mineralContainers` above
-    // carries one (ADR 0047 decision 1): the two answer the same question by
-    // different mechanisms, and the pile's is one step earlier. A child's floor
-    // is not `borrowable` at all (`ColonyView.borrowable` refuses `Dropped _`),
-    // so a pile in a room the mother lends never reaches her `TargetKinds` and
-    // `ourThoriumPiles` cannot return one. The container is in her projection
-    // and has to be filtered; the pile is not there to filter.
-    //
-    // **Pooling it was not collecting it, and #306 is what made it so.** Ranked
-    // at a rungless `StockDraw` this list tied the [[storage]]'s own energy
-    // Withdraw and lost every travel-cost tie to it, so a colony with energy
-    // banked swept its floor never. #306 gives the ore a rung inside that tier —
-    // the pile one, the container that is feeding it two — and the two ends of
-    // that ticket's pressure are answered together in `Pool.priorityOf`.
-    // What the [[hauler unit]]'s quota prices is the [[miner]]'s output into the
-    // *container* (`Quota.mineRows`) and it is not widened for the floor: the
-    // term is gated on `depositIsDiggable`, so the tick a deposit runs dry the
-    // term goes to zero with a pile possibly still standing. Survivable — a pile
-    // is a finite remainder and the row it is left to is the row already hired —
-    // and still not a reason for a second term.
+    // And the same intake off the floor (#311): every tick the haul lags, the
+    // next dig lands on the ground as a pile decaying at `ceil(amount / 1000)`
+    // a tick. The energy Pickup's two rules read down the Thorium column: our
+    // ground (`ourThoriumPiles`) and `Tuning.PickupThreshold`. The pickup
+    // reflex is no fallback: it is energy-only (`Atlas.droppedEnergyIn`). No
+    // borrowed-room filter, because a child's floor is not `borrowable` at all
+    // (`ColonyView.borrowable` refuses `Dropped _`), so there is nothing to
+    // filter. The hauler quota prices the miner's output into the *container*
+    // (`Quota.mineRows`) and is not widened for the floor.
     let minePickups =
         ourThoriumPiles view
         |> List.filter (fun id ->
             SpatialInfo.heldIn view.Spatial Thorium id >= view.Tuning.PickupThreshold)
         |> List.map (fun id -> Pickup(id, Thorium))
 
-    // **And the same ore in a store with a clock on it** (#359): a tombstone or
-    // a ruin holding Thorium. A courier that dies loaded leaves its ore in its
-    // tombstone, which is where W15S25's 175 T stood — in the declared Reactor
-    // room, decaying, named by nothing. The energy line above pools a tombstone
-    // as a store already and says why: "a tombstone and a ruin are stores the
-    // same way", and the engine's `withdraw` takes either object. It only ever
-    // said it about energy; this is the same sentence read down the ore's
-    // column, and the Intent, the cap and the tier are the mineral container's
-    // own (`Withdraw(_, Thorium)`).
-    //
-    // **No threshold beside it**, where the pile above carries
-    // `Tuning.PickupThreshold`: the pile's threshold buys the [[pickup
-    // reflex]]'s bargain — a scrap too small for a trip is left to a body that
-    // is passing anyway — and there is no reflex that empties a store, so the
-    // alternative to a Task here is watching it decay. What bounds the trip
-    // instead is the Withdraw's own `worthTheTrip` clause, which exempts a
-    // store that ends for exactly this reason (`Emitter`, #232).
-    //
-    // Whose the ore is, is `Facts.ourThoriumTombstones`' to say, beside the
-    // pile's: a room we own or a room we declared an errand in. The borrowed
-    // filter is read over it as the energy line beside it reads one — no store
-    // of a child's is the mother's to draw at any stage (ADR 0047 decision 1) —
-    // and it subtracts nothing today, `ColonyView.borrowable` refusing
-    // `Tombstone` outright, so a child's tombstone never reaches her census to
-    // be filtered.
-    //
-    // **Where the load goes**, because a draw with no sink is #262's stranded
-    // carrier: `mineRefills` below, the Storage's own `Refill(_, Thorium)`,
-    // which is pooled off the Storage's free capacity alone and off no fact
-    // about the mine — written that way so that a body holding ore always has
-    // somewhere to put it down. A tombstone's load is under
-    // `Tuning.ReactorLoad`, and nothing on that side needs to know: the
-    // Storage's Thorium sink has no lower bound, and the delivery's 500-unit
-    // gate is on the *draw* from Storage and not on the sink into it. Where the
-    // courier programme is open the Reactor itself is the nearer sink and takes
-    // it — `reactorRefills` below, whose cap clause admits any load at or under
-    // `Tuning.ReactorLoad` (`Emitter`, #319) — which is the whole trip for ore
-    // already standing in that room. So this rung needs no sink of its own.
+    // And the same ore in a store with a clock on it (#359): a tombstone or a
+    // ruin holding Thorium, where a courier that dies loaded leaves it. No
+    // threshold, where the pile carries one: no reflex empties a store, so the
+    // alternative to a Task is watching it decay, and the Withdraw's own
+    // `worthTheTrip` exempts a store that ends. Its sink is `mineRefills`
+    // below, or the Reactor where the programme is open.
     let tombstoneOre =
         ourThoriumTombstones view
         |> List.filter (inABorrowedRoom >> not)
         |> List.map (fun id -> Withdraw(id, Thorium))
 
-    // The sink, pooled off the **Storage alone** and off no fact about the mine
-    // (#262): the Planner is creep-blind (ADR 0013), so what gates this is the
-    // store that takes the load, and a body already holding Thorium must have
-    // somewhere to put it down whatever the ground behind it has become. Gating
-    // it on a standing mineral container read the intake's own condition onto
-    // the sink and stranded the carrier the moment the two disagreed — the
-    // container is destroyed or decays and the Layout re-places it as a site, and
-    // for the whole of that window a laden hauler is applicable to **nothing**:
-    // no Work for the three spending Tasks, Thorium aboard shutting every energy
-    // intake, and `Refill(_, Energy)` wanting energy it does not have. The row's
-    // census counts the body as living, so it reads itself satisfied and casts no
-    // replacement, and one hauler leaves the energy economy for up to 1,500
-    // ticks. The Task is inapplicable to a body holding no Thorium, which is
-    // every body of every colony before the extractor stands, so the entry is
+    // The sink, pooled off the Storage alone and off no fact about the mine
+    // (#262): a body already holding Thorium must have somewhere to put it
+    // down. Gated on a standing mineral container it stranded a laden hauler —
+    // applicable to nothing, counted as living, replaced by nobody — for up to
+    // 1,500 ticks. Inapplicable to a body holding no Thorium, so the entry is
     // the whole of what pooling it unconditionally costs.
     let mineRefills =
         storages
         |> List.filter (fun id -> storageRoom id > 0)
         |> List.map (fun id -> Refill(id, Thorium))
 
-    // The delivery pair (#319), expressed as the same resource-aware cycle as
-    // the mine haul now that the Atlas prices the three-crossing errand. The
-    // start sentence gates a new draw; a load already drawn keeps its sink if
-    // the mine is exhausted, the Storage falls below one load, or the resident
-    // dies, so facts that close the row do not strand work already paid for.
-    // The exact load marks a new in-flight delivery before it has an assignment;
-    // once a partial transfer changes that amount, the held Reactor Task carries
-    // the same fact until applicability releases it empty.
+    // The delivery pair (#319), the same resource-aware cycle as the mine haul
+    // now that the Atlas prices the three-crossing errand. The start sentence
+    // gates a new draw; a load already drawn keeps its sink if the mine is
+    // exhausted, the Storage falls below one load, or the resident dies, so
+    // facts that close the row do not strand work already paid for.
     let deliveryOpen = courierProgrammeOpen view atlas
 
-    // **The load this tick's draw takes** (#378), which is a whole
-    // `Tuning.ReactorLoad` while the mine still feeds the bank and the
-    // remainder once it does not. Read once and used by all three of the rules
-    // below, because the amount the draw admits, the amount that marks a
-    // delivery in flight and the room the Reactor must have for it are one
-    // number: the old code wrote `Tuning.ReactorLoad` at each of the three, and
-    // a partial last load makes that spelling wrong in three places at once.
+    // The load this tick's draw takes (#378): a whole `Tuning.ReactorLoad`
+    // while the mine still feeds the bank and the remainder once it does not.
+    // Read once and used by all three rules below — the amount the draw
+    // admits, the amount that marks a delivery in flight and the room the
+    // Reactor must have for it are one number.
     let loadNow = deliveryLoad view atlas
 
     let stillComing = oreStillComing view atlas
@@ -811,7 +561,7 @@ let planTasks
     // courier holding Thorium it cannot transfer stands on its own hot tile
     // burning three ticks of life a tick until it dies of it — 915 T reached
     // the Reactor room's floor that way. Held work is untouched: the sink
-    // below keeps a load already drawn, whatever the store has become.
+    // below keeps a load already drawn.
     let deliveryWithdraws =
         if deliveryOpen && reactorTakesALoad view loadNow then
             storages
@@ -828,13 +578,10 @@ let planTasks
             let owner = Map.tryFind reactorId view.Spatial.Owners
             let stored = SpatialInfo.heldIn view.Spatial Thorium reactorId
 
-            // **And ore already lying in the Reactor's own room opens it**
-            // (#378): a pile or a tombstone out there is score at the far end
-            // of the delivery's walk, and the body that picks it up is five
-            // tiles from the store it belongs in. Without this clause the only
-            // sink such a body had was the Storage three crossings back, so
-            // 500 T from a courier that died on the leg was carried home to be
-            // carried out again — if anything fetched it at all.
+            // Ore already lying in the Reactor's own room opens it too (#378):
+            // a pile or a tombstone out there is score at the far end of the
+            // delivery's walk, and without this clause the only sink the body
+            // that picks it up had was the Storage three crossings back.
             if
                 (deliveryOpen
                  || deliveryInFlight
@@ -849,27 +596,22 @@ let planTasks
 
     // The consignment (#349): the two Tasks that put a declaring colony's
     // banked ore into its own terminal, and the one that takes an arriving
-    // consignment out of it. What actually crosses the map is `planConsignment`
-    // in `Layout` — a structure intent, not a body — and these three are the
-    // hauling either side of it.
-    //
-    // Three rooms of `send` replace five and six crossings of walk, which is
-    // the whole reason the terminal was worth 100,000 energy: W12S28 and
-    // W13S28 bank 36,484 T between them and sit outside `Tuning.MaxHops` of the
-    // Reactor, so no courier row of theirs can ever be opened (`Errand`'s own
-    // docstring, and `docs/research/fourth-colony.md` deferred deliverability
-    // to exactly this ticket).
+    // consignment out of it. What actually crosses the map is
+    // `planConsignment` in `Layout` — a structure intent, not a body. Three
+    // rooms of `send` replace five and six crossings of walk: W12S28 and
+    // W13S28 sit outside `Tuning.MaxHops` of the Reactor, so no courier row of
+    // theirs can ever be opened.
     let terminals = idsOfKind (Structure BuiltKind.Terminal)
 
     let terminalRoom id =
         Engine.terminalCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
 
-    // **Outbound**, and only for a colony that declares a consignee: the ore
-    // goes from the Storage into the terminal. Gated on room in the terminal
-    // and on nothing else — not on the Storage's level, because unlike the
-    // delivery draw there is no 500-unit load here and no walk to strand a
-    // carrier on: the terminal stands in the home room, feet from the Storage,
-    // and a body that fills up half way puts down what it has.
+    // Outbound, and only for a colony that declares a consignee: the ore goes
+    // from the Storage into the terminal. Gated on room in the terminal and on
+    // nothing else — not on the Storage's level, because there is no fixed
+    // load here and no walk to strand a carrier on: the terminal stands feet
+    // from the Storage, and a body that fills up half way puts down what it
+    // has.
     let consignWithdraws =
         match view.Consignee with
         | None -> []
@@ -881,39 +623,14 @@ let planTasks
             else
                 []
 
-    // Its sink, and the fee's intake beside it. The energy matters as much as
-    // the ore: `send` is paid out of the **sending** terminal's own energy, so
-    // a terminal holding 19,848 T and no energy ships nothing at all — which is
-    // the live state of W12S28, whose storage was emptied to 0 by the 100,000
-    // the terminal itself cost.
-    //
-    // **Both** sinks are gated on the declaration, and the ore sink was not for
-    // the first forty minutes this shipped — which is the bug it is worth
-    // spelling out, because the argument that left it open was a good argument
-    // about the wrong pair.
-    //
-    // The argument was `mineRefills`': a body already holding ore must have
-    // somewhere to put it down. True, and already answered — the *Storage's*
-    // Thorium sink is pooled unconditionally and is that somewhere. What an
-    // ungated terminal sink adds is a **second** sink in the same room, and at
-    // the receiving end the same room also draws ore *out* of that terminal, so
-    // the two rules fed each other: live at W15S28 a courier and a hauler both
-    // matched `refill:<terminal>:Thorium` while 19,848 T sat in the terminal
-    // waiting to be walked to the Storage, and the courier's 500-unit delivery
-    // load — drawn for the Reactor three crossings away — was about to be put
-    // back into the terminal beside it. The Reactor was at 619 and falling with
-    // no delivery for 380 ticks.
-    //
-    // So the self-feeding loop ADR 0023 refuses for the stock's Withdraw is
-    // refused here the same way: only a colony that **ships** offers its
-    // terminal as a sink, and a colony that receives only ever draws out.
-    //
-    // The energy clause is gated for its own reason, and the difference is
-    // 4,000 energy a colony: only a sender pays a fee, so a terminal stocked
-    // for a send it will never make has taken `Tuning.TerminalEnergy` out of
-    // the spawn economy to hold forever. Live that is W15S28, the receiving end
-    // whose terminal exists precisely so it never ships, and W11S29, four
-    // levels from an extractor.
+    // Its sink, and the fee's intake beside it: `send` is paid out of the
+    // sending terminal's own energy. Both are gated on the declaration. An
+    // ungated ore sink is a second sink in the same room the receiving end
+    // draws ore *out* of, so the two rules fed each other and a delivery load
+    // drawn for the Reactor was about to go back into the terminal beside it;
+    // only a colony that ships offers its terminal as a sink. The energy
+    // clause for its own reason: only a sender pays a fee, and a terminal
+    // stocked for a send it never makes holds `Tuning.TerminalEnergy` forever.
     let consignRefills =
         match view.Consignee with
         | None -> []
@@ -928,18 +645,12 @@ let planTasks
                         Refill(id, Energy)
                 ])
 
-    // **Inbound**, at the far end: ore that arrived by `send` sits in the
-    // terminal, and the courier's draw reads the *Storage*, so it has to be
-    // walked across the room. The sink is `mineRefills` above, which is pooled
-    // off the Storage's free capacity alone — written for the mine's ore and
-    // taking this the same way, because neither rule knows nor needs to know
-    // where a load came from.
-    //
-    // Gated on the colony declaring **no** consignee of its own, which is what
-    // keeps the two directions from fighting: a room that both ships out and
-    // draws in would cycle its ore between two stores forever, one Task
-    // undoing the other tick after tick — the same self-feeding loop ADR 0023
-    // refuses for the stock's Withdraw.
+    // Inbound, at the far end: ore that arrived by `send` sits in the terminal,
+    // and the courier's draw reads the *Storage*, so it has to be walked across
+    // the room. The sink is `mineRefills` above, which knows nothing about
+    // where a load came from. Gated on the colony declaring no consignee of its
+    // own: a room that both ships out and draws in would cycle its ore between
+    // two stores forever.
     let arrivalWithdraws =
         match view.Consignee with
         | Some _ -> []
@@ -948,24 +659,20 @@ let planTasks
             |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
             |> List.map (fun id -> Withdraw(id, Thorium))
 
-    // The [[ferry]]'s other half (ADR 0052 decision 7): a bootstrapping child's
-    // upgrade buffer is a Refill target of the mother's, on the same tier her
-    // own buffer sits on (ADR 0012) — the deepest but the stock's, so nothing
-    // she feeds at home waits on it and the load crosses the Seam only when
-    // there is nowhere nearer to put it.
+    // The ferry's other half: a bootstrapping child's upgrade buffer is a
+    // Refill target of the mother's, on the same tier her own buffer sits on,
+    // so the load crosses the Seam only when there is nowhere nearer to put it.
     let ferryRefills =
         ferrySinks
         |> Set.toList
         |> List.filter (fun id -> stored id < Engine.containerCapacity)
         |> List.map (fun id -> Refill(id, Energy))
 
-    // The stock's other half (ADR 0023): a stocked Storage is a Withdraw source
-    // too, but only while the pool holds a Refill whose target is not the stock
-    // itself. Its own Refill is deliberately no such sink: counting it would
-    // gate the Storage open against itself, and a hauler beside a store that is
-    // both its only intake and its only sink cycles energy in and out of it
-    // tick after tick. Both halves can still be pooled on one tick, and there
-    // the tier gap carries the load away instead of putting it back.
+    // The stock's other half (ADR-0023): a stocked Storage is a Withdraw source
+    // only while the pool holds a Refill whose target is not the stock itself.
+    // Its own Refill is deliberately no such sink: counting it would gate the
+    // Storage open against itself. Both halves can still be pooled on one
+    // tick, and there the tier gap carries the load away.
     let storageWithdraws =
         if
             List.isEmpty refills
@@ -983,8 +690,7 @@ let planTasks
     @ harvests
     // The consignment's rungs sit here, above the energy cycle and below the
     // season's own: ore is the season's score and the hauling it asks for is a
-    // few tiles of the home room, so nothing in the energy economy is worth
-    // making it wait (#349).
+    // few tiles of the home room (#349).
     @ consignWithdraws
     @ arrivalWithdraws
     @ consignRefills
@@ -992,15 +698,11 @@ let planTasks
     // Matcher's ladder: the two never tie for a body anyway, the deposit's
     // Harvest reaching only a body with no Carry at all.
     @ deposits
-    // **The piles stand before the Withdraws** (#242). Pool order is the last
-    // rung of the Matcher's ladder — what it falls back to once [[priority]],
-    // travel cost *and* the crowding load have all three tied, the scored key
-    // being `(rank, cost, load)` (`MatchFactor.PoolOrder`) — and of two intakes
-    // a body could take at the same rank, for the same walk, with the same
-    // crowd already on them, the decaying one is the one to take: a pile loses
-    // `ceil(amount / 1000)` a tick and a container loses nothing. The order
-    // reaches exact ties and nothing else, so it moves no pair the ladder or
-    // the flood had already separated.
+    // The piles stand before the Withdraws (#242). Pool order is the last rung
+    // of the Matcher's ladder — what it falls back to once priority, travel
+    // cost and the crowding load have all three tied (`MatchFactor.PoolOrder`)
+    // — and of two intakes tied that way the decaying one is the one to take:
+    // a pile loses `ceil(amount / 1000)` a tick and a container loses nothing.
     @ pickups
     @ withdraws
     @ refills
@@ -1014,35 +716,14 @@ let planTasks
     @ ferryRefills
     @ storageRefills
     @ storageWithdraws
-    // Last, which costs the pair nothing: pool order is the Matcher's final
-    // tie-break and reaches only an exact tie in [[priority]], [[travel cost]]
-    // and crowding load alike. The Thorium pair shares the [[storage]]'s tier
-    // with the Storage's own two Tasks, and **one of those three pairings is
-    // live** — this is the whole of #306 and the sentence that let #262 and
-    // #311 believe otherwise: a body holding Thorium is applicable to neither
-    // of the Storage's energy Tasks, but an **empty** one is applicable to
-    // `Withdraw(mineralContainer, Thorium)` and `Withdraw(storage, Energy)` at
-    // the same time, which is exactly the pair a hauler standing on the bank
-    // chooses between. Since #306 that pair is decided by [[priority]] and not
-    // by pool order at all — the lifted mine outranks the bank — and where the
-    // mine is under the cliff the bank's own travel cost wins, as it did
-    // before. The `Refill(storage, Thorium)` half is the disjoint one: a body
-    // with ore aboard applies to no energy Task in the colony.
-    //
-    // The piles stand before the Withdraws here for the reason they do above
-    // (#242, #311) — of two copies of one resource on one tile the one to take
-    // is the one that is going away — but since #306 gave each of them a rung
-    // of its own the [[priority]] decides this pair outright, in both
-    // directions: the pile over a container under the contact cliff, the
-    // container over the pile once it is past it. So the order below carries
-    // nothing for this pair and is written the way the energy lists above are
-    // written, which is the only claim made for it.
+    // Last, which costs the pair nothing: pool order reaches only an exact
+    // tie, and the one live pairing — an empty body choosing between the
+    // mineral container's Thorium and the Storage's energy — is decided by
+    // priority since #306. The piles stand before the Withdraws for the reason
+    // they do above.
     @ minePickups
     // Beside the piles and for their reason (#359): of the ore this colony can
-    // name, the copy in a tombstone is the one on the shortest clock — the
-    // store decays into piles that then decay themselves — and pool order is
-    // the Matcher's last tie-break, reaching an exact tie in priority, travel
-    // cost and crowd alike and nothing else.
+    // name, the copy in a tombstone is the one on the shortest clock.
     @ tombstoneOre
     @ mineWithdraws
     @ mineRefills

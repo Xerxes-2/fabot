@@ -1,7 +1,6 @@
-// Reads the engine, once, and files what it answered under the room names
-// it answered for: this tick's World (ADR 0052 decision 1). The only code
-// that reads the game's *objects*; what one colony makes of them is
-// `ColonyView.ofWorld`'s, in Core, where a test can hand it a world.
+// Reads the engine, once, and files what it answered under the room names it
+// answered for: this tick's World. The only code that reads the game's
+// objects; what one colony makes of them is `ColonyView.ofWorld`'s, in Core.
 module Fabot.World
 
 open Fabot.Bindings
@@ -17,9 +16,8 @@ let private terrainAt (terrain: ITerrain) x y =
 
 let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
-/// The tile a creep stands on, room and all — the one reading of an engine
-/// creep's position, since a `Pos` carries no room (ADR 0041) and a creep's own
-/// room is the only room its coordinates mean anything in.
+/// The tile a creep stands on, room and all: the one reading of an engine
+/// creep's position.
 let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
 
 /// Classify an engine part-type string into the Core's body vocabulary:
@@ -28,15 +26,13 @@ let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
 let private bodyPartOf =
     reverseOf partName allBodyParts >> Option.defaultValue Tough
 
-/// Classify an engine STRUCTURE_* string into the Core's built kinds. A
-/// string the table lacks is a kind the decision layer has no rules for,
-/// which is what Other says. Classified once here so every filter below
-/// reads the kind and the rules over it stay in Core (#75).
+/// Classify an engine STRUCTURE_* string into the Core's built kinds; a
+/// string the table lacks is Other. Classified once so the rules stay in Core.
 let private builtKindOf =
     reverseOf builtKindName allBuiltKinds >> Option.defaultValue BuiltKind.Other
 
-/// Attribute one visible Reactor's flag once, before deriving the narrow
-/// decision ownership and the richer operator-facing row from it (#320).
+/// One visible Reactor's owner, read once for both the decision's ownership
+/// and the observe row.
 let private reactorOwnerOf (reactor: IReactor) =
     if not (isNull (box reactor.my)) && reactor.my then
         ReactorOwner.Ours
@@ -45,25 +41,18 @@ let private reactorOwnerOf (reactor: IReactor) =
     else
         ReactorOwner.Rival reactor.owner.username
 
-/// One room's terrain as the engine spells it — the whole fifty-by-fifty grid,
-/// in the two windows the projection assembles from it, off one engine read so
-/// there is one terrain truth per room (ADR 0041).
+/// One room's terrain, in the two windows the projection assembles from it,
+/// off one engine read.
 type private RoomTerrain =
     {
-        /// x,y in 1..48: the ground the projection stands on, as the flat
-        /// grid the Atlas rebuilds its weight arrays from (#278). Memoised
-        /// per room below, so this list-and-fill happens once per room per
-        /// global reset rather than once per room per tick.
+        /// x,y in 1..48: the ground the projection stands on.
         Ground: TerrainGrid
         /// The border ring, x or y of 0 or 49: the Seam's terrain, never
         /// ground.
         Border: Map<Pos, Terrain>
     }
 
-/// The projection's terrain, memoised per room name (ADR 0031). Room
-/// terrain is fixed for the life of the server, so the key can never go
-/// stale. Heap state only — nothing here reaches Memory, and a global
-/// reset empties the table.
+/// ADR-0031
 let private terrainMemo =
     System.Collections.Generic.Dictionary<string, RoomTerrain>()
 
@@ -75,11 +64,10 @@ let private terrainOf (roomName: string) : RoomTerrain =
 
         let tiles =
             {
-                // Rows and columns 0/49 are exit tiles — stepping on one
-                // teleports the creep into the next room. They stay out
-                // of the projection's ground: an absent tile is
-                // impassable, so no path, Seat or standing candidate ever
-                // uses an exit (ADR 0041). Do not "fix" this trim.
+                // Rows and columns 0/49 are exit tiles: stepping on one
+                // teleports the creep into the next room. They stay out of
+                // the ground, so nothing ever stands on one. Do not "fix"
+                // this trim.
                 Ground =
                     TerrainGrid.ofList
                         [
@@ -87,10 +75,7 @@ let private terrainOf (roomName: string) : RoomTerrain =
                                 for y in 1..48 do
                                     { X = x; Y = y }, terrainAt terrain x y
                         ]
-                // The same read's other window: the ring the trim drops,
-                // kept beside the ground because a Seam is a pair of rooms
-                // joined at a tile and never a tile to stand on (ADR 0036,
-                // ADR 0041).
+                // The same read's other window: the ring the trim drops.
                 Border =
                     Map.ofList
                         [
@@ -104,13 +89,11 @@ let private terrainOf (roomName: string) : RoomTerrain =
         terrainMemo.[roomName] <- tiles
         tiles
 
-/// The absolute tick a structure's collapse timer runs out at, or None where it
-/// carries none (ADR 0043). `effects` is undefined on an object nothing is
-/// applied to, and a deployed core carries other effects beside this one, so
-/// the array is searched by id rather than read at an index. `Game.time +` is
-/// load-bearing: the engine's `ticksRemaining` is a **relative** count, while
-/// ADR 0043's prose is written in the read-only API's absolute `endTime`.
-/// Storing either raw puts the deadline about a hundred thousand ticks out.
+/// The absolute tick a structure's collapse timer runs out at, or None.
+/// `effects` is undefined on an object nothing is applied to, and a deployed
+/// core carries other effects, so the array is searched by id. `Game.time +`
+/// is load-bearing: the engine's `ticksRemaining` is relative, unlike the
+/// HTTP API's absolute `endTime`.
 let private collapseTickOf (structure: IStructure) : int option =
     if isNull (box structure.effects) then
         None
@@ -119,42 +102,17 @@ let private collapseTickOf (structure: IStructure) : int option =
         |> Array.tryFind (fun effect -> effect.effect = effectCollapseTimer)
         |> Option.map (fun effect -> Game.time + effect.ticksRemaining)
 
-/// One room we can see, read whole: everything vision pays for, filed under
-/// this room's name and narrowed by nothing (ADR 0052 decision 1). What the
-/// engine does not scope to the room — our own creeps, out of the world-wide
-/// `Game.creeps` — is scoped by hand here; terrain and spawns are handed in,
-/// the first needing no vision and the second swept once for the tick. It holds
-/// **every creep of ours standing here**, not one colony's: which of them a
-/// colony holds is that colony's own cut (`ColonyView.ofWorld`, which files the
-/// rest under `Foreign`). `ours` is the name the engine spells this player,
-/// read in `ofGame`: whose a reservation is, is a comparison against it, so
-/// Core is handed the answer rather than the two names (ADR 0042).
-/// The census's **stable half**, memoised per room name (#384).
+/// The census's stable half, memoised per room name (#384). Building
+/// `TargetKinds` is 6.5% of a profiled tick (`--scenario reactor --level 7`,
+/// four interleaved pairs), and the cost is the `Map.ofArray` build, not the
+/// reading. The fixtures are the same objects tick after tick; only the floor
+/// (piles, tombstones) moves, and it is a handful of `Map.add`s per tick.
 ///
-/// Building `TargetKinds` is 6.5% of a profiled tick on its own, measured by
-/// building it twice and pricing the delta (`--scenario reactor --level 7`,
-/// four interleaved pairs, pinned to one CCD). It is one `Map.ofArray` over
-/// every object the room holds, and an F# `Map` of N entries is N inserts with
-/// rebalancing — so the cost is the *building*, not the reading, which is why
-/// #383's three attempts at a cheaper walk all measured zero.
-///
-/// Almost none of it changes. A room's sources, minerals, controller and
-/// structures are the same objects tick after tick; what moves is the floor —
-/// dropped piles and tombstones — and those are a handful of entries that cost
-/// a handful of `Map.add`s onto a map already built. So the stable half is
-/// built once and kept, and the tick adds its floor to it.
-///
-/// **The key is a checksum and not a count**, because the direction that must
-/// never be wrong is a structure that is *gone*: a census still naming a
-/// destroyed target is a Task pointed at nothing. Count alone would miss one
-/// structure destroyed and another built on the same tick. The sum and the xor
-/// of the ids' hashes together catch any change of membership, and are
-/// order-insensitive, so a `find` sweep that answers in a different order is a
-/// hit rather than a needless rebuild.
-///
-/// Heap state only — nothing here reaches Memory, a global reset empties it,
-/// and the worst a lost table can do is rebuild what it would have built
-/// anyway. The precedent and the shape are `terrainMemo` above.
+/// The key is a checksum and not a count: a count alone would miss one
+/// structure destroyed and another built on the same tick, and a census still
+/// naming a destroyed target is a Task pointed at nothing. Sum and xor of the
+/// ids' hashes are order-insensitive, so a `find` sweep answering in another
+/// order is a hit. Heap only, like `terrainMemo`.
 type private StableCensus =
     {
         Sum: int
@@ -175,18 +133,14 @@ let private seenFacts
     (casting: ICreep list)
     (room: IRoom)
     : RoomFacts =
-    // Each structure and site is classified once here and carried beside
-    // its kind, so the engine string is interpreted in one place (#75).
+    // Each structure and site is classified once and carried beside its kind.
     let structures =
         room.find findStructures
         |> Array.map (fun o ->
             let st = o :?> IStructure
             st, builtKindOf st.structureType)
 
-    // The structures whose store enters the projection (ADR 0012, ADR 0023),
-    // swept once: the energy table below and the Thorium table beside it ask
-    // the same question of the same array, and two sweeps are two answers free
-    // to disagree the day the predicate moves.
+    // Swept once for the energy table and the Thorium table both.
     let storedStructures = structures |> Array.filter (fun (_, kind) -> isStored kind)
 
     let sites =
@@ -195,22 +149,16 @@ let private seenFacts
             let site = o :?> IConstructionSite
             site, builtKindOf site.structureType)
 
-    // Everybody else's sites standing here, as tiles and nothing more (#248).
-    // No kind is classified and no id is kept: the engine takes one
-    // construction site per tile whoever placed it, and refusing to ask for a
-    // site under one is the only thing a decision can do about it
-    // (`RoomLayer.RivalSites`). Every other reader of a site — the Build pool,
-    // the gap rule's allowance, the Post a container site raises, the rampart
-    // that covers it — asks a question that presumes the site is ours, and the
-    // census above is what answers those.
+    // Everybody else's sites, as tiles and nothing more: the engine takes one
+    // site per tile whoever placed it, and every other reader of a site
+    // presumes the site is ours.
     let rivalSites =
         room.find findHostileConstructionSites
         |> Array.map (fun o -> posOf (o :?> IConstructionSite).pos)
 
-    // The structures we own here, classified once. Their **ids** are what
-    // the kinds that ask for an owner are checked against (`needsOwner`,
-    // ADR 0034) — FIND_STRUCTURES carries every owner's — and the
-    // energy-hungry ones among them are the room's Refillables.
+    // The structures we own here: `needsOwner` kinds are checked against
+    // their ids (FIND_STRUCTURES carries every owner's), and the
+    // energy-hungry ones are the Refillables.
     let mine =
         room.find findMyStructures
         |> Array.map (fun o ->
@@ -221,20 +169,9 @@ let private seenFacts
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
-    // Dropped piles: position, kind and amount, which is what the Pickup
-    // Task's threshold and its capacity are read off (#167).
-    //
-    // **Both of the colony's resources and not energy alone** (#311). The
-    // filter here used to be `resourceType = "energy"`, so a Thorium pile
-    // reached neither `Stores`, nor `Dropped`, nor the [[pickup reflex]] — the
-    // shell did not carry it as a fact at all, and nothing downstream could
-    // have pooled a Task for it however much it wanted to. That is what left
-    // ~630 on W12S28's mine tile and ~300 on W13S28's decaying at
-    // `ceil(amount / 1000)` a tick with the hauler row standing by. Classified
-    // rather than filtered, the way every other engine string in this file is:
-    // the resource rides into the projection on the kind, and a pile of
-    // anything else — a stronghold's loot, another player's drop — is filtered
-    // out here, where `Resource` says what this colony has a decision about.
+    // Dropped piles of either of the colony's resources, classified rather
+    // than filtered on "energy" (#311 was a Thorium pile the shell did not
+    // carry at all). A pile of anything else is dropped here.
     let dropped =
         room.find findDroppedResources
         |> Array.map (fun o -> o :?> IResource)
@@ -246,29 +183,13 @@ let private seenFacts
             else
                 None)
 
-    // The stores with a clock on them (#167): a dead creep's tombstone and a
-    // destroyed structure's ruin, projected as one kind because a Withdraw
-    // reads the same three facts off either. Only while there is something in
-    // it, which is the filter's original reason and stands unchanged: an empty
-    // tombstone is a target no rule can answer for, and projecting one is a
-    // hundred ticks of churn in every id-keyed table.
-    //
-    // **Something is either resource and not energy alone** (#359). A courier
-    // that dies with ore aboard leaves it in its tombstone, and the filter read
-    // down the energy column alone dropped such a tombstone here — no kind, no
-    // tile, no amount, so no rule downstream could name it however much it
-    // wanted to. Live at W15S25 that was 175 T in a tombstone at (43,6), in the
-    // declared Reactor room, decaying. The engine's `withdraw` takes it: its
-    // target test admits `globals.Tombstone` and `globals.Ruin` beside a
-    // structure and its resource argument is any of `RESOURCES_ALL`
-    // (`@screeps/engine` `src/game/creeps.js`, and the processor's
-    // `intents/creeps/withdraw.js` moves `target.store[resourceType]`), so ore
-    // in one is drawable exactly as its energy is. And it is worth drawing
-    // rather than waiting out: a decaying tombstone drops its **whole** store
-    // as piles (`intents/tombstones/tick.js` calls `_create-energy` once per
-    // resourceType), so ore left in one becomes ore on the floor bleeding at
-    // `ceil(amount / 1000)` a tick, and Thorium never regenerates — the mod
-    // deletes an exhausted deposit outright, so ore lost is lost for the season.
+    // Tombstones and ruins, one kind, only while something is in them: an
+    // empty one is a target no rule can answer for, and projecting it is a
+    // hundred ticks of churn in every id-keyed table. Either resource, not
+    // energy alone (#359): the engine's `withdraw` admits `Tombstone` and
+    // `Ruin` with any of `RESOURCES_ALL`, and a decaying tombstone drops its
+    // whole store as piles (`intents/tombstones/tick.js`), so ore left in one
+    // bleeds on the floor at `ceil(amount / 1000)` a tick.
     let tombstones =
         Array.append (room.find findTombstones) (room.find findRuins)
         |> Array.map (fun o -> o :?> ITombstone)
@@ -276,33 +197,18 @@ let private seenFacts
             r.store.getUsedCapacity (resourceName Energy) > 0
             || r.store.getUsedCapacity (resourceName Thorium) > 0)
 
-    // The season's Thorium deposits, and only those (ADR 0057 decision 1).
-    // The mod stands an ordinary-ore mineral in the same room and the colony
-    // never extracts it — there is no market this season — so it is filtered
-    // out here, where every other engine string is classified, and the Core's
-    // `TargetKind.Mineral` carries no resource because only one kind ever
-    // reaches it. An exhausted deposit is deleted by the mod outright, so a
-    // mineral that leaves this array is a deposit that is gone and not one at
-    // zero.
+    // The season's Thorium deposits only; the ordinary ore beside them is
+    // never extracted, so `TargetKind.Mineral` carries no resource. The mod
+    // deletes an exhausted deposit outright, so a mineral that leaves this
+    // array is gone, not at zero.
     let minerals =
         room.find findMinerals
         |> Array.map (fun o -> o :?> IMineral)
         |> Array.filter (fun m -> m.mineralType = resourceName Thorium)
 
-    // The sector Reactors standing here (#318), and the **only** sweep that can
-    // answer with one: `mod-season5` registers the reactor through
-    // `registerCustomObjectPrototype` with `findConstant: FIND_REACTORS`, and
-    // the engine's own `game.js` files a custom object into that find cache and
-    // into no other — it is not in `structureTypes`, so `FIND_STRUCTURES` has
-    // never carried it and `builtKindOf` has never seen its `structureType`.
-    // ADR 0060 decision 1's comment said the object was "placed and classified
-    // harmlessly already" and that what was missing was an `isStored` fact;
-    // that was wrong in the same direction twice, and this is the sweep it said
-    // was not needed.
-    //
-    // The array is normally empty: one room in a sector holds a reactor at all,
-    // and this colony has vision of that room only while its [[re-claimer]] is
-    // standing in it.
+    // The only sweep that can answer with a reactor (`findReactors`). Normally
+    // empty: one room in a sector holds one, seen only while a body of ours
+    // stands in it.
     let reactors = room.find findReactors |> Array.map (fun o -> o :?> IReactor)
 
     let reactorFacts =
@@ -322,11 +228,8 @@ let private seenFacts
         else
             Some controllers.[0]
 
-    // The stable half of the census, recalled or rebuilt (#384). The ids that
-    // enter it are the room's fixtures — its rocks, its controller, and every
-    // structure and site standing in it — and the checksum below is taken over
-    // exactly those, so a structure destroyed, a site finished or a road laid
-    // all miss and rebuild. The floor is not in it and is added per tick below.
+    // The stable half of the census, recalled or rebuilt: the checksum is over
+    // exactly the fixtures that enter it, and the floor is added per tick.
     let stable =
         let mutable sum = 0
         let mutable bits = 0
@@ -401,23 +304,16 @@ let private seenFacts
         Layer =
             {
                 Terrain = terrain.Ground
-                // The fixtures recalled, the floor added (#384): a handful of
-                // `Map.add`s onto a map already built, against rebuilding two
-                // hundred entries from scratch every tick.
+                // The fixtures recalled, the floor added.
                 TargetPositions =
                     (stable.Positions,
                      Array.append
                          (dropped |> Array.map (fun (r, _) -> r.id, posOf r.pos))
                          (tombstones |> Array.map (fun r -> r.id, posOf r.pos)))
                     ||> Array.fold (fun places (id, tile) -> Map.add id tile places)
-                // This room's creeps, not the world's — the scope rides on the
-                // argument, `ofGame` having grouped the one sweep by room. A
-                // layer keyed by room name may hold only the tiles of the room
-                // it is filed under (ADR 0041): a creep standing elsewhere
-                // filed here under that room's coordinates is a phantom
-                // occupant the Resolver arbitrates against (ADR 0001). A creep
-                // the projection cannot place is ADR 0004's absence, which is
-                // what `Atlas.placedCreeps` already answers.
+                // This room's creeps, not the world's: a creep standing
+                // elsewhere filed here under that room's coordinates is a
+                // phantom occupant the Resolver arbitrates against.
                 CreepPositions = standing |> List.map (fun c -> c.name, posOf c.pos) |> Map.ofList
                 // Structures a creep cannot stand on block their tile; the
                 // kinds it can are the Core's own predicate (Screeps
@@ -446,50 +342,37 @@ let private seenFacts
                                 minerals |> Array.map (fun m -> posOf m.pos)
                             ]
                     )
-                // Built roads only: a road construction site is not yet a
-                // road, so it never enters the pricing (ADR 0010).
+                // Built roads only: a road site is not yet a road.
                 Roads =
                     structures
                     |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
                     |> Array.map (fun (st, _) -> posOf st.pos)
                     |> Set.ofArray
-                // Tiles and no kind, and deliberately not in `Obstacles`
-                // above: the engine blocks a creep on an obstacle-type site
-                // its own owner placed, and a hostile creep that walks onto
-                // one destroys it, so a rival's site prices nothing (#248).
+                // Deliberately not in `Obstacles`: the engine blocks only the
+                // owner's own creep on an obstacle-type site, and a hostile
+                // that walks onto one destroys it, so a rival's site prices
+                // nothing.
                 RivalSites = Set.ofArray rivalSites
             }
-        // The border ring of the room, under its own name: the Atlas
-        // answers a Seam from these and from nothing else (ADR 0041).
         Border = terrain.Border
         // Same array order as the layer's TargetPositions, so a controller
         // that also travels through FIND_STRUCTURES resolves to Controller
-        // both times.
-        // The fixtures recalled, the floor added (#384). A tombstone stands on
-        // the tile its creep died on and a ruin where its structure stood, and
-        // both are gone within a few hundred ticks; the fixtures outlive them
-        // by the life of the server.
+        // both times. The fixtures recalled, the floor added.
         TargetKinds =
             (stable.Kinds,
              Array.append
                  (dropped |> Array.map (fun (r, resource) -> r.id, Dropped resource))
                  (tombstones |> Array.map (fun r -> r.id, Tombstone)))
             ||> Array.fold (fun kinds (id, kind) -> Map.add id kind kinds)
-        // Hits on the repairable kinds only — the decaying roads and containers
-        // (ADR 0010, ADR 0012), the Keep and our own ramparts (ADR 0034):
-        // fields nobody decides on stay out.
+        // Hits on the repairable kinds only; fields nobody decides on stay out.
         Hits =
             structures
             |> Array.filter (fun (st, kind) ->
                 (wholeLine kind).IsSome && (not (needsOwner kind) || Set.contains st.id ourIds))
             |> Array.map (fun (st, _) -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
-        // Stored energy on the containers, the stock the logistics Tasks judge
-        // one by (ADR 0012), and on the Storage, which the Planner reads the
-        // same way (ADR 0023). The two transient stores ride the same table
-        // (#167): a tombstone's or a ruin's energy, which a Withdraw draws
-        // exactly as it draws a container's, and a pile's amount, which decides
-        // whether the pile is worth a Task at all.
+        // Stored energy, with the transient stores (tombstones, piles) in the
+        // same table.
         Stores =
             Array.concat
                 [
@@ -503,13 +386,8 @@ let private seenFacts
                         if resource = Energy then Some(r.id, r.amount) else None)
                 ]
             |> Map.ofArray
-        // The Thorium beside it (ADR 0057 decision 3): what each store holds of
-        // it, and the deposit's own remaining amount, which is the fact the
-        // miner row's quota reads. A second map and never a resource key inside
-        // `Stores`, for the reason the field's own comment gives. Absent per
-        // entry (ADR 0004): a store holding none of it has no entry, so a
-        // colony with no deposit carries an empty map rather than a table of
-        // zeroes.
+        // The Thorium beside it, the deposit's own remaining amount included.
+        // A store holding none has no entry.
         Thorium =
             Array.concat
                 [
@@ -517,58 +395,36 @@ let private seenFacts
                     |> Array.map (fun (st, _) ->
                         st.id, st.store.getUsedCapacity (resourceName Thorium))
                     minerals |> Array.map (fun m -> m.id, m.mineralAmount)
-                    // And the floor (#311): a dropped pile holds its amount in
-                    // `object[resourceType]` rather than in a `store`, which is
-                    // why the mod's contact penalty skips it — and why the
-                    // amount is read off `r.amount` here exactly as an energy
-                    // pile's is, one column over.
+                    // A dropped pile holds its amount in `object[resourceType]`
+                    // rather than a `store`, which is why the mod's contact
+                    // penalty skips it.
                     dropped
                     |> Array.choose (fun (r, resource) ->
                         if resource = Thorium then Some(r.id, r.amount) else None)
-                    // And the store with a clock on it (#359), read off
-                    // `store` exactly as the stored structures above are: a
-                    // tombstone or a ruin holds its ore in a real store, which
-                    // is why the mod's contact penalty counts it and why a
-                    // `withdraw` empties it. Without this column a tombstone
-                    // that survived the filter above still reached the pool
-                    // with no amount, and a Withdraw's capacity and its
-                    // worth-the-trip clause are both read off this map.
+                    // A tombstone or a ruin holds its ore in a real store, so
+                    // the mod's contact penalty counts it and `withdraw`
+                    // empties it. Without this column one reached the pool
+                    // with no amount (#359).
                     tombstones
                     |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Thorium))
                 ]
             |> Array.filter (fun (_, held) -> held > 0)
             |> Map.ofArray
-        // The extractor's cooldown (ADR 0057 decision 2): `EXTRACTOR_COOLDOWN`
-        // is 5 and the intent pass runs before the object pass, so successive
-        // harvests land six ticks apart and the other five are refused. Read
-        // off the one kind that carries one — `cooldown` is undefined on every
-        // other structure the colony builds — and 0 is a real answer here,
-        // meaning "this tick", which is why the map is not filtered the way the
-        // Thorium above is.
+        // The extractor's cooldown: `cooldown` is undefined on every other
+        // kind we build, and 0 is a real answer ("this tick"), so the map is
+        // not filtered the way the Thorium above is.
         Cooldowns =
             structures
             |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
             |> Array.map (fun (st, _) -> st.id, st.cooldown)
             |> Map.ofArray
-        // Whose each object we read an owner off is (#318) — the reactors, and
-        // nothing else, because the [[reclaim]]'s act is the one decision in
-        // this tree that asks an *object* whose it is (ADR 0007). The three
-        // answers are read off `my` and `owner` in the order the controller's
-        // are and for the same reason: the mod's `my` is
-        // `o.user ? o.user == user._id : undefined`, so it is **undefined** and
-        // not false on a reactor nobody owns, and `owner` separates the other
-        // two.
-        //
-        // Neither the reactor's tile nor a kind for it is filed here, and both
-        // omissions are load-bearing. The tile is the **declaration**'s
-        // (`Errand.place`, ADR 0060 decision 1), which is what lets a Task name
-        // the target before any body of ours has stood in the room; and the
-        // kind is *nobody's* — an id classified by nothing is priceable by a
-        // Task that names it and enumerable by no pool that sweeps a kind,
-        // which is the whole of "no row hires for it except the ones the
-        // errand's own Tasks belong to". A `TargetKind` written here would undo
-        // that from the far side of the narrowing, where the view's `erranding`
-        // cut could not put it back.
+        // The reactors' owners, read off `my` and `owner` as the controller's
+        // are (the mod's `my` is undefined, not false, on one nobody owns).
+        // Neither the reactor's tile nor a kind is filed, and both omissions
+        // are load-bearing: the tile is the declaration's (`Errand.place`),
+        // and an id classified by nothing is priceable by a Task that names it
+        // and enumerable by no pool that sweeps a kind. A `TargetKind` here
+        // would undo that from the far side of the view's `erranding` cut.
         Owners =
             reactorFacts
             |> Array.map (fun (reactor, owner) ->
@@ -588,9 +444,8 @@ let private seenFacts
                     ContinuousWork = reactor.continuousWork
                 })
             |> Array.toList
-        // Who holds the room, home included (ADR 0042). A seen room with
-        // no controller at all gets a truthful entry: nobody owns or
-        // reserves it, which is the neutral rate and not an unknown.
+        // Who holds the room. A seen room with no controller gets a truthful
+        // entry: nobody owns or reserves it.
         Control =
             Some(
                 match controller with
@@ -607,22 +462,16 @@ let private seenFacts
                         // `safeMode` is the tick count remaining and
                         // undefined otherwise.
                         SafeMode = not (isNull (box c.safeMode))
-                        // The text standing on the controller, absent on one
-                        // nobody has signed (#381). `sign` is undefined until
-                        // somebody writes one, and its `text` is what the rule
-                        // compares — who wrote it is not asked, a rival who
-                        // copies our words having said them for us.
+                        // `sign` is undefined until somebody writes one; the
+                        // text is what the rule compares, not who wrote it.
                         Sign =
                             if isNull (box c.sign) then
                                 None
                             else
                                 Some(string c.sign.text)
                         // `my` is undefined and not false on a controller
-                        // nobody owns, so ours is asked first and off
-                        // `my`. `owner` separates the other two: an owner
-                        // that is not us is a rival's, and none at all is
-                        // unowned and reservable, which is every outpost a
-                        // colony works (ADR 0042, ADR 0043).
+                        // nobody owns, so ours is asked first and off `my`;
+                        // `owner` separates the other two.
                         Owner =
                             if not (isNull (box c.my)) && c.my then Ownership.Ours
                             elif isNull (box c.owner) then Ownership.Unowned
@@ -631,12 +480,9 @@ let private seenFacts
                             if isNull (box c.reservation) then
                                 None
                             else
-                                // Three holders and not two: ADR 0043
-                                // reads different answers off the two that
-                                // are not ours — the NPC's reservation is
-                                // the clock a core's stand-down runs to
-                                // under a floor, a player's is a stand-down
-                                // clocked to the hold itself (#165).
+                                // Three holders, not two: the stand-down
+                                // reads different clocks off the NPC's and a
+                                // player's.
                                 let holder =
                                     if Some c.reservation.username = ours then
                                         ReservationHolder.Ours
@@ -652,10 +498,8 @@ let private seenFacts
                                     }
                     }
             )
-        // The controller **while it is ours**: the downgrade clock and the
-        // banked safe modes are undefined on a controller we do not own, so a
-        // room a rival holds carries its ownership in `Control` and no
-        // controller here (ADR 0004).
+        // The controller while it is ours: the downgrade clock and the banked
+        // safe modes are undefined on one we do not own.
         Controller =
             controller
             |> Option.filter (fun c -> not (isNull (box c.my)) && c.my)
@@ -676,7 +520,7 @@ let private seenFacts
                 Capacity = room.energyCapacityAvailable
             }
         Spawns = spawns
-        // The bodies still gestating in this room's ovens (#156).
+        // The bodies still gestating in this room's spawns.
         Casting =
             casting
             |> List.map (fun c ->
@@ -695,10 +539,9 @@ let private seenFacts
                 }
                 : RefillableInfo)
             |> Array.toList
-        // The room's rocks as vision answered for them. A source holding
-        // energy restocks in zero ticks (ADR 0025) whatever its
-        // regeneration timer reads; the timer is read only for a drained
-        // source, and is undefined until the engine starts it.
+        // A source holding energy restocks in zero ticks whatever its timer
+        // reads; the timer is read only for a drained source, and is undefined
+        // until the engine starts it.
         Sources =
             sources
             |> Array.map (fun s ->
@@ -712,10 +555,8 @@ let private seenFacts
                 }
                 : SourceInfo)
             |> Array.toList
-        // Our sites standing here (#150): the Build pool is a colony's share of
-        // these one to one (`Decide.planTasks`), so a site missing from it is a
-        // site no creep is ever sent to — and ADR 0042 makes a standing
-        // container the switch that admits an outpost into the economy.
+        // Our sites standing here: a site missing from this list is a site no
+        // creep is ever sent to.
         ConstructionSites =
             sites
             |> Array.map (fun (site, _) ->
@@ -725,10 +566,7 @@ let private seenFacts
                 }
                 : ConstructionSiteInfo))
             |> Array.toList
-        // The hostiles standing here (ADR 0033, #201). Read for every room the
-        // world can see and not the spawn rooms' alone: a Threat's Reach gates
-        // the Tasks whose Work Area lies in it, a creep standing in one is
-        // matched to Flee, and a spawn whose doorstep is in one holds.
+        // The hostiles standing here, read for every room the world can see.
         Hostiles =
             room.find findHostileCreeps
             |> Array.map (fun o ->
@@ -745,13 +583,9 @@ let private seenFacts
                 }
                 : HostileInfo)
             |> Array.toList
-        // The invader cores standing here (ADR 0043). Not folded into
-        // `Hostiles`: a core is a *structure*, so `FIND_HOSTILE_CREEPS` cannot
-        // answer with one, and the two lists answer different questions — a
-        // raider is something a creep runs from this tick, a core is something
-        // a whole room is withheld from for thousands.
-        // `FIND_HOSTILE_STRUCTURES` answers with every structure a rival owns,
-        // so the kind is checked here.
+        // The invader cores standing here. A core is a structure, so
+        // `FIND_HOSTILE_CREEPS` cannot answer with one; `FIND_HOSTILE_STRUCTURES`
+        // answers with every structure a rival owns, so the kind is checked.
         InvaderCores =
             room.find findHostileStructures
             |> Array.map (fun o -> o :?> IStructure)
@@ -760,13 +594,9 @@ let private seenFacts
                 ({
                     RoomName = room.name
                     CollapseTick = collapseTickOf st
-                    // A level-0 expansion core reads 0 and a bunker reads its
-                    // own level (#382). The guard is belt and braces: the
-                    // sweep above has already filtered to `structureInvaderCore`
-                    // and every one of those carries a level, so the fallback
-                    // is unreachable — and it is the **wrong** direction if it
-                    // ever fires, reading an unknown structure as safe to
-                    // cross, which is why the filter and not this is what the
+                    // Every core carries a level, so the fallback is
+                    // unreachable, and it reads the wrong direction (safe to
+                    // cross) if it ever fires: the filter above is what the
                     // rule rests on.
                     Level = if isNull (box st.level) then 0 else st.level
                 }
@@ -784,13 +614,8 @@ let private roomSeen (roomName: string) : IRoom option =
     if isNull (box room) then None else Some room
 
 /// One room's facts. Terrain comes off the memo whether or not we can see the
-/// room: `Game.map.getRoomTerrain` answers for any room, needs no vision and
-/// never goes stale (ADR 0031, ADR 0041), so the terrain layer's marginal cost
-/// across rooms is zero. Everything else comes off `Game.rooms`, which holds
-/// only the rooms we have vision in — so the half vision pays for is absent
-/// entry by entry until vision returns (ADR 0004) rather than a "blind" state
-/// anything models: unplaced geometry is unpriceable, enters no Task and blocks
-/// no action.
+/// room (`Game.map.getRoomTerrain` needs no vision); everything else comes off
+/// `Game.rooms`, and is absent entry by entry until vision returns.
 let private factsOf
     (ours: string option)
     (spawns: SpawnInfo list)
@@ -808,54 +633,38 @@ let private factsOf
                     Terrain = terrain.Ground
                 }
             Border = terrain.Border
-            // A spawn of ours stands in a room we can see, so this list is
-            // empty here in every world the engine can build; it is filed
-            // from the same sweep as the seen half.
+            // Empty in every world the engine can build (a spawn of ours is
+            // in a room we can see); filed from the same sweep as the seen
+            // half.
             Spawns = spawns
         }
     | Some room -> seenFacts ours terrain spawns standing casting room
 
-/// The rooms the world holds facts for this tick: every room the engine
-/// answered `Game.rooms` with — which is every room we can see — and, beside
-/// them, the rooms a **standing** colony's declaration names, whose terrain and
-/// furniture need no vision at all (ADR 0041). The union and not one colony's
-/// scan set, which is the whole difference between a world and a projection
-/// (ADR 0052 decision 1): the [[stand-down]] gate (ADR 0043) and the bootstrap
-/// rule narrow what a *colony* works (`ColonyView.ofWorld`), and narrowing the
-/// world by them would put the shell in the business of deciding which rooms
-/// matter. The price is that a room we can **see** and no colony works — a
-/// [[stand-down]]'s withheld outpost with one of our creeps still walking out
-/// of it — costs the full `seenFacts` sweep; it is bounded by the rooms our own
-/// bodies stand in, since vision is what `Game.rooms` is.
+/// The rooms the world holds facts for this tick: every room we can see and
+/// every room a standing colony's declaration names. The union and not one
+/// colony's scan set: narrowing the world by the gates would put the shell in
+/// the business of deciding which rooms matter. A seen room no colony works
+/// costs the full `seenFacts` sweep; that is bounded by where our bodies stand.
 let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list) : string list =
     let declared =
         colonies
         |> List.filter (fun colony -> List.contains colony.Home seen)
-        // The colony's own projection set and not the declaration read a
-        // second time: it is home, the outposts and the transit rooms a chain
-        // to one of them crosses (ADR 0058), and a room the view will project
-        // is a room the world has to hold terrain for. Terrain is what a
-        // transit room is for and terrain is free of vision (`terrainOf`), so
-        // the marginal cost of one here is a memo read.
-        //
-        // Narrowed by the hop budget exactly as `World.scanOf` narrows it, and
-        // for a reason the budget's own rule gives: a declaration past it is
-        // refused, so no view projects that room — and reading the transit
-        // rectangle of one anyway would drag every room between here and a
+        // The colony's own projection set, transit rooms included: a room the
+        // view will project is a room the world has to hold terrain for, and a
+        // transit room costs a memo read. Narrowed by the hop budget as
+        // `World.scanOf` is: a declaration past it is refused, and reading its
+        // transit rectangle anyway would drag every room between here and a
         // mis-declaration into the world for nobody to use.
         |> List.collect (fun colony ->
             let outposts =
                 colony.Outposts |> List.filter (Outpost.withinHopBudget maxHops colony.Home)
 
-            // The rooms a child of this colony's would be projected through,
-            // off the names alone: which of them the view actually borrows
-            // turns on a [[stage]] this function cannot read — the stages are
-            // derived from the world it is choosing the rooms for — so the
-            // declaration's shape is what is read here, and a room the view
-            // does not borrow costs the memo read a transit room costs
-            // (`Colony.roomsProjected`, ADR 0058). Without it a claimed
-            // nursery two hops out is projected with no chain to it, which is
-            // the state W15S28 was found in on 2026-09-10.
+            // The rooms a child would be projected through, off the names
+            // alone: whether the view borrows them turns on a stage derived
+            // from the world this is choosing rooms for, so the declaration's
+            // shape is read and an unborrowed room costs a memo read. Without
+            // it a nursery two hops out is projected with no chain to it
+            // (W15S28, 2026-09-10).
             let children =
                 colonies
                 |> List.filter (fun child ->
@@ -866,13 +675,8 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
                 |> List.collect (fun child ->
                     child.Home :: RoomName.transitBetween colony.Home child.Home)
 
-            // The colony's [[errand]]s and their chains, narrowed by the same
-            // budget for the same reason (ADR 0060 decision 1): the errand room
-            // joins `worldRooms` because a **standing** colony declares it, so
-            // the world holds its terrain and the view can price a walk into a
-            // room with no controller. Only the declaring colony's errands
-            // reach here, which is the whole of "projected for that colony
-            // alone" at the world's altitude.
+            // The colony's errands and their chains, narrowed by the same
+            // budget for the same reason.
             let errands =
                 colony.Errands |> List.filter (Errand.withinHopBudget maxHops colony.Home)
 
@@ -882,44 +686,26 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
 
     seen @ declared |> List.distinct
 
-/// This tick's World (ADR 0052 decision 1): every room we declared or can see,
-/// under its own name, and every creep we own beside them. The one place the
-/// bot reads `Game`. The declaration is handed in rather than read off the
-/// constant (ADR 0041), so a harness or a test can hand this function a world
-/// of its own.
-/// The CPU counter as each room's facts finished, in the order they were swept,
-/// for the tick's own readings to difference (ADR 0041). Heap-only and
-/// overwritten every tick, like the plan memos and the sightings in `Main`: a
-/// reading is about the tick it was taken in and means nothing carried over.
-///
-/// Held here rather than returned beside the `World` because the world is a
-/// Core type and a measurement of the shell is not a fact about the game. The
-/// shell reads the counter and subtracts; nothing in `Core` learns that rooms
-/// have a price.
-///
-/// Why it exists: `snapshot` is 21% of the live tick and the harness cannot
-/// measure a single millisecond of it — its rooms are stubs whose `find`
-/// answers a pre-built array, while the live phase pays the engine for eleven
-/// sweeps of real objects per room (#370). A per-room split is the one reading
-/// that is comparable between the two, because it is a count of our own calls
-/// and not a price the engine sets.
+/// The CPU counter as each room's facts finished, in sweep order, for the
+/// tick's readings to difference. Heap-only and overwritten every tick. Held
+/// here rather than on the `World` because a measurement of the shell is not
+/// a fact about the game. It exists because `snapshot` is 21% of the live
+/// tick and the harness's stub rooms cannot measure any of it (#370); a
+/// per-room split counts our own calls, so it is comparable between the two.
 let mutable roomCosts: (string * float) list = []
 
-/// The counter as the room sweep **began**, which is what the first room is
-/// differenced against. Not `AtEntry`: the phase does work before the first
-/// room — it enumerates `Game.rooms`, groups every creep by the room it stands
-/// in, and reads the declarations — and charging that to whichever room happens
-/// to be swept first is how this reading first lied about itself. It said
-/// W11S28, an outpost with one rock, cost 2.35 ms while the four-spawn home
-/// room beside it cost 1.23 (#370).
+/// The counter as the room sweep began, which the first room is differenced
+/// against. Not `AtEntry`: the phase enumerates `Game.rooms`, groups the
+/// creeps and reads the declarations before the first room, and charging that
+/// to the first room swept made a one-rock outpost read 2.35 ms against the
+/// four-spawn home's 1.23 (#370).
 let mutable roomsBegan: float = 0.0
 
 let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
-    // The name the engine spells us, off the controller of a room one of
-    // our spawns stands in — a spawn cannot stand in a room we do not own,
-    // so that owner is us. Read once for the world: there is one of us.
+    // The name the engine spells us, off the controller of a room one of our
+    // spawns stands in: a spawn cannot stand in a room we do not own.
     let ours =
         spawns
         |> Array.tryPick (fun s ->
@@ -930,8 +716,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
             else
                 Some c.owner.username)
 
-    // Our spawns grouped by the room they stand in, swept once: which of
-    // them a colony casts from is its own cut (`ColonyView.ofWorld`).
+    // Our spawns grouped by the room they stand in, swept once.
     let spawnsByRoom =
         spawns
         |> Array.map (fun s ->
@@ -947,14 +732,9 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
         |> List.map (fun (room, entries) -> room, entries |> List.map snd)
         |> Map.ofList
 
-    // Every creep we own, swept once for the tick and grouped by the room it
-    // stands in, the standing apart from the still-gestating (#156) — two facts
-    // a room is asked for and one traversal for both. The scope is ADR 0041's:
-    // a layer keyed by room name may hold only the tiles of the room it is
-    // filed under, and an argument states that where a predicate at each
-    // reader would only promise it. `List.groupBy` keeps the engine's own
-    // order within a room, which `World.creepColonies` reads (ADR 0047
-    // decision 2).
+    // Every creep we own, swept once and grouped by the room it stands in,
+    // the standing apart from the gestating. `List.groupBy` keeps the engine's
+    // own order within a room, which `World.creepColonies` reads.
     let standing, casting =
         objectValues<ICreep> Game.creeps
         |> Array.toList
@@ -969,10 +749,8 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     let inRoom (grouped: Map<string, ICreep list>) roomName =
         Map.tryFind roomName grouped |> Option.defaultValue []
 
-    // The rooms vision answered for this tick — `Game.rooms` is exactly that
-    // (`roomSeen`) — read once and used twice: it decides which rooms the
-    // world holds facts for, and which of them this tick may stamp a sighting
-    // for (#151).
+    // The rooms vision answered for, read once and used twice: which rooms
+    // the world holds facts for, and which may stamp a sighting.
     let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
 
     let mutable costs = []
@@ -1000,13 +778,8 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     {
         Time = Game.time
         Rooms = Map.ofList rooms
-        // This tick's sighting for every room this tick could see, and none
-        // for the rest (#151): the ids of the room's own kind census and not
-        // the kinds, which is all the grace asks and so all the sighting
-        // carries (ADR 0007). The rooms it does *not* cover are the ones
-        // `World.recalling` fills from the previous tick's map — the merge is
-        // Core's, so the only thing this reads out of `Game` is which rooms
-        // answered.
+        // A sighting for every room seen this tick, carrying the census's ids
+        // and not the kinds; the rest `World.recalling` fills from last tick.
         Sightings =
             rooms
             |> List.filter (fun (roomName, _) -> List.contains roomName seen)
@@ -1021,9 +794,8 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                 }
                 : RoomSighting))
             |> Map.ofList
-        // Every creep we own that is not still gestating, in the engine's
-        // own order — whose each of these is this tick is
-        // `World.creepColonies`' answer (ADR 0047 decision 2).
+        // Every creep we own that is not still gestating, in the engine's own
+        // order.
         Creeps =
             standing
             |> List.map (fun c ->
@@ -1036,26 +808,15 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                             Fatigue = c.fatigue
                             Hits = { Hits = c.hits; HitsMax = c.hitsMax }
                             Energy = c.store.getUsedCapacity (resourceName Energy)
-                            // The season's ore beside it (ADR 0057 decision 3):
-                            // a body carries one resource at a time, and which
-                            // of the two it is holding decides which arm of
-                            // [[withdraw]] and [[refill]] it answers.
                             Thorium = c.store.getUsedCapacity (resourceName Thorium)
-                            // The **whole** store's free room: a creep's store
-                            // is general, so this is the capacity less
-                            // everything aboard and not the energy's own share.
+                            // The whole store's free room: a creep's store is
+                            // general, so this is the capacity less everything
+                            // aboard and not the energy's own share.
                             FreeCapacity = c.store.getFreeCapacity (resourceName Energy)
                             Body =
-                                // The parts still standing, and never the parts
-                                // it was cast with (#270): the engine destroys
-                                // them from the head of the body and leaves
-                                // them in the array reading zero hits. Live, a
-                                // guard whose three Attack parts were gone went
-                                // on being counted as three, so it read as a
-                                // Fighter, kept the Guard its body could not
-                                // perform, and answered ERR_NO_BODYPART every
-                                // tick while the raid it was hired for went on
-                                // untouched.
+                                // The parts still standing, never the parts it
+                                // was cast with: a destroyed part stays in the
+                                // array reading zero hits (#270).
                                 c.body
                                 |> Array.toList
                                 |> List.filter (fun p -> p.hits > 0)
@@ -1071,10 +832,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     }
 
 /// Where every creep of ours stands this tick, for next tick's
-/// `CreepInfo.Moved` (#225). Here and not at the Memory boundary that writes it
-/// because this module is the only code that reads the game's objects: the same
-/// sweep and the same gestating filter `ofGame`'s own `Creeps` uses, so the two
-/// ends of that loop cannot part.
+/// `CreepInfo.Moved`. Here so it shares `ofGame`'s gestating filter.
 let positions () : (string * RoomPos) list =
     objectValues<ICreep> Game.creeps
     |> Array.filter (fun c -> not c.spawning)

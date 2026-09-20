@@ -1,6 +1,6 @@
-/// The Resolver: arbitrated movement (ADR 0001). Prices each mover's step,
+/// The Resolver: arbitrated movement (ADR-0001). Prices each mover's step,
 /// matches steps to tiles so two bodies never claim one, and returns the move
-/// Intents with the Verdicts explaining them (ADR 0009).
+/// Intents with the Verdicts explaining them.
 [<AutoOpen>]
 module Fabot.Core.Decide.Resolver
 
@@ -10,69 +10,19 @@ open Fabot.Core.Types
 /// Creeps with no Task rank below every task in arbitration.
 let private idleRank = System.Int32.MaxValue
 
-/// Register one creep's Move Intent — every creep gets one (ADR 0001). A creep
-/// travelling toward its Work Area wants exactly its next path step; one
-/// already inside is force-registered "stay put, displaceable within the Work
-/// Area"; one with no Task, or no way to reach its area, is parked: stay put,
-/// displaceable to any adjacent walkable tile. The displacement tiles are its
-/// own room's, the Resolver arbitrating each projected room by itself (ADR
-/// 0041's Consequences). **Every candidate list is the head it asked for and a
-/// tail after it** (#219). A traveller heads its step and tails the ground that
-/// lies beside both it and that step — a sidestep around the tile it wanted. A
-/// creep inside its area heads its own tile, then the area's neighbours, then
-/// the ground outside it. Head and tail are read differently by the arbitration
-/// below — the head is what the score pays a creep's whole weight for, a tail
-/// is a detour worth the least positive thing — so the order is the whole of
-/// the preference. Without a tail a creep whose one candidate is held stands
-/// still for as long as that body does; it is a sidestep and never a retreat,
-/// which is the half ADR 0008 keeps. One tile is never a candidate: the creep's
-/// own, when that tile is a Seam (#142). The ring is no room's ground (ADR
-/// 0036) and a creep that ends its tick on it is moved out of the room again,
-/// so "stay put" there is a bounce across the border every other tick. The Task
-/// goes to `stepToward` beside the area, and that is what gives a creep matched
-/// across a border somewhere to walk (#142): its Work Area is empty here by
-/// construction (ADR 0041), so without the Task it would park on a Task it was
-/// priced for and never move. A [[guard]]'s area is the one that is *not* empty
-/// across that border — it is the raided room's ring, filed under that room (ADR
-/// 0056) — and it crosses through the same seam all the same, the Task naming
-/// the room the step is aimed at.
-///
-/// **A body with no Task parks off the [[idle ground]]** (`Atlas.idleGroundIn`;
-/// #241, widening ADR 0022 from the Layout to the mover, and #268 widening the
-/// mover's set past the Layout's). The Seats and the Upgrade Work Area are the
-/// tiles the colony works *from*, and an idle body standing on one costs
-/// exactly what a clustered structure there would: the tile. W13S28's north
-/// pocket is eight tiles of Upgrade Work Area with the [[buffer]] container
-/// inside it, so its five refill tiles are working ground to the last one; two
-/// idle upgraders parked on them for 190 ticks and the hauler carrying the
-/// energy that would have un-idled them never got in — the buffer stayed empty
-/// because the bodies waiting on it were standing where its feed had to stand.
-/// The [[storage]]'s and the [[refill cluster]]'s standing tiles jam the same
-/// way and are outside ADR 0022's set, which is why the mover reads a set of
-/// its own: "where standing idle blocks somebody" is a fact about traffic and
-/// is strictly wider than "where work happens" (#268).
-/// So an idle body's head is the first step off that ground, and its own tile
-/// falls into the tail behind it: where there is nowhere off the ground to go,
-/// it parks exactly as before. Two things ride on that head. The goal set is
-/// taken less this tick's Reach, as every tasked candidate already is (ADR
-/// 0033) — a [[work-heavy body]] has no Flee, so a step off a safe pocket into
-/// an attacker is one nothing walks back — and the tail is ordered off the
-/// ground first, because a body shoved aside off the ground and re-housed onto
-/// it is a body that steps off again next tick, which is the very swap #241
-/// was opened about. The rule is the idle body's alone — a body with a Task it
-/// cannot reach parks on the Task's own rank and keeps its tile, because it is
-/// not the ground it is standing on that is stopping it.
-///
-/// **A body crossing for a room it cannot see keeps crossing** (#151). The
-/// vision grace holds a creep's assignment while its target's room is dark, and
-/// a held assignment whose Task left the pool with the vision reaches the mover
-/// as `crossing`: the room the target was last seen in, and nothing else about
-/// it. That is enough to walk — the step is toward the near side of a Seam,
-/// which is border layer and memoised terrain (`Atlas.stepTowardRoom`) — and it
-/// is the whole reason the grace is worth having: a body that stops walking
-/// arrives no sooner than the one that turned round, and it is its own arrival
-/// that ends the darkness. It pushes at `idleRank`, because the Task it is
-/// walking for is in no pool to be priced against the ones that are.
+/// Register one creep's Move Intent — every creep gets one: a traveller heads
+/// its next step and tails a sidestep, an arrived body heads its own tile and
+/// tails its area's neighbours then the ground outside, an idle body heads the
+/// first step off the idle ground and tails its own tile, and a body with a
+/// Task it cannot reach is parked on the Task's rank. The order is the whole
+/// of the preference. One tile is never a candidate: the creep's own when it
+/// is a Seam (#142), since a creep ending its tick on the ring is moved out of
+/// the room again. The Task goes to `stepToward` beside the area, which is
+/// what gives a creep matched across a border somewhere to walk. A body
+/// crossing for a room it cannot see keeps crossing (#151): the vision grace
+/// hands the mover the room its target was last seen in and nothing else,
+/// which is enough for `Atlas.stepTowardRoom`, and it is its own arrival that
+/// ends the darkness.
 let private moveIntentFor
     (rankOf: Task -> int)
     (idleGround: string -> Set<Pos> * Set<RoomPos>)
@@ -83,9 +33,8 @@ let private moveIntentFor
     (task: Task option)
     (crossing: string option)
     : MoveIntent =
-    // The room the creep stands in and the only room its candidates are
-    // tiles of (#145): it rides on the tile now (ADR 0052 decision 2)
-    // rather than beside it as a field of its own.
+    // The room the creep stands in and the only room its candidates are tiles
+    // of (#145).
     let room = at.Room
     let pos = RoomPos.pos at
     let here = RoomPos.at room
@@ -98,10 +47,8 @@ let private moveIntentFor
 
     // Every branch below decides three things and no more: the rank it pushes
     // at, the tiles it will accept in the order it wants them tried, and the
-    // Work Area the arbitration charges a push out of (#267). Which body, which
-    // tile, and the room every candidate is stamped with (#145) are the same in
-    // all of them, so they are stated here once — a branch cannot forget the
-    // stamp.
+    // Work Area the arbitration charges a push out of. The rest is stated here
+    // once, so a branch cannot forget the room stamp.
     let intent rank (candidates: Pos list) area =
         {
             Creep = creep
@@ -118,12 +65,11 @@ let private moveIntentFor
 
     // The detours behind a step: the ground beside this creep that also lies
     // beside the step it asked for — a way *around* the tile it wanted and
-    // never a way back down the lane it came up. Both halves are load-bearing.
-    // Without the tail a creep whose one candidate is held by a body that
-    // cannot move stands still for as long as that body does; with the whole
-    // neighbourhood in it, a traveller queued behind a merely fatigued creep
-    // would back away and return every other tick, and ADR 0008's answer —
-    // wait in place — is the right one.
+    // never a way back down the lane it came up. Without the tail a creep
+    // whose one candidate is held by a body that cannot move stands still for
+    // as long as that body does; with the whole neighbourhood in it, a
+    // traveller queued behind a merely fatigued creep would back away and
+    // return every other tick.
     let detour step =
         if onSeam then
             beside |> List.filter ((<>) step)
@@ -133,18 +79,13 @@ let private moveIntentFor
 
     // A body that has not arrived: the step it asked for, the ways around it,
     // and no Work Area at all — it is standing outside the one it is walking
-    // to, so nothing it is pushed off is work (#267). `parked`'s sibling, and
-    // the same reason for existing: a rule two branches each have to remember
-    // is a rule one of them can forget.
+    // to, so nothing it is pushed off is work.
     let travelling rank step =
         intent rank (step :: detour step) Set.empty
 
     // The graced holder's crossing (#151), asked before the Task branches
-    // because it is the one body with neither: its Task left the pool with its
-    // target's room's vision, so there is nothing to price and nothing to act
-    // on, and the room name is the whole of what the mover was handed. No Seam
-    // to that room — it is not next door — and it falls through to the idle
-    // rule below, which is what it is until the vision comes back. Which chain
+    // because it is the one body with neither. No Seam to that room — it is
+    // not next door — and it falls through to the idle rule below. Which chain
     // it crosses on is the compass's and not the price's, so where the room is
     // reachable round either of two corners the grace can turn a creep at the
     // border and the returning vision turn it back (#288, #297).
@@ -155,32 +96,27 @@ let private moveIntentFor
 
     match crossingStep, task with
     | Some step, _ ->
-        // Walking, and toward a room it cannot even see, so it pushes at the
-        // idle rank: the Task it walks for is in no pool to be priced against
-        // the ones that are.
+        // Walking toward a room it cannot even see, so it pushes at the idle
+        // rank.
         travelling idleRank step
     | None, None ->
-        // The room's [[idle ground]] and the ground just off it: any way off runs
-        // through one of those tiles, so the nearest of them is the nearest
-        // standing room there is outside the colony's workplaces and the lanes
-        // that feed them, and the goal set stays the perimeter rather than the
-        // whole room.
+        // The room's idle ground and the ground just off it: any way off runs
+        // through one of those tiles, so the goal set stays the perimeter
+        // rather than the whole room.
         let ground, offGround = idleGround room
 
-        // The tail, ordered off the idle ground first — the same job the
-        // other two branches give their own tails. `arbitrate` re-houses a
+        // The tail, ordered off the idle ground first: `arbitrate` re-houses a
         // displaced body on the first free tile of its list, so an unordered
         // tail puts a body shoved off the ground straight back onto it, and
-        // the two idle bodies trade the one tile off the ground every tick.
+        // two idle bodies trade the one tile off the ground every tick.
         let off, on = beside |> List.partition (fun tile -> not (Set.contains tile ground))
 
         let tail = staying @ off @ on
 
-        // The way off, less this tick's Reach (ADR 0033) — the subtraction
-        // `areaFor` makes below, made here too because this is the branch it
-        // is hardest on: ADR 0033 gives a [[work-heavy body]] no Flee, so a
-        // step out of a safe pocket into an attacker is one nothing walks it
-        // back from. Nowhere safe off the ground is nowhere to go: it parks.
+        // The way off, less this tick's Reach — the subtraction `areaFor`
+        // makes below, made here too because a work-heavy body has no Flee,
+        // so a step out of a safe pocket into an attacker is one nothing walks
+        // it back from. Nowhere safe off the ground is nowhere to go: it parks.
         let stepOff =
             if Set.contains pos ground then
                 let reach = Threats.reachIn threats room
@@ -192,9 +128,8 @@ let private moveIntentFor
             else
                 None
 
-        // A body with no Task is working from nowhere, which is the whole of
-        // #241's rule: the ground it stands on is somebody else's to work from,
-        // and shoving it off costs the chain nothing (#267).
+        // A body with no Task is working from nowhere: shoving it off costs
+        // the chain nothing.
         intent
             idleRank
             (match stepOff with
@@ -202,10 +137,10 @@ let private moveIntentFor
              | None -> tail)
             Set.empty
     | None, Some task ->
-        // The area less this tick's Reach (ADR 0033): a creep works from the
-        // safe half of its Work Area rather than abandoning the Task because
-        // one corner is hot, and its steps go nowhere else. Read against the
-        // set the Atlas already holds rather than a narrowed copy of it.
+        // The area less this tick's Reach: a creep works from the safe half of
+        // its Work Area rather than abandoning the Task because one corner is
+        // hot. Read against the set the Atlas already holds rather than a
+        // narrowed copy of it.
         let area = areaFor threats atlas creep task
 
         if Set.contains (here pos) area then
@@ -214,49 +149,25 @@ let private moveIntentFor
 
             // The one body that has arrived: the tiles it may be shuffled
             // between for nothing, and the border the arbitration charges for
-            // pushing it over (#267). The area less this tick's Reach, the same
-            // set the candidates were partitioned on — a tile the Reach took is
-            // not somewhere this body is working from.
+            // pushing it over — the area less this tick's Reach, the same set
+            // the candidates were partitioned on.
             intent (rankOf task) (pos :: (inside @ outside)) area
         else
             match stepToward atlas creep task area |> Option.map RoomPos.pos with
             | Some step -> travelling (rankOf task) step
             | None -> parked (rankOf task)
 
-/// The push a rank carries into the arbitration's arithmetic. `Rank` stays the
-/// fold's deterministic sort key below, and this is the second reading the
-/// augmenting search needs: a *weight*, so a chain seating two bodies on the
-/// steps they asked for can outweigh one body pushed off its own. Positive and
-/// never rising with rank, so the ladder's order carries over, and `idleRank`
-/// lands on the smallest weight there is rather than none: a body with no Task
-/// pushes with something, or a crowd of idle bodies would be a wall no
-/// traveller could walk into. The ladder's rungs are divided back out,
-/// **rounding to the tier** (ADR 0052 decision 6): a [[priority]] the Planner
-/// stepped a rung inside its tier is a claim about which of two Tasks a creep
-/// should take and never about how hard it should push through a corridor.
-///
-/// The rounding is to the **nearest** tier, and it was one rung wide until #237
-/// — the ceiling slid by a single `priorityStep`, which was every step that
-/// existed when it was written. A rung is not the only step any more: a full
-/// source container's Withdraw steps two (#216 R5) and a rescued Repair steps
-/// two inside Surplus (#284), and both of those rounded *past* their own tier
-/// and pushed a whole weight harder than the tier they belong to — in a
-/// corridor, the body holding a full container's Withdraw shoving aside the one
-/// holding the spawn's Refill. Sliding by half a tier instead makes the window
-/// one whole tier wide and centred on it, so every rung the ladder admits lands
-/// on its own tier's weight, and no tier's weight moves — the tiers themselves
-/// sit on the grid's multiples either way.
-///
-/// What the window asks of the ladder in return is `Pool.tierRungs`' own rule,
-/// and the arithmetic it is stated against is here: a tier owns the ranks from
-/// `tierRungs / 2` above it to `tierRungs / 2 - 1` below, a tie going to the
-/// deeper tier. Every rung steps a Task **up**, so a rung may be half a tier at
-/// the most; `Pool.Rung` is the vocabulary that keeps a new one from being
-/// written without this line being checked against it.
-///
-/// Exported for the tests that walk it (#237): one unit of push weight is one
-/// whole tier, which ADR 0001's eviction price reads, and the rungs in between
-/// are the Matcher's business alone.
+/// The push a rank carries into the arbitration's arithmetic: a *weight*, so a
+/// chain seating two bodies on the steps they asked for can outweigh one body
+/// pushed off its own. Positive and never rising with rank, and `idleRank`
+/// lands on the smallest weight rather than none, or a crowd of idle bodies
+/// would be a wall no traveller could walk into. The ladder's rungs are divided
+/// back out, rounding to the **nearest** tier (#237): a rung is a claim about
+/// which of two Tasks a creep should take, never about how hard it pushes, and
+/// a two-rung step rounded past its own tier when the window was one rung
+/// wide. A tier owns the ranks from `tierRungs / 2` above it to
+/// `tierRungs / 2 - 1` below, a tie going to the deeper tier, so a rung may be
+/// half a tier at the most (`Pool.Rung`). Exported for the tests that walk it.
 let weightOfRank (rank: int) : int =
     max 1 (ceilDiv (priorityOfTier Stock - rank - tierRungs / 2) tierRungs + 2)
 
@@ -273,49 +184,15 @@ type private Matching =
     }
 
 /// Resolver core: the room's Move Intents matched onto its tiles by a weighted
-/// augmenting search (#219). The algorithm is sy-harabi's traffic manager, read
-/// and rewritten rather than linked — that library is unlicensed and issues the
-/// engine's moves itself, which ADR 0001 and ADR 0009 each refuse. What is
-/// deliberately not taken from it: its hash-shuffled candidate order, because
-/// every tie in this bot falls to the lowest x then y; its cost-matrix
-/// threshold, because a crowd is priced here and never made impassable (ADR
-/// 0008); and its free-tiles-first candidate order, which is incompatible with
-/// the head-and-tail list beside it. Preference order costs nil: a room's pass
-/// is O(creeps x 8). The state starts as the identity — every creep holds the
-/// tile it stands on — and the intents are offered one at a time in a
-/// deterministic order: travellers before stayers (a stayer settled first walls
-/// off a traveller's only path), then by rank, then by name. A creep already
-/// holding its first candidate is left where it is, and so is one an earlier
-/// chain has already shuffled to another tile of the area it works from
-/// (#267); any other is lifted off its tile and searched for an augmenting
-/// path. A path is a chain of displacements ending on a free tile, and its
-/// `score` is the chain's **net** priority: a
-/// creep landing on the candidate it asked for first adds its rank's whole
-/// weight, the chain's initiator adds the smallest weight there is for landing
-/// on a tail instead, a creep merely shuffled out of the way adds nothing, and
-/// a creep pushed off a step *it* had asked for subtracts its own weight. A
-/// creep pushed off a tile it merely stands on costs nothing, which is ADR
-/// 0001's essential rule as arithmetic. Only a strictly positive chain is
+/// augmenting search — sy-harabi's traffic manager, read and rewritten rather
+/// than linked (unlicensed, and it issues the engine's moves itself), without
+/// its hash-shuffled candidate order (every tie here falls to the lowest x then
+/// y), its cost-matrix threshold (a crowd is priced, never impassable) or its
+/// free-tiles-first order (incompatible with the head-and-tail list). A room's
+/// pass is O(creeps x 8). The intents are offered in a deterministic order:
+/// travellers before stayers (a stayer settled first walls off a traveller's
+/// only path), then by rank, then by name. Only a strictly positive chain is
 /// taken, and dropping the Map the search returned is the whole rollback.
-///
-/// **Yielding is a move inside the area, and eviction from it is priced**
-/// (#267). "Merely stands on" was read off the candidate list — a body whose
-/// head is its own tile asked for nothing and so was free to push anywhere —
-/// and that reading gave away the one thing ADR 0001 was written to protect:
-/// an arrived body could be shoved clean out of its Work Area for nothing, and
-/// walked back in next tick at the same price, which in W13S28's Upgrade
-/// pocket was a traveller and an upgrader trading the mouth every tick for as
-/// long as the scan ran. So a displaced body's landing is read against the
-/// area it arrived in (`MoveIntent.Area`): inside it the shuffle is free, as
-/// this decision's rule requires, and outside it the chain pays that body's
-/// rank's weight and the sidestep it is priced against. A body with no area is
-/// unchanged — the free shuffle it always was. The price is only half of it:
-/// the fold must also stop *reopening* a body it has already shuffled inside
-/// its own area, or that body re-initiates and is paid its rank's whole weight
-/// for landing back on the tile it never chose to leave, and three of those
-/// phantom gains in one chain buy the very eviction this priced — the same two
-/// bodies trading the same mouth for ever on a pocket whose free tile is
-/// merely not adjacent.
 let private arbitrate
     (occupants: Map<RoomPos, string>)
     (blocked: Set<RoomPos>)
@@ -344,34 +221,13 @@ let private arbitrate
             }
         | None -> m
 
-    // What a creep landing on `tile` is worth to the chain. A tail tile is
-    // worth the smallest weight there is, and only to the creep the search
-    // started from: that creep asked to move and could not have the tile it
-    // asked for, and stepping aside is what empties a lane (#219). For a body
-    // the chain is shuffling out of somebody's way it is worth nothing —
-    // unless the tile lies outside the Work Area it had arrived in, where it
-    // is worth *minus* its rank's weight and the sidestep above (#267). ADR
-    // 0001's rule is that a creep with slack yields, and the slack a working
-    // body has is its own area: pushed to another of its tiles it goes on
-    // working and the chain owes it nothing, pushed off the area it stops
-    // working and the chain pays for that. The charge is levied here, on the
-    // landing, because that is where the search knows where the body ended up;
-    // `cost` below is charged on the push, where it does not. A body with no
-    // area — a traveller, a parked or idle one — is landing nowhere it was
-    // working, so it is the free shuffle this rule leaves exactly as it was.
-    //
-    // The sidestep is why the charge is the weight **and one**, and it is not a
-    // fudge: a chain that ends with its initiator stepping aside onto a tail
-    // scores exactly 1, so an eviction priced at the occupant's bare weight
-    // makes taking a body off its work worth the same as walking round it as
-    // soon as the arriving body is one tier up the ladder — one tier and never
-    // one rung, `weightOfRank` above dividing the ladder's rungs back out, so
-    // one unit of push weight is one whole tier. Live that reads as the
-    // [[buffer]]'s own hauler evicted from the tile it feeds from by the sixth
-    // upgrader walking into a full pocket — the ring #241 opened on, the
-    // served displacing the server, arrived at through eviction instead of
-    // through parking. So a body is taken off its work only by a chain worth
-    // strictly more than the sidestep that is the alternative to it.
+    // What a creep landing on `tile` is worth to the chain. The eviction
+    // charge is levied here, on the landing, because that is where the search
+    // knows where the body ended up; `cost` below is charged on the push. It
+    // is the weight **and one**: a chain that ends with its initiator stepping
+    // aside onto a tail scores exactly 1, so at the bare weight an eviction
+    // would be worth the same as walking round as soon as the arriving body is
+    // one tier up.
     let gain initiator (intent: MoveIntent) tile =
         if headOf intent = Some tile then
             weightOfRank intent.Rank
@@ -458,15 +314,11 @@ let private arbitrate
                 |> Map.ofList
         }
 
-    // Whether an intent has nothing left to ask for: it is holding the tile it
-    // asked for, or — the arrived body an earlier chain has already shuffled —
-    // it is holding another tile of the area it works from. The second half is
-    // the fold's side of #267's rule. A yield inside the area is finished
-    // business, and an arrived body that re-initiated after one would collect
-    // its rank's whole weight for being put back on the tile it never chose to
-    // leave: three such phantom gains in one chain buy the eviction this
-    // ticket prices at the weight and the sidestep, which is the two-cycle
-    // surviving its own fix on a pocket with a free tile that is not adjacent.
+    // Whether an intent has nothing left to ask for: it holds the tile it
+    // asked for, or it is an arrived body an earlier chain shuffled within its
+    // own area. Re-initiating the second would collect its rank's whole weight
+    // for being put back on a tile it never chose to leave, and three such
+    // phantom gains in one chain buy the very eviction `gain` prices.
     let asked (intent: MoveIntent) (m: Matching) =
         let held = Map.tryFind intent.Creep m.Tile
 
@@ -518,25 +370,23 @@ type private RoomPass =
         /// candidate list — a Move Intent's candidates are never empty.
         Preferences: Map<string, RoomPos>
         /// The tiles no intent in this pass may be settled onto and no
-        /// chain may run through: the fatigued creeps' (ADR 0008) and the
-        /// [[foreign bodies]]' that nobody in the fold holds (#220).
+        /// chain may run through: the fatigued creeps' and the foreign
+        /// bodies' that nobody in the fold holds (#220).
         Blocked: Set<RoomPos>
         /// Who stands where at tick start.
         Occupants: Map<RoomPos, string>
     }
 
 /// Resolver, first half: one colony's Move Intents, unarbitrated. Every rested
-/// creep the Atlas places registers one (ADR 0001); a fatigued creep registers
-/// none — the engine would answer its move with ERR_TIRED — and its tile is a
-/// wall for the tick, so nobody plans a step through it (ADR 0008). Takes the
-/// tick's assigned Task per creep as data; a creep absent from the map is idle,
-/// unless it is in `crossings` — the vision grace's holders and the room each
-/// is still walking toward (#151), which is the one assignment that reaches
-/// here without a Task because the Task left the pool with its room's vision.
-/// Rerouted is settled here rather than in the pass, because it is the one
-/// movement Verdict the arbitration does not answer: it compares this creep's
-/// priced first step against the step the same body would take were no tile
-/// occupied, which is a second flood on this colony's Atlas.
+/// creep the Atlas places registers one; a fatigued creep registers none — the
+/// engine would answer its move with ERR_TIRED — and its tile is a wall for the
+/// tick (ADR-0008). Takes the tick's assigned Task per creep as data; a creep
+/// absent from the map is idle, unless it is in `crossings` — the vision
+/// grace's holders and the room each is still walking toward (#151). Rerouted
+/// is settled here rather than in the pass, because it is the one movement
+/// Verdict the arbitration does not answer: it compares this creep's priced
+/// first step against the step the same body would take were no tile occupied,
+/// which is a second flood on this colony's Atlas.
 let movementOf
     (view: ColonyView)
     atlas
@@ -547,9 +397,8 @@ let movementOf
     (verbose: Set<string>)
     : Movement =
     // The push each assigned Task carries into arbitration is its own pooled
-    // [[priority]] (ADR 0052 decision 6), read off the pool rather than
-    // re-derived: the mover and the Matcher order the colony's work by one
-    // number or they order it by two.
+    // priority, read off the pool rather than re-derived: the mover and the
+    // Matcher order the colony's work by one number or they order it by two.
     let priorities = pool |> List.map (fun p -> taskId p.Task, p.Priority) |> Map.ofList
 
     let priorityOf task =
@@ -562,19 +411,18 @@ let movementOf
 
     let placed = Atlas.placedCreeps atlas
 
-    // The ground an idle body steps off (#241, widened by #268), and the ring
-    // of ground just outside it that any step off has to land on — one pair per
-    // room some body of ours idles in, and none at all for a tick where every
-    // body has a Task, which is the tick that must pay nothing for this rule.
-    // `idleGroundIn` and not `workingGroundIn`: the [[working ground]] is the
-    // Layout's question and this is the mover's, and the two sets part company
-    // at the [[storage]]'s and the [[refill cluster]]'s standing tiles (#268).
+    // The ground an idle body steps off, and the ring of ground just outside
+    // it that any step off has to land on — one pair per room some body of
+    // ours idles in, and none at all for a tick where every body has a Task,
+    // which is the tick that must pay nothing for this rule. `idleGroundIn`
+    // and not `workingGroundIn`: the working ground is the Layout's question
+    // and this is the mover's, and the two sets part company at the Storage's
+    // and the refill cluster's standing tiles (#268).
     let idleGrounds =
         placed
         |> List.filter (fun (name, _) ->
             not (Map.containsKey name assigned)
-            // A graced holder is walking a crossing, not idling (#151): it
-            // steps off nothing and it is not the [[idle ground]]'s problem.
+            // A graced holder is walking a crossing, not idling (#151).
             && not (Map.containsKey name crossings)
             && not (Set.contains name tired))
         |> List.map (fun (_, at) -> at.Room)
@@ -641,14 +489,12 @@ let movementOf
 /// standing in it, whichever colony registered its intent (#220) — a room two
 /// colonies work is one room, and half its traffic arbitrated against the other
 /// half read as empty is how a body ends up claiming a tile the engine will
-/// never let it into. Once per room, and never across two (#145): arbitrated
-/// movement is a room's (ADR 0001, ADR 0008), and ADR 0041's Consequences keep
-/// it so — geometry crosses the Seam and arbitration does not. The tiles keying
-/// each room's occupants, walls and intents carry the room they are in (ADR
-/// 0052 decision 2), or two creeps on one coordinate of two rooms would
-/// collapse into one occupant. What is *not* arbitrated is the border tile: two
-/// creeps aiming at one exit from its two sides are never checked against each
-/// other, which ADR 0041 accepts in as many words. What crosses the Seam is the
+/// never let it into. Once per room, and never across two (#145): geometry
+/// crosses the Seam and arbitration does not, so the tiles keying each room's
+/// occupants, walls and intents carry the room they are in, or two creeps on
+/// one coordinate of two rooms would collapse into one occupant. What is *not*
+/// arbitrated is the border tile: two creeps aiming at one exit from its two
+/// sides are never checked against each other. What crosses the Seam is the
 /// *destination* (#142): a creep matched to an outpost's Task is arbitrated at
 /// home over a home tile, and the next tick that room's pass walks it off the
 /// ring onto its own floor.

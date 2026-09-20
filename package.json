@@ -10,7 +10,8 @@
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "profile": "node scripts/profile.mjs",
     "wire": "npm run build:fable --silent && node scripts/wire-check.mjs",
-    "test": "dotnet test && npm run wire --silent",
+    "adr-check": "bash scripts/adr-check.sh",
+    "test": "npm run adr-check --silent && dotnet test && npm run wire --silent",
     "deploy": "npm run build && npm run upload",
     "capture-room": "node --env-file-if-exists=.env scripts/capture-room.mjs"
   },

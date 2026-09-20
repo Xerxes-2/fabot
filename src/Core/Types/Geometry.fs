@@ -1,16 +1,15 @@
 /// Position and distance. `Pos` is a tile of no particular room and `RoomPos`
-/// the same tile once it is named (ADR 0041), plus the room-name arithmetic
-/// that walks the world grid.
+/// the same tile once it is named, plus the room-name arithmetic that walks
+/// the world grid.
 [<AutoOpen>]
 module Fabot.Core.Types.Geometry
 
 /// A tile of a **named** room: the coordinate a value carries once it leaves
-/// the grid it indexes (ADR 0052 decision 2). Two rooms hold the same
-/// fifty-by-fifty coordinates, so a bare `Pos` handed between functions is
-/// joined to a room by convention alone — the convention that produced a
-/// phantom [[post]] and a hostile in an [[outpost]] measured at range 0 from
-/// home. Declared **before** `Pos` and never after it: F# resolves a bare `.X`
-/// on an un-annotated value to the *last* record type declaring that field.
+/// the grid it indexes (ADR-0052). Two rooms hold the same fifty-by-fifty
+/// coordinates, so a bare `Pos` handed between functions is joined to a room
+/// by convention alone. Declared **before** `Pos` and never after it: F#
+/// resolves a bare `.X` on an un-annotated value to the *last* record type
+/// declaring that field.
 [<CustomEquality; CustomComparison>]
 type RoomPos =
     {
@@ -48,9 +47,9 @@ type RoomPos =
                 else 0
             | _ -> 1
 
-/// A tile coordinate inside a room. Kept as the **grid** coordinate (ADR 0052
-/// decision 2): a key of `RoomLayer.Terrain`, of `Obstacles`, of the flood
-/// arrays and of every Seat, Reach and Work-Area grid the Atlas lays per room.
+/// A tile coordinate inside a room. Kept as the **grid** coordinate: a key of
+/// `RoomLayer.Terrain`, of `Obstacles`, of the flood arrays and of every Seat,
+/// Reach and Work-Area grid the Atlas lays per room.
 [<CustomEquality; CustomComparison>]
 type Pos =
     {
@@ -73,7 +72,7 @@ type Pos =
     interface System.IComparable with
         /// **X then Y**, which is the field order the record's default
         /// comparison used and which every "ties by (X, Y) order" rule in the
-        /// colony rests on (ADR 0011, ADR 0042, #244).
+        /// colony rests on.
         member this.CompareTo other =
             match other with
             | :? Pos as that ->
@@ -86,15 +85,11 @@ type Pos =
 
 /// The grid index of a tile, and its inverse — one room's fifty-by-fifty laid
 /// out as `x * roomSide + y`. This is the stride every flat per-room array in
-/// the colony is indexed by: the flood's distance, weight and price arrays
-/// (`Grid`), the Atlas's Seat, Reach and Work-Area grids, and the terrain grid
-/// the projection carries (`TerrainGrid`). It lives here, beside `Pos` and
-/// ahead of all of them, because the day two of those arrays disagreed about
-/// the stride they would index each other's tiles — and `Pos.GetHashCode` is
-/// this same expression, which is what makes it injective over a room.
+/// the colony is indexed by (`Grid`, the Atlas's grids, `TerrainGrid`), and
+/// `Pos.GetHashCode` is this same expression, which is what makes it
+/// injective over a room.
 ///
-/// `inline`, all four: these are the innermost expressions of the tick, and a
-/// call per grid read is what the flat arrays were bought to avoid.
+/// `inline`, all four: these are the innermost expressions of the tick.
 let internal tileCount = Engine.roomSide * Engine.roomSide
 
 let inline internal indexOf (pos: Pos) = pos.X * Engine.roomSide + pos.Y
@@ -109,27 +104,23 @@ let inline internal posAt (index: int) =
 /// flat-array read passes through, because a `Pos` off the grid indexes off
 /// the array: under Fable that reads `undefined`, which a weight comparison
 /// would call walkable and a terrain match would call absent in one case and
-/// crash on in another, while .NET throws outright. A guarded read answers
-/// what `Map.tryFind` answered for the same tile: nothing.
+/// crash on in another, while .NET throws outright.
 let inline internal inGrid (tile: Pos) =
     tile.X >= 0
     && tile.X < Engine.roomSide
     && tile.Y >= 0
     && tile.Y < Engine.roomSide
 
-/// Screeps range: Chebyshev distance between two tiles of **one** room. The
-/// one definition — the Atlas's geometry, the two hostile reflexes and the
-/// Raid log's closest approach all measure with it. Takes grid coordinates;
-/// `RoomPos.range` is the same measure for tiles that carry their own rooms.
+/// Screeps range: Chebyshev distance between two tiles of **one** room.
+/// Takes grid coordinates; `RoomPos.range` is the same measure for tiles
+/// that carry their own rooms.
 let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 
-/// The Chebyshev ball of a tile: every grid coordinate within `radius` of it —
-/// the neighbourhood `range` above is the measure of, written beside the metric
-/// it belongs to rather than open-coded as a double `for` at each of the four
-/// places that wanted one. **Unclamped**: a centre near a room edge yields
-/// coordinates off the grid, and every caller drops those through the
-/// membership test it was applying anyway, so clamping here would quietly
-/// change what a doorstep or a Reach means at a border.
+/// The Chebyshev ball of a tile: every grid coordinate within `radius` of it.
+/// **Unclamped**: a centre near a room edge yields coordinates off the grid,
+/// and every caller drops those through the membership test it was applying
+/// anyway, so clamping here would quietly change what a doorstep or a Reach
+/// means at a border.
 let tilesWithin (radius: int) (center: Pos) : Pos list =
     [
         for x in center.X - radius .. center.X + radius do
@@ -137,17 +128,10 @@ let tilesWithin (radius: int) (center: Pos) : Pos list =
     ]
 
 /// The eight tiles touching this one, in (X, Y) order — the order every answer
-/// derived from them is listed in. Written out rather than generated, this
-/// being the innermost list the Atlas builds. **Unclamped**, like
-/// `tilesWithin`: a tile on a room edge yields coordinates off the grid, and
-/// every caller drops those through the walkability test it was applying
-/// anyway.
-///
-/// It lives here rather than beside the [[atlas]]'s grids because the [[seam]]
-/// needs it too (ADR 0062): a crossing is only a crossing when the landing tile
-/// has one of the far room's ground tiles beside it, and "beside" has to be the
-/// same eight tiles the flood steps through or the band and the price would be
-/// free to disagree about a diagonal.
+/// derived from them is listed in. **Unclamped**, like `tilesWithin`. It lives
+/// here rather than beside the Atlas's grids because the Seam needs it too:
+/// "beside" has to be the same eight tiles the flood steps through or the band
+/// and the price would be free to disagree about a diagonal.
 let internal neighbours (pos: Pos) : Pos list =
     let x = pos.X
     let y = pos.Y
@@ -193,26 +177,23 @@ module RoomPos =
         ||> Set.fold (fun acc tile -> if tile.Room = room then pos tile :: acc else acc)
 
     /// Chebyshev range between two tiles that carry their rooms, and **None**
-    /// across a border (ADR 0052 decision 2). Not a large number and not an
-    /// error: two rooms' coordinate systems are not one metric space, and
-    /// every reader that decided it by accident decided "range 0" (#204).
+    /// across a border. Not a large number and not an error: two rooms'
+    /// coordinate systems are not one metric space, and every reader that decided
+    /// it by accident decided "range 0" (#204).
     let range (a: RoomPos) (b: RoomPos) : int option =
         if a.Room = b.Room then
             Some(range (pos a) (pos b))
         else
             None
 
-/// What a room's **name** says about where the room is, and nothing else it
-/// says: the engine's own grammar, read here so that the two questions the
-/// colony asks of a pair of names — which border they share, and whether they
-/// share one at all — are one subtraction and not two rules (ADR 0041).
+/// What a room's **name** says about where the room is: the engine's own
+/// grammar, read here so that which border two rooms share, and whether they
+/// share one at all, are one subtraction and not two rules.
 module RoomName =
     /// A room's place on the world grid, read off its name — `W12S28` is
     /// (-13, 28). West and North count outward from the origin, so they run
     /// negative (`W n` is x = -n-1, `N n` is y = -n-1) and East and South run
-    /// straight up, which turns "are these two rooms neighbours, and across
-    /// which border" into subtraction. None for a name outside the engine's
-    /// grammar, which is unplaceable geometry like any other (ADR 0004).
+    /// straight up. None for a name outside the engine's grammar.
     let private worldCoordsOf (roomName: string) : (int * int) option =
         let isDigit index =
             index < roomName.Length && roomName.[index] >= '0' && roomName.[index] <= '9'
@@ -265,12 +246,9 @@ module RoomName =
 
     /// The four rooms a name grid puts next to this one, in a fixed order —
     /// north, east, south, west — whatever terrain has to say about them. The
-    /// order is the order the route search *offers* its chains in, and since
-    /// #288 that is all it is: two chains of the same length are not the same
-    /// price, so the choice between them is the caller's walk and no longer
-    /// this list's (`routesBy`). What the fixed order still buys is that a
-    /// search which broke the remaining ties on the heap's whim would offer
-    /// them in a different order on two ticks that read the same world.
+    /// order is the order the route search *offers* its chains in; a search that
+    /// broke the remaining ties on the heap's whim would offer them in a
+    /// different order on two ticks that read the same world.
     let adjacent (roomName: string) : string list =
         match worldCoordsOf roomName with
         | Some(x, y) ->
@@ -286,53 +264,34 @@ module RoomName =
         | Some(hereX, hereY), Some(thereX, thereY) -> Some(thereX - hereX, thereY - hereY)
         | _ -> None
 
-    /// Whether two rooms share a border: exactly one axis apart by one, which
-    /// is the whole of what a [[seam]] can join (ADR 0041). Screeps has no
-    /// diagonal exit, so a room a single axis step away is the only kind a
-    /// creep reaches without crossing a third room — `Atlas.borderPairs` names
-    /// tiles for those four offsets and for no other, so a pair this refuses
-    /// has an empty Seam band by construction. That an empty band once meant an
-    /// unpriceable pair is ADR 0058's business now and no longer this
-    /// predicate's: a walk crosses a **chain** of Seams, so a pair with no band
-    /// of its own may still be joined through the rooms between them, and what
-    /// this answers is one Seam and never the walk. The implication runs
-    /// **one way only**, and the
-    /// difference is load-bearing: this reading is over names, so it can be
-    /// asked of a declaration before any terrain is read; the Seam is over
-    /// tiles, so a bordering pair whose shared column or row the engine walled
-    /// end to end is a neighbour here and has no band there — W12S27's west
-    /// column in `tests/Core.Tests/rooms/` is exactly that, and `AtlasTests`'
-    /// "a walled border is a neighbour with no band" pins it. So this answers
-    /// whether the declaration is *shaped* like one a Seam could join, never
-    /// whether one does. A room is not its own neighbour, and a name outside
-    /// the grammar neighbours nothing.
+    /// Whether two rooms share a border: exactly one axis apart by one. Screeps
+    /// has no diagonal exit, so `Atlas.borderPairs` names tiles for those four
+    /// offsets and no other. The implication runs **one way only**: this reading
+    /// is over names, so it can be asked of a declaration before any terrain is
+    /// read; the Seam is over tiles, so a bordering pair whose shared column the
+    /// engine walled end to end is a neighbour here and has no band there
+    /// (W12S27's west column in `tests/Core.Tests/rooms/`). A room is not its own
+    /// neighbour, and a name outside the grammar neighbours nothing.
     let neighbouring (fromRoom: string) (toRoom: string) : bool =
         offsetOf fromRoom toRoom |> Option.exists (fun (dx, dy) -> abs dx + abs dy = 1)
 
-    /// The fewest [[seam]]s a walk between two rooms could possibly cross: the
-    /// grid distance between the names, one crossing per border (ADR 0058).
-    /// A floor and never the route — terrain can only make a walk longer, and
-    /// only `Atlas.route` says whether one exists at all — but a floor is what
-    /// a hop budget is asked against, and it is answerable off the names
-    /// alone, which is what lets a declaration be judged before any terrain is
-    /// read. Zero for a room and itself. None outside the grammar.
+    /// The fewest Seams a walk between two rooms could possibly cross: the grid
+    /// distance between the names, one crossing per border. A floor and never the
+    /// route — only `Atlas.route` says whether one exists — but answerable off
+    /// the names alone. Zero for a room and itself. None outside the grammar.
     let hopsBetween (fromRoom: string) (toRoom: string) : int option =
         offsetOf fromRoom toRoom |> Option.map (fun (dx, dy) -> abs dx + abs dy)
 
-    /// Every room a walk of the fewest possible hops could pass through, the
-    /// two ends excluded: the interior of the name-grid rectangle the two
-    /// names span (ADR 0058). A room in that rectangle lies on some monotone
-    /// path between them and a room outside it lies on none, so this is the
-    /// exact set — no smaller one covers every shortest chain, and a larger
-    /// one projects a room no shortest walk can use.
+    /// Every room a walk of the fewest possible hops could pass through, the two
+    /// ends excluded: the interior of the name-grid rectangle the two names span
+    /// (ADR-0058). A room in that rectangle lies on some monotone path between
+    /// them and a room outside it lies on none, so this is the exact set.
     ///
-    /// This is what decides which **transit rooms** enter the projection, and
-    /// it is deliberately answered off the names: the route itself needs the
-    /// rooms' terrain, the terrain needs them projected, and the circle is cut
-    /// here, by the one question the names can answer on their own. A detour
-    /// around a walled border therefore lies outside what this projects and is
-    /// not found — the route is `None`, the declaration is refused loudly
-    /// (`ColonyView.Refused`), and widening this set is what would buy it.
+    /// This is what decides which **transit rooms** enter the projection, and it
+    /// is answered off the names because the route needs the rooms' terrain, the
+    /// terrain needs them projected, and the circle is cut here. A detour around
+    /// a walled border therefore lies outside what this projects and is not found
+    /// (`ColonyView.Refused`); widening this set is what would buy it.
     let transitBetween (fromRoom: string) (toRoom: string) : string list =
         match worldCoordsOf fromRoom, worldCoordsOf toRoom with
         | Some(fromX, fromY), Some(toX, toY) ->
@@ -347,31 +306,21 @@ module RoomName =
         | _ -> []
 
     /// **Every** chain of rooms a walk of the fewest possible crossings could
-    /// take, ends included, and an empty list where the hop budget or the
-    /// terrain leaves none (ADR 0058, #288): a breadth-first search over the
-    /// name grid, `linked` deciding which of the four steps out of a room a
-    /// creep can actually take, stopped at `maxHops` crossings.
+    /// take, ends included, and an empty list where the hop budget or the terrain
+    /// leaves none (ADR-0059): a breadth-first search over the name grid,
+    /// `linked` deciding which of the four steps out of a room a creep can take,
+    /// stopped at `maxHops` crossings.
     ///
-    /// `linked` is the caller's because the two askers answer it differently
-    /// and must not: the Atlas reads a Seam band off two rooms' border rings
-    /// (`Atlas.routes`), and a room the projection does not carry is joined to
-    /// nothing — which is what keeps this search inside the rooms
-    /// `transitBetween` put there rather than wandering the sector.
+    /// `linked` is the caller's because the two askers answer it differently:
+    /// the Atlas reads a Seam band off two rooms' border rings (`Atlas.routes`),
+    /// and a room the projection does not carry is joined to nothing — which
+    /// keeps this search inside the rooms `transitBetween` put there.
     ///
-    /// **All of them and not the first**, which is #288's whole correction.
-    /// Breadth first still says how *long* a chain may be — every chain here
-    /// crosses the fewest borders any chain could — but at two hops there is
-    /// more than one such chain and they are not the same walk: an L-shaped
-    /// target is reached round either corner, and the room the walk turns in
-    /// decides how long both legs are (measured at up to +91% on rooms this
-    /// colony works). ADR 0058 decision 1 promised the chain was "a function
-    /// of the world and not of the search" and `adjacent`'s north-east-
-    /// south-west order delivered only the second half of that: deterministic,
-    /// and blind to the terrain it was choosing over. So the choice moves to
-    /// the one reader that can price it — `Atlas.routes`' callers keep the
-    /// cheapest by their own walk — and what the fixed order decides here is
-    /// only the **order** the candidates come in, which is what leaves a tie
-    /// on the price falling the way it always fell.
+    /// All chains and not the first: at two hops there is more than one
+    /// shortest chain and they are not the same walk (measured at up to +91% on
+    /// rooms this colony works). The caller prices them; the fixed order here
+    /// decides only the order the candidates come in, so a tie on the price falls
+    /// the way it always fell.
     let routesBy
         (linked: string -> string -> bool)
         (maxHops: int)
@@ -392,29 +341,20 @@ module RoomName =
                 | _ ->
                     // The chain's length and not its hop count: a chain of
                     // n rooms crosses n-1 borders, and this guards *before*
-                    // the frontier is expanded, so the step about to be taken
-                    // is the one being budgeted for. Every entry of a frontier
-                    // is the same length — a layer is one breadth — so the
-                    // first one answers for all of them.
+                    // the frontier is expanded. Every entry of a frontier
+                    // is the same length, so the first answers for all.
                     let chainLength = List.length (snd (List.head frontier))
 
                     if chainLength > maxHops then
                         []
                     else
-                        // The goal before the frontier is expanded, off one
-                        // `linked` per room where expanding would pay for four
-                        // apiece: all but one declaration in force is a single
-                        // hop, so the goal test is the answer most of the time,
-                        // and it is asked several times a tick by every reader
-                        // of the scan set. A layer that reaches the goal at all
-                        // is the last layer there is — a chain one border
-                        // longer can only lose — so the arrivals are the whole
-                        // answer. Per frontier *entry* and not per room, since
-                        // #288: a room two chains of the same length reach
-                        // stands in the frontier twice and is asked twice, here
-                        // and in the expansion below. What bounds that is
-                        // `maxHops` and nothing else, and at three it is not
-                        // worth a set to dedupe the asking.
+                        // The goal is tested before the frontier is expanded:
+                        // one `linked` per room where expanding pays for four.
+                        // A layer that reaches the goal at all is the last layer
+                        // there is, so the arrivals are the whole answer. Per
+                        // frontier *entry* and not per room: a room two chains
+                        // reach stands in the frontier twice and is asked twice;
+                        // at three hops it is not worth a set to dedupe.
                         let arrived =
                             frontier
                             |> List.choose (fun (room, chain) ->
@@ -426,14 +366,10 @@ module RoomName =
                         match arrived with
                         | _ :: _ -> arrived
                         | [] ->
-                            // A room may enter the frontier under **several**
-                            // chains of the same length, which is exactly the
-                            // tie this search no longer breaks. What it may not
-                            // enter under is a *longer* one, and that is what
-                            // `seen` still forbids: a room reached in an earlier
-                            // layer is never extended into again, so the
-                            // frontier stays one breadth and the chains stay
-                            // simple.
+                            // A room may enter the frontier under **several** chains
+                            // of the same length; what it may not enter under is a
+                            // *longer* one, which `seen` forbids, so the frontier
+                            // stays one breadth and the chains stay simple.
                             let steps =
                                 [
                                     for room, chain in frontier do
@@ -448,21 +384,10 @@ module RoomName =
 
             search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
 
-    /// The first of those chains — the answer this module gave before #288,
-    /// under `adjacent`'s own order. What a reader takes when it has no price to
-    /// choose a chain with; a reader that prices one takes `routesBy` above and
-    /// keeps the cheapest.
-    ///
-    /// **No production caller today, and the doc says so rather than naming a
-    /// reader that has moved.** `Outpost.routable` asked this until ADR 0060
-    /// decision 1 routed both declaration kinds through `Declaration.routable`,
-    /// which asks `routesBy`: "is there a chain" is an empty list and not a
-    /// missing head, and the list is the one that keeps answering that as the
-    /// tie-breaking moves. What holds this binding in place is the contract over
-    /// it — `AtlasSeamTests` pins that the head of `routesBy` is this answer,
-    /// which is the line that goes red if the search's order ever stops being
-    /// the order it documents. Retire it when that contract has a better home,
-    /// not because the last caller left.
+    /// The first of those chains, under `adjacent`'s own order. No production
+    /// caller today: `AtlasSeamTests` pins that the head of `routesBy` is this
+    /// answer, which is what holds the binding in place. Retire it when that
+    /// contract has a better home.
     let routeBy
         (linked: string -> string -> bool)
         (maxHops: int)
@@ -471,42 +396,27 @@ module RoomName =
         : string list option =
         routesBy linked maxHops fromRoom toRoom |> List.tryHead
 
-/// The border two rooms share, as tiles — the half of a [[seam]] that
-/// `RoomName` answers over names alone (ADR 0041). Written here rather than
-/// beside the [[atlas]]'s own grids because two readers ask it and they hold
-/// their terrain differently: the Atlas over the ring grids it lays per tick,
-/// and the scan set over the [[world]]'s own border maps, before any grid
-/// exists (ADR 0058). One definition, so the two cannot disagree about which
-/// pair of rooms a creep can walk between.
-///
-/// Since ADR 0062 a band is a fact about two rings **and the far room's
-/// ground**: the engine puts a body down on the landing tile, and a landing
-/// with no ground beside it is a crossing nothing can walk out of. Both readers
-/// therefore hand in a third predicate, and the world's half is why it reaches
-/// past its border maps into the terrain it already holds for every room a
-/// chain could cross.
+/// The border two rooms share, as tiles — the half of a Seam that `RoomName`
+/// answers over names alone. Written here rather than beside the Atlas's own
+/// grids because two readers ask it and hold their terrain differently: the
+/// Atlas over the ring grids it lays per tick, and the scan set over the
+/// world's own border maps, before any grid exists. A band is a fact about
+/// two rings **and the far room's ground** (`landsOnGround`).
 module Seam =
     /// The far exit row and column of a room — index 49, the outer of the two
-    /// the projection's ground stops short of (ADR 0036).
+    /// the projection's ground stops short of.
     let exitEdge = Engine.roomSide - 1
 
     /// The tile pairs the engine joins across the border two rooms share,
     /// before terrain has a say: this room's exit tile beside the tile a creep
-    /// stepping onto it lands on, the same coordinate on the opposite row or
-    /// column. `offset` is the neighbour's world position minus this room's
-    /// (`RoomName.offsetOf`), so only the four unit steps name a shared border
-    /// — which is the tile half of the rule `RoomName.neighbouring` states over
-    /// the names alone. The four corner tiles are left out of every row and
-    /// column: a corner lies on two borders at once, and the engine makes at
-    /// most one landing.
-    /// The four lists, built once. Each is 47 pairs of records, and the
-    /// callers ask for them per room pair per tick — the band's own derivation
-    /// walks every neighbour of every room in the scan set, and `joinedBy` asks
-    /// again for the price. Rebuilding a constant is what #365 found the keeper
-    /// mask doing, and this is the same shape: nothing about a border depends on
-    /// the tick, so the list is a value and not a computation. Private, so the
-    /// only way to reach one is through the `offset` match below, which is
-    /// where the rule about which offsets name a border lives.
+    /// stepping onto it lands on. `offset` is the neighbour's world position
+    /// minus this room's (`RoomName.offsetOf`), so only the four unit steps name
+    /// a shared border. The four corner tiles are left out: a corner lies on two
+    /// borders at once, and the engine makes at most one landing.
+    /// The four lists are built once: nothing about a border depends on the tick,
+    /// and the callers ask per room pair per tick (#365 found the keeper mask
+    /// rebuilding a constant the same way). Private, so the only way to reach one
+    /// is through the `offset` match below.
     let private alongEdge = [ 1 .. exitEdge - 1 ]
 
     let private northPairs =
@@ -529,38 +439,27 @@ module Seam =
         | 1, 0 -> eastPairs
         | _ -> []
 
-    /// Whether a body the engine puts down on a landing tile has anywhere to
-    /// go: one tile of the far room's own **ground** beside it (ADR 0062).
-    ///
-    /// The border ring is not ground and nothing stands on it (ADR 0036, ADR
-    /// 0041), so a landing with no ground beside it is a tile a body arrives on
-    /// and never leaves — an **orphan**. Until ADR 0062 the band was a fact
-    /// about two rings alone and could not see this, so three readers each
-    /// remembered the far side separately and one of them forgot (#317, #326).
+    /// ADR-0062
+    /// Whether a body the engine puts down on a landing tile has anywhere to go:
+    /// one tile of the far room's own **ground** beside it. The border ring is
+    /// not ground, so a landing with no ground beside it is a tile a body arrives
+    /// on and never leaves.
     ///
     /// `farGround` is the caller's reading of the far room's ground. The two
-    /// readings the **band** is built on are the [[atlas]]'s raw terrain grid
-    /// and the [[world]]'s own terrain map, each with the [[keeper margin]]
-    /// already taken off it and neither carrying a structure — a band is
-    /// geometry, and ADR 0062 decision 2 is why. A third caller asks the same
-    /// question over a stricter grid and is not building a band with it:
-    /// `Atlas.stepTowardRoom` hands it the **walking** grid, roads and
-    /// obstacles and all, because it is the one mover with no far leg to drop a
-    /// built-over landing for it (ADR 0059's exception, #317). This function is
-    /// what makes "beside" one answer across all three; what each reading
-    /// counts as ground is the caller's own. Diagonals count,
-    /// because the engine lets a creep step off its landing tile diagonally,
-    /// which is the same eight tiles `neighbours` gives every flood.
+    /// readings the band is built on are the Atlas's raw terrain grid and the
+    /// world's terrain map, each with the keeper margin taken off and neither
+    /// carrying a structure; `Atlas.stepTowardRoom` hands in the **walking** grid
+    /// instead, being the one mover with no far leg to drop a built-over landing
+    /// for it (#317). Diagonals count, because the engine lets a creep step off
+    /// its landing tile diagonally.
     let landsOnGround (farGround: Pos -> bool) (landing: Pos) : bool =
         neighbours landing |> List.exists farGround
 
     /// The Seam band joining two rooms: the passable exit-tile pairs, each the
     /// first room's border tile beside the tile it lands a creep on in the
     /// second. `nearWalkable` and `farWalkable` are the caller's reading of one
-    /// room's border ring — a tile the ring carries and whose terrain is not
-    /// wall — and `farGround` its reading of the far room's ground, which is
-    /// what says the landing is a tile a body can leave (ADR 0062).
-    /// Deterministic (X, Y) order, total (ADR 0004).
+    /// room's border ring, and `farGround` its reading of the far room's ground.
+    /// Deterministic (X, Y) order, total.
     let bandBy
         (nearWalkable: Pos -> bool)
         (farWalkable: Pos -> bool)
@@ -575,16 +474,10 @@ module Seam =
                 nearWalkable here && farWalkable there && landsOnGround farGround there)
         | None -> []
 
-    /// Whether *any* crossing joins the two rooms — the band's existence
-    /// without the band. What a route search asks at every edge it considers
-    /// (ADR 0058), and it short-circuits on the first passable pair, where
-    /// `bandBy` would build all forty-eight and then be asked if the list is
-    /// empty.
-    ///
-    /// The ring tests run before the ground one, and that ordering is the whole
-    /// of what the third predicate costs: eight lookups are paid only for a
-    /// pair both rings already passed, which on a walled border is none of the
-    /// forty-eight (ADR 0062).
+    /// Whether *any* crossing joins the two rooms — the band's existence without
+    /// the band, short-circuiting on the first passable pair. The ring tests run
+    /// before the ground one: eight lookups are paid only for a pair both rings
+    /// already passed, which on a walled border is none of the forty-eight.
     let joinedBy
         (nearWalkable: Pos -> bool)
         (farWalkable: Pos -> bool)

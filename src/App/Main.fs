@@ -46,116 +46,77 @@ let private pruneDeadCreepMemory (living: Set<string>) =
             if not (Set.contains name living) then
                 emitJsStatement (creepsMemory, name) "delete $0[$1]"
 
-// The census-keyed plan memo (ADR 0017), one per colony and keyed by its home
-// room (ADR 0047): heap state only, carried across ticks in this binding and
-// never written to Memory.
+// The plan memo per colony, keyed by home: heap state only, never in Memory.
 let mutable private planMemos: Map<string, PlanMemo> = Map.empty
 
-// What the world last saw standing in each room (#151), carried across ticks
-// on the heap beside the plan memos and deliberately not into Memory: the
-// grace it feeds is worth 150 ticks of one creep's patience, which is not
-// worth a leaf every tick's `JSON.stringify` pays for. A global reset empties
-// it, and a colony that has forgotten decides exactly as it did before the
-// grace existed — the release it would have held is one it takes.
+// What the world last saw standing in each room, on the heap and not in
+// Memory: the grace it feeds is worth 150 ticks of one creep's patience, not
+// a leaf every tick's `JSON.stringify` pays for. A reset empties it and the
+// colony decides as it did before the grace existed.
 let mutable private sightings: Map<string, RoomSighting> = Map.empty
 
-// The CPU line (ADR 0041), carried across ticks on the heap beside the plan
-// memos: read off Memory only when the heap holds none — a global reset, which
-// every code upload is — and dropped outright when the leaf is gone, a line
-// somebody discarded on purpose (#370). The leaf is still written every tick,
-// one row a tick, unconditionally; what the heap buys is that the hundred rows
-// standing are not decoded and re-encoded to add the one
-// (`ObserveMemory.appendCpu`).
+// The CPU line on the heap: read off Memory only when the heap holds none (a
+// global reset), dropped when the leaf is gone (discarded on purpose). The
+// leaf is still written every tick; the heap saves decoding and re-encoding
+// the hundred standing rows to add one (`ObserveMemory.appendCpu`).
 let mutable private cpuLine: Observe.CpuState option = None
 
-// Which ordered room pairs a Seam band joins (`JoinTable`), carried across
-// ticks on the heap beside the sightings and never emptied: every answer in it
-// is the terrain's, and the one fact about a pair that moves — whether the
-// world holds both rooms this tick — is read ahead of the table on every ask
-// (`World.linkedRecalling`). One table for every reader of every colony. A
-// global reset empties it, and the first tick after one answers every pair as
-// every tick used to.
+// Which ordered room pairs a Seam band joins, on the heap and never emptied:
+// every answer is the terrain's, and the one moving input (whether the world
+// holds both rooms) is read ahead of the table (`World.linkedRecalling`).
 let private joins = JoinTable()
 
-// The Transition log (ADR 0009), carried across ticks on the heap for the CPU
-// line's reason and on the same terms: read off Memory only when the heap
-// holds none or the leaf is gone, folded on the heap, and written back one
-// changed creep at a time (`ObserveMemory.saveChanged`). It was the largest
-// leaf in Memory, decoded and re-encoded whole every tick (#370).
+// The Transition log on the heap, on the CPU line's terms: folded on the
+// heap and written back one changed creep at a time
+// (`ObserveMemory.saveChanged`). It was the largest leaf in Memory.
 let mutable private observeLog: Observe.ObserveState option = None
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
-    // The engine's counter is already running when `loop` is entered, and this
-    // reads how far (#170). Nothing of the bot's has run yet, so this number is
-    // the engine's prelude alone, and it is the first candidate for the ~1.6x
-    // that separates the live line from the local ruler. What is *not* in it is
-    // the Memory parse, the second candidate: `Memory` deserializes on the
-    // first touch of it, which is `loadRaids` below, so the parse is charged to
-    // the `snapshot` phase and a reader attributing the gap must not strike it
-    // off against this column. Every reading below is taken unconditionally, on
-    // every tick: ADR 0041 is measured, not budgeted, and a measurement that
-    // switches itself off is one whose absences a reader has to explain.
+    // The engine's counter is already running when `loop` is entered: this is
+    // the engine's prelude alone. The Memory parse is not in it: `Memory`
+    // deserializes on first touch, which is `loadRaids` below, so the parse is
+    // charged to the `snapshot` phase. Every reading is taken every tick; a
+    // measurement that switches itself off has absences to explain.
     let atEntry = Game.cpu.getUsed ()
-    // The flood counters start the tick at zero (#389), so each colony's
-    // reading below is cumulative from here and `foldCpu` can difference it.
+    // The flood counters start the tick at zero, so each colony's reading
+    // below is cumulative from here and `foldCpu` can difference it.
     Grid.Counters.reset ()
 
-    // The tick's World: every room we declared or can see and every creep we
-    // own, read out of the engine once (ADR 0052 decision 1). Every other line
-    // in this loop works off this record or off Memory.
-    // Read with the previous tick's sightings laid under it (#151), so a room
-    // vision did not answer for this tick still says when it was last looked
-    // into and what stood in it then.
+    // The tick's World, read out of the engine once, with the previous tick's
+    // sightings laid under it.
     let world =
         World.ofGame Tuning.defaults.MaxHops Colony.declared (ObserveMemory.loadPositions ())
         |> World.recalling sightings
 
     sightings <- world.Sightings
 
-    // The colonies that run this tick: a declared home that is ours and holds
-    // a spawn of ours (`Colony.living`, ADR 0047 decision 1), both facts read
-    // off the world's rooms rather than a second sweep of `Game.spawns`.
     let colonies = World.living Colony.declared world
 
-    // Each colony's Raid log is read *before* any view is cut, alone among the
-    // observe channels, because ADR 0043's gate is a condition on which rooms a
-    // colony works at all: a stood-down outpost never enters its projection.
-    // The conclusion is the previous tick's — the last one with the vision to
-    // read a deadline — which is the whole mechanism, the gate's own effect
-    // being to withdraw the creeps that pay for that vision. One read and not
-    // two: a second `loadRaids` after `decide` could answer differently — a
-    // hand-edit through the Memory HTTP API lands between them — and the tick
+    // Each colony's Raid log is read before any view is cut, because the
+    // stand-down gate decides which rooms a colony works at all. One read and
+    // not two: a second `loadRaids` after `decide` could answer differently (a
+    // hand-edit through the Memory HTTP API lands between them) and the tick
     // would be decided against one log and recorded against another.
     let raids =
         colonies
         |> List.map (fun colony -> colony.Home, ObserveMemory.loadRaids colony.Home)
         |> Map.ofList
 
-    // The gate's answer for each colony, derived once from that colony's log:
-    // the scan set, the furniture and the pooled rocks all narrow through it
-    // inside `ColonyView.ofWorld`, and a second derivation would be a second
-    // answer free to disagree. All three of its sets ride in one record — the
-    // rooms withdrawn from, the latched rooms this tick looks into once (#165),
-    // and the rooms somebody else's reservation still stands on (#333) — for
-    // the same reason.
+    // The gate's answer per colony, derived once: a second derivation would
+    // be a second answer free to disagree.
     let gates =
         raids |> Map.map (fun _ log -> Observe.standDown Tuning.defaults world.Time log)
 
     let gateOf home =
         gates |> Map.tryFind home |> Option.defaultValue StandDown.none
 
-    // Every creep this bot owns, filed under the colony that holds it this
-    // tick: the one it was cast by, or the one that has adopted it (ADR 0047
-    // decision 2). Cut once here over every living colony's scan set and handed
-    // to each view — a creep cannot be two colonies' business, or two decisions
-    // would write two Tasks into the one flat `assignments` leaf. An argument
-    // to the view and not a field of the World, because the rule needs the
-    // stand-down gate above, which is Memory's answer and not the world's. The
-    // numbers every colony decides under (ADR 0052 decision 5).
-    // The rooms withdrawn from and not the rooms looked into: a creep is
-    // adopted by the colony whose projection it stands in, and a latched room
-    // the gate takes one look at this tick is projected by nobody (#165).
+    // Every creep filed under the colony that holds it this tick, cut once
+    // and handed to each view: two colonies holding one creep would write two
+    // Tasks into the one flat `assignments` leaf. An argument to the view and
+    // not a field of the World because the rule needs the stand-down gate,
+    // which is Memory's answer. Keyed on the rooms withdrawn from, not the
+    // rooms looked into: a latched room is projected by nobody this tick.
     let holders =
         World.creepColoniesRecalling
             joins
@@ -165,15 +126,10 @@ let loop () =
             (gates |> Map.map (fun _ gate -> gate.Shut))
             world
 
-    // One view per living colony (ADR 0052 decision 1), each cut from the one
-    // world by a pure function in Core: the rooms this colony works, the bodies
-    // it holds, its own bank and controller, and the explicit little it may
-    // borrow of a child's. `ColonyView.ofWorld` owns every rule, and that half
-    // of the shell boundary is under test (`ViewTests`, ADR 0052 decision 8).
-    // The boundary the first projection is differenced against, and the list
-    // the rest are: what stands between the last room and here is the world's
-    // own tail — the sightings, the creep list, the Raid logs — and leaving it
-    // as a named remainder is the same choice `decide`'s remainder gets.
+    // One view per living colony, cut from the one world by `ColonyView.ofWorld`
+    // (under test in `ViewTests`). The reading here is the boundary the first
+    // projection is differenced against; what stands between the last room
+    // and it is the world's own tail (sightings, creep list, Raid logs).
     let atProjects = Game.cpu.getUsed ()
     let mutable projectedAt = []
 
@@ -190,65 +146,48 @@ let loop () =
                     world
                     colony
 
-            // The counter after each colony's projection, exactly as `decide`
-            // reads it after each colony's decision (#370): the `snapshot`
-            // column turned out to be mostly *this* — 7.63 ms of it stood after
-            // the last room was swept, and the projections are what stands
-            // there. Ours to cut, unlike the engine's `find` sweeps.
+            // The counter after each colony's projection, as `decide` reads it
+            // after each decision: the `snapshot` column turned out to be
+            // mostly this (7.63 ms of it stood after the last room was swept,
+            // #370), and it is ours to cut, unlike the engine's `find` sweeps.
             projectedAt <- (colony.Home, Game.cpu.getUsed ()) :: projectedAt
             colony, view)
 
-    // The projection boundary, and the Raid logs' reads ride in this phase
-    // rather than the prelude: the two are one act — the gate decides which
-    // rooms a colony works — and splitting them would price a `find` sweep
-    // against a Memory read. The world's one sweep and every colony's cut of
-    // it are both inside this column (ADR 0047).
+    // The projection boundary. The Raid logs' reads ride in this phase, not
+    // the prelude: the gate and the cut are one act, and splitting them would
+    // price a `find` sweep against a Memory read.
     let atSnapshot = Game.cpu.getUsed ()
-    // The verbose list and the assignments are read once and handed to every
-    // colony: both are flat, keyed by creep name, and a creep is one colony's
-    // business for the tick — so what a colony is handed for a creep it does
-    // not hold is dropped by the Matcher's own fold.
+    // Both flat and keyed by creep name, read once and handed to every colony;
+    // what a colony is handed for a creep it does not hold, the Matcher drops.
     let assignments = loadAssignments ()
     let verbose = ObserveMemory.loadVerbose ()
 
-    // Each colony decides its own tick, with its movement left unarbitrated
-    // (#216 R2b): a room two colonies both work is one room, and half its
-    // traffic arbitrated against the other half read as empty is how a
-    // mother's [[pioneer]] came to claim the child's [[anchor]]'s tile (#220).
-    // One colony re-plans per tick, round-robin by tick (#357). The tick that
-    // re-planned all four at once cost 487 ms of the engine's 500 ms ceiling,
-    // and a re-planning tick averages 209 ms against a mean of 84 — and they
-    // arrive together by construction, because a global reset (every code
-    // upload is one) empties every memo in the same tick.
+    // Each colony decides its own tick with its movement left unarbitrated: a
+    // room two colonies both work is one room, and half its traffic arbitrated
+    // against the other half read as empty is how a mother's pioneer came to
+    // claim the child's anchor's tile (#220).
     //
-    // The turn is `Game.time % count` and not "whoever is stalest", because
-    // the alternative asks this shell to compute a census signature it has no
-    // business knowing (it is the decision layer's own, ADR 0032/0033). A
-    // colony waits at most `count - 1` ticks for its turn, spends them serving
-    // a plan whose reservations are level-blind anyway, and a colony that
-    // needs no re-plan simply passes its turn. One colony alone is always its
-    // own turn, so every one-colony world — the whole suite and the profile
-    // harness — is unchanged.
+    // One colony re-plans per tick, round-robin (#357): the tick that re-planned
+    // all four at once cost 487 ms of the engine's 500, a re-planning tick
+    // averages 209 ms against a mean of 84, and they arrive together because a
+    // global reset empties every memo in the same tick. The turn is
+    // `Game.time % count` and not "whoever is stalest" because the alternative
+    // asks this shell for a census signature that is the decision layer's own.
+    // A colony that needs no re-plan passes its turn; one colony alone is
+    // always its own turn, so a one-colony world is unchanged.
     let turn =
         if List.isEmpty views then
             0
         else
             Game.time % List.length views
 
-    // The decision is **bound** and then tupled, and the turn is a DU
-    // (`ReplanTurn`), because the first shape of this call shipped broken: as
-    // an expression inside the tuple with a `bool` last argument, the turn
-    // arrived as JavaScript `undefined` and `not undefined` is `true`, so
-    // every colony deferred every tick and no layout was planned at all
-    // (#357). `npm run profile` caught it and no test did, which is why the
-    // harness is now a pre-deploy gate and not a convenience.
-    // The counter is read *after* each colony's decision, so the CPU line can
-    // say which colony a spike came out of and not merely that the tick had
-    // one (#370). Cumulative, like every other boundary in this loop: the
-    // differencing is `foldCpu`'s. One `Game.cpu.getUsed` per colony, four
-    // calls on this bot, which is the cheapest reading in the loop and the one
-    // that decides where the next profile is taken — every CPU refusal
-    // recorded so far was measured on the wrong shape.
+    // The decision is bound and then tupled, and the turn is a DU
+    // (`ReplanTurn`), because the first shape shipped broken: as an expression
+    // inside the tuple with a `bool` last argument, the turn arrived as
+    // JavaScript `undefined`, `not undefined` is `true`, and no layout was
+    // planned at all (#357). Only `npm run profile` caught it.
+    // The counter is read after each colony's decision, cumulative, so the CPU
+    // line can say which colony a spike came out of; `foldCpu` differences.
     let decisions =
         views
         |> List.mapi (fun index (colony, view) ->
@@ -258,8 +197,8 @@ let loop () =
 
             let decision = decideUnarbitrated view assignments verbose memo whose
 
-            // And the flood counters at the same boundary (#389): what this
-            // colony's decision flooded, cumulative like the clock beside it.
+            // The flood counters at the same boundary, cumulative like the
+            // clock beside them.
             let flooded: Observe.FloodCounts =
                 {
                     Floods = Grid.Counters.floods
@@ -269,31 +208,23 @@ let loop () =
 
             colony, view, decision, Game.cpu.getUsed (), flooded)
 
-    // The one movement pass of the tick: every colony's Move Intents folded
-    // together and arbitrated once per room, over every creep of ours standing
-    // in it, each moving on the intent its own colony registered (ADR 0001 —
-    // this is that pure Resolver taking the whole room as its argument).
+    // The one movement pass of the tick: every colony's Move Intents,
+    // arbitrated once per room.
     let moveIntents, moveVerdicts =
         resolveRooms (decisions |> List.map (fun (_, _, decision, _, _) -> decision.Movement))
 
-    // The decision boundary, and every colony's `decide` is inside it: the
-    // column is what the tick spent deciding and not what one colony did (ADR
-    // 0047). The two Memory reads above are inside it too, being `decide`'s
-    // arguments, which buys the reading a place the code cannot drift away
-    // from.
+    // The decision boundary; the two Memory reads above are inside it, being
+    // `decide`'s arguments.
     let atDecide = Game.cpu.getUsed ()
 
-    // How many colonies **paid for a plan** this tick, counted against the memo
-    // each one was handed, before the table is overwritten (#357). A `decide`
-    // six times its own mean is either a replan or a pricing storm, and the CPU
-    // line could not tell those apart — which is the job, and the reason this
-    // counts what was paid rather than what was dropped (#387). The two are the
-    // same number on every tick but the one after a global reset, and that is
-    // the tick the count was most wrong about and most read.
+    // How many colonies paid for a plan this tick, counted against the memo
+    // each was handed before the table is overwritten: a `decide` six times
+    // its mean is either a replan or a pricing storm, and the line has to tell
+    // them apart. Paid, not dropped: the two differ only on the tick after a
+    // global reset, the tick most read.
     //
-    // Whose turn it was, by the same index the loop above handed `ReplanTurn` on
-    // — read here rather than carried through the decision tuple, which is four
-    // wide already and is destructured in five other places.
+    // Whose turn it was, by the same index the loop above handed `ReplanTurn`
+    // on, read here rather than widening the decision tuple further.
     let payingHome =
         views
         |> List.tryItem turn
@@ -303,18 +234,12 @@ let loop () =
         decisions
         |> List.filter (fun (colony, _, decision, _, _) ->
             match Map.tryFind colony.Home planMemos with
-            // A memo that stood is the same memo, and a **deferred** plan keeps
-            // the stale signature on purpose ("the plan is owed and the next
-            // turn pays it"), so both compare equal here and neither is a
-            // replan. Only the colony that paid carries this tick's census.
+            // A deferred plan keeps the stale signature on purpose, so it
+            // compares equal and is not a replan.
             | Some prior -> prior.Signature <> decision.Memo.Signature
-            // No prior at all — a global reset, and every code upload is one.
-            // **Only the colony whose turn it was paid for a plan** (#387):
-            // the rest were handed `PlanMemo.deferred` and did the same work a
-            // waiting colony always does. Counted as four, this column said
-            // "four colonies re-planned" for a tick in which one did, and then
-            // counted the other three again over the next three ticks as their
-            // turns came — the same four re-plans reported eight times.
+            // No prior at all is a global reset, and only the colony whose
+            // turn it was paid; the rest were handed `PlanMemo.deferred`.
+            // Counting all four here reported the same four re-plans twice.
             | None -> Some colony.Home = payingHome)
         |> List.length
 
@@ -323,10 +248,8 @@ let loop () =
         |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo)
         |> Map.ofList
 
-    // The one sector Reactor programme's global observation (#320). The
-    // declaration identifies both the target and the home Storage feeding it;
-    // the room facts answer only while vision does. A blind tick therefore
-    // hands `None` to the pure fold and retains the last sample unchanged.
+    // The Reactor programme's observation. The room facts answer only while
+    // vision does, so a blind tick hands `None` and the last sample stands.
     let reactorReading =
         decisions
         |> List.tryPick (fun (colony, _, decision, _, _) ->
@@ -369,10 +292,8 @@ let loop () =
     |> ObserveMemory.saveReactor
 
     // Memory writes land before the engine calls: a throw inside Executor.run
-    // must not discard the tick's anti-thrash state. The assignments stay one
-    // flat leaf keyed by creep name (ADR 0047): a creep is one colony's
-    // business for the tick, so the colonies' answers are disjoint and the
-    // union is the whole map.
+    // must not discard the tick's anti-thrash state. The colonies' answers are
+    // disjoint, so the union is the whole map.
     saveAssignments (
         (Map.empty, decisions)
         ||> List.fold (fun acc (_, _, decision, _, _) ->
@@ -380,17 +301,13 @@ let loop () =
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
     )
 
-    // Dead creeps' timelines are pruned by the fold under the same aliveness
-    // rule as the memory pruning below — and the Raid logs read their losses
-    // against this one world-wide set too (ADR 0047): a colony's `Creeps` is
-    // its own fleet, so a name that left it may merely have been
-    // adopted, and only `Game.creeps` can say which names stopped existing.
+    // One world-wide aliveness set for the fold, the Raid logs and the memory
+    // pruning: a name that left a colony's `Creeps` may merely have been
+    // adopted, and only `Game.creeps` says which names stopped existing.
     let living = livingCreeps ()
 
-    // The Transition log stays flat too, and for the same reason: it is keyed
-    // by creep name, and the tick's Verdicts are every colony's in colony
-    // order — one fold over the union, so a creep adopted this tick continues
-    // the timeline its caster started.
+    // One fold over every colony's Verdicts in colony order, so a creep
+    // adopted this tick continues the timeline its caster started.
     let priorLog =
         if not (ObserveMemory.observeLogStands ()) then
             Map.empty
@@ -408,11 +325,9 @@ let loop () =
              @ moveVerdicts)
             priorLog
 
-    // The tick after a global reset writes the log whole, for the CPU line's
-    // reason: the rows standing after an upload are another bundle's, a row
-    // this one cannot restate was dropped by `load`, and only a whole write
-    // normalises the leaf to what this bundle reads. Every tick after it
-    // writes the changed creeps alone.
+    // The tick after a global reset writes the log whole: the rows standing
+    // are another bundle's, and only a whole write normalises the leaf to
+    // what this bundle reads. Every tick after it writes the changed creeps.
     match observeLog with
     | Some _ -> ObserveMemory.saveChanged priorLog log
     | None -> ObserveMemory.save log
@@ -420,32 +335,19 @@ let loop () =
     observeLog <- Some log
 
     for colony, view, decision, _, _ in decisions do
-        // The Raid log's own channel (ADR 0028): colony-level and episodic,
-        // because the fold above prunes a creep's whole timeline the tick it
-        // dies — the one event a raid record has to keep. Written every tick
-        // whether or not the fold changed anything, so the leaf's presence is
-        // itself the signal that this bundle is live, which is what lets
-        // `observe.mjs raids` tell "no channel" from "no raids". Folded here
-        // and read at the top of the loop: this tick's sightings are what the
-        // *next* tick's gate stands on (ADR 0043). Under this colony's own key,
-        // an episode being one colony's record and the gate that reads it back
-        // that colony's (ADR 0047).
+        // The Raid log, written every tick whether or not the fold changed
+        // anything, so the leaf's presence lets `observe.mjs raids` tell "no
+        // channel" from "no raids". Folded here and read at the top of the
+        // loop: this tick's sightings are what the next tick's gate stands on.
         raids
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
         |> Observe.foldRaids Observe.capEpisodes living view (Decide.Planner.outpostFactsOf view)
         |> ObserveMemory.saveRaids colony.Home
 
-        // The Layout's own channel (ADR 0035): the footing targets this tick's
-        // plan could not serve, the trunks it could not route (#107), and the
-        // container picks it deferred to a container already serving their
-        // target (ADR 0040). Written every tick, empty or not, and under the
-        // home room whose Layout it is (ADR 0047). Beside them the colony's
-        // other loss of this tick, taken off the **view** and not the memo
-        // because it is the declaration's rather than the plan's: the
-        // declarations — outposts and errands alike — that no chain of Seams
-        // joins to this home, which the view refused, each under the kind it
-        // was declared as (#243, #259, ADR 0060 decision 1).
+        // The Layout's channel, written every tick, empty or not. The refused
+        // declarations come off the view and not the memo: they are the
+        // declaration's loss, not the plan's.
         ObserveMemory.saveLayout
             colony.Home
             decision.Memo.UnservedFootings
@@ -453,22 +355,15 @@ let loop () =
             decision.Memo.DeferredContainers
             view.Refused
 
-        // The cascade's own numbers, for `observe.mjs quotas` (ADR 0009).
+        // The cascade's own numbers, for `observe.mjs quotas`.
         ObserveMemory.saveQuotas colony.Home decision.Quotas
 
-        // The breach log (#278): the live invariant checks, folded with memory
-        // so every row carries how long it has stood. Off the **same view this
-        // tick decided from**, which is the whole point of the channel — the
-        // test suite runs on fixtures this repo authors, so it confirms the
-        // code's belief about the projection, and three of the four incidents
-        // in the Thorium programme happened in `World.fs`, the half that has no
-        // tests by construction. An assertion read off the real projection
-        // every tick is the only feedback loop that could have caught them; the
-        // Layout record beside it is the one that already works that way, and
-        // it is reporting a real loss right now.
-        //
-        // Written every tick, empty or not, and under this colony's own key —
-        // its checks read this colony's rooms and its declarations (ADR 0047).
+        // The breach log: the live invariant checks, off the same view this
+        // tick decided from. The suite runs on fixtures this repo authors, so
+        // it confirms the code's belief about the projection; an assertion
+        // read off the real projection every tick is the feedback loop that
+        // could have caught the `World.fs` incidents (#278). Written every
+        // tick, empty or not.
         ObserveMemory.loadBreaches colony.Home
         |> Observe.foldBreaches Observe.capBreaches Game.time view
         |> ObserveMemory.saveBreaches colony.Home
@@ -476,24 +371,15 @@ let loop () =
     pruneDeadCreepMemory living
 
     // Where every creep of ours stood this tick, for next tick's
-    // `CreepInfo.Moved` (#225).
+    // `CreepInfo.Moved`.
     World.positions () |> ObserveMemory.savePositions
-    // The Memory boundary: the assignments, every observe channel but one and
-    // the dead creeps' pruning, which is everything this tick persists except
-    // the CPU line's own leaf — written after the last reading, so it is the single
-    // write the line never prices. A boundary and not a noun's price: the phase
-    // holds the observe folds and the `Game.creeps` sweep that feeds them as
-    // well as the writes — the breach log's four checks among them since #278,
-    // which is where their cost is read if ADR 0041's trigger ever fires on
-    // them.
+    // The Memory boundary: everything this tick persists except the CPU
+    // line's own leaf, which is written after the last reading and so is the
+    // one write the line never prices. The phase holds the observe folds and
+    // the `Game.creeps` sweep as well as the writes.
     let atSave = Game.cpu.getUsed ()
-    // Failures are already logged by the Executor; what is read off the
-    // outcomes here is how many intents the engine took (#170). The engine
-    // charges 0.2 CPU per intent it *executes*, so a call answered with an
-    // error code, and one whose actor the view promised but the engine does not
-    // hold, are both counted out. Every colony's Intents in colony order,
-    // executed in one pass: the engine is one world and the phase is the tick's
-    // whole execution cost (ADR 0047).
+    // How many intents the engine took: it charges 0.2 CPU per intent it
+    // executes, so an error code and a missing actor are both counted out.
     let executionPlan =
         (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
         @ moveIntents
@@ -512,13 +398,9 @@ let loop () =
             | Executor.Failed _
             | Executor.ActorMissing -> 0)
 
-    // The CPU line (ADR 0041): one row per tick, so the condition that sends
-    // the layered projection back to the drawing board — a mean tick above 50
-    // ms, or any single tick above 80 — is a number somebody can read rather
-    // than a feeling. Measured, never budgeted: nothing in the bot reads this
-    // back, and the thresholds live with the readers. The tick's total is
-    // deliberately the last of the five readings, taken after the Executor,
-    // because the intents are most of what a tick costs.
+    // The CPU line: measured, never budgeted; nothing in the bot reads it
+    // back. The tick's total is the last reading, after the Executor, because
+    // the intents are most of what a tick costs.
     let readings: Observe.CpuReadings =
         {
             AtEntry = atEntry
@@ -532,18 +414,15 @@ let loop () =
             ColonyDecides = decisions |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
             ColonyFloods =
                 decisions |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
-            // Read off `World`'s own heap slot rather than threaded through the
-            // world record: a measurement of the shell is not a fact about the
-            // game, and `World` is a Core type (#370).
+            // Off `World`'s own heap slot, not the world record: a measurement
+            // of the shell is not a fact about the game.
             RoomSnapshots = World.roomCosts
             AtRooms = World.roomsBegan
             AtProjects = atProjects
             ColonyProjects = List.rev projectedAt
         }
 
-    // The CPU line stays one flat leaf keyed by tick: it records the whole
-    // loop, every colony's phase inside every column, so there is nothing
-    // here for two colonies to collide over (ADR 0047).
+    // One flat leaf keyed by tick: nothing for two colonies to collide over.
     let prior =
         if not (ObserveMemory.cpuLineStands ()) then
             Observe.CpuState.empty
@@ -555,11 +434,9 @@ let loop () =
     let line = Observe.foldCpu Observe.capCpuTicks Game.time readings prior
 
     // The tick after a global reset writes the line whole, and every tick
-    // after it appends: the rows standing after an upload are another
-    // bundle's, and only a re-encode normalises a phase group this one no
-    // longer reads whole (`decodeCpuPhases` answers `None` for a row short a
-    // key, and `observe.mjs cpu` refuses such a row) — which is what the
-    // whole write did on every tick, and now does once per upload.
+    // after it appends: only a re-encode normalises a phase group this bundle
+    // no longer reads whole (`decodeCpuPhases` answers `None` for a row short
+    // a key, and `observe.mjs cpu` refuses such a row).
     match cpuLine with
     | Some _ -> ObserveMemory.appendCpu line
     | None -> ObserveMemory.saveCpu line

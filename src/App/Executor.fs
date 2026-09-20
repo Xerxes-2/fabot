@@ -13,10 +13,8 @@ type Outcome =
     | Failed of code: int
     | ActorMissing
 
-/// A placement Intent's kind as `createConstructionSite` spells it: the
-/// placeable kind widened to its built kind, then spelled by the Core's
-/// one kind-name table (#75) — as a spawned body's parts are. Nothing is
-/// restated here, so no case can drift out of step with the projection's.
+/// A placement Intent's kind as `createConstructionSite` spells it, through
+/// the Core's one kind-name table so no case drifts from the projection's.
 let private structureName = builtKindOfPlaceable >> builtKindName
 
 let private outcomeOf code = if code = 0 then Ok else Failed code
@@ -45,10 +43,8 @@ let private withCreepTarget
     : Outcome =
     withTarget targetId (fun target -> withCreep name (fun creep -> act creep target))
 
-/// The same pair where the target is a creep of **ours**, and so is named
-/// rather than identified: `Game.creeps` is the hash our own bodies are
-/// addressed through everywhere else in this module, and the [[guard]]'s heal
-/// names itself (ADR 0056).
+/// The same pair where the target is a creep of ours, and so is named through
+/// `Game.creeps` rather than identified.
 let private withOurCreepTarget
     (name: string)
     (targetName: string)
@@ -73,63 +69,41 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName sourceId (fun c t -> c.harvest t)
     | TransferEnergyToStructure(creepName, structureId, resource) ->
         withCreepTarget creepName structureId (fun c t -> c.transfer (t, resourceName resource))
-    // `None` is the engine's own default — as much as the body holds room for,
-    // which is what every Withdraw of this colony has always asked for — and is
-    // spelled by calling the two-argument form (ADR 0057 decision 3).
+    // `None` is the engine's default (as much as the body holds), spelled by
+    // the two-argument form.
     | WithdrawFromStore(creepName, storeId, resource, amount) ->
         withCreepTarget creepName storeId (fun c t ->
             match amount with
             | None -> c.withdraw (t, resourceName resource)
             | Some units -> withdrawAmount c t (resourceName resource) units)
     | BuildSite(creepName, siteId) -> withCreepTarget creepName siteId (fun c t -> c.build t)
-    // The colony's line onto a controller the creep stands beside (#381). One
-    // act like every other here, and the text rides the Intent: what a room
-    // says is `Colony.signature`'s to decide, and this layer's job is to put
-    // it there. The failure this cannot see is the one that matters least — a
-    // sign refused for range is a body that moved between the decision and the
-    // act, and the reflex offers it again the next time anybody passes.
+    // The text rides the Intent (`Colony.signature` decides it); a sign refused
+    // for range is offered again the next time anybody passes.
     | SignController(creepName, controllerId, text) ->
         withCreepTarget creepName controllerId (fun c t -> c.signController (t, text))
     | RepairStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.repair t)
     | UpgradeController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
-    // The outpost controller is a target like any other: a declared one is
-    // in the projection without vision (ADR 0041), so the id can name an
-    // object this tick's `getObjectById` cannot answer for, and that is
-    // exactly the ActorMissing the shared guard already reports.
+    // A declared outpost controller is in the projection without vision, so
+    // `getObjectById` can answer null for it: the shared guard's ActorMissing.
     | ReserveController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.reserveController t)
-    // The claim (ADR 0047), the one act with a precondition the decision
-    // layer has no model of: a controller the account has no GCL level
-    // left for answers ERR_GCL_NOT_ENOUGH, and the view carries no GCL
-    // fact for Core to have planned around it. The code is logged here and
-    // read nowhere else, as every result code is (`Outcome` above) — the
-    // room stays unowned, so the Task is pooled again next tick and the
-    // creep walks back to it, which is what every other failed act does
-    // too. The difference is that this one can repeat forever, and the log
-    // line is the only place a human sees it.
+    // The one act with a precondition Core has no model of: no GCL level left
+    // answers ERR_GCL_NOT_ENOUGH, the Task is pooled again next tick, and this
+    // can repeat forever with the log line as the only place a human sees it.
     | ClaimController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
-    // The re-claim (ADR 0057 decision 5). The target is the [[errand]]'s
-    // declared id, placed in the projection with no vision at all (ADR 0060
-    // decision 1), so `getObjectById` can answer nothing for it on a tick the
-    // body has not arrived — which is the shared guard's ActorMissing and is
-    // what a relay that has gapped looks like from here. Unlike the claim above
-    // this act has no precondition the decision layer has no model of: the
-    // engine checks a live CLAIM part and Chebyshev 1, and the Emitter gates on
-    // both.
+    // The reactor is the errand's declared id, in the projection without
+    // vision, so `getObjectById` answers null until the body arrives: the
+    // shared guard's ActorMissing. The engine checks a live CLAIM part and
+    // Chebyshev 1, and the Emitter gates on both.
     | ClaimReactor(creepName, reactorId) ->
         withCreepTarget creepName reactorId (fun c t -> c.claimReactor t)
     | PickupPile(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
-    // The Guard's attack and the shared self-heal reflex. The hostile belongs
-    // to somebody
-    // else's and so arrives by id, through the same `getObjectById` the [[fire
-    // reflex]]'s target does — one that died between the decision and the
-    // replay is the shared guard's ActorMissing, which is what a raid that
-    // ended mid-tick looks like. The heal names one of ours twice, actor and
-    // target, and goes through `Game.creeps` for both.
+    // The hostile arrives by id; one that died between decision and replay is
+    // ActorMissing. The heal names one of ours twice, through `Game.creeps`.
     | AttackCreep(creepName, hostileId) ->
         withCreepTarget creepName hostileId (fun c t -> c.attack t)
     | HealCreep(creepName, targetName) ->
@@ -148,9 +122,8 @@ let private execute (intent: Intent) : Outcome =
             terminal.send (resourceName resource, amount, destination))
 
 /// Replay every Intent and answer back what the engine said. Failures are
-/// logged here, once and uniformly; the outcome list is the seam `Main.loop`
-/// counts the engine's accepted intents off (#170), and a future sim harness
-/// reads.
+/// logged here, once; the outcome list is what `Main.loop` counts accepted
+/// intents off.
 let run (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
     Fabot.Core.IntentPlan.intents plan
     |> List.map (fun intent ->

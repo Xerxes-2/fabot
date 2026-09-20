@@ -1,19 +1,16 @@
 /// The Matcher: keep still-valid assignments, then greedily assign the rest.
-/// Assignments in, Assignments and Verdicts out. **It knows no Task kinds**
-/// (ADR 0052 decision 6).
+/// Assignments in, Assignments and Verdicts out. It knows no Task kinds.
 [<AutoOpen>]
 module Fabot.Core.Decide.Matcher
 
 open Fabot.Core
 open Fabot.Core.Types
 
-/// Matcher: keep still-valid assignments (anti-thrash) and greedily assign the
-/// rest. Assignments in, Assignments and the Verdicts explaining them out (ADR
-/// 0009): releases first in memory order, then one status Verdict per living
-/// creep in view order — each preceded, for a creep on the verbose list, by its
-/// Scoring Verdict, the whole pool judged against the same state its status was
-/// decided from. Emission belongs to the Emitter, movement to the Resolver.
-/// **It knows no Task kinds** (ADR 0052 decision 6).
+/// Keep still-valid assignments (anti-thrash) and greedily assign the rest.
+/// Verdicts out: releases first in memory order, then one status Verdict per
+/// living creep in view order — each preceded, for a creep on the verbose
+/// list, by its Scoring Verdict, the whole pool judged against the same state
+/// its status was decided from.
 let matchCreeps
     (view: ColonyView)
     atlas
@@ -25,15 +22,12 @@ let matchCreeps
     : Assignments * Verdict list =
     let byId = pool |> List.map (fun p -> taskId p.Task, p) |> Map.ofList
 
-    // Each living creep's remaining life and its [[body class]], hoisted
-    // for the tick: the capacity gate asks the first once per holder per
-    // judged pair and the second once per holder and once per candidate,
-    // and both are view facts that cannot move inside a tick.
+    // Each living creep's remaining life and its body class, hoisted for the
+    // tick: the capacity gate asks them once per holder per judged pair.
     let lives = view.Creeps |> List.map (fun c -> c.Name, c.TicksToLive) |> Map.ofList
 
-    // What each body carries, for the one cap that is a number about loads
-    // and not about holders (#374): the [[refill cluster]]'s budget. Energy
-    // alone, because the ring takes nothing else.
+    // What each body carries, for the budget cap. Energy alone, because the
+    // refill ring takes nothing else.
     let carried = view.Creeps |> List.map (fun c -> c.Name, c.Energy) |> Map.ofList
 
     let carriedBy name =
@@ -46,23 +40,19 @@ let matchCreeps
 
     let classOf name = Map.tryFind name classes
 
-    // The crowding component of the matching key (ADR 0002): every holder,
-    // counted at this tick. Arrival discounts what a Task's cap counts (ADR
-    // 0026), never what the key does — spreading creeps over Tasks is a
-    // judgement about now.
+    // ADR-0002. The crowding component of the matching key: every holder,
+    // counted at this tick, never at arrival — spreading creeps over Tasks is
+    // a judgement about now.
     let load (loads: Map<string, int>) tid =
         Map.tryFind tid loads |> Option.defaultValue 0
 
     let hold (loads: Map<string, int>) tid = Map.add tid (load loads tid + 1) loads
 
-    // The holders a candidate actually competes with, counted at arrival (ADR
-    // 0026): two creeps hold the same standing room against each other only
-    // while both are standing on it, so a holder counts against a candidate
-    // exactly when their two stays overlap.
-    //
-    // One relation, asked twice with the two bodies swapped: does this walk end
-    // before that body dies? An unpriceable walk is no overlap to refuse (ADR
-    // 0004), and neither is a life the projection does not carry.
+    // ADR-0026. The holders a candidate actually competes with, counted at
+    // arrival: a holder counts against a candidate exactly when their two
+    // stays overlap. One relation, asked twice with the two bodies swapped.
+    // An unpriceable walk is no overlap to refuse, and neither is a life the
+    // projection does not carry.
     let outlives (walk: int option) (life: int option) =
         match walk with
         | None -> true
@@ -95,8 +85,7 @@ let matchCreeps
                 None)
 
     // Every heavy body and the tile it stands on, folded once for the tick: the
-    // Post census below asks this of every (candidate, Harvest) pair, and since
-    // #269 every posted rock carries tiles where only a rock mid-build did.
+    // Post census below asks this of every (candidate, Harvest) pair.
     let heavyStanders =
         view.Creeps
         |> List.choose (fun c ->
@@ -106,17 +95,9 @@ let matchCreeps
                 None)
 
     // The bodies standing on the Task's `Garrison` tiles, whatever Task they
-    // hold this tick (#205, widened to every Post by #269) — **unioned** with
-    // the Heavy holders below rather than added to them, because on a standing
-    // container the two sets are ordinarily the same body: the overflow
-    // reprieve keeps a garrison's Harvest applicable through a full store, so
-    // it holds the Task it is standing on and a sum would spend two of the
-    // rock's Posts on one Anchor. What the tiles add is the tick the two part —
-    // a build tick on a Post whose container is still a site, an Upgrade
-    // through the empty window on a bare dual seat — where a cap counting
-    // assignments alone reads a manned Post as free. Counted at arrival like
-    // every other holder (ADR 0026), which is what keeps a succession's
-    // successor admissible; the candidate never counts against itself.
+    // hold this tick. Counted at arrival like every other holder, which is
+    // what keeps a succession's successor admissible; the candidate never
+    // counts against itself.
     let garrisons (candidate: CreepInfo) task arrival (tiles: Set<RoomPos>) =
         if Set.isEmpty tiles then
             Set.empty
@@ -133,12 +114,9 @@ let matchCreeps
                     None)
             |> Set.ofList
 
-    // Holders against numbers, and nothing else (ADR 0052 decision 6): the
-    // total the Task admits, the share each scope the candidate falls in
-    // admits, the tiles whose standing bodies hold a slot without holding the
-    // Task, and — since #374 — the energy budget the holders' loads are read
-    // against. A candidate standing on an `Exempt` tile is outside all of it —
-    // the one body a budget that prices a commute never priced (#205).
+    // Holders against numbers, and nothing else: the caps, the garrison tiles
+    // and the budget. A candidate standing on an `Exempt` tile is outside all
+    // of it.
     let hasCapacity (creep: CreepInfo) acc (pooled: PooledTask) (arrival: Lazy<int option>) =
         let capacity = pooled.Capacity
 
@@ -148,9 +126,8 @@ let matchCreeps
                 |> Option.exists (fun tile -> Set.contains tile capacity.Exempt))
 
         if standing || not (Capacity.isBounded capacity) then
-            // Only a capped Task forces the walk: the Refills and the
-            // surplus work the pool is mostly made of neither walk the
-            // assignment map nor pay for an arrival (ADR 0029).
+            // Only a capped Task forces the walk: most of the pool neither
+            // walks the assignment map nor pays for an arrival.
             true
         else
             let holders = holdersAt acc creep pooled.Task capacity.Handover arrival.Value
@@ -164,22 +141,16 @@ let matchCreeps
             let standingRow = inClass Standing |> List.length
             let all = List.length holders
 
-            // The Post cap's crowd, by **name**: the heavy bodies holding this
-            // Task and the heavy bodies standing on its Posts are one crowd,
-            // and the ordinary garrison is in both lists (#269). Summed, it
-            // would spend two of a two-Post rock's slots on the one Anchor that
-            // is both, and the second Post would read full while it stands
-            // empty. Only the Heavy cap reads tiles; the class shares below
-            // stay counts of holders.
+            // The Post cap's crowd, by name: the heavy holders and the heavy
+            // bodies standing on its Posts are one crowd, and the ordinary
+            // garrison is in both lists. Only the Heavy cap reads tiles.
             let garrisoned =
                 garrisons creep pooled.Task arrival.Value capacity.Garrison
                 |> Set.union (Set.ofList heavyHolders)
                 |> Set.count
 
             // Whose crowd each scope is a number about, and how many of them
-            // this cap is counted against — the pairing the scope carries, read
-            // here once for every cap on the Task rather than re-asserted per
-            // field.
+            // this cap is counted against.
             let appliesTo =
                 function
                 | CapScope.Everyone -> fun _ -> true
@@ -200,101 +171,57 @@ let matchCreeps
 
             // Every cap on the Task holds, or the candidate is refused. A cap
             // whose crowd the candidate's own class does not fall in is not its
-            // cap — that is how a rule says "this number is about somebody
-            // else's crowd" — and so is a class the Atlas cannot name.
+            // cap, and neither is any cap for a class the Atlas cannot name.
             let capsHold =
                 capacity.Caps
                 |> Map.forall (fun scope limit ->
                     match scope with
-                    // The one cap that refuses a class outright rather than counting
-                    // it (ADR 0056): a `Fighters` number admits that many Fighters
-                    // and no body of any other class, because the scopes above
-                    // cannot spell "not a Fighter" — `Commuters` and `Generalists`
-                    // both contain it — and a scope a class falls outside of means
-                    // "somebody else's crowd", which is the opposite of a refusal.
+                    // The one cap that refuses a class outright rather than
+                    // counting it (`CapScope.Fighters`).
                     | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
                     | _ ->
                         match cls with
                         | Some c when appliesTo scope c -> counted scope < limit
                         | _ -> true)
 
-            // The budget is a number about **loads** (#374): the holders'
-            // carried energy together, against what the Task can still take.
-            // Strict, like every cap above — a ring with room for exactly
-            // what its holders carry admits nobody more — and read over the
-            // same arrival-counted holders, so a body still walking counts
-            // what it carries and a body that has poured counts nothing.
+            // The budget is a number about loads: strict, like every cap
+            // above, and read over the same arrival-counted holders, so a body
+            // still walking counts what it carries and a body that has poured
+            // counts nothing.
             let budgetHolds =
                 capacity.Budget
                 |> Option.forall (fun budget -> (holders |> List.sumBy carriedBy) < budget)
 
             capsHold && budgetHolds
 
-    // The vision grace (#151): a Task leaves the pool for two opposite reasons
-    // and its id alone cannot tell them apart — the target was destroyed, or
-    // the room carrying it went dark. The pool stays gated on vision and
-    // rightly so (ADR 0004): a blind room hands over an empty site list, and
-    // no rule here may price what nobody can see. What this asks instead is
-    // about **looking**, never about the target — the id stood in a room this
-    // colony works, that room has not been seen since, and it went dark inside
-    // `Tuning.VisionGrace`. Then the assignment is kept: the [[outpost]] whose
-    // [[reserver]] just died is dark for the relief's lead and no longer, and
-    // a builder released here walks a full load home to start the crossing
-    // again on the tick the vision returns. Past the grace the release is
-    // `task-gone` exactly as it was, because a container that really was
-    // destroyed must not be held for ever by a body that cannot see the tile.
-    // One rule over every Task kind that vision pays for, and Harvest needs
-    // none of it: a declared rock is placed and pooled without vision at all
-    // (ADR 0041, #148).
+    // The vision grace (#151): an assignment whose Task left the pool because
+    // its room went dark inside `Tuning.VisionGrace` is kept (`lastSeenIn`);
+    // past the grace the release is `task-gone`, because a container that
+    // really was destroyed must not be held for ever.
     //
-    // One thing the grace may not outrank, and it is the one thing nothing
-    // below could have asked for it: Safety (ADR 0033). A Task in no pool has
-    // no Work Area, so `threatened` — which reads the *Task's* tiles — answers
-    // false for it whatever stands where; the question that keeps a body alive
-    // has to be asked of the **creep**. A holder standing inside a Reach is
-    // therefore denied the grace, falls through to `task-gone`, and rematches
-    // in the cascade below exactly as it did before the grace existed — to
-    // Flee, unless it is a `Fighter`, which ADR 0056 decision 3 refuses Flee on
-    // purpose: the body bought to stand in the ring is left standing where it
-    // is rather than walked out of the fight by a dark room.
+    // The one thing the grace may not outrank is Safety. A Task in no pool has
+    // no Work Area, so `threatened` answers false for it whatever stands
+    // where; the question has to be asked of the creep. A holder inside a
+    // Reach is denied the grace and rematches in the cascade below.
     let graced (creep: CreepInfo) tid =
         if standsInReach threats atlas creep.Name then
             None
         else
             lastSeenIn view tid
 
-    // Capacity applies to remembered assignments too: memory can carry an
-    // oversell from before a cap existed. So does reachability — a Work Area
-    // the Atlas can no longer reach releases the assignment, freeing its
-    // capacity for creeps that can get there, deliberately with no range-based
-    // fallback (ADR 0002) — and so does the arrival gate: a drained source's
-    // Harvest whose wait the holder's walk no longer covers releases it (ADR
-    // 0025). Each failed gate names the release; a dead creep's assignment
-    // drops silently.
     // One gate cascade judges every (creep, Task) pair, for both readings of
     // one: the fresh candidate the Matcher scores and the assignment it is
     // deciding whether to keep. Rejected at the first gate it fails
-    // (threatened, applicable, capacity, reachable, in time) or the travel cost
-    // when none does. The two used to be written out in full a few lines apart,
-    // with prose at each promising the other ran the same gates in the same
-    // order — and the order is load-bearing twice over: which rejection a pair
-    // earns is what `IdleReason` reads below, and the two numbers bound above
-    // the capacity gate (the travel cost, which the reachability gate and the
-    // scored key both read, and the walk, which capacity counts holders at per
-    // ADR 0026 and the arrival gate spends after it) are priced at most once,
-    // and only if a gate asks.
+    // (threatened, applicable, capacity, reachable, in time) or the travel
+    // cost when none does. The order is load-bearing twice over: which
+    // rejection a pair earns is what `IdleReason` reads below, and the travel
+    // cost and the walk are priced at most once, and only if a gate asks.
     //
-    // `escape` is the one gate the two readings do not share: a holder whose
-    // body is expiring is kept over capacity (ADR 0026) where a fresh candidate
-    // is refused. It is a `Lazy` for the same reason the walk beside it is —
-    // the fresh cascade must not price it, and the keep path must not price it
-    // unless the capacity gate has already failed.
-    //
-    // The cascade's failures are a `RejectReason`, which is what a
-    // `ReleaseReason.Rejected` carries (`Types/Verdicts.fs`): one gate answers
-    // both readings, and the release path only says which reading it is.
-    // `TaskGone` is answered above this cascade, where the Task is in no pool
-    // at all and no gate here can be asked about it.
+    // `escape` is the one gate the two readings do not share: an expiring
+    // holder is kept over capacity where a fresh candidate is refused. A
+    // `Lazy` for the same reason the walk beside it is: priced only if the
+    // capacity gate has already failed. `TaskGone` is answered above this
+    // cascade, where the Task is in no pool at all.
     let gate
         (escape: Lazy<bool>)
         acc
@@ -319,48 +246,23 @@ let matchCreeps
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
                     | None -> Ok cost
 
-    // Which holder a cap that has shrunk gives up (#230). The fold below
-    // judges each remembered assignment against the ones it has already kept,
-    // so the order it walks one Task's holders in *is* the rule for who keeps
-    // the slot — and in the assignment map's own order that is creep-name
-    // order, which is a fact about nobody's distance from anything. **The
-    // nearest keeps**: the body already standing in the Work Area is the one
-    // whose next tick is work, and the one still walking is the one that has
-    // spent nothing yet. ADR 0054 records this price on the [[refill
-    // cluster]], where `ceil(free / one load)` shrinks continuously and the
-    // release fires often enough to see; the order is the Matcher's and not
-    // that Task's, so every capped Task gets it.
+    // Which holder a cap that has shrunk gives up (#230): the fold below
+    // judges each remembered assignment against the ones already kept, so the
+    // order it walks one Task's holders in is the rule for who keeps the slot.
+    // The nearest keeps: the body already standing in the Work Area is the one
+    // whose next tick is work. Ordered only where it could decide something,
+    // a bounded Task with more than one holder, so most of the pool is never
+    // walked for this. The floods it adds (holders that never reached the
+    // gate's `arrival` lazy) are bounded by the holders of capped Tasks and
+    // memoised per start tile within the tick; the profile does not move on
+    // them.
     //
-    // Read off `Atlas.walkTicks`, the same number the capacity gate counts
-    // holders at (ADR 0026), and ordered only where it *could* decide
-    // something: a **bounded** Task with more than one holder. Most of the pool
-    // is neither and is never walked for this (ADR 0029), which must stay that
-    // way. It is not, though, only the walks the gate below would have priced
-    // anyway: a holder `threatened` or inapplicable never reached that gate's
-    // `arrival` lazy, and one standing on an `Exempt` tile short-circuits
-    // `hasCapacity` ahead of it. Those floods are new, bounded by the holders
-    // of capped Tasks, and memoised per start tile within the tick — the
-    // profile does not move on them, and it is the thing to re-read if this
-    // order ever grows a second number.
-    //
-    // **A body the Atlas can say nothing about sorts last**, and that is two
-    // holders and not one, because `Atlas.walkTicks` answers `Some 0` for a
-    // creep the projection does not place (ADR 0004's escape, so that
-    // unpriceable geometry never counts *against* a Task) — the same number it
-    // answers for a body standing in the Work Area. Ranked on the walk alone
-    // the ghost ties with the body on the tile and takes the slot on its name;
-    // the escape is a ranking price for the capacity gate and not a claim that
-    // a body nobody can find is the nearest one to anything. So the tier is
-    // read off `Atlas.creepTile` first: placed and priced sorts by the walk,
-    // placed-but-disconnected and unplaced alike sort behind every holder that
-    // has a distance at all, and the creep name breaks a tie so the fold stays
-    // a function of the view.
-    //
-    // Sorting the disconnected holder last is also what keeps the *reason*
-    // right: it meets the cap the kept holders filled and is released
-    // `CapacityFull`, which is what the gate cascade above gives that pair in
-    // either reading of it — one cascade answers the candidate and the
-    // assignment, and the release path only says which reading it is.
+    // A body the Atlas cannot place sorts last, because `Atlas.walkTicks`
+    // answers `Some 0` for an unplaced creep — the same number as a body
+    // standing in the Work Area — and ranked on the walk alone the ghost would
+    // take the slot on its name. The creep name breaks a tie so the fold stays
+    // a function of the view. Sorting it last also keeps the reason right: it
+    // meets the cap the kept holders filled and is released `CapacityFull`.
     let tier (pooled: PooledTask) (name: string) =
         match Atlas.creepTile atlas name with
         | Some _ ->
@@ -385,8 +287,7 @@ let matchCreeps
                 | _ -> holders)
 
     // The releases are reported in the assignment map's order whatever order
-    // they were decided in, so the Verdict list stays the memory order its
-    // readers (ADR 0009) have always been handed.
+    // they were decided in, so the Verdict list stays in memory order.
     let kept, keptLoads, released =
         ((Map.empty, Map.empty, []), remembered)
         ||> List.fold (fun (acc, loads, released) (name, tid) ->
@@ -397,20 +298,14 @@ let matchCreeps
             | None -> acc, loads, released
             | Some creep ->
                 match Map.tryFind tid byId with
-                // Kept, and by the Verdict every other steady assignment
-                // answers with (ADR 0009): what the colony did this tick about
-                // this creep is nothing, and there is no second word for it.
-                // The Task is in no pool, so no gate below can be asked about
-                // it: `graced` is the whole judgement, and the one gate it
-                // carries is the one a Work Area could not have answered for
-                // (Safety, ADR 0033). The holder counts against its own Task's
-                // crowd the tick the vision returns, on the ordinary path.
+                // Kept, by the Verdict every other steady assignment answers
+                // with. The Task is in no pool, so `graced` is the whole
+                // judgement.
                 | None when Option.isSome (graced creep tid) ->
                     Map.add name tid acc, hold loads tid, released
                 | None -> release ReleaseReason.TaskGone
                 // An expiring holder is kept over capacity where a fresh
-                // candidate would be refused (ADR 0026) — the one gate this
-                // reading does not share with the cascade below.
+                // candidate would be refused.
                 | Some pooled ->
                     match gate (lazy (expiring view atlas sizing creep)) acc creep pooled with
                     | Error reason -> release (ReleaseReason.Rejected reason)
@@ -455,12 +350,10 @@ let matchCreeps
 
             match keyed with
             | [] ->
-                // How far the best Task got through the gates — applicable,
-                // capacity, reachable, in time — is why the creep sits idle,
-                // deepest gate first: a creep whose only rejection is the arrival
-                // gate is waiting out a restock (ADR 0025), and saying nothing
-                // fit its body would be the same lie the rejection reason
-                // refuses.
+                // How far the best Task got through the gates is why the creep
+                // sits idle, deepest gate first: a creep whose only rejection
+                // is the arrival gate is waiting out a restock, and saying
+                // nothing fit its body would be a lie.
                 let rejectedWith wanted =
                     judged
                     |> List.exists (function

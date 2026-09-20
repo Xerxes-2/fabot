@@ -1,6 +1,6 @@
 /// What a tick produces: the described `Intent`s the Executor performs, the
 /// `Assignments` carried to the next tick, and the plan memo with the Layout
-/// rows (footings, trunks, containers) it is keyed on (ADR 0017, ADR 0044).
+/// rows (footings, trunks, containers) it is keyed on.
 [<AutoOpen>]
 module Fabot.Core.Types.Intents
 
@@ -8,29 +8,19 @@ module Fabot.Core.Types.Intents
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
     | PlaceConstructionSite of tile: RoomPos * kind: StructureKind
-    /// The dig act, over either rock the `Harvest` Task can name (ADR 0057
-    /// decision 2): a source, or a Thorium deposit under an extractor of ours.
-    /// The Intent's name is the frozen one and the field's is the honest one.
+    /// The dig act, over either rock the `Harvest` Task can name: a source, or
+    /// a Thorium deposit under an extractor of ours. The Intent's name is the
+    /// frozen one (a raid log and every `observe` channel reads it) and the
+    /// field's is the honest one.
     | HarvestSource of creepName: string * rockId: string
-    /// The transfer act, over the resource the [[refill]] Task names (ADR 0057
-    /// decision 3): `transfer` has taken one all along, and what changed is that
-    /// the colony now says which rather than passing energy implicitly. The
-    /// Intent's **name** is frozen, exactly as `HarvestSource`'s is over a rock
-    /// that is no longer always a source: it is the spelling a [[raid log]] and
-    /// every `observe` channel already reads.
+    /// The transfer act, over the resource the refill Task names. The name is
+    /// frozen, as `HarvestSource`'s is.
     | TransferEnergyToStructure of creepName: string * structureId: string * resource: Resource
-    /// The withdraw act, whose target has not been a structure alone since
-    /// ADR 0023 widened it: a [[container]], the [[storage]], a tombstone or a
-    /// ruin — the same store the [[withdraw]] Task already names (#183) — and
-    /// whose resource is the Task's own since ADR 0057 decision 3.
-    ///
-    /// The **amount** is `int option`, and `None` — take as much as the body
-    /// has room for, which is what every construction of this Intent has meant
-    /// until now — is the whole of what this colony asks for today. The one
-    /// place a Withdraw will ever name a number is the delivery's 999-unit load
-    /// (ADR 0057 decision 4), whose decade cliff is worth 275 ticks of a
-    /// courier's life; the field arrives here with the resource beside it
-    /// because the two are one argument list on the engine's own `withdraw`.
+    /// The withdraw act: a container, the Storage, a tombstone or a ruin
+    /// (#183), and the Task's own resource. `None` for the amount takes as
+    /// much as the body has room for; the delivery's 999-unit load is the one
+    /// Withdraw that names a number. Resource and amount are one argument list
+    /// on the engine's own `withdraw`.
     | WithdrawFromStore of
         creepName: string *
         storeId: string *
@@ -39,84 +29,49 @@ type Intent =
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
-    /// The reserve act (ADR 0042): a CLAIM body standing beside a neutral
-    /// controller pushes its reservation up by one tick per CLAIM part,
-    /// which is what doubles that room's sources. Range 1, like the
-    /// engine's other three touching acts.
+    /// The reserve act: a CLAIM body standing beside a neutral controller
+    /// pushes its reservation up by one tick per CLAIM part. Range 1.
     | ReserveController of creepName: string * controllerId: string
-    /// The claim act (ADR 0047): a CLAIM body standing beside a neutral
-    /// controller takes the room for this player. Range 1, like the engine's
-    /// other four touching acts.
+    /// The claim act: a CLAIM body standing beside a neutral controller takes
+    /// the room for this player. Range 1.
     | ClaimController of creepName: string * controllerId: string
-    /// The re-claim act (ADR 0057 decision 5, ADR 0060 decision 3): a CLAIM
-    /// body standing beside the sector **Reactor** takes it for this player.
-    /// Range 1, like the engine's other five touching acts, and a **custom
-    /// intent** of the season mod rather than one of the engine's own —
-    /// `creep.claimReactor.js` registers `claimReactor` on the Creep prototype
-    /// and handles it in `processObjectIntents`, where it does exactly one
-    /// thing: `bulk.update(target, {user: object.user})`.
-    ///
-    /// What that one line is worth knowing for: there is **no cooldown, no
-    /// ownership precondition, and `launchTime` is untouched**. So the act is
-    /// never refused for having been made recently, is made against a rival's
-    /// flag as readily as against none, and does not break the streak it takes
-    /// — continuity of the reactor's score depends on its store never emptying
-    /// and not on who owns it. A theft is undone on the tick it is seen, and we
-    /// are stolen from on the same terms.
+    /// The re-claim act: a CLAIM body standing beside the sector Reactor takes
+    /// it for this player. Range 1, and a custom intent of the season mod
+    /// (`creep.claimReactor.js`): no cooldown, no ownership precondition,
+    /// `launchTime` untouched.
     | ClaimReactor of creepName: string * reactorId: string
     /// The pickup act: a creep within range 1 of a dropped pile takes as much
-    /// of it as its store has room for. Named for the **pile** and not for
-    /// energy since #311, the way #183 renamed the Withdraw's: the engine's
-    /// `pickup` takes the object and no resource argument, so one call answers
-    /// for an energy pile and a Thorium one alike, and a log line that said
-    /// energy while the body walked off with the season's ore was a lie the
-    /// reader had to reconcile.
-    ///
-    /// **Why this one moved where `HarvestSource` and
-    /// `TransferEnergyToStructure` are frozen**: the freeze is a rule about
-    /// *readers* and not about names. Those two spellings are already out in
-    /// the world — a human greps them — so renaming them would cost somebody a
-    /// reconciliation the honesty is not worth. This one had no reader at all:
-    /// no `PickupEnergy` was written anywhere outside this module, and the one
-    /// spelling that *is* persisted, the Task id a Memory key carries, is
-    /// `Facts.taskId`'s `pickup:<id>` and has not moved a byte (#167). A name
-    /// with a reader stays a lie; a name with none is corrected. That is #183's
-    /// `WithdrawFromStore` precedent read out, and it is the whole of the
-    /// difference between this paragraph and the one above.
+    /// of it as its store has room for. Named for the pile and not for energy
+    /// (#311): the engine's `pickup` takes no resource argument, and this
+    /// spelling had no reader outside this module — the persisted Task id is
+    /// `Facts.taskId`'s `pickup:<id>`, unchanged.
     | PickupPile of creepName: string * resourceId: string
     /// One creep writing the colony's signature onto a controller it stands
     /// beside. Carries the text so the Executor needs no declaration of its
     /// own: what a room says is a human's to write (`Colony.signature`), and
     /// the shell's job is to put it there.
     | SignController of creepName: string * controllerId: string * text: string
-    /// The melee act (ADR 0056): a body with ATTACK parts standing within
-    /// range 1 of a hostile creep deals `Engine.attackPower` a part. The
-    /// [[guard]]'s own act, and the one Intent that names a creep this colony
-    /// does not own — by id, as the [[fire reflex]]'s target is, a hostile
-    /// being no target of the projection's.
+    /// The melee act: a body with ATTACK parts standing within range 1 of a
+    /// hostile creep deals `Engine.attackPower` a part. The one Intent that
+    /// names a creep this colony does not own — by id, as the fire reflex's
+    /// target is.
     | AttackCreep of creepName: string * hostileId: string
-    /// The heal act (ADR 0056): a body with HEAL parts restores
-    /// `Engine.healPower` a part to a creep of ours within range 1, itself
-    /// included, and the engine settles it against the same tick's damage. The
-    /// self-heal reflex emits this only for an injured creep with active HEAL
-    /// and no conflicting selected action: heal suppresses attack in the engine.
-    /// Both creeps are named, and both by **name** — the target is one of ours,
-    /// and an Intent whose target rode implicitly
-    /// on the actor would say nothing in the Executor's own failure line.
+    /// The heal act: a body with HEAL parts restores `Engine.healPower` a part
+    /// to a creep of ours within range 1, itself included. Heal suppresses
+    /// attack in the engine, so it is emitted only with no melee target in
+    /// range. Both creeps are named, the target by name: an Intent whose
+    /// target rode implicitly on the actor would say nothing in the
+    /// Executor's own failure line.
     | HealCreep of creepName: string * targetName: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string
     | FireTower of towerId: string * hostileId: string
     /// A terminal shipping a resource to another room's terminal (#349). The
-    /// **amount and the destination room** are both named here rather than left
-    /// for the Executor to work out, for `HealCreep`'s reason: an Intent whose
-    /// numbers ride implicitly on the actor says nothing in the Executor's
-    /// failure line, and this is the one intent in this list whose refusal is
-    /// expected in normal running — a terminal is on cooldown for ten ticks
-    /// after every send, and a colony that decides to ship reads no cooldown
-    /// (`RoomFacts` carries none) and so is refused about a tenth of the time
-    /// it asks.
+    /// amount and the destination are named here for `HealCreep`'s reason, and
+    /// this is the one intent whose refusal is expected in normal running: a
+    /// terminal is on cooldown for ten ticks after every send, and `RoomFacts`
+    /// carries no cooldown, so about a tenth of the asks are refused.
     | SendFromTerminal of
         terminalId: string *
         resource: Resource *
@@ -126,81 +81,55 @@ type Intent =
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>
 
-/// A body's fatigue factor (ADR 0006): the parts that generate fatigue when
-/// moving and the Move parts that pay it off. Terrain weight scales by their
-/// ratio to price travel in cost units — half-ticks under the engine-native
-/// weights (ADR 0010).
+/// A body's fatigue factor: the parts that generate fatigue when moving and
+/// the Move parts that pay it off. Terrain weight scales by their ratio to
+/// price travel in cost units.
 type FatigueFactor = { FatigueParts: int; MoveParts: int }
 
-/// The spawn-origin walk table (ADR 0032): the traffic-blind walk out of the
-/// tiles beside a spawner, for a body's fatigue factor, as whole-tick distances
-/// per tile index of one room (ADR 0026, ADR 0029) — the half of a lead paid
-/// after the cast. Filled on demand by the Atlas and handed to the next tick's
-/// while the census signature holds. Mutable, and heap-only like the memo
-/// carrying it.
+/// ADR-0032. The spawn-origin walk table: the traffic-blind walk out of the
+/// tiles beside a spawner, for a body's fatigue factor, as whole-tick
+/// distances per tile index of one room. Filled on demand by the Atlas and
+/// handed to the next tick's while the census signature holds. Mutable, and
+/// heap-only like the memo carrying it.
 type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * string, int[]>
 
 /// What a step costs a body, as the flood prices it. It lives here beside the
-/// tables keyed on it rather than in `Grid`, where it was declared until the
-/// far-field memo below joined the plan memo: a record the host holds across
+/// tables keyed on it rather than in `Grid`: a record the host holds across
 /// ticks cannot name a type declared in a module compiled after it.
 ///
-/// The split that matters to every reader of it is **traffic**: `TravelCost`
-/// prices this tick's standing creeps and the other two are blind to them
-/// (`Grid.pricingOf` substitutes `noTraffic`). Since ADR 0070 that split is
-/// the **near** leg's alone — the creep's own flood, the one whose crowd it
-/// will meet in the next few ticks and the one its first step is read off.
-/// The far leg of a cross-room price floods over empty ground under every
-/// pricing, so no far field reads a creep's tile and every one of them may
-/// outlive the tick that computed it.
+/// The split that matters to every reader is traffic: `TravelCost` prices
+/// this tick's standing creeps and the other two are blind to them
+/// (`Grid.pricingOf` substitutes `noTraffic`). That split is the near leg's
+/// alone; the far leg of a cross-room price floods over empty ground under
+/// every pricing.
 type Pricing =
     /// Travel cost's units — half-ticks, floored at one unit a step, with
-    /// the occupancy surcharge on occupied tiles (ADR 0010, ADR 0008).
-    /// The ranking price: it breaks rank ties in the Matcher.
+    /// the occupancy surcharge on occupied tiles. The ranking price.
     | TravelCost
-    /// The walk's whole ticks — floored at one tick a step, traffic-blind
-    /// (ADR 0029). The clock: the horizon every time-aware judgement is
-    /// made at.
+    /// The walk's whole ticks — floored at one tick a step, traffic-blind.
+    /// The clock every time-aware judgement is made at.
     | Walk
-    /// Travel cost's own units over empty ground (ADR 0030): the route the
-    /// body would take were no tile occupied. It differs from TravelCost in
-    /// traffic alone, which is what lets the reroute attribution blame the
-    /// difference on traffic and nothing else (ADR 0008, ADR 0009).
+    /// Travel cost's own units over empty ground. It differs from TravelCost
+    /// in traffic alone, which is what lets the reroute attribution blame the
+    /// difference on traffic and nothing else.
     | Baseline
 
-/// Far fields flooded under one census signature
+/// ADR-0070. Far fields flooded under one census signature
 /// (`docs/research/cpu-headroom.md` §5.1): the cost from every tile of the
 /// first room of a chain to the origins the walk ends at, carried across the
-/// chain's Seams (ADR 0058), per tile index of that first room. The far leg of
-/// every cross-room price, and the eighteen whole-room floods the survey found
-/// a `pair --level 7` tick spending three quarters of its flood work
-/// recomputing from scratch every tick.
+/// chain's Seams, per tile index of that first room.
 ///
-/// Held across ticks on the plan memo like `WalkTable` above and for the same
-/// reason (ADR 0032): every input it reads is signed by the census signature —
-/// the walking grid of each room in the chain, and the Seam bands, which are
-/// terrain. A grid is terrain plus roads, obstacle-kind structures and sites,
-/// minerals and the controller's own tile; the signature names the first four
-/// per projected room, and a controller is either the declaration's furniture,
-/// which no tick moves, or a fact of vision — and vision moving in a projected
-/// room adds or drops that room's entry in the signature's per-room rate
-/// (`Decide.censusSignature`, `ColonyView.ofWorld` filing `Control` for every
-/// room it works, transit rooms included). So a signature that has not moved
-/// is a field that cannot have.
+/// Held across ticks on the plan memo like `WalkTable` and for the same
+/// reason: every input it reads is signed by the census signature — the
+/// walking grid of each room in the chain, and the Seam bands. A controller's
+/// tile is either the declaration's furniture or a fact of vision, and vision
+/// moving in a projected room moves that room's entry in the signature.
 ///
-/// The key is the field's whole derivation: the chain of rooms, the Task and
-/// whether the body is Work-heavy, the fatigue factor, the pricing, and the
-/// **origins** the flood is seeded from — that last one because two callers
-/// hand different ones under the same Task (#358).
-///
-/// Nothing about a creep's tile is in it, and nothing needs to be: since ADR
-/// 0070 the far leg floods over empty ground under every pricing, so a field
-/// is a function of the census and of nothing else. The pricing that reaches
-/// the key is **normalised** with it — `TravelCost` and `Baseline` differ in
-/// traffic and in nothing else (ADR 0030), so with the traffic gone they are
-/// one field, filed and read under the `TravelCost` entry
-/// (`Atlas.farFieldAlong`). Every field in here therefore keys on the census
-/// alone and lives exactly as long as the census does.
+/// The key is the field's whole derivation, including the origins the flood
+/// is seeded from, because two callers hand different ones under the same
+/// Task (#358). `TravelCost` and `Baseline` differ in traffic alone, so with
+/// the traffic gone they are one field, filed under the `TravelCost` entry
+/// (`Atlas.farFieldAlong`).
 type FarFieldTable =
     System.Collections.Generic.Dictionary<
         string list * Task * bool * FatigueFactor * Pricing * Pos list,
@@ -209,53 +138,29 @@ type FarFieldTable =
 
 /// The walk out to a Seam from every tile of one room's ground, per ordered
 /// room pair, as the flood's whole-tick distance per tile index — the tile's
-/// own entry cost included, which `Atlas.seamWalkTicks` takes back off (ADR
-/// 0042's outpost container pick, and the order #266's builder budget is
-/// spent in). Held on
-/// the same terms as `WalkTable`: it is flooded over the room's walking grid
-/// and its Seam band under one constant planning body, all of which the census
-/// signature signs and nothing else moves, so it is filled on demand by the
-/// Atlas and handed to the next tick's while the signature holds.
+/// own entry cost included, which `Atlas.seamWalkTicks` takes back off. Held
+/// on the same terms as `WalkTable`: flooded over the room's walking grid and
+/// its Seam band under one constant planning body, all of which the census
+/// signature signs.
 type SeamWalkTable = System.Collections.Generic.Dictionary<string * string, int[]>
 
 /// The tables an Atlas prices its cross-room legs out of and the census memo
-/// recalls: the far fields, and beside them the Seam walks — the near half of
-/// a cross-room price with the far leg left off. **One** lifetime between
-/// them, the census's, which is what ADR 0070 bought: the far leg prices no
-/// traffic under any pricing, so there is no longer a table whose keys move
-/// with the crowd and no tick-long carry to bound one.
-///
-/// A record still, and not two bare arguments: it is the one name the whole
-/// far side of a cross-room price is handed around under — into the Atlas,
-/// back out onto the plan memo — and it is where a reader meets the rule the
-/// two tables share (`docs/research/cpu-headroom.md` §5.1, §5.3).
+/// recalls: the far fields, and beside them the Seam walks. One lifetime
+/// between them, the census's. A record, because it is the one name the whole
+/// far side of a cross-room price is handed around under
+/// (`docs/research/cpu-headroom.md` §5.1, §5.3).
 type FarFieldMemo =
     {
-        /// The Seam walks flooded under this census signature (ADR 0032):
-        /// `Atlas.seamWalkTicks`' table, which was laid per Atlas — once a
-        /// tick — until the profile put the outpost budget's ordering at 5%
-        /// of a `reactor --level 7` tick, all of it the same whole-room flood
-        /// out of the same band over the same grid every tick. Everything it
-        /// reads is the census's: the room's walking grid, its Seam band, and
-        /// a planning body that is a constant.
+        /// The Seam walks flooded under this census signature. Laid per Atlas
+        /// until the profile put the outpost budget's ordering at 5% of a
+        /// `reactor --level 7` tick, all of it the same whole-room flood.
         SeamWalks: SeamWalkTable
         /// The far fields, every pricing's, held while the census signature
-        /// stands (ADR 0032, ADR 0070). Grows with the census: the chains a
-        /// colony's declarations reach over, times the Tasks at the end of
-        /// them — and no longer with the crowd, which since ADR 0070 no far
-        /// field prices.
-        ///
-        /// Task-derived **origins** only, which is what keeps that true: an
-        /// ask the decision layer narrowed for itself — a Guard's ring cut out
-        /// of this tick's Threats — keys on tiles that move every tick, and
-        /// under a census that has not moved would mint a key a tick here with
-        /// nothing to evict it. Those ride the Atlas's per-tick table instead
+        /// stands. Task-derived origins only: an ask the decision layer
+        /// narrowed for itself (a Guard's ring cut out of this tick's Threats)
+        /// keys on tiles that move every tick and would mint a key a tick here
+        /// with nothing to evict it. Those ride the Atlas's per-tick table
         /// (`Atlas.TickFarFields`, `Atlas.farFieldAlong`).
-        ///
-        /// The name survives ADR 0070 rather than being kept out of habit:
-        /// what it says — this field lives exactly as long as the census —
-        /// used to tell one of the three tables from the other two, and is now
-        /// simply every far field's lifetime.
         PerCensus: FarFieldTable
     }
 
@@ -271,9 +176,8 @@ module FarFieldMemo =
             PerCensus = FarFieldTable()
         }
 
-/// What a Link footing is held beside (ADR 0022, ADR 0027): each planned
-/// source container, the controller container, the Storage. The Layout knows a
-/// target's kind by construction and carries it, so a footing the fold cannot
+/// What a Link footing is held beside: each planned source container, the
+/// controller container, the Storage. Carried so a footing the fold cannot
 /// serve names the guarantee that was lost, not merely a tile.
 [<RequireQualifiedAccess>]
 type FootingKind =
@@ -288,12 +192,9 @@ type FootingKind =
 type UnservedFooting = { Target: RoomPos; Kind: FootingKind }
 
 /// A footing target the Layout served: the tile it reserved, beside the target
-/// that tile is held for and that target's kind. The served counterpart of
-/// `UnservedFooting`, which names a target and a kind and no tile because there
-/// was none. The pairing rather than the bare set of tiles, because the set is
-/// a one-line projection of the pairing and the reverse is a search: a
-/// reservation the bot never emits can otherwise only be cross-checked by a
-/// second derivation (ADR 0035).
+/// that tile is held for and that target's kind. The pairing rather than the
+/// bare set of tiles, because the set is a one-line projection of the pairing
+/// and the reverse is a search.
 type ServedFooting =
     {
         Target: RoomPos
@@ -301,49 +202,37 @@ type ServedFooting =
         Tile: RoomPos
     }
 
-/// The two ends a trunk is routed to (ADR 0011): the controller's Upgrade Work
-/// Area, and each spawn's walkable ring. A type of its own because the loss is
-/// per goal and not per source — one source can lose its line to the spawn and
-/// keep the one to the controller.
+/// The two ends a trunk is routed to: the controller's Upgrade Work Area, and
+/// each spawn's walkable ring. A type of its own because the loss is per goal
+/// and not per source.
 [<RequireQualifiedAccess>]
 type TrunkGoal =
     | UpgradeArea
     | Spawn of spawn: string
 
-/// A trunk the Layout could not route: the router paved nothing for this goal,
-/// because no tile of it was reachable from the source once the clustered
-/// reservation was marked impassable — or because the goal holds no tile at
-/// all. The two are one answer on purpose: a line that carries nothing is the
-/// loss, and which way the geometry failed is not something the colony can act
-/// on differently. Recorded rather than dropped in silence, because an empty
-/// path unions into the road plan contributing nothing (ADR 0035's channel,
-/// since a trunk has no creep to key a Verdict on).
+/// A trunk the Layout could not route: no tile of the goal was reachable from
+/// the source once the clustered reservation was marked impassable, or the
+/// goal holds no tile at all. One answer on purpose: which way the geometry
+/// failed is not something the colony can act on differently. Recorded rather
+/// than dropped, because an empty path unions into the road plan in silence.
 type UnroutedTrunk = { Source: string; Goal: TrunkGoal }
 
-/// What a container is planned for (ADR 0012): a source, named by its id, or
-/// the controller. The two targets the container plan judges, and it judges
-/// them independently — a tile can satisfy both at once (a [[dual seat]] is
-/// within range 1 of a source and inside the Upgrade Work Area), and ADR 0040
-/// names that edge and leaves it. The source carries its id where the
-/// controller needs none: a room has one controller (ADR 0005) and several
-/// sources.
+/// What a container is planned for: a source, the controller, or a mineral.
+/// Judged independently — a dual seat can satisfy a source and the controller
+/// at once. A room has one controller and several sources, so only the
+/// source carries an id.
 [<RequireQualifiedAccess>]
 type ContainerTarget =
     | Source of source: string
     | Controller
-    /// A Thorium mineral, named by its id (ADR 0057 decision 1). A target of
-    /// its own and not a source: the two are served by the same rule — a
-    /// container standing or pending within range 1 — and planned by two, the
-    /// source's container seating on that source's own trunk and the mineral's
-    /// on the trunk out to the Storage, the mineral having no trunk of its
-    /// own. A room may hold several, so it carries its id as a source does.
+    /// A Thorium mineral. A target of its own and not a source: served by the
+    /// same rule, planned by a different one — the mineral's container seats
+    /// on the trunk out to the Storage, the mineral having no trunk of its own.
     | Mineral of mineral: string
 
-/// A container pick the plan did not place because its target is already served
-/// by a container standing somewhere else (ADR 0040): the target, the tile the
-/// plan picked, and the tile actually serving it. The pick moves when the trunk
-/// moves — a commit, not a tick — so the colony carries a container on a worse
-/// tile rather than two containers.
+/// ADR-0040. A container pick the plan did not place because its target is
+/// already served by a container standing somewhere else: the target, the
+/// tile the plan picked, and the tile actually serving it.
 type DeferredContainer =
     {
         Target: ContainerTarget
@@ -368,72 +257,55 @@ type HaulDemandRow =
         Demand: int
     }
 
-/// The census-keyed plan memo (ADR 0017): the census signature beside the plans
-/// derived from exactly that census — the Layout's site Intents, the footings
-/// it placed and the ones it could not, the hauler quota, and the spawn walks
-/// behind the leads (ADR 0032). Held by the host in heap across ticks, never
-/// written to Memory: a global reset discards it and the next tick recomputes.
+/// ADR-0017. The census-keyed plan memo: the census signature beside the plans
+/// derived from exactly that census. Held by the host in heap across ticks,
+/// never written to Memory: a global reset discards it and the next tick
+/// recomputes.
 type PlanMemo =
     {
         Signature: string
-        /// The census signature **per projected room** the three walk tables
-        /// below were filled under (#388): `Decide.roomSignatures`, the
-        /// per-room half of `Signature` with the colony-wide inputs (home,
-        /// level) folded into every entry. The plan above keys on the whole
-        /// census; a walk table entry reads the grids of the rooms it names
-        /// and nothing else, so it is kept while *those* rooms' entries hold
-        /// and dropped the tick one of them moves (`Atlas.evictRooms`). A
-        /// replan used to throw every table away and re-flood the lot:
-        /// measured by count 2026-09-20 (`docs/profiling.md`),
-        /// `reactor --level 7 --census-every 1` ran 109,258 heap pops a tick
-        /// against 9,554 quiet, and the per-room drop took the perturbed
-        /// tick to 91,920 with the harness moving the home room — the rest
-        /// of the difference is the plan's own floods and the walks a moved
-        /// home genuinely owes.
+        /// The census signature per projected room the three walk tables
+        /// below were filled under (#388, `Decide.roomSignatures`). A walk
+        /// table entry reads the grids of the rooms it names and nothing else,
+        /// so it is kept while those rooms' entries hold and dropped the tick
+        /// one of them moves (`Atlas.evictRooms`); the numbers are in
+        /// `docs/profiling.md`.
         ///
-        /// Stamped with the tick the tables were filled on, *not* with the
+        /// Stamped with the tick the tables were filled on, not with the
         /// plan's signature: on a deferred turn (#357) the plan served is
-        /// stale while the tables are this tick's, and stamping them with the
-        /// stale signature was #372's hazard — a census that moved and moved
-        /// back would recall tables flooded under the intermediate one.
+        /// stale while the tables are this tick's, and a census that moved
+        /// and moved back would otherwise recall tables flooded under the
+        /// intermediate one (#372).
         RoomSignatures: Map<string, string>
         SiteIntents: Intent list
-        /// The footing targets this plan left unserved (#77), derived from
-        /// the same census as the site Intents. Empty is the healthy answer
-        /// and rides here all the same: a channel that says nothing when
-        /// nothing is lost cannot be told from one that is not there.
+        /// The footing targets this plan left unserved (#77). Empty is the
+        /// healthy answer and rides here all the same: a channel that says
+        /// nothing when nothing is lost cannot be told from one that is not
+        /// there.
         UnservedFootings: UnservedFooting list
-        /// The footings this plan placed, each naming its target, that
-        /// target's kind and the tile reserved for it. No Intent ever names a
-        /// link (ADR 0022) and this never crosses the Memory boundary, so the
-        /// heap is the only place the reserved tiles are observable at all —
-        /// the whole-room invariant that a footing is off every trunk, target
-        /// and other footing reads them here (ADR 0036).
+        /// The footings this plan placed. No Intent ever names a link and this
+        /// never crosses the Memory boundary, so the heap is the only place
+        /// the reserved tiles are observable at all.
         ServedFootings: ServedFooting list
-        /// The trunks this plan could not route (#107), one entry per
-        /// (source, goal) the router found no path for. Empty is the healthy
+        /// The trunks this plan could not route (#107). Empty is the healthy
         /// answer and rides here all the same, as `UnservedFootings` does.
         UnroutedTrunks: UnroutedTrunk list
         /// The container picks this plan deferred to a container already
-        /// serving their targets (ADR 0040). Empty is the healthy answer and
-        /// rides here all the same, as `UnservedFootings` does.
+        /// serving their targets. Empty rides here all the same.
         DeferredContainers: DeferredContainer list
         HaulerQuota: int
         /// The quota's per-container arithmetic, kept beside it for the
-        /// `quotas` view; the same census the quota rides.
+        /// `quotas` view.
         HaulerDemand: HaulDemandRow list
         HaulerLoad: int
         /// The walks flooded under this signature, filled through the tick by
         /// the Atlas the table was handed to.
         Walks: WalkTable
         /// The Seam walks flooded under this signature, on the same terms as
-        /// `Walks` and for the same reason (`SeamWalkTable`).
+        /// `Walks`.
         SeamWalks: SeamWalkTable
-        /// The far fields flooded under this signature, filled through the
-        /// tick by that same Atlas — `Walks`' rule one query over
-        /// (`docs/research/cpu-headroom.md` §5.1). Every pricing's since ADR
-        /// 0070: the far leg reads no creep's tile, so there is one table
-        /// here and it rides the signature like the two above it.
+        /// The far fields flooded under this signature, on the same terms as
+        /// `Walks` (`docs/research/cpu-headroom.md` §5.1).
         FarFields: FarFieldTable
     }
 
@@ -453,33 +325,23 @@ type ReplanTurn =
 [<RequireQualifiedAccess>]
 module PlanMemo =
 
-    /// A colony's plan when its turn to re-plan has not come round (#357). The
-    /// tick that re-planned four colonies at once cost **487 ms of the
-    /// engine's 500 ms ceiling** — 164 in the projection and 248 deciding —
-    /// against a mean of 84, and a re-planning tick averages 209 against 84.
-    /// So a colony re-plans on its turn, and this is what it holds until then:
-    /// nothing placed, no footing reserved, no hauler asked for.
+    /// A colony's plan when its turn to re-plan has not come round (#357: the
+    /// tick that re-planned four colonies at once cost 487 ms of the engine's
+    /// 500 ms ceiling). Nothing placed, no footing reserved, no hauler asked
+    /// for — all safe stand-ins: the engine holds construction sites, an
+    /// unreserved footing blocks nothing, and a hauler row of zero casts no
+    /// body rather than dismissing one.
     ///
-    /// The signature is **deliberately empty**, which is why this is a value
-    /// and not a record literal at the call site. `censusSignature` composes
-    /// eight fields with `|` separators, so it can never produce the empty
-    /// string — and a memo whose signature can never match is one the next
-    /// tick must replace. A memo stamped with the signature it *declined* to
-    /// plan against would be served forever.
+    /// The signature is deliberately empty: `censusSignature` composes eight
+    /// fields with `|` separators and can never produce the empty string, so
+    /// this memo can never match and the next tick must replace it. A memo
+    /// stamped with the signature it declined to plan against would be served
+    /// forever.
     ///
-    /// Empty is the right stand-in and not merely the cheap one: a site
-    /// already in the world does not need this tick's Intent to survive (the
-    /// engine holds construction sites), an unreserved footing blocks nothing,
-    /// and a hauler row of zero casts no body rather than dismissing one. What
-    /// is lost is one tick of *new* placement per colony per turn — measured
-    /// against a tick that the engine kills outright.
-    /// The three tables are handed in and not defaulted, because every one of
-    /// them is a fact this tick paid for: a deferred colony declines to
-    /// **plan**, not to price. Handing in an empty table here would throw away
-    /// the tick's own walks, Seam walks and far fields (ADR 0032,
-    /// `docs/research/cpu-headroom.md`). The per-room signatures come with
-    /// them for the same reason: they say which census the tables were
-    /// filled under, and that is this tick's, whatever the plan's is (#372).
+    /// The three tables are handed in and not defaulted: a deferred colony
+    /// declines to plan, not to price. The per-room signatures come with them
+    /// because they say which census the tables were filled under, and that
+    /// is this tick's, whatever the plan's is (#372).
     let deferred
         (roomSignatures: Map<string, string>)
         (walks: WalkTable)

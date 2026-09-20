@@ -40,34 +40,28 @@ type BuiltKind =
     | Container
     | Storage
     /// A link. Projection-only: no counterpart in the placeable kinds,
-    /// because the Layout holds a footing for one but never places it
-    /// (ADR 0022).
+    /// because the Layout holds a footing for one but never places it.
     | Link
-    /// A rampart, the walkable defence over the Keep and the Posts (ADR
-    /// 0034). Walkability answers for it before anything else does: a creep
-    /// may stand on a rampart, and folding it into Other would make every kind
+    /// A rampart, the walkable defence over the Keep and the Posts.
+    /// Walkability answers for it before anything else does: a creep may
+    /// stand on a rampart, and folding it into Other would make every kind
     /// the decision layer does not model walkable with it.
     | Rampart
-    /// The extractor over a Thorium mineral (ADR 0057 decision 1). One per
-    /// room ever, standing on the mineral's own tile, and a modelled kind
-    /// rather than Other for one reason: the Layout has to see the one already
-    /// standing — or the site going up — before it asks for another. It feeds
-    /// nothing, stores nothing, decays into nothing and is never repaired, so
-    /// every predicate over the vocabulary answers no for it.
+    /// The extractor over a Thorium mineral. One per room ever, standing on
+    /// the mineral's own tile, and a modelled kind rather than Other for one
+    /// reason: the Layout has to see the one already standing — or the site
+    /// going up — before it asks for another. It feeds nothing, stores
+    /// nothing, decays into nothing and is never repaired, so every predicate
+    /// over the vocabulary answers no for it.
     | Extractor
     /// The terminal (#349). One per room from RCL6, and the only structure in
     /// the vocabulary whose reason for existing is a room it is **not** in: a
     /// `send` between two terminals of the same owner is unrestricted by
     /// `mod-season5/src/terminal-restriction.js`, which nulls a send only when
-    /// the target terminal belongs to somebody else. That is the one path from
-    /// the Thorium banked in rooms five and six crossings from the Reactor to
-    /// the colony that can walk it in.
-    ///
-    /// Modelled rather than Other for the Extractor's reason: the Layout has to
-    /// see the one already standing — or the site going up — before it asks for
-    /// another. It holds a store, and no rule reads that store yet; a kind the
-    /// Refill rules do not name is a kind no hauler fills, which is what keeps
-    /// this slice inert until #349's send rule lands.
+    /// the target terminal belongs to somebody else. Modelled rather than Other
+    /// for the Extractor's reason. It holds a store, and no rule reads that
+    /// store yet; a kind the Refill rules do not name is a kind no hauler
+    /// fills, which is what keeps this slice inert until #349's send rule lands.
     | Terminal
     /// Any structure kind the decision layer has no rules for yet.
     | Other
@@ -79,19 +73,16 @@ type RefillableInfo =
         Id: string
         /// Energy the structure's store can still take (0 = full).
         FreeCapacity: int
-        /// What kind of structure this is — the Refill rank layer's key
-        /// (ADR 0010): spawn-feeding kinds are feeding-tier work, towers
-        /// surplus-tier. To a creep both are the same transfer.
+        /// What kind of structure this is — the Refill rank layer's key. To a
+        /// creep both are the same transfer.
         Kind: BuiltKind
     }
 
-/// The colony's [[refill cluster]] (ADR 0054): the colony's spawn and every
-/// extension of it, read as **one** Refill target. One Task is one place a body
-/// walks to once, and `task-gone` fires when the whole ring is full, where one
-/// Task per structure had a loaded body lose its extension to whoever filled it
-/// while it walked. **The spawn is the key**: the member every cluster has, and
-/// the door the [[hauler unit]] quota already prices its leg to (ADR 0052
-/// decision 4).
+/// ADR-0054
+/// The colony's [[refill cluster]]: the colony's spawn and every extension
+/// of it, read as **one** Refill target. **The spawn is the key**: the
+/// member every cluster has, and the door the [[hauler unit]] quota
+/// already prices its leg to.
 type RefillCluster =
     {
         /// The Task's target id: the cluster's spawn, and the id every
@@ -108,10 +99,9 @@ type RefillCluster =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module RefillCluster =
     /// The cluster this colony's Refillables make, or None where no spawn
-    /// stands among them to key one (ADR 0054). Membership is by kind and not
-    /// by geometry: every spawn-feeding structure is in the one cluster however
-    /// far the [[layout]] put it, and the walk is still short because the Work
-    /// Area is the union of the members' rings.
+    /// stands among them to key one. Membership is by kind and not by
+    /// geometry: every spawn-feeding structure is in the one cluster however
+    /// far the [[layout]] put it.
     let ofRefillables (refillables: RefillableInfo list) : RefillCluster option =
         let members =
             refillables
@@ -132,14 +122,12 @@ module RefillCluster =
                 }
 
     /// The energy the whole cluster can still take: what pools the Task at
-    /// all and what its [[capacity]] divides into holders (ADR 0054).
+    /// all and what its [[capacity]] divides into holders.
     let free (cluster: RefillCluster) =
         cluster.Members |> Map.fold (fun total _ room -> total + room) 0
 
     /// The members with room left, in id order — the structures the Work Area
-    /// is laid over and the only ones the Emitter may transfer into (ADR
-    /// 0054). A body stopped beside a full extension has nothing to pour,
-    /// which is this Task shape's own churn re-entered through the geometry.
+    /// is laid over and the only ones the Emitter may transfer into.
     let hungry (cluster: RefillCluster) =
         cluster.Members
         |> Map.toList
@@ -149,10 +137,9 @@ module RefillCluster =
 type SourceInfo =
     {
         Id: string
-        /// Ticks until the source holds energy again — its restock (ADR 0013,
-        /// widened by ADR 0025); 0 while it holds energy now. Not the amount:
-        /// the one time fact a decision reads about a source, so a drained
-        /// source's Harvest is judged at the creep's arrival.
+        /// Ticks until the source holds energy again — its restock; 0 while it
+        /// holds energy now. Not the amount: the one time fact a decision reads
+        /// about a source.
         TicksToRestock: int
     }
 
@@ -174,50 +161,39 @@ type ControllerInfo =
 
 /// Whose CLAIM parts hold one room's reservation, as the colony reads it:
 /// three answers and not a username, the same closed shape as `Ownership`
-/// below. The third is load-bearing and not a refinement of the second — ADR
-/// 0043 gives an NPC invader's reservation and another *player's* different
-/// meanings, and each is a **clock** a [[stand-down]] runs to that the other's
-/// rule would read wrong: the Invader's is the core's deadline and never
-/// answers earlier than the fallback, because the core re-takes the hold it
-/// lets lapse (#136); a player's is the hold itself, read literally and with no
-/// floor, because a claimer that stops coming re-takes nothing (#165). What
-/// carries no clock at all is a player's *ownership*, which is `Ownership`'s
-/// answer and not this one's.
+/// below. The third is load-bearing and not a refinement of the second:
+/// an NPC invader's reservation and another *player's* are each a
+/// **clock** a [[stand-down]] runs to that the other's rule would read
+/// wrong. What carries no clock at all is a player's *ownership*, which is
+/// `Ownership`'s answer and not this one's.
 [<RequireQualifiedAccess>]
 type ReservationHolder =
     /// This colony's own CLAIM parts. The one answer that doubles the
     /// room's sources and the one the reserver row sizes itself from.
     | Ours
     /// The NPC Invader — the holder of the reservation a level-0 core takes
-    /// with `attackController` in a room it expanded into (ADR 0043,
-    /// docs/research/remote-mining.md §8.4). Worth the neutral rate like any
+    /// with `attackController` in a room it expanded into
+    /// (docs/research/remote-mining.md §8.4). Worth the neutral rate like any
     /// hold that is not ours, and, unlike a rival's, an expiry: this lapses.
     | Invader
     /// Another player. Worth the neutral rate, and a [[stand-down]] that
-    /// runs to the end of the hold itself (#165) — the room is being worked
-    /// by somebody else for exactly as long as the engine says it is. The
-    /// abandonment trigger every mature bot implements; its permanent half
-    /// is `Ownership.Rival`.
+    /// runs to the end of the hold itself. Its permanent half is
+    /// `Ownership.Rival`.
     | Rival
 
-/// The reservation standing on one room's controller this tick (ADR
-/// 0042): a neutral controller held by CLAIM parts, which doubles every
-/// source in that room, decays by one a tick and caps at 5,000.
+/// The reservation standing on one room's controller this tick: a neutral
+/// controller held by CLAIM parts, which doubles every source in that
+/// room, decays by one a tick and caps at 5,000.
 type ReservationInfo =
     {
-        /// Whose CLAIM parts hold it — which of the three, never which
-        /// string: the engine answers holding with a username, and both names
-        /// that would have to be compared are the shell's to know. A
-        /// reservation somebody else holds reads for *pricing* exactly as no
-        /// reservation does, which is a colony decision and not the engine's
-        /// arithmetic: the colony prices it at five because a room somebody
-        /// else holds has stopped being ours to work (ADR 0043).
+        /// Whose CLAIM parts hold it — which of the three, never which string:
+        /// the engine answers holding with a username, and both names that would
+        /// have to be compared are the shell's to know.
         Holder: ReservationHolder
-        /// Ticks left on the reservation — what the reserver row sizes and
-        /// quotas from, `ceil((5000 - this) / 600)` CLAIM parts (ADR 0042).
-        /// Read as the colony's own hold only where `Holder` is `Ours`; under
-        /// `Invader` it is the deadline ADR 0043 falls back to, and under
-        /// `Rival` the one the stand-down #165 clocks runs to.
+        /// Ticks left on the reservation — what the reserver row sizes and quotas
+        /// from, `ceil((5000 - this) / 600)` CLAIM parts. Read as the colony's own
+        /// hold only where `Holder` is `Ours`; under `Invader` and `Rival` it is
+        /// the deadline the stand-down runs to.
         TicksToEnd: int
     }
 
@@ -225,18 +201,14 @@ type ReservationInfo =
 /// A closed vocabulary rather than a pair of booleans, because "ours" and
 /// "somebody else's" answer one question, and the two names that would have to
 /// be compared are the shell's to know. "We cannot see" is the absence of the
-/// whole entry (ADR 0004).
+/// whole entry.
 ///
 /// **Two senses, one vocabulary.** A *room*'s, read off its controller
-/// (`RoomControlInfo.Owner`): two of the answers are what ADR 0042 prices a
-/// source from — ours is the held rate, nobody's is half — and the third is
-/// what ADR 0043's clockless withdrawal is judged on, the one trigger the
-/// engine gives no end for (#165). And since #318 one *object*'s
+/// (`RoomControlInfo.Owner`), and since #318 one *object*'s
 /// (`SpatialInfo.Owners`), which is what a sector centre needs, there being no
 /// controller in that room to read a room answer off at all. The clauses below
-/// are written in the room sense because it is the older and the busier one;
-/// the object sense reads them one scale down, and `Ownership` is deliberately
-/// not split into two types, the question being the same question.
+/// are written in the room sense; the object sense reads them one scale down,
+/// and `Ownership` is deliberately not split into two types.
 [<RequireQualifiedAccess>]
 type Ownership =
     /// Nobody owns the controller — the shape every neutral room and every
@@ -244,21 +216,19 @@ type Ownership =
     /// controller at all is projected as. Reservable, and worth half until it
     /// is reserved.
     | Unowned
-    /// This colony owns it: the spawn room, and nothing else while there
-    /// is one colony. Worth the held ten a tick, and never reserved — the
+    /// This colony owns it. Worth the held ten a tick, and never reserved — the
     /// engine refuses `reserveController` on a room anybody owns.
     | Ours
     /// Another player owns it. The engine yields ten a tick in a rival's room
-    /// exactly as in ours, and the colony prices it at five all the same, for
-    /// the reason `ReservationInfo.Holder` gives (ADR 0043). No NPC case: an
-    /// invader core *reserves* and never owns.
+    /// exactly as in ours, and the colony prices it at five all the same. No
+    /// NPC case: an invader core *reserves* and never owns.
     | Rival
 
 /// Who holds one room the colony can see this tick — the fact a source's
-/// output is read from (ADR 0042), ten energy a tick being the *held* rate and
-/// a neutral room's source yielding five. One entry per room vision answered
+/// output is read from, ten energy a tick being the *held* rate and a
+/// neutral room's source yielding five. One entry per room vision answered
 /// for; a room the colony cannot see has no entry, and that absence is not
-/// "half" but unpriceable (ADR 0004).
+/// "half" but unpriceable.
 type RoomControlInfo =
     {
         /// Whose the room's controller is. Read *beside* the reservation and
@@ -266,11 +236,9 @@ type RoomControlInfo =
         /// 3,000 a cycle it gives a reserved one, so "reserved, or half" would
         /// price the colony's own sources at five.
         Owner: Ownership
-        /// The reservation standing on the room's controller; None where
-        /// nothing reserves it. *Which* rival holds it is deliberately not
-        /// carried, no rule reading a rival's name. What the pair does carry is
-        /// every question ADR 0043 asks: whether somebody else holds this room,
-        /// and whether the holder is the NPC whose reservation is a clock.
+        /// The reservation standing on the room's controller; None where nothing
+        /// reserves it. *Which* rival holds it is deliberately not carried, no
+        /// rule reading a rival's name.
         Reservation: ReservationInfo option
         /// Whether the room's controller is under safe mode this tick.
         /// Carried per room and not on the colony's own controller alone:
@@ -278,12 +246,11 @@ type RoomControlInfo =
         /// a room *we* own shields us. False where no controller stands.
         SafeMode: bool
         /// The text standing on this controller, and **None for a controller
-        /// nobody has signed** (ADR 0004). A sign is written by any creep
-        /// adjacent to the controller and lasts until somebody overwrites it,
-        /// so it is the one fact about a room that outlives every body that
-        /// made it — which is why four of ours carried another player's
-        /// flavour text for hundreds of thousands of ticks before anybody
-        /// read the field.
+        /// nobody has signed**. A sign is written by any creep adjacent to the
+        /// controller and lasts until somebody overwrites it, so it is the one
+        /// fact about a room that outlives every body that made it — which is why
+        /// four of ours carried another player's flavour text for hundreds of
+        /// thousands of ticks before anybody read the field.
         ///
         /// The text alone and not who wrote it: what the rule asks is whether
         /// what stands there is what this colony means to say, and a rival who
@@ -294,11 +261,7 @@ type RoomControlInfo =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module RoomControlInfo =
     /// The reservation this room carries **if it is that holder's**, and None
-    /// otherwise — an unheld room and one held by somebody else read alike
-    /// (ADR 0004). Four rules ask it of four different holders and each used to
-    /// spell the same bind-and-filter for itself; what each does with the
-    /// answer stays its own, because the deadlines they derive are genuinely
-    /// different clocks.
+    /// otherwise — an unheld room and one held by somebody else read alike.
     let heldBy (holder: ReservationHolder) (control: RoomControlInfo) : ReservationInfo option =
         control.Reservation |> Option.filter (fun held -> held.Holder = holder)
 
@@ -307,18 +270,12 @@ module RoomControlInfo =
     /// it or we do. The one question the *engine* asks before it answers
     /// `reserveController` or `createConstructionSite`: both are refused on a
     /// controller anybody but us holds, and neither cares which of the two it
-    /// is (#333). So this is deliberately not `heldBy` twice over: the rules
-    /// above it derive **clocks**, which the Invader's hold and a player's
-    /// genuinely disagree about, and this one derives a **refusal**, which
-    /// they do not. Three readers. Two are the halves of one sentence about
-    /// what this colony may do with a controller it can see: which ones it may
-    /// reserve at all (`reservableControllers`), and which of them a
-    /// [[candidate colony]] may claim (`claimTargets`). The third is the
-    /// [[raid log]]'s fold (`Observe.foldRaids`), which writes the same
-    /// judgement down under its room's name so the first of those two can
-    /// still be answered on the thousands of ticks nothing is looking
-    /// (`RaidState.Holds`, #333) — one predicate, or the record and the rule
-    /// could disagree about which rooms are refused.
+    /// is (#333). Deliberately not `heldBy` twice over: the rules above derive
+    /// **clocks**, which the two holds disagree about, and this one derives a
+    /// **refusal**, which they do not. Three readers (`reservableControllers`,
+    /// `claimTargets`, `Observe.foldRaids` via `RaidState.Holds`) share this
+    /// one predicate, or the record and the rule could disagree about which
+    /// rooms are refused.
     let heldByOther (control: RoomControlInfo) : ReservationInfo option =
         control.Reservation
         |> Option.filter (fun held -> held.Holder <> ReservationHolder.Ours)

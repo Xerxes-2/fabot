@@ -11,6 +11,17 @@
 - `[<Emit>]` binding stubs use `_`-prefixed params (args are used positionally via `$0`, invisible to the compiler).
 - An `[<Emit>]` accessor with a real body (the checked index that runs on .NET, e.g. the Atlas flood's `at`) names its params normally: the .NET body uses them.
 
+## ADRs
+- Write an ADR only if the decision is hard to reverse, surprising without
+  context, and a real trade-off. Tuning and behavioural details get a one-line
+  why-comment or a test name instead.
+- Changing a decision: mark the old ADR `superseded by NNNN` and remove its
+  code citations in the same commit.
+- Cite an ADR in code once, at the site that implements it, as `// ADR-NNNN`.
+  Never restate its reasoning in a comment.
+- Skip superseded ADRs unless asked for history.
+  `bash scripts/adr-check.sh --index` lists the live ones.
+
 ## Version control
 
 This repo uses **jj** (colocated with git). All VCS mutations go through `jj`; git is read-only.

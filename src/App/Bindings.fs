@@ -5,19 +5,10 @@ open Fable.Core
 
 type ICpu =
     abstract getUsed: unit -> float
-    /// The CPU the engine has banked for us. Read because the margin is what
-    /// decides whether a spike matters (#357): a tick may spend up to **500 ms**
-    /// and it banks what it does not spend — so a 339 ms tick against a 100 ms
-    /// limit is a 239 ms withdrawal, and whether that is survivable is a fact
-    /// about this number alone.
-    ///
-    /// **Not `min(limit + bucket, 500)`**, which is the arithmetic that reads
-    /// naturally and is wrong in the direction that matters: the engine's own
-    /// wording is that `tickLimit` "equals 500" and "will start decreasing only
-    /// after the accumulation is depleted". So the ceiling is 500 for the whole
-    /// life of a non-empty bucket, and a tick killed while the bucket still
-    /// held anything is a tick that tried to take more than half a second —
-    /// not one that merely outgrew a sliding allowance (#387).
+    /// The CPU the engine has banked for us. The tick ceiling is 500 ms for
+    /// the whole life of a non-empty bucket, not `min(limit + bucket, 500)`:
+    /// the engine's `tickLimit` "equals 500" and "will start decreasing only
+    /// after the accumulation is depleted".
     abstract bucket: int
 
 /// Screeps `FIND_SOURCES` constant.
@@ -32,59 +23,37 @@ let findStructures = 107
 /// Screeps `FIND_MY_CONSTRUCTION_SITES` constant.
 let findMyConstructionSites = 114
 
-/// Screeps `FIND_HOSTILE_CONSTRUCTION_SITES` constant: every construction site
-/// in the room a user who is not us placed — "hostile" being the engine's word
-/// for `my === false` and this bot having no ally vocabulary. Swept beside the
-/// sweep above rather than partitioning one `FIND_CONSTRUCTION_SITES` pass
-/// (#248), so each array is already the side it belongs to: ours are the
-/// projection's id-keyed sites and the colony's Build pool, and these are tiles
-/// alone. The engine takes one site per tile whoever owns it, which is the
-/// whole of why they are read.
+/// Screeps `FIND_HOSTILE_CONSTRUCTION_SITES` constant: every site a user who
+/// is not us placed (`my === false`). Read because the engine takes one site
+/// per tile whoever owns it.
 let findHostileConstructionSites = 115
 
 /// Screeps `FIND_HOSTILE_CREEPS` constant.
 let findHostileCreeps = 103
 
-/// Screeps `FIND_HOSTILE_STRUCTURES` constant: every structure in the room a
-/// user who is not us owns — the NPC Invader included, which is what an invader
-/// core belongs to. The only sweep that can *name* a core: a core is a
-/// structure, so `FIND_HOSTILE_CREEPS` has never answered with one, and the
-/// projection's own `FIND_STRUCTURES` pass sees it as `BuiltKind.Other` (ADR
-/// 0043).
+/// Screeps `FIND_HOSTILE_STRUCTURES` constant: every structure a user who is
+/// not us owns, the NPC Invader included. The only sweep that can name an
+/// invader core: `FIND_STRUCTURES` sees it as `BuiltKind.Other`.
 let findHostileStructures = 109
 
 /// Screeps `FIND_DROPPED_RESOURCES` constant.
 let findDroppedResources = 106
 
-/// Screeps `FIND_MINERALS` constant: the mineral deposits standing in the room
-/// (ADR 0057 decision 1). The season mod puts a Thorium deposit in most rooms
-/// beside the ordinary ore, and only the Thorium one is projected — the filter
-/// is on `mineralType` in `World`, where every other engine string is
-/// classified.
+/// Screeps `FIND_MINERALS` constant. The season mod puts a Thorium deposit in
+/// most rooms beside the ordinary ore; `World` filters on `mineralType`.
 let findMinerals = 116
 
-/// The season mod's `FIND_REACTORS` constant (`reactor.roomObject.js` sets
-/// `config.common.constants.FIND_REACTORS = 10051`). The **only** sweep that
-/// can answer with a reactor: the mod registers it through
-/// `registerCustomObjectPrototype`, so the engine files it in the find cache
-/// under this constant alone and in none of the built-in ones — a reactor
-/// reaches no `FIND_STRUCTURES` pass, carries no `structureType`, and so is
-/// invisible to every other sweep this shell makes (ADR 0060 decision 1's
-/// comment on the errand's missing facts, corrected).
-///
-/// The number and not the global, like every other find constant in this file:
-/// the mod's constants are runtime globals and a binding to one is a binding to
-/// the mod's own version. Ten thousand and fifty-one is what 1.0.3 sets.
+/// The season mod's `FIND_REACTORS` constant (`reactor.roomObject.js`, mod
+/// 1.0.3). The only sweep that can answer with a reactor: it is registered
+/// through `registerCustomObjectPrototype`, reaches no `FIND_STRUCTURES` pass
+/// and carries no `structureType`. The number, not the runtime global.
 let findReactors = 10051
 
-/// Screeps `FIND_TOMBSTONES` constant: what a creep leaves behind when it
-/// dies, holding whatever it carried (#167).
+/// Screeps `FIND_TOMBSTONES` constant.
 let findTombstones = 118
 
-/// Screeps `FIND_RUINS` constant: what a destroyed structure leaves behind,
-/// holding whatever stood in it. Projected as the same kind a tombstone is
-/// (`TargetKind.Tombstone`) — one store with a clock on it — because that is
-/// the whole of what a decision reads off either.
+/// Screeps `FIND_RUINS` constant. Projected as `TargetKind.Tombstone`: one
+/// store with a clock on it.
 let findRuins = 123
 
 /// Screeps `TERRAIN_MASK_WALL` constant.
@@ -93,27 +62,18 @@ let terrainMaskWall = 1
 /// Screeps `TERRAIN_MASK_SWAMP` constant.
 let terrainMaskSwamp = 2
 
-// The STRUCTURE_* spellings live in Core (`builtKindName`, #75): the kind
-// predicates over them are Core rules, so the table has to be readable there.
-// One exception, and the sentence above is the reason for it: an invader core
-// has no kind predicate in Core at all. Nothing repairs it, refills it, stores
-// in it or is charged damage on it, and Core's answer to every one of those is
-// already `BuiltKind.Other`'s. What Core reads off a core is a threat fact
-// under its own name (`InvaderCoreInfo`, ADR 0043) and never a built kind, so
-// admitting it to the modelled vocabulary would add eight predicate arms nobody
-// asks — and buy the census nothing, a core already signing as
-// `Other@room:x,y`.
+// The STRUCTURE_* spellings live in Core (`builtKindName`); the one exception
+// is the invader core, which Core reads as a threat fact (`InvaderCoreInfo`)
+// and never as a built kind.
 /// Screeps `STRUCTURE_INVADER_CORE` constant.
 let structureInvaderCore = "invaderCore"
 
 /// The NPC Invader's username, as the engine spells it on every object that
-/// user holds — an invader core, a raider, and the reservation a level-0 core
-/// takes with `attackController` (ADR 0043).
+/// user holds: a core, a raider, and the reservation a level-0 core takes.
 let invaderUsername = "Invader"
 
-/// Screeps `EFFECT_COLLAPSE_TIMER` constant. The effect an NPC stronghold's
-/// structures carry once deployed; when it runs out the engine removes the
-/// stronghold, and with it that sector's invasion switch (ADR 0043).
+/// Screeps `EFFECT_COLLAPSE_TIMER` constant: the effect a deployed stronghold's
+/// structures carry; when it runs out the engine removes the stronghold.
 let effectCollapseTimer = 1002
 
 type IStore =
@@ -135,22 +95,15 @@ type ISource =
 
 /// One entry of `RoomObject.effects`: an effect standing on a game object.
 type IEffect =
-    /// Effect id — a natural effect (EFFECT_*) or a Power id. The `level`
-    /// beside it in the engine is a Power effect's alone and no rule here
-    /// reads one, so it is not bound.
+    /// Effect id: a natural effect (EFFECT_*) or a Power id.
     abstract effect: int
-    /// How many ticks the effect will last: a count **relative** to now, which
-    /// is the engine runtime's shape and not the read-only HTTP API's. That
-    /// API's raw documents carry an absolute `endTime` instead, and
-    /// `docs/research/remote-mining.md` is written in its vocabulary — so an
-    /// expiry read off this has the current tick added to it (ADR 0043, #133).
+    /// Ticks the effect will last, relative to now (the HTTP API's raw
+    /// documents carry an absolute `endTime` instead, and
+    /// `docs/research/remote-mining.md` speaks in that vocabulary).
     abstract ticksRemaining: int
 
-/// A mineral deposit standing in a room (ADR 0057 decision 1). Read only for
-/// the season's Thorium: `mineralType` is the filter, and `mineralAmount` is
-/// what the projection carries as the deposit's own remaining Thorium. Density
-/// and `ticksToRegeneration` are not bound — a Thorium deposit never
-/// regenerates, and nothing decides on the density.
+/// A mineral deposit standing in a room. Density and `ticksToRegeneration`
+/// are not bound: a Thorium deposit never regenerates.
 type IMineral =
     abstract id: string
     abstract pos: IRoomPosition
@@ -173,15 +126,11 @@ type IStructure =
     /// The effects standing on this structure; undefined when none does,
     /// the shape `safeMode` and `reservation` also arrive in.
     abstract effects: IEffect[]
-    /// An invader core's level, and `undefined` on every other structure
-    /// (#382): 0 is the expansion core a stronghold plants in a neighbouring
-    /// room, 1 and up is the bunker itself — towers under million-hit
-    /// ramparts, and a room nothing of ours crosses alive.
+    /// An invader core's level, `undefined` on every other structure: 0 is
+    /// the expansion core a stronghold plants next door, 1 and up the bunker.
     abstract level: int
-    /// Ticks before this structure may act again. Defined on the extractor
-    /// alone among the kinds we build (`EXTRACTOR_COOLDOWN` is 5), and read
-    /// only there — the shell classifies the kind first, so no other structure
-    /// is ever asked (ADR 0057 decision 2).
+    /// Ticks before this structure may act again. Among the kinds we build,
+    /// defined on the extractor alone (`EXTRACTOR_COOLDOWN` is 5).
     abstract cooldown: int
 
 /// A dropped resource pile lying on the ground.
@@ -190,16 +139,11 @@ type IResource =
     /// Screeps RESOURCE_* string, e.g. "energy".
     abstract resourceType: string
     abstract pos: IRoomPosition
-    /// How much of that resource the pile holds — the field the Pickup Task's
-    /// threshold and its capacity are both read off (#167). A pile is a bare
-    /// amount and not a store, which is why this is a number here and a
-    /// `getUsedCapacity` call on everything else.
+    /// How much the pile holds: a bare amount, not a store.
     abstract amount: int
 
-/// A tombstone or a ruin: the two engine objects that are a store with a clock
-/// on it. One binding for both (#167), because the three fields the projection
-/// reads are the same three and Core models the pair as one kind. What draws
-/// from them is the ordinary `creep.withdraw`, which takes any store.
+/// A tombstone or a ruin: one binding, since the projection reads the same
+/// three fields off both and `creep.withdraw` takes any store.
 type ITombstone =
     abstract id: string
     abstract pos: IRoomPosition
@@ -210,10 +154,7 @@ type IConstructionSite =
     /// Screeps STRUCTURE_* string of what is being built.
     abstract structureType: string
     abstract pos: IRoomPosition
-    /// The energy already built into it, and what it needs in all. Bound for
-    /// the worker row's backlog term (#364): a road's 300 and a terminal's
-    /// 100,000 are both "a site" to a count, and a row hired off a count sends
-    /// two bodies at either.
+    /// The energy already built into it, and what it needs in all.
     abstract progress: int
     abstract progressTotal: int
 
@@ -221,9 +162,8 @@ type IConstructionSite =
 type IOwner =
     abstract username: string
 
-/// The line somebody has written onto a controller (#381). Undefined until
-/// one is, and it outlives every body in the room: four of ours carried a
-/// stranger's flavour text for hundreds of thousands of ticks.
+/// The line somebody has written onto a controller. Undefined until one is,
+/// and it outlives every body in the room.
 type ISign =
     /// The text itself, at most a hundred characters.
     abstract text: string
@@ -242,11 +182,7 @@ type IController =
     /// True when this controller is owned by us; undefined on a
     /// controller nobody owns, the shape `safeMode` also arrives in.
     abstract my: bool
-    /// Whose controller this is; undefined on an unowned one. Read off every
-    /// room the colony can see, and twice for two questions: once off the room
-    /// its spawns stand in, for the one name a reservation and a hostile are
-    /// compared against (ADR 0042), and once per seen room for the third
-    /// answer `Ownership` carries — the clockless half of ADR 0043.
+    /// Whose controller this is; undefined on an unowned one.
     abstract owner: IOwner
     /// The reservation standing on this controller; undefined when none
     /// does.
@@ -258,26 +194,18 @@ type IController =
     /// Safe-mode activations banked.
     abstract safeModeAvailable: int
     /// The sign standing on this controller, `undefined` until somebody
-    /// writes one (#381).
+    /// writes one.
     abstract sign: ISign
     /// Ticks of safe mode remaining; undefined when safe mode is off.
     abstract safeMode: int
     abstract pos: IRoomPosition
     abstract activateSafeMode: unit -> int
 
-/// The sector **Reactor** (ADR 0057, `mod-season5/src/reactor.roomObject.js`):
-/// the season's scoring sink, one per sector centre, indestructible — it
-/// carries no `hits` at all — and walkable. The decision reads its id and
-/// ownership; the observation channel also reads its store, owner name and
-/// continuity clock (#320).
-///
-/// `my` is the mod's own accessor, `o.user ? o.user == runtimeData.user._id :
-/// undefined` — so it is **undefined** on a reactor nobody owns, exactly as a
-/// controller's is, and the three answers are read off `my` and `owner`
-/// together the way a room's ownership already is. The tile is still not read
-/// here — it is the **declaration**'s
-/// (`Errand.place`, ADR 0060 decision 1), which is what lets a Task name the
-/// target before any body of ours has stood in the room.
+/// The sector Reactor (`mod-season5/src/reactor.roomObject.js`): one per
+/// sector centre, indestructible (no `hits` at all) and walkable. `my` is the
+/// mod's own accessor, `o.user ? o.user == runtimeData.user._id : undefined`,
+/// so it is undefined on one nobody owns, as a controller's is. The tile is
+/// not read here; it is the declaration's (`Errand.place`).
 type IReactor =
     abstract id: string
     /// True when this reactor is ours; undefined on one nobody owns.
@@ -291,15 +219,10 @@ type IReactor =
 type ITower =
     abstract attack: target: obj -> int
 
-/// The one verb a terminal has that a store does not (#349). `send` moves a
-/// resource to another room's terminal directly, paying a fee out of **this**
-/// terminal's energy, and the season's `mod-season5/src/terminal-restriction.js`
-/// nulls it only when the destination terminal belongs to another user — an
-/// own-terminal send of Thorium is legal, which is the whole basis of the
-/// consignment.
-///
-/// `description` is the optional last argument the engine logs; nothing here
-/// passes one, so it is omitted from the binding rather than passed as null.
+/// `send` moves a resource to another room's terminal, paying a fee out of
+/// this terminal's energy; `mod-season5/src/terminal-restriction.js` nulls it
+/// only when the destination belongs to another user. The optional
+/// `description` argument is omitted rather than passed as null.
 type ITerminal =
     abstract send: resourceType: string * amount: int * destination: string -> int
 
@@ -337,12 +260,10 @@ type IBodyPartDef =
 type ICreep =
     abstract id: string
     abstract name: string
-    /// The room the creep is standing in this tick. Read to keep the
-    /// projection's creep table inside the room it is filed under (ADR 0041):
-    /// `Game.creeps` is world-wide and the projection is one room's.
+    /// The room the creep is standing in this tick (`Game.creeps` is
+    /// world-wide; the projection is one room's).
     abstract room: IRoom
-    /// Whose creep this is. Read only off hostiles, for the Raid log's
-    /// roster (ADR 0028); our own creeps' ownership is never in question.
+    /// Whose creep this is; read only off hostiles.
     abstract owner: IOwner
     /// True while the creep is still being built inside the spawn.
     abstract spawning: bool
@@ -362,36 +283,28 @@ type ICreep =
     abstract build: target: obj -> int
     abstract repair: target: obj -> int
     abstract upgradeController: target: obj -> int
-    /// Push a neutral controller's reservation up by one tick per CLAIM
-    /// part (ADR 0042). Range 1, and refused on a controller anybody owns
-    /// — including ours, which is Upgraded instead.
+    /// Push a neutral controller's reservation up by one tick per CLAIM part.
+    /// Range 1; refused on a controller anybody owns.
     abstract reserveController: target: obj -> int
-    /// Take a neutral controller's room for this player (ADR 0047). Range
-    /// 1, one CLAIM part, and refused — ERR_GCL_NOT_ENOUGH — while every
-    /// GCL level this account has is already spent on a room.
+    /// Take a neutral controller's room. Range 1, one CLAIM part, and
+    /// ERR_GCL_NOT_ENOUGH while every GCL level is already spent.
     abstract claimController: target: obj -> int
-    /// Write an arbitrary line onto a controller this creep stands beside
-    /// (#381): no body part, range 1, a hundred characters, and it lasts until
-    /// somebody overwrites it.
+    /// Write a line onto a controller at range 1: no body part, a hundred
+    /// characters, lasts until overwritten.
     abstract signController: target: obj * text: string -> int
-    /// Take the sector Reactor for this player (ADR 0057 decision 5). The
-    /// season mod's own custom intent and not an engine method: range 1, one
-    /// live CLAIM part, **no cooldown and no ownership precondition** — so it
-    /// is made against a rival's flag on the same terms as against none, and it
-    /// leaves `launchTime` alone, which is why a steal in either direction
-    /// costs the streak nothing.
+    /// Take the sector Reactor: the season mod's own intent. Range 1, one live
+    /// CLAIM part, no cooldown and no ownership precondition, and it leaves
+    /// `launchTime` alone.
     abstract claimReactor: target: obj -> int
     abstract pickup: target: obj -> int
-    /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part (ADR 0056).
-    /// The [[guard]]'s act, and the only one this colony aims at a body it
-    /// does not own.
+    /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part.
     abstract attack: target: obj -> int
     /// Restore `HEAL_POWER` per HEAL part to a creep of ours at range 1,
-    /// itself included (ADR 0056). A different act from `attack` in the
-    /// engine, so a body carrying both parts does both in one tick.
+    /// itself included. A different act from `attack` in the engine, so a body
+    /// carrying both parts does both in one tick.
     abstract heal: target: obj -> int
-    /// Single-step move by direction constant (TOP = 1, clockwise). The
-    /// only movement API the bot uses — moveTo is forbidden (ADR 0001).
+    /// Single-step move by direction constant (TOP = 1, clockwise). The only
+    /// movement API the bot uses; moveTo is not bound.
     abstract move: direction: int -> int
     /// Chat bubble above the creep. The omitted `public` argument defaults
     /// to false: bubbles stay private to our own viewer.
@@ -430,18 +343,13 @@ let objectValues<'T> (_o: obj) : 'T[] = jsNative
 let objectEntries (_o: obj) : (string * obj)[] = jsNative
 
 /// One value out of a JS hash by key, or null when the hash holds no such
-/// entry. Read against `Game.rooms`, which holds only the rooms we have vision
-/// in this tick — so a null here is exactly "no vision", which the projection
-/// expresses as absence entry by entry (ADR 0004).
+/// entry. Against `Game.rooms` a null is exactly "no vision".
 [<Emit("$0[$1]")>]
 let objectItem<'T> (_o: obj) (_key: string) : 'T = jsNative
 
-/// `creep.withdraw` with the engine's **optional third argument** supplied — the
-/// amount (ADR 0057 decision 3). A stub of its own rather than a second
-/// interface member, because F# has no optional argument on an abstract member
-/// and the two-argument call is not the same call as one passing `undefined`:
-/// `withdraw(target, resource)` takes as much as the body has room for, which is
-/// what every Withdraw of this colony means and what the Intent spells `None`.
+/// `creep.withdraw` with the engine's optional third argument, the amount. A
+/// stub of its own because F# has no optional argument on an abstract member,
+/// and the two-argument call is not the same call as one passing `undefined`.
 [<Emit("$0.withdraw($1, $2, $3)")>]
 let withdrawAmount (_creep: ICreep) (_target: obj) (_resource: string) (_amount: int) : int =
     jsNative

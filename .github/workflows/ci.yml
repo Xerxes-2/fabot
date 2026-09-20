@@ -47,6 +47,9 @@ jobs:
       - name: Format check
         run: nix develop -c npm run format:check
 
+      - name: ADR check
+        run: bash scripts/adr-check.sh
+
       - name: Test
         run: nix develop -c dotnet test
 

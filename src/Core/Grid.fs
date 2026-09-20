@@ -37,27 +37,23 @@ type internal Flood =
 /// Unreached marker in a flood's distance array.
 let internal unreached = System.Int32.MaxValue
 
+/// ADR-0008
 /// Extra cost priced onto a step landing on a tile some creep occupies this
-/// tick — one swamp step by definition (ADR 0008, ADR 0010): a crowd usually
-/// means waiting, so a modest detour is preferred; the tile stays passable,
-/// so traffic never makes a Task inapplicable.
+/// tick — one swamp step. The tile stays passable, so traffic never makes a
+/// Task inapplicable.
 let private occupancyPenalty = Engine.swampWeight
 
 /// No tile occupied: the flood baseline the occupancy surcharge is judged
-/// against — the ground the walk is priced over (ADR 0029), and the ground
-/// the `Baseline` pricing the attribution compares against is priced over
-/// (ADR 0030).
+/// against.
 let internal noTraffic: bool[] = Array.create tileCount false
 
 /// The grid of a room the projection does not carry: every tile impassable,
-/// read a whole room at a time (ADR 0004, ADR 0041). Absence of a room and
-/// absence of every tile in it are one answer — unpriceable geometry, never
-/// blocked geometry. Shared by all three grids and never written.
+/// read a whole room at a time. Shared by all three grids and never written.
 let internal noGround: int[] = Array.create tileCount -1
 
-/// The weight of raw ground (ADR 0010): plain 2, swamp 10, wall impassable —
-/// written as the -1 the weight table marks impassable with. The one place
-/// the engine's terrain prices live, so no grid drifts from another.
+/// The weight of raw ground: plain 2, swamp 10, wall impassable — written as
+/// the -1 the weight table marks impassable with. The one place the engine's
+/// terrain prices live, so no grid drifts from another.
 let internal terrainWeight terrain =
     match terrain with
     | Plain -> 2
@@ -79,19 +75,13 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
 
 /// The fatigue factor a living creep would have holding `load` units of one
 /// resource and nothing else (#373) — the body the delivery draw prices its
-/// loaded leg for. `fatigueFactorOf` above reads the body as it stands, and
-/// the body asking for that draw stands **empty**, because it has to be empty
-/// to draw; the leg it is asking about is walked loaded. The two factors are
-/// not one number with a load added: a courier's `20C 10M` is weightless empty
-/// and at parity under `Tuning.ReactorLoad` (10 loaded Carry against 10 Move),
-/// where a worker's `11W 12C 12M` is at parity empty and two ticks a tile
-/// loaded (21 against 12), so a gate priced off the empty factor let the
-/// worker through at half the walk it went on to make, and it died of ore
-/// ageing on the leg with the season's ore aboard. Public, unlike its
-/// neighbours, for the reason `Pool.bodyClassOf` and `bodyFor` are (ADR
-/// 0006): a body fact a test reads directly — the gate's test reads the leg
-/// through it, and one that re-derived the factor by hand would pin a number
-/// and not the rule.
+/// loaded leg for. `fatigueFactorOf` reads the body as it stands, and the body
+/// asking for that draw stands **empty**; the leg it is asking about is walked
+/// loaded. A courier's `20C 10M` is weightless empty and at parity under
+/// `Tuning.ReactorLoad`, where a worker's `11W 12C 12M` is at parity empty and
+/// two ticks a tile loaded, so a gate priced off the empty factor let the
+/// worker through at half the walk it went on to make. Public: a body fact a
+/// test reads directly.
 let factorCarrying (creep: CreepInfo) (load: int) : FatigueFactor =
     fatigueFactorOf
         { creep with
@@ -101,23 +91,14 @@ let factorCarrying (creep: CreepInfo) (load: int) : FatigueFactor =
 
 /// The fatigue factor of a body list carrying nothing — the shape a body
 /// leaves the spawner in. Beside `fatigueFactorOf`, which reads a living
-/// creep; this one reads a body the projection carries no creep for: the
-/// hauler quota's candidate (ADR 0012) and a lead's replacement (ADR 0026).
+/// creep; this one reads a body the projection carries no creep for.
 let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
     // Counted in one pass over the list rather than through
     // `Vocabulary.partsOf`, which counts a whole `Map<BodyPart, int>` into
-    // existence to read two keys out of it — `partCountIn`'s own argument, on
-    // the rule that asks about a single part, applied to the rule that asks
-    // about two. The answer is identical by construction: `List.length` is the
-    // total and the map's two entries are these two counts.
-    //
-    // It is here rather than anywhere else because this is the hot one: every
-    // [[lead]] prices its successor's walk through `Atlas.castWalkTicks`, which
-    // takes this factor before it reaches its own memo, and a `pair --level 7`
-    // profile attributed 17.0 ms of a 265 ms `decide` — 6.4% — to the map this
-    // line used to build (`npm run profile -- 100 30 --scenario pair --level
-    // 7`, 2026-09-17). `partsOf` stays what it is for the rules that read
-    // several parts.
+    // existence to read two keys out of it. This is the hot one: every lead
+    // prices its successor's walk through `Atlas.castWalkTicks`, and a
+    // `pair --level 7` profile attributed 17.0 ms of a 265 ms `decide` — 6.4% —
+    // to the map this line used to build (2026-09-17).
     let mutable total = 0
     let mutable moves = 0
     let mutable carry = 0
@@ -137,10 +118,8 @@ let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
 
 /// The fatigue factor of the same body carrying a full load — every part but
 /// Move generating fatigue, the empty Carry's free ride spent. Beside
-/// `emptyFactorOf` because the two are one body's two journeys (ADR 0029) and
-/// a round trip prices both; written apart from it, the loaded half lived
-/// inside `Atlas.haulRoundTripTicks` and no reader of this file could see that
-/// the pair existed.
+/// `emptyFactorOf` because the two are one body's two journeys and a round
+/// trip prices both.
 let internal loadedFactorOf (body: BodyPart list) : FatigueFactor =
     let moves = partCountIn body Move
 
@@ -149,10 +128,11 @@ let internal loadedFactorOf (body: BodyPart list) : FatigueFactor =
         MoveParts = moves
     }
 
+/// ADR-0010
 /// Cost units the body needs to step onto a tile of the given terrain weight
 /// (Screeps fatigue): the step generates weight fatigue per fatigue-generating
-/// part, each Move part pays off 2 per tick — so the unit is a half-tick (ADR
-/// 0010) — and no step prices below one unit. At unit granularity and not whole
+/// part, each Move part pays off 2 per tick — so the unit is a half-tick —
+/// and no step prices below one unit. At unit granularity and not whole
 /// ticks, so a Move surplus keeps a road step cheaper than plain for every
 /// body. A body without Move parts cannot step at all.
 let internal stepUnits (factor: FatigueFactor) weight =
@@ -163,9 +143,8 @@ let internal stepUnits (factor: FatigueFactor) weight =
         Some(if units < 1 then 1 else units)
 
 /// Whole ticks the body needs to step onto a tile of the given terrain weight
-/// — the walk's price (ADR 0029). Two cost units make a tick and a part of
-/// one still costs a whole tick, and no step costs less than a tick however
-/// much Move it carries. The nested rounding is exact — ceil(ceil(w*F / M) /
+/// — the walk's price. Two cost units make a tick and a part of one still
+/// costs a whole tick. The nested rounding is exact — ceil(ceil(w*F / M) /
 /// 2) = ceil(w*F / 2M) — so this is the step's physical time, which is why
 /// the floor belongs per step and not on the total. No Move parts, no step.
 let private stepTicks (factor: FatigueFactor) weight =
@@ -177,12 +156,10 @@ let private stepTicks (factor: FatigueFactor) weight =
 /// What a step costs this body on every weight the ground can carry, laid out
 /// once per pricing: the index is the tile's weight and the value the price of
 /// stepping onto it, written as the same -1 the weight grid marks impassable
-/// with. That shared sentinel is the point — the flood's inner loop tests one
-/// integer instead of calling a pricing closure. Filled by
-/// `stepUnits`/`stepTicks`, the one place a step's price is computed (ADR 0010,
-/// ADR 0029). Swamp must stay the dearest weight a grid can hold: the table's
-/// length follows `Engine.swampWeight`, and a weight past its end reads as a
-/// free step under Fable.
+/// with, so the flood's inner loop tests one integer instead of calling a
+/// pricing closure. Swamp must stay the dearest weight a grid can hold: the
+/// table's length follows `Engine.swampWeight`, and a weight past its end
+/// reads as a free step under Fable.
 let internal stepTable (stepPrice: int -> int option) : int[] =
     Array.init (Engine.swampWeight + 1) (fun weight -> stepPrice weight |> Option.defaultValue -1)
 
@@ -207,17 +184,16 @@ let private setHeapAt (index: int) (heap: ResizeArray<int>) (value: int) : unit 
     heap.[index] <- value
 
 /// One tile's weight in one of the Atlas's grids, and -1 — impassable — for a
-/// tile off the grid. The single-tile ground query: the grids are laid once a
-/// tick, so asking one about a tile is an array index rather than a `Pos`
-/// compared down a tree. The room is the caller's, as on every query below (ADR
-/// 0041).
+/// tile off the grid. The grids are laid once a tick, so asking one about a
+/// tile is an array index rather than a `Pos` compared down a tree. The room
+/// is the caller's, as on every query below.
 let internal weightAt (grid: int[]) (tile: Pos) : int =
     if inGrid tile then at (indexOf tile) grid else -1
 
 /// Whether a tile is passable in one of the Atlas's grids — the -1 above
-/// read as the one thing it means. A tile off the grid, off the
-/// projection, walled, or blocked in whichever grid is being asked is not
-/// walkable in it, which is one answer and not four (ADR 0004).
+/// read as the one thing it means. A tile off the grid, off the projection,
+/// walled, or blocked in whichever grid is being asked is not walkable in
+/// it, which is one answer and not four.
 let internal walkableAt (grid: int[]) (tile: Pos) : bool = weightAt grid tile >= 0
 
 /// The heap's push: sift up by moving the hole, not by swapping. The climbing
@@ -249,33 +225,23 @@ let private push (flood: Flood) (key: int) =
 
 /// How much flooding one tick ran, as three integers: every flood built
 /// (`floodFromAllSeeded`, which every flood passes through), how many of
-/// those started **free** — every origin seeded at zero: a creep's own flood
-/// (`floodPriced`), a clock's walk (`walkFloodFromAll`), a trunk's
-/// (`floodFrom`) — rather than seeded at a cost carried in from elsewhere (a
-/// far field, a Seam walk, a cast leg over a border, `floodPricedInto`), and
-/// every heap pop (`pop`, the flood's unit of work). Free is judged on the
-/// seeds and not on the caller, because the caller that looked like the
-/// free one (`floodFromAll`) is not where a creep's flood comes from.
+/// those started **free** — every origin seeded at zero — rather than seeded
+/// at a cost carried in from elsewhere, and every heap pop (the flood's unit
+/// of work). Free is judged on the seeds and not on the caller, because the
+/// caller that looked like the free one (`floodFromAll`) is not where a
+/// creep's flood comes from.
 ///
-/// Why a count and not a clock (#389, AGENTS.md § Code hygiene): a live
-/// `decide` spike with **zero replans** — 45 ms against a 16 ms floor at
-/// t617394, 2026-09-20 — is unreadable off the phase split, which says the
-/// tick spent it deciding and nothing about what deciding did. Every CPU
-/// question this month that the clock could not settle was settled by a
-/// count, and every one of those counts was a throwaway patch of the bundle.
-/// These are the same three, made permanent: the shell reads them at each
-/// colony's boundary (`Main`, beside `Game.cpu.getUsed`), `Observe.foldCpu`
-/// differences them, and the CPU line carries them per colony.
+/// A count and not a clock (#389): a live `decide` spike with zero replans
+/// — 45 ms against a 16 ms floor at t617394, 2026-09-20 — is unreadable off
+/// the phase split. The shell reads these at each colony's boundary,
+/// `Observe.foldCpu` differences them, and the CPU line carries them.
 ///
 /// A module-level mutable, like `World.roomCosts`: a measurement of the run
-/// and not a fact of the game, so it rides no record the decision reads. The
-/// increments are integers on the hottest path there is — 9,554 pops a tick
-/// on `reactor --level 7` in the harness and 9,464 by #370's live probe,
-/// both 2026-09 — and too small for the clock to see; what they cost is what
-/// counting costs. `dotnet test` runs suites in parallel and two tests may
-/// increment at once, which loses a count: harmless, because no test reads
-/// these (#310's rule is enforced over the test assembly's statics, and the
-/// hazard it names is a torn read that a test *does* read).
+/// and not a fact of the game. The increments are integers on the hottest
+/// path there is — 9,554 pops a tick on `reactor --level 7` in the harness
+/// and 9,464 by #370's live probe, both 2026-09. `dotnet test` runs suites in
+/// parallel and two tests may increment at once, which loses a count:
+/// harmless, because no test reads these.
 module Counters =
     let mutable floods = 0
     let mutable free = 0
@@ -335,16 +301,13 @@ let private pop (flood: Flood) =
 
 /// Dijkstra flood over the weight grid from every tile in `starts`, each seeded
 /// at the cost the caller gives it and priced by `stepPrices` — one body's
-/// `stepTable`, and, beside the occupancy the caller passes, the only thing
-/// that differs between the tick's floods (ADR 0029, ADR 0030). Nothing is
-/// relaxed here: what comes back is seeded and unadvanced, and `settleTo` runs
-/// it, so the memo can lay one flood per creep per pricing and charge only the
-/// ones a reader asks about. A start takes its seed even when it cannot be
-/// stepped onto — a creep stands there, or on the border ring, which is no tile
-/// of the projection's ground. Several starts price a body that may begin
-/// anywhere in a set (ADR 0026). An occupied tile costs `occupancyPenalty`
-/// extra, in cost units, so a caller pricing steps in anything else must pass
-/// `noTraffic`, which `pricingOf` pairs per pricing.
+/// `stepTable`. Nothing is relaxed here: what comes back is seeded and
+/// unadvanced, and `settleTo` runs it, so the memo can lay one flood per creep
+/// per pricing and charge only the ones a reader asks about. A start takes its
+/// seed even when it cannot be stepped onto — a creep stands there, or on the
+/// border ring. An occupied tile costs `occupancyPenalty` extra, in cost
+/// units, so a caller pricing steps in anything else must pass `noTraffic`,
+/// which `pricingOf` pairs per pricing.
 let internal floodFromAllSeeded
     (weights: int[])
     (occupied: bool[])
@@ -385,17 +348,13 @@ let internal floodFromAllSeeded
 let private everyTile = -1
 
 /// Advance a flood until `goal`'s distance is final — or, for `everyTile`,
-/// until the heap is empty. It fills the flood's two grids: cheapest cost to
-/// every settled tile (`unreached` elsewhere), and each one's predecessor on a
-/// cheapest path. The tick's hottest loop, so it runs on flat arrays with a
-/// binary min-heap of dist-then-index keys, whose ordering also fixes
-/// tie-breaking; the price is a table read and not a closure call, and the
-/// grids come off the flood, so a resumed flood charges what the interrupted
-/// one did. The stopping rule is Dijkstra's own invariant: no unsettled tile
-/// can end up cheaper than the cheapest key left in the heap, because every
-/// step costs at least one (ADR 0010, ADR 0029), so once `dist[goal]` is at or
-/// under that frontier the tile is finished, with the number and the
-/// predecessor the whole flood would have left there.
+/// until the heap is empty. The tick's hottest loop, so it runs on flat
+/// arrays with a binary min-heap of dist-then-index keys, whose ordering also
+/// fixes tie-breaking; the price is a table read and not a closure call. The
+/// stopping rule is Dijkstra's own invariant: no unsettled tile can end up
+/// cheaper than the cheapest key left in the heap, because every step costs
+/// at least one, so once `dist[goal]` is at or under that frontier the tile
+/// is finished.
 let private settleTo (flood: Flood) (goal: int) =
     let dist = flood.Dist
     let parents = flood.Parents
@@ -465,7 +424,7 @@ let internal drained (flood: Flood) : int[] * int[] =
 /// read every per-tile question goes through, so no reader can mistake the
 /// `unreached` of an unsettled tile for the one that means unreachable. A
 /// tile off the grid is `unreached` too — the guard is what makes the reads
-/// below in-range, and it hands unplaceable geometry ADR 0004's answer.
+/// below in-range.
 let internal reachedBy (flood: Flood) (tile: Pos) : int =
     if not (inGrid tile) then
         unreached
@@ -528,11 +487,12 @@ let private floodFromAll weights occupied stepPrices (starts: Pos list) =
 let internal floodFrom weights occupied stepPrices (start: Pos) =
     floodFromAll weights occupied stepPrices [ start ]
 
+/// ADR-0029, ADR-0030
 /// What a step costs and whether the crowd is seen, for one pricing over one
 /// body: the ranking price sees today's traffic and counts half-ticks, the
-/// clock is blind to it and counts whole ticks (ADR 0029), and the baseline
-/// counts half-ticks with the crowd taken out (ADR 0030). The one place the
-/// pair is laid side by side, so no flood can take one half without the other.
+/// clock is blind to it and counts whole ticks, and the baseline counts
+/// half-ticks with the crowd taken out. The one place the pair is laid side
+/// by side, so no flood can take one half without the other.
 ///
 /// `TravelCost` and `Baseline` must go on sharing a step table, because
 /// `Atlas.farFieldAlong` files the far field of both under one key, so the
@@ -543,9 +503,8 @@ let internal pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Pric
     | Walk -> stepTable (stepTicks factor), noTraffic
     | Baseline -> stepTable (stepUnits factor), noTraffic
 
-/// The walk's flood over one body, from anywhere in `starts` (ADR 0029):
-/// whole ticks a step and blind to today's traffic — the `Walk` row of
-/// `pricingOf`, reached by the clocks whose origins keep them outside the
+/// The walk's flood over one body, from anywhere in `starts`: the `Walk` row
+/// of `pricingOf`, reached by the clocks whose origins keep them outside the
 /// tick's pricing memo (the lead's cast walk, the hauler quota's round trip).
 let internal walkFloodFromAll weights factor (starts: Pos list) =
     let stepPrices, traffic = pricingOf noTraffic factor Walk
@@ -590,11 +549,10 @@ let internal entryCost
 /// The same pricing flooded *into* a set of goals rather than out of one
 /// origin: cheapest cost from every tile of the room to the nearest goal,
 /// counting the step onto the tile it is read at and the step onto the goal it
-/// ends on (ADR 0041).
+/// ends on.
 ///
-/// Over empty ground always, and no occupancy argument to say otherwise: its
-/// one caller is the far leg of a cross-room price, which since ADR 0070
-/// prices no standing crowd under any pricing.
+/// ADR-0070: over empty ground always, and no occupancy argument to say
+/// otherwise — its one caller is the far leg of a cross-room price.
 let internal floodPricedInto weights factor pricing (goals: Pos list) : int[] =
     let stepPrices, traffic = pricingOf noTraffic factor pricing
 

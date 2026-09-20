@@ -1,8 +1,6 @@
-/// Serialization shell for the observe channels (ADR 0009, ADR 0028, ADR 0035,
-/// ADR 0041, #278): read the prior Transition log, Raid log, CPU line and
-/// breach log from `Memory.fabot.observe`, hand each to its pure Core fold and
-/// write the results back; the Layout leaf is written outright, having no prior
-/// state because it records this tick's plan. Absent or unreadable state is
+/// Serialization shell for the observe channels: read each prior log from
+/// `Memory.fabot.observe`, hand it to its pure Core fold and write the result
+/// back; the Layout leaf is written outright. Absent or unreadable state is
 /// discarded, never repaired, so telemetry cannot take the colony down.
 module Fabot.ObserveMemory
 
@@ -12,26 +10,17 @@ open Fabot.Bindings
 open Fabot.Core.Types
 open Fabot.Core.Observe
 
-// Body parts ride the Core's own part-name table in both directions over
-// its closed set, so `Core.Tests` round-trips every one of them and a case
-// added without its wire name fails a test rather than decoding silently.
+// Body parts ride the Core's own part-name table in both directions, so a
+// case added without its wire name fails a test rather than decoding silently.
 let private partOf = reverseOf partName allBodyParts
 
+// ADR-0028
 // A wire array read row by row: an absent leaf is the empty list and a row
-// that will not decode costs its own row and no more (ADR 0028). Bad state is
-// discarded rather than repaired, and the discard is one row and never the
-// whole channel — the discipline six leaves used to re-apply by hand, each one
-// `try`/`with` away from getting it wrong. A decoder says "not this row" by
-// answering None or by throwing; both read the same from here.
-//
-// The **absent** leaf is where this widens what the six sites used to do, and
-// deliberately. Four of them guarded no nulls at all: `unbox` is erased by
-// Fable, so a missing `episodes` key walked an `undefined`, threw, and hit the
-// enclosing `try` — which discarded the whole `RaidState`, `Outposts` and
-// `Living` and `Hits` along with it, and the whole of a creep's log for a
-// missing `log` key. That is precisely the failure ADR 0028 is written against
-// and precisely what `loadRaids`' own doc-comment says does not happen, so the
-// guard here is the rule those comments already claimed.
+// that will not decode costs its own row and no more. A decoder says "not
+// this row" by answering None or by throwing; both read the same from here.
+// The null guard matters: `unbox` is erased by Fable, so a missing key walks
+// an `undefined`, throws, and would hit the enclosing `try` that discards the
+// whole leaf.
 let private rowsOf (decode: obj -> 'a option) (raw: obj) : 'a list =
     if isNull raw then
         []
@@ -55,13 +44,9 @@ let private hashOf (encode: 'v -> obj) (entries: seq<string * 'v>) : obj =
 
     o
 
-// A wire leaf read whole: an absent leaf and one that will not decode are the
-// same answer — the empty value — so a bundle written before the leaf existed
-// and a bundle written wrong both cost that leaf and no more (ADR 0028). The
-// discipline `rowsOf` applies row by row, applied one level up, where five
-// loaders used to re-apply it by hand and each one was a `try`/`with` away
-// from getting it wrong. The leaf arrives as a thunk because reading it is
-// itself part of what may throw.
+// A wire leaf read whole: an absent leaf and one that will not decode both
+// read as the empty value and cost that leaf and no more. The leaf arrives as
+// a thunk because reading it is itself part of what may throw.
 let private leafOr (empty: 'a) (leaf: unit -> obj) (decode: obj -> 'a) : 'a =
     try
         let raw = leaf ()
@@ -69,18 +54,11 @@ let private leafOr (empty: 'a) (leaf: unit -> obj) (decode: obj -> 'a) : 'a =
     with _ ->
         empty
 
-// **A whole number off the wire, and a throw for anything else** (#294).
-// `unbox<int>` is erased by Fable, so an off-shape value compiles to `| 0` and
-// reads back as tick 0 — a stand-down whose `expiry` was hand-edited to an
-// object decoded to a row that `standingDown` then read as *spent*, which is
-// the one direction ADR 0043 says the gate may not be wrong in. Every decoder
-// below that took a tick or a coordinate took it this way; the wire gate
-// (`scripts/wire-check.mjs`) is what found it, and #275 is where the same cast
-// cost a rival latch its tick.
-//
-// A throw and not a default, because every caller of this is inside a row
-// decoder: a row that will not read costs its own row (ADR 0028), and a
-// default would be the invented tick all over again.
+// A whole number off the wire, and a throw for anything else. `unbox<int>`
+// is erased by Fable, so an off-shape value compiles to `| 0` and reads back
+// as tick 0: a stand-down's expiry read as spent (#294). A throw and not a
+// default, because every caller is inside a row decoder and a default would
+// be the invented tick all over again.
 let private numberValue (value: obj) : int option =
     if jsTypeof value <> "number" then
         None
@@ -101,9 +79,9 @@ let private intMapOf (raw: obj) : Map<string, int> =
         Map.empty
     else
         objectEntries raw
-        // A value that is not a number costs its own entry (#294): these are
-        // baselines a later tick re-reads, so dropping one is a tick of
-        // silence where keeping it is a difference taken against nonsense.
+        // A value that is not a number costs its own entry: dropping a
+        // baseline is a tick of silence, keeping it is a difference taken
+        // against nonsense.
         |> Array.choose (fun (key, value) -> numberValue value |> Option.map (fun n -> key, n))
         |> Map.ofArray
 
@@ -247,10 +225,8 @@ let private encodeCreepLog (log: CreepLog) =
     o?lastMove <- log.LastMove |> List.map encodeVerdict |> List.toArray
     o
 
-// A Verdict this bundle cannot restate costs its own row and no more, the
-// way an undecodable episode costs one episode (ADR 0028): bad state is
-// discarded rather than repaired, but the discard is one row and never the
-// whole log. A cursor that will not decode reads as no cursor.
+// A Verdict this bundle cannot restate costs its own row and no more. A
+// cursor that will not decode reads as no cursor.
 let private decodeCreepLog creep (raw: obj) : CreepLog =
     let tryVerdict (raw: obj) =
         try
@@ -281,14 +257,10 @@ let private decodeCreepLog creep (raw: obj) : CreepLog =
         LastMove = raw?lastMove |> rowsOf tryVerdict
     }
 
-// One raid episode on the wire: the window, the roster as an array of rows
-// (the id is a field, so a roster reads in order), the closest approach
-// when one was measured, the losses, and the damage in hits (ADR 0034).
-/// A tile **with its room** as a wire object, and the read of one: the shape
-/// the Raid log's coordinates take (#204, #216 R3, #376), where the Layout's
-/// `tileObject` below leaves the room off on purpose. The episode is the
-/// colony's and names no room (ADR 0028), so every coordinate it carries
-/// says its own.
+/// A tile with its room as a wire object, and the read of one: the Raid log's
+/// coordinates, where the Layout's `tileObject` below leaves the room off. An
+/// episode names no room of its own, so every coordinate it carries says its
+/// own.
 let private roomPosObject (tile: RoomPos) =
     let o = createEmpty<obj>
     o?room <- tile.Room
@@ -327,9 +299,8 @@ let private encodeEpisode (episode: RaidEpisode) =
 
     match episode.Closest with
     | Some approach ->
-        // The room the approach was measured in rides the tile (#204): the
-        // episode is the colony's and names none of its own (ADR 0028), so
-        // without it the coordinate would read as home's.
+        // The room rides the tile; without it the coordinate would read as
+        // home's.
         let c = roomPosObject approach.Pos
         c?range <- approach.Range
         c?t <- approach.Tick
@@ -404,22 +375,18 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                 {
                     Creep = string d?creep
                     Tick = numberOf d "t"
-                    // Absent on a row written before #376, and on a body the
-                    // projection never placed: both read as no tile.
+                    // Absent on a legacy row and on a body the projection
+                    // never placed: both read as no tile.
                     Where = if isNull d?room then None else Some(roomPosOf d)
                 })
             |> Array.toList
-        // Absent on an episode written before ADR 0034, and zero is what that
-        // says: the field is missing rather than wrong, and the roster and
-        // approach beside it were written correctly (ADR 0028). Present and
-        // off-shape is the other case, and costs the row like every number.
+        // Absent on a legacy episode, and zero is what that says; present and
+        // off-shape costs the row like every number.
         Damage = if isNull raw?damage then 0 else numberOf raw "damage"
     }
 
-// One outpost episode on the wire (ADR 0043): the room it shuts, the
-// window, the tick the stand-down runs to, and which deadline that tick
-// was read off. A key of its own beside `episodes`, so a reader of either
-// family reads it whole and a bad row of one costs the other nothing.
+// One outpost episode on the wire. A key of its own beside `episodes`, so a
+// bad row of one family costs the other nothing.
 let private encodeOutpost (episode: OutpostEpisode) =
     let o = createEmpty<obj>
     o?room <- episode.RoomName
@@ -427,9 +394,7 @@ let private encodeOutpost (episode: OutpostEpisode) =
     o?last <- episode.LastSeen
     o?expiry <- episode.Expiry
     o?basis <- standDownBasisName episode.Basis
-    // Written only when true (#382), so a row from a bundle that predates the
-    // field reads `false` — "no bunker seen here", which is what every row
-    // written before this change meant.
+    // Written only when true, so a legacy row reads `false`.
     if episode.Stronghold then
         o?stronghold <- true
 
@@ -440,58 +405,36 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         RoomName = string raw?room
         Opened = numberOf raw "opened"
         LastSeen = numberOf raw "last"
-        // The one field with no honest default: `unbox` is a cast and not a
-        // check, so a row without this key would decode to `undefined`, every
-        // comparison against it would answer false, and `standingDown` would
-        // report a running stand-down as spent — the one direction ADR 0043
-        // does not allow the gate to be wrong in.
-        // A row with no expiry, or one whose expiry is not a number, costs its
-        // own row. `unbox` is a cast and not a check, so either would have
-        // decoded to `undefined` or to 0, every comparison against it would
-        // answer false, and `standingDown` would report a running stand-down
-        // as spent — the one direction ADR 0043 does not allow the gate to be
-        // wrong in. The off-shape half of that was live until #294's wire gate
-        // asked.
+        // The one field with no honest default: a missing or off-shape expiry
+        // would read as `undefined` or 0 and `standingDown` would report a
+        // running stand-down as spent, so the row is dropped instead.
         Expiry = numberOf raw "expiry"
         // A basis the vocabulary does not have costs its row rather than
-        // reading as another basis: a stand-down that cannot say why it
-        // holds an outpost is no stand-down, and the load already degrades
-        // episode by episode (ADR 0028).
+        // reading as another basis.
         Basis =
             match standDownBasisOf (string raw?basis) with
             | Some basis -> basis
             | None -> failwith "unknown wire name"
-        // Absent on every row written before #382, and absent on a row that
-        // never saw one: both mean "no bunker here", which is the reading the
-        // colony had for the whole of its life until this field existed.
+        // Absent on a legacy row and on one that never saw a bunker: both
+        // mean "no bunker here".
         Stronghold = not (isNull raw?stronghold) && unbox<bool> raw?stronghold
     }
 
-// One room held by somebody else's reservation on the wire (#333):
-// `{ holder, until }` — whose CLAIM parts stand on the controller, and the
-// absolute tick the engine's countdown ends on. Under the room's own key like
-// the latch below it and not a row of the ring: the ring's rows withdraw a
-// room, and this one withdraws only the reservation on it.
+// One room held by somebody else's reservation on the wire: `{ holder,
+// until }`, the absolute tick the engine's countdown ends on. Under the
+// room's own key, not a row of the ring: this withdraws only the reservation.
 let private encodeHold (hold: OutpostHold) =
     let o = createEmpty<obj>
     o?holder <- reservationHolderName hold.Holder
     o?until <- hold.Until
     o
 
-// `encodeHold`'s partner, and — like `decodeLatch` — a checker rather than a
-// cast. Both fields answer for the entry: a `holder` this vocabulary does not
-// have would name the wrong player, and an `until` that is not a number would
-// read as a tick and hold the room in the record for ever, `view.Time < until`
-// comparing against a string being false in the one direction that never ends.
-// An entry that will not read **costs a body** (`holdMapOf`, ADR 0028): the
-// room drops out of the record, and the record is what the Reserve pool and
-// the reserver row are narrowed by on the ticks nothing is looking into the
-// room (`ColonyView.HeldOutposts`, #333) — so the room reads as reservable and
-// the row buys the deficit. That is why the wire guard in `observe.mjs` fails
-// the whole command over one such entry instead of printing the room open: the
-// bot drops what it cannot decode, and the operator is the only one who can be
-// told. Dropping it is still the right shape here — the next tick with vision
-// writes the entry back — but it is a loss and not a free one.
+// A checker rather than a cast: an `until` that is not a number would hold
+// the room in the record for ever, `view.Time < until` comparing false against
+// a string. An entry that will not read costs a body: the room reads as
+// reservable and the reserver row buys the deficit until the next tick with
+// vision writes the entry back, which is why `observe.mjs` fails the whole
+// command over one such entry.
 let private decodeHold (raw: obj) : OutpostHold =
     if isNull raw || jsTypeof raw <> "object" then
         failwith "not a hold"
@@ -506,8 +449,7 @@ let private decodeHold (raw: obj) : OutpostHold =
             Until = numberOf raw "until"
         }
 
-// The hold map read back, entry by entry as the latch map is and for the same
-// reason: one unreadable entry must not take the leaf's whole history with it.
+// The hold map read back, entry by entry as the latch map is.
 let private holdMapOf (raw: obj) : Map<string, OutpostHold> =
     if isNull raw then
         Map.empty
@@ -520,24 +462,18 @@ let private holdMapOf (raw: obj) : Map<string, OutpostHold> =
                 None)
         |> Map.ofArray
 
-// One remembered raid on the wire (#366): `{ until }`, the tick the guard row
-// stops answering for a room it has gone blind in. One field and an object all
-// the same, matching `encodeHold` beside it rather than a bare number: the leaf
-// beside this one was written as a bare number once and #275 had to grow it a
-// second field on a live bundle, which cost a migration clause that is still
-// there.
+// One remembered raid on the wire: `{ until }`, the tick the guard row stops
+// answering for a room it has gone blind in. An object and not a bare number:
+// `rivalHeld` was a bare number once and growing it a second field on a live
+// bundle cost a migration clause that is still there (`decodeLatch`).
 let private encodeThreat (latch: ThreatLatch) =
     let o = createEmpty<obj>
     o?until <- latch.Until
     o
 
-// `encodeThreat`'s partner, a checker and not a cast for `decodeHold`'s reason:
-// an `until` that is not a number would compare false against `view.Time <
-// until` for ever, which here means a guard hired for a room nothing has looked
-// into since the log was hand-edited. An entry that will not read is dropped
-// (`threatMapOf`) and costs the room its memory — the guard row falls back to
-// what vision says, which is the pre-#366 behaviour and not a wrong answer
-// about a different room.
+// A checker and not a cast, for `decodeHold`'s reason: an `until` that is not
+// a number would hire a guard for ever. A dropped entry costs the room its
+// memory, and the guard row falls back to what vision says.
 let private decodeThreat (raw: obj) : ThreatLatch =
     if isNull raw || jsTypeof raw <> "object" then
         failwith "not a threat latch"
@@ -557,36 +493,22 @@ let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
                 None)
         |> Map.ofArray
 
-// One latched room on the wire (#275): `{ since, lastLooked }` — the tick the
-// gate shut on, and the tick the last look into the room was taken on, which is
-// what the stride to the next look is measured from.
+// One latched room on the wire: `{ since, lastLooked }`, the tick the gate
+// shut on and the tick of the last look, which the next look's stride is
+// measured from.
 let private encodeLatch (latch: RivalLatch) =
     let o = createEmpty<obj>
     o?since <- latch.Since
     o?lastLooked <- latch.LastLooked
     o
 
-// A latch written as a bare number is the shape this leaf carried before #275,
-// and a live bundle meets one on the tick it is deployed: every room the running
-// colony has latched is recorded that way. The number is the tick the gate shut
-// on, and under the old rule it was also the tick the stride was counted from,
-// so it reads as both fields — the first look under the new rule then falls a
-// full `RivalRecheck` after the shutting, which is where the old rule would have
-// put it too. A record carrying `since` and no `lastLooked` reads the same way,
-// for the same reason: the only look such a log can vouch for is the one that
-// shut the gate.
-//
-// Every *other* shape throws, and the throw costs this entry alone
-// (`latchMapOf`). `unbox` is a cast and not a check — the discipline
-// `decodeOutpost` states against itself two decoders up — so a `since` that is
-// not a number would read back as a tick all the same: `{}`, `[100, 100]` and
-// `"100"` all decode to the epoch, dating the withdrawal to tick 0 where #117's
-// US-20 asks for the real one, and leaving `lookDue`'s elapsed test to compare
-// a tick against a string for ever. An unfalsifiable latch is precisely what
-// #275 exists to kill, so a latch that cannot be read is dropped instead: the
-// room leaves the gate, re-enters the scan, and the next look with vision
-// decides it again. Both ticks are checked the same way, because a
-// `lastLooked` that is not a number is the same lie about the same gate.
+// A latch written as a bare number is the legacy shape (pre-#275): the tick
+// the gate shut on, which was also the tick the stride was counted from, so
+// it reads as both fields. A record with `since` and no `lastLooked` reads
+// the same way. Every other shape throws and costs this entry alone: `unbox`
+// is a cast, so `{}`, `[100, 100]` and `"100"` would all decode to the epoch
+// and leave `lookDue` comparing a tick against a string for ever. A dropped
+// latch re-enters the scan and the next look with vision decides it again.
 let private decodeLatch (raw: obj) : RivalLatch =
     let tickOf (field: obj) =
         if jsTypeof field = "number" then
@@ -612,21 +534,12 @@ let private decodeLatch (raw: obj) : RivalLatch =
                     tickOf raw?lastLooked
         }
 
-// The latch map read back — `hashOf encodeLatch`'s decode partner, absent
-// reading as empty the way an absent row array does, and an entry that will not
-// decode costing that entry and no more, the way a row of `rowsOf` does (ADR
-// 0028).
-//
-// Entry by entry and not leaf by leaf, which is the difference between one
-// reopened room and a lost history. The only `try` above this one is
-// `loadRaids`' own `leafOr`, which wraps the whole bundle: a single unreadable
-// entry throwing past here would take the episode ring, every clocked
-// stand-down row, `Living` and `Hits` with it, and `saveRaids` would write that
-// emptiness back on the same tick, making it permanent. A `null` under one room
-// is the likely hand edit rather than an exotic one — editing this leaf is the
-// documented way out of a stuck latch, and writing `null` is how the Memory
-// HTTP API is told to remove a path — and the rows it would cost include every
-// live stand-down, which is the safety channel.
+// The latch map read back, entry by entry: the only `try` above this one is
+// `loadRaids`' `leafOr`, which wraps the whole bundle, so an entry throwing
+// past here would empty the episode ring and every stand-down row, and
+// `saveRaids` would write that emptiness back the same tick. A `null` under
+// one room is the likely hand edit (it is how the Memory HTTP API removes a
+// path).
 let private latchMapOf (raw: obj) : Map<string, RivalLatch> =
     if isNull raw then
         Map.empty
@@ -639,10 +552,8 @@ let private latchMapOf (raw: obj) : Map<string, RivalLatch> =
                 None)
         |> Map.ofArray
 
-// The observe subtree is created on demand and replaced whole only when
-// what stands there is not an object; each writer then assigns its own
-// leaf, so `creeps`, `verbose`, `cpu` and the `colonies` subtree never
-// clobber one another (ADR 0047).
+// The observe subtree is created on demand and replaced whole only when what
+// stands there is not an object; each writer then assigns its own leaf.
 let private ensureObserve () =
     if isNull Memory?fabot then
         Memory?fabot <- createEmpty<obj>
@@ -650,11 +561,7 @@ let private ensureObserve () =
     if jsTypeof Memory?fabot?observe <> "object" || isNull Memory?fabot?observe then
         Memory?fabot?observe <- createEmpty<obj>
 
-// One colony's own subtree under `Memory.fabot.observe.colonies.<home>` (ADR
-// 0047): the [[raid log]] and the [[layout record]] are a colony's record and
-// not the world's, so they live under one home room's key because `decide` runs
-// once per colony. `assignments`, `observe.creeps` and `observe.cpu` stay flat
-// and keyed as they were, because no two colonies can collide on those keys.
+// One colony's own subtree under `Memory.fabot.observe.colonies.<home>`.
 let private ensureColony (home: string) =
     ensureObserve ()
 
@@ -670,9 +577,7 @@ let private ensureColony (home: string) =
         colonies?(home) <- createEmpty<obj>
 
 // One flat leaf of `Memory.fabot.observe` as it stands, or null when the
-// subtree or the leaf is absent — the descent every reader below used to spell
-// out for itself. Null is what they all degrade from, so an absent leaf reads
-// as empty and is rebuilt from this tick on.
+// subtree or the leaf is absent.
 let private observeLeaf (leaf: string) : obj =
     let fabot = Memory?fabot
     let observe = if isNull fabot then null else fabot?observe
@@ -685,16 +590,13 @@ let private writeObserveLeaf (leaf: string) (value: obj) =
     ensureObserve ()
     Memory?fabot?observe?(leaf) <- value
 
-// Write one leaf of one colony's own subtree, leaving every other colony's
-// leaves and every flat leaf alone (ADR 0047).
+// Write one leaf of one colony's own subtree, leaving every other leaf alone.
 let private writeColonyLeaf (home: string) (leaf: string) (value: obj) =
     ensureColony home
     Memory?fabot?observe?colonies?(home)?(leaf) <- value
 
 // One colony's leaf as it stands in Memory, or null when the subtree, the
-// colony or the leaf is absent — a colony this bundle has not written for
-// yet (ADR 0047). Null is what every reader below already degrades from,
-// so an absent leaf reads as empty and is rebuilt from this tick on.
+// colony or the leaf is absent.
 let private colonyLeaf (home: string) (leaf: string) : obj =
     let colonies = observeLeaf "colonies"
     let colony = if isNull colonies then null else colonies?(home)
@@ -720,10 +622,8 @@ let loadVerbose () : Set<string> =
                 Set.empty)
 
 /// The prior observe state, or empty when the subtree is absent or
-/// unreadable — a discarded log only costs a restarted timeline. A creep
-/// whose log will not decode costs that creep alone, and inside a log an
-/// unreadable row costs itself, so a wire-shape change reads as a gap
-/// rather than as amnesia (ADR 0028).
+/// unreadable. A creep whose log will not decode costs that creep alone, and
+/// inside a log an unreadable row costs itself.
 let load () : ObserveState =
     leafOr Map.empty (fun () -> observeLeaf "creeps") (fun creeps ->
         objectEntries creeps
@@ -741,11 +641,8 @@ let load () : ObserveState =
 let save (state: ObserveState) =
     state |> Map.toSeq |> hashOf encodeCreepLog |> writeObserveLeaf "creeps"
 
-/// Whether the leaf holds a log at all — an object under
-/// `Memory.fabot.observe.creeps`. Asked by the shell before it trusts the log
-/// it holds on the heap, for the CPU line's reason (`cpuLineStands`): a leaf
-/// somebody removed is a log discarded on purpose, and it restarts from this
-/// tick as it always did rather than being written back whole off the heap.
+/// Whether the leaf holds a log at all. Asked by the shell before it trusts
+/// the log on the heap, for `cpuLineStands`' reason.
 let observeLogStands () : bool =
     let creeps = observeLeaf "creeps"
 
@@ -764,27 +661,15 @@ let private sameLog (a: CreepLog) (b: CreepLog) : bool =
     && a.LastMove = b.LastMove
 
 /// Write the creeps whose timeline moved this tick and no other, and drop the
-/// ones the fold pruned (#370): the leaf's own object is what `save` wrote a
-/// tick ago, so a creep whose log the fold handed back unchanged already has
-/// its row, and only the changed rows are encoded. The stored shape is the one
-/// `save` writes, key for key, so `observe.mjs` and `load` read what they
-/// always read.
+/// ones the fold pruned; the stored shape is the one `save` writes, key for
+/// key. The log is the largest leaf in Memory (a hundred kilobytes over fifty
+/// creeps) and encoding it whole every tick cost 1.5 ms of a live tick (#370).
 ///
-/// Why: the log is the largest leaf in Memory — a hundred kilobytes over
-/// fifty creeps — and it was decoded whole and encoded whole every tick to
-/// move a few creeps' cursors: 1.5 ms of a live tick, read by the probe that
-/// measured it (#370), most of it standing bodies whose story had not moved.
-///
-/// `prior` is the state the fold was handed, which is what the leaf holds when
-/// the shell keeps the log on the heap and wrote it whole on its first tick.
-/// The leaf is taken at its word only when it agrees with that prior by its
-/// key count — the handshake `appendCpu` makes on tick numbers — and a leaf
-/// that is not an object, is an array, or holds another number of creeps is
-/// written whole as `save` does. What the handshake cannot see, and is
-/// accepted: a row somebody hand-edited under a creep the fold leaves
-/// unchanged stays as edited until that creep's story moves, and a tick whose
-/// Memory the engine did not commit leaves that tick's entries out of the leaf
-/// for the creeps that then stay quiet.
+/// The leaf is taken at its word only when it agrees with `prior` by key
+/// count; otherwise it is written whole. What the handshake cannot see, and
+/// is accepted: a hand-edited row under an unchanged creep stays as edited,
+/// and a tick whose Memory the engine did not commit leaves that tick's
+/// entries out for the creeps that then stay quiet.
 let saveChanged (prior: ObserveState) (state: ObserveState) =
     let creeps = observeLeaf "creeps"
 
@@ -874,50 +759,24 @@ let saveReactor (state: ReactorState) =
     raw?dryTicks <- state.DryTicks
     writeObserveLeaf "reactor" raw
 
-/// The named colony's prior Raid log, or empty when its subtree is absent
-/// or unreadable. An episode that will not decode costs that episode
-/// alone: the ring degrades row by row rather than vanishing (ADR 0028),
-/// so a hand edit or a rollback leaves the rest readable. One log per
-/// colony (ADR 0047), because the log answers for the rooms one colony
-/// works; a flat `observe.raids` leaf is not migrated — it reads as
-/// absent, and the ring refills within one window.
+/// The named colony's prior Raid log, or empty when its subtree is absent or
+/// unreadable; an episode that will not decode costs that episode alone. A
+/// flat legacy `observe.raids` leaf is not migrated: it reads as absent.
 let loadRaids (home: string) : RaidState =
     leafOr RaidState.empty (fun () -> colonyLeaf home "raids") (fun raids ->
         {
             Episodes = raids?episodes |> rowsOf (decodeEpisode >> Some)
-            // The outpost family's ring (ADR 0043), absent from a
-            // bundle that predates it — and an empty ring is what
-            // that says. Degraded row by row: a stand-down that will
-            // not decode costs its own room's gate and no other.
+            // Each of these maps is absent from a bundle that predates it,
+            // and empty is what that says.
             Outposts = raids?outposts |> rowsOf (decodeOutpost >> Some)
-            // The clockless withdrawal's memory (ADR 0043): the rooms last
-            // seen **owned** by another player — a rival's reservation is a
-            // clocked row of `outposts` since #165 — each against the tick
-            // that look was taken on, and — since #275 — the tick the last
-            // look was taken on beside it, which is what the stride between
-            // rechecks is counted from. An empty map is honest — the room is
-            // still scanned, so the next look with vision re-decides it.
             RivalHeld = latchMapOf raids?rivalHeld
-            // The rooms somebody else's reservation stands on (#333),
-            // absent from a bundle that predates the read and an empty
-            // map being what that says: the rule the reserver row obeys
-            // is read off the view every tick, so an empty record costs
-            // the colony nothing and the operator one tick of silence.
             Holds = holdMapOf raids?holds
-            // The guard row's memory of a raid in a room it has gone blind in
-            // (#366), absent from a bundle that predates it and an empty map
-            // being what that says: the ticks with vision write it back, and
-            // until they do the row answers off vision alone, which is what it
-            // did before the record existed.
             Threatened = threatMapOf raids?threatened
-            // Names, and a name is a string: `unbox` is erased, so without
-            // the filter a number under `living` becomes a creep we think
-            // stands somewhere, and the tick after it "dies" and charges the
-            // episode a loss nobody suffered.
+            // `unbox` is erased: without the filter a number under `living`
+            // becomes a creep that "dies" next tick and charges the episode a
+            // loss nobody suffered, and a string walks character by character
+            // as one creep per letter.
             Living =
-                // An array and not merely a truthy thing: `unbox` is a cast,
-                // so a string under this key walks character by character and
-                // reads as one creep per letter (#294).
                 if not (JS.Constructors.Array.isArray raids?living) then
                     Set.empty
                 else
@@ -929,49 +788,35 @@ let loadRaids (home: string) : RaidState =
                         else
                             None)
                     |> Set.ofArray
-            // The tiles beside the names (#376), absent from a bundle that
-            // predates them: the first loss after a deploy carries no tile.
+            // The tiles beside the names, absent from a legacy bundle: the
+            // first loss after a deploy carries no tile.
             Placed =
                 if isNull raids?placed then
                     Map.empty
                 else
                     objectEntries raids?placed
                     |> Array.choose (fun (name, tile) ->
-                        // Entry by entry, the way `latchMapOf` reads: a tile
-                        // that will not decode costs the body it belongs to
-                        // and not the episode ring beside it.
+                        // Entry by entry: a bad tile costs its body, not the
+                        // episode ring beside it.
                         try
                             Some(name, roomPosOf tile)
                         with _ ->
                             None)
                     |> Map.ofArray
-            // The damage baseline, absent from a bundle written
-            // before it existed: an empty baseline charges the next
-            // tick nothing, which is where a fresh episode starts.
+            // The damage baseline; an empty one charges the next tick nothing.
             Hits = intMapOf raids?hits
         })
 
 /// Write one colony's Raid log back under
-/// `Memory.fabot.observe.colonies.<home>.raids`, leaving the rest of the
-/// observe subtree and every other colony's leaves alone (ADR 0047).
+/// `Memory.fabot.observe.colonies.<home>.raids`.
 let saveRaids (home: string) (state: RaidState) =
     let raids = createEmpty<obj>
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
-    // Room name to the two ticks the clockless withdrawal keeps: the one the
-    // gate shut on and the one the last look was taken on (#275). Still no
-    // window, expiry or basis — this withdrawal has none — so the entry stays a
-    // pair of dates under the room's own key rather than a row of the ring.
+    // The three per-room maps: none has a window, expiry or basis, so each
+    // stays under the room's own key rather than a row of the ring.
     raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf encodeLatch
-    // Room name to whose reservation stands on its controller and the tick
-    // that hold ends (#333). A clock and no window or basis — this withdraws
-    // nothing, so there is no episode to date — and under the room's own key,
-    // one hold per controller being all the engine allows.
     raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
-    // Room name to the tick the guard row stops answering for a raid it can no
-    // longer see (#366). A clock and no window, basis or roster: what a raid
-    // was is the episode ring's business, and this is one bit — armed, and
-    // still worth a body — under the room's own key.
     raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
     raids?living <- state.Living |> Set.toArray
 
@@ -980,11 +825,8 @@ let saveRaids (home: string) (state: RaidState) =
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids
 
-/// One tile as a wire object; the deferral rows carry two of them, and a
-/// tile named `x`/`y` twice over would say which is which nowhere. The
-/// room is not written: every row of this leaf is one colony's Layout
-/// (ADR 0011) and the leaf is already filed under that colony's home
-/// name, so two spellings of one fact are what the record avoids.
+/// One tile as a wire object; the deferral rows carry two of them. The room
+/// is not written: the leaf is already filed under the colony's home name.
 let private tileObject (tile: RoomPos) =
     let o = createEmpty<obj>
     o?x <- tile.X
@@ -1043,21 +885,9 @@ let saveQuotas (home: string) (quotas: Quotas) =
 
     writeColonyLeaf home "quotas" o
 
-/// Write one colony's losses this tick — the footing targets the Layout could
-/// not serve, the trunks it could not route, the container picks it deferred to
-/// a container already serving their target (ADR 0040), and the declarations the
-/// colony refuses because no chain of [[seam]]s joins them to its home (#243,
-/// ADR 0060 decision 1) — under
-/// `observe.colonies.<home>.layout`, leaving every other leaf
-/// alone the way `saveRaids` does. Four lists in one leaf, so a reader asking
-/// what this room lost asks once, which is ADR 0035's own reason for putting
-/// more than one there; written every tick, empty lists included, so
-/// `observe.mjs layout` can tell "nothing is lost" from "this bundle does not
-/// record it" (ADR 0028). The fourth is the declaration's loss and not the
-/// Layout's, and it joins this channel rather than opening a fourth for one
-/// list because it shares every other property of the three: colony-level,
-/// this tick's rather than history, and with no creep for a [[verdict]] to
-/// name.
+/// Write one colony's losses this tick under `observe.colonies.<home>.layout`:
+/// four lists in one leaf, written every tick, empty lists included, so
+/// `observe.mjs layout` can tell "nothing is lost" from "not recorded".
 let saveLayout
     (home: string)
     (unserved: UnservedFooting list)
@@ -1113,13 +943,8 @@ let saveLayout
             o)
         |> List.toArray
 
-    // The room and the kind it was declared as (ADR 0060 decision 1). The
-    // room alone was the whole of what a reader could act on while there was
-    // one kind of declaration; with two, a bare "W15S25" under a heading that
-    // reads "declared outposts" is a second silence wearing the first one's
-    // clothes. The fix is still a human moving the declaration (ADR 0041's
-    // constant), and the kind is what says which list to move it in; the home
-    // this leaf is filed under is the other half of the pair already.
+    // The room and the kind it was declared as: the fix is a human moving the
+    // declaration, and the kind says which list to move it in.
     layout?refused <-
         refused
         |> List.map (fun entry ->
@@ -1131,11 +956,9 @@ let saveLayout
 
     writeColonyLeaf home "layout" layout
 
-// A breach kind on the wire (#278). Spelled once, in both directions, over a
-// closed set — `reactorOwnerName`'s idiom two leaves up, and for its reason: a
-// kind added without its wire name must fail to compile or fail to decode,
-// never print as a blank. Hyphenated lower case, the spelling
-// `standDownBasisName` and `declarationKindName` already use on this subtree.
+// A breach kind on the wire, spelled once in both directions over a closed
+// set: a kind added without its wire name fails to compile or to decode,
+// never prints as a blank.
 let private breachKindName =
     function
     | BreachKind.OreOnTheFloor -> "ore-on-the-floor"
@@ -1153,14 +976,9 @@ let private breachKindOf name =
     | "reactor-lost" -> Some BreachKind.ReactorLost
     | _ -> None
 
-// One standing breach on the wire: what broke, where, on which engine object,
-// the number that makes it actionable, and the two ticks that date it. Plain
-// fields and no union, the way every other leaf of this subtree is written.
-//
-// Both ticks ride, though one of them is always this tick: `last` is what lets
-// a reader of the leaf compute an age — `last - first` — with no game clock of
-// its own, and what tells that reader whether the bundle that wrote the row is
-// still running. `observe.mjs breaches` reads exactly those two.
+// One standing breach on the wire. Both ticks ride, though `last` is always
+// this tick: it lets a reader with no game clock compute an age and tell
+// whether the bundle that wrote the row is still running.
 let private encodeBreach (row: StandingBreach) =
     let o = createEmpty<obj>
     o?kind <- breachKindName row.Breach.Kind
@@ -1171,14 +989,9 @@ let private encodeBreach (row: StandingBreach) =
     o?last <- row.LastSeen
     o
 
-// `encodeBreach`'s partner, and a checker rather than a cast: `unbox` is erased
-// by Fable, so a `first` that is not a number would read back as a tick and
-// date a breach to the epoch — an age of a hundred thousand ticks printed
-// against a pile dropped this minute. A row that will not read costs its own
-// row and no more (`rowsOf`, ADR 0028), which is the safe direction here in a
-// way it is not for a stand-down: the next tick re-reads the projection and
-// writes every live breach back, so a dropped row is one tick of silence rather
-// than a room left open.
+// A checker rather than a cast: a `first` that is not a number would date a
+// breach to the epoch. A dropped row is one tick of silence here, since the
+// next tick re-reads the projection and writes every live breach back.
 let private decodeBreach (raw: obj) : StandingBreach option =
     if isNull raw || jsTypeof raw <> "object" then
         None
@@ -1208,14 +1021,9 @@ let private decodeBreach (raw: obj) : StandingBreach option =
                             }
                     }
 
-/// The named colony's prior breach log, or empty when its subtree is absent or
-/// unreadable (#278). One log per colony, like the Raid log and the Layout
-/// record beside it (ADR 0047): the checks read one colony's view.
-///
-/// What a discarded log costs is the **ages** and nothing else — every live
-/// breach is re-read off this tick's view and written back, so the rows return
-/// on the next tick reading zero ticks old. That is the cheapest degradation of
-/// the four channels, and it is why nothing here is repaired.
+/// The named colony's prior breach log, or empty when its subtree is absent
+/// or unreadable. A discarded log costs the ages and nothing else: every live
+/// breach is re-read off this tick's view.
 let loadBreaches (home: string) : BreachState =
     leafOr BreachState.empty (fun () -> colonyLeaf home "breaches") (fun breaches ->
         {
@@ -1227,17 +1035,9 @@ let loadBreaches (home: string) : BreachState =
         })
 
 /// Write one colony's breach log back under
-/// `Memory.fabot.observe.colonies.<home>.breaches`, leaving the rest of the
-/// observe subtree and every other colony's leaves alone (ADR 0047).
-///
-/// Written every tick, empty list included, so the leaf's presence is itself
-/// the signal that this bundle is live — which is what lets `observe.mjs
-/// breaches` tell "no channel" from "nothing is broken", the distinction ADR
-/// 0028 made for the Raid log and ADR 0035 for the Layout record.
-///
-/// Rows in `breachRows`' order — oldest breach first — so the ordering is
-/// Core's, computed once and under test, rather than a second opinion in the
-/// writer and a third in the reader.
+/// `Memory.fabot.observe.colonies.<home>.breaches`, every tick, empty list
+/// included, so `observe.mjs breaches` can tell "no channel" from "nothing is
+/// broken". Rows in `breachRows`' order, so the ordering is Core's.
 let saveBreaches (home: string) (state: BreachState) =
     let breaches = createEmpty<obj>
     breaches?rows <- state |> breachRows |> List.map encodeBreach |> List.toArray
@@ -1258,21 +1058,10 @@ let private cpuPhaseFields: (string * (CpuPhases -> obj)) list =
         "replans", (fun p -> box p.Replans)
     ]
 
-/// What each colony spent inside `decide`, read off one CPU row, or the empty
-/// list when the row carries none (#370).
-///
-/// Decoded on its own and never folded into `cpuPhaseFields`' all-six-or-none
-/// guard: the rows standing when this landed were written by a bundle that did
-/// not measure it, and they are exactly the window the change is compared
-/// against, so admitting them with their phases intact is the point. Every
-/// entry must be a number — a key whose value is not says the writer and the
-/// reader disagree about the shape, and half a split would price one colony
-/// against a boundary nobody read.
 /// A sub-object of numbers off a CPU row, or the empty list when the row has
-/// none. Shared by the two splits that hang beside the phases — the colonies'
-/// `decide` and the rooms' `snapshot` — because they are the same shape read
-/// from two keys, and a second copy of this would be the next place the two
-/// drift apart.
+/// none. Decoded on its own and never folded into `cpuPhaseFields`'
+/// all-or-none guard, so rows written by a bundle that did not measure the
+/// split keep their phases.
 let private decodeCpuSplit (raw: obj) (key: string) : (string * float) list =
     let split = raw?(key)
 
@@ -1284,11 +1073,9 @@ let private decodeCpuSplit (raw: obj) (key: string) : (string * float) list =
         |> Seq.map (fun name -> name, unbox<float> split?(name))
         |> List.ofSeq
 
-/// The flood split off one CPU row (#389): `{ home: [floods, free, pops] }`,
-/// three integers per colony under one sub-object, read the way
-/// `decodeCpuSplit` reads the millisecond splits — absent or malformed is the
-/// empty list, and a colony whose triple is not three numbers is left out
-/// rather than read as zeros.
+/// The flood split off one CPU row: `{ home: [floods, free, pops] }`. Absent
+/// or malformed is the empty list, and a colony whose triple is not three
+/// numbers is left out rather than read as zeros.
 let private decodeCpuFloods (raw: obj) : (string * FloodCounts) list =
     let split = raw?floods
 
@@ -1317,12 +1104,9 @@ let private decodeCpuFloods (raw: obj) : (string * FloodCounts) list =
                 None)
         |> List.ofSeq
 
-/// The phase split off one CPU row, or `None` when the row carries none.
-/// Absent and malformed answer alike: a row that predates the split has no
-/// phase keys, and one whose keys will not decode was measured by nobody,
-/// while its `ms` is still the number ADR 0041's trigger is read off. All
-/// six or none — a half-decoded group would price a phase against a
-/// boundary that was never read.
+/// The phase split off one CPU row, or `None` when the row carries none. All
+/// or none: a half-decoded group would price a phase against a boundary that
+/// was never read, while the row's `ms` still counts.
 let private decodeCpuPhases (raw: obj) : CpuPhases option =
     if cpuPhaseFields |> List.forall (fun (key, _) -> jsTypeof raw?(key) = "number") then
         Some
@@ -1380,22 +1164,17 @@ let savePositions (creeps: (string * RoomPos) list) =
         p)
     |> writeObserveLeaf "positions"
 
-/// The prior CPU line, or empty when the leaf is absent or unreadable — a
-/// discarded line costs the ticks it held and nothing else. A row that
-/// will not decode costs that row alone (ADR 0028): the window shortens
-/// rather than vanishing.
+/// The prior CPU line, or empty when the leaf is absent or unreadable. A row
+/// that will not decode costs that row alone: the window shortens.
 let loadCpu () : CpuState =
     leafOr CpuState.empty (fun () -> observeLeaf "cpu") (fun cpu ->
         {
             Ticks =
                 cpu?ticks
                 |> rowsOf (fun raw ->
-                    // The wire types are checked rather than assumed, which
-                    // is what makes `rowsOf`'s degradation real here:
-                    // `unbox` is erased by Fable, so without the check a
-                    // row of a foreign shape is not rejected but built, and
-                    // then crowds out the window ADR 0041's mean is read
-                    // off.
+                    // Checked rather than assumed: `unbox` is erased by Fable,
+                    // so without the check a foreign row is built, not
+                    // rejected, and crowds out the window.
                     if jsTypeof raw?t = "number" && jsTypeof raw?ms = "number" then
                         Some
                             {
@@ -1406,12 +1185,9 @@ let loadCpu () : CpuState =
                                 Rooms = decodeCpuSplit raw "rooms"
                                 Projects = decodeCpuSplit raw "projects"
                                 Floods = decodeCpuFloods raw
-                                // A bare number and not a group, so it decodes
-                                // on its own: a row from a bundle that did not
-                                // measure the head reads 0.0, which is what a
-                                // sweep with no head would also read — and the
-                                // two are told apart by whether `rooms` is
-                                // there at all.
+                                // A bare number, decoded on its own: a legacy
+                                // row reads 0.0, told apart from a headless
+                                // sweep by whether `rooms` is there at all.
                                 SweepHead =
                                     if jsTypeof raw?head = "number" then
                                         unbox<float> raw?head
@@ -1420,10 +1196,8 @@ let loadCpu () : CpuState =
                             }
                     else
                         None)
-            // The coarse spans (#386), absent from a leaf written before they
-            // existed and an empty list being what that says: the fine ring
-            // beside them is untouched, and the first tick after a deploy
-            // opens the first span.
+            // The coarse spans, absent from a legacy leaf: the first tick
+            // after a deploy opens the first span.
             Spans =
                 cpu?spans
                 |> rowsOf (fun raw ->
@@ -1445,10 +1219,9 @@ let loadCpu () : CpuState =
                                 Sum = unbox<float> raw?sum
                                 Bucket = numberOf raw "b"
                                 Replans = numberOf raw "r"
-                                // Absent from a span written before #389,
-                                // and zero is what that says: no tick of
-                                // it was counted. Present and not a number
-                                // costs the span, as `b` and `r` do.
+                                // Absent from a legacy span, and zero is what
+                                // that says; present and not a number costs
+                                // the span.
                                 MaxPops =
                                     if jsTypeof raw?p = "undefined" then 0 else numberOf raw "p"
                             }
@@ -1470,17 +1243,10 @@ let private encodeCpuSample (sample: CpuSample) : obj =
             o?(key) <- read phases
     | None -> ()
 
-    // One sub-object rather than a key per colony, so a home room's
-    // name can never collide with a phase's (#370) — and so the group
-    // is absent as a whole on a row that has none, which is what
-    // `decodeCpuSplit` reads as "nobody measured this".
-    //
-    // Two of them now, and they are written the same way for the same
-    // reasons: the colonies' share of `decide` and the rooms' share of
-    // `snapshot`. Separate keys rather than one table of names, because
-    // a home room appears in **both** — W15S28 is a colony that decides
-    // and a room that is swept — and one table would have to choose
-    // which of its two prices to keep.
+    // One sub-object per split rather than a key per colony, so a home room's
+    // name can never collide with a phase's and the group is absent whole on
+    // a row that has none. Separate keys per split because a home room is
+    // both a colony that decides and a room that is swept.
     let writeSplit key rows =
         if not (List.isEmpty rows) then
             let split = createEmpty<obj>
@@ -1494,9 +1260,8 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     writeSplit "rooms" sample.Rooms
     writeSplit "projects" sample.Projects
 
-    // The flood counts (#389), a triple per colony under one key for the
-    // same collision reason, and as an array rather than three keys because
-    // a hundred rows pay for every character of every key.
+    // The flood counts, a triple per colony, as an array rather than three
+    // keys because a hundred rows pay for every character of every key.
     if not (List.isEmpty sample.Floods) then
         let split = createEmpty<obj>
 
@@ -1513,12 +1278,8 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 
     o
 
-/// Write the CPU line back under `Memory.fabot.observe.cpu`, leaving the rest
-/// of the observe subtree alone the way `saveRaids` does — the whole line,
-/// every row. What `appendCpu` below falls back to.
-/// One coarse span on the wire (#386): eight numbers under short keys, because
-/// two hundred of these ride in the same leaf as the fine ring and every
-/// character of every key is paid for two hundred times.
+/// One coarse span on the wire: eight numbers under short keys, because two
+/// hundred of these ride in the same leaf as the fine ring.
 let private encodeCpuSpan (span: CpuSpan) =
     let o = createEmpty<obj>
     o?f <- span.From
@@ -1537,13 +1298,11 @@ let saveCpu (state: CpuState) =
     cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
     writeObserveLeaf "cpu" cpu
 
-/// Whether the leaf holds a line at all — a `ticks` array with a row in it
-/// under `Memory.fabot.observe.cpu`. The shell asks this before it trusts the
-/// line it holds on the heap: a leaf somebody removed or emptied through the
-/// Memory HTTP API is a line discarded on purpose, and it restarts from this
-/// tick as it always did — from `CpuState.empty` — rather than being written
-/// back whole off the heap. Empty counts as discarded because the bot never
-/// leaves it so: `foldCpu` appends on every tick.
+/// Whether the leaf holds a line at all: a `ticks` array with a row in it.
+/// The shell asks before it trusts the line on the heap: a leaf somebody
+/// removed or emptied is a line discarded on purpose, and restarts from
+/// `CpuState.empty`. Empty counts as discarded because `foldCpu` appends on
+/// every tick.
 let cpuLineStands () : bool =
     let cpu = observeLeaf "cpu"
 
@@ -1551,29 +1310,12 @@ let cpuLineStands () : bool =
     && JS.Constructors.Array.isArray cpu?ticks
     && (unbox<obj[]> cpu?ticks).Length > 0
 
-/// Write this tick's row and no other (#370): the leaf's own `ticks` array is
-/// what `saveCpu` would have written a tick ago, so the newest row is pushed
-/// onto it and, once the ring is at its cap, the oldest shifted off the front.
-/// The stored shape is the one `saveCpu` writes, row for row, for every row
-/// this bundle wrote, so `observe.mjs cpu` and `loadCpu` read what they always
-/// read. A row an edit changed inside the window is not repaired — the
-/// agreement below is read at the ends — and stands until the ring shifts it
-/// off; the rows another bundle wrote are re-encoded once, by the whole write
-/// the shell makes on its first tick.
-///
-/// Why: the line is a hundred rows of some thirty-five values each, and it was
-/// decoded whole and encoded whole on every tick to add one row — 1.36 ms of
-/// a live tick, read by the probe that measured it (#370), and outside every
-/// phase column because it is the one write the line does not price. ADR
-/// 0041's rule stands untouched: one row a tick, every tick, unconditionally;
-/// what changes is that ninety-nine rows nobody asked about this tick are no
-/// longer rebuilt.
-///
-/// The append is taken only when the leaf agrees with the line: its rows are
-/// the line's but the newest — one longer when the fold dropped the oldest
-/// this tick — checked on the tick numbers at both ends rather than assumed.
-/// Anything else (no leaf, a hand-edited one, a line the heap and the leaf
-/// disagree about) is written whole, which is what every earlier tick did.
+/// Write this tick's row and no other: the newest row is pushed onto the
+/// leaf's own `ticks` array and, at the cap, the oldest shifted off. Encoding
+/// the whole line every tick cost 1.36 ms of a live tick (#370). The append is
+/// taken only when the leaf agrees with the line, checked on the tick numbers
+/// at both ends; anything else is written whole. A row an edit changed inside
+/// the window is not repaired and stands until the ring shifts it off.
 let appendCpu (state: CpuState) =
     let cpu = observeLeaf "cpu"
     let ticks = if isNull cpu then null else cpu?ticks
@@ -1604,15 +1346,11 @@ let appendCpu (state: CpuState) =
 
             emitJsStatement (rows, encodeCpuSample newest) "$0.push($1)"
 
-            // The coarse spans ride the same append (#390): the open span is
-            // rewritten every tick and a span that just opened is pushed,
-            // against a leaf whose span array is the state's but the newest
-            // — one row a tick against the two hundred the whole write does.
+            // The coarse spans ride the same append: the open span is
+            // rewritten every tick and a span that just opened is pushed.
             // Before this, `spans` was written by `saveCpu` alone, once per
-            // upload, and the record #386 sized for five hours reached
-            // Memory frozen at the first tick. A leaf that disagrees — no
-            // array, a length the fold could not have produced — is written
-            // whole, as the rows are.
+            // upload, and reached Memory frozen at the first tick (#390). A
+            // leaf that disagrees is written whole, as the rows are.
             let spans = cpu?spans
 
             match List.rev state.Spans with

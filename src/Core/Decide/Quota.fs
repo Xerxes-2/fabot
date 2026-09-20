@@ -1,35 +1,27 @@
-/// The rows and how many bodies each is owed: source output and haul demand
-/// (ADR 0012), the guard, reserver and upgrader rows, and the workforce target
-/// they sum to. Answers "how many", never "who".
+/// The rows and how many bodies each is owed: source output, haul demand,
+/// the guard, reserver, miner, courier and upgrader rows, and the workforce
+/// target they sum to. Answers "how many", never "who".
 [<AutoOpen>]
 module Fabot.Core.Decide.Quota
 
 open Fabot.Core
 open Fabot.Core.Types
 
-/// What one body of this shape hauls in a trip: its Carry parts at the engine's
-/// per-part capacity. Two readers turn Carry parts into energy — the hauler
-/// quota divides a source's output over a round trip by it (ADR 0012), and a
-/// Withdraw's cap divides its store's stock by it — so the arithmetic is
-/// written once and neither can grow a second per-part rule.
+/// What one body of this shape hauls in a trip. Written once: the hauler
+/// quota and a Withdraw's cap both turn Carry parts into energy through it.
 let internal carryCapacityOf body =
     partCountIn body Carry * Engine.carryPartCapacity
 
-/// Ceiling division over the quota rows' arithmetic: a quota that came out a
-/// fraction of a body hires the whole body (ADR 0012 for the hauler row, ADR
-/// 0037 for the worker row), because the fraction a floor drops is demand
-/// nobody is hired for. A numerator at or below zero lands at or below zero —
-/// F# divides toward zero — and each row's own floor answers for it.
+/// Ceiling division for the quota rows: a fraction of a body hires the whole
+/// body. A numerator at or below zero lands at or below zero (F# divides
+/// toward zero); each row's own floor answers for it.
 let internal ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 
-/// What one source of a room the colony holds this way is worth per tick (ADR
-/// 0042): the held rate in a room this colony owns or reserves, half of it in a
-/// room nobody holds. The whole rate rule, so the census signature can sign
-/// exactly what the memoised quota reads rather than a paraphrase of it. Owned
-/// **or** reserved, never reserved alone: the engine gives a room carrying
-/// either the same 3,000 a cycle, and the colony's own room is owned while
-/// nothing reserves it, so "reserved, or half" would price the two home sources
-/// at five each.
+/// ADR-0042
+/// What one source of a room held this way is worth per tick. Owned **or**
+/// reserved, never reserved alone: the colony's own room is owned while
+/// nothing reserves it, so "reserved, or half" would price the two home
+/// sources at five each.
 let internal heldRateOf (control: RoomControlInfo) =
     if
         control.Owner = Ownership.Ours
@@ -39,58 +31,32 @@ let internal heldRateOf (control: RoomControlInfo) =
     else
         Engine.neutralOutputPerTick
 
-/// One source's **rate** per tick (ADR 0042), read off the room it stands in:
-/// what the rock regenerates, and so the ceiling on what anything standing over
-/// it can take out. A fact read per source and not a module constant, because a
-/// reservation can lapse and quotas sized for the held rate against a source
-/// yielding five overbuild their rows twofold. The rate and not the output:
-/// what a Post is *worth* is what the body garrisoning it digs, which is this
-/// number only while the row's cast can reach it (`sourceOutputOf`). Two
-/// readers want the ceiling itself — `postWorkCapsOf`, which would otherwise
-/// size the body off a number the body decides, and the cap inside
-/// `sourceOutputOf`. None for a source in a room the colony has no vision in,
-/// and for one the projection does not place (ADR 0004): unpriceable is not
-/// half, and a blind outpost must not hire against income the colony has no
-/// evidence for.
+/// One source's rate per tick, read off the room it stands in: the ceiling on
+/// what anything standing over it can take out. Read per source, not a module
+/// constant, because a reservation can lapse. None for a source in a room the
+/// colony has no vision in or that the projection does not place: unpriceable
+/// is not half.
 let internal sourceRateOf (view: ColonyView) atlas (sourceId: string) : int option =
     Atlas.targetRoom atlas sourceId
     |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
     |> Option.map heldRateOf
 
-/// Whether a source is posted: whether a container stands on one of its Seats,
-/// or a Dual Seat makes one of them a Post without a structure — the switch
-/// that admits a source into the quotas at all (ADR 0042). One spelling, read
-/// by the anchor row's ceiling and by the income base's own split, so a rule
-/// that narrows what counts as posted cannot narrow it for one of the two
-/// alone. Judged in the source's own room, by `Atlas.standingPostsOf` and not
-/// by testing its Seats against the home room's Posts: a `Pos` carries no room,
-/// so a home Post on an outpost Seat's coordinates would read that outpost
-/// source as posted with no container under it — a phantom ten a tick in the
-/// income base, and a phantom Anchor place beside it.
+/// Whether a source is posted — the switch that admits it into the quotas.
+/// One spelling for the anchor row's ceiling and the income base's split.
+/// Judged in the source's own room by `Atlas.standingPostsOf`, not by testing
+/// its Seats against the home room's Posts: a `Pos` carries no room, so a home
+/// Post on an outpost Seat's coordinates would read that outpost source as
+/// posted with no container under it.
 let private isPosted atlas (s: SourceInfo) =
     Atlas.standingPostsOf atlas s.Id |> Set.isEmpty |> not
 
-/// **Every [[post]]'s own Work ceiling** (ADR 0021 as ADR 0042 narrows it and
-/// ADR 0053 pairs it): the saturation of the rock that Post seats, plus the one
-/// spare Work. A source under no reservation regenerates half as much, and six
-/// Work on it drain it in 125 ticks and then idle for 175. **A Post and no
-/// longer the set**, which is the whole of ADR 0053: folded into one
-/// colony-wide `List.max`, the answer was the held ceiling in every state a
-/// colony with one posted home source can reach, and an outpost whose
-/// reservation had lapsed went on being garrisoned at six Work against a rock
-/// giving five for ever. What pairs a body to a rock without a role is not the
-/// caster's knowledge but the **vacancy** it is casting into (`planSpawns`,
-/// which walks the empty Posts richest first). Two other readers ask this map
-/// for a Post they already hold — the amortization, and a [[lead]] pricing the
-/// incumbent's successor. Richest first, and every fallback answers the largest
-/// ceiling the rule gives, because an over-sized Anchor wastes 300 energy once
-/// in 1,500 ticks where an under-sized one loses four energy a tick for its
-/// whole life; a Post whose room the colony cannot price keeps the **held**
-/// ceiling (ADR 0004). The **ground** census and not the income one, so the map
-/// has one entry per Anchor the colony hires and the amortization can charge
-/// them one for one. Keyed by the Post's own [[room position]] and never a bare
-/// tile (ADR 0041): two sources whose Seats overlap share a Post tile, and the
-/// richer rate keeps it.
+/// ADR-0053
+/// Every Post's own Work ceiling: the saturation of the rock it seats plus one
+/// spare, per Post and never a colony-wide max. Richest first, and every
+/// fallback answers the largest ceiling the rule gives; a Post whose room the
+/// colony cannot price keeps the held ceiling. Keyed by the Post's room
+/// position, never a bare tile: two sources whose Seats overlap share a Post
+/// tile, and the richer rate keeps it.
 let internal postWorkCapsOf (view: ColonyView) atlas : Map<RoomPos, int> =
     view.Sources
     |> List.collect (fun s ->
@@ -107,80 +73,35 @@ let internal postWorkCapsOf (view: ColonyView) atlas : Map<RoomPos, int> =
             | _ -> Map.add tile cap caps)
         Map.empty
 
-/// What one source is **worth to the quotas that read a store** (ADR 0042 as
-/// #208 amends it): what the Anchor row's cast digs there, capped at the rate
-/// its room pays. A Post yields what the body garrisoning it takes out of it,
-/// and a bank that cannot buy the Work to drain a source does not earn ten a
-/// tick because the room would have paid ten — at a 300 bank the row casts
-/// `2W/1C/1M`, which digs four, so a child with two Posts read twenty a tick of
-/// income it never earned and hired eighteen workers off it. **The row's cast
-/// at this bank, and emphatically not the living Anchor's body**: a quota read
-/// off a living body oscillates on that body's death, where what the row
-/// *casts* is a colony fact (ADR 0006). Unpriceable stays unpriceable (ADR
-/// 0004).
+/// What one source is worth to the quotas that read a store: what the Anchor
+/// row's cast digs there, capped at the rate its room pays. The row's cast at
+/// this bank, never the living Anchor's body: a quota read off a living body
+/// oscillates on that body's death.
 let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int option =
     sourceRateOf view atlas sourceId
     |> Option.map (fun rate ->
-        // The Work the row would cast for this rock's own Post times
-        // HARVEST_POWER — the same `anchorBodyFor` triple the amortization
-        // charges that Post at, so the two readings cannot drift apart.
+        // The same `anchorBodyFor` triple the amortization charges that Post
+        // at, so the two readings cannot drift apart.
         let dug =
             partCountIn (anchorBodyFor (workCapOf rate) view.Bank.Capacity) Work
             * Engine.harvestPerWork
 
         min rate dug)
 
-/// The hauler row's quota rule (ADR 0012) — the row's colony fact, per ADR
-/// 0006's law that a row arrives with its quota or not at all: ceil(Sigma over
-/// the source containers of round-trip travel ticks to the colony's **sinks** x
-/// that container's own source's output, / the cast body's carry capacity), so
-/// a farther container hires proportionally more haul capacity and never
-/// quietly overflows. No source containers, or unreachable geometry, hire
-/// nothing. **The sinks are where this colony's energy is actually spent** (ADR
-/// 0052 decision 4), and there are three: the spawn/extension cluster, the
-/// controller's [[buffer]] and the [[storage]]. The cluster is one place and
-/// not one per spawn — the extensions ring the spawns and a hauler filling them
-/// walks to that ring once — so several spawns resolve at the cheapest. Each
-/// contributes a leg while it stands and none while it does not. The spawn
-/// alone is what this read before, and a child whose buffer sat thirty tiles
-/// from its north Post hired **one** hauler off the spawn leg while its
-/// containers overflowed: the energy really was flowing to the controller, and
-/// the quota was priced as if it flowed to the spawn. **Each container's flow
-/// is spread over the sinks it can price**, and that is an admission rather
-/// than a measurement: this layer knows what is produced and where it is spent,
-/// and nothing here knows in what proportion. It errs **both ways** — larger
-/// wherever a sink stands further off than the cluster, smaller wherever one
-/// stands nearer — and neither direction is free: a body too many idles, and a
-/// body too few leaves a room's income on the ground. A container that can
-/// price **no** sink hires nobody (ADR 0004). **One rounding, for the colony**
-/// (ADR 0049, succeeding ADR 0012 and ADR 0037 on the granularity alone): the
-/// demands are summed first and the ceiling taken once. Rounding each container
-/// up on its own bought a body per fraction, because a hauler is not the
-/// property of the container it was hired for: a Withdraw's capacity is its own
-/// store's stock divided by a hauler load, so the shared integer is spent where
-/// the energy actually stands. The cap is a **capacity and not an order** —
-/// `tierOf` files every source container's Withdraw on the feeding tier alike
-/// and travel cost ranks inside it. What ADR 0012 rejected was the *flat*
-/// quota, one hauler per container regardless of distance, and this is the
-/// opposite of that. The output is that source's and not the colony's (ADR
-/// 0042), which is why the fold resolves each tile back to the rock it serves:
-/// a container over an unreserved source ships half as much. And that output is
-/// what the Post's garrison digs, capped at the rock's rate (`sourceOutputOf`).
-/// Every room the projection carries, and not the colony's own alone (ADR
-/// 0042): an outpost's container ships its source's energy home across a
-/// border, so it hires haul capacity exactly as a home container does, against
-/// `Atlas.haulRoundTripTicks` joined on the Seam band, run once per leg because
-/// the loaded body and the empty one are two journeys (ADR 0029, ADR 0030). The
-/// room is the container's own throughout, carried beside its tile rather than
-/// assumed, because a `Pos` names none (ADR 0041). A container the projection
-/// places in no room is priced by nothing and hires nobody (ADR 0004), as is a
-/// Seam band the body cannot pay a crossing on.
+/// ADR-0012
+/// The hauler row's quota: the sum over source containers of round-trip ticks
+/// to the colony's sinks times that source's output, over the cast body's
+/// carry capacity, rounded once for the colony. The three sinks are
+/// the spawn/extension cluster, the controller buffer and the Storage; each
+/// contributes a leg while it stands. A container that can price no sink hires
+/// nobody. Every projected room, not the home room alone: an outpost's
+/// container hires haul capacity exactly as a home one does. The cap is a
+/// capacity and not an order — `tierOf` files every source container's
+/// Withdraw on the feeding tier alike and travel cost ranks inside it.
 let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list * int =
-    // Each source container beside the room it stands in and the output of the
-    // rock it serves: the tile alone cannot be priced, so a container the
-    // projection places in no room, or one the fold cannot resolve to a source
-    // whose room it can price, leaves the list here rather than entering the sum
-    // at some default rate.
+    // Each source container beside its room and the output of the rock it
+    // serves; one the projection places in no room, or that resolves to no
+    // priceable source, leaves the list rather than entering at a default.
     let sourceContainers =
         Atlas.idsOfKind atlas (Structure BuiltKind.Container)
         |> List.choose (SpatialInfo.placementOf view.Spatial)
@@ -189,37 +110,29 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
             |> Option.bind (sourceOutputOf view atlas)
             |> Option.map (fun output -> container, output))
 
-    // One load, for the whole colony, and the row's own body cast at the
-    // richest bank: rounding once (ADR 0049) sums demands before it divides, so
-    // every term has to be a fraction of the *same* body or the integer at the
-    // end counts nothing.
+    // One load for the whole colony: the sum is of fractions of the *same*
+    // body, or the one rounding at the end counts nothing.
     let body = bodyFor haulerPattern (view.Bank.Capacity)
 
     let capacity = carryCapacityOf body
 
     let home = SpatialInfo.homeName view.Spatial
 
-    // The three sinks, each a **place** and not a structure: a sink is a list
-    // of tiles that stand for one destination, and the cheapest of them is that
-    // sink's leg. The spawn/extension cluster is the list with more than one
-    // entry today, and taking its minimum is the old rule's "of several spawns
-    // the cheapest wins" read as what it always was. Every tile is the
-    // projection's and never `SpawnInfo.RoomName` (ADR 0041).
+    // Each sink is a list of tiles standing for one destination; the cheapest
+    // is that sink's leg. The cluster is one place, not one per spawn.
     let cluster =
         view.Spawns |> List.choose (fun s -> SpatialInfo.placementOf view.Spatial s.Id)
 
     // The upgrade buffer, off the one derivation the Withdraw gate and the
-    // upgrader row's own quota read (`Atlas.controllerContainers`, ADR 0019):
-    // built and in the home controller's Upgrade area, so a container *site*
-    // beside the controller is a promise and not yet a sink.
+    // upgrader row read: built, so a container *site* beside the controller is
+    // a promise and not yet a sink.
     let buffers =
         Atlas.controllerContainers atlas
         |> Set.toList
         |> List.choose (SpatialInfo.placementOf view.Spatial)
 
-    // The Storage while one stands, in the home room alone: it is the
-    // colony's stock (ADR 0023) and a colony banks in one room (ADR 0052
-    // decision 1), so a Storage standing anywhere else is somebody else's.
+    // The Storage while one stands, in the home room alone: a colony banks in
+    // one room, so a Storage standing anywhere else is somebody else's.
     let storages =
         Atlas.storageTilesIn atlas home |> Set.toList |> List.map (RoomPos.at home)
 
@@ -227,12 +140,11 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
         [ "cluster", cluster; "buffer", buffers; "storage", storages ]
         |> List.filter (snd >> List.isEmpty >> not)
 
-    // Each container's own haul, priced at the **dearest** sink it can reach
-    // and summed over the colony — the fraction of a hauler it asks for, never
-    // that fraction rounded. The dearest and not the mean: a cluster holds a
-    // few hundred energy and fills in a trip, so the flow that goes on all day
-    // is the flow to the far sink, and a quota sized to the mean hired one body
-    // for a room whose both containers stood full with the buffer at zero.
+    // Each container's haul, priced at the **dearest** sink it can reach. The
+    // dearest and not the mean: a cluster fills in a trip, so the flow that
+    // goes on all day is the flow to the far sink, and a quota sized to the
+    // mean hired one body for a room whose both containers stood full with the
+    // buffer at zero.
     let rows =
         sourceContainers
         |> List.map (fun (container, output) ->
@@ -261,24 +173,13 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                     | trips -> output * List.max trips
             })
 
-    // **The mine-to-[[storage]] leg is one more term in this sum, not one more
-    // row of bodies** (ADR 0057 decision 3): the act is the existing pair with a
-    // resource on it, so what grows is a row's quota. Each mineral
-    // [[container]]'s round trip to the Storage times the [[miner]]'s own rate
-    // — `Work / 6` Thorium a tick, the extractor's cooldown being five and the
-    // intent pass running before the object pass — which is the same
-    // `output × trip` shape every source container's line has, in the other
-    // resource.
-    //
-    // The Storage alone and never the three sinks: Thorium goes to the one store
-    // nothing can stand on, the contact penalty being a property of a tile. A
-    // colony with no Storage standing, or one whose mine it cannot price, asks
-    // for nothing here (ADR 0004) — which is also the tick the pair is not
-    // pooled at all, the Refill needing a Storage with room.
-    //
-    // The rate is the row's **cast** at this bank and never a living miner's
-    // parts, exactly as every other term here is a cast: a quota priced off a
-    // body that stands moves when that body dies (ADR 0042, #208).
+    // The mine-to-Storage leg is one more term in this sum, not one more row
+    // of bodies: each mineral container's round trip to the Storage times the
+    // miner's cast rate, `Work / 6` Thorium a tick (the extractor's cooldown
+    // is five and the intent pass runs before the object pass). The Storage
+    // alone and never the three sinks: Thorium goes to the one store nothing
+    // can stand on. No Storage standing, or a mine it cannot price, asks for
+    // nothing — which is also the tick the pair is not pooled at all.
     let minerRate =
         partCountIn (minerBodyFor view.Tuning.MinerWorkPerMove view.Bank.Capacity) Work
         * Engine.mineralHarvestPerWork
@@ -288,24 +189,16 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
             []
         else
             ourMineralContainerPairs view
-            // **A mine that cannot be dug asks for no carrier** (#262): the term
-            // prices the [[miner]]'s output, so it must read the same two facts
-            // the miner row's own quota puts a body at 0 for — the deposit holds
-            // Thorium, and the extractor **stands**. Without them the container
-            // alone bought a hauler for a mine producing nothing: the RCL6 build
-            // window this leg lands in, where the Layout emits the extractor and
-            // the container as two sites and the container is the one that
-            // finishes first, and the tick the deposit runs to zero under a
-            // standing extractor. The third fact, the mine [[post]], is the
-            // container this list is made of.
+            // A mine that cannot be dug asks for no carrier (#262): the same
+            // two facts the miner row's own quota reads, so the container
+            // alone cannot buy a hauler during the RCL6 build window (the
+            // Layout emits extractor and container as two sites) or after the
+            // deposit runs to zero under a standing extractor.
             |> List.filter (fun (depositId, _) -> depositIsDiggable view atlas depositId)
             |> List.choose (fun (_, containerId) ->
                 SpatialInfo.placementOf view.Spatial containerId)
-            // **No store of a child's is the mother's to draw** (ADR 0047
-            // decision 1), which is the same filter the Task pool reads over
-            // this same list: a room this colony owns may still be a child's,
-            // and a term priced for a mine nothing in the pool draws is a body
-            // hired for a haul that is never offered.
+            // No store of a child's is the mother's to draw — the same filter
+            // the Task pool reads over this list.
             |> List.filter (fun container -> not (List.contains container.Room view.Borrowed.Rooms))
             |> List.map (fun container ->
                 let trip =
@@ -322,30 +215,22 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                     Demand =
                         match trip with
                         | None -> 0
-                        // One division, here rather than in the sum: the rate is
-                        // a fraction of a Thorium a tick and every other term in
-                        // this sum is a whole energy a tick, so the mine's term
-                        // is brought to whole units before it joins them. The
-                        // truncation is under one unit against a load of
-                        // hundreds.
+                        // One division here rather than in the sum: the rate
+                        // is a fraction of a Thorium a tick and every other
+                        // term is whole energy a tick. The truncation is
+                        // under one unit against a load of hundreds.
                         | Some trip -> minerRate * trip / Engine.mineralHarvestCycle
                 })
 
-    // The source containers' demand and the mine's, summed before the one
-    // rounding ADR 0049 takes.
     let demand =
         (rows |> List.sumBy (fun row -> row.Demand))
         + (mineRows |> List.sumBy (fun row -> row.Demand))
 
-    // The [[ferry]] (ADR 0052 decision 7): the bodies a mother lends a
-    // bootstrapping child, over and above the haul her own containers ask for.
-    // Hired per child and capped at `Tuning.FerryLoads`, because what one
-    // colony takes of another is written down and bounded and never derived
-    // from how much the child could absorb. Priced **from her Storage**, which
-    // is what makes it a lend and not a second economy: the stock is the only
-    // energy a mother has that her own rows are not already hired against (ADR
-    // 0023). A child whose room she cannot reach, or that has no buffer
-    // standing, hires nobody (ADR 0004).
+    // ADR-0052
+    // The ferry: the bodies a mother lends a bootstrapping child, per child
+    // and capped at `Tuning.FerryLoads`, priced from her Storage. A child
+    // whose room she cannot reach, or that has no buffer standing, hires
+    // nobody.
     let ferry =
         if List.isEmpty storages then
             0
@@ -357,107 +242,62 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                 storages
                 |> List.exists (fun stock ->
                     Atlas.haulRoundTripTicks atlas body stock tile |> Option.isSome))
-            // Per **child** and not per store: the lend is a sentence about
-            // a colony, and a room the Layout ever planned two buffers in
-            // would otherwise buy two ferries off one declaration.
+            // Per child and not per store: a room the Layout ever planned
+            // two buffers in would otherwise buy two ferries off one
+            // declaration.
             |> List.map (fun tile -> tile.Room)
             |> List.distinct
             |> List.length
             |> (*) view.Tuning.FerryLoads
 
-    // **A haul that crosses a Seam is never one body** (#279). The rounding
-    // above is honest about throughput and says nothing about redundancy, and
-    // at the live reading — 1,170 of demand against a 1,200 load, 97.5% of one
-    // body — the colony was one death, one detour or one Threat away from
-    // losing a source: what a full container at home does is wait, and what a
-    // full container in an [[outpost]] does is drop the [[anchor]]'s next
-    // fifty on the floor, where it decays, while the replacement walks forty
-    // tiles out. That asymmetry is the whole of the argument, so the floor is
-    // read off the rows this function already priced — a container standing in
-    // a room that is not home — and not off the declaration: a room a
-    // [[stand-down]] withdrew asks for nothing here, exactly as it asks for no
-    // reserver. #157's argument for two builders, said again for the haul.
-    //
-    // **The source containers' rows alone** and never the mine's: the whole of
-    // the argument is an [[anchor]] dropping its next fifty on the floor of a
-    // room nobody can reach, and a mineral container overflowing drops the
-    // [[miner]]'s Thorium onto a tile inside the colony's own room, where the
-    // next hauler takes it. A deposit is dug only in a room this colony **owns**
-    // at RCL6, so a mine row out of the home room is a child's, and the child
-    // hauls its own.
+    // A haul that crosses a Seam is never one body (#279): a full container
+    // at home waits, a full container in an outpost drops the anchor's next
+    // fifty on the floor while the replacement walks forty tiles out. Read
+    // off the rows priced above — a container in a room that is not home —
+    // and not off the declaration, so a stood-down room asks for nothing.
+    // The source containers' rows alone: a mineral container overflows onto
+    // a tile inside the colony's own room, where the next hauler takes it.
     let remote =
         rows
         |> List.filter (fun row -> row.Container.Room <> home)
         |> List.sumBy (fun row -> row.Demand)
 
-    // The colony's whole haul, rounded once (ADR 0049), and the ferry's own
-    // whole bodies beside it: a lend is counted in bodies rather than in
-    // tick-energy, so it is added after the division rather than inside it.
+    // ADR-0049
+    // Rounded once for the colony; the ferry is counted in bodies, so it is
+    // added after the division.
     let hired = ceilDiv demand capacity
 
     // The mine's lines ride at the end of the reported rows, so
     // `observe.mjs quotas` prints the new term beside the ones it always had.
     (if remote * 2 >= capacity then max hired 2 else hired) + ferry, rows @ mineRows, capacity
 
-/// The hauler quota alone; `haulerDemandOf` is the same arithmetic with
-/// its lines kept.
-/// What one body of this shape drinks a tick standing at a controller: its Work
-/// parts at the rate above.
+/// What one body of this shape drinks a tick standing at a controller.
 let private upgradeDrainOf body =
     partCountIn body Work * Engine.upgradeDrainPerWork
 
-/// Whether a living body was cast from the guard row: it carries an ATTACK
-/// part (ADR 0056). The same part test `findAttack.js` splits the engine's own
-/// invaders on, and the one cut no other row of this colony makes — every other
-/// row is built out of Work, Carry, Move and CLAIM — so it is asked **first**,
-/// beside `Fighter`'s place at the head of the [[body class]] ladder. Read off
-/// the parts like every other row predicate (ADR 0006), so a fighting body the
-/// colony was handed rather than cast fills this row's quota exactly as one it
-/// cast does.
-/// The guard cut, over parts (ADR 0006): an ATTACK part. One predicate for the
-/// two readers that must not drift — a living body and one still in an oven
-/// (#375).
+/// The guard cut, over parts: an ATTACK part, the one cut no other row of
+/// this colony makes. One predicate for a living body and one still in an
+/// oven, so the two cannot drift.
 let internal isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
 
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
-/// How many guards one raided [[outpost]] wants (ADR 0056 decision 1, as #272
-/// amends it), which is **0** for the whole of a colony's ordinary life because
-/// no room is raided: one guard per declared outpost a [[threat]] stands in
-/// this tick, two where one guard block loses the exchange, capped at two
-/// and — for the row's own quota — summed over the
-/// outposts. A per-tick fact read off vision and nothing remembered between
-/// ticks — vision
-/// in a guarded outpost *is* the guard — so it falls to 0 the tick the room is
-/// clear; it does not decay in between, and it needs none: a cast is 1,500
-/// ticks of body and a raid is 1,500 ticks, so one cast covers one raid by
-/// construction and the survivor goes on filling the row's `Living`.
-///
-/// The count compares one block against the raid, independently of the bank
-/// and the guards already standing. A lone smallMelee needs one; backed by a
-/// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
-/// net damage kills its 1,000 hits. That raid needs the second block.
-///
 /// Whether `blocks` whole `guardPattern` blocks win the exchange against the
-/// raid standing in one room (ADR 0056 decision 1, as #280 amends it). Two
-/// clocks compared, cross-multiplied to stay in whole numbers: the ticks our
-/// blocks need to chew through the raid's **armed** bodies, against the ticks
-/// the raid needs to chew through ours.
+/// raid standing in one room: two clocks compared, cross-multiplied to stay in
+/// whole numbers. Our blocks cannot self-heal while attacking (heal
+/// suppresses attack), so their survival uses the raid's full damage. A raid
+/// that out-heals our damage is never killed. Healers are priced in the
+/// healing and never in the hits. The raid's durability is priced at full off
+/// its parts, because the projection carries a hostile's body and not its
+/// hits; over-stating what it can take is the safe direction.
 ///
-/// Our melee blocks cannot self-heal while attacking: heal suppresses attack.
-/// Their survival uses the raid's full damage. A raid that out-heals our damage
-/// can never be killed and is not. Healers are priced in the healing and never
-/// in the hits — killing them is not what ends the fight, out-damaging them is,
-/// and the last armed body down leaves them taking no ground and dealing
-/// nothing. The raid's durability is priced at full off its parts, because the
-/// projection carries a hostile's body and not its hits (ADR 0007), and
-/// over-stating what it can take is the safe direction for a rule that decides
-/// whether we fight at all.
+/// Worked example: a lone smallMelee needs one block; backed by a smallHealer,
+/// its 40 damage kills our 1,000 hits in 25 ticks, before our 30 net damage
+/// kills its 1,000 hits, so that raid needs the second block.
 ///
-/// Two readers, which is why it is a rule and not an expression written twice:
-/// the guard row asks it of **one** block to size the crowd (below), and ADR
-/// 0043's stand-down asks it of the **cap** to decide whether the room is a
-/// fight or a withdrawal (`Observe.raidDeadlines`, #257).
+/// Two readers: the guard row asks it of one block to size the crowd, and the
+/// stand-down asks it of the cap to decide whether the room is a fight or a
+/// withdrawal (`Observe.raidDeadlines`).
 let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     let parts part body = partCountIn body part
 
@@ -492,46 +332,17 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     else
         raidHits * raidDamage < ourHits * (ourDamage - raidHealing)
 
-/// **The count reads the raid and never our own answer to it** (#272). Priced
-/// against the guards *standing* in the room it was not monotone — 2 while one
-/// stood, 1 the tick the second arrived — so the escalation cancelled itself:
-/// the reinforcement it had just bought was `CapacityFull`-evicted on arrival,
-/// onto a [[flee]] whose safe set is that same room, where it stood for its
-/// whole life holding the count down with its own damage. Nothing about the
-/// bodies already sent enters this, which is what makes the number monotone in
-/// the raid: the row hires the second guard, the Task's cap admits it, and
-/// neither can retract while the raid is unchanged. Never a living body, for
-/// the reason ADR 0042 stopped reading the living Anchor's (#208): a quota
-/// priced off a body that stands moves when that body dies. The block is a
-/// whole 90, so the damage term is never zero. A raid with enough armed
-/// bodies can buy a second guard even without healing.
-///
-/// Vision is the whole of what this reads (ADR 0004): an outpost the colony
-/// cannot see this tick carries no hostiles and asks for no guard, which is the
-/// same zero a quiet room contributes. The [[home room]] is not in this list —
-/// a raid at home casts no guard and is the [[keep]]'s business (ADR 0034), and
-/// the spawn hold would refuse the cast anyway.
-///
-/// **One room's number, and the row's quota is its sum** (ADR 0056 decision 2):
-/// the Guard pooled for that room is capped at exactly this, so the row hires
-/// what the pool admits and the Matcher counts holders against the number the
-/// Planner set, which is ADR 0052 decision 6. Asked only of a room
-/// `guardedOutposts` has already answered for — a room with no Threat in it is
-/// not one guard but none.
-///
-/// **A room remembered and not seen is one guard** (#366). Since that ticket
-/// `guardedOutposts` also answers for a declared outpost the colony has gone
-/// blind in, and the two-guard clause prices the raid's healing against our
-/// blocks' damage — neither number exists while blind, because a room with no
-/// `RoomControl` entry contributes no hostile to the view at all. One is the
-/// answer that sends the body already bought without buying a second for a
-/// fight nobody can see; pricing an unseen raid at its cheapest is the wrong
-/// direction (ADR 0056's own argument for ignoring `rangedHealPower`), and
-/// hiring two bodies for a room nobody can see is worse. Written as its own
-/// clause rather than left to the empty raid falling through
-/// `guardBlocksBeat`'s zero-damage arm below: the arms agree today, but that
-/// one is a statement about a raid we **can** see dealing nothing, and this is
-/// a statement about not being able to see.
+/// ADR-0056
+/// How many guards one raided outpost wants: one, two where one block loses
+/// the exchange. The count reads the raid and never our own answer to it
+/// (#272): priced against the guards standing in the room it was not monotone,
+/// and the reinforcement it bought was evicted on arrival. Vision is the whole
+/// of what this reads: an outpost the colony cannot see carries no hostiles.
+/// A room remembered and not seen is one guard (#366): a room with no
+/// `RoomControl` entry contributes no hostile to the view, so neither number
+/// of the two-guard clause exists. Written as its own clause rather than left
+/// to `guardBlocksBeat`'s zero-damage arm: that one is a statement about a
+/// visible raid dealing nothing.
 let internal guardsWanted (view: ColonyView) (room: string) : int =
     if
         Set.contains room view.ThreatenedOutposts
@@ -547,37 +358,29 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
     outposts.Guarded |> List.sumBy (guardsWanted view)
 
-/// The whole guard blocks one raided room's exchange takes to win (#375, ADR
-/// 0072): the smallest count `guardBlocksBeat` answers yes to, up to the
-/// largest body the engine casts, and that largest where none wins. A room
-/// the colony is blind in prices at one — its raid is the remembered one and
-/// `view.Hostiles` carries nothing of it, so the exchange reads as won — which
-/// is what a 750 body against an unseen raid is worth: enough to go and look.
+/// ADR-0072
+/// The whole guard blocks one raided room's exchange takes to win: the
+/// smallest count `guardBlocksBeat` answers yes to, the largest body where
+/// none wins. A room the colony is blind in prices at one, since `view.Hostiles`
+/// carries nothing of its raid: enough to go and look.
 let internal guardBlocksFor (view: ColonyView) (room: string) : int =
     [ 1..guardBlocksMost ]
     |> List.tryFind (guardBlocksBeat view room)
     |> Option.defaultValue guardBlocksMost
 
-/// The blocks the guard row casts at this tick: the worst of the guarded rooms'
-/// answers, one where nothing is guarded. Every cast this tick carries it, as
-/// the reserver row's casts carry the largest outstanding claim — the Matcher
-/// pairs a finished body to a room by travel cost, so a body sized for the
-/// heavier raid can land on the lighter one and the other way about would
-/// lose. This is what the guard row was missing: `guardsWanted` read the
-/// exchange for the **count** and `guardBodyFor` read the bank for the
-/// **size**, so at W15S28's 2,300 bank the row asked 2,250 for a raid one
-/// 750 block wins, and a bank the reserver row drains at 650 never reached it.
+/// The blocks the guard row casts this tick: the worst of the guarded rooms'
+/// answers, one where nothing is guarded. Every cast carries it, as the
+/// reserver row's casts carry the largest outstanding claim: the Matcher pairs
+/// a finished body to a room by travel cost.
 let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
     match outposts.Guarded |> List.map (guardBlocksFor view) with
     | [] -> 1
     | blocks -> List.max blocks
 
 /// Whether the guard row is filled — every body it wants standing or in an
-/// oven (#375, ADR 0072). Read by the reserver row: a guarded room's seat
-/// waits on this. Counted over every living guard and not over the row's
-/// census less its expiring bodies (ADR 0026): a guard inside its lead still
-/// stands in the room, so the seat stays open while the row buys the relief,
-/// and closes again only when the incumbent is actually gone.
+/// oven. Read by the reserver row. Counted over every living guard and not the
+/// census less its expiring bodies: a guard inside its lead still stands in
+/// the room, so the seat stays open while the row buys the relief.
 let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
     let living = view.Creeps |> List.filter isGuardBody |> List.length
 
@@ -588,89 +391,43 @@ let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
 
     living + inOven >= guardQuota view outposts
 
-/// The [[miner]] row's quota (ADR 0057 decision 2): **one body per deposit the
-/// colony can actually dig**, and nothing for one it cannot. Three facts and
-/// all of them read off this tick's projection rather than off anything
-/// remembered, over the deposits that are **ours** (`ourDeposits`, #261):
-///
-/// - the deposit **holds Thorium**. The mod deletes an exhausted deposit
-///   outright (`postProcessObject` on `mineralType == 'T' && !mineralAmount`),
-///   so the ordinary way this falls to zero is the target leaving the
-///   projection altogether — the same fact that retires the Task, the Post and
-///   the row together, which is why ADR 0057 decision 7 writes no stop
-///   condition at all. The amount is read as well as the kind because a
-///   projection that ever carried a deposit at zero would otherwise hire a body
-///   for it for 1,500 ticks.
-/// - the extractor **stands** on the deposit's own tile. A site is 0: an
-///   extractor under construction extracts nothing, `harvest.js` refuses a
-///   mineral with no extractor on it, and a miner cast against a site stands
-///   idle for a life.
-/// - the deposit has a **mine [[post]]**, which is to say its container stands
-///   (#261). The two gates were the extractor's alone and the [[work area]]'s
-///   was the container's, and between them the row bought a body with nowhere
-///   to work: the Layout emits both 5,000-point sites in one tick, so which
-///   finishes first is the builder's accident, and any tick the mine container
-///   is destroyed under a standing extractor re-opens the window. A miner with
-///   an empty Work Area is `Unassigned(NoneReachable)` for 1,500 ticks — or
-///   worse, was applicable to a *source's* Harvest and spent that life
-///   squatting a garrison tile. Read off `Atlas.postsOf`, which is the same
-///   census the Work Area narrows to, so the row and the ground cannot
-///   disagree about whether there is anywhere to stand.
-///
-/// Summed over the deposits, never counted as one: a colony works its home room
-/// and its [[outpost]]s, and only an **owned RCL6** room can hold an extractor
-/// (`checkControllerAvailability` derives `rcl = 0` from a reservation), so an
-/// outpost's deposit contributes the zero this rule gives it rather than a zero
-/// the shape of the sum assumes. Which is an argument about *our* rooms and
-/// never about a neighbour's, and that is what `ourDeposits` answers: a rival's
-/// extractor over a rival's deposit is exactly as visible as our own and the
-/// engine refuses to let us dig it.
+/// ADR-0057
+/// The miner row's quota: one body per deposit the colony can actually dig —
+/// it holds Thorium, the extractor stands, and its mine Post stands (#261).
+/// The mod deletes an exhausted deposit outright (`postProcessObject` on
+/// `mineralType == 'T' && !mineralAmount`); the amount is read as well because
+/// a projection that ever carried a deposit at zero would otherwise hire a body
+/// for 1,500 ticks. The Post is read off `Atlas.postsOf`, the same census the
+/// Work Area narrows to. Summed over `ourDeposits`: only an owned RCL6 room can
+/// hold an extractor, and a rival's is as visible as our own.
 let internal minerQuota (view: ColonyView) atlas : int =
     ourDeposits view
-    // The first two are `depositIsDiggable`, which the [[hauler unit]]'s own
-    // mine term reads off the same sentence (#262).
+    // The first two are `depositIsDiggable`, which the hauler's mine term
+    // reads off the same sentence (#262).
     |> List.filter (fun id ->
         depositIsDiggable view atlas id && not (Set.isEmpty (Atlas.postsOf atlas id)))
     |> List.length
 
-/// The reserver row's quota and its sizing, which are one rule with two faces
-/// (ADR 0042, ADR 0006's law that a row arrives with its quota): one reserver
-/// per declared outpost this colony may actually reserve, each wanting
-/// `ceil((5000 - ticks this colony
-/// holds) / 600)` CLAIM parts. The list's length is the quota; each entry is
-/// what that outpost's body asks for. No state is kept between ticks — the
-/// deficit recomputes from the reservation itself. A **candidate colony** takes
-/// one more entry, of a single block (ADR 0047), and its room leaves the
-/// reservation demands, because a controller carries one Task and a candidate
-/// colony's is the Claim; the body is the same `[Claim; Move]` either way,
-/// which is why this is one row and not two. A declared **[[errand]]** takes a
-/// third entry beside them, also of a single block (#318) — the row's third
-/// face, and the same body once more.
+/// The reserver row's quota and its sizing, one rule with three faces: one
+/// reserver per reservable outpost, each wanting `ceil((5000 - ticks held) /
+/// 600)` CLAIM parts; one block per candidate colony; one block per declared
+/// errand. The list's length is the quota; every cast this tick is sized at
+/// the largest entry, since which controller a finished body holds is the
+/// Matcher's. No state between ticks: the deficit recomputes from the
+/// reservation itself. The bank must afford one block, or the row hires
+/// nobody.
 ///
-/// Which rooms count is `reservableOutposts`, which is `declaredOutposts` — the
-/// set the [[guard]] row and the scan set still read whole — less the rooms
-/// whose controller **somebody else's CLAIM parts hold** (#333). The engine
-/// refuses `reserveController` on such a controller as flatly as on an owned
-/// one, so a body hired for one stands adjacent and is refused every tick of
-/// its life: W12S27 bought two of them over the 617 ticks the ticket watched —
-/// `reserver-411079`, then `reserver-411698`, the reservation unmoved between
-/// them — and was on course to buy four or five more before the 4,999 ticks an
-/// invader core's reservation outlives its core ran out, at 1,950 energy a head
-/// against a [[storage]] holding no energy at all. The same read takes the
-/// controller out of the Reserve pool, so this is one refusal and not a row
-/// that can be undone by the Matcher. It is asked of the room's **record**
-/// where no vision answers for it, which is what makes the cadence above stop
-/// rather than slow: the reserver is the only body such a room ever holds, so a
-/// read off vision alone would go dark the tick the last one died and hire the
-/// next (`Planner.reservableControllers`).
-///
-/// The *rooms* drop out and every cast this tick is sized at the largest demand in
-/// the list: the quota counts bodies, and which controller each finished body
-/// holds is the Matcher's, priced by travel cost. Over-buying is the safe
-/// direction (ADR 0026), and the bank truncates it anyway. **The bank must
-/// afford one block**, or the row hires nobody: a colony that cannot buy a
-/// reservation does not hold one, and a row hired against a body it can never
-/// buy is an addend of the Workforce target no cast will pay off.
+/// `reservableOutposts` is `declaredOutposts` less the rooms whose controller
+/// somebody else's CLAIM parts hold (#333): the engine refuses
+/// `reserveController` on such a controller as flatly as on an owned one, so
+/// a body hired for one stands adjacent and is refused every tick of its
+/// life. W12S27 bought two of them over the 617 ticks the ticket watched
+/// (`reserver-411079`, then `reserver-411698`, the reservation unmoved) at
+/// 1,950 energy a head, and an invader core's reservation outlives its core
+/// by 4,999 ticks. Asked of the room's **record** where no vision answers for
+/// it: the reserver is the only body such a room ever holds, so a read off
+/// vision alone would go dark the tick the last one died and hire the next
+/// (`Planner.reservableControllers`).
 let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int list =
     let heldTicks room =
         view.RoomControl
@@ -679,30 +436,15 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         |> Option.map (fun held -> held.TicksToEnd)
         |> Option.defaultValue 0
 
-    // The candidate colonies this tick, each asking for **one** block (ADR
-    // 0047): the Claim row is this row, because both bodies are CLAIM bodies
-    // and a second pattern row would be the same block under a second name (ADR
-    // 0006), so `patternOf` reads a claimer back as a reserver and the casting
-    // order, the gap and the amortization all count it as one. One block and
-    // never the deficit's nine: a claim is one act by one CLAIM part, finished
-    // the tick it succeeds. Their rooms are already out of `declaredOutposts`,
-    // which is the same fact read from the other end.
+    // The candidate colonies, each asking for one block: a claim is one act
+    // by one CLAIM part. `patternOf` reads a claimer back as a reserver, so
+    // this is one row and not two.
     let claims = outposts.Claims
 
-    // **A guarded room's seat waits for its guard** (#375, ADR 0072). The
-    // guard row stands in front of this one in the cascade for a reason, and
-    // ADR 0050's yield undid it: a guard the bank could not yet afford let
-    // this row buy a 650 body the tick the bank held 650, the body walked
-    // into the room the raid log knew was held and died there inside fifty
-    // ticks, the gap reopened, and the next 650 bought the next — eight in
-    // 491 ticks at W15S27, thirty-three with the reactor room before it,
-    // while the guard never cast and the colony spent down to six bodies. So
-    // while the guard row has a gap, the rooms it is hired for are not this
-    // row's to hire for; the tick a guard stands or is in the oven, the seat
-    // is back. The rest of the row is untouched, and so is the Reserve Task
-    // (#366): what stops is the buying of bodies the raider is eating, which
-    // is the seam ADR 0050 said this belonged at. The target moves by one per
-    // withheld room, keyed to the guard gap and not to the spending, so it
+    // A guarded room's seat waits for its guard (#375): while the guard row
+    // has a gap, the rooms it is hired for are not this row's to hire for.
+    // The Reserve Task is untouched; what stops is the buying of bodies the
+    // raider is eating. Keyed to the guard gap and not to the spending, so it
     // flips once and not every cast.
     let withheld =
         if guardStands view outposts then
@@ -721,78 +463,42 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
 
         reserved
         @ (claims |> List.map (fun _ -> 1))
-        // And the **[[re-claimer]]**, which is this row's third face (ADR 0057
-        // decision 5, ADR 0060 decision 3): one resident per declared
-        // [[errand]], each asking for one block, for the claim's reason one
-        // room further out — the reactor is taken by one touch of one CLAIM
-        // part, and a second block buys a body that walks no faster and holds
-        // the same flag. `patternOfParts` reads a `[Claim; Move]` back as a
-        // reserver whatever it was bought for (ADR 0006: a second pattern row
-        // would be the same block under a second name), so a row of its own
-        // would be a census no predicate can tell from this one's — which is
-        // the defect the [[miner]]'s own arm exists to have prevented — and
-        // folding it here is what gets it cast in the row's own order, led by
-        // `castBodyOf`'s reserver arm and **charged in `surplusOverLifetime`
-        // beside the reserver's**, scaled onto a CLAIM body's 600-tick life
-        // rather than a worker's 1,500. That charge is #304's argument reaching
-        // this row verbatim: it is hired off a fact about the ground — a
-        // declaration and a chain — and it earns no energy at all.
+        // The re-claimer, the row's third face: one resident per declared
+        // errand, one block each. `patternOfParts` reads a `[Claim; Move]`
+        // back as a reserver whatever it was bought for, so a row of its own
+        // would be a census no predicate can tell from this one's; folding
+        // it here gets it cast in the row's order and charged in
+        // `surplusOverLifetime` beside the reserver's.
         //
-        // **One entry and never two while a relief is in flight.** The cadence
-        // is not here: the quota counts the seats the errand wants, and the
-        // relief is cast by the incumbent leaving `living` at its own [[lead]]
-        // (`Spawns.expiring`), which already prices the successor's walk over
-        // the chain. Written as a cadence here instead, the row would have to
-        // tell a re-claimer from a reserver in the living census to know
-        // whether the seat was filled, and the two are the same body.
+        // One entry and never two while a relief is in flight: the relief is
+        // cast by the incumbent leaving `living` at its own lead
+        // (`Spawns.expiring`), which already prices the successor's walk.
         //
-        // The **start condition is the bank gate above and the chain**, and
-        // nothing else: no extractor, no road and no banked Thorium (ADR 0060
-        // decision 3 retiring ADR 0057 decision 7's first clause). The flag is
-        // already planted by a rival, so the claim is the first act of the
-        // programme rather than its last, and `view.Errands` carries only the
-        // errands a chain of [[seam]]s reaches.
+        // The start condition is the bank gate above and the chain, nothing
+        // else: `view.Errands` carries only the errands a chain of Seams
+        // reaches.
         @ (view.Errands |> List.map (fun _ -> 1))
 
-/// The facts the rows whose sizing is not the bank's answer alone read, derived
-/// once for the tick (ADR 0042): the anchor row's Work ceilings, the reserver
-/// row's outstanding CLAIM demands, and the miner row's knob and its count.
-/// Together with the bank they say what **this colony's rows will cast this
-/// tick** (ADR 0052 decision 4), which is the number three readers have to agree
-/// on: the casting cascade that buys the body, the amortization that charges for
-/// it, and the lead that prices its succession. A record and not a handful of
-/// arguments, and derived in
-/// `decideUnarbitrated` rather than per reader, because both folds walk the
-/// projection and a lead is priced once per living creep in two different steps
-/// of the tick. Neither field may be derived from a creep's remaining life (ADR
-/// 0053): a [[lead]] is priced off this record, so which Posts stand *empty* —
-/// an arrival-time judgement (ADR 0026) — cannot be a field of it without
-/// closing a circle.
+/// The facts the rows whose sizing is not the bank's answer alone read,
+/// derived once for the tick in `decideUnarbitrated`: the casting cascade, the
+/// amortization and the lead must agree on what this colony's rows will cast.
+/// Neither field may be derived from a creep's remaining life: a lead is
+/// priced off this record, so which Posts stand *empty* — an arrival-time
+/// judgement — cannot be a field of it without closing a circle.
 type RowSizing =
     {
-        /// `postWorkCapsOf`'s answer this tick — one ceiling per [[post]],
-        /// keyed by the Post's own tile.
+        /// `postWorkCapsOf`'s answer this tick, keyed by the Post's own tile.
         AnchorPostCaps: Map<RoomPos, int>
-        /// `reserverClaimsOf`'s answer this tick — one entry per room the
-        /// row hires for, each that room's CLAIM demand.
+        /// `reserverClaimsOf`'s answer this tick.
         ReserverClaims: int list
-        /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing` (ADR 0057
-        /// decision 2): the miner row's sizing rule is not the bank's answer
-        /// alone either, and the third thing it reads is a knob of this
-        /// colony's rather than a fact of the tick.
+        /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing`.
         MinerWorkPerMove: int
-        /// `guardBlocksWanted`'s answer this tick (#375, ADR 0072): the whole
-        /// blocks the worst guarded room's exchange takes, carried through to
-        /// `BodySizing` so the guard row is sized by the fight and not by the
-        /// bank.
+        /// `guardBlocksWanted`'s answer this tick, carried through to
+        /// `BodySizing` so the guard row is sized by the fight and not the bank.
         GuardBlocks: int
-        /// `minerQuota`'s answer this tick — one [[miner]] per diggable
-        /// deposit. Here for `ReserverClaims`' own reason (#304): the number is
-        /// both the addend of the [[workforce target]] and the multiplier of
-        /// the charge deducted from the surplus, and a second derivation is a
-        /// body hired against one number and counted against another. It is
-        /// also a walk of the projection's targets that every colony without a
-        /// deposit was paying for twice.
+        /// `minerQuota`'s answer this tick. Here for `ReserverClaims`' reason
+        /// (#304): the addend of the target and the multiplier of the charge
+        /// must be one number, and the walk of the projection is paid once.
         MinerQuota: int
         /// One while the Reactor delivery's current ground facts stand (#319).
         CourierQuota: int
@@ -809,37 +515,19 @@ let internal rowSizingOf (view: ColonyView) atlas (outposts: OutpostFacts) : Row
     }
 
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
-/// rows are hired out of, written once because both read it and a paraphrase
-/// would let them hire against different money (ADR 0012, ADR 0046). Income is
-/// counted per source at that source's own output and never at a colony-wide
-/// ten (ADR 0042): an unreserved source is worth half a held one, and a posted
-/// source whose room the colony cannot see is worth nothing at all rather than
-/// half (ADR 0004). An output is what the garrison digs, capped at the rock's
-/// rate, and the row is charged its replacement at that same body, so credit
-/// and charge are one cast — since ADR 0053, Post by Post. From that income the
-/// reserver, anchor, hauler and [[miner]] rows' amortization is deducted: those
-/// four are hired off facts about the *ground*, so their price is settled before
-/// the surplus has a number, while the two rows hired out of the surplus itself
-/// are charged inside `workforceTarget`.
+/// rows are hired out of, written once because both read it. Income is counted
+/// per posted source at that source's own output; a source the colony cannot
+/// price contributes nothing. The reserver, anchor, hauler, miner and courier
+/// rows' amortization is deducted here: they are hired off facts about the
+/// ground, so their price is settled before the surplus has a number.
 let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) haulerQuota =
     let capacity = view.Bank.Capacity
     let reserverClaims = sizing.ReserverClaims
 
-    // The row's own body, once, times the places it hires: every reserver cast
-    // this tick carries the largest outstanding demand, so the charge is priced
-    // off that same body and never off a per-room one the casting step would not
-    // have cast. Scaled from a CLAIM body's own 600-tick life onto the 1,500 the
-    // rest of this sum is written in (ADR 0042): a reserver is replaced two and
-    // a half times over one worker's life, and charging it once would hire an
-    // upgrade mouth the reservation is really paying for.
-    //
-    // **Every entry at the largest**, the [[errand]]'s one-block seat included
-    // (#318): beside a slipped reservation the re-claimer is *cast* at the
-    // bigger body — `castBodyOf`'s reserver arm reads the same `List.max` — so
-    // it is charged at the body it is bought at and not at the block it asked
-    // for. That is the claimer's precedent one room further out and it
-    // over-buys in the safe direction (ADR 0026); what it costs on the day a
-    // W15S28 outpost slips is filed rather than absorbed here.
+    // Every reserver cast this tick carries the largest outstanding demand
+    // (the errand's one-block seat included, #318), so the charge is priced
+    // off that same body. Scaled from a CLAIM body's 600-tick life onto the
+    // 1,500 the rest of this sum is written in.
     let reserverCost =
         if List.isEmpty reserverClaims then
             0
@@ -847,21 +535,14 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
             List.length reserverClaims
             * bodyCost (reserverBodyWithin (List.max reserverClaims) capacity)
 
-    // The [[miner]] row charged like the three rows beside it (#304), on the
-    // argument `workforceTarget`'s own docstring states and this one does not
-    // repeat: a row that earns nothing and stands for as long as the deposit
-    // does is the guard's excuse read the other way round. Off `sizing` and
-    // never re-derived here, for `ReserverClaims`' reason — the addend and the
-    // charge must be one number.
-    //
-    // Scaled onto the 1,500 this sum is written in exactly as the reserver's
-    // CLAIM body is, and by a number that is a **policy assumption** rather
-    // than a bound: the miner spends its life standing *on* the mineral
-    // container, and `Tuning.MineContactAgeing` is what the mod's contact
-    // penalty comes to while the haul keeps that container inside the 100..999
-    // band. Its own doc carries the two live ways that is optimistic (#306,
-    // #313); what an under-charge costs is an upgrade mouth the mine is really
-    // paying for, which is the same error this term exists to fix, smaller.
+    // The miner row charged like the rows beside it (#304): it earns nothing
+    // and stands as long as the deposit does. Off `sizing` and never
+    // re-derived, so the addend and the charge are one number. Scaled by
+    // `Tuning.MineContactAgeing`, a policy assumption rather than a bound:
+    // the miner stands on the mineral container, and that is what the mod's
+    // contact penalty comes to while the haul keeps the container inside the
+    // 100..999 band (its own doc carries the two live ways that is optimistic,
+    // #306, #313).
     let minerCost =
         sizing.MinerQuota * bodyCost (minerBodyFor sizing.MinerWorkPerMove capacity)
 
@@ -871,12 +552,8 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
             (bodyCost courierPattern.Block * Engine.creepLifetime)
             view.Tuning.DeliveryInterval
 
-    // The anchor row charged **Post by Post**, each at the body the casting
-    // step would actually buy for that Post (ADR 0053): a row whose bodies
-    // shrank with a lapsed reservation while its amortization went on deducting
-    // the six-Work price would hire an upgrade mouth fewer than the income
-    // really feeds, and a quota times one ceiling is that same mistake wherever
-    // the colony's Posts disagree.
+    // The anchor row charged Post by Post, each at the body the casting step
+    // would actually buy for that Post.
     let amortization =
         (sizing.AnchorPostCaps
          |> Map.fold (fun total _ cap -> total + bodyCost (anchorBodyFor cap capacity)) 0)
@@ -886,8 +563,7 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
         + courierCost
 
     // Summed over the posted sources at each one's own output, never a count
-    // times a constant (ADR 0042): a source the colony cannot price contributes
-    // nothing, the same zero it would contribute by not being posted.
+    // times a constant.
     let income =
         view.Sources
         |> List.filter (isPosted atlas)
@@ -895,127 +571,44 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
 
     income * Engine.creepLifetime - amortization
 
-/// Whether a living body is a **standing body** (ADR 0046): it carries fewer
-/// than one Carry part per four Work — `Carry * 4 < Work`. Part arithmetic and
-/// nothing else, like every other row-reading predicate here (ADR 0006), and a
-/// fact about a *body* rather than about a row: the upgrader row's `11W/1C/11M`
-/// is one, and so is the anchor row's `6W/1C/1M`. The gate that reads it is
-/// `applicable` below, on Build, Repair and Refill — on Pickup and on every
-/// Withdraw but the buffer's, and since #235 on Harvest, where the body that
-/// keeps it is the Work-heavy one (ADR 0016) and not the standing one, the
-/// anchor row's `6W/1C/1M` being both. What is left exactly as its own gates
-/// already had it is the working life the upgrader row was shaped for: it draws
-/// from the buffer at its feet (ADR 0019, through ADR 0016's gate) and spends
-/// into the controller in place. Digging is not part of it — #206 left Harvest
-/// open on the reasoning that travel cost would keep the row beside its buffer,
-/// and an empty buffer leaves the row nothing else applicable at all.
+/// Whether a living body is a standing body: `Carry * 4 < Work`. A fact about
+/// a body, not a row: the upgrader row's `11W/1C/11M` is one, and so is the
+/// anchor row's `6W/1C/1M`. Read by `applicable` on Build, Repair, Refill,
+/// Pickup and every Withdraw but the buffer's; on Harvest the body that keeps
+/// it is the Work-heavy one and not the standing one.
 let internal isStandingBody (tuning: Tuning) (creep: CreepInfo) = standingParts tuning creep.Body
 
-/// What one body of the upgrader row eats per tick: every Work part of the
-/// row's cast at the richest bank, at the controller's own per-Work rate
-/// (ADR 0046). Never below one — the row's sizing rule floors at a pair —
-/// so the quota below always has a divisor.
+/// What one body of the upgrader row eats per tick, at the row's cast at the
+/// richest bank. Never below one — the sizing rule floors at a pair — so the
+/// quota always has a divisor.
 let private upgraderDrain capacity =
     upgradeDrainOf (bodyFor upgraderPattern capacity)
 
 /// What one body of the row costs the colony over a life: the energy its Work
-/// drinks plus the body itself (ADR 0046). One expression, because the quota
-/// below *sells* bodies at this price and `workforceTarget` *charges* the
-/// surplus at it — written apart, a term added to one silently oversells the
-/// worker row against the other.
+/// drinks plus the body itself. One expression, because the quota *sells*
+/// bodies at this price and `workforceTarget` *charges* the surplus at it.
 let private upgraderLifetimeCost capacity =
     upgraderDrain capacity * Engine.creepLifetime
     + bodyCost (bodyFor upgraderPattern capacity)
 
-/// The upgrader row's quota (ADR 0046): the surplus divided by what one
-/// standing body **costs the colony over a life** — the energy its Work drinks
-/// plus the body itself — rounded **down**, with the remainder handed on to the
-/// worker row, whose own division rounds up (ADR 0037). **The divisor carries
-/// the row's own replacement cost.** Read as the drain alone, a surplus of
-/// 33,100 over a 16,500 drain hires two bodies that cost 36,400 to run and
-/// replace: the worker row's income term goes to zero and the colony has
-/// promised more over a lifetime than its rocks bring in. What a row pays for
-/// is the mouth *and* the body. Only one of the two rows may round up: ADR 0037
-/// admits an oversell bounded by *one body's* lifetime drain, and two rows
-/// rounding up against the same number sell that bound twice — the rounding
-/// goes to the row whose oversold body is smaller, which is the worker row.
-/// **Non-zero only while a built controller container stands in the room**: the
-/// buffer is this row's working ground (ADR 0046 against ADR 0012's
-/// generalization), and a site there is a promise, not a store to withdraw
-/// from. A negative surplus hires none.
-/// What the colony may hire out of its **stock** rather than its income (#385),
-/// beyond the row the income already pays for.
-///
-/// The precedent is in this same function's neighbour: the worker row's backlog
-/// term is "paid out of the stock and not out of income" (#364,
-/// `Facts.stockedEnergy`), because a 100,000-energy terminal is bought with
-/// what is banked. This is the same argument for the row whose product is the
-/// one thing a colony can never lose — **controller progress does not unwind**,
-/// so an upgrader that dies the tick the stock runs out leaves everything it
-/// bought standing, and the mouth it stops being costs nobody a seat or a walk.
-///
-/// Live at t594,190 with this rule absent: W13S28 held 849,766 energy that had
-/// not moved by one unit in 365 ticks while it put 14.1 e/t into its controller
-/// and W12S28, on the same number of rocks and no stock at all, put 30.6.
-///
-/// **Two bounds, and they are what keep this from being ADR 0039's mistake in
-/// another currency.** The floor (`Tuning.UpgradeStockBodies`) is the colony's
-/// ability to re-cast itself, kept back before a unit of this is spent. The cap
-/// is the row the income itself buys: the stock may **double** the row and no
-/// more, because a second mouth is already about what one buffer refilled by
-/// one hauler's spare loads can feed, and because each tick re-decides as the
-/// stock falls — a row hired on a bank that empties shrinks by attrition, which
-/// is how every other row here shrinks. A colony whose income buys no mouth at
-/// all may still buy one, since a stock that cannot be spent is a stock that
-/// is lost.
-/// Whether this colony may hire the standing row at all (ADR 0046): a **built**
+/// Whether this colony may hire the standing row at all: a **built**
 /// controller container to stand at, and a bank whose own cast is a standing
-/// body. Named rather than spelled twice, because both halves of the row — the
-/// income's and the stock's (#385) — must answer to it, and a body hired where
-/// the row is illegal reads `NoneApplicable` for its whole life.
+/// body. Named once because both halves of the row must answer to it, and a
+/// body hired where the row is illegal reads `NoneApplicable` for its whole
+/// life.
 let private rowStands (view: ColonyView) atlas =
     not (Set.isEmpty (Atlas.controllerContainers atlas))
     && standingParts view.Tuning (partsOf (bodyFor upgraderPattern view.Bank.Capacity))
 
-/// What the colony's **stock** buys on top of the row its income pays for
-/// (#385, amending ADR 0046 decision 3).
-///
-/// The precedent is the worker row's backlog term below, which is "paid out of
-/// the stock and not out of income" (#364, `Facts.stockedEnergy`): a
-/// 100,000-energy terminal is bought with what is banked. This is that argument
-/// for the row whose product a colony can never lose — **controller progress
-/// does not unwind**, so an upgrader that dies the tick the stock runs out
-/// leaves everything it bought standing, and the mouth it stops being costs
-/// nobody a seat or a walk.
-///
-/// Live at t594,190 with this rule absent: W13S28 held 849,766 energy that had
-/// not moved by one unit in 365 ticks while it put 14.1 e/t into its controller
-/// and W12S28, on the same number of rocks and no stock at all, put 30.6.
-///
-/// **Three bounds, and they are what keep this from being ADR 0039's mistake in
-/// another currency.**
-///
-/// - `upgraderQuota`'s own gate, read here too and not repeated: no buffer
-///   standing, no row — a body hired where ADR 0046 makes the row illegal is a
-///   body that reads `NoneApplicable` for its whole life, which is what the
-///   first draft of this shipped and a review caught.
-/// - The **sites are charged first**, the same subtraction and for the same
-///   reason the backlog term makes it: bodies are hired out of what is left
-///   once the building is covered.
-/// - The floor (`Tuning.UpgradeStockBodies`) is the colony's ability to re-cast
-///   itself, kept back before a unit of the rest is spent.
-///
-/// And **one mouth at a time**, which is the whole of the cap: one more is
-/// about what a single buffer refilled by one hauler's spare loads can feed,
-/// `haulerQuota` is fixed before this term so the extra mouth brings no carrier
-/// with it, and each tick re-decides as the stock falls — a row hired on a bank
-/// that empties shrinks by attrition, which is how every row here shrinks. A
-/// colony whose income buys no mouth may still buy this one, because a stock
-/// that cannot be spent is a stock that is lost.
-/// Both halves, derived together because they share every expensive term: the
-/// gate, the body the row casts and the price of a life. Split apart they cost
-/// two body builds and two gate reads a tick per colony, measured at **+2.4%**
-/// of a tick on the idle box before they were folded into one pass.
+/// ADR-0046
+/// The upgrader row's two halves: what the income buys — the surplus divided
+/// by a body's lifetime cost, rounded **down**, the remainder handed to the
+/// worker row whose division rounds up — and what the stock buys on top
+/// (#385): sites charged first, `Tuning.UpgradeStockBodies` kept back, and one
+/// mouth at a time, because `haulerQuota` is fixed before this term so the
+/// extra mouth brings no carrier with it. Derived together because they share
+/// every expensive term; split apart they measured +2.4% of a tick on the idle
+/// box.
 let internal upgraderRow (view: ColonyView) atlas surplus : int * int =
     let capacity = view.Bank.Capacity
 
@@ -1029,20 +622,14 @@ let internal upgraderRow (view: ColonyView) atlas surplus : int * int =
 
         onIncome, (Facts.stockedEnergy view - owed - floor |> max 0) / cost |> min 1
 
-/// The income's half alone, which is what ADR 0046's own arithmetic names.
+/// The income's half alone.
 let internal upgraderQuota (view: ColonyView) atlas surplus = fst (upgraderRow view atlas surplus)
 
 
-/// The worker row's floor (ADR 0046): the row's income term is whatever the
-/// upgrader row has not eaten, and beside a buffer that can still be nothing at
-/// all — the remainder is bounded by one standing body's lifetime drink, and
-/// that row's own replacement is charged against it first. A colony with no
-/// generalist builds nothing and repairs nothing: a standing body is shut out
-/// of all three deliveries and the hauler row carries no Work. Two while
-/// anything stands in the Build or Repair pool, one otherwise. Two, because
-/// since ADR 0042 a builder crosses a Seam and the home room's own sites are
-/// unattended for the fifty ticks of that walk; one, because hiring the second
-/// against no pool would be hiring for a job that does not exist.
+/// The worker row's floor: two while anything stands in the Build or Repair
+/// pool, one otherwise. Two, because a builder crosses a Seam and the home
+/// room's own sites are unattended for that walk; one, because a second
+/// against no pool is hiring for a job that does not exist.
 let private workerFloor (tasks: Task list) =
     let building =
         tasks
@@ -1053,42 +640,33 @@ let private workerFloor (tasks: Task list) =
 
     if building then 2 else 1
 
-/// Every number the specialist rows are hired against this tick, derived in the
-/// one order they depend on each other (`quotaRowsOf`) and handed on as one
-/// value. A record and not eight positional arguments: five of them are bare
-/// `int`s, the casting cascade, the `quotas` view and the Workforce target all
-/// read the same five, and a mis-ordering was silent in every one of them.
-/// `Surplus` rides beside them because it is not a row — it is the income the
-/// last two are divided out of, read here and by `upgraderQuota` alike.
+/// Every number the specialist rows are hired against this tick, in the order
+/// they depend on each other (`quotaRowsOf`). A record and not positional
+/// `int`s: three readers read the same five, and a mis-ordering was silent in
+/// every one of them. `Surplus` rides beside them because `upgraderQuota`
+/// reads it too.
 type QuotaRows =
     {
-        /// One entry per room the reserver row hires for, each that room's
-        /// CLAIM demand (ADR 0042): the length is the addend, the largest entry
-        /// prices every cast.
+        /// One entry per room the reserver row hires for: the length is the
+        /// addend, the largest entry prices every cast.
         Reserver: int list
         Guard: int
         Anchor: int
         Hauler: int
-        /// One [[miner]] per diggable deposit (ADR 0057 decision 2) — 0 for
-        /// every colony that has not reached RCL6 and stood an extractor, which
-        /// is every colony this bot has ever run until this season.
+        /// One miner per diggable deposit — 0 below RCL6.
         Miner: int
         Courier: int
         Upgrader: int
-        /// How many of `Upgrader` the **stock** bought rather than the income
-        /// (#385). Carried rather than re-derived because `workforceTarget`
-        /// charges the surplus for the row and must charge it for these mouths
-        /// **not at all**: they ate no income, so the worker row hired out of
-        /// what the upgrade row left is owed every unit of it.
+        /// How many of `Upgrader` the stock bought (#385): `workforceTarget`
+        /// must charge the surplus for these mouths not at all, since they ate
+        /// no income.
         UpgraderOnStock: int
         Surplus: int
     }
 
-/// The tick's rows, in dependency order: the two read off the ground, the
-/// income they leave, and the standing upgrade row that income buys. Written
-/// once because the cascade that casts a body, the amortization that charges
-/// for it and the target that counts it must read one set of numbers — a second
-/// derivation is a body hired against one number and counted against another.
+/// The tick's rows, in dependency order, written once so the cascade that
+/// casts a body, the amortization that charges for it and the target that
+/// counts it read one set of numbers.
 let internal quotaRowsOf
     (view: ColonyView)
     atlas
@@ -1098,17 +676,12 @@ let internal quotaRowsOf
     : QuotaRows =
     let surplus = surplusOverLifetime view atlas sizing haulerQuota
 
-    // The two halves of the upgrade row, derived once and kept apart (#385):
-    // what the rocks pay for, and what the Storage pays for on top of it.
     let onIncome, onStock = upgraderRow view atlas surplus
 
     {
         Reserver = sizing.ReserverClaims
         Guard = guardQuota view outposts
-        // One Anchor per Post of *every* projected room (ADR 0042): an
-        // outpost's Post is the same garrison tile a home Post is, so it hires
-        // from the same row and travel cost pins each Anchor on the Post
-        // nearest it.
+        // One Anchor per Post of every projected room.
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
@@ -1118,42 +691,13 @@ let internal quotaRowsOf
         Surplus = surplus
     }
 
-/// Workforce target (ADR 0012, ADR 0046, ADR 0056, ADR 0057): seven addends,
-/// each a pattern
-/// row's own colony fact — reservers one per declared outpost, guards one or two
-/// per raided one, Anchors one per Post, haulers the throughput quota, miners
-/// one per diggable deposit, upgraders
-/// the surplus divided by a standing body's drain plus at most one more the
-/// stock buys (#385), workers the income arithmetic
-/// that is left and the pioneers a nursery adds to it (ADR 0047) — floored at
-/// `Tuning.MinWorkforce` and derived
-/// fresh each tick. A source whose Post is provided for retires its other
-/// Seats: one heavy body drains it alone. An unposted source of the home room
-/// still contributes its Seat count, its output being spoken for by the seat
-/// crews that walk it, so only the posted sources' output is income. An
-/// unposted source of an **outpost** contributes nothing at all (ADR 0042): the
-/// seat-crew justification presumes the walk is cheap, and across a border it
-/// is not. A standing container is the switch admitting an outpost into the
-/// economy: until one stands the room is invisible to every quota but the
-/// reserver's, and the tick it stands the source enters the two that read a
-/// store, a hauler term at its own round trip and a share of the income base at
-/// its own output. The Anchor place moved one step earlier with the container's
-/// *site*. The reserver row is the quota this switch does *not* gate — it is
-/// what makes the container possible — arriving as `reserverClaims`, whose
-/// length is the addend and whose largest entry prices the amortization. The
-/// income and the four ground-hired rows' amortization arrive together as
-/// `surplus`, read here and by `upgraderQuota` alike. The guard row is an addend
-/// like the rest (ADR 0056) and is the one addend charged nowhere else: it is 0
-/// for the whole of an ordinary life, and a guard left out of the target would
-/// have the deficit read the body it is alive as one of the generalists the
-/// income already paid for — a raid would quietly retire a worker for as long as
-/// the guard stood. **The miner row is an addend on that same argument** (ADR
-/// 0057 decision 2) — it is hired off a fact about the ground, a deposit
-/// standing under an extractor, and a miner left out of the target would retire
-/// a generalist for the whole of its life — but it is **not** uncharged (#304):
-/// it produces no energy at all and it stands for as long as the deposit does,
-/// which is the guard's excuse read the other way round, so its replacement is a
-/// term of `surplus` beside the reserver's, the anchor's and the hauler's.
+/// The workforce target: every specialist row's quota plus the worker row —
+/// the home room's unposted Seats, the income arithmetic the upgrade row left,
+/// the pioneers a nursery adds and the backlog term — floored at
+/// `Tuning.MinWorkforce`. An unposted source of an outpost contributes nothing:
+/// the seat-crew justification presumes the walk is cheap. The guard and miner
+/// rows are addends so that a body hired off the ground is not read as one of
+/// the generalists the income paid for.
 let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: QuotaRows) =
     let home = SpatialInfo.homeName view.Spatial
 
@@ -1168,36 +712,22 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     let workerDrain = upgradeDrainOf (bodyFor workerPattern capacity)
 
     // What the standing row takes out of the surplus before the commuting one
-    // is hired against the rest (ADR 0046): the energy its Work drinks over a
-    // lifetime, and the row's replacement cost over the same lifetime, priced
-    // at the body the casting step would actually cast.
-    // The **income-bought** mouths only (#385). A mouth the stock bought ate no
-    // income, so charging the worker row for it would take the surplus away
-    // twice — once at the Storage where the energy came from and once here.
+    // is hired against the rest: the income-bought mouths only (#385), since a
+    // stock-bought mouth ate no income and charging it here would take the
+    // surplus away twice.
     let upgraderCost =
         (rows.Upgrader - rows.UpgraderOnStock) * upgraderLifetimeCost capacity
 
-    // Rounded up through the same ceilDiv as the hauler row (ADR 0037): the
-    // granularity a floor would drop is a whole worker body's Work, which grows
-    // with RCL, and the income it drops leaks every tick while the body it
-    // oversells is paid for out of stock.
+    // ADR-0037
     let incomeWorkers =
         ceilDiv (rows.Surplus - upgraderCost) (workerDrain * Engine.creepLifetime)
         |> max 0
 
-    // The pioneers (ADR 0047 decision 4): while a room this colony has claimed
-    // still has no spawn in it, the mother hires `Tuning.PioneerCount` more
-    // generalists to go and raise one. Hired off a fact about the *world* and
-    // not out of the surplus — a nursery is a room a human declared and the
-    // colony has taken, exactly as the reserver row is hired off a declared
-    // outpost — so it is added to the row rather than divided out of what the
-    // upgrader row left. On top of the whole row and outside its floor: the
-    // floor is the smallest crowd that can take a delivery at all (ADR 0046),
-    // and these bodies are hired for a delivery that exists whatever else the
-    // colony is doing. No term of `surplus` answers for them, which is the
-    // worker row's pre-existing shape. The addend outlives the nursery and runs
-    // on through the bootstrap window, flat over both [[stage]]s for the reason
-    // it is flat over two nurseries.
+    // ADR-0047
+    // The pioneers: while a room this colony has claimed still has no spawn,
+    // `Tuning.PioneerCount` more generalists. Hired off a fact about the world
+    // and added on top of the row, outside its floor; the addend runs on
+    // through the bootstrap window.
     let pioneers =
         let raising room =
             isNurseryRoom view room || isBootstrapRoom view room
@@ -1207,76 +737,46 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
         else
             0
 
-    // The generalist row's whole share of the target, and the floor sits here
-    // rather than on the income term beside it (ADR 0046): both addends hire
-    // the same body from the same row, so a colony already running three seat
-    // crews has three bodies that can build, and a floor read off the income
-    // term alone would hire a fourth against a job that does not exist. What
-    // the floor is for is the colony where this sum is *zero*.
-    // The **backlog** term (#364): generalists hired against what the standing
-    // sites still owe, paid for out of the stock rather than divided out of the
-    // income the two terms above share.
+    // The floor sits on the whole generalist share and not on the income
+    // term: a colony already running three seat crews has three bodies that
+    // can build.
     //
-    // Why it exists, and the numbers are W13S28's on 2026-09-17: a terminal
-    // site sat at 3,836/100,000 for thousands of ticks with **535,748 energy
-    // banked**, two workers in the room, and 16,464 T of score stranded behind
-    // it — ore that cannot move until the terminal stands (#349). Nothing in
-    // this sum could see it. `unpostedSeats` counts Posts, `incomeWorkers`
-    // divides a surplus, and `workerFloor` answers *two* whether the pool holds
-    // a road's 300 or a terminal's 100,000. A colony with a bank and a job was
-    // hiring as though it had neither.
-    //
-    // Sized in **labour and not in energy**, which is the whole of the
-    // arithmetic: a Work part puts `Engine.buildPerWork` into a site every
-    // tick, so one body of the row clears `work × 5 × 1,500` over a life, and
-    // the term is what it takes to clear the backlog inside one lifetime. At
-    // W13S28's four-Work body that is 30,000 a body, so 96,164 owing hires
-    // four. Bodies are charged against the stock at their cast price and the
-    // whole term is refused if the stock cannot pay for them *and* the
-    // building, because a row hired against a bank that empties mid-build is
-    // the ADR 0039 mistake in a different currency.
-    //
-    // It decays without any rule of its own: the sites become structures, the
-    // backlog goes to zero, and the bodies are not replaced as they die.
+    // The backlog term (#364): generalists hired against what the standing
+    // sites still owe, paid out of the stock. W13S28 on 2026-09-17: a terminal
+    // site at 3,836/100,000 for thousands of ticks with 535,748 banked, two
+    // workers, and 16,464 T stranded behind it; `workerFloor` answers two
+    // whether the pool holds a road's 300 or a terminal's 100,000. Sized in
+    // labour: one body clears `work × buildPerWork × BuildTicksPerLife` over
+    // a life, and the term is what clears the backlog inside one. It decays
+    // without a rule of its own: the sites become structures and the bodies
+    // are not replaced.
     let backlogWorkers =
         let owed = view.ConstructionSites |> List.sumBy (fun site -> site.Left)
 
         let body = bodyFor workerPattern capacity
 
-        // `Tuning.BuildTicksPerLife` and **not** `Engine.creepLifetime`, which
-        // is what this term shipped with an hour earlier and what made it dead
-        // code on the colony it was written for: a 16-Work body nominally
-        // clears 120,000 over a whole life, so W13S28's 96,465 answered "one
-        // body is enough" for a site that had not moved in thousands of ticks.
-        // Live it was building at a tenth to a fifth of nominal, because a
-        // generalist spends most of its life carrying its own energy — the two
-        // measured windows are in that field's own docstring.
+        // `Tuning.BuildTicksPerLife` and not `Engine.creepLifetime`: at
+        // nominal a 16-Work body clears 120,000 a life, so W13S28's 96,465
+        // answered "one body is enough"; live it built at a tenth to a fifth
+        // of nominal, because a generalist spends most of its life carrying
+        // its own energy (the measured windows are on that field).
         let clearedPerLife =
             partCountIn body Work * Engine.buildPerWork * view.Tuning.BuildTicksPerLife
 
         if owed = 0 || clearedPerLife = 0 then
             0
         else
-            // **Floored, where every other division in this file is a
-            // ceiling** (ADR 0037), and the asymmetry is the point: what a
-            // ceiling would round up here is a whole extra body for a road's
-            // 300, and `workerFloor` already stands two generalists whenever
-            // anything is in the Build pool. So this term adds a body only for
-            // a whole lifetime of building the row it sits beside provably
-            // cannot absorb — the remainder is the floor's job, and it is
-            // already doing it.
+            // Floored where every other division here is a ceiling: a
+            // ceiling would round up a whole body for a road's 300, and
+            // `workerFloor` already stands two whenever anything is in the
+            // Build pool.
             let wanted = owed / clearedPerLife
 
-            // The stock this is paid out of, and the **building is charged
-            // first**: bodies are hired out of what is left once the sites
-            // themselves are covered. A row hired against a bank that empties
-            // mid-build is ADR 0039's mistake in another currency — bodies
-            // standing beside a site nobody can pay for.
-            //
-            // `Bank` is not this number. That is the spawn account the
-            // extensions hold, which the hauler row keeps full out of this very
-            // stock (ADR 0023), so reading it here would count the same energy
-            // twice.
+            // Paid out of the stock with the building charged first: bodies
+            // standing beside a site nobody can pay for is the wrong side.
+            // `Bank` is not this number: that is the spawn account the hauler
+            // row keeps full out of this very stock, so reading it here would
+            // count the same energy twice.
             (stockedEnergy view - owed) / bodyCost body |> max 0 |> min wanted
 
     let workerRow =

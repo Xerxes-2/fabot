@@ -1,16 +1,15 @@
-/// The body patterns and the arithmetic that sizes one to a bank (ADR 0006):
-/// which pattern a row casts, and how many parts that pattern buys at a given
-/// capacity. Knows nothing of a colony — a pattern shapes what a creep is good
-/// at, never what it is assigned.
+/// The body patterns and the arithmetic that sizes one to a bank: which
+/// pattern a row casts, and how many parts it buys at a given capacity. Knows
+/// nothing of a colony.
 [<AutoOpen>]
 module Fabot.Core.Decide.Bodies
 
 open Fabot.Core
 open Fabot.Core.Types
 
-/// A Body pattern: the repeating part block a body is generated from.
-/// Which pattern a spawn casts is a colony decision; the pattern shapes
-/// what a creep is good at, never what it is assigned (ADR 0006).
+/// A Body pattern: the repeating part block a body is generated from. Which
+/// pattern a spawn casts is a colony decision; the pattern shapes what a creep
+/// is good at, never what it is assigned.
 type BodyPattern = { Name: string; Block: BodyPart list }
 
 /// The generalist pattern: 200 energy, full speed empty, half speed loaded.
@@ -20,28 +19,26 @@ let workerPattern =
         Block = [ Work; Carry; Move ]
     }
 
-/// The Anchor pattern: the heavy-WORK body cast for a Dual Seat (ADR 0006).
-/// The block is its minimal cast — two Work keep the body readable as an
-/// Anchor (Work > Move, which fatigue parity forbids a worker body) beside the
-/// single Carry and the single Move that pay the walk to the seat.
+/// The Anchor pattern: the heavy-WORK body cast for a Dual Seat. Two Work keep
+/// the block readable as an Anchor (Work > Move, which fatigue parity forbids a
+/// worker body) beside the Carry and Move that pay the walk to the seat.
 let anchorPattern =
     {
         Name = "anchor"
         Block = [ Work; Work; Carry; Move ]
     }
 
-/// The hauler unit (ADR 0012): 150 energy, full speed loaded on roads — the
-/// row carries its own road-parity declaration, because a hauler's whole life
-/// is the trunk. No Work part, so it lives in the Withdraw->Refill cycle.
+/// ADR-0012
+/// The hauler unit: 150 energy, full speed loaded on roads. No Work part, so
+/// it lives in the Withdraw->Refill cycle.
 let haulerPattern =
     {
         Name = "hauler"
         Block = [ Carry; Carry; Move ]
     }
 
-/// The season courier (ADR 0057 decision 4, re-derived by #319): twenty Carry
-/// hold a 999-unit Thorium load below the 1,000-unit contact cliff, and ten
-/// Move carry it at road parity. Unlike the hauler beside it this row is one
+/// The season courier (#319): twenty Carry hold a 999-unit Thorium load below
+/// the 1,000-unit contact cliff, and ten Move carry it at road parity. One
 /// fixed body: a richer bank buys no useful capacity, and a poorer one yields.
 let courierPattern =
     {
@@ -49,82 +46,56 @@ let courierPattern =
         Block = List.replicate 20 Carry @ List.replicate 10 Move
     }
 
-/// The reserver row (ADR 0042): the CLAIM body that walks to an outpost's
-/// controller and holds its reservation, which is what makes that room's
-/// sources worth ten a tick rather than five. `[2Claim;2Move]` pays for itself
-/// twice over on a single source.
+/// The reserver row: the CLAIM body that holds an outpost's reservation.
 let reserverPattern =
     {
         Name = "reserver"
         Block = [ BodyPart.Claim; Move ]
     }
 
-/// The upgrader row (ADR 0046): the body that stands beside the upgrade buffer
-/// and spends the colony's surplus into the controller. Every part slot past
-/// its single Carry goes to a Work/Move pair, so nothing in the body pays for a
-/// commute it does not make. One Carry, because a body that stands still needs
-/// exactly enough store to hold a Withdraw from the buffer at its feet (ADR
-/// 0019).
+/// The upgrader row: the body that stands beside the upgrade buffer. One Carry,
+/// because a body that stands still needs exactly enough store to hold a
+/// Withdraw from the buffer at its feet.
 let upgraderPattern =
     {
         Name = "upgrader"
         Block = [ Work; Carry; Move ]
     }
 
-/// The guard row (ADR 0056): the melee body cast the tick a [[threat]] is seen
-/// standing in a declared [[outpost]], and never before. 750 energy, ten parts,
-/// 1,000 hits, 90 damage and 12 self-heal a tick — the body Overmind and bonzAI
-/// converged on independently, and the one melee beats ranged on arithmetic at
-/// this budget: an ATTACK part is 0.231 damage per energy counting the Move
-/// that carries it, against a RANGED_ATTACK's 0.050. One Move per non-Move
-/// part, so ADR 0003's fatigue parity holds with none of the [[anchor]]'s
-/// exemption.
-///
-/// **The order is a rule and not a layout** (#282). The engine destroys body
-/// parts from the head of the array, so what stands first is what is spent
-/// first. Live, with `Attack` second, the whole of a guard's damage sat inside
-/// the first four hundred hits: it was disarmed on the approach and reached
-/// range 1 with nothing to swing, healing itself and answering
-/// `ERR_NO_BODYPART` every tick while both invaders stayed at full health. So
-/// Tough eats first, the Move parts next — a guard that cannot walk is still a
-/// guard, because it is standing on its target already — then the Attack parts,
-/// and Heal last, which is the ordering the community's own bodies carry. Cast
-/// in whole blocks, the second block's Attack sits a further six hundred hits
-/// down, so the damage degrades a part at a time rather than all at once.
+/// ADR-0056
+/// The guard row: the melee body cast the tick a threat is seen in a declared
+/// outpost. One Move per non-Move part, so fatigue parity holds. The order is
+/// a rule and not a layout (#282): the engine destroys parts from the head of
+/// the array, so Tough eats first, Move next (a guard that cannot walk is
+/// already standing on its target), then Attack, and Heal last.
 let guardPattern =
     {
         Name = "guard"
         Block = [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
     }
 
-/// The most whole guard blocks one body can carry — the engine's part cap over
-/// the block (#375): the ceiling `guardBlocksFor` searches under and the size
-/// a caller holding no colony prices the row at.
+/// The most whole guard blocks one body can carry under the engine's part cap:
+/// the ceiling `guardBlocksFor` searches under and the size a caller holding
+/// no colony prices the row at.
 let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
 
-/// The [[miner]] row (ADR 0057 decision 2): the store-less Work body that
-/// stands over the mineral container and digs the season's Thorium. The block
-/// is `[Work; Work; Move]` and the sizing rule is one Move per
-/// `Tuning.MinerWorkPerMove` Work, so the block is the row's floor rather than
-/// its ratio.
-///
-/// **No Carry, and that is the decision rather than an economy.** A body
-/// holding Thorium ages by `floor(log10 store.T)` ticks a tick, and a
-/// twenty-Work miner passes ten Thorium in three ticks; a harvest with no room
-/// to put the yield drops it on the creep's own tile, and a drop onto a
-/// container tile lands **in** the container — the same engine rule the
-/// [[anchor]]'s overflow already rides on. Which makes the row Work-heavy with
-/// no Carry at all, the one shape no other row of this colony casts, and so the
-/// cut `patternOfParts` reads it back off.
+/// ADR-0057
+/// The miner row: the store-less Work body over the mineral container. The
+/// block is the row's floor rather than its ratio (one Move per
+/// `Tuning.MinerWorkPerMove` Work). No Carry, which is the decision: a body
+/// holding Thorium ages by `floor(log10 store.T)` ticks a tick, and a harvest
+/// with no room for the yield drops it onto the container tile, which lands
+/// **in** the container. Work-heavy with no Carry is the one shape no other row
+/// casts, and so the cut `patternOfParts` reads it back off.
 let minerPattern =
     {
         Name = "miner"
         Block = [ Work; Work; Move ]
     }
 
-/// The pattern table: every body the colony casts is a row here, sized by
-/// energy under the row's own sizing rule. A future pattern is one more data
-/// row plus its own quota rule, never a new code path (ADR 0006).
+/// ADR-0006
+/// The pattern table: every body the colony casts is a row here. A future
+/// pattern is one more data row plus its own quota rule, never a new code path.
 let patternTable =
     [
         workerPattern
@@ -149,36 +120,29 @@ let bodyCost body =
         | BodyPart.Claim -> 600
         | Tough -> 10)
 
-/// Whether a counted body is a **standing body** (ADR 0046): fewer than one
-/// Carry per `StandingCarryPerWork` Work. A fact about a *body* rather than
-/// about a row — the upgrader row's `11W/1C/11M` is one, and so is the anchor
-/// row's `6W/1C/1M`.
+/// Whether a counted body is a standing body: fewer than one Carry per
+/// `StandingCarryPerWork` Work. A fact about a body rather than a row — the
+/// upgrader's `11W/1C/11M` is one, and so is the anchor's `6W/1C/1M`.
 let internal standingParts (tuning: Tuning) parts =
     partCount parts Carry * tuning.StandingCarryPerWork < partCount parts Work
 
-/// The Work ceiling of the [[miner]] row (ADR 0057 decision 2): twenty, and it
-/// is the **bank's** ceiling rather than the engine's part cap — twenty Work
-/// and four Move is twenty-four parts of fifty, and 2,200 energy of the 2,300 an
-/// RCL6 spawn holds. Past it the arithmetic stops mattering: `WORK / 6` a tick
-/// against a reactor that eats one Thorium a tick means mining was never the
-/// bottleneck, and a larger body only ends the deposit sooner. Stated here and
-/// not in `Tuning`, beside `heldWorkCap` and for its reason: it is the ceiling
-/// one row's sizing rule stops at, which is the same kind of number ADR 0021's
-/// saturation is.
+/// The Work ceiling of the miner row: twenty, the **bank's** ceiling rather
+/// than the engine's part cap — twenty Work and four Move is 2,200 of the 2,300
+/// an RCL6 spawn holds. Past it a larger body only ends the deposit sooner:
+/// `WORK / 6` a tick against a reactor that eats one Thorium a tick. Stated here
+/// beside `heldWorkCap`: it is the ceiling one row's sizing rule stops at.
 let internal minerWorkCap = 20
 
-/// The miner row's sizing rule (ADR 0057 decision 2): every part slot the bank
-/// affords spent on Work up to `minerWorkCap`, with one Move per `perMove` of
-/// them — `[16 Work; 4 Move]` at 1,800 and `[20 Work; 4 Move]` at 2,300. Exempt
-/// from ADR 0003's fatigue parity, which is a rule about a body that keeps
-/// moving: this one walks to a tile once and then never leaves it. Never below
-/// the row's own block, like every other row: what a bank too poor to pay for
-/// the cast refuses is the cast, in `castFromBank`, and not the sizing.
+/// The miner row's sizing rule: every part slot the bank affords on Work up to
+/// `minerWorkCap`, one Move per `perMove` of them — `[16 Work; 4 Move]` at
+/// 1,800 and `[20 Work; 4 Move]` at 2,300. Exempt from fatigue parity, which is
+/// a rule about a body that keeps moving: this one walks to a tile once. Never
+/// below the row's own block: a bank too poor to pay is refused in
+/// `castFromBank`, not here.
 let internal minerBodyFor perMove capacity =
     // Whole `perMove` Work and the one Move that carries them, then the
     // remainder on a short group, which pays for its own Move as soon as it
-    // holds a single Work. Counted rather than searched so the rule reads as
-    // the arithmetic it is.
+    // holds a single Work.
     let group = perMove * bodyCost [ Work ] + bodyCost [ Move ]
     let groups = capacity / group |> min (minerWorkCap / perMove)
 
@@ -196,40 +160,25 @@ let internal minerBodyFor perMove capacity =
 
     List.replicate work Work @ List.replicate move Move
 
-/// The pattern row a body was cast from, read off the parts alone (ADR 0006):
-/// an ATTACK part is the guard row, a CLAIM part is the reserver row, a
-/// Work-heavy body with **no Carry at all** is the miner row, a Work-heavy body
-/// with one is the anchor row, a standing body at or under that line is the
-/// upgrader row, no Work beside a Carry is the hauler row, and every other body
-/// is the generalist. The row is what sizes the replacement a lead prices
-/// (ADR 0026), so one rule serves every row.
+/// The pattern row a body was cast from, read off the parts alone: an ATTACK
+/// part is the guard row, a CLAIM part the reserver row, a Work-heavy body with
+/// no Carry the miner row, a Work-heavy body with one the anchor row, a
+/// standing body at or under that line the upgrader row, no Work beside a Carry
+/// the hauler row, and every other body the generalist.
 ///
-/// The miner arm stands **in front of** the anchor arm and is the whole of what
-/// separates the two (ADR 0057 decision 2): both rows are Work-heavy, and the
-/// Carry part the Anchor buys to pay its walk is the one the miner refuses
-/// because a store holding Thorium ages the body standing in it. Without the
-/// arm a `[20 Work; 4 Move]` reads back as an **Anchor**, fills the Anchor
-/// row's `Living` against a quota counted off the [[post]]s, and retires a
-/// garrison from a rock for its whole life.
-///
-/// Order matters between the miner and anchor arms, above, and between the
-/// anchor and upgrader arms below, and nowhere else:
-/// `6W/1C/1M` satisfies both descriptions, and it is the anchor row that casts
-/// it — a body pinned to a Post by ADR 0020's Work Area is a stronger claim
-/// than standing beside the buffer. The reserver arm is what keeps ADR 0026
-/// honest for a CLAIM body: `[Claim; Move]` has neither Work nor Carry, so
-/// before it existed a reserver's lead was priced off a worker unit. The guard
-/// arm is the same debt paid for a fighting body (ADR 0056): `[T; A×3; M×5; H]`
-/// has neither, so without it a guard read back as a **worker**, and the raid
-/// that cast it would go on filling the generalist row's `Living` for 1,500
-/// ticks. The ATTACK test is asked first, beside `Fighter`'s place at the head
-/// of the [[body class]] ladder — it is the one cut no other row of this colony
-/// makes, every other row being built out of Work, Carry, Move and CLAIM.
+/// Order matters between the miner and anchor arms, and between the anchor and
+/// upgrader arms, and nowhere else. Miner before anchor: both are Work-heavy
+/// and the Carry is the whole difference; without the arm a `[20 Work; 4 Move]`
+/// reads back as an Anchor and retires a garrison from a rock for its whole
+/// life. Anchor before upgrader: `6W/1C/1M` satisfies both, and a body pinned
+/// to a Post is the stronger claim. The reserver and guard arms exist because
+/// `[Claim; Move]` and `[T; A×3; M×5; H]` have neither Work nor Carry, so
+/// without them a reserver's lead was priced off a worker unit and a guard
+/// filled the generalist row's `Living` for 1,500 ticks.
 ///
 /// `heavy` is the one input the two readings cannot share: the Atlas's
 /// `workHeavy` set is keyed by creep name, and a body still in the oven has
-/// none, so a cast answers the question for itself with `Work > Move` — the
-/// ratio fatigue parity forbids a worker body.
+/// none, so a cast answers it for itself with `Work > Move`.
 let internal patternOfParts (tuning: Tuning) heavy parts =
     if partCount parts Attack > 0 then
         guardPattern
@@ -246,44 +195,34 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
     else
         workerPattern
 
-/// Whether a body can take energy out of a store and put it into an extension
-/// — the one capability the bank's own refilling depends on, and so the one
-/// every capacity-sized row depends on (the supply floor, ADR 0050). Not "has
-/// a Carry part": it is the body half of `Refill`'s gate and the body half of
-/// `Withdraw`'s read back together, because a body that can deliver but never
-/// draw cannot reach the storage the energy is standing in — a Carry part, no
-/// standing-body ratio (ADR 0046) and not Work-heavy (ADR 0016). `Refill`'s
-/// third conjunct, `Energy > 0`, is deliberately *not* read: that is a state a
-/// hauler passes through twice a trip. `heavy` is `patternOfParts`' own input,
-/// for its own reason.
+/// Whether a body can take energy out of a store and put it into an extension:
+/// the body half of `Refill`'s gate and of `Withdraw`'s read back together,
+/// because a body that can deliver but never draw cannot reach the storage the
+/// energy is standing in. `Refill`'s third conjunct, `Energy > 0`, is
+/// deliberately not read: that is a state a hauler passes through twice a
+/// trip.
 let internal canRefillParts (tuning: Tuning) heavy parts =
     partCount parts Carry > 0 && not (standingParts tuning parts) && not heavy
 
-/// The Anchor row's Work ceiling (ADR 0021): the Work that saturate one source
-/// — dig its whole regeneration in the regeneration time — plus one spare. Past
-/// saturation a further Work only drains the source sooner and idles; the spare
-/// drains it 50 ticks early, and those ticks absorb an unmanned Post's gap at
-/// no cost. A rule about one source's regeneration and never about heavy bodies
-/// in general, so ADR 0042 narrows it by changing its input.
+/// ADR-0021
+/// The Anchor row's Work ceiling: the Work that saturate one source plus one
+/// spare. A rule about one source's regeneration, so the outpost layer narrows
+/// it by changing its input.
 let internal workCapOf output = output / Engine.harvestPerWork + 1
 
-/// The ceiling in a room the colony holds: six Work, the number ADR 0021
-/// derived.
+/// The ceiling in a room the colony holds: six Work.
 let internal heldWorkCap = workCapOf Engine.heldOutputPerTick
 
+/// ADR-0003
 /// The worker row's sizing rule: the largest affordable repetition of the block
-/// (never below one repeat), with the remainder spent on Carry/Move at fatigue
-/// parity — the padded body is never slower than the pure-block body, empty or
-/// loaded, and within that buys as much Carry as possible (ADR 0003, narrowed
-/// to the worker pattern by ADR 0006). Parts are grouped Work, Carry, Move so
-/// damage strips Work first and mobility last. It is the rule every row without
-/// one of its own falls through to, and it can only place the three parts it
-/// counts, so a *shape* it cannot size is a hard stop rather than a quiet
-/// omission: a block holding a guard's Attack would be silently rebuilt out of
+/// (never below one), the remainder spent on Carry/Move at fatigue parity.
+/// Parts are grouped Work, Carry, Move so damage strips Work first and mobility
+/// last. It is the rule every row without one of its own falls through to, and
+/// it can only place the three parts it counts, so a shape it cannot size is a
+/// hard stop: a block holding a guard's Attack would be silently rebuilt out of
 /// Work, Carry and Move, and an empty one divides by zero on .NET while the
 /// emitted JS reads `capacity / 0` as no repeats at all and pads a Carry/Move
-/// body out of a row that asked for neither — which is why the stop is
-/// explicit and not left to the arithmetic.
+/// body out of a row that asked for neither.
 let private parityBodyFor (pattern: BodyPattern) capacity =
     let block = pattern.Block
 
@@ -341,10 +280,8 @@ let private parityBodyFor (pattern: BodyPattern) capacity =
     List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
 
 /// The anchor row's sizing rule: one Carry, one Move, and every part slot the
-/// remaining energy affords on Work up to the row's ceiling — spawn energy buys
-/// output rather than mobility the Post never uses, and stops where the source
-/// has no more to give (ADR 0021). Exempt from fatigue parity (ADR 0006); never
-/// below the row's two-Work block.
+/// remaining energy affords on Work up to the row's ceiling. Exempt from
+/// fatigue parity; never below the row's two-Work block.
 let internal anchorBodyFor workCap capacity =
     let work =
         (capacity - bodyCost [ Carry; Move ]) / bodyCost [ Work ]
@@ -367,11 +304,10 @@ let private wholeBlockBodyFor (block: BodyPart list) capacity =
     |> List.distinct
     |> List.collect (fun part -> List.replicate (repeats * partCountIn block part) part)
 
-/// The hauler row's sizing rule (ADR 0012): as many whole [Carry; Carry; Move]
-/// blocks as capacity buys (never below one), and nothing else. The row's
-/// parity declaration is road parity — two loaded Carry generate two fatigue on
-/// a road tile, the one Move pays off two a tick — which the whole block meets
-/// and a padded lone Carry would break.
+/// The hauler row's sizing rule: whole `[Carry; Carry; Move]` blocks and
+/// nothing else. Road parity — two loaded Carry generate two fatigue on a road
+/// tile, the one Move pays off two a tick — which a padded lone Carry would
+/// break.
 let private haulerBodyFor capacity =
     wholeBlockBodyFor haulerPattern.Block capacity
 
@@ -380,45 +316,35 @@ let private haulerBodyFor capacity =
 /// what that shape costs.
 let private courierBodyFor () = courierPattern.Block
 
-/// The reserver row's sizing rule: as many whole [Claim; Move] blocks as
-/// capacity buys, never below one. The bank's truncation alone, which is half
-/// the row's rule — ADR 0042 sizes the body off the reservation deficit *capped
-/// by the bank*, and `reserverBodyWithin` is where the two halves meet. This
-/// entry point is the one `bodyFor` exposes, so a reader holding only a
-/// capacity gets the largest body the row could cast and therefore the longest
-/// lead, which is the safe direction: a successor is cast early rather than
-/// after its incumbent died.
+/// The bank's truncation alone, half the reserver row's rule; `reserverBodyWithin`
+/// is where the deficit meets it. This is the entry `bodyFor` exposes, so a
+/// reader holding only a capacity gets the largest body the row could cast and
+/// therefore the longest lead, which is the safe direction.
 let internal reserverBodyFor capacity =
     wholeBlockBodyFor reserverPattern.Block capacity
 
-/// The guard row's sizing rule (ADR 0056): as many whole
-/// `[Tough; Attack×3; Move×5; Heal]` blocks as capacity buys, never below one
-/// and capped at five by the engine's 50 parts — the rule the hauler and
-/// reserver rows already share, chosen for this row because the block is
-/// already at fatigue parity and a remainder spent at ADR 0003's parity would
-/// buy Carry a guard has no use for. `List.distinct` keeps the block's order,
-/// so two blocks are `[T;T; A×6; M×10; H;H]` and not a shuffle of them. What
-/// the banks buy: 300 cannot afford one block at all and the row **yields**
-/// (ADR 0050), 800 and 1,300 buy one, 1,800 two and 2,300 three.
+/// The guard row's sizing rule: whole blocks, never below one and capped at
+/// five by the engine's 50 parts. A remainder spent at parity would buy Carry
+/// a guard has no use for. `List.distinct` keeps the block's order, so two
+/// blocks are `[T;T; A×6; M×10; H;H]` and not a shuffle of them. 300 cannot
+/// afford one block and the row yields; 800 and 1,300 buy one, 1,800 two,
+/// 2,300 three.
 let private guardBodyFor capacity =
     wholeBlockBodyFor guardPattern.Block capacity
 
-/// The guard row's body at the blocks its exchange takes (#375, ADR 0072):
-/// `reserverBodyWithin`'s shape on the guard column — the bank truncates the
-/// blocks and the blocks truncate the bank, so a colony that can afford one
-/// block casts one where one wins, and never waits on the three its capacity
-/// would buy.
+/// ADR-0072
+/// The guard row's body at the blocks its exchange takes: the bank truncates
+/// the blocks and the blocks truncate the bank, so a colony that can afford one
+/// block casts one where one wins.
 let internal guardBodyWithin blocks capacity =
     guardBodyFor (min capacity (blocks * bodyCost guardPattern.Block))
 
-/// The upgrader row's sizing rule (ADR 0046): one Carry, and every part slot
-/// the rest of the capacity affords spent on Work/Move **pairs** — `W = M =
-/// floor((capacity - 50) / 150)`, never below one pair. The gain over the
-/// generalist is the parts it would spend carrying energy to work it is not
-/// going to do standing still. Why the Move parts at all, for a body that
-/// stands: ADR 0016's gate is `Work > Move`, and a body over that line may not
-/// Withdraw — which is the buffer this row exists to drink from (ADR 0019). So
-/// pairing keeps the row at `Work = Move`, inside the gate.
+/// ADR-0046
+/// The upgrader row's sizing rule: one Carry, and the rest on Work/Move pairs
+/// — `W = M = floor((capacity - 50) / 150)`, never below one pair. Why Move
+/// parts at all for a body that stands: the Withdraw gate is `Work > Move`, and
+/// the buffer is what this row drinks from, so pairing keeps it at `Work = Move`
+/// inside the gate.
 let private upgraderBodyFor capacity =
     let pairs =
         (capacity - bodyCost [ Carry ]) / bodyCost [ Work; Move ]
@@ -427,46 +353,34 @@ let private upgraderBodyFor capacity =
 
     List.replicate pairs Work @ [ Carry ] @ List.replicate pairs Move
 
-/// The reserver row's body for one outpost (ADR 0042): the deficit sizing and
-/// the bank truncation, whichever asks for less, never below one block. The
-/// deficit arrives as a second capacity ceiling, because "as many whole blocks
-/// as capacity buys" is already `reserverBodyFor`'s rule.
+/// ADR-0042
+/// The reserver row's body for one outpost: the deficit sizing and the bank
+/// truncation, whichever asks for less, never below one block.
 let internal reserverBodyWithin claims capacity =
     reserverBodyFor (min capacity (claims * bodyCost reserverPattern.Block))
 
-/// The second fact the two rows whose sizing is not the bank's answer alone
-/// read (ADR 0052 decision 4): the anchor row's Work ceiling — the [[post]] the
-/// finished body is being bought for (ADR 0053) — and the reserver row's
-/// outstanding claims (ADR 0042). Carried as one record so that the one sizing
-/// rule below takes one shape from every caller: the rows, the [[lead]]'s
-/// successor and the plain capacity reader each hand it what they know, and
-/// none of them restates the dispatch over the pattern.
+/// The second fact the rows whose sizing is not the bank's answer alone read:
+/// the anchor row's Work ceiling for the Post the body is bought for, the
+/// reserver row's outstanding claims, the miner ratio and the guard blocks. One
+/// record so the one sizing rule takes one shape from every caller.
 type BodySizing =
     {
         AnchorCap: int
         ReserverClaims: int list
-        /// The Work one Move carries on the [[miner]] row — `Tuning`'s own
-        /// number (ADR 0057 decision 2), carried here beside the other two
-        /// because it is the third thing a row's sizing rule reads that the
-        /// bank does not answer. Unlike those two it is a *tunable* rather than
-        /// a fact of the tick, so every caster hands over its colony's own.
+        /// `Tuning`'s own number: a tunable rather than a fact of the tick,
+        /// so every caster hands over its colony's own.
         MinerWorkPerMove: int
-        /// `Quota.guardBlocksWanted`'s answer this tick (#375, ADR 0072): the
-        /// whole guard blocks the worst of the guarded rooms' exchanges takes
-        /// to win, at least one. The guard row was the one row sized by the
-        /// bank alone — three blocks at 2,250 against a 1,000-hit invader one
-        /// block kills — and a body the bank never reaches is a row that
-        /// never casts, whatever its place in the cascade.
+        /// `Quota.guardBlocksWanted`'s answer this tick, at least one. The
+        /// guard row was the one row sized by the bank alone — three blocks
+        /// at 2,250 against a 1,000-hit invader one block kills — and a body
+        /// the bank never reaches is a row that never casts.
         GuardBlocks: int
     }
 
 /// The sizing a caller holding nothing but a capacity can ask for: every row at
-/// its **largest** body — the anchor row at the held rock's saturation, the
-/// reserver row untruncated by any demand, and the miner row at the ratio this
-/// bot ships with. The miner's entry is the one stand-in here that is a tunable
-/// and not a ceiling, and it is honest for the same reason `AnchorCap`'s is: a
-/// caller that holds no colony holds no colony's miner either, and every casting
-/// path that buys one comes through `RowSizing`, which reads `view.Tuning`.
+/// its largest body. The miner's entry is a tunable and not a ceiling, honest
+/// for the same reason `AnchorCap`'s is: every casting path that buys one comes
+/// through `RowSizing`, which reads `view.Tuning`.
 let largestSizing =
     {
         AnchorCap = heldWorkCap
@@ -475,16 +389,9 @@ let largestSizing =
         GuardBlocks = guardBlocksMost
     }
 
-/// Body for a pattern at an energy capacity, under the row's own sizing rule
-/// (ADR 0006): the anchor row spends on Work beside its fixed Carry/Move pair,
-/// the hauler, reserver and guard rows buy whole blocks, the upgrader row buys
-/// Work/Move pairs beside one Carry, the miner row buys Work with one Move per
-/// five of them and no Carry at all, and every other row pads its remainder at
-/// plain fatigue parity — or, if its block holds a part that rule cannot place,
-/// is refused rather than sized into some other body. **The** dispatch over the
-/// pattern, asked by the rows, by the lead's successor and by `bodyFor` below:
-/// written per caller it was three tables, and a seventh row would have been
-/// three edits the compiler could not check.
+/// Body for a pattern at an energy capacity, under the row's own sizing rule.
+/// **The** dispatch over the pattern, asked by the rows, by the lead's
+/// successor and by `bodyFor`: written per caller it was three tables.
 let sizedBodyFor (sizing: BodySizing) pattern capacity =
     if pattern.Name = anchorPattern.Name then
         anchorBodyFor sizing.AnchorCap capacity
@@ -495,10 +402,9 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
     elif pattern.Name = reserverPattern.Name then
         match sizing.ReserverClaims with
         | [] -> reserverBodyFor capacity
-        // Every cast at the largest outstanding demand and never at the one
-        // standing beside it in the list: the Matcher pairs a finished body to a
-        // controller by travel cost, so a body sized for the room that has
-        // slipped furthest can land on the room that has not.
+        // Every cast at the largest outstanding demand: the Matcher pairs a
+        // finished body to a controller by travel cost, so a body sized for
+        // the room that has slipped furthest can land on the one that has not.
         | claims -> reserverBodyWithin (List.max claims) capacity
     elif pattern.Name = guardPattern.Name then
         guardBodyWithin sizing.GuardBlocks capacity
@@ -509,9 +415,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
     else
         parityBodyFor pattern capacity
 
-/// The same at the largest body either of those two rows can take: a capacity
-/// is the whole of what this entry point holds, so the anchor's Post (ADR 0053)
-/// and the reserver's deficit are answered at their ceiling.
+/// The same at the largest body either of those rows can take: the anchor's
+/// Post and the reserver's deficit are answered at their ceiling.
 let bodyFor pattern capacity =
     sizedBodyFor largestSizing pattern capacity
 

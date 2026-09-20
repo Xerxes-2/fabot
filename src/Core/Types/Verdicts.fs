@@ -1,6 +1,6 @@
-/// The explanation channel (ADR 0009): why a creep was matched, released,
-/// rejected or left idle, the arbitrated `Movement` behind each step, and the
-/// quota row the census is read against — each with its wire name.
+/// The explanation channel: why a creep was matched, released, rejected or
+/// left idle, the arbitrated `Movement` behind each step, and the quota row
+/// the census is read against — each with its wire name.
 [<AutoOpen>]
 module Fabot.Core.Types.Verdicts
 
@@ -38,9 +38,8 @@ type MatchFactor =
     | Load
     | PoolOrder
 
-/// The wire spelling of each MatchFactor, in the observe channel's Memory
-/// subtree (ADR 0009) — the one place the spelling lives, beside the
-/// union it spells, the way `partName` holds the engine's part spelling.
+/// The wire spelling of each MatchFactor — the one place the spelling lives,
+/// beside the union it spells.
 let matchFactorName =
     function
     | MatchFactor.OnlyCandidate -> "only-candidate"
@@ -49,10 +48,8 @@ let matchFactorName =
     | MatchFactor.Load -> "load"
     | MatchFactor.PoolOrder -> "pool-order"
 
-/// The MatchFactor a wire name spells, or None for a name this vocabulary
-/// does not have. The case list is a literal, so a case added without its
-/// entry decodes to nothing; `Core.Tests` round-trips the union itself and
-/// fails on exactly that.
+/// The MatchFactor a wire name spells, or None. The case list is a literal;
+/// `Core.Tests` round-trips the union itself and fails on a missing case.
 let matchFactorOf =
     reverseOf
         matchFactorName
@@ -64,11 +61,8 @@ let matchFactorOf =
             MatchFactor.PoolOrder
         ]
 
-/// Why a Task in the pool was rejected for a creep, in a verbose scoring: a
-/// Threat's Reach has taken the whole of its Work Area (ADR 0033), it did not
-/// fit the creep's body or energy state, its worker cap was already full, its
-/// Work Area is unreachable, or its time has not come — the matching gates, in
-/// the order they are tried.
+/// Why a Task in the pool was rejected for a creep, in a verbose scoring — the
+/// matching gates, in the order they are tried.
 [<RequireQualifiedAccess>]
 type RejectReason =
     | Inapplicable
@@ -112,20 +106,16 @@ let rejectReasonOf =
         ]
 
 /// Why a remembered assignment was released: its Task left the pool, or one of
-/// the matching gates refused it for this creep — which is every `RejectReason`
-/// above, carried rather than restated. A release *is* a rejection of a Task
-/// the creep already held (`Matcher.gate` answers one cascade for both
-/// readings), and the one case no gate can produce is the Task no longer being
-/// in the pool to be refused: `TaskGone` is answered above the cascade, where
-/// there is nothing left to ask a gate about.
+/// the matching gates refused it for this creep (`Matcher.gate` answers one
+/// cascade for both readings). `TaskGone` is answered above the cascade.
 [<RequireQualifiedAccess>]
 type ReleaseReason =
     | TaskGone
     | Rejected of RejectReason
 
-/// The wire spelling of each ReleaseReason, as `matchFactorName` is
-/// MatchFactor's: the refusals spell what they spelt as refusals, so the
-/// release channel and the scoring channel name one failure one way.
+/// The wire spelling of each ReleaseReason: the refusals spell what they
+/// spelt as refusals, so the release and scoring channels name one failure
+/// one way.
 let releaseReasonName =
     function
     | ReleaseReason.TaskGone -> "task-gone"
@@ -139,19 +129,14 @@ let releaseReasonNumbers =
     | ReleaseReason.Rejected reason -> rejectReasonNumbers reason
 
 /// The ReleaseReason a wire name spells for the numbers the wire carried
-/// beside it, or None for a name this vocabulary does not have — and for
-/// `too-early` with no numbers to be about, which is the carried decoder's
-/// answer and not a second rule.
+/// beside it, or None — including `too-early` with no numbers.
 let releaseReasonOf payload name =
     if name = releaseReasonName ReleaseReason.TaskGone then
         Some ReleaseReason.TaskGone
     else
         rejectReasonOf payload name |> Option.map ReleaseReason.Rejected
 
-/// Why an unassigned creep got nothing: the pool was empty, no Task fit its
-/// body or energy state, every fitting Task's worker cap was full, every
-/// fitting Task with room had an unreachable Work Area, or every Task it could
-/// otherwise have taken is one whose time has not come (ADR 0025).
+/// Why an unassigned creep got nothing: the last gate every Task failed at.
 [<RequireQualifiedAccess>]
 type IdleReason =
     | NoTasks
@@ -184,9 +169,7 @@ let idleReasonOf =
         ]
 
 /// The wire spelling of each FootingKind, on the Layout channel's Memory leaf.
-/// Not a Verdict vocabulary — the Layout speaks no Verdicts, which is the whole
-/// reason its losses need a channel — but the same rule: one spelling, written
-/// once, round-tripped against the union itself by `Core.Tests`.
+/// Not a Verdict vocabulary, but the same rule.
 let footingKindName =
     function
     | FootingKind.SourceContainer -> "source-container"
@@ -205,10 +188,9 @@ let footingKindOf =
         ]
 
 /// The wire spelling of each DeclarationKind, on the Layout channel's Memory
-/// leaf beside `footingKindName` and under the same rule (ADR 0060 decision 1).
-/// The refusal's own row carries it, because a room name under a heading that
-/// reads "declared outposts" says the wrong thing about an [[errand]], and the
-/// operator's next act — which list to move the declaration in — turns on it.
+/// leaf beside `footingKindName`. The refusal's own row carries it, because
+/// the operator's next act — which list to move the declaration in — turns
+/// on it.
 let declarationKindName =
     function
     | DeclarationKind.Outpost -> "outpost"
@@ -219,28 +201,22 @@ let declarationKindName =
 let declarationKindOf =
     reverseOf declarationKindName [ DeclarationKind.Outpost; DeclarationKind.Errand ]
 
-/// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf
-/// beside `footingKindName`. A carrying vocabulary, like the two reason
-/// vocabularies: the spawn's id rides beside the name rather than inside it, so
-/// a goal is one spelling and not one per spawn.
+/// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf.
+/// A carrying vocabulary: the spawn's id rides beside the name.
 let trunkGoalName =
     function
     | TrunkGoal.UpgradeArea -> "upgrade-area"
     | TrunkGoal.Spawn _ -> "spawn"
 
-/// The spawn a TrunkGoal names beside its wire name, or None for the goal
-/// that names none. The encoder's half of what `trunkGoalOf` reads back,
-/// as `releaseReasonNumbers` is ReleaseReason's.
+/// The spawn a TrunkGoal names beside its wire name, or None.
 let trunkGoalSpawn =
     function
     | TrunkGoal.Spawn spawn -> Some spawn
     | TrunkGoal.UpgradeArea -> None
 
 /// The TrunkGoal a wire name spells for the spawn the wire carried beside it,
-/// or None for a name this vocabulary does not have — and for `spawn` with no
-/// id carried beside it at all, which is a row that lost its spawn rather than
-/// a goal. An id that is carried but empty is a spawn like any other here: the
-/// vocabulary spells names, and what counts as a usable id is the caller's.
+/// or None — including `spawn` with no id. An empty id is a spawn like any
+/// other here; what counts as a usable id is the caller's.
 let trunkGoalOf =
     reverseCarrying
         trunkGoalName
@@ -248,18 +224,16 @@ let trunkGoalOf =
         [ (fun _ -> Some TrunkGoal.UpgradeArea); Option.map TrunkGoal.Spawn ]
 
 /// The wire spelling of each ContainerTarget, on the Layout channel's Memory
-/// leaf beside `trunkGoalName` (ADR 0040). A carrying vocabulary like it, and
-/// for the same reason: the source's id rides beside the name rather than
-/// inside it, so a target is one spelling and not one per source.
+/// leaf beside `trunkGoalName`. A carrying vocabulary like it: the source's
+/// id rides beside the name rather than inside it.
 let containerTargetName =
     function
     | ContainerTarget.Source _ -> "source"
     | ContainerTarget.Controller -> "controller"
     | ContainerTarget.Mineral _ -> "mineral"
 
-/// The source a ContainerTarget names beside its wire name, or None for
-/// the controller, which names none. The encoder's half of what
-/// `containerTargetOf` reads back, as `trunkGoalSpawn` is TrunkGoal's.
+/// The source a ContainerTarget names beside its wire name, or None for the
+/// controller.
 let containerTargetSource =
     function
     | ContainerTarget.Source source -> Some source
@@ -267,9 +241,7 @@ let containerTargetSource =
     | ContainerTarget.Mineral mineral -> Some mineral
 
 /// The ContainerTarget a wire name spells for the source the wire carried
-/// beside it, or None for a name this vocabulary does not have — and for
-/// `source` with no id carried beside it at all, which is a row that lost
-/// its source rather than another target.
+/// beside it, or None — including `source` with no id.
 let containerTargetOf =
     reverseCarrying
         containerTargetName
@@ -280,12 +252,8 @@ let containerTargetOf =
             Option.map ContainerTarget.Mineral
         ]
 
-/// The wire spelling of each StandDownBasis, on the Raid log's Memory leaf
-/// (ADR 0043), as `footingKindName` is the Layout channel's, and under the same
-/// rule: one spelling, written once here, reversed by the table below and
-/// round-tripped against the union itself by `Core.Tests`, so a fifth basis
-/// added without a name is a red test rather than a stand-down that decodes to
-/// nothing.
+/// The wire spelling of each StandDownBasis, on the Raid log's Memory leaf,
+/// round-tripped against the union itself by `Core.Tests`.
 let standDownBasisName =
     function
     | StandDownBasis.CollapseTimer -> "collapse-timer"
@@ -294,32 +262,24 @@ let standDownBasisName =
     | StandDownBasis.RivalReservation -> "rival-reservation"
     | StandDownBasis.InvaderRaid -> "invader-raid"
 
-/// The wire spelling of each ReservationHolder, on the Raid log's Memory leaf
-/// (#333). Only two of the three are ever written — the leaf records the rooms
-/// whose controller **somebody else** holds, ours being the state that needs no
-/// record — but the name is spelt for all three under the rule every vocabulary
-/// here keeps: one spelling, reversed by the table below and round-tripped
-/// against the union itself by `Core.Tests`, so a fourth holder added without a
-/// name is a red test rather than a room that decodes to nothing.
+/// The wire spelling of each ReservationHolder, on the Raid log's Memory leaf.
+/// Only two of the three are ever written — the leaf records the rooms whose
+/// controller somebody else holds — but the name is spelt for all three.
 let reservationHolderName =
     function
     | ReservationHolder.Ours -> "ours"
     | ReservationHolder.Invader -> "invader"
     | ReservationHolder.Rival -> "rival"
 
-/// The ReservationHolder a wire name spells, or None for a name this
-/// vocabulary does not have — an entry whose holder will not read back cannot
-/// say who is standing on the room, and the shell drops that entry rather than
-/// naming the wrong player.
+/// The ReservationHolder a wire name spells, or None: the shell drops that
+/// entry rather than naming the wrong player.
 let reservationHolderOf =
     reverseOf
         reservationHolderName
         [ ReservationHolder.Ours; ReservationHolder.Invader; ReservationHolder.Rival ]
 
-/// The StandDownBasis a wire name spells, or None for a name this
-/// vocabulary does not have — a row whose basis will not read back is a
-/// stand-down that cannot say why, and the shell drops that row rather
-/// than inventing a reason for it.
+/// The StandDownBasis a wire name spells, or None: the shell drops that row
+/// rather than inventing a reason for it.
 let standDownBasisOf =
     reverseOf
         standDownBasisName
@@ -337,12 +297,9 @@ let standDownBasisOf =
 /// creep walked at a Seam is given the exit tile itself as its last step, and
 /// that is a destination rather than a place to stand — the engine moves a
 /// creep off a border tile at the end of the tick — which is why no Seat, Work
-/// Area or standing candidate query will ever name one. It is a tile of this
-/// room, so the arbitration settles it exactly as it settles ground. It carries
-/// the room it was registered in, on the tiles themselves (ADR 0052 decision
-/// 2): a room's arbitration is one pass over **every** creep of ours standing
-/// in it, and the intents that pass folds together come from as many `decide`
-/// calls as there are colonies working that room.
+/// Area or standing candidate query will ever name one. The tiles carry the
+/// room they were registered in: a room's arbitration folds the intents of
+/// every colony working that room.
 type MoveIntent =
     {
         Creep: string
@@ -351,54 +308,41 @@ type MoveIntent =
         Candidates: RoomPos list
         /// The tiles this body counts as still working from: its Work Area
         /// less this tick's Reach when it is standing inside that area, and
-        /// empty for every body that is not — a traveller, a parked one, a
-        /// body with no Task (#267). It is what tells the arbitration a
-        /// shuffle from an eviction: a body moved within this set has yielded
-        /// and the chain pays nothing, one moved out of it has been taken off
-        /// its work and the chain pays its rank's weight and the sidestep
-        /// besides — the 1 a chain scores for ending in a sidestep, so that
-        /// taking a body off its work is never merely worth walking round it
-        /// (ADR 0001). The
-        /// candidate list cannot answer that on its own — it holds the same
-        /// tiles in preference order and says nothing about which of them are
-        /// still the Work Area. It is also what tells the arbitration a body
-        /// it has already shuffled *inside* this set is finished business and
-        /// is not offered again.
+        /// empty for every body that is not (#267). It tells the arbitration
+        /// a shuffle (moved within the set: the chain pays nothing) from an
+        /// eviction (moved out of it: the chain pays the rank's weight and the
+        /// sidestep), and that a body already shuffled inside it is finished
+        /// business. The candidate list holds the same tiles in preference
+        /// order and cannot say which are still the Work Area.
         Area: Set<RoomPos>
     }
 
-/// One colony's movement for the tick, before a tile of it is arbitrated: where
-/// this colony's bodies stand, which of them fatigue keeps out of the
-/// arbitration, what each rested one asked for, and the two attributions only
-/// this colony's Atlas can answer. It exists because **a room's movement is not
-/// one colony's decision**. Two colonies work one room whenever a [[mother
-/// colony]] is raising a child (ADR 0047 decision 4), and a `decide`
-/// arbitrating its own half of that room's traffic against the other half's
-/// tiles read as empty claimed the tile the child's [[anchor]] stood on, every
-/// tick.
+/// One colony's movement for the tick, before a tile of it is arbitrated. It
+/// exists because a room's movement is not one colony's decision: two colonies
+/// work one room whenever a mother colony is raising a child, and a `decide`
+/// arbitrating its own half against the other half's tiles read as empty
+/// claimed the tile the child's anchor stood on, every tick.
 type Movement =
     {
         /// This colony's creeps in view order — the order its move Intents
-        /// and its movement Verdicts leave in (ADR 0009).
+        /// and its movement Verdicts leave in.
         Order: string list
-        /// Where the projection places each of this colony's bodies:
-        /// creep and tile, the tile carrying its room
+        /// Where the projection places each of this colony's bodies
         /// (`Atlas.placedCreeps`). A creep the projection cannot place is
-        /// in no room's pass, exactly as before.
+        /// in no room's pass.
         Placed: (string * RoomPos) list
-        /// The creeps fatigue takes out of arbitration this tick (ADR 0008
-        /// decision 1). Their tiles are the pass's walls.
+        /// The creeps fatigue takes out of arbitration this tick. Their tiles
+        /// are the pass's walls.
         Tired: Set<string>
-        /// The tiles held by bodies this colony does not hold ([[foreign
-        /// bodies]], ADR 0052 decision 1), each carrying its room (decision 2).
+        /// The tiles held by bodies this colony does not hold, each carrying
+        /// its room.
         Foreign: Set<RoomPos>
         /// Each rested creep's Move Intent, each a tile of the room the
         /// creep stands in.
         Intents: MoveIntent list
-        /// The creeps on the [[verbose list]] whose priced step differs from
-        /// their traffic-blind one (ADR 0018, ADR 0030) — the one movement
-        /// Verdict that is not the arbitration's own answer and the one that
-        /// needs this colony's Atlas, so it is settled here and carried.
+        /// The verbose-list creeps whose priced step differs from their
+        /// traffic-blind one — the one movement Verdict that needs this
+        /// colony's Atlas, so it is settled here and carried.
         Rerouted: Set<string>
     }
 
@@ -410,11 +354,8 @@ type Candidate =
     | Scored of task: string * rank: int * cost: int * load: int
     | Rejected of task: string * reason: RejectReason
 
-/// The reasoned outcome a decision step returns beside its decision — data,
-/// never a log line (ADR 0009). The Matcher speaks at conclusion level: which
-/// Task won a creep and what decided it, a remembered assignment kept
-/// (anti-thrash) as distinct from a fresh match, a release with its reason, or
-/// why nothing was applicable.
+/// ADR-0009. The reasoned outcome a decision step returns beside its decision
+/// — data, never a log line.
 [<RequireQualifiedAccess>]
 type Verdict =
     | Matched of creep: string * task: string * factor: MatchFactor
@@ -431,9 +372,8 @@ type Verdict =
 
 /// One casting row's count this tick: what the quota asks for, how many living
 /// bodies the row reads back (`patternOf`), and how many are in the oven for
-/// it. Observability only (ADR 0009): the cascade reads the same numbers itself,
-/// and this is what `observe.mjs quotas` prints so a human can see why a spawn
-/// stands idle at a full bank.
+/// it. Observability only: what `observe.mjs quotas` prints so a human can see
+/// why a spawn stands idle at a full bank.
 type RowQuota =
     {
         Row: string
@@ -472,8 +412,8 @@ module Quotas =
 
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, the plan memo to hold in heap
-/// for next tick (ADR 0017), the Verdicts explaining them (ADR 0009), and
-/// this colony's [[move intent]]s before anybody arbitrated them.
+/// for next tick, the Verdicts explaining them, and this colony's move
+/// intents before anybody arbitrated them.
 type Decision =
     {
         Intents: Intent list

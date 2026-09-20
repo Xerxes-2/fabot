@@ -7,33 +7,13 @@ module Fabot.Core.Decide.Emitter
 open Fabot.Core
 open Fabot.Core.Types
 
-/// Whether a creep can usefully work this Task right now. The body must
-/// physically be able to do it — Work-part tasks need a Work part, energy
-/// delivery needs a Carry part — and the energy state must call for it: a body
-/// past half full is not worth *sending* for more, by digging or by drawing
-/// (#235), and an empty creep has nothing to deliver. Not all of it is a
-/// judgement about the body: the gates below read the target's kind, its
-/// geometry and what is standing in it. Gates read part arithmetic, never names
-/// or roles (ADR 0006). One geometric widening (ADR
-/// 0012), body-aware since ADR 0024: a full Work-heavy creep standing on a
-/// built source container keeps Harvest, the engine dropping the overflow into
-/// the container underfoot. A light body gets no such reprieve, or it would
-/// hold the Post for the rest of its life. A second gate is comparative (ADR
-/// 0016): a body with more Work than Move never Withdraws, so its only
-/// feeding-tier candidate is Harvest. A third reads the target's kind beside
-/// the body (ADR 0019): only a creep with a Work part draws from the
-/// controller's upgrade buffer. A fourth reads the body alone and covers
-/// **every** Build (#157, widened by #234): a Build is inapplicable to a
-/// Work-heavy body. A fifth covers Build, Repair and Refill for a **standing
-/// body** (ADR 0046), all three being deliveries and a delivery by a body
-/// holding fifty energy against eleven Work being a commute. A sixth reads the
-/// geometry beside the body (ADR 0048): Upgrade is applicable to a Work-heavy
-/// body only where it may already act on it. A seventh is three clauses over
-/// one Task (#235), all of them about the walk a light body makes to a rock
-/// and none of them reaching the Work-heavy body ADR 0020 has pinned to a Post:
-/// it must be half empty *or* already standing where it may dig, it must not be
-/// a standing body — which closes #206 for the one Task that ticket spared —
-/// and the rock's rate must still outrun what the bodies garrisoning it take.
+/// Whether a creep can usefully work this Task right now: the body must be able
+/// to do it, and its energy state must call for it. Gates read part arithmetic,
+/// never names or roles. The body gates enforced here: ADR-0016 (a Work-heavy
+/// body never Withdraws), ADR-0019 (only a Work part draws the upgrade buffer),
+/// ADR-0024 (a full garrison keeps Harvest), ADR-0046 (a standing body makes no
+/// delivery), ADR-0048 (a Work-heavy body's Upgrade is in place or nowhere) and
+/// ADR-0057 (the miner's gate, one resource at a time, the delivery draw).
 let internal applicable
     (view: ColonyView)
     (threats: Threats)
@@ -45,116 +25,49 @@ let internal applicable
 
     let has part = partCount creep.Body part > 0
 
-    // The two body facts this whole cascade is written against, read once for
-    // the creep rather than at each of the eight and seven clauses that ask
-    // them: whether the body stands beside its buffer (ADR 0046) and whether it
-    // is the Work-heavy one pinned to a Post (ADR 0016, ADR 0048). Both are
-    // this tick's and neither depends on the Task, so a clause that asks twice
-    // in one conjunction was asking the Atlas twice for one answer.
+    // Read once for the creep rather than at each clause: neither depends on
+    // the Task, and a clause that asked twice was asking the Atlas twice.
     let standing = isStandingBody view.Tuning creep
     let heavy = Atlas.workHeavy atlas creep.Name
 
-    // An intake — a Withdraw, a Pickup or, since #235, a Harvest — is for a body
-    // with room to carry it: at least half its store free (live: a hauler holding
-    // 1,150 of 1,200 walked forty tiles to pick fifty off a pile while the spawn
-    // stood at eighteen energy). A body past half full is a delivery, and its
-    // intake waits until it has delivered. A standing body's one Carry is a
-    // trip's worth, so for it this is "empty". Harvest joined the other two
-    // late and for a light body only (#235), and there it prices the **walk**
-    // alone: the other two finish in the tick the body arrives, where a dig
-    // runs for dozens, so only Harvest can be half way through when this is
-    // read — and a garrison's whole working life is spent past half full.
+    // An intake is for a body with at least half its store free (#235): a body
+    // past half full is a delivery. A standing body's one Carry is a trip's
+    // worth, so for it this is "empty". For a light body's Harvest this prices
+    // the walk alone; see the Harvest arm.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
-    // **A body carries one resource at a time** (ADR 0057 decision 3). Thorium
-    // aboard shuts every *energy* intake — the Withdraw, the Pickup and the
-    // light body's Harvest — because a mixed load pours energy into a reactor
-    // that refuses it and arrives at the decade cliff with the wrong count in
-    // its store. The mirror of it is the Thorium arm's own gate below, which
-    // asks for an **empty** store and not #232's half-empty one: between the
-    // two, a load is one resource from the tick it is taken to the tick it is
-    // poured. Zero for every body in a colony with no mine, so no energy
-    // decision moves.
+    // Thorium aboard shuts every energy intake: a mixed load pours energy into a
+    // reactor that refuses it. Zero for every body in a colony with no mine.
     let carryingThorium = creep.Thorium > 0
 
-    // Nothing aboard at all, over both resources — the Thorium intake's own
-    // gate. Read as the two holdings and not as `FreeCapacity` against the
-    // body's carry, because that arithmetic is the engine's own and a hand-built
-    // body is free to state a store the engine would never hand back.
+    // Read as the two holdings and not as `FreeCapacity` against the body's
+    // carry: a hand-built body is free to state a store the engine would never
+    // hand back.
     let emptyHanded = creep.Energy = 0 && creep.Thorium = 0
 
-    // A delivery of Work: the three Tasks that spend a Work part into something
-    // out of the body's own store (ADR 0046), and the one clause all three
-    // share. Refill is *not* one of them — it carries rather than works — so it
-    // keeps its own `has Carry` beside this.
+    // A delivery of Work. Refill carries rather than works, so it keeps its own
+    // `has Carry`.
     let spending = has Work && creep.Energy > 0
 
     match task with
-    // **The [[miner]]'s gate, and the whole of it** (ADR 0057 decision 2): a
-    // Work part to dig with and **no Carry at all**. Part arithmetic and
-    // nothing else (ADR 0006), and the one cut no other row of this colony
-    // makes — every other body it casts carries either a Carry or an ATTACK or
-    // a CLAIM — so it is to this Task what `isGuardBody` is to the Guard.
-    //
-    // Not a narrowing of the source arm below but a different sentence, because
-    // every clause that arm is made of is about a **source**: the half-empty
-    // mirror and the full-store reprieve price a store this body does not have,
-    // ADR 0025's empty window is a regeneration a deposit does not have, and
-    // `hasSpareRate` is a rate a deposit does not have either — Thorium never
-    // comes back, so there is no rate to outrun and the only thing rationing
-    // the dig is the extractor's cooldown, which is the Emitter's gate below
-    // and not applicability's.
-    //
-    // And it is why a **body with a Carry part is refused**, which is the
-    // decision rather than an economy: an [[anchor]] released off its own rock
-    // is Work-heavy, is applicable to every Harvest in the pool, and would
-    // stand on the mine [[post]] filling a store that ages it by
-    // `floor(log10 store.T)` ticks a tick — and never empty it, ADR 0016 having
-    // shut its Withdraw and ADR 0046 its Refill.
+    // The miner's gate: a Work part and no Carry at all. A body with a Carry is
+    // refused because a released Anchor is applicable to every Harvest and would
+    // stand on the mine Post filling a store that ages it by
+    // `floor(log10 store.T)` ticks a tick, and never empty it. Thorium never
+    // regenerates, so the only thing rationing the dig is the extractor's
+    // cooldown, which is `heldByCooldown`'s gate and not applicability's.
     | Harvest rockId when Atlas.isMineral atlas rockId -> has Work && not (has Carry)
-    // ADR 0024's full-store reprieve, and beside it the clause that keeps ADR
-    // 0048's own Consequence reachable ("stands where it is until it can dig
-    // again"). A Work-heavy body never empties — ADR 0016 shut Withdraw and
-    // Transfer, ADR 0046 shut Refill, Build and Repair, ADR 0048 shuts the walk
-    // to the controller — so a store gate that reads fullness as "done here"
-    // reads a garrison's ordinary condition as a reason to take its work away.
-    // Which it did: a hauler drawing the container swaps the Anchor onto the
-    // Seat beside it, and a full body one step off its Post had no Task at all.
-    // So the gate is widened by a question and not by a tile: ADR 0024 asks
-    // whether a body may keep *digging* where it stands, and a body still
-    // walking is not digging.
-    //
-    // **And the walk has to end somewhere it can stand** (#258). ADR 0048
-    // offered it wherever the source has a Post, on the argument that a Post is
-    // a tile the arriving body has something to do on — true of the tile and
-    // not of the tick, because the Post cap that would otherwise refuse the
-    // pair is counted at arrival (ADR 0026) and a long enough walk discounts
-    // any incumbent. So a full Anchor released off its own rock read every
-    // garrisoned Post in the colony as somewhere to go, and the one live case
-    // walked a border home to stand beside another Anchor's Post while the
-    // vacancy it left cast a replacement (user, 2026-09-08). The walk is
-    // offered while a Post of that source has no garrison standing on it
-    // *now* — over the same census this clause's own Post test reads, so the
-    // rock a full body is walking to raise the site of is one it can still
-    // have (#205). The narrowing is this disjunct's alone and so is a **full**
-    // body's alone: a heavy body with a free store is offered the walk by the
-    // clause above, which is what lets a fresh Anchor be sent to the Post its
-    // expiring incumbent is still standing on (ADR 0026).
-    //
-    // **And the cut runs both ways** (#261): a source's Harvest wants a body
-    // with somewhere to put the yield, which is a **Carry part**. ADR 0057
-    // decision 2 cut the deposit's Harvest to a body with none, and the source's
-    // arm left open to every heavy body is the same sentence unfinished: a
-    // store-less [[miner]] reports `FreeCapacity = 0`, so the first disjunct
-    // refuses it — and then the third offers it the walk, because it is
-    // Work-heavy, has not arrived, and every manned Post in the colony reads as
-    // somewhere to go. Live that is 2,200 energy of Work dribbling into a source
-    // container for a whole life, `Kept` from the tick it arrives because
-    // `garrisons` is positional, while the season's deposit is never dug and the
-    // Anchor row buys a replacement for a Post `Capacity.garrisoning` will not
-    // let it have. Every other row this colony casts with a Work part carries
-    // one — the generalist, the [[anchor]] and the [[upgrader]] alike — so the
-    // clause refuses exactly the one body it names.
+    // A full garrison keeps digging where it stands; a heavy body still walking
+    // is offered the walk only toward a Post of this source with no garrison on
+    // it *now* (#258), because the Post cap is counted at arrival and a long
+    // enough walk discounts any incumbent: without that clause a full Anchor
+    // released off its rock read every garrisoned Post in the colony as
+    // somewhere to go. The narrowing is the full body's alone, so a fresh
+    // Anchor is still sent to the Post its expiring incumbent stands on.
+    // `has Carry` refuses the store-less miner (#261): it reports
+    // `FreeCapacity = 0`, is Work-heavy and has not arrived, so it would
+    // otherwise be offered the walk and dribble its Work into a source
+    // container for a whole life while the deposit is never dug.
     | Harvest sourceId ->
         has Work
         && has Carry
@@ -164,116 +77,45 @@ let internal applicable
                 && not (Set.isEmpty (Atlas.postsOf atlas sourceId))
                 && not (mayActNow threats atlas creep.Name task)
                 && hasUnmannedPost view atlas creep sourceId))
-        // **Three clauses a light body answers and a garrison does not**
-        // (#235), drawn at ADR 0016's ratio, which is where every other line
-        // that separates the two bodies is drawn. Every one of the three is
-        // about the walk digging costs a body that does not live at the rock,
-        // so none of them can reach the body ADR 0020 has already pinned to a
-        // Post it is standing on: a Work-heavy body's Harvest goes on being
-        // decided by the gate above and by ADR 0024's two reprieves alone.
-        //
-        // **Half empty, like the other two intakes — while the walk is still
-        // ahead of it.** The mirror the Withdraw and the Pickup have carried
-        // since 75edfee never reached Harvest, so any room at all was room
-        // enough: live at t199,88x a `9W/9C/9M` worker with nine free of four
-        // hundred and fifty crossed a Seam, dug once, released full, and
-        // crossed back — and Harvest being the Feeding tier (ADR 0023) it
-        // outranked every Surplus Task the body could have done where it
-        // stood. But Harvest is the one intake that does not finish in a tick,
-        // and this gate is the *release* gate as well as the dispatch one, so
-        // the store mirror alone evicted a body off the Seat it was digging on
-        // the tick it crossed half full: half a load carried home for the whole
-        // of the walk it had already paid. So it is spelled the way ADR 0048
-        // spells its own widening in this same branch — the Emitter's `mayAct`,
-        // false while the walk is ahead of the body and true the tick it
-        // arrives. A body still walking answers the mirror; a body standing
-        // where it may dig has no walk left to price and fills to the brim.
-        //
-        // **A [[standing body]] does not walk to a rock either**, which closes
-        // #206 for the one Task it left open. That ticket shut the Pickup and
-        // every non-buffer Withdraw for a body carrying fewer than one Carry per
-        // four Work, and spared Harvest on the reasoning that travel cost would
-        // keep the upgrader row beside its buffer and that the anchor row is a
-        // standing body too. Travel cost did not: an empty buffer leaves the row
-        // nothing else applicable at all, and W13S28's `11W/1C/11M` upgraders
-        // walked to the sources on the ticks it ran dry, fifty energy a trip
-        // against eleven Work. The anchor row's half of that reasoning is what
-        // the heavy exemption above already answers.
-        //
-        // **And something spare in the rock to dig.** Those last two carry no
-        // arrival exemption on purpose: what they refuse is a body that should
-        // not be at the rock at all, and the release is the point of them —
-        // #235's case (b) is a light body squatting the Seat the outpost's own
-        // Anchor needs the tick it stands up.
+        // Three clauses a light body answers and a garrison does not (#235),
+        // all about the walk digging costs a body that does not live at the
+        // rock. Half empty *while the walk is still ahead of it*: Harvest is the
+        // one intake that runs for dozens of ticks, and this is the release gate
+        // as well as the dispatch one, so the store mirror alone evicted a body
+        // off the Seat it was digging on the tick it crossed half full. Not a
+        // standing body (closes #206 for the one Task it spared: an empty
+        // buffer left the row nothing else applicable, and travel cost did not
+        // hold it). And something spare in the rock. The last two carry no
+        // arrival exemption on purpose: the release is the point of them.
         && (heavy
             || ((halfEmpty || mayActNow threats atlas creep.Name task)
                 && not standing
                 && hasSpareRate view atlas sourceId))
-        // A body already carrying the season's ore does not dig energy into the
-        // same store (ADR 0057 decision 3). Never true of a garrison — the
-        // [[miner]] is the only body of this colony that touches Thorium at the
-        // rock and it has no store to hold any — so what the clause refuses is a
-        // light body that took a load off the mineral container and would
-        // otherwise outrank its own delivery on the Feeding tier.
+        // A body carrying ore does not dig energy into the same store. Never
+        // true of a garrison; what it refuses is a light body that took a load
+        // off the mineral container and would outrank its own delivery.
         && not carryingThorium
-    // The body half of this gate — a Carry part and ADR 0016's comparative
-    // clause — is read a second time out of line by `canRefill`, the supply
-    // floor's arming condition (ADR 0050): a clause narrowing what a body may
-    // draw with belongs in front of both readers, or a colony whose only carrier
-    // this gate has just shut out still reads as able to refill.
+    // The body half of this gate is read a second time by `canRefill`, the
+    // supply floor's arming condition: a clause narrowing what a body may draw
+    // with belongs in front of both readers.
     | Withdraw(storeId, resource) ->
         let buffer = Set.contains storeId (Atlas.controllerContainers atlas)
 
-        // **A Withdraw must be worth this body's trip** (#232): the store has
-        // to hold at least half of what the body came with room for. It is the
-        // mirror of `halfEmpty` above and the second half of the same sentence
-        // — half empty is what makes a body worth sending, half a load is what
-        // makes a store worth sending it to — and it is a fact about the
-        // *pair*, so it belongs here and not in `capacityOf`, whose number is
-        // the Task's alone. What it cures is the other end of the haul cycle: a
-        // [[capacity]] of `ceil(stock / one load)` admits a drawer to any store
-        // holding one energy, and the half-full rule above then keeps the
-        // arriving body there until it has drained the Anchor's trickle. Live,
-        // a 24C/12M hauler stood forty-two ticks on a container holding ~200 to
-        // carry six hundred, while the Storage held 263,803 and the spawn stood
-        // at twenty-eight. The tier gap (ADR 0023) cannot break that by itself:
-        // a container's Withdraw outranks the stock's while it is applicable.
-        // Read off the body's **free** capacity and not its total, so it is the
-        // same sentence for a part-loaded body as for an empty one, and judged
-        // every tick against a pool rebuilt from scratch, so it gates
-        // persistence as well as entry. Not carried to Pickup, which keeps the
-        // half-empty clause alone: a pile decays and a container does not.
-        // Three stores it does not price. **A store that ends** — a tombstone
-        // or a ruin — is the Pickup's exemption word for word. **The stock**
-        // (ADR 0023): what this line buys is the fall to the tier below, and
-        // there is none below the Storage's own Withdraw. **The [[standing
-        // body]] at the buffer under its own feet**: the same exception #205
-        // makes of a site on a creep's own Post — this clause prices a trip and
-        // that row makes none.
-        // **Read down the resource's own column** (ADR 0057 decision 3): what
-        // makes a store worth a body's trip is what that store holds of the
-        // thing the body came for, so the mineral container is priced on its
-        // Thorium and the energy stores on theirs. Identical to `storedIn` for
-        // every Withdraw this colony had before the extractor stood.
-        //
-        // On the Thorium arm the stock-tier disjunct below already answers
-        // **true**, and for its own stated reason rather than by accident: what
+        // A Withdraw must be worth this body's trip (#232): the store holds at
+        // least half of what the body has room for. A fact about the pair, so it
+        // is here and not in `capacityOf`. Read off free capacity, and judged
+        // every tick, so it gates persistence as well as entry. Not carried to
+        // Pickup: a pile decays and a container does not. Three stores it does
+        // not price: a store that ends (the Pickup's exemption), the stock (what
         // the line buys is the fall to the tier below, and there is none below
-        // the Storage's tier — a body refused the mine has no deeper intake to
-        // fall to, so the refusal would leave it idle while the container fills
-        // and the miner's next dig bleeds onto the ground. The column is read
-        // here all the same, because which stock a Withdraw is worth is a
-        // question about its own resource on any tier it is ever ranked at.
-        // The clause reaches the **Storage's** Thorium draw alone: that is the
-        // delivery's intake, and the mine haul's — a container under the
-        // miner's feet — is a walk of a few tiles onto the same room's floor.
-        // **In a colony that has declared the errand** (#373): a consignor's
-        // Storage is drawn for its own terminal (#349), a leg of a few tiles
-        // with no crossing on it, and that draw is a Storage's Thorium too.
-        // The errand is what tells the two apart, and it is the same test the
-        // Intent's own 500-unit clause reads (`intentFor`); the programme's
-        // *open* half is the Pool's to ask, because the delivery draw is only
-        // pooled while it is.
+        // the Storage's own Withdraw), and the buffer under a standing body's
+        // feet. Priced down the resource's own column.
+        //
+        // The delivery draw is the Storage's Thorium in a colony that has
+        // declared the errand (#373). A consignor's Storage drawn for its own
+        // terminal (#349) is a Storage's Thorium too, a leg of a few tiles with
+        // no crossing on it, and the errand is what tells the two apart — the
+        // same test `intentFor` reads.
         let deliveryDraw =
             Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
             && not (List.isEmpty view.Errands)
@@ -283,96 +125,37 @@ let internal applicable
         let worthTheTrip =
             stock * 2 >= creep.FreeCapacity
             || (Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient)
-            // The **tier** and not the bare rank (#306): a rung orders a Task
-            // inside its tier and never leaves it (`tierRungs`/`priorityStep`),
-            // so the shallowest rank `StockDraw` owns is half a tier above it,
-            // and the mineral container lifted two rungs for bleeding onto the
-            // floor is the stock-tier intake it always was. Read as a
-            // comparison against the tier's own rank this clause goes quietly
-            // false on exactly the container it exists to keep drawable —
-            // **latently**, and the word is exact: the Thorium arm below admits
-            // an *empty* body only, the first disjunct is then
-            // `stock * 2 >= carry`, and the widest carrier this colony casts is
-            // 1,600 (sixteen hauler blocks at the engine's fifty parts), so at
-            // the 1,000 the lift fires at the first disjunct is already true for
-            // every body that can ask. Falsifying this one would want a body
-            // over 2,000 of carry, which no row of ours sizes. Written as the
-            // tier all the same, because the clause's own reason is a fact about
-            // the tier — there is no intake below the Storage's — and a
-            // disjunct that is right by an arithmetic coincidence two rows away
-            // is the kind of thing a wider body silently breaks.
-            // **The column this is still for is the energy one** (#380). It
-            // was written as the rank comparison because the Storage's draw
-            // sat at `StockDraw` when #232 wrote it, and #367 then moved the
-            // *ore* half of that draw to `Feeding` — where `0 >= 5` is false
-            // and the escape quietly stopped applying to the one draw that
-            // needed it most. The comment above called that shot ("a disjunct
-            // that is right by an arithmetic coincidence two rows away is the
-            // kind of thing a wider body silently breaks") and it came true one
-            // ticket later: while the draw only ever opened at a whole
-            // `ReactorLoad` the two conditions coincided, and the tick #378
-            // made the last partial load drawable, 376 T stood in the Storage
-            // with the Reactor dry for 424 ticks and no body applicable to it.
+            // The tier and not the bare rank (#306): a rung never leaves its tier
+            // (`tierRungs`/`priorityStep`), so the shallowest rank `StockDraw`
+            // owns is half a tier above it. This disjunct is the energy column's
+            // alone (#380): #367 moved the ore half of the Storage draw to
+            // `Feeding`, where the comparison is false, and 376 T stood in the
+            // Storage with the Reactor dry for 424 ticks.
             || pooled.Priority >= priorityOfTier StockDraw - tierRungs / 2
-            // So the ore half says it in its own words instead of borrowing a
-            // rank: **the delivery's draw is always worth the trip**, by the
-            // escape's own argument rather than by its arithmetic. What the
-            // line buys is a fall to a deeper intake and the Storage's ore has
-            // none — a body refused it stands idle while the Reactor burns
-            // down, which is the opposite of what refusing a trip is for.
+            // So the ore half says it in its own words: the delivery's draw is
+            // always worth the trip, because a body refused it stands idle while
+            // the Reactor burns down.
             || deliveryDraw
             || (buffer && standing)
 
-        // **The Thorium arm is a different sentence** (ADR 0057 decision 3),
-        // and the whole of the difference is the store gate: an **empty** body
-        // and not #232's half-empty one, because a body carries one resource at
-        // a time here. The three clauses it keeps are the ones about the body
-        // rather than about the target — a Carry part to hold the ore, ADR
-        // 0016's comparative gate (a Work-heavy body's intake is digging), and
-        // #206's standing gate (a trip to the mine is the commute that row was
-        // shaped to never make) — and the two it drops are the two that are
-        // about the *controller's* container: ADR 0019's Work part and the
-        // buffer-side exemption, neither of which a mineral container can be.
-        // **A load must be deliverable by the body that draws it** (#354). The
-        // delivery draw is the one intake in this colony whose onward leg is
-        // priced at *three* ticks of life per tick walked: under the
-        // 1,000-unit contact cliff the mod spends `floor(log10 store.T)`
-        // extra life a tick on every creep whose tile carries ore, and the
-        // ore on that tile is the body's own load, so there is nowhere to
-        // stand that is not hot and no way to put it down but the Reactor.
-        // `Tuning.MineContactAgeing` is that three, already written for the
-        // miner's side of the same rule.
+        // The Thorium arm asks for an *empty* body and not a half-empty one, and
+        // drops the two clauses about the controller's container.
         //
-        // A body that cannot outlive the loaded leg dies on it, and dying
-        // loaded is not a lost body but lost **score**: the tombstone makes
-        // its own tile hot, so it decays at the same three-fold rate and
-        // drops the ore as a pile that then bleeds at 1 T a tick.
-        //
-        // Priced **from the store, for the body as loaded** (#373), and not
-        // from where the candidate stands for the body as it stands. The
-        // candidate is empty when it asks — `emptyHanded` below is the gate —
-        // and an empty body is not the one that walks the leg: a worker's
-        // `11W 12C 12M` is at fatigue parity empty and two ticks a tile under
-        // `Tuning.ReactorLoad`, so read off the empty body this clause let one
-        // through at half the walk it went on to make, and it died of ore
-        // ageing in the Reactor's room with 500 T in its tombstone. The
-        // courier's `20C 10M` is the other way about — weightless empty, at
-        // parity loaded — which is why the number ADR 0067 sized the row
-        // against was right for it and for it alone. From the store, because
-        // that is where the loaded leg begins, and because the store's tile
-        // and the loaded shape are the same for every candidate, so the Atlas
-        // prices the leg once per body shape (`Atlas.walkTicksFrom`) rather
-        // than once per candidate per tick. An unpriceable walk does not
-        // refuse (ADR 0004), and a colony with no errand declared has nothing
-        // to forall over — which is every colony before this season.
-        // **The life a loaded leg costs, with the slack the gate leaves over
-        // it** (#378, `Tuning.DeliveryLifeMargin`). Written as the bare
-        // `walk * MineContactAgeing` this clause was an equality against a
-        // *priced* walk, and every difference between that price and the walk
-        // a body actually makes came out of a margin that was not there: live,
-        // `hauler-558190` drew with about two ticks over a 196-tick leg and
-        // died in the Reactor's room with the load aboard. The margin is what
-        // a flee, a keeper detour or a swamp step is paid out of.
+        // A load must be deliverable by the body that draws it (#354). Under the
+        // 1,000-unit contact cliff the mod spends `floor(log10 store.T)` extra
+        // life a tick on every creep whose tile carries ore, and the ore on that
+        // tile is the body's own load, so the loaded leg costs
+        // `Tuning.MineContactAgeing` ticks of life per tile. Dying loaded is
+        // lost score: the tombstone's tile is hot too, and the pile bleeds 1 T a
+        // tick. Priced from the store for the body as loaded (#373): the empty
+        // candidate is not the body that walks the leg — a worker's `11W 12C 12M`
+        // is at parity empty and two ticks a tile under `ReactorLoad`, and read
+        // off the empty body one died in the Reactor's room with 500 T aboard —
+        // and pricing from the store lets the Atlas price the leg once per body
+        // shape (`Atlas.walkTicksFrom`). `Tuning.DeliveryLifeMargin` is the
+        // slack a flee, a keeper detour or a swamp step is paid out of (#378):
+        // without it the clause was an equality against a priced walk, and
+        // `hauler-558190` drew with two ticks over a 196-tick leg.
         let requiredLife walk =
             walk * view.Tuning.MineContactAgeing * (100 + view.Tuning.DeliveryLifeMargin)
             / 100
@@ -389,21 +172,12 @@ let internal applicable
                     | None -> true
                     | Some walk -> creep.TicksToLive >= requiredLife walk)
 
-        // **And no Work part on the delivery draw** (#373). Part arithmetic
-        // and not a row (ADR 0006), and the same shape of clause as ADR
-        // 0016's comparative gate read the other way round: a Work part is
-        // dead weight on a leg that is all carrying, it is what puts the body
-        // above parity at exactly the load the programme carries, and it is
-        // what the body was cast to spend at home. ADR 0067 sized the
-        // programme as one `[20 Carry; 10 Move]` body, and "one fixed body"
-        // was a row fact and never a gate: any empty light carrier of 500 or
-        // more could win this draw, and once #367 ranked it at the top of
-        // Feeding the empty workers refuelling beside the Storage did — two
-        // 500 T loads went out on worker bodies in one delivery slot, the
-        // courier hauling energy the while, and the second was still afloat
-        // while the Reactor burned down from 176. The mine haul and the
-        // tombstone draw keep the worker: those legs are a few tiles onto the
-        // same floor, and the clause is read behind `deliveryDraw` alone.
+        // No Work part on the delivery draw (#373): dead weight on a leg that is
+        // all carrying, and what puts the body above parity at exactly the load.
+        // "One fixed courier body" was a row fact and never a gate, so once #367
+        // ranked the draw at the top of Feeding the empty workers beside the
+        // Storage took it. Read behind `deliveryDraw` alone: the mine haul and
+        // the tombstone draw are a few tiles onto the same floor.
         let carriesOnly = not (has Work)
 
         match resource with
@@ -422,36 +196,18 @@ let internal applicable
             && not heavy
             && (has Work || not buffer)
             // A standing body fetches from the buffer at its feet and from
-            // nowhere else (#206, ADR 0046): its one Carry is one trip's worth,
-            // and a trip to the Storage — or across a Seam to a pile — is the
-            // commute the row was shaped to never make.
+            // nowhere else (#206).
             && (buffer || not standing)
-    // The Withdraw gate without its one target-shaped clause: a Carry part,
-    // room to put the energy, and ADR 0016's comparative gate — a Work-heavy
-    // body's intake is digging, and picking a pile up off the ground is no more
-    // its work than drawing a container is. The buffer clause has no
-    // counterpart here: ADR 0019 shuts a Work-less body out of the
-    // *controller's* container, and a pile is nobody's buffer.
-    //
-    // **The Thorium arm is the Withdraw's Thorium arm minus the same clause**
-    // (#311, ADR 0057 decision 3): an **empty** body and not #232's half-empty
-    // one, because a body carries one resource at a time and a pile of ore is
-    // the mineral container's own load lying on the floor. It keeps the two
-    // body gates the energy arm keeps — ADR 0016's comparative clause, a
-    // Work-heavy body's intake being digging, and #206's, a trip to the mine
-    // being the commute the [[standing body]] row was shaped never to make —
-    // and it drops `worthTheTrip` for this Task's own stated reason: a pile
-    // decays and a store does not, so there is no later body to leave it for.
+    // The Withdraw gate without its target-shaped clauses: a pile is nobody's
+    // buffer, and it drops `worthTheTrip` because a pile decays and a store does
+    // not, so there is no later body to leave it for (#311).
     | Pickup(_, Thorium) -> has Carry && emptyHanded && not heavy && not standing
     | Pickup(_, Energy) ->
         has Carry && halfEmpty && not carryingThorium && not heavy && not standing
-    // Its two body clauses are read a second time out of line by
-    // `canRefill`, beside Withdraw's (ADR 0050) — the Energy clause is not,
-    // being a state and not a fact about the body.
-    // The delivery half read down the same two columns (ADR 0057 decision 3):
-    // the energy sinks take a body holding energy and the [[storage]]'s Thorium
-    // sink takes one holding Thorium, which is the intake's own gate seen from
-    // the far end — what a body took is what it has to put down.
+    // The two body clauses are read a second time by `canRefill`, beside
+    // Withdraw's; the Energy clause is a state, not a fact about the body. The
+    // delivery half reads down the same two columns: what a body took is what
+    // it has to put down.
     | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing
     | Refill(targetId, Thorium) ->
         let reactor =
@@ -467,137 +223,67 @@ let internal applicable
         // Storage draw is capped to 999 (#319).
         && (not reactor || creep.Thorium <= view.Tuning.ReactorLoad)
         // The exact delivery load is its body/task marker, not the courier's
-        // name: any light carrier may draw it, and once drawn it waits for the
-        // Reactor rather than pouring it straight back into Storage.
-        //
-        //
-        // **A remainder is not that number and is not refused here** (#378).
-        // Widening this clause to "any ore, once the mine is out" was tried and
-        // taken back out: `oreStillComing` is false for every colony with no
-        // diggable deposit, so the widening refused the Storage to the last
-        // *mine* haul, to a body sweeping a crossed room's pile, and to the
-        // carrier walking an arriving consignment in from the terminal (#349) —
-        // the one sink `Planner.mineRefills` is written unconditionally to
-        // guarantee, and #262's stranded carrier all over again. What sends a
-        // remainder to the Reactor instead is the tier gap that was always
-        // going to decide it: the Reactor's Refill is Feeding and this one is
-        // Stock (ADR 0023), so the body prefers the Reactor while it can act on
-        // it and banks the ore when it cannot, which is the right answer to a
-        // full Reactor and to a body that has run out of leg.
+        // name: once drawn it waits for the Reactor rather than pouring straight
+        // back into Storage. A remainder is not that number and is not refused
+        // here (#378): widening this to "any ore, once the mine is out" was
+        // tried and taken out — `oreStillComing` is false for every colony with
+        // no diggable deposit, so it refused the Storage to the last mine haul,
+        // to a crossed room's pile and to a consignment walked in from the
+        // terminal (#349). The tier gap sends a remainder to the Reactor while
+        // the body can act on it and banks it when it cannot.
         && (not storage || creep.Thorium <> view.Tuning.ReactorLoad)
-    // The body gate on Build (#157, widened to every Build by #234), here for
-    // the same reason ADR 0016's Withdraw gate is: the ladder lifts a site over
-    // the Task that was pinning the body, and a rank the whole colony shares is
-    // exactly what travel cost can no longer thin. A full Anchor whose Post has
-    // no standing container under it loses Harvest, and was then outranked off
-    // its own controller and walked fifty tiles at four to seven ticks a step
-    // to spend one Carry into a 5,000-progress site. A heavy body's cross-room
-    // work is a Post and never a delivery (ADR 0020), so the switch is light
-    // bodies' work, and what it costs the colony is one body's walk and never a
-    // garrison's Post. The gate followed the *tier* and now follows the body,
-    // #234 having lifted the ordinary **home** site a rung over the Upgrade
-    // that was the whole of what travel cost pinned the Anchor with. And one
-    // exception over both gates, which is #205's whole change: a container site
-    // **under the body's own feet, on its own Post**
-    // (`Atlas.standsOnPostSite`). Both prohibitions are about a walk, and
-    // neither reaches a site the body is standing on.
+    // A Build is a walk a colony-wide rank cannot thin (#157, #234): light
+    // bodies' work, and neither a heavy body's nor a standing one's. The one
+    // exception is a container site under the body's own feet, on its own Post
+    // (#205): both prohibitions are about a walk, and neither reaches a site
+    // the body is standing on.
     | Build siteId ->
         spending
         && (Atlas.standsOnPostSite atlas creep.Name siteId || (not standing && not heavy))
-    // Repair leaves Upgrade's arm with ADR 0046's gate (a delivery, and a
-    // standing body's Carry is one trip's worth), and the two stay
-    // otherwise identical: a Work part and something to spend.
     | Repair _ -> spending && not standing
-    // The one Task the whole row exists for, and so the one place the standing
-    // gate must not appear (ADR 0046): a standing body spends its Work into the
-    // controller from where it stands. And the sixth gate, which is that
-    // sentence's other half (ADR 0048): a Work-heavy body spends its Work into
-    // the controller only from where it already stands, because it is the walk
-    // that is the loss. ADR 0016 accepted one commute — "a full Anchor off-post
-    // matching Upgrade once empties it and converges" — but there is no *once*:
-    // every release puts the same body back at this gate. The Dual Seat and the
-    // buffer-side row are exactly the shapes this leaves standing (ADR 0020,
-    // ADR 0046), both already inside the Work Area.
+    // The one Task a standing body exists for, so no standing gate; a heavy
+    // body spends its Work into the controller only from where it already
+    // stands.
     | Upgrade _ ->
         spending
         && (not heavy || mayActNow threats atlas creep.Name task)
-        // A standing body holds no commuting body (ADR 0046) and the borrowed
-        // Upgrade is a commute across the Seam (#213): the lift that sends the
-        // pioneers must not send the home upgraders after them. Their own
-        // controller stays the one Task the row exists for, ungated.
+        // The borrowed Upgrade is a commute across the Seam (#213): the lift
+        // that sends the pioneers must not send the home upgraders after them.
         && not (pooled.Borrowed && standing)
-    // Part arithmetic and nothing else (ADR 0006): a reservation is pushed up
-    // by CLAIM parts, so a body without one can no more reserve than a
-    // Work-less one can dig, and a body with one asks for no energy state.
     | Reserve _ -> has BodyPart.Claim
-    // The same part arithmetic, for the same reason (ADR 0047): the engine's
-    // `claimController` is a CLAIM part's act, and a claimer carries nothing.
     | Claim _ -> has BodyPart.Claim
-    // And once more for the third CLAIM act (ADR 0057 decision 5): the engine's
-    // `claimReactor` checks a live CLAIM part and nothing else about the body —
-    // not its store, not its owner's standing, not a cooldown — so the gate is
-    // the same one sentence. Applicability is **not** where the ownership is
-    // read: the Task exists and is held for the whole of a body's residence,
-    // and what the reactor's owner decides is whether this tick's act is issued
-    // (`intentFor`). Read here instead, a body whose flag was safe would be
-    // released the tick it took it and would walk three rooms home.
+    // The engine's `claimReactor` checks a live CLAIM part and nothing else.
+    // Ownership is read at `intentFor`, not here: read here, a body whose flag
+    // was safe would be released the tick it took it and walk three rooms home.
     | Reclaim _ -> has BodyPart.Claim
-    // The same part arithmetic once more (ADR 0006, ADR 0056): an ATTACK part
-    // is what makes a body a Fighter and the only thing that kills an invader,
-    // and a body carrying one asks for no energy state — it spends nothing. No
-    // room clause beside it: the [[work area]] is that room's ring and the
-    // walk to it is what travel cost prices, exactly as an outpost's Harvest is
-    // offered to a body standing at home. Spelled through the row predicate the
-    // [[body class]] ladder itself reads (`isGuardBody`), so "a Fighter body"
-    // is one sentence here and in `bodyClassOf` and the [[capacity]] beside it
-    // cannot come to disagree with the gate.
+    // Spelled through the row predicate the body-class ladder reads, so the
+    // gate and `bodyClassOf` cannot disagree. No room clause: the walk to the
+    // work area is what travel cost prices.
     | Guard _ -> isGuardBody creep
-    // Flee asks for no part and no energy state, only for a creep that is being
-    // shot at and can run (ADR 0033). Two bodies are exempt, and for opposite
-    // reasons. A Work-heavy body **cannot** run: at four to seven ticks a step
-    // an Anchor leaving its Post neither escapes nor digs, and the answer for
-    // the Post is a rampart (ADR 0034) — which is also why the tile under one
-    // is in no Reach. A `Fighter` **will not**: a body carrying an ATTACK part
-    // does not run from the creep it was cast to kill, which is the same part
-    // test the engine's own `findAttack.js` splits its invaders on (ADR 0056
-    // decision 3). Without it a guard standing on the ring is offered both
-    // Tasks of the Safety tier and kept in the fight by travel cost alone — the
-    // ring being underfoot and any safe tile a walk away — so the tick a raid
-    // steps toward it, or a second guard is refused by the room's [[capacity]],
-    // the body the colony bought to stand still walks away from the invader it
-    // was bought for. Spelled through the row predicate the [[body class]]
-    // ladder reads (`isGuardBody`), exactly as the Guard's own gate above is:
-    // the two clauses are one sentence about one class, and a fighting body the
-    // colony was handed rather than cast answers both.
+    // Two bodies are exempt, for opposite reasons: a Work-heavy body cannot run
+    // (the answer for its Post is a rampart), and a Fighter will not. Without
+    // the second a guard on the ring is offered both Safety-tier Tasks and kept
+    // in the fight by travel cost alone, so the tick a raid steps toward it the
+    // body bought to stand still walks away.
     | Flee -> not (isGuardBody creep) && not heavy && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, and `None` where this tick asks
-/// for none. Two different reasons answer `None`, and they are not the same
-/// case: [[flee]] has **no action at all** — it is movement and nothing else
-/// (ADR 0033), so it answers `None` on every tick it is held — while
-/// [[reclaim]] has an action and withholds it on the ticks the reactor is
-/// already ours (ADR 0057 decision 5). The view is a parameter for the second
-/// of those: it is the one act gated on a fact about its *target* rather than
-/// on the body holding the Task.
+/// for none: Flee is movement and nothing else, and Reclaim withholds its act
+/// on the ticks the reactor is already ours — the one act gated on a fact about
+/// its target rather than the body, which is why the view is a parameter.
 let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     match task with
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
-    // The same Intent for a tombstone or a ruin as for a container (#167):
-    // the engine's `withdraw` is one method over every store, and the
-    // Intent names one too since #183 — the Executor hands it whatever
-    // `getObjectById` answers with, and no reader of a log line has to
-    // reconcile a store with a name that says structure.
-    // `None` for the amount, which is what every Withdraw of this colony has
-    // always meant: take as much as the body has room for (ADR 0057 decision 3).
-    // The one place a number is ever named is the delivery's 999-unit load, and
-    // that is decision 4's.
+    // The same Intent for a tombstone or a ruin as for a container: the engine's
+    // `withdraw` is one method over every store. `None` for the amount means
+    // "as much as the body has room for".
     | Withdraw(storeId, resource) ->
         let amount =
-            // The one place a number is named, and since #378 it is the
-            // tick's own load rather than the constant: a whole
-            // `Tuning.ReactorLoad` while the mine still feeds the bank, the
-            // remainder when it does not. Zero means there is no delivery draw
-            // to spell an amount for, so the Withdraw is the ordinary one.
+            // The one place a number is named, and since #378 it is the tick's
+            // own load rather than the constant: a whole `Tuning.ReactorLoad`
+            // while the mine still feeds the bank, the remainder when it does
+            // not. Zero means there is no delivery draw, so the Withdraw is the
+            // ordinary one.
             if
                 resource = Thorium
                 && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
@@ -610,18 +296,13 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
                 None
 
         Some(WithdrawFromStore(creep.Name, storeId, resource, amount))
-    // The reflex's own Intent, issued for a creep that walked: one act, one
-    // vocabulary, whether the energy was underfoot already or was the reason the
-    // creep came. Which is why an arriving picker spells it twice and `decide`
-    // keeps one — this Task owns its own act, and the reflex is what gives way.
-    // One act for both resources: the engine's `pickup` takes the object and
-    // no resource argument, the pile being one resource already (#311).
+    // The reflex's own Intent, issued for a creep that walked: an arriving
+    // picker spells it twice and `decide` keeps one. One act for both
+    // resources: the engine's `pickup` takes no resource argument.
     | Pickup(pileId, _) -> Some(PickupPile(creep.Name, pileId))
-    // One Task, one act, and — since ADR 0054 — sometimes many structures: a
-    // [[refill cluster]]'s Refill names a place, and *which* member of it the
-    // energy lands in is settled here, at arrival, off the tile the body
-    // actually stands on (`Atlas.refillTarget`). Every other Refill resolves
-    // through the same call, so the Emitter has one line and not a branch.
+    // A refill cluster's Refill names a place; which member the energy lands in
+    // is settled here, at arrival, off the tile the body stands on. Every other
+    // Refill resolves through the same call.
     | Refill(structureId, resource) ->
         Atlas.refillTarget atlas creep.Name structureId resource
         |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
@@ -630,19 +311,12 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
-    // **The one act gated on a fact about its target rather than on the body**
-    // (ADR 0057 decision 5): it is issued on a tick the reactor is not ours and
-    // on no other, and every other tick the resident stands on the ring and
-    // says nothing. The engine would take the act either way — `claimReactor`
-    // has no ownership precondition and no cooldown, and setting `user` to the
-    // user it already holds changes nothing — so what this buys is not
-    // correctness but legibility: an act in the Executor's log is a flag that
-    // had been taken from us, and a re-claimer that spoke every tick would make
-    // the one tick that mattered unreadable.
-    //
-    // Absence is **not ours** (`SpatialInfo.ownsTarget`, ADR 0004): the body
-    // standing here is the colony's only vision of the room, and a tick with no
-    // answer is a tick to act rather than a tick to wait.
+    // Issued on a tick the reactor is not ours and on no other. The engine
+    // would take the act either way — `claimReactor` has no ownership
+    // precondition and no cooldown — so what this buys is legibility: an act in
+    // the Executor's log is a flag that had been taken from us. Absence is not
+    // ours: the body standing here is the colony's only vision of the room, and
+    // a tick with no answer is a tick to act.
     | Reclaim reactorId ->
         if SpatialInfo.ownsTarget view.Spatial reactorId then
             None
@@ -666,42 +340,24 @@ let private glyphFor =
     | Upgrade _ -> "⚡"
     | Reserve _ -> "🚩"
     | Claim _ -> "🏴"
-    // The reactor's own glyph, and it is said on **every** tick the Task is
-    // held and not only on the ticks the act fires — where the [[miner]]'s is
-    // withheld on a cooldown tick (ADR 0057 decision 2). The two are not the
-    // same case: a miner's silence makes a one-in-six rhythm legible, where a
-    // re-claimer's would make the row invisible for the 99.9% of its life that
-    // *is* the work. Standing there holding the Task is the whole of what this
-    // body is for, so the bubble says so.
+    // Said on every tick the Task is held, not only on the ticks the act
+    // fires: standing there holding the Task is the whole of what this body is
+    // for. (The miner's is withheld on a cooldown tick; see `emit`.)
     | Reclaim _ -> "☢️"
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
 
-/// The [[threat]] a [[guard]] swings at, out of the ones standing in the room
-/// its Task names and passing the caller's own gate (ADR 0056): **the one
-/// nearest a [[post]] of that room**, ties by id. That is "between the invader
-/// and the [[anchor]]" said in this colony's vocabulary and the only place the
-/// Anchor enters the geometry — the engine's own `findAttack.js` chases the
-/// closest hostile creep by path, so a guard standing on the ring of the invader
-/// nearest the Post *is* between it and everything behind it, and a tile set of
-/// ours would be a second, weaker spelling of a fact the engine already
-/// guarantees. With no Post standing, the nearest Threat to the guard — a room
-/// with no garrison in it has nothing to stand in front of, so the body fights
-/// what is closest. A Threat and never "a hostile": the healer beside an invader
-/// is what the row's count rule prices, not what its ATTACK parts are spent on.
-/// None where the room holds none, or where the projection places the guard
-/// nowhere (ADR 0004).
+/// The Threat a guard swings at, out of the ones standing in the room its Task
+/// names and passing the caller's own gate: the one nearest a Post of that
+/// room, ties by id; with no Post standing, the nearest to the guard. None
+/// where the room holds none, or where the projection places the guard nowhere.
 ///
-/// **The gate is the caller's and stands ahead of the choice**, which is where
-/// ADR 0056 decision 2's one sentence reads it behind: a Threat the swing cannot
-/// reach is not a Threat this answer is about. Ordered the other way round, a
-/// guard standing on the ring of the *second* invader of a two-creep raid is
+/// The gate is the caller's and stands *ahead* of the choice, which narrows
+/// ADR-0056 decision 2 without overturning it: ordered the other way round, a
+/// guard standing on the ring of the second invader of a two-creep raid is
 /// handed the one nearest the Post, finds it three tiles off, and swings at
-/// nothing while the invader beside it deals 40 a tick — 90 damage a tick
-/// forgone for a pick that moves nothing else, the mover aiming at the whole
-/// ring either way. Where the nearest-Post Threat is in reach — the 90% raid of
-/// one invader, and every case the ADR argues about — the two readings answer
-/// alike, which is why this narrows decision 2 rather than overturning it.
+/// nothing while the invader beside it deals 40 a tick. Where the nearest-Post
+/// Threat is in reach the two readings answer alike.
 let private guardTarget
     (view: ColonyView)
     atlas
@@ -759,27 +415,21 @@ let selfHeal (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
         else
             plan)
 
-/// Whether a Thorium harvest is **held this tick** by the extractor's clock
-/// (ADR 0057 decision 2). `EXTRACTOR_COOLDOWN` is 5 and the engine runs the
-/// intent pass before the object pass — `extractors/tick.js` writes the 5 at the
-/// end of the harvest tick and decrements it once per tick after — so successive
-/// harvests land **six** ticks apart and the other five are refused outright.
+/// Whether a Thorium harvest is held this tick by the extractor's clock.
+/// `EXTRACTOR_COOLDOWN` is 5 and the engine runs the intent pass before the
+/// object pass — `extractors/tick.js` writes the 5 at the end of the harvest
+/// tick and decrements it once per tick after — so successive harvests land
+/// **six** ticks apart and the other five are refused outright.
 ///
-/// **The gate is here and never in applicability**, and the distinction is the
-/// one ADR 0013 and ADR 0025 spent two decisions on. A cooldown is five ticks
-/// long and a re-match is a flood: a Task that vanished and returned every sixth
-/// tick would churn the pool the way ADR 0054's ring of extensions did, for a
-/// body that has nowhere else to be and no way to get there. **The Task exists
-/// exactly while the deposit does; what the cooldown decides is whether this
-/// tick's act is issued** — so the body keeps its Task, stands on its Post, and
-/// the [[verdict]] does not claim it dug.
+/// The gate is here and never in applicability: a Task that vanished and
+/// returned every sixth tick would churn the pool for a body that has nowhere
+/// else to be. The Task exists exactly while the deposit does; the cooldown
+/// decides whether this tick's act is issued.
 ///
-/// A deposit with **no extractor standing on it** is held on the same footing
-/// and not by a different rule: `harvest.js` refuses a mineral with no extractor
-/// on its tile, so the act is as impossible as it is on a cooldown tick, and
-/// issuing it would be one `ERR_NOT_FOUND` a tick for as long as the site takes
-/// to build. Every other Task, and every source's Harvest, answers false (ADR
-/// 0004).
+/// A deposit with no extractor standing on it is held on the same footing:
+/// `harvest.js` refuses a mineral with no extractor on its tile, and issuing it
+/// would be one `ERR_NOT_FOUND` a tick for as long as the site takes to build.
+/// Every other Task answers false.
 let private heldByCooldown atlas task =
     match task with
     | Harvest rockId when Atlas.isMineral atlas rockId ->
@@ -790,14 +440,13 @@ let private heldByCooldown atlas task =
 
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
-/// only while the source holds energy (ADR 0025). Anticipatory dispatch and the
-/// occupancy surcharge (ADR 0008) both price a walk high enough to land a creep
-/// a tick or two early, so the gate is what keeps the engine's
-/// ERR_NOT_ENOUGH_RESOURCES spam structurally impossible. The Guard is the one
-/// Task judged outside that gate: its acts reach a creep the projection places
-/// nothing for, so `Atlas.mayAct` — which asks where a Task's *target* stands —
-/// answers false for it on every tick, and the range it is really gated on is
-/// the swing `guardIntent` measures itself (ADR 0056).
+/// only while the source holds energy. Anticipatory dispatch and the occupancy
+/// surcharge both price a walk high enough to land a creep a tick or two early,
+/// so the gate is what keeps the engine's ERR_NOT_ENOUGH_RESOURCES spam
+/// structurally impossible. The Guard is judged outside that gate: its acts
+/// reach a creep the projection places nothing for, so `Atlas.mayAct` answers
+/// false for it on every tick, and the range it is really gated on is the
+/// swing `guardIntent` measures itself.
 let private actionIntents
     (view: ColonyView)
     atlas
@@ -831,15 +480,12 @@ let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
             | Some task -> actionIntents view atlas threats creep task
             | None -> [])
 
-    // Every assigned creep says its Task's glyph every tick; unassigned
-    // creeps say nothing. One exception, and it is the one ADR 0057 decision 2
-    // writes out: a [[miner]] says ⛏ on the ticks it digs and **nothing on the
-    // ticks it waits**, so the one-in-six rhythm the extractor's cooldown
-    // imposes is legible in the viewer rather than hidden behind a glyph that
-    // claims a dig every tick. Read off the same gate the act is withheld by,
-    // so the two cannot come to disagree **about the cooldown** — the bubble
-    // goes on showing the Task through every other reason an act is withheld,
-    // `mayActNow` and a drained source included, which is what it is for.
+    // Every assigned creep says its Task's glyph every tick; unassigned creeps
+    // say nothing. One exception: a miner says ⛏ on the ticks it digs and
+    // nothing on the ticks it waits, so the one-in-six rhythm is legible in the
+    // viewer. Read off the same gate the act is withheld by, so the two cannot
+    // disagree about the cooldown; the bubble goes on showing the Task through
+    // every other reason an act is withheld.
     let says =
         view.Creeps
         |> List.choose (fun creep ->
