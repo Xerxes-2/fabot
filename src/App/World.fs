@@ -1,11 +1,28 @@
 // Reads the engine, once, and files what it answered under the room names it
 // answered for: this tick's World. The only code that reads the game's
 // objects; what one colony makes of them is `ColonyView.ofWorld`'s, in Core.
+// Every string it stores — an id, a room name, an owner — is copied flat
+// through `intern` (#399): the engine hands them over as V8 slices, and a
+// slice held past the tick pins the room data it was cut from.
 module Fabot.World
 
 open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.Types
+
+// One flat copy per engine string per tick (#399): an id is read half a
+// dozen times a tick, and the table keys on the engine's own string, whose
+// hash V8 caches, so the repeats cost a lookup and not a copy. Cleared at
+// the top of every tick, so the sliced keys die with it.
+let private interned = System.Collections.Generic.Dictionary<string, string>()
+
+let private intern (s: string) : string =
+    match interned.TryGetValue s with
+    | true, copy -> copy
+    | _ ->
+        let copy = flat s
+        interned.[s] <- copy
+        copy
 
 /// Classify one tile of engine terrain into the Core's three states.
 let private terrainAt (terrain: ITerrain) x y =
@@ -19,13 +36,14 @@ let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 
 /// The tile a creep stands on, room and all: the one reading of an engine
 /// creep's position.
-let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
+let private tileOf (c: ICreep) : RoomPos =
+    RoomPos.at (intern c.room.name) (posOf c.pos)
 
 /// A creep's name as a string that owns nothing (#396): the engine hands
 /// `name` over sliced, a slice pins its ~4.5 KB parent, and the Transition
 /// log holds names across ticks (measured 2026-09-21: 6.3 MB over 1,500
-/// entries). `Bindings.flat` says why not a JSON round trip.
-let private nameOf (c: ICreep) : string = flat c.name
+/// entries). `Bindings.flat` says why not a JSON round trip; `intern` copies once.
+let private nameOf (c: ICreep) : string = intern c.name
 
 /// Classify an engine part-type string into the Core's body vocabulary:
 /// the reverse of the Core's one part-name table. The engine's part set is
@@ -46,7 +64,7 @@ let private reactorOwnerOf (reactor: IReactor) =
     elif isNull (box reactor.owner) then
         ReactorOwner.Unowned
     else
-        ReactorOwner.Rival reactor.owner.username
+        ReactorOwner.Rival(intern reactor.owner.username)
 
 /// One room's terrain, in the two windows the projection assembles from it,
 /// off one engine read.
@@ -172,7 +190,7 @@ let private seenFacts
             let st = o :?> IStructure
             st, builtKindOf st.structureType)
 
-    let ourIds = mine |> Array.map (fun (st, _) -> st.id) |> Set.ofArray
+    let ourIds = mine |> Array.map (fun (st, _) -> (intern st.id)) |> Set.ofArray
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
@@ -249,24 +267,24 @@ let private seenFacts
             count <- count + 1
 
         for s in sources do
-            note s.id
+            note (intern s.id)
 
         for (st, _) in structures do
-            note st.id
+            note (intern st.id)
 
         for (site, _) in sites do
-            note site.id
+            note (intern site.id)
 
         for c in controllers do
-            note c.id
+            note (intern c.id)
 
         for m in minerals do
-            note m.id
+            note (intern m.id)
 
         for r in reactors do
-            note r.id
+            note (intern r.id)
 
-        match censusMemo.TryGetValue room.name with
+        match censusMemo.TryGetValue(intern room.name) with
         | true, held when held.Sum = sum && held.Xor = bits && held.Count = count -> held
         | _ ->
             let built =
@@ -283,28 +301,31 @@ let private seenFacts
                         Map.ofArray (
                             Array.concat
                                 [
-                                    sources |> Array.map (fun s -> s.id, Source)
+                                    sources |> Array.map (fun s -> (intern s.id), Source)
                                     structures
-                                    |> Array.map (fun (st, kind) -> st.id, Structure kind)
-                                    sites |> Array.map (fun (site, kind) -> site.id, Site kind)
-                                    controllers |> Array.map (fun c -> c.id, Controller)
-                                    minerals |> Array.map (fun m -> m.id, Mineral)
+                                    |> Array.map (fun (st, kind) -> (intern st.id), Structure kind)
+                                    sites
+                                    |> Array.map (fun (site, kind) -> (intern site.id), Site kind)
+                                    controllers |> Array.map (fun c -> (intern c.id), Controller)
+                                    minerals |> Array.map (fun m -> (intern m.id), Mineral)
                                 ]
                         )
                     Positions =
                         Map.ofArray (
                             Array.concat
                                 [
-                                    sources |> Array.map (fun s -> s.id, posOf s.pos)
-                                    structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
-                                    sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
-                                    controllers |> Array.map (fun c -> c.id, posOf c.pos)
-                                    minerals |> Array.map (fun m -> m.id, posOf m.pos)
+                                    sources |> Array.map (fun s -> (intern s.id), posOf s.pos)
+                                    structures
+                                    |> Array.map (fun (st, _) -> (intern st.id), posOf st.pos)
+                                    sites
+                                    |> Array.map (fun (site, _) -> (intern site.id), posOf site.pos)
+                                    controllers |> Array.map (fun c -> (intern c.id), posOf c.pos)
+                                    minerals |> Array.map (fun m -> (intern m.id), posOf m.pos)
                                 ]
                         )
                 }
 
-            censusMemo.[room.name] <- built
+            censusMemo.[(intern room.name)] <- built
             built
 
     {
@@ -315,8 +336,8 @@ let private seenFacts
                 TargetPositions =
                     (stable.Positions,
                      Array.append
-                         (dropped |> Array.map (fun (r, _) -> r.id, posOf r.pos))
-                         (tombstones |> Array.map (fun r -> r.id, posOf r.pos)))
+                         (dropped |> Array.map (fun (r, _) -> (intern r.id), posOf r.pos))
+                         (tombstones |> Array.map (fun r -> (intern r.id), posOf r.pos)))
                     ||> Array.fold (fun places (id, tile) -> Map.add id tile places)
                 // This room's creeps, not the world's: a creep standing
                 // elsewhere filed here under that room's coordinates is a
@@ -368,15 +389,16 @@ let private seenFacts
         TargetKinds =
             (stable.Kinds,
              Array.append
-                 (dropped |> Array.map (fun (r, resource) -> r.id, Dropped resource))
-                 (tombstones |> Array.map (fun r -> r.id, Tombstone)))
+                 (dropped |> Array.map (fun (r, resource) -> (intern r.id), Dropped resource))
+                 (tombstones |> Array.map (fun r -> (intern r.id), Tombstone)))
             ||> Array.fold (fun kinds (id, kind) -> Map.add id kind kinds)
         // Hits on the repairable kinds only; fields nobody decides on stay out.
         Hits =
             structures
             |> Array.filter (fun (st, kind) ->
-                (wholeLine kind).IsSome && (not (needsOwner kind) || Set.contains st.id ourIds))
-            |> Array.map (fun (st, _) -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
+                (wholeLine kind).IsSome
+                && (not (needsOwner kind) || Set.contains (intern st.id) ourIds))
+            |> Array.map (fun (st, _) -> (intern st.id), { Hits = st.hits; HitsMax = st.hitsMax })
             |> Map.ofArray
         // Stored energy, with the transient stores (tombstones, piles) in the
         // same table.
@@ -385,12 +407,16 @@ let private seenFacts
                 [
                     storedStructures
                     |> Array.map (fun (st, _) ->
-                        st.id, st.store.getUsedCapacity (resourceName Energy))
+                        (intern st.id), st.store.getUsedCapacity (resourceName Energy))
                     tombstones
-                    |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Energy))
+                    |> Array.map (fun r ->
+                        (intern r.id), r.store.getUsedCapacity (resourceName Energy))
                     dropped
                     |> Array.choose (fun (r, resource) ->
-                        if resource = Energy then Some(r.id, r.amount) else None)
+                        if resource = Energy then
+                            Some((intern r.id), r.amount)
+                        else
+                            None)
                 ]
             |> Map.ofArray
         // The Thorium beside it, the deposit's own remaining amount included.
@@ -400,20 +426,24 @@ let private seenFacts
                 [
                     storedStructures
                     |> Array.map (fun (st, _) ->
-                        st.id, st.store.getUsedCapacity (resourceName Thorium))
-                    minerals |> Array.map (fun m -> m.id, m.mineralAmount)
+                        (intern st.id), st.store.getUsedCapacity (resourceName Thorium))
+                    minerals |> Array.map (fun m -> (intern m.id), m.mineralAmount)
                     // A dropped pile holds its amount in `object[resourceType]`
                     // rather than a `store`, which is why the mod's contact
                     // penalty skips it.
                     dropped
                     |> Array.choose (fun (r, resource) ->
-                        if resource = Thorium then Some(r.id, r.amount) else None)
+                        if resource = Thorium then
+                            Some((intern r.id), r.amount)
+                        else
+                            None)
                     // A tombstone or a ruin holds its ore in a real store, so
                     // the mod's contact penalty counts it and `withdraw`
                     // empties it. Without this column one reached the pool
                     // with no amount (#359).
                     tombstones
-                    |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Thorium))
+                    |> Array.map (fun r ->
+                        (intern r.id), r.store.getUsedCapacity (resourceName Thorium))
                 ]
             |> Array.filter (fun (_, held) -> held > 0)
             |> Map.ofArray
@@ -423,7 +453,7 @@ let private seenFacts
         Cooldowns =
             structures
             |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
-            |> Array.map (fun (st, _) -> st.id, st.cooldown)
+            |> Array.map (fun (st, _) -> (intern st.id), st.cooldown)
             |> Map.ofArray
         // The reactors' owners, read off `my` and `owner` as the controller's
         // are (the mod's `my` is undefined, not false, on one nobody owns).
@@ -435,7 +465,7 @@ let private seenFacts
         Owners =
             reactorFacts
             |> Array.map (fun (reactor, owner) ->
-                reactor.id,
+                (intern reactor.id),
                 match owner with
                 | ReactorOwner.Ours -> Ownership.Ours
                 | ReactorOwner.Unowned -> Ownership.Unowned
@@ -445,7 +475,7 @@ let private seenFacts
             reactorFacts
             |> Array.map (fun (reactor, owner) ->
                 {
-                    Id = reactor.id
+                    Id = (intern reactor.id)
                     Owner = owner
                     Thorium = reactor.store.getUsedCapacity (resourceName Thorium)
                     ContinuousWork = reactor.continuousWork
@@ -491,9 +521,9 @@ let private seenFacts
                                 // reads different clocks off the NPC's and a
                                 // player's.
                                 let holder =
-                                    if Some c.reservation.username = ours then
+                                    if Some(intern c.reservation.username) = ours then
                                         ReservationHolder.Ours
-                                    elif c.reservation.username = invaderUsername then
+                                    elif (intern c.reservation.username) = invaderUsername then
                                         ReservationHolder.Invader
                                     else
                                         ReservationHolder.Rival
@@ -512,7 +542,7 @@ let private seenFacts
             |> Option.filter (fun c -> not (isNull (box c.my)) && c.my)
             |> Option.map (fun c ->
                 {
-                    Id = c.id
+                    Id = (intern c.id)
                     Level = c.level
                     TicksToDowngrade = c.ticksToDowngrade
                     SafeModeAvailable = c.safeModeAvailable
@@ -540,7 +570,7 @@ let private seenFacts
             |> Array.filter (fun (_, kind) -> isRefillable kind)
             |> Array.map (fun (st, kind) ->
                 {
-                    Id = st.id
+                    Id = (intern st.id)
                     FreeCapacity = st.store.getFreeCapacity (resourceName Energy)
                     Kind = kind
                 }
@@ -553,7 +583,7 @@ let private seenFacts
             sources
             |> Array.map (fun s ->
                 {
-                    Id = s.id
+                    Id = (intern s.id)
                     TicksToRestock =
                         if s.energy > 0 || isNull (box s.ticksToRegeneration) then
                             0
@@ -568,7 +598,7 @@ let private seenFacts
             sites
             |> Array.map (fun (site, _) ->
                 ({
-                    Id = site.id
+                    Id = (intern site.id)
                     Left = site.progressTotal - site.progress
                 }
                 : ConstructionSiteInfo))
@@ -580,11 +610,11 @@ let private seenFacts
                 let c = o :?> ICreep
 
                 {
-                    Id = c.id
-                    Owner = c.owner.username
+                    Id = (intern c.id)
+                    Owner = (intern c.owner.username)
                     // The room being scanned and not the creep's own field: a
                     // hostile is found *in* this room, which is what places it.
-                    Pos = RoomPos.at room.name (posOf c.pos)
+                    Pos = RoomPos.at (intern room.name) (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                     TicksToLive = c.ticksToLive
                 }
@@ -599,7 +629,7 @@ let private seenFacts
             |> Array.filter (fun st -> st.structureType = structureInvaderCore)
             |> Array.map (fun st ->
                 ({
-                    RoomName = room.name
+                    RoomName = (intern room.name)
                     CollapseTick = collapseTickOf st
                     // Every core carries a level, so the fallback is
                     // unreachable, and it reads the wrong direction (safe to
@@ -709,6 +739,8 @@ let mutable roomCosts: (string * float) list = []
 let mutable roomsBegan: float = 0.0
 
 let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
+    interned.Clear()
+
     let spawns = objectValues<ISpawn> Game.spawns
 
     // The name the engine spells us, off the controller of a room one of our
@@ -721,17 +753,17 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
             if isNull (box c) || isNull (box c.owner) then
                 None
             else
-                Some c.owner.username)
+                Some(intern c.owner.username))
 
     // Our spawns grouped by the room they stand in, swept once.
     let spawnsByRoom =
         spawns
         |> Array.map (fun s ->
-            s.room.name,
+            (intern s.room.name),
             {
-                Name = s.name
-                Id = s.id
-                RoomName = s.room.name
+                Name = (intern s.name)
+                Id = (intern s.id)
+                RoomName = (intern s.room.name)
                 IsSpawning = not (isNull s.spawning)
             })
         |> Array.toList
@@ -748,7 +780,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
         |> List.partition (fun c -> not c.spawning)
 
     let byRoom (creeps: ICreep list) =
-        creeps |> List.groupBy (fun c -> c.room.name) |> Map.ofList
+        creeps |> List.groupBy (fun c -> (intern c.room.name)) |> Map.ofList
 
     let standingByRoom = byRoom standing
     let castingByRoom = byRoom casting
@@ -758,7 +790,9 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
 
     // The rooms vision answered for, read once and used twice: which rooms
     // the world holds facts for, and which may stamp a sighting.
-    let seen = objectEntries Game.rooms |> Array.map fst |> Array.toList
+    // Property names are internalized by V8 — measured flat for `Game.creeps`
+    // (#396) — and copied all the same: the boundary rule has no exceptions.
+    let seen = objectEntries Game.rooms |> Array.map (fst >> intern) |> Array.toList
 
     let mutable costs = []
     roomsBegan <- Game.cpu.getUsed ()
@@ -807,7 +841,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
             standing
             |> List.map (fun c ->
                 {
-                    Room = c.room.name
+                    Room = (intern c.room.name)
                     Info =
                         {
                             Name = nameOf c
@@ -830,7 +864,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                                 |> List.map (fun p -> bodyPartOf p.``type``)
                                 |> partsOf
                             Moved =
-                                match Map.tryFind c.name lastPositions with
+                                match Map.tryFind (intern c.name) lastPositions with
                                 | Some last -> last <> tileOf c
                                 | None -> false
                         }
