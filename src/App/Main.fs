@@ -62,7 +62,8 @@ let mutable private sightings: Map<string, RoomSighting> = Map.empty
 // the hundred standing rows to add one (`ObserveMemory.appendCpu`).
 let mutable private cpuLine: Observe.CpuState option = None
 
-// Which ordered room pairs a Seam band joins, on the heap and never emptied:
+// Which ordered room pairs a Seam band joins, on the heap and emptied only
+// by a reset or the console (#395):
 // every answer is the terrain's, and the one moving input (whether the world
 // holds both rooms) is read ahead of the table (`World.linkedRecalling`).
 let private joins = JoinTable()
@@ -86,16 +87,14 @@ let private sizes () =
         |> Map.toList
         |> List.map (fun (home, memo) ->
             home,
-            box (
-                createObj
-                    [
-                        "walks" ==> memo.Walks.Count
-                        "seams" ==> memo.SeamWalks.Count
-                        "far" ==> memo.FarFields.Count
-                        "sites" ==> List.length memo.SiteIntents
-                        "demand" ==> List.length memo.HaulerDemand
-                    ]
-            ))
+            createObj
+                [
+                    "walks" ==> memo.Walks.Count
+                    "seams" ==> memo.SeamWalks.Count
+                    "far" ==> memo.FarFields.Count
+                    "sites" ==> List.length memo.SiteIntents
+                    "demand" ==> List.length memo.HaulerDemand
+                ])
 
     let log = observeLog |> Option.defaultValue Map.empty
 

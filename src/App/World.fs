@@ -3,6 +3,7 @@
 // objects; what one colony makes of them is `ColonyView.ofWorld`'s, in Core.
 module Fabot.World
 
+open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.Types
 
@@ -19,6 +20,13 @@ let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 /// The tile a creep stands on, room and all: the one reading of an engine
 /// creep's position.
 let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
+
+/// A creep's name as a string that owns nothing (#396): the engine hands
+/// `name` over sliced, a slice pins its ~4.5 KB parent, and the Transition
+/// log holds names across ticks (measured 2026-09-21: 6.3 MB over 1,500
+/// entries). A JSON round trip is a fresh sequential string.
+let private nameOf (c: ICreep) : string =
+    emitJsExpr c.name "JSON.parse(JSON.stringify($0))"
 
 /// Classify an engine part-type string into the Core's body vocabulary:
 /// the reverse of the Core's one part-name table. The engine's part set is
@@ -314,7 +322,7 @@ let private seenFacts
                 // This room's creeps, not the world's: a creep standing
                 // elsewhere filed here under that room's coordinates is a
                 // phantom occupant the Resolver arbitrates against.
-                CreepPositions = standing |> List.map (fun c -> c.name, posOf c.pos) |> Map.ofList
+                CreepPositions = standing |> List.map (fun c -> nameOf c, posOf c.pos) |> Map.ofList
                 // Structures a creep cannot stand on block their tile; the
                 // kinds it can are the Core's own predicate (Screeps
                 // OBSTACLE_OBJECT_TYPES).
@@ -525,7 +533,7 @@ let private seenFacts
             casting
             |> List.map (fun c ->
                 {
-                    Name = c.name
+                    Name = nameOf c
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
                 })
         Refillables =
@@ -803,7 +811,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                     Room = c.room.name
                     Info =
                         {
-                            Name = c.name
+                            Name = nameOf c
                             TicksToLive = c.ticksToLive
                             Fatigue = c.fatigue
                             Hits = { Hits = c.hits; HitsMax = c.hitsMax }
@@ -836,5 +844,5 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
 let positions () : (string * RoomPos) list =
     objectValues<ICreep> Game.creeps
     |> Array.filter (fun c -> not c.spawning)
-    |> Array.map (fun c -> c.name, tileOf c)
+    |> Array.map (fun c -> nameOf c, tileOf c)
     |> Array.toList
