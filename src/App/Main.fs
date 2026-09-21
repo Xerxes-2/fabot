@@ -1,5 +1,6 @@
 module Fabot.Main
 
+open Fable.Core
 open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core
@@ -70,6 +71,63 @@ let private joins = JoinTable()
 // heap and written back one changed creep at a time
 // (`ObserveMemory.saveChanged`). It was the largest leaf in Memory.
 let mutable private observeLog: Observe.ObserveState option = None
+
+[<Emit("globalThis")>]
+let private globalThis: obj = jsNative
+
+// The five process-lifetime slots, on the global for the console (#395):
+// `__fabot.sizes()` and `__fabot.drop.<slot>()`, so a heap that climbs with
+// every count flat can be attributed by dropping one slot, `gc()`, and
+// reading `Game.cpu.getHeapStatistics()` — each drop is a state the loop
+// already recovers from. Read by nothing in the loop.
+let private sizes () =
+    let memos =
+        planMemos
+        |> Map.toList
+        |> List.map (fun (home, memo) ->
+            home,
+            box (
+                createObj
+                    [
+                        "walks" ==> memo.Walks.Count
+                        "seams" ==> memo.SeamWalks.Count
+                        "far" ==> memo.FarFields.Count
+                        "sites" ==> List.length memo.SiteIntents
+                        "demand" ==> List.length memo.HaulerDemand
+                    ]
+            ))
+
+    let log = observeLog |> Option.defaultValue Map.empty
+
+    createObj
+        [
+            "memos" ==> createObj memos
+            "sightings" ==> Map.count sightings
+            "cpuTicks"
+            ==> (cpuLine |> Option.map (fun l -> List.length l.Ticks) |> Option.defaultValue 0)
+            "cpuSpans"
+            ==> (cpuLine |> Option.map (fun l -> List.length l.Spans) |> Option.defaultValue 0)
+            "logCreeps" ==> Map.count log
+            "logEntries"
+            ==> (log |> Map.toList |> List.sumBy (fun (_, c) -> List.length c.Entries))
+            "joins" ==> joins.Count
+        ]
+
+do
+    globalThis?__fabot <-
+        createObj
+            [
+                "sizes" ==> sizes
+                "drop"
+                ==> createObj
+                        [
+                            "planMemos" ==> (fun () -> planMemos <- Map.empty)
+                            "sightings" ==> (fun () -> sightings <- Map.empty)
+                            "cpuLine" ==> (fun () -> cpuLine <- None)
+                            "observeLog" ==> (fun () -> observeLog <- None)
+                            "joins" ==> (fun () -> joins.Clear())
+                        ]
+            ]
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
