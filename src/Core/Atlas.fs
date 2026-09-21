@@ -1464,6 +1464,25 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
             fromRoom
             toRoom)
 
+/// The table with only the entries `keep` answers for, rebuilt in place
+/// through `Clear` rather than removed entry by entry (#397): the bundled
+/// `Dictionary.Remove` splices an entry out of its bucket and leaves the
+/// emptied bucket in the hash map, on the order of 100 B per key hash ever held, where
+/// `Clear` resets the map. Walked on a census move only, hundreds of ticks
+/// apart, so the per-tick eviction's leftovers are swept here.
+let private rebuilt (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep: 'k -> bool) =
+    let kept = ResizeArray()
+
+    for KeyValue(key, value) in table do
+        if keep key then
+            kept.Add((key, value))
+
+    if kept.Count < table.Count then
+        table.Clear()
+
+        for key, value in kept do
+            table.[key] <- value
+
 /// ADR-0032
 /// Drop, from the three census-keyed tables this Atlas was handed, every
 /// entry that read a room whose census moved — in place, because the tables
@@ -1482,46 +1501,23 @@ let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
     let departed =
         moved |> Set.exists (fun room -> not (Map.containsKey room atlas.Spatial.Rooms))
 
-    let staleWalks = ResizeArray()
+    rebuilt atlas.Walks (fun (_, _, goalRoom) ->
+        if goalRoom = atlas.Home then
+            not (moved.Contains atlas.Home)
+        else
+            not departed
+            && not (
+                touches (atlas.Home :: goalRoom :: List.concat (routes atlas atlas.Home goalRoom))
+            ))
 
-    for KeyValue((_, _, goalRoom) as key, _) in atlas.Walks do
-        let stale =
-            if goalRoom = atlas.Home then
-                moved.Contains atlas.Home
-            else
-                departed
-                || touches (
-                    atlas.Home :: goalRoom :: List.concat (routes atlas atlas.Home goalRoom)
-                )
-
-        if stale then
-            staleWalks.Add key
-
-    for key in staleWalks do
-        atlas.Walks.Remove key |> ignore
-
-    let staleSeams = ResizeArray()
-
-    for KeyValue((fromRoom, toRoom) as key, _) in atlas.SeamWalks do
-        if touches [ fromRoom; toRoom ] then
-            staleSeams.Add key
-
-    for key in staleSeams do
-        atlas.SeamWalks.Remove key |> ignore
-
-    let staleFields = ResizeArray()
-
-    for KeyValue((chain, _, _, _, _, _) as key, _) in atlas.FarFields.PerCensus do
-        if touches chain then
-            staleFields.Add key
-
-    for key in staleFields do
-        atlas.FarFields.PerCensus.Remove key |> ignore
+    rebuilt atlas.SeamWalks (fun (fromRoom, toRoom) -> not (touches [ fromRoom; toRoom ]))
+    rebuilt atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
 
 /// Drop every far field whose Task is not in `live` (#392): a Task carries an
 /// object id, so a quiet census leaks one field per Task that ever priced a
-/// far leg. A Task that comes back costs one re-flood. In place, as
-/// `evictRooms`.
+/// far leg. A Task that comes back costs one re-flood. In place and not
+/// `rebuilt`: this runs every tick, and the buckets it leaves are swept by
+/// the next census move (#397).
 let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
     let stale = ResizeArray()
 
