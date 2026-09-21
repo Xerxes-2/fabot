@@ -405,7 +405,10 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
       getUsed: () => performance.now() - tickStart,
       // The CPU line reads the isolate's heap (#391); the harness has no
       // isolate, so it answers the process's own, which nothing here judges.
-      getHeapStatistics: () => ({ used_heap_size: process.memoryUsage().heapUsed }),
+      getHeapStatistics: () => ({
+        used_heap_size: process.memoryUsage().heapUsed,
+        externally_allocated_size: process.memoryUsage().external,
+      }),
     },
     map: {
       // Answered by room name. The engine answers for every room in the

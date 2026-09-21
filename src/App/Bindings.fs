@@ -6,6 +6,10 @@ open Fable.Core
 /// `Game.cpu.getHeapStatistics()`: the V8 heap of our isolate, in bytes.
 type IHeapStatistics =
     abstract used_heap_size: float
+    /// Memory "not included in the v8 heap but counts against this isolate's
+    /// memory limit"; the docs name ArrayBuffers "over a certain size", so a
+    /// 10 KB flood field lands here. Other external accounting rides too.
+    abstract externally_allocated_size: float
 
 type ICpu =
     abstract getUsed: unit -> float

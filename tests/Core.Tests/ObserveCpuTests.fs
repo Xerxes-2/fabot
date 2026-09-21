@@ -36,6 +36,7 @@ let private costing (ms: float) =
         ColonyProjects = []
         ColonyFloods = []
         HeapMb = 0.0
+        ExternalMb = 0.0
         MemoRows = 0
     }
 
@@ -226,6 +227,7 @@ let cpuTests =
                             ColonyProjects = []
                             ColonyFloods = []
                             HeapMb = 0.0
+                            ExternalMb = 0.0
                             MemoRows = 0
                         }
 
@@ -257,6 +259,7 @@ let cpuTests =
                         AtExecute = 40.0
                         HeapMb = heap
                         MemoRows = rows
+                        ExternalMb = heap / 2.0
                     }
 
                 let state =
@@ -276,6 +279,24 @@ let cpuTests =
                     (span.MaxHeapMb, span.MaxMemoRows)
                     (55.0, 1400)
                     "the span keeps the largest of each, not the last"
+
+                Expect.equal
+                    (span.MinHeapMb, span.MaxExternalMb)
+                    (41.3, 27.5)
+                    "and the heap's floor and the off-heap peak beside them (#393)"
+
+                // A span an older bundle opened has no floor; the first
+                // measured tick sets it rather than being min'd against zero.
+                let continued =
+                    { state with
+                        Spans = state.Spans |> List.map (fun span -> { span with MinHeapMb = 0.0 })
+                    }
+                    |> foldCpu capCpuTicks 103 (reading 50.0 1000)
+
+                Expect.equal
+                    (continued.Spans |> List.map (fun span -> span.MinHeapMb))
+                    [ 50.0 ]
+                    "a floor of zero means unmeasured, not a heap of nothing"
 
                 Expect.equal
                     (span.SnapshotSum, span.DecideSum, span.SaveSum, span.ExecuteSum)
@@ -396,6 +417,7 @@ let cpuTests =
                             ColonyProjects = []
                             ColonyFloods = []
                             HeapMb = 0.0
+                            ExternalMb = 0.0
                             MemoRows = 0
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
@@ -452,6 +474,7 @@ let cpuTests =
                             ColonyProjects = []
                             ColonyFloods = []
                             HeapMb = 0.0
+                            ExternalMb = 0.0
                             MemoRows = 0
                         }
 
@@ -503,6 +526,7 @@ let cpuTests =
                             ColonyProjects = []
                             ColonyFloods = []
                             HeapMb = 0.0
+                            ExternalMb = 0.0
                             MemoRows = 0
                         }
 
@@ -556,6 +580,7 @@ let cpuTests =
                                     Projects = []
                                     Floods = []
                                     HeapMb = 0.0
+                                    ExternalMb = 0.0
                                     MemoRows = 0
                                 }
                             ]

@@ -1208,6 +1208,7 @@ let loadCpu () : CpuState =
                                 Floods = decodeCpuFloods raw
                                 HeapMb = floatOrZero raw "heap"
                                 MemoRows = numberOrZero raw "rows"
+                                ExternalMb = floatOrZero raw "ext"
                                 // A bare number, decoded on its own: a legacy
                                 // row reads 0.0, told apart from a headless
                                 // sweep by whether `rooms` is there at all.
@@ -1248,6 +1249,8 @@ let loadCpu () : CpuState =
                                 MaxPops = numberOrZero raw "p"
                                 MaxHeapMb = floatOrZero raw "h"
                                 MaxMemoRows = numberOrZero raw "w"
+                                MinHeapMb = floatOrZero raw "hmin"
+                                MaxExternalMb = floatOrZero raw "x"
                                 SnapshotSum = floatOrZero raw "ss"
                                 DecideSum = floatOrZero raw "sd"
                                 SaveSum = floatOrZero raw "sv"
@@ -1310,10 +1313,11 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     if sample.HeapMb > 0.0 then
         o?heap <- sample.HeapMb
         o?rows <- sample.MemoRows
+        o?ext <- sample.ExternalMb
 
     o
 
-/// One coarse span on the wire: fourteen numbers under short keys, because
+/// One coarse span on the wire: sixteen numbers under short keys, because
 /// two hundred of these ride in the same leaf as the fine ring.
 let private encodeCpuSpan (span: CpuSpan) =
     let o = createEmpty<obj>
@@ -1327,6 +1331,8 @@ let private encodeCpuSpan (span: CpuSpan) =
     o?p <- span.MaxPops
     o?h <- span.MaxHeapMb
     o?w <- span.MaxMemoRows
+    o?hmin <- span.MinHeapMb
+    o?x <- span.MaxExternalMb
     o?ss <- span.SnapshotSum
     o?sd <- span.DecideSum
     o?sv <- span.SaveSum

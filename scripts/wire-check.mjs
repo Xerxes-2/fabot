@@ -208,7 +208,7 @@ wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", as
   saveCpu(loadCpu());
   assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a line written before the spans keeps its ticks");
 
-  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 0, w: 0, ss: 0, sd: 0, sv: 0, sx: 0 };
+  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 0, w: 0, hmin: 0, x: 0, ss: 0, sd: 0, sv: 0, sx: 0 };
 
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [span] });
   saveCpu(loadCpu());
@@ -231,7 +231,7 @@ wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", as
   const { loadCpu, appendCpu } = await import(MODULE);
 
   const row = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
-  const span = (f, t, n) => ({ f, t, n, max: 1.5, sum: 1.5 * n, b: 10000, r: 0, p: 0, h: 0, w: 0, ss: 0.2 * n, sd: 0.3 * n, sv: 0.4 * n, sx: 0.5 * n });
+  const span = (f, t, n) => ({ f, t, n, max: 1.5, sum: 1.5 * n, b: 10000, r: 0, p: 0, h: 0, w: 0, hmin: 0, x: 0, ss: 0.2 * n, sd: 0.3 * n, sv: 0.4 * n, sx: 0.5 * n });
 
   // Each state is read off a leaf through `loadCpu`, so it has Core's own
   // types (an F# list is not a JS array); the leaf is then reset to what the
@@ -266,12 +266,18 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
   const { loadCpu, saveCpu } = await import(MODULE);
 
   const base = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
-  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 55.3, w: 1400, ss: 900.5, sd: 2100.25, sv: 300, sx: 700 };
+  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 55.3, w: 1400, hmin: 41.3, x: 27.5, ss: 900.5, sd: 2100.25, sv: 300, sx: 700 };
 
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: 41.3, rows: 900 }], spans: [span] });
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: 41.3, rows: 900, ext: 27.5 }], spans: [span] });
   saveCpu(loadCpu());
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable({ ...base, heap: 41.3, rows: 900 }), "the row's heap and rows round-trip");
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans[0]), stable(span), "and the span's six new keys");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable({ ...base, heap: 41.3, rows: 900, ext: 27.5 }), "the row's heap, rows and off-heap size round-trip");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans[0]), stable(span), "and the span's new keys");
+
+  // A row #391's bundle wrote has heap and rows but no `ext`: it reads as
+  // zero and is written back with the key, as the span's `p` is.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: 41.3, rows: 900 }], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable({ ...base, heap: 41.3, rows: 900, ext: 0 }), "a row without the off-heap size reads it as zero");
 
   // A legacy row and span carry none of the keys; they read as zero and a
   // zero is not written back, so the row re-encodes as itself.
@@ -279,7 +285,7 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [older] });
   saveCpu(loadCpu());
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable(base), "no heap, no key");
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans[0]), stable({ ...older, p: 0, h: 0, w: 0, ss: 0, sd: 0, sv: 0, sx: 0 }), "a legacy span reads its new keys as zero");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans[0]), stable({ ...older, p: 0, h: 0, w: 0, hmin: 0, x: 0, ss: 0, sd: 0, sv: 0, sx: 0 }), "a legacy span reads its new keys as zero");
 
   // Present and not a number costs the span, as every other span field does.
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [{ ...older, h: "x" }] });
@@ -289,7 +295,7 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
   // And the row alike: a non-number heap costs that row and no other.
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: "x" }, { ...base, t: 11, heap: 41.3, rows: 0 }], spans: [] });
   saveCpu(loadCpu());
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks), stable([{ ...base, t: 11, heap: 41.3, rows: 0 }]), "the bad row is dropped, and a measured tick with no memo rows keeps its zero");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks), stable([{ ...base, t: 11, heap: 41.3, rows: 0, ext: 0 }]), "the bad row is dropped, and a measured tick with no memo rows keeps its zero");
 });
 
 wire("cpu: the flood counts ride the row per colony, and a malformed triple is left out", async () => {

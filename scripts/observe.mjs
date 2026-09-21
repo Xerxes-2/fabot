@@ -1575,7 +1575,12 @@ if (command === "console") {
       const counted = floodsOf(row);
       return counted ? String(counted.pops).padStart(8) : absent;
     };
-    const tail = (row) => [popsCell(row), numberCell(row, "heap", 1), numberCell(row, "rows", 0)];
+    const tail = (row) => [
+      popsCell(row),
+      numberCell(row, "heap", 1),
+      numberCell(row, "ext", 1),
+      numberCell(row, "rows", 0),
+    ];
     const cells = (row) =>
       isSplit(row)
         ? [...PHASES.map((key) => ms(row[key])), ...COUNTS.map((key) => String(row[key]).padStart(8)), ...tail(row)]
@@ -1588,6 +1593,7 @@ if (command === "console") {
         ...COLUMNS.map((key) => key.padStart(8)),
         "pops".padStart(8),
         "heap MB".padStart(8),
+        "ext MB".padStart(8),
         "rows".padStart(8),
       ].join("  "),
     );
@@ -1889,6 +1895,22 @@ if (command === "console") {
             `memo rows ${first.w} → ${last.w}, peak ${Math.max(...measured.map((s) => s.w))}` +
             `${measured.length < spans.length ? ` (${measured.length} of ${spans.length} spans measured)` : ""}`,
         );
+
+        // The floor (#393) is what survived a GC — the live set; the peak
+        // above is what V8 let pile up before one.
+        const floored = measured.filter((s) => typeof s.hmin === "number" && s.hmin > 0);
+
+        if (floored.length > 0) {
+          const firstFloor = floored[0];
+          const lastFloor = floored[floored.length - 1];
+          const ext = (s) => (typeof s.x === "number" ? `${s.x.toFixed(1)} MB` : "—");
+          console.log(
+            `  heap floor ${firstFloor.hmin.toFixed(1)} MB at t${firstFloor.f.toLocaleString()} → ` +
+              `${lastFloor.hmin.toFixed(1)} MB at t${lastFloor.t.toLocaleString()}; ` +
+              `off-heap ${ext(firstFloor)} → ${ext(lastFloor)}` +
+              `${floored.length < measured.length ? ` (${floored.length} of ${measured.length} measured spans carry a floor)` : ""}`,
+          );
+        }
       }
 
       const loud = spans.filter((s) => s.max >= 100).slice(-12);
@@ -1902,7 +1924,9 @@ if (command === "console") {
               `max ${s.max.toFixed(0).padStart(4)} ms  mean ${(s.sum / Math.max(1, s.n)).toFixed(0).padStart(3)} ms  ` +
               `bucket floor ${String(s.b).padStart(6)}  replans ${s.r}` +
               (typeof s.p === "number" ? `  max pops ${String(s.p).padStart(6)}` : "") +
-              (typeof s.h === "number" && s.h > 0 ? `  heap ${s.h.toFixed(1)} MB  rows ${s.w}` : "") +
+              (typeof s.h === "number" && s.h > 0
+                ? `  heap ${s.h.toFixed(1)} MB${typeof s.hmin === "number" && s.hmin > 0 ? ` (floor ${s.hmin.toFixed(1)})` : ""}  rows ${s.w}`
+                : "") +
               (["ss", "sd", "sv", "sx"].every((key) => typeof s[key] === "number")
                 ? `  phases snapshot ${(s.ss / Math.max(1, s.n)).toFixed(1)} decide ${(s.sd / Math.max(1, s.n)).toFixed(1)} ` +
                   `save ${(s.sv / Math.max(1, s.n)).toFixed(1)} execute ${(s.sx / Math.max(1, s.n)).toFixed(1)}`

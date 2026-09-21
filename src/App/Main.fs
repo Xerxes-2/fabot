@@ -401,6 +401,15 @@ let loop () =
     // The CPU line: measured, never budgeted; nothing in the bot reads it
     // back. The tick's total is the last reading, after the Executor, because
     // the intents are most of what a tick costs.
+    // Absent on the sim room and the shared-VM runtimes
+    // (`docs/research/engine-testing.md`); 0 there reads as unmeasured. One
+    // call: each crosses the isolate boundary.
+    let heapStats =
+        if isNull (box Game.cpu?getHeapStatistics) then
+            None
+        else
+            Some(Game.cpu.getHeapStatistics ())
+
     let readings: Observe.CpuReadings =
         {
             AtEntry = atEntry
@@ -414,13 +423,14 @@ let loop () =
             ColonyDecides = decisions |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
             ColonyFloods =
                 decisions |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
-            // Absent on the sim room and the shared-VM runtimes
-            // (`docs/research/engine-testing.md`); 0 there reads as unmeasured.
             HeapMb =
-                if isNull (box Game.cpu?getHeapStatistics) then
-                    0.0
-                else
-                    Game.cpu.getHeapStatistics().used_heap_size / 1048576.0
+                heapStats
+                |> Option.map (fun h -> h.used_heap_size / 1048576.0)
+                |> Option.defaultValue 0.0
+            ExternalMb =
+                heapStats
+                |> Option.map (fun h -> h.externally_allocated_size / 1048576.0)
+                |> Option.defaultValue 0.0
             MemoRows =
                 planMemos
                 |> Map.toList

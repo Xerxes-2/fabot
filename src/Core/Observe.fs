@@ -1011,6 +1011,9 @@ type CpuReadings =
         /// accumulating — from a slow host, which the phase split cannot.
         HeapMb: float
         MemoRows: int
+        /// `externally_allocated_size` in MB (#393): where a flood field's
+        /// `Int32Array` is counted, and not in `HeapMb`.
+        ExternalMb: float
     }
 
 /// One tick's cost, split at the loop's phase boundaries, and the count of
@@ -1060,6 +1063,8 @@ type CpuSample =
         /// for a legacy row.
         HeapMb: float
         MemoRows: int
+        /// The off-heap size in MB (#393); zero for a legacy row.
+        ExternalMb: float
     }
 
 /// One span of ticks, summarised: the coarse record beside the fine one,
@@ -1095,6 +1100,12 @@ type CpuSpan =
         /// hours that a reset cures shows here as both rising span by span.
         MaxHeapMb: float
         MaxMemoRows: int
+        /// The smallest heap the span saw (#393): the post-GC floor, which is
+        /// the live set, where `MaxHeapMb` is the pre-GC peak V8 lets grow
+        /// under allocation pressure. Zero until a measured tick folds in.
+        MinHeapMb: float
+        /// The largest off-heap size the span saw (#393).
+        MaxExternalMb: float
         /// The phase sums, so a reader divides by `Ticks` for each mean: the
         /// fine ring's hundred rows had aged out of the 2026-09-21 storm hour
         /// before anyone read it, and nothing said which phase the hour went to.
@@ -1195,6 +1206,14 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
     // A tenth of a megabyte: finer than the climb this reads, and Memory
     // pays for every digit two hundred times.
     let heap = floor (readings.HeapMb * 10.0 + 0.5) / 10.0
+    let external = floor (readings.ExternalMb * 10.0 + 0.5) / 10.0
+
+    // The floor ignores an unmeasured tick, and a span an older bundle
+    // opened starts its floor at the first measured tick.
+    let floorOf (a: float) (b: float) =
+        if a = 0.0 then b
+        elif b = 0.0 then a
+        else min a b
 
     // The span still filling is the last of the list; it closes at
     // `spanTicks`, and a tick behind the open span's (a stale leaf) opens a
@@ -1215,6 +1234,8 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     MaxPops = max open'.MaxPops pops
                     MaxHeapMb = max open'.MaxHeapMb heap
                     MaxMemoRows = max open'.MaxMemoRows readings.MemoRows
+                    MinHeapMb = floorOf open'.MinHeapMb heap
+                    MaxExternalMb = max open'.MaxExternalMb external
                     SnapshotSum = open'.SnapshotSum + phases.Snapshot
                     DecideSum = open'.DecideSum + phases.Decide
                     SaveSum = open'.SaveSum + phases.Save
@@ -1235,6 +1256,8 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     MaxPops = pops
                     MaxHeapMb = heap
                     MaxMemoRows = readings.MemoRows
+                    MinHeapMb = heap
+                    MaxExternalMb = external
                     SnapshotSum = phases.Snapshot
                     DecideSum = phases.Decide
                     SaveSum = phases.Save
@@ -1258,6 +1281,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Floods = floods
                     HeapMb = heap
                     MemoRows = readings.MemoRows
+                    ExternalMb = external
                 }
             ]
             |> trim cap
