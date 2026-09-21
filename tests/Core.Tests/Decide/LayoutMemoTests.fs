@@ -1021,6 +1021,60 @@ let planMemoTests =
                         "and a field over the outpost alone rides on, unflooded"
             }
 
+            test "a far field whose Task left the pool is evicted, census or no census" {
+                // #392. The Harvest across the border prices a far field;
+                // the tick the rock is gone from the projection, its Task is
+                // pooled by nobody and the field goes — while the census
+                // signature has not moved, so this is the Task rule and not
+                // the room rule (#388).
+                let held = borderedColony (Some(reservedRoom true 4000))
+
+                let gone =
+                    { held with
+                        Sources = held.Sources |> List.filter (fun s -> s.Id <> "src-out")
+                        Spatial =
+                            { held.Spatial with
+                                TargetKinds = Map.remove "src-out" held.Spatial.TargetKinds
+                                Rooms =
+                                    held.Spatial.Rooms
+                                    |> Map.map (fun _ layer ->
+                                        { layer with
+                                            TargetPositions =
+                                                Map.remove "src-out" layer.TargetPositions
+                                        })
+                            }
+                    }
+
+                Expect.equal
+                    (censusSignature gone)
+                    (censusSignature held)
+                    "the premise: a rock leaving moves no census input"
+
+                let ofRock (memo: PlanMemo) =
+                    [
+                        for KeyValue((_, task, _, _, _, _), field) in memo.FarFields do
+                            if task = Harvest "src-out" then
+                                field
+                    ]
+
+                let first = decideOn held
+                let fields = ofRock first.Memo
+
+                Expect.isNonEmpty fields "the premise: the first tick priced the rock's far leg"
+
+                let still = decide held Map.empty Set.empty (Some first.Memo)
+
+                for field in fields do
+                    Expect.isTrue
+                        (ofRock still.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, field)))
+                        "a Task still pooled keeps its field, unflooded"
+
+                let second = decide gone Map.empty Set.empty (Some first.Memo)
+
+                Expect.isEmpty (ofRock second.Memo) "and the tick its Task is gone, so is its field"
+            }
+
             test
                 "a deferred turn stamps the tables with the census that filled them, not the plan's" {
                 // On a `Waiting` turn the plan served is the stale one under

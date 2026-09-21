@@ -276,6 +276,12 @@ let decideUnarbitrated
     // Matcher and the mover.
     let pool = planPool view atlas tasks
 
+    // A far field whose Task is not in the tick's list is dead weight the
+    // census never evicts (#392). Every far leg priced this tick — by the
+    // Matcher off the pool, by the mover off the assignments — is a Task in
+    // this list; a graced crossing (#151) prices none.
+    Atlas.evictFarFieldsExcept atlas (Set.ofList tasks)
+
     let spawnIntents, quotas =
         planSpawns view atlas outposts sizing threats tasks plan.HaulerQuota
 

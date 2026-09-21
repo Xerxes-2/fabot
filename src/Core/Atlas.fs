@@ -1518,6 +1518,20 @@ let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
     for key in staleFields do
         atlas.FarFields.PerCensus.Remove key |> ignore
 
+/// Drop every far field whose Task is not in `live` (#392): a Task carries an
+/// object id, so a quiet census leaks one field per Task that ever priced a
+/// far leg. A Task that comes back costs one re-flood. In place, as
+/// `evictRooms`.
+let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
+    let stale = ResizeArray()
+
+    for KeyValue((_, task, _, _, _, _) as key, _) in atlas.FarFields.PerCensus do
+        if not (Set.contains task live) then
+            stale.Add key
+
+    for key in stale do
+        atlas.FarFields.PerCensus.Remove key |> ignore
+
 /// The first of those chains, or `None` where there is none — what a reader
 /// with no price to choose one with takes (`stepTowardRoom`, whose room is
 /// dark and prices nothing, and which is therefore the one mover that can
