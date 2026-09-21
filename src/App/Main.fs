@@ -16,8 +16,12 @@ let private loadAssignments () : Assignments =
     if isNull raw then
         Map.empty
     else
+        // Copied flat (#398): a value `JSON.parse` read off Memory is a slice
+        // of the tick's whole raw string, and these ids reach the Transition
+        // log through the Matcher's Kept and Released Verdicts. The keys are
+        // property names, internalized by V8, and own nothing.
         objectEntries raw
-        |> Array.map (fun (name, taskId) -> name, string taskId)
+        |> Array.map (fun (name, taskId) -> name, flat (string taskId))
         |> Map.ofArray
 
 let private saveAssignments (assignments: Assignments) =

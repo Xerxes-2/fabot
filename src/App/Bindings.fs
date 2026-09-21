@@ -3,6 +3,15 @@ module Fabot.Bindings
 
 open Fable.Core
 
+/// A fresh sequential copy of a string (#396, #398). V8 hands strings over
+/// sliced — the engine's `Creep.name`, every value `JSON.parse` reads off
+/// the 310 KB raw Memory — and a slice keeps its parent alive for as long
+/// as anything holds it. `split("").join("")` owns nothing; a JSON round
+/// trip still does, measured 2026-09-21 (45 names stashed across a tick:
+/// the round trip pinned 0.08 MB, this 0).
+[<Emit("$0.split(\"\").join(\"\")")>]
+let flat (_s: string) : string = jsNative
+
 /// `Game.cpu.getHeapStatistics()`: the V8 heap of our isolate, in bytes.
 type IHeapStatistics =
     abstract used_heap_size: float

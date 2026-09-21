@@ -24,9 +24,8 @@ let private tileOf (c: ICreep) : RoomPos = RoomPos.at c.room.name (posOf c.pos)
 /// A creep's name as a string that owns nothing (#396): the engine hands
 /// `name` over sliced, a slice pins its ~4.5 KB parent, and the Transition
 /// log holds names across ticks (measured 2026-09-21: 6.3 MB over 1,500
-/// entries). A JSON round trip is a fresh sequential string.
-let private nameOf (c: ICreep) : string =
-    emitJsExpr c.name "JSON.parse(JSON.stringify($0))"
+/// entries). `Bindings.flat` says why not a JSON round trip.
+let private nameOf (c: ICreep) : string = flat c.name
 
 /// Classify an engine part-type string into the Core's body vocabulary:
 /// the reverse of the Core's one part-name table. The engine's part set is
