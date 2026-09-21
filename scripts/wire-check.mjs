@@ -259,6 +259,37 @@ wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", as
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2), row(3)], spans: [] });
   appendCpu(withSecond);
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span(1, 3, 3), span(4, 4, 1)]), "a disagreeing leaf is rewritten whole");
+
+  // At the cap (#394): the state holds 200 spans whether the open span
+  // continues or just opened, so the two are told apart by the open span's
+  // `From`. A span that opened shifts the oldest out and is pushed; one
+  // that continues is rewritten in place.
+  const CAP = 200;
+  const full = Array.from({ length: CAP }, (_, i) => span(i * 100 + 1, i * 100 + 100, 100));
+  const opened = stateOf([row(1), row(2)], [...full.slice(1), span(CAP * 100 + 1, CAP * 100 + 1, 1)]);
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1)], spans: [...full] });
+  appendCpu(opened);
+  const afterOpen = globalThis.Memory.fabot.observe.cpu.spans;
+  assert.equal(afterOpen.length, CAP, "the leaf stays at the cap");
+  assert.equal(afterOpen[0].f, 101, "the oldest span left");
+  assert.equal(stable(afterOpen[CAP - 2]), stable(full[CAP - 1]), "the last closed span is kept");
+  assert.equal(afterOpen[CAP - 1].f, CAP * 100 + 1, "and the one that opened is pushed after it");
+
+  const continued = stateOf([row(1), row(2), row(3)], [...full.slice(1), span(CAP * 100 + 1, CAP * 100 + 2, 2)]);
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2)], spans: afterOpen });
+  appendCpu(continued);
+  const afterContinue = globalThis.Memory.fabot.observe.cpu.spans;
+  assert.equal(afterContinue.length, CAP, "a continuing span adds nothing");
+  assert.equal(afterContinue[CAP - 1].t, CAP * 100 + 2, "and is rewritten in place");
+  assert.equal(stable(afterContinue[CAP - 2]), stable(full[CAP - 1]), "with the closed span beside it untouched");
+
+  // A leaf whose last span slot is null or off the shape disagrees and is
+  // written whole — never a throw in the loop.
+  for (const bad of [null, 7, "x", {}, { f: "4" }]) {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2)], spans: [span(1, 3, 3), bad] });
+    appendCpu(continued);
+    assert.equal(globalThis.Memory.fabot.observe.cpu.spans.length, CAP, `a last span that is ${JSON.stringify(bad)} is rewritten whole`);
+  }
 });
 
 

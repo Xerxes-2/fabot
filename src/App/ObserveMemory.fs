@@ -1402,12 +1402,25 @@ let appendCpu (state: CpuState) =
 
             match List.rev state.Spans with
             | open' :: closed when JS.Constructors.Array.isArray spans ->
-                let held = (unbox<obj[]> spans).Length
+                let rows = unbox<obj[]> spans
+                let held = rows.Length
                 let count = List.length closed
 
-                if held = count + 1 then
+                // Told apart by the open span's `From`, not by length (#394):
+                // at the cap the state holds `capCpuSpans` either way. A last
+                // slot that is null or off the shape disagrees, like a row.
+                let continues =
+                    held > 0
+                    && not (isNull rows.[held - 1])
+                    && jsTypeof rows.[held - 1]?f = "number"
+                    && unbox<int> rows.[held - 1]?f = open'.From
+
+                if continues && held = count + 1 then
                     emitJsStatement (spans, held - 1, encodeCpuSpan open') "$0[$1] = $2"
-                elif held = count then
+                elif
+                    not continues
+                    && (held = count || (held = capCpuSpans && count = capCpuSpans - 1))
+                then
                     // A span opened this tick; the one before it was last
                     // written a tick ago, closed. At the cap the fold
                     // dropped the oldest, and so does the leaf.
