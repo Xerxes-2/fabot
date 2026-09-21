@@ -1005,6 +1005,12 @@ type CpuReadings =
         /// `Grid.Counters` as each colony finished deciding, cumulative from
         /// the tick's reset.
         ColonyFloods: (string * FloodCounts) list
+        /// The isolate's used V8 heap as the tick ended, in MB, and the rows
+        /// standing in every plan memo's three tables (#391): the two
+        /// readings that tell an hour-long climb a reset cures — heap state
+        /// accumulating — from a slow host, which the phase split cannot.
+        HeapMb: float
+        MemoRows: int
     }
 
 /// One tick's cost, split at the loop's phase boundaries, and the count of
@@ -1050,6 +1056,10 @@ type CpuSample =
         /// What each colony's decision flooded, differenced the way `Colonies`
         /// is; empty for a legacy row.
         Floods: (string * FloodCounts) list
+        /// Used heap in MB and memo table rows as the tick ended (#391); zero
+        /// for a legacy row.
+        HeapMb: float
+        MemoRows: int
     }
 
 /// One span of ticks, summarised: the coarse record beside the fine one,
@@ -1081,6 +1091,17 @@ type CpuSpan =
         /// its reason: an incident hours old has to say whether its worst tick
         /// was flooding.
         MaxPops: int
+        /// The largest heap and memo table the span saw (#391): a climb over
+        /// hours that a reset cures shows here as both rising span by span.
+        MaxHeapMb: float
+        MaxMemoRows: int
+        /// The phase sums, so a reader divides by `Ticks` for each mean: the
+        /// fine ring's hundred rows had aged out of the 2026-09-21 storm hour
+        /// before anyone read it, and nothing said which phase the hour went to.
+        SnapshotSum: float
+        DecideSum: float
+        SaveSum: float
+        ExecuteSum: float
     }
 
 /// The whole persisted CPU line: oldest first, capped. A record so the leaf
@@ -1171,6 +1192,9 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 
     let floods = FloodCounts.differenced readings.ColonyFloods
     let pops = FloodCounts.totalPops floods
+    // A tenth of a megabyte: finer than the climb this reads, and Memory
+    // pays for every digit two hundred times.
+    let heap = floor (readings.HeapMb * 10.0 + 0.5) / 10.0
 
     // The span still filling is the last of the list; it closes at
     // `spanTicks`, and a tick behind the open span's (a stale leaf) opens a
@@ -1189,6 +1213,12 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Bucket = min open'.Bucket readings.Bucket
                     Replans = open'.Replans + readings.Replans
                     MaxPops = max open'.MaxPops pops
+                    MaxHeapMb = max open'.MaxHeapMb heap
+                    MaxMemoRows = max open'.MaxMemoRows readings.MemoRows
+                    SnapshotSum = open'.SnapshotSum + phases.Snapshot
+                    DecideSum = open'.DecideSum + phases.Decide
+                    SaveSum = open'.SaveSum + phases.Save
+                    ExecuteSum = open'.ExecuteSum + phases.Execute
                 }
             ]
         | _ ->
@@ -1203,6 +1233,12 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     Bucket = readings.Bucket
                     Replans = readings.Replans
                     MaxPops = pops
+                    MaxHeapMb = heap
+                    MaxMemoRows = readings.MemoRows
+                    SnapshotSum = phases.Snapshot
+                    DecideSum = phases.Decide
+                    SaveSum = phases.Save
+                    ExecuteSum = phases.Execute
                 }
             ]
             |> trim capCpuSpans
@@ -1220,6 +1256,8 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     SweepHead = toMicrosecond (readings.AtRooms - readings.AtEntry)
                     Projects = projects
                     Floods = floods
+                    HeapMb = heap
+                    MemoRows = readings.MemoRows
                 }
             ]
             |> trim cap

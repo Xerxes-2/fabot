@@ -414,6 +414,18 @@ let loop () =
             ColonyDecides = decisions |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
             ColonyFloods =
                 decisions |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
+            // Absent on the sim room and the shared-VM runtimes
+            // (`docs/research/engine-testing.md`); 0 there reads as unmeasured.
+            HeapMb =
+                if isNull (box Game.cpu?getHeapStatistics) then
+                    0.0
+                else
+                    Game.cpu.getHeapStatistics().used_heap_size / 1048576.0
+            MemoRows =
+                planMemos
+                |> Map.toList
+                |> List.sumBy (fun (_, memo) ->
+                    memo.Walks.Count + memo.SeamWalks.Count + memo.FarFields.Count)
             // Off `World`'s own heap slot, not the world record: a measurement
             // of the shell is not a fact about the game.
             RoomSnapshots = World.roomCosts

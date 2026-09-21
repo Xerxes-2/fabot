@@ -35,6 +35,8 @@ let private costing (ms: float) =
         AtProjects = 0.0
         ColonyProjects = []
         ColonyFloods = []
+        HeapMb = 0.0
+        MemoRows = 0
     }
 
 /// The same reading with a bucket and a replan count of its own, which is
@@ -223,6 +225,8 @@ let cpuTests =
                             AtProjects = 0.0
                             ColonyProjects = []
                             ColonyFloods = []
+                            HeapMb = 0.0
+                            MemoRows = 0
                         }
 
                 Expect.equal
@@ -239,6 +243,44 @@ let cpuTests =
                     (phases |> Option.map (fun p -> p.Decide))
                     (Some 41.0)
                     "the phase stays the tick's own, 41.0 ms against the colonies' 40.6"
+            }
+
+            test "the span keeps its worst heap and memo rows and its phase sums" {
+                // #391. An hour-long climb a reset cures shows as heap and
+                // rows rising span by span; the phase sums say which phase
+                // the hour went to once the fine ring has forgotten it.
+                let reading heap rows =
+                    { costing 40.0 with
+                        AtSnapshot = 10.0
+                        AtDecide = 30.0
+                        AtSave = 33.0
+                        AtExecute = 40.0
+                        HeapMb = heap
+                        MemoRows = rows
+                    }
+
+                let state =
+                    CpuState.empty
+                    |> foldCpu capCpuTicks 100 (reading 41.26 900)
+                    |> foldCpu capCpuTicks 101 (reading 55.04 1400)
+                    |> foldCpu capCpuTicks 102 (reading 48.0 1100)
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.HeapMb, sample.MemoRows))
+                    [ 41.3, 900; 55.0, 1400; 48.0, 1100 ]
+                    "each row carries its heap to a tenth of a megabyte and its rows"
+
+                let span = state.Spans |> List.exactlyOne
+
+                Expect.equal
+                    (span.MaxHeapMb, span.MaxMemoRows)
+                    (55.0, 1400)
+                    "the span keeps the largest of each, not the last"
+
+                Expect.equal
+                    (span.SnapshotSum, span.DecideSum, span.SaveSum, span.ExecuteSum)
+                    (30.0, 60.0, 9.0, 21.0)
+                    "and the phase sums over its three ticks"
             }
 
             test "the flood counts are differenced per colony from the tick's reset" {
@@ -353,6 +395,8 @@ let cpuTests =
                             AtProjects = 0.0
                             ColonyProjects = []
                             ColonyFloods = []
+                            HeapMb = 0.0
+                            MemoRows = 0
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -407,6 +451,8 @@ let cpuTests =
                             AtProjects = 0.0
                             ColonyProjects = []
                             ColonyFloods = []
+                            HeapMb = 0.0
+                            MemoRows = 0
                         }
 
                 Expect.equal
@@ -456,6 +502,8 @@ let cpuTests =
                             AtProjects = 0.0
                             ColonyProjects = []
                             ColonyFloods = []
+                            HeapMb = 0.0
+                            MemoRows = 0
                         }
 
                 Expect.equal
@@ -507,6 +555,8 @@ let cpuTests =
                                     SweepHead = 0.0
                                     Projects = []
                                     Floods = []
+                                    HeapMb = 0.0
+                                    MemoRows = 0
                                 }
                             ]
                     }

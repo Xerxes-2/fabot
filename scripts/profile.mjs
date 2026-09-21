@@ -401,7 +401,12 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
   const terrainReads = new Map([...terrains.keys()].map((name) => [name, 0]));
   const game = {
     time: 1000,
-    cpu: { getUsed: () => performance.now() - tickStart },
+    cpu: {
+      getUsed: () => performance.now() - tickStart,
+      // The CPU line reads the isolate's heap (#391); the harness has no
+      // isolate, so it answers the process's own, which nothing here judges.
+      getHeapStatistics: () => ({ used_heap_size: process.memoryUsage().heapUsed }),
+    },
     map: {
       // Answered by room name. The engine answers for every room in the
       // world with no vision and never goes stale, which is the whole

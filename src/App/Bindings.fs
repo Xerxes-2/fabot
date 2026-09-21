@@ -3,8 +3,13 @@ module Fabot.Bindings
 
 open Fable.Core
 
+/// `Game.cpu.getHeapStatistics()`: the V8 heap of our isolate, in bytes.
+type IHeapStatistics =
+    abstract used_heap_size: float
+
 type ICpu =
     abstract getUsed: unit -> float
+    abstract getHeapStatistics: unit -> IHeapStatistics
     /// The CPU the engine has banked for us. The tick ceiling is 500 ms for
     /// the whole life of a non-empty bucket, not `min(limit + bucket, 500)`:
     /// the engine's `tickLimit` "equals 500" and "will start decreasing only

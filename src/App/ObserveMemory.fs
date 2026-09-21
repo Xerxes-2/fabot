@@ -72,6 +72,27 @@ let private numberOf (raw: obj) (key: string) : int =
     // asking which field of it will not read.
     | None -> failwith ("not a number: " + key)
 
+let private floatOf (raw: obj) (key: string) : float =
+    if jsTypeof raw?(key) = "number" then
+        unbox<float> raw?(key)
+    else
+        failwith ("not a number: " + key)
+
+/// A key a later bundle added to a row (#389, #391): absent reads as the
+/// zero it means, present and not a number costs the row.
+let private numberOrZero (raw: obj) (key: string) : int =
+    if jsTypeof raw?(key) = "undefined" then
+        0
+    else
+        numberOf raw key
+
+/// The same for a fraction, the heap in MB.
+let private floatOrZero (raw: obj) (key: string) : float =
+    if jsTypeof raw?(key) = "undefined" then
+        0.0
+    else
+        floatOf raw key
+
 // A keyed wire object read back as whole numbers — `hashOf box`'s decode
 // partner, absent reading as empty the way an absent row array does.
 let private intMapOf (raw: obj) : Map<string, int> =
@@ -1185,6 +1206,8 @@ let loadCpu () : CpuState =
                                 Rooms = decodeCpuSplit raw "rooms"
                                 Projects = decodeCpuSplit raw "projects"
                                 Floods = decodeCpuFloods raw
+                                HeapMb = floatOrZero raw "heap"
+                                MemoRows = numberOrZero raw "rows"
                                 // A bare number, decoded on its own: a legacy
                                 // row reads 0.0, told apart from a headless
                                 // sweep by whether `rooms` is there at all.
@@ -1222,8 +1245,13 @@ let loadCpu () : CpuState =
                                 // Absent from a legacy span, and zero is what
                                 // that says; present and not a number costs
                                 // the span.
-                                MaxPops =
-                                    if jsTypeof raw?p = "undefined" then 0 else numberOf raw "p"
+                                MaxPops = numberOrZero raw "p"
+                                MaxHeapMb = floatOrZero raw "h"
+                                MaxMemoRows = numberOrZero raw "w"
+                                SnapshotSum = floatOrZero raw "ss"
+                                DecideSum = floatOrZero raw "sd"
+                                SaveSum = floatOrZero raw "sv"
+                                ExecuteSum = floatOrZero raw "sx"
                             }
                     else
                         None)
@@ -1276,10 +1304,17 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     if sample.SweepHead > 0.0 then
         o?head <- sample.SweepHead
 
+    // Written only when measured, so a legacy row re-encodes as itself. The
+    // heap says whether the tick measured: a live heap is never 0, where a
+    // memo with no cross-room Task and no lead cast has 0 rows.
+    if sample.HeapMb > 0.0 then
+        o?heap <- sample.HeapMb
+        o?rows <- sample.MemoRows
+
     o
 
-/// One coarse span on the wire: eight numbers under short keys, because two
-/// hundred of these ride in the same leaf as the fine ring.
+/// One coarse span on the wire: fourteen numbers under short keys, because
+/// two hundred of these ride in the same leaf as the fine ring.
 let private encodeCpuSpan (span: CpuSpan) =
     let o = createEmpty<obj>
     o?f <- span.From
@@ -1290,6 +1325,12 @@ let private encodeCpuSpan (span: CpuSpan) =
     o?b <- span.Bucket
     o?r <- span.Replans
     o?p <- span.MaxPops
+    o?h <- span.MaxHeapMb
+    o?w <- span.MaxMemoRows
+    o?ss <- span.SnapshotSum
+    o?sd <- span.DecideSum
+    o?sv <- span.SaveSum
+    o?sx <- span.ExecuteSum
     o
 
 let saveCpu (state: CpuState) =

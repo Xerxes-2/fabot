@@ -1567,18 +1567,19 @@ if (command === "console") {
               { floods: 0, free: 0, pops: 0 },
             )
         : null;
+    // Heap and memo rows (#391): a climb a reset cures shows here before it
+    // shows in the mean. A legacy row has neither key and prints the dash.
+    const numberCell = (row, key, digits) =>
+      typeof row[key] === "number" ? row[key].toFixed(digits).padStart(8) : absent;
     const popsCell = (row) => {
       const counted = floodsOf(row);
       return counted ? String(counted.pops).padStart(8) : absent;
     };
+    const tail = (row) => [popsCell(row), numberCell(row, "heap", 1), numberCell(row, "rows", 0)];
     const cells = (row) =>
       isSplit(row)
-        ? [
-            ...PHASES.map((key) => ms(row[key])),
-            ...COUNTS.map((key) => String(row[key]).padStart(8)),
-            popsCell(row),
-          ]
-        : [...COLUMNS.map(() => absent), popsCell(row)];
+        ? [...PHASES.map((key) => ms(row[key])), ...COUNTS.map((key) => String(row[key]).padStart(8)), ...tail(row)]
+        : [...COLUMNS.map(() => absent), ...tail(row)];
 
     console.log(
       [
@@ -1586,6 +1587,8 @@ if (command === "console") {
         "total ms".padStart(8),
         ...COLUMNS.map((key) => key.padStart(8)),
         "pops".padStart(8),
+        "heap MB".padStart(8),
+        "rows".padStart(8),
       ].join("  "),
     );
 
@@ -1870,6 +1873,24 @@ if (command === "console") {
         );
       }
 
+      // The heap and the memo tables over the record (#391): where they
+      // stood first and last, and the largest either reached. A record whose
+      // last span stands well above its first is the climb, whatever the
+      // means did; the phase sums under each loud span say which phase.
+      const measured = spans.filter((s) => typeof s.h === "number" && s.h > 0 && typeof s.w === "number");
+
+      if (measured.length > 0) {
+        const first = measured[0];
+        const last = measured[measured.length - 1];
+        const peak = measured.reduce((a, b) => (b.h > a.h ? b : a));
+        console.log(
+          `  heap ${first.h.toFixed(1)} MB at t${first.f.toLocaleString()} → ${last.h.toFixed(1)} MB at ` +
+            `t${last.t.toLocaleString()}, peak ${peak.h.toFixed(1)} in t${peak.f.toLocaleString()}-${peak.t.toLocaleString()}; ` +
+            `memo rows ${first.w} → ${last.w}, peak ${Math.max(...measured.map((s) => s.w))}` +
+            `${measured.length < spans.length ? ` (${measured.length} of ${spans.length} spans measured)` : ""}`,
+        );
+      }
+
       const loud = spans.filter((s) => s.max >= 100).slice(-12);
 
       if (loud.length > 0) {
@@ -1880,7 +1901,12 @@ if (command === "console") {
             `    t${String(s.f).padStart(7)}-${String(s.t).padEnd(7)} ` +
               `max ${s.max.toFixed(0).padStart(4)} ms  mean ${(s.sum / Math.max(1, s.n)).toFixed(0).padStart(3)} ms  ` +
               `bucket floor ${String(s.b).padStart(6)}  replans ${s.r}` +
-              (typeof s.p === "number" ? `  max pops ${String(s.p).padStart(6)}` : ""),
+              (typeof s.p === "number" ? `  max pops ${String(s.p).padStart(6)}` : "") +
+              (typeof s.h === "number" && s.h > 0 ? `  heap ${s.h.toFixed(1)} MB  rows ${s.w}` : "") +
+              (["ss", "sd", "sv", "sx"].every((key) => typeof s[key] === "number")
+                ? `  phases snapshot ${(s.ss / Math.max(1, s.n)).toFixed(1)} decide ${(s.sd / Math.max(1, s.n)).toFixed(1)} ` +
+                  `save ${(s.sv / Math.max(1, s.n)).toFixed(1)} execute ${(s.sx / Math.max(1, s.n)).toFixed(1)}`
+                : ""),
           );
         }
       } else {
