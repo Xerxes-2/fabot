@@ -307,7 +307,9 @@ let loop () =
     planMemos <-
         decisions
         |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo)
-        |> Map.ofList
+        // Not `Map.ofList` here (#401): its comparer would keep this tick's
+        // `decisions`, views and Atlases alive until the next tick's memos.
+        |> Fresh.mapOfList
 
     // The Reactor programme's observation. The room facts answer only while
     // vision does, so a blind tick hands `None` and the last sample stands.

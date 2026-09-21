@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Types/Vocabulary.fs" />
+    <Compile Include="Types/Fresh.fs" />
     <Compile Include="Types/Rules.fs" />
     <Compile Include="Types/Rooms.fs" />
     <Compile Include="Types/Geometry.fs" />

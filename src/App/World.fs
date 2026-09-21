@@ -39,6 +39,12 @@ let private posOf (p: IRoomPosition) : Pos = { X = p.x; Y = p.y }
 let private tileOf (c: ICreep) : RoomPos =
     RoomPos.at (intern c.room.name) (posOf c.pos)
 
+/// A sighting's deferred id set, built where the closure captures only the
+/// census it reads (#401): made inline in `ofGame`, its context would be the
+/// sweep's — every engine creep of the tick — held per dark room until seen.
+let private targetsOf (kinds: Map<string, TargetKind>) : Lazy<Set<string>> =
+    lazy (kinds |> Map.keys |> Fresh.setOfSeq)
+
 /// A creep's name as a string that owns nothing (#396): the engine hands
 /// `name` over sliced, a slice pins its ~4.5 KB parent, and the Transition
 /// log holds names across ticks (measured 2026-09-21: 6.3 MB over 1,500
@@ -102,7 +108,7 @@ let private terrainOf (roomName: string) : RoomTerrain =
                         ]
                 // The same read's other window: the ring the trim drops.
                 Border =
-                    Map.ofList
+                    Fresh.mapOfList
                         [
                             for x in 0..49 do
                                 for y in 0..49 do
@@ -298,7 +304,7 @@ let private seenFacts
                     // win in `Map.ofArray`, and the floor added afterwards can
                     // never collide with a fixture's id.
                     Kinds =
-                        Map.ofArray (
+                        Fresh.mapOfArray (
                             Array.concat
                                 [
                                     sources |> Array.map (fun s -> (intern s.id), Source)
@@ -311,7 +317,7 @@ let private seenFacts
                                 ]
                         )
                     Positions =
-                        Map.ofArray (
+                        Fresh.mapOfArray (
                             Array.concat
                                 [
                                     sources |> Array.map (fun s -> (intern s.id), posOf s.pos)
@@ -818,7 +824,7 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
 
     {
         Time = Game.time
-        Rooms = Map.ofList rooms
+        Rooms = Fresh.mapOfList rooms
         // A sighting for every room seen this tick, carrying the census's ids
         // and not the kinds; the rest `World.recalling` fills from last tick.
         Sightings =
@@ -831,10 +837,10 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
                     // Deferred, and the census captured rather than copied:
                     // the ids are read the tick this room goes dark, not the
                     // tick it is seen (#371).
-                    Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
+                    Targets = targetsOf facts.TargetKinds
                 }
                 : RoomSighting))
-            |> Map.ofList
+            |> Fresh.mapOfList
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

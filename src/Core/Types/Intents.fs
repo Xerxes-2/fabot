@@ -166,6 +166,12 @@ type FarFieldMemo =
 
 [<RequireQualifiedAccess>]
 module FarFieldMemo =
+
+    /// A spawn walk table built where nothing is captured (#401, `Fresh`):
+    /// the memo's tables outlive the tick, and one built in
+    /// `decideUnarbitrated` would keep that tick's view and Atlas alive.
+    let walks () : WalkTable = WalkTable()
+
     /// Two empty tables: the Atlas of a caller holding no memo at all — a
     /// test, or a one-off. A function and never a value, because a table
     /// shared by two parallel test lists is two threads writing one

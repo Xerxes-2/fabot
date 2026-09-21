@@ -143,7 +143,9 @@ let fold
                 }
 
         name, step cap tick (Map.tryFind name grouped |> Option.defaultValue []) log)
-    |> Map.ofSeq
+    // Built where nothing is captured (#401): a comparer made here would keep
+    // `prior` — last tick's log — alive through this tick's, every tick.
+    |> Fresh.mapOfSeq
 
 /// One visible reading of the sector Reactor programme; `None` at the fold
 /// boundary means the room is blind.

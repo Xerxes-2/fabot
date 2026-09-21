@@ -653,7 +653,7 @@ let load () : ObserveState =
                 Some(name, decodeCreepLog name raw)
             with _ ->
                 None)
-        |> Map.ofArray)
+        |> Fresh.mapOfArray)
 
 /// Write the folded state back under `Memory.fabot.observe.creeps`,
 /// leaving the rest of the observe subtree alone — unless the subtree

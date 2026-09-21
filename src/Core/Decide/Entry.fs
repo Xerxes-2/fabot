@@ -67,9 +67,14 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // shape was 4% of a `pair --level 7` tick by inclusive samples
     // (2026-09-18, #370), most of it `placementOf` searching every room per
     // id; the A/B came back inside the clock's spread.
+    // Rebuilt and not mapped: `Map.map` would keep whichever comparer built
+    // the world's Rooms — `Fresh`'s in the shell, a test's or the harness's
+    // elsewhere — and the memo outlives the tick (#401).
     let rooms =
         spatial.Rooms
-        |> Map.map (fun room layer ->
+        |> Map.toList
+        |> List.map (fun (room, layer) ->
+            room,
             let standingIds = ResizeArray<string>()
             let pendingIds = ResizeArray<string>()
             let mineralIds = ResizeArray<string>()
@@ -115,6 +120,7 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
                 Map.tryFind room view.Stages |> Option.map string |> Option.defaultValue ""
 
             $"{home}|{level}|{stage}|{held}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
+        |> Fresh.mapOfList
 
     // The rooms joined on a newline, which no field can carry: the room set
     // itself is signed by the join.
@@ -170,7 +176,7 @@ let decideUnarbitrated
                 SeamWalks = m.SeamWalks
                 PerCensus = m.FarFields
             }
-        | None -> WalkTable(), FarFieldMemo.empty ()
+        | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
     let atlas = Atlas.ofViewRecalling walks farFields view
 
