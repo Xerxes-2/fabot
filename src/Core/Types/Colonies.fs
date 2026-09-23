@@ -358,7 +358,8 @@ module Outpost =
 
     /// The fifth colony's room, declared 2026-09-24 off
     /// `docs/research/fifth-colony.md`, which says why this room and not a
-    /// richer one. The ids and tiles are the engine's, read that day.
+    /// richer one. The ids and tiles are the engine's, read that day. Kept as
+    /// the record of the claim window: W13S28 worked it until t702,714 (#404).
     let w11s27: Outpost =
         {
             RoomName = "W11S27"
@@ -661,11 +662,12 @@ module Colony =
                 Home = "W13S28"
                 // W13S29 to the south (2026-09-07), the survey's first pick.
                 //
-                // W15S28 and W11S29 are **not** here, and the day each was
-                // claimed is why: `childrenWhere` gives a room in both lists
-                // to the outpost list, so an owned, spawn-less room left here
-                // reads as a room we *mine* — no Reserve, no Post, its spawn
-                // site behind a container one hop nearer. W15S28 was claimed
+                // W15S28, W11S29 and W11S27 are **not** here, and the day each
+                // was claimed is why (W11S27's at t702,714, #404):
+                // `childrenWhere` gives a room in both lists to the outpost
+                // list, so an owned, spawn-less room left here reads as a
+                // room we *mine* — no Reserve, no Post, its spawn site behind
+                // a container one hop nearer. W15S28 was claimed
                 // at t~305,2xx and not one body crossed until this line
                 // changed; W11S29 also paid in haul, this colony anchoring
                 // its rock three crossings out while W11S29's colony did the
@@ -690,12 +692,7 @@ module Colony =
                 // `idle (none-applicable)`. The last step between the rate and
                 // the demand is not measured and belongs in a ticket; the
                 // farthest rock is the one lever this file has.
-                //
-                // W11S27 joins it on 2026-09-24 as the fifth colony's room, so
-                // its controller enters this pool as a Claim — **to be taken
-                // out of this list the day that Claim lands**, by the paragraph
-                // above. Why this mother: `docs/research/fifth-colony.md`.
-                Outposts = [ Outpost.w13s29; Outpost.w11s27 ]
+                Outposts = [ Outpost.w13s29 ]
                 // Five crossings to the Reactor: the 22,000 Thorium banked
                 // here is ore nothing here can deliver.
                 Errands = []

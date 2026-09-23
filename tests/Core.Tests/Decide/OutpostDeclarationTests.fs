@@ -1304,8 +1304,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W13S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W13S29"; "W11S27" ]
-                    "and the second colony works its south outpost, and the fifth colony's room while that Claim is pending (2026-09-24). W14S28 went to W15S28 on 2026-09-20, which stands 46 tiles from its rock where this colony stood 181 ticks from it, and five rocks were turning into 15.7 e/t of controller progress here against four rocks making 30.7 at W12S28, the difference banked and standing still"
+                    [ "W13S29" ]
+                    "and the second colony works its south outpost alone: the fifth colony's room left on its Claim (t702,714, #404), and W14S28 went to W15S28 on 2026-09-20, which stands 46 tiles from its rock where this colony stood 181 ticks from it, and five rocks were turning into 15.7 e/t of controller progress here against four rocks making 30.7 at W12S28, the difference banked and standing still"
 
                 // What the removal cost while it was overdue (#352): W13S28 ran an
                 // anchor on W11S29's rock **three crossings out** while W11S29's own
@@ -1321,6 +1321,11 @@ let outpostTests =
                     (Outpost.w11s29.RoomName)
                     "W11S29"
                     "while the declaration itself is kept written for the record: it is how the fourth colony was taken, and ADR 0047's arrangement needs it readable"
+
+                Expect.isFalse
+                    (Colony.outpostsOf Colony.declared "W13S28"
+                     |> List.exists (fun outpost -> outpost.RoomName = Outpost.w11s27.RoomName))
+                    "and the fifth colony's room left the same list on its Claim (t702,714, #404), its declaration kept for the same reason"
 
                 // W15S28 is declared and is **not** an outpost of anybody's: it is
                 // owned, so its mother raises it and does not mine it, and
@@ -1346,27 +1351,15 @@ let outpostTests =
                         (Colony.errandsOf Colony.declared "W13S28")
                         [ "W15S28" ]
                         "W13S28")
-                    [
-                        "W13S28"
-                        "W13S29"
-                        "W11S27"
-                        "W13S27"
-                        "W12S27"
-                        "W12S28"
-                        "W11S28"
-                        "W15S28"
-                        "W14S28"
-                    ]
-                    "the home, its outposts with the rectangle three crossings to W11S27 spans (until that Claim lands and the room leaves this list), and the child two hops out, with W14S28 behind them: it is W15S28's since 2026-09-20, so it reaches this scan set as a transit room and sorts after the declared ones"
+                    [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
+                    "the home, its one outpost and the child two hops out, with W14S28 behind them: it is W15S28's since 2026-09-20, so it reaches this scan set as a transit room and sorts after the declared ones"
 
                 // Three rooms left this scan set with W11S29's declaration (#352): the
                 // nursery itself, W12S29 and W11S28, plus W12S28's own home, which was
                 // in here only as a corner of the rectangle `transitBetween` names for
                 // a three-hop chain. Four rooms of terrain, borders and census no
                 // longer read every tick, in the middle of a CPU squeeze
-                // (`docs/research/cpu-headroom.md`). W11S27's Claim window
-                // (2026-09-24) puts W12S28 and W11S28 back, as corners of its own
-                // three-hop rectangle, until that room leaves the outpost list.
+                // (`docs/research/cpu-headroom.md`).
                 //
                 // What replaces it for the nursery is the **bootstrap** half: a room a
                 // mother raises is projected because she raises it. Named as
@@ -1380,17 +1373,14 @@ let outpostTests =
                     [
                         "W13S28"
                         "W13S29"
-                        "W11S27"
-                        "W13S27"
-                        "W12S27"
-                        "W12S28"
-                        "W11S28"
                         "W15S28"
                         "W14S28"
                         "W11S29"
+                        "W12S28"
                         "W12S29"
+                        "W11S28"
                     ]
-                    "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain: W11S29 and W12S29 here, W12S28 and W11S28 being in already by W11S27's (ADR 0058)"
+                    "the nursery rides the bootstrap half and brings the whole rectangle `transitBetween` names for a three-hop chain — W12S28's own home among them (ADR 0058), which is where it belonged all along"
 
                 // The third colony's three since 2026-09-20: W15S27 is the room the
                 // delivery route crosses on the way to the Reactor, and W15S29 is the
