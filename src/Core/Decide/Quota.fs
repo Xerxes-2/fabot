@@ -173,8 +173,8 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                     | trips -> output * List.max trips
             })
 
-    // The mine-to-Storage leg is one more term in this sum, not one more row
-    // of bodies: each mineral container's round trip to the Storage times the
+    // The mine-to-Storage leg is a sum of its own, rounded apart from the
+    // energy's: each mineral container's round trip to the Storage times the
     // miner's cast rate, `Work / 6` Thorium a tick (the extractor's cooldown
     // is five and the intent pass runs before the object pass). The Storage
     // alone and never the three sinks: Thorium goes to the one store nothing
@@ -222,9 +222,9 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
                         | Some trip -> minerRate * trip / Engine.mineralHarvestCycle
                 })
 
-    let demand =
-        (rows |> List.sumBy (fun row -> row.Demand))
-        + (mineRows |> List.sumBy (fun row -> row.Demand))
+    let demand = rows |> List.sumBy (fun row -> row.Demand)
+
+    let mineDemand = mineRows |> List.sumBy (fun row -> row.Demand)
 
     // ADR-0052
     // The ferry: the bodies a mother lends a bootstrapping child, per child
@@ -263,13 +263,17 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
         |> List.sumBy (fun row -> row.Demand)
 
     // ADR-0049
-    // Rounded once for the colony; the ferry is counted in bodies, so it is
-    // added after the division.
+    // The energy rounded once for the colony; the mine and the ferry are
+    // counted in bodies of their own, so they are added after its division.
     let hired = ceilDiv demand capacity
 
     // The mine's lines ride at the end of the reported rows, so
     // `observe.mjs quotas` prints the new term beside the ones it always had.
-    (if remote * 2 >= capacity then max hired 2 else hired) + ferry, rows @ mineRows, capacity
+    (if remote * 2 >= capacity then max hired 2 else hired)
+    + ceilDiv mineDemand capacity
+    + ferry,
+    rows @ mineRows,
+    capacity
 
 /// What one body of this shape drinks a tick standing at a controller.
 let private upgradeDrainOf body =

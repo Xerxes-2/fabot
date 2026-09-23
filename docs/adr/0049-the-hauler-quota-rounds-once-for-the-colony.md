@@ -1,6 +1,8 @@
 # The hauler quota rounds once, for the colony, because a hauler is not the property of one container
 
-> **Status:** amended by #216 R4, #279
+> **Status:** amended by #216 R4, #279, #403
+
+> **Amended by #403**: the mine's haul is rounded **apart** from the energy's, and its fraction buys a body of its own. "The cap is a capacity and not an order" is safe only where every term shares a tier, and the ore does not: ADR 0057 decision 3 ranks it under every Feeding draw, so its share of a shared body is paid out only when the energy has none left to ask for. Live at W11S29 (t701,7xx) the 256 of ore rode a single 1,500 load with 1,100 of energy, the one body never reached the mine, and the container stood full with 839 T on the floor. The energy sum, its one rounding and #279's floor are unchanged; the mine's body is added after them, like the ferry.
 
 > **Amended by #279** with a floor and not with a different division: a haul whose remote rows are worth half a load or more hires **two** bodies however the rounding falls. The arithmetic below is unchanged and still says what throughput costs; what it never said is what redundancy costs, and at the live reading — 1,170 energy-ticks against a 1,200 load, one body at 97.5% of itself — the colony was one death, one detour or one Threat away from losing a source. The failure is asymmetric, which is the whole of the argument: a full container at home waits, and a full container in an [[outpost]] drops the [[anchor]]'s next fifty on the floor to decay while the replacement walks forty tiles out. #157's "two is the smallest that survives losing a body" said again for the haul. The floor reads the rows this rule already prices and never the declaration, so a room a [[stand-down]] withdrew asks for nothing.
 

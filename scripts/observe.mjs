@@ -1001,11 +1001,13 @@ if (command === "console") {
         );
       }
       if (Array.isArray(stored.haul)) {
+        // The quota is the hauler row's own number, never re-derived here: the
+        // mine rounds apart from the energy (#403), and the floor and the ferry
+        // sit on top, none of which this sum can see.
         const sum = stored.haul.reduce((a, r) => a + (r.demand ?? 0), 0);
+        const hauler = stored.rows.find((r) => r.row === "hauler");
         console.log(
-          `  haul: ${sum} demand over a ${stored.load}-energy load = ${
-            stored.load ? Math.ceil(sum / stored.load) : "?"
-          } haulers before the ferry`,
+          `  haul: ${sum} demand over a ${stored.load}-energy load; hauler quota ${hauler ? hauler.quota : "?"}`,
         );
         for (const r of stored.haul) {
           const sinks = (r.sinks ?? [])

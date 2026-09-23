@@ -1001,8 +1001,8 @@ let quotaOf snapshot =
     let { Memo = memo } = decideOn snapshot
     memo.HaulerQuota
 
-/// The haul this ColonyView prices, summed over its source containers — the
-/// number the quota above is the division of. A rock's own rate lives here,
+/// The haul this ColonyView prices, summed over its source and mineral
+/// containers — the numbers the quota above divides, the mine's apart. A rock's own rate lives here,
 /// where the shaping rules the quota carries (#279's floor for a haul that
 /// crosses a Seam) cannot reach it, so a case about the rate reads this and a
 /// case about the crowd reads the quota.

@@ -506,7 +506,7 @@ let mineHaulTests =
     testList
         "the mine's haul"
         [
-            test "the mineral container is one more term in the hauler row's demand sum" {
+            test "the mineral container is one more line in the hauler row's reported demand" {
                 // The leg is worked by the existing hauler unit row and no new one, so
                 // what grows is a row's quota and not the cascade. The term is the
                 // mineral container's round trip to the storage times the miner's own
@@ -590,5 +590,59 @@ let mineHaulTests =
                 Expect.isEmpty
                     (demandOf runOut)
                     "and a deposit with nothing left in it is a mine that is over"
+            }
+        ]
+
+/// `earningMine` with the Storage standing at (14,10) and ore in the mineral
+/// container: a colony whose energy haul and mine haul both price, so the
+/// hauler row has an energy share and a mine share to round.
+let private mineBesideEnergy =
+    { earningMine with
+        Spatial =
+            { earningMine.Spatial with
+                Thorium = Map.add "can-min" 600 earningMine.Spatial.Thorium
+            }
+            |> withObstacles [ { X = 14; Y = 10 } ]
+            |> withTargets [ "sto-1", { X = 14; Y = 10 }, Structure BuiltKind.Storage ]
+    }
+
+[<Tests>]
+let mineRoundingTests =
+    testList
+        "the mine's haul is rounded apart"
+        [
+            test "a mine beside an energy haul hires its own body, however little it asks" {
+                // #403: live at W11S29 one body carried both, and the container stood
+                // at 2,000 with 839 on the floor. Pairwise on the mineral container.
+                let mineDemand colony =
+                    (decideOn colony).Quotas.HaulerDemand
+                    |> List.filter (fun row -> RoomPos.pos row.Container = minePost)
+                    |> List.sumBy (fun row -> row.Demand)
+
+                Expect.isLessThan
+                    (haulDemandOf mineBesideEnergy)
+                    mineBesideEnergy.Bank.Capacity
+                    "the premise: energy and ore together fit one load"
+
+                Expect.isGreaterThan
+                    (mineDemand mineBesideEnergy)
+                    0
+                    "the premise: and the ore asks for some"
+
+                Expect.equal
+                    (quotaOf (mineBesideEnergy |> withoutMineContainer))
+                    1
+                    "the premise: the energy haul alone is one body"
+
+                Expect.equal
+                    (quotaOf mineBesideEnergy)
+                    2
+                    "and the mine is a second, not a share of the first"
+            }
+
+            test "a mine alone is still one body" {
+                // The split adds no body where there is nothing to split from: the
+                // mine-only colony hires what the one rounding always hired it.
+                Expect.equal (quotaOf mineHaulColony) 1 "one mine, no energy haul, one body"
             }
         ]

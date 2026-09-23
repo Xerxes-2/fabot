@@ -162,7 +162,7 @@ The per-tick query interface over the [[spatial projection]]: seats, work areas,
 The heavy-WORK [[body pattern]] cast for a [[post]]: Work up to the saturation of the rock its Post seats, one Carry and minimal Move, cast into the vacant Posts richest first, pinned by [[travel cost]] and working in place. ADR-0006, ADR-0012, ADR-0016, ADR-0020, ADR-0021, ADR-0025, ADR-0026, ADR-0048, ADR-0053.
 
 ### Hauler unit
-The repeating [Carry; Carry; Move] block hauler bodies are built from, at road parity, living in the [[withdraw]]→[[refill]] cycle. Its quota is the colony's whole haul — each source [[container]]'s round trip to the colony's sinks times its output over carry capacity — rounded up once. ADR-0012, ADR-0029, ADR-0030, ADR-0042, ADR-0049.
+The repeating [Carry; Carry; Move] block hauler bodies are built from, at road parity, living in the [[withdraw]]→[[refill]] cycle. Its quota is the colony's whole haul — each source [[container]]'s round trip to the colony's sinks times its output over carry capacity — rounded up once, with each Thorium mine's haul rounded apart to a body of its own. ADR-0012, ADR-0029, ADR-0030, ADR-0042, ADR-0049.
 
 ### Work-heavy body
 A living body with strictly more Work parts than Move — a predicate over the parts, never a row name. Its intake is digging from its [[post]], and it walks to nothing else. ADR-0003, ADR-0006, ADR-0016, ADR-0020, ADR-0024, ADR-0033, ADR-0048.
