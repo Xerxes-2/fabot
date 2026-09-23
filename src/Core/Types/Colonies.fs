@@ -356,6 +356,20 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319018", { Room = "W15S29"; X = 12; Y = 34 }
         }
 
+    /// The fifth colony's room, declared 2026-09-24 off
+    /// `docs/research/fifth-colony.md`, which says why this room and not a
+    /// richer one. The ids and tiles are the engine's, read that day.
+    let w11s27: Outpost =
+        {
+            RoomName = "W11S27"
+            Sources =
+                [
+                    "6a8caac6dd4872bccd3195ed", { Room = "W11S27"; X = 13; Y = 28 }
+                    "6a8caac6dd4872bccd3195ef", { Room = "W11S27"; X = 46; Y = 33 }
+                ]
+            Controller = "6a8caac6dd4872bccd3195ee", { Room = "W11S27"; X = 14; Y = 29 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`: one hop, one source at a 210-tick
     /// round trip, about 6.25 energy a tick net, and the cheapest tick of the
@@ -676,7 +690,12 @@ module Colony =
                 // `idle (none-applicable)`. The last step between the rate and
                 // the demand is not measured and belongs in a ticket; the
                 // farthest rock is the one lever this file has.
-                Outposts = [ Outpost.w13s29 ]
+                //
+                // W11S27 joins it on 2026-09-24 as the fifth colony's room, so
+                // its controller enters this pool as a Claim — **to be taken
+                // out of this list the day that Claim lands**, by the paragraph
+                // above. Why this mother: `docs/research/fifth-colony.md`.
+                Outposts = [ Outpost.w13s29; Outpost.w11s27 ]
                 // Five crossings to the Reactor: the 22,000 Thorium banked
                 // here is ore nothing here can deliver.
                 Errands = []
@@ -742,6 +761,16 @@ module Colony =
                 // the tick the Layout stands it the ore has a path with nobody
                 // having to remember — a hand edit at a moment no alarm
                 // watches is how 36,484 T sat unshipped until #349.
+                Consignee = Some "W15S28"
+            }
+            // The fifth colony (2026-09-24, `docs/research/fifth-colony.md`).
+            // No outposts until its spawn stands, and its ore goes by
+            // terminal, both as the fourth's.
+            {
+                Home = "W11S27"
+                Outposts = []
+                Errands = []
+                Mother = Some "W13S28"
                 Consignee = Some "W15S28"
             }
         ]
