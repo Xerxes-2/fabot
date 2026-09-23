@@ -41,3 +41,15 @@ W13S28 is three crossings away (W12S28, W11S28) where W12S28 is two, and `fourth
 - **CPU:** the claim goes ahead only while the bucket holds; before the declaration the mean was ~58 ms against a limit of 100. The `profile` scenarios are unmoved (`pair` 5.52 ms), since none of them stands the rectangle's rooms as work.
 - **Risks:** Ague's W8S27 (RCL3) borders W9S27, on the road to W9S28. Nightred (W9S24, RCL6) reserves W9S25 and W8S24/W8S25. No invader core stands in W11S27 or next to it.
 - **Unverified:** the W9S28 chain is counted with ring tiles only, not with ADR 0062's ground-behind-the-landing test. W10S27, W9S27 and W9S28 are not captured, so the repo's chain test has not seen them. Capture them before W9S28 is declared.
+
+## The first spawn: 24,27
+
+Placed by hand at t702,925 (ADR 0047: the nursery's first spawn is a human's act). Chosen by a stride-1 sweep over the capture. The throwaway test ran one RCL6 `decide` per tile at a 2,300 bank, then read the Layout's roads, its losses and the Atlas's `haulRoundTripTicks` from the spawn to each furniture. All 1,380 admissible tiles (Plain, ≥3 from every source, controller and the deposit) plan with no unserved footing and no unrouted trunk, so the choice is between two families:
+
+| tile | roads | source A (13,28) / B (46,33) | controller | south door | T |
+|---|---|---|---|---|---|
+| **24,27** | 41 | 33 / 63 | 36 | 60 | 79 |
+| 22,27 (fewest roads) | 40 | 27 / 69 | 30 | 60 | 85 |
+| 31,36 (by the door) | 54 | 54 / 42 | 57 | 33 | 83 |
+
+Source B's haul is priced at its dearest sink, the controller buffer on the far west side, so no spawn tile moves it much. What the tile does move is source A's cluster and storage leg (A stands beside the controller) and the road count. The centre wins on both, by about 20 ticks and 13 roads. The door tile wins only the bootstrap walk, by 27 ticks against a ~450-tick pioneer round trip from W13S28.
