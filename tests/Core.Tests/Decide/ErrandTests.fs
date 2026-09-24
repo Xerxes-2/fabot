@@ -1582,7 +1582,8 @@ let courierTests =
                     "with no errand in the view the Storage takes it back, or it ages its body to death"
             }
 
-            test "an ally burning in the Reactor keeps our flag off it until the handover mark" {
+            test
+                "an ally burning in the Reactor keeps our flag and our loads off it until its store is empty" {
                 let heldBy owner store =
                     deliveryColony (Some Ownership.Rival)
                     |> withReactorStore store
@@ -1597,22 +1598,27 @@ let courierTests =
                         }
 
                 Expect.isEmpty
-                    (reclaimIntents (heldBy "Odiodin" 800))
-                    "their burn is theirs: the re-claimer stands by"
+                    (reclaimIntents (heldBy "Odiodin" 1))
+                    "their burn is theirs to the last unit: the re-claimer stands by"
 
                 Expect.isNonEmpty
-                    (reclaimIntents (heldBy "Odiodin" Tuning.defaults.AllyHandover))
-                    "at the handover mark it takes the flag, before the store empties"
+                    (reclaimIntents (heldBy "Odiodin" 0))
+                    "an empty store is taken, with no handover timed"
 
                 Expect.isNonEmpty
                     (reclaimIntents (heldBy "Shibdib" 800))
                     "a stranger's flag is taken back on sight, as before"
 
                 Expect.equal
-                    ((courierRow (heldBy "Odiodin" 800)).Quota,
-                     (courierRow (heldBy "Odiodin" Tuning.defaults.AllyHandoverLead)).Quota)
+                    ((courierRow (heldBy "Odiodin" 1)).Quota,
+                     (courierRow (heldBy "Odiodin" 0)).Quota)
                     (0, 1)
-                    "no load is drawn for an ally's run until the store is within the lead"
+                    "no load is drawn for an ally's run, and the programme reopens on their empty store"
+
+                Expect.isFalse
+                    (planTasksOn (heldBy "Odiodin" 1) noThreats
+                     |> List.contains (Refill(reactor, Thorium)))
+                    "nothing is poured under their flag"
 
                 let loaded = courier "courier-ally" |> carrying 500
 
@@ -1622,47 +1628,6 @@ let courierTests =
                      |> Map.tryFind loaded.Name)
                     (Some(taskId (Refill("sto-1", Thorium))))
                     "and a load already drawn banks rather than aging its body through their run"
-
-                // Within the lead the load walks: the Reactor is a sink to go to
-                // while the flag is still theirs.
-                let withinLead = heldBy "Odiodin" Tuning.defaults.AllyHandoverLead
-
-                Expect.contains
-                    (planTasksOn withinLead noThreats)
-                    (Refill(reactor, Thorium))
-                    "the sink is pooled under an ally's flag, so the courier sets out"
-
-                Expect.equal
-                    ((decideOn (withinLead |> withHomeCreep { X = 13; Y = 10 } loaded)).Assignments
-                     |> Map.tryFind loaded.Name)
-                    (Some(taskId (Refill(reactor, Thorium))))
-                    "and the drawn load walks to the Reactor rather than sitting at home"
-
-                // At the Reactor it pours nothing into their flag; the handover
-                // comes the tick our load stands there with room to go in.
-                let arrived store =
-                    heldBy "Odiodin" store |> withErrandCreep ringTile loaded
-
-                Expect.isEmpty
-                    (emitOn (arrived 300) [ loaded.Name, Refill(reactor, Thorium) ]
-                     |> List.filter (function
-                         | TransferEnergyToStructure _ -> true
-                         | _ -> false))
-                    "no transfer while the flag is theirs"
-
-                Expect.isNonEmpty
-                    (reclaimIntents (arrived 300))
-                    "the re-claimer takes the flag for the load at hand: 300 and 500 fit"
-
-                Expect.isEmpty
-                    (reclaimIntents (arrived 800))
-                    "but not while 800 of theirs leaves the load no room"
-
-                let sweeper = courier "sweeper" |> carrying 30
-
-                Expect.isEmpty
-                    (reclaimIntents (heldBy "Odiodin" 300 |> withErrandCreep ringTile sweeper))
-                    "and a body holding a swept pile's thirty is no delivery at hand"
             }
 
             test "visible Keeper Reach pre-empts a loaded courier, which re-prices after it clears" {
