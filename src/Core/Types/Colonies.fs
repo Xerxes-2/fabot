@@ -651,6 +651,15 @@ module Colony =
     let signature =
         "A functional bot. F# compiled by Fable; Core is pure — one projection in, intents out"
 
+    /// The players we have agreed with, by the username the engine spells
+    /// them (#412): moved by a human in a commit, like every declaration.
+    /// Odiodin since 2026-09-25, to defend and share W15S25 against
+    /// Shibdib's steal (`docs/research/shibdib-reactor-steal.md`).
+    let allies: Set<string> = Set.ofList [ "Odiodin" ]
+
+    /// Whether the engine's username is one of `allies`.
+    let isAlly (username: string) = Set.contains username allies
+
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an
     /// entry with no spawn behind it yet is that intent rather than a mistake.

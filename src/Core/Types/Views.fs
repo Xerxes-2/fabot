@@ -548,7 +548,11 @@ module ColonyView =
             ThreatenedOutposts = gate.ThreatenedOutposts
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
-            Hostiles = collected (fun facts -> facts.Hostiles)
+            // An ally's creep is no hostile (#412): this is the one entry every
+            // rule that fires, flees, stands down or counts a rival reads.
+            Hostiles =
+                collected (fun facts -> facts.Hostiles)
+                |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
             InvaderCores = collected (fun facts -> facts.InvaderCores)
             Spatial =
                 {

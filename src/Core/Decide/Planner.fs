@@ -536,17 +536,29 @@ let planTasks
             []
 
     // Not while a rival's claimer stands beside it (#406), held work
-    // included: the load would burn for the flag it takes next tick.
+    // included: the load would burn for the flag it takes next tick. A room an
+    // ally is still burning in beyond the lead (#412) takes no new load, but a
+    // load already walking keeps its sink: turned back, it ages its body to
+    // death on the way home.
     let deliverable = errandRoomsDeliverable view
+    let contested = errandRoomsContested view
 
     let reactorRefills =
         view.Errands
-        |> List.filter (fun errand -> Set.contains errand.RoomName deliverable)
+        |> List.filter (fun errand ->
+            not (Set.contains errand.RoomName contested)
+            && (Set.contains errand.RoomName deliverable
+                || Set.contains (taskId (Refill(fst errand.Target, Thorium))) held.WithThorium))
         |> List.choose (fun errand ->
             let reactorId = fst errand.Target
             let task = Refill(reactorId, Thorium)
             let owner = Map.tryFind reactorId view.Spatial.Owners
             let stored = SpatialInfo.heldIn view.Spatial Thorium reactorId
+
+            // An ally's flag is a sink to walk to and not yet to pour into
+            // (#412): the load stands at the Reactor while the handover comes,
+            // and the Emitter withholds the transfer until the flag is ours.
+            let allyHeld = reactorRow view reactorId |> Option.exists allyHolds
 
             // Ore already lying in the Reactor's own room opens it too (#378):
             // a pile or a tombstone out there is score at the far end of the
@@ -557,7 +569,7 @@ let planTasks
                  || deliveryInFlight
                  || oreBesideTheReactor view
                  || Set.contains (taskId task) held.WithThorium)
-                && (owner = Some Ownership.Ours || owner = Some Ownership.Unowned)
+                && (owner = Some Ownership.Ours || owner = Some Ownership.Unowned || allyHeld)
                 && stored < Engine.reactorCapacity
             then
                 Some task

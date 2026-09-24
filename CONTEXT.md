@@ -78,7 +78,7 @@ The Task of holding an [[outpost]]'s controller under this colony's [[reservatio
 The Task of taking a [[candidate colony]]'s controller for our own with CLAIM parts — the first tick of a second [[colony]]. Pooled one per candidate whose controller is projected and takeable; applicability, [[work area]] and cap are [[reserve]]'s. ADR-0047. 🏴
 
 ### Reclaim
-The Task of claiming the sector Reactor for this player with CLAIM parts, pooled one per declared [[errand]] off the declaration alone, feeding-tier, and fired only on a tick the reactor is not ours. ADR-0057, ADR-0060, ADR-0069. ☢️
+The Task of claiming the sector Reactor for this player with CLAIM parts, pooled one per declared [[errand]] off the declaration alone, feeding-tier, and fired only on a tick the reactor is not ours — and not an [[ally]]'s while their store is above the handover mark, unless a load of ours stands beside it with room to go in. ADR-0057, ADR-0060, ADR-0069. ☢️
 
 ### Flee
 The Task of getting out of a [[reach]]: applicable to any creep standing inside one except a [[work-heavy body]] and a Fighter, with the room's safe set as its [[work area]] and no action. One of the two Safety-tier Tasks. ADR-0033, ADR-0056. 🏃
@@ -334,8 +334,12 @@ The colony reflex that emits a pickup Intent for every creep with free capacity 
 ### Fire reflex
 The colony reflex that has every tower shoot the [[hostile]] nearest to itself each tick one stands in the [[home room]] — attack only, per tower, no focus fire and no energy floor. ADR-0014.
 
+### Ally
+A player we have agreed with, by username, declared by hand in `Colony.allies` (#412). Their creeps are no [[hostile]], so nothing fires on them, flees them or stands down for them. On a Reactor they hold, the burn is theirs until a handover: no load is drawn beyond `Tuning.AllyHandoverLead` of their store, and the [[reclaim]] waits for `Tuning.AllyHandover`.
+_Avoid_: friend, alliance
+
 ### Hostile
-A hostile creep as the [[world]] projects it — id, owner, [[room position]] and body parts — swept from every room the colony works and can see; out of the [[spatial projection]], gating Tasks only through a [[threat]]'s [[reach]]. An invader core is a structure and rides a field of its own. ADR-0007, ADR-0014, ADR-0028, ADR-0033, ADR-0041, ADR-0043, ADR-0052.
+A hostile creep as the [[world]] projects it — id, owner, [[room position]] and body parts — swept from every room the colony works and can see, less every [[ally]]'s; out of the [[spatial projection]], gating Tasks only through a [[threat]]'s [[reach]]. An invader core is a structure and rides a field of its own. ADR-0007, ADR-0014, ADR-0028, ADR-0033, ADR-0041, ADR-0043, ADR-0052.
 
 ### Threat
 A [[hostile]] carrying an ATTACK or RANGED_ATTACK part, read off the parts and never the owner; under safe mode in a room we own nothing is a Threat. Only a Threat has a [[reach]]. ADR-0033.

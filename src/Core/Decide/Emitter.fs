@@ -310,9 +310,15 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // A refill cluster's Refill names a place; which member the energy lands in
     // is settled here, at arrival, off the tile the body stands on. Every other
     // Refill resolves through the same call.
+    //
+    // Into a Reactor an ally holds, nothing (#412): the load stands there for
+    // the handover, and poured now it would burn for them.
     | Refill(structureId, resource) ->
-        Atlas.refillTarget atlas creep.Name structureId resource
-        |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
+        if Facts.reactorRow view structureId |> Option.exists Facts.allyHolds then
+            None
+        else
+            Atlas.refillTarget atlas creep.Name structureId resource
+            |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
@@ -324,8 +330,33 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // the Executor's log is a flag that had been taken from us. Absence is not
     // ours: the body standing here is the colony's only vision of the room, and
     // a tick with no answer is a tick to act.
+    //
+    // Nor while an ally burns in it (#412): that burn is theirs by agreement.
+    // The claim waits for the store to be nearly spent, or for a whole
+    // delivery of ours to stand beside it with room to go in, whichever comes
+    // first — a loaded body ages three ticks a tick while it waits.
     | Reclaim reactorId ->
-        if SpatialInfo.ownsTarget view.Spatial reactorId then
+        let allyBurning =
+            Facts.reactorRow view reactorId
+            |> Option.exists (fun reactor ->
+                let loadAtHand =
+                    Atlas.positionOf atlas reactorId
+                    |> Option.exists (fun at ->
+                        view.Creeps
+                        |> List.exists (fun other ->
+                            // A whole delivery and nothing less: a body holding a
+                            // swept pile's thirty is no reason to take their flag.
+                            other.Thorium = view.Tuning.ReactorLoad
+                            && reactor.Thorium + other.Thorium <= Engine.reactorCapacity
+                            && Atlas.creepTile atlas other.Name
+                               |> Option.bind (RoomPos.range at)
+                               |> Option.exists (fun r -> r <= 1)))
+
+                Facts.allyHolds reactor
+                && reactor.Thorium > view.Tuning.AllyHandover
+                && not loadAtHand)
+
+        if SpatialInfo.ownsTarget view.Spatial reactorId || allyBurning then
             None
         else
             Some(ClaimReactor(creep.Name, reactorId))

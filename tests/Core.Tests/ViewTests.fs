@@ -1949,6 +1949,42 @@ let private courierWorld =
     }
 
 [<Tests>]
+let allyTests =
+    testList
+        "an ally is no hostile"
+        [
+            test "an ally's creep never reaches the view's hostiles, and a stranger's does" {
+                let armed owner : HostileInfo =
+                    {
+                        Id = $"h-{owner}"
+                        Owner = owner
+                        Pos = RoomPos.at mother { X = 20; Y = 20 }
+                        Body = [ RangedAttack; Heal; Move ]
+                        TicksToLive = 1_000
+                    }
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.change
+                                mother
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        Hostiles = [ armed "Odiodin"; armed "Shibdib" ]
+                                    }))
+                    }
+
+                Expect.isTrue (Set.contains "Odiodin" Colony.allies) "the premise: declared by hand"
+
+                Expect.equal
+                    ((viewOf world mother).Hostiles |> List.map (fun hostile -> hostile.Owner))
+                    [ "Shibdib" ]
+                    "no tower, guard, stand-down or flee rule reads an ally's body; every one reads a stranger's"
+            }
+        ]
+
+[<Tests>]
 let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"

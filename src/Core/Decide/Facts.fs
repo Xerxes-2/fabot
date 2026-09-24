@@ -242,10 +242,37 @@ let internal errandRoomsContested (view: ColonyView) : Set<string> =
         |> List.exists (fun hostile ->
             hostile.Pos.Room = room && List.contains BodyPart.Claim hostile.Body))
 
+/// The declared Reactor's own row, if this tick sees it.
+let internal reactorRow (view: ColonyView) (reactorId: string) : ReactorInfo option =
+    view.Reactors |> List.tryFind (fun reactor -> reactor.Id = reactorId)
+
+/// Whether an ally's flag is on this Reactor row (#412).
+let internal allyHolds (reactor: ReactorInfo) =
+    match reactor.Owner with
+    | ReactorOwner.Rival username -> Colony.isAlly username
+    | ReactorOwner.Ours
+    | ReactorOwner.Unowned -> false
+
+/// The errand rooms whose Reactor an ally holds with more than `mark` in its
+/// store, by the Reactor's own row (#412): no row, no vision, and absence is
+/// not an ally.
+let internal errandRoomsAllyHeldAbove (view: ColonyView) (mark: int) : Set<string> =
+    view.Errands
+    |> List.filter (fun errand ->
+        reactorRow view (fst errand.Target)
+        |> Option.exists (fun reactor -> allyHolds reactor && reactor.Thorium > mark))
+    |> List.map (fun errand -> errand.RoomName)
+    |> Set.ofList
+
 /// The errand rooms a delivery may be drawn for and poured into this tick:
-/// the declared ones less the contested.
+/// the declared ones less the contested, and less those an ally is still
+/// burning in beyond the handover lead (#412).
 let internal errandRoomsDeliverable (view: ColonyView) : Set<string> =
-    Set.difference (errandRooms view) (errandRoomsContested view)
+    Set.difference
+        (errandRooms view)
+        (Set.union
+            (errandRoomsContested view)
+            (errandRoomsAllyHeldAbove view view.Tuning.AllyHandoverLead))
 
 /// Whether decaying ore standing at this target is this colony's to sweep: a
 /// room we own (#311), a room we declared an errand in (#354: the Reactor's

@@ -341,6 +341,22 @@ type Tuning =
         /// over a 196-tick leg and died in the Reactor's room with 500 T
         /// aboard. A percentage because the risk scales with the leg.
         DeliveryLifeMargin: int
+        /// The store at or below which the re-claimer takes back a Reactor an
+        /// ally holds (#412): the ally's burn is theirs until it is nearly
+        /// spent, and the handover must land before the store empties or the
+        /// streak both of us feed breaks. Small, because every unit above it
+        /// burns for us and not for them.
+        AllyHandover: int
+        /// The store at or below which a delivery is drawn for a Reactor an
+        /// ally holds (#412), so the load is at the Reactor when the handover
+        /// comes: the store burns one a tick while the courier is cast (~90
+        /// ticks for thirty parts) and walks W15S28's 318-tick loaded leg,
+        /// with slack over both. Above it the Reactor is not deliverable, so a
+        /// load drawn and still at home banks rather than aging its body
+        /// through the ally's whole run. One already walking keeps its sink
+        /// (`Planner.reactorRefills`): turned back, it dies on the way home;
+        /// kept, its ore at worst lies beside the Reactor to be swept in.
+        AllyHandoverLead: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -476,6 +492,8 @@ module Tuning =
             MineContactCliff = 1000
             ReactorLoad = 500
             DeliveryLifeMargin = 25
+            AllyHandover = 20
+            AllyHandoverLead = 500
             TerminalEnergy = 4_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636

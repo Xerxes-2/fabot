@@ -1,6 +1,8 @@
 # The reactor is a declared errand, a keeper lair is terrain, and the programme is W15S28's
 
-> **Status:** accepted
+> **Status:** accepted, amended by #412
+
+> **Amended by #412** on 2026-09-25, on Odiodin and on nothing else this ADR decided. The standing claim war with **Odiodin** described below is over: Odiodin is a declared ally (`Colony.allies`), their creeps are no hostile, and the re-claimer leaves a Reactor they hold alone while they burn, taking it back at the handover mark or when a load of ours stands beside it with room. Every other rival is taken back on sight exactly as before.
 
 ADR 0057 was written on 2026-09-07 against `docs/research/thorium-reactor.md` at tick 202,041. Its **rules** are still the authority and were re-verified against `mod-season5` (`da59118`) on 2026-09-13; its **world** is gone. `docs/research/thorium-season-plan.md` is that re-read, at ticks 396,515–396,757, and it lists every number of its predecessor that has moved. Three things moved far enough to need a decision rather than a correction:
 
