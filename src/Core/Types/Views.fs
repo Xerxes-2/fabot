@@ -611,7 +611,7 @@ module ColonyView =
                 let reaches = World.reachesUnder gate joins tuning world
 
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
-                @ Errand.refused reaches tuning.MaxHops home colony.Errands
+                @ Errand.refused reaches tuning.MaxHops home (Errand.unheld colony.Errands)
             // The world's memory of these rooms and of no others (#151), read
             // off the same walk the facts are (#271).
             Sightings =

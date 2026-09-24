@@ -576,8 +576,7 @@ module World =
             |> List.filter (Outpost.routable reaches tuning.MaxHops colony.Home)
 
         let errands =
-            colony.Errands
-            |> List.filter (fun errand -> not (Set.contains errand.RoomName gate.Shut))
+            Errand.worked gate.Shut colony.Errands
             |> List.filter (Errand.routable reaches tuning.MaxHops colony.Home)
 
         // The two halves of what a mother projects for a child of hers,

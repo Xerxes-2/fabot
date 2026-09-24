@@ -197,6 +197,7 @@ let private declared: Colony list =
                     {
                         RoomName = errand
                         Target = "reactor-1", { Room = errand; X = 4; Y = 6 }
+                        Held = false
                     }
                 ]
             Mother = None

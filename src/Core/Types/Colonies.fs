@@ -408,10 +408,26 @@ type Errand =
         /// The one object the errand is for, under the id the engine knows it
         /// by. One and not a list: a second entry would be a second errand's.
         Target: string * RoomPos
+        /// A human has paused it: still declared, so its chain and its
+        /// capture stay under test, and worked by nothing — the scan drops it
+        /// as a stand-down drops a shut room. Moved in a commit, like the
+        /// declaration itself.
+        Held: bool
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Errand =
+    /// The errands a human has not held (#407): what the scan works and the
+    /// layout record may refuse. A pause is neither.
+    let unheld (errands: Errand list) : Errand list =
+        errands |> List.filter (fun errand -> not errand.Held)
+
+    /// The declarations the colony works this tick: the unheld ones, less
+    /// every room a [[stand-down]] is withholding (`Outpost.worked`'s twin).
+    let worked (shut: Set<string>) (errands: Errand list) : Errand list =
+        unheld errands
+        |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
+
     /// `Declaration.withinHopBudget` asked of this errand's room.
     let withinHopBudget (maxHops: int) (home: string) (errand: Errand) : bool =
         Declaration.withinHopBudget maxHops home errand.RoomName
@@ -505,6 +521,10 @@ module Errand =
         {
             RoomName = "W15S25"
             Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
+            // Held 2026-09-25: the ore is banked, not burnt, until a joint
+            // defence against Shibdib's steal is agreed with Odiodin
+            // (`docs/research/shibdib-reactor-steal.md`).
+            Held = true
         }
 
 /// What this colony's [[raid log]] says about the rooms it declares, this tick

@@ -232,12 +232,13 @@ let internal applicable
         // terminal (#349). The tier gap sends a remainder to the Reactor while
         // the body can act on it and banks it when it cannot.
         //
-        // Except while a rival's claimer contests the Reactor (#406): a
-        // rival's flag is ours again the tick the re-claimer acts, a flag war
-        // is not, and a load held through one ages its body to death.
+        // Except when no Reactor will take it: contested (#406), held or shut
+        // (#407). A rival's flag is ours again the tick the re-claimer acts;
+        // none of those three is, and a load held through one ages its body
+        // to death.
         && (not storage
             || creep.Thorium <> view.Tuning.ReactorLoad
-            || not (Set.isEmpty (Facts.errandRoomsContested view)))
+            || Set.isEmpty (Facts.errandRoomsDeliverable view))
     // A Build is a walk a colony-wide rank cannot thin (#157, #234): light
     // bodies' work, and neither a heavy body's nor a standing one's. The one
     // exception is a container site under the body's own feet, on its own Post

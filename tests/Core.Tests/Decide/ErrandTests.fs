@@ -1562,6 +1562,26 @@ let courierTests =
                     "the premise: uncontested, the same body pours"
             }
 
+            test "a drawn load banks when no errand is worked, held or shut" {
+                let loaded = courier "courier-held" |> carrying 500
+
+                let banked colony =
+                    (decideOn (colony |> withHomeCreep { X = 13; Y = 10 } loaded)).Assignments
+                    |> Map.tryFind loaded.Name
+
+                let worked = deliveryColony (Some Ownership.Ours)
+
+                Expect.notEqual
+                    (banked worked)
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "the premise: while the errand is worked, the drawn load is the Reactor's"
+
+                Expect.equal
+                    (banked { worked with Errands = [] })
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "with no errand in the view the Storage takes it back, or it ages its body to death"
+            }
+
             test "visible Keeper Reach pre-empts a loaded courier, which re-prices after it clears" {
                 let loaded = courier "courier-fleeing" |> carrying 500
 

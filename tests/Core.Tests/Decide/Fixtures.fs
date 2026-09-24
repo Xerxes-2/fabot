@@ -1773,6 +1773,7 @@ let reactorErrand: Errand =
     {
         RoomName = "W1N2"
         Target = "reactor-1", RoomPos.at "W1N2" { X = 25; Y = 44 }
+        Held = false
     }
 
 /// The declared target's id and tile, and the ring tile due south of it that a

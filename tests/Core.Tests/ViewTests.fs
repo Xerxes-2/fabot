@@ -1843,6 +1843,7 @@ let private errandDeclared: Colony list =
                         {
                             RoomName = errandRoom
                             Target = reactor, RoomPos.at errandRoom reactorTile
+                            Held = false
                         }
                     ]
             })
@@ -1952,6 +1953,67 @@ let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"
         [
+            test "a held errand is worked by nothing and refused by nothing" {
+                let held =
+                    errandDeclared
+                    |> List.map (fun colony ->
+                        { colony with
+                            Errands =
+                                colony.Errands
+                                |> List.map (fun errand -> { errand with Held = true })
+                        })
+
+                let worked = viewUnder errandDeclared errandWorld mother
+                let paused = viewUnder held errandWorld mother
+
+                Expect.equal
+                    (worked.Errands |> List.map (fun errand -> errand.RoomName))
+                    [ errandRoom ]
+                    "the premise: unheld, the same declaration is worked"
+
+                Expect.isEmpty
+                    paused.Errands
+                    "held, no rule sees it: no Reclaim, no courier, no delivery"
+
+                Expect.isFalse
+                    (Map.containsKey errandRoom paused.Spatial.Rooms)
+                    "and its room leaves the projection, as a shut room does"
+
+                // A declaration no chain reaches is refused loudly (#243) —
+                // unless a human has held it, which is not the same fact.
+                let unreachable held =
+                    errandDeclared
+                    |> List.map (fun colony ->
+                        if colony.Home <> mother then
+                            colony
+                        else
+                            { colony with
+                                Errands =
+                                    [
+                                        {
+                                            RoomName = "W9N9"
+                                            Target =
+                                                "far-reactor", RoomPos.at "W9N9" { X = 5; Y = 5 }
+                                            Held = held
+                                        }
+                                    ]
+                            })
+
+                Expect.equal
+                    (viewUnder (unreachable false) errandWorld mother).Refused
+                    [
+                        {
+                            RoomName = "W9N9"
+                            Kind = DeclarationKind.Errand
+                        }
+                    ]
+                    "the premise: unheld, an errand no chain reaches is named"
+
+                Expect.isEmpty
+                    (viewUnder (unreachable true) errandWorld mother).Refused
+                    "held, it is a pause and not a refusal"
+            }
+
             test
                 "what a site still owes reaches the view, which is what tells a road from a terminal" {
                 // The projection-side counterpart of the backlog term: a
@@ -2451,6 +2513,7 @@ let errandTests =
                                         {
                                             RoomName = "W12S34"
                                             Target = reactor, RoomPos.at "W12S34" reactorTile
+                                            Held = false
                                         }
                                     ]
                             })
@@ -2824,8 +2887,9 @@ let scanSetMaskTests =
             test "an errand the raw ring reaches and the masked layer does not leaves the scan set" {
                 // `scanOf`'s errand clause, the same case one clause over. The
                 // live declaration, carrying no outpost, so this case is the
-                // errand clause's alone.
-                let colony = declaringErrand Errand.w15s25
+                // errand clause's alone. Unheld: the margin is the subject,
+                // not a human's pause.
+                let colony = declaringErrand { Errand.w15s25 with Held = false }
                 let scan = scanUnder Tuning.defaults colony
 
                 Expect.isEmpty
