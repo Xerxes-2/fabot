@@ -43,19 +43,19 @@ let private withCreepTarget
     : Outcome =
     withTarget targetId (fun target -> withCreep name (fun creep -> act creep target))
 
-/// The same pair where the target is a creep of ours, and so is named through
-/// `Game.creeps` rather than identified.
+/// A creep of ours named as a target, through `Game.creeps` rather than by id.
+let private withOurCreep (targetName: string) (act: ICreep -> Outcome) : Outcome =
+    let target: ICreep = Game.creeps?(targetName)
+
+    if isNull (box target) then ActorMissing else act target
+
+/// The same pair where the target is a creep of ours.
 let private withOurCreepTarget
     (name: string)
     (targetName: string)
     (act: ICreep -> ICreep -> int)
     : Outcome =
-    let target: ICreep = Game.creeps?(targetName)
-
-    if isNull (box target) then
-        ActorMissing
-    else
-        withCreep name (fun creep -> act creep target)
+    withOurCreep targetName (fun target -> withCreep name (fun creep -> act creep target))
 
 let private execute (intent: Intent) : Outcome =
     match intent with
@@ -108,6 +108,8 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName hostileId (fun c t -> c.attack t)
     | HealCreep(creepName, targetName) ->
         withOurCreepTarget creepName targetName (fun c t -> c.heal (box t))
+    | RangedHealCreep(creepName, targetName) ->
+        withOurCreepTarget creepName targetName (fun c t -> c.rangedHeal (box t))
     | MoveCreep(creepName, direction) ->
         withCreep creepName (fun c -> c.move (directionCode direction))
     | SayCreep(creepName, message) -> withCreep creepName (fun c -> c.say message)
@@ -117,6 +119,10 @@ let private execute (intent: Intent) : Outcome =
     | FireTower(towerId, hostileId) ->
         withTarget hostileId (fun target ->
             withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.attack target))
+    | HealWithTower(towerId, targetName) ->
+        withOurCreep targetName (fun target ->
+            withActor (Game.getObjectById towerId :?> ITower) (fun tower ->
+                tower.heal (box target)))
     | SendFromTerminal(terminalId, resource, amount, destination) ->
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))

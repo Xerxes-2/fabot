@@ -406,21 +406,67 @@ let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: strin
     guardTarget view atlas creep room inSwing
     |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
 
-/// Self-preservation beside any Task or none: only damage and an active HEAL
-/// part invite a heal. Existing actions own their channels; a reflex must never
-/// suppress a swing, a harvest, construction or another chosen action.
-let selfHeal (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
-    (plan, view.Creeps)
-    ||> List.fold (fun plan creep ->
-        if
-            creep.Hits.Hits < creep.Hits.HitsMax
-            && (Map.tryFind Heal creep.Body |> Option.defaultValue 0) > 0
-        then
-            match Fabot.Core.IntentPlan.tryAdd (HealCreep(creep.Name, creep.Name)) plan with
-            | Ok healed -> healed
-            | Error _ -> plan
+/// The heal reflex beside any Task or none (#409): a body with an active HEAL
+/// part heals itself if it is hurt, else the most-hurt creep of ours beside it,
+/// else the most-hurt within `Engine.rangedRange` at the ranged rate. Existing
+/// actions own their channels: a reflex never suppresses a swing, a harvest,
+/// construction or another chosen action. Each heal is counted off its
+/// patient's missing hits as it is planned, so two healers do not both pour
+/// into a wound one of them closes.
+let healReflex (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
+    let healParts (creep: CreepInfo) =
+        Map.tryFind Heal creep.Body |> Option.defaultValue 0
+
+    let tileOf (creep: CreepInfo) =
+        SpatialInfo.creepPlacementOf view.Spatial creep.Name
+
+    let missing =
+        view.Creeps
+        |> List.map (fun creep -> creep.Name, creep.Hits.HitsMax - creep.Hits.Hits)
+        |> Map.ofList
+
+    let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
+        if Map.find healer.Name owed > 0 then
+            Some(healer, 0)
         else
-            plan)
+            tileOf healer
+            |> Option.bind (fun at ->
+                view.Creeps
+                |> List.choose (fun other ->
+                    if other.Name = healer.Name || Map.find other.Name owed <= 0 then
+                        None
+                    else
+                        tileOf other
+                        |> Option.bind (RoomPos.range at)
+                        |> Option.filter (fun r -> r <= Engine.rangedRange)
+                        |> Option.map (fun r -> other, r))
+                // Adjacent first, at three times the rate; then the deepest
+                // wound; then the name, so the choice is the same every tick.
+                |> List.sortBy (fun (other, r) ->
+                    (r > Engine.meleeRange), -(Map.find other.Name owed), other.Name)
+                |> List.tryHead)
+
+    ((plan, missing), view.Creeps)
+    ||> List.fold (fun (plan, owed) healer ->
+        let parts = healParts healer
+
+        if parts = 0 then
+            plan, owed
+        else
+            match patientFor healer owed with
+            | None -> plan, owed
+            | Some(patient, r) ->
+                let intent, power =
+                    if r <= Engine.meleeRange then
+                        HealCreep(healer.Name, patient.Name), Engine.healPower
+                    else
+                        RangedHealCreep(healer.Name, patient.Name), Engine.rangedHealPower
+
+                match Fabot.Core.IntentPlan.tryAdd intent plan with
+                | Ok healed ->
+                    healed, Map.add patient.Name (Map.find patient.Name owed - parts * power) owed
+                | Error _ -> plan, owed)
+    |> fst
 
 /// Whether a Thorium harvest is held this tick by the extractor's clock.
 /// `EXTRACTOR_COOLDOWN` is 5 and the engine runs the intent pass before the

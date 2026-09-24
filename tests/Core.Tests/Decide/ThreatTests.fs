@@ -535,6 +535,101 @@ let fireReflexTests =
             }
         ]
 
+let private towerHeals intents =
+    intents
+    |> List.choose (function
+        | HealWithTower(tower, target) -> Some(tower, target)
+        | _ -> None)
+
+/// The tower colony with creeps of ours standing at home, each owing the given
+/// hits.
+let private woundedAt towers hostiles (creeps: (string * Pos * int) list) =
+    let colony = towerColony towers hostiles
+
+    { colony with
+        Creeps =
+            creeps
+            |> List.map (fun (name, _, owed) ->
+                { creepWith name 0 0 [ Move ] with
+                    Hits = { Hits = 1000 - owed; HitsMax = 1000 }
+                })
+        Spatial =
+            colony.Spatial
+            |> withCreepsAt (creeps |> List.map (fun (name, pos, _) -> name, pos))
+    }
+
+[<Tests>]
+let towerHealTests =
+    testList
+        "tower heal"
+        [
+            test "a quiet room's tower heals the creep of ours that owes the most" {
+                let snapshot =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        []
+                        [ "scratched", { X = 11; Y = 40 }, 50; "mauled", { X = 30; Y = 30 }, 300 ]
+
+                Expect.equal
+                    (towerHeals (decideOn snapshot).Intents)
+                    [ "tower-1", "mauled" ]
+                    "the deepest wound, wherever it stands in the room"
+            }
+
+            test "a second tower does not pour into a wound the first one closes" {
+                let towers = [ "tower-1", { X = 10; Y = 40 }; "tower-2", { X = 12; Y = 40 } ]
+
+                Expect.equal
+                    (towerHeals
+                        (decideOn (woundedAt towers [] [ "one", { X = 11; Y = 40 }, 100 ])).Intents)
+                    [ "tower-1", "one" ]
+                    "400 at range 1 closes 100; the other tower holds its energy"
+
+                Expect.equal
+                    (towerHeals
+                        (decideOn (
+                            woundedAt
+                                towers
+                                []
+                                [ "one", { X = 11; Y = 40 }, 100; "two", { X = 13; Y = 40 }, 60 ]
+                        ))
+                            .Intents)
+                    [ "tower-1", "one"; "tower-2", "two" ]
+                    "so it takes the next wound instead"
+            }
+
+            test "a hostile at home keeps every tower firing and none healing" {
+                let snapshot =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 20; Y = 20 } [ Attack; Move ] ]
+                        [ "mauled", { X = 30; Y = 30 }, 300 ]
+
+                let { Intents = intents } = decideOn snapshot
+                Expect.equal (shots intents) [ "tower-1", "h-1" ] "the fire reflex keeps the tower"
+                Expect.isEmpty (towerHeals intents) "the engine would drop the shot for the heal"
+            }
+
+            test "the heal falls off with range as the engine's does" {
+                Expect.equal
+                    ([ 1; 5; 6; 10; 20; 30 ] |> List.map Engine.towerHealAt)
+                    [ 400; 400; 380; 300; 100; 100 ]
+                    "400 to range 5, down 300 over the next 15, flat past 20"
+            }
+
+            test "a room with no one hurt heals nobody" {
+                let snapshot =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        []
+                        [ "whole", { X = 11; Y = 40 }, 0 ]
+
+                Expect.isEmpty
+                    (towerHeals (decideOn snapshot).Intents)
+                    "nothing owed, no energy spent"
+            }
+        ]
+
 [<Tests>]
 let downgradeDeadlineTests =
     testList

@@ -63,10 +63,17 @@ type Intent =
     /// target rode implicitly on the actor would say nothing in the
     /// Executor's own failure line.
     | HealCreep of creepName: string * targetName: string
+    /// The same act at range 2..3 for `Engine.rangedHealPower` a part (#409).
+    /// The engine lets `heal` suppress it, and it suppresses `attack`.
+    | RangedHealCreep of creepName: string * targetName: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string
     | FireTower of towerId: string * hostileId: string
+    /// A tower putting hits back on a creep of ours (#410), named by name as
+    /// `HealCreep`'s target is. The engine runs a tower's heal before its
+    /// attack and drops the attack, so the two are never planned together.
+    | HealWithTower of towerId: string * targetName: string
     /// A terminal shipping a resource to another room's terminal (#349). The
     /// amount and the destination are named here for `HealCreep`'s reason, and
     /// this is the one intent whose refusal is expected in normal running: a

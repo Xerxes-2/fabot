@@ -802,7 +802,7 @@ let selfHealTests =
 
         match IntentPlan.create actions with
         | Error conflict -> failtestf "invalid fixture: %A" conflict
-        | Ok plan -> selfHeal colony plan |> IntentPlan.intents
+        | Ok plan -> healReflex colony plan |> IntentPlan.intents
 
     testList
         "self-heal reflex"
@@ -871,6 +871,82 @@ let selfHealTests =
                     (run healer selected)
                     (selected @ [ HealCreep("patient", "patient") ])
                     "read the shared compatibility rules"
+            }
+            test "a whole healer heals the most-hurt neighbour, adjacent before ranged" {
+                let hurt name missing =
+                    { creepWith name 0 0 [ Move ] with
+                        Hits = { Hits = 200 - missing; HitsMax = 200 }
+                    }
+
+                let medic = creepWith "medic" 0 0 [ Heal; Heal; Move ]
+
+                let heals placed =
+                    let colony =
+                        { bareRespawn with
+                            Creeps = placed |> List.map fst
+                            Spatial =
+                                bareRespawn.Spatial
+                                |> withCreepsAt (
+                                    placed |> List.map (fun (c: CreepInfo, pos) -> c.Name, pos)
+                                )
+                        }
+
+                    match IntentPlan.create [] with
+                    | Error conflict -> failtestf "invalid fixture: %A" conflict
+                    | Ok plan -> healReflex colony plan |> IntentPlan.intents
+
+                let at x = { X = x; Y = 10 }
+
+                Expect.equal
+                    (heals [ medic, at 10; hurt "near" 50, at 11; hurt "far" 150, at 13 ])
+                    [ HealCreep("medic", "near") ]
+                    "adjacent first, at three times the ranged rate, whoever bleeds more"
+
+                Expect.equal
+                    (heals [ medic, at 10; hurt "far" 150, at 13 ])
+                    [ RangedHealCreep("medic", "far") ]
+                    "a wound three tiles off takes the ranged heal"
+
+                Expect.isEmpty
+                    (heals [ medic, at 10; hurt "farther" 150, at 14 ])
+                    "and four tiles off is out of reach"
+            }
+            test "a second healer does not pour into a wound the first one closes" {
+                let patient missing =
+                    { creepWith "patient" 0 0 [ Move ] with
+                        Hits = { Hits = 200 - missing; HitsMax = 200 }
+                    }
+
+                let heals missing =
+                    let one = creepWith "one" 0 0 [ Heal; Heal; Move ]
+                    let two = creepWith "two" 0 0 [ Heal; Heal; Move ]
+
+                    let colony =
+                        { bareRespawn with
+                            Creeps = [ one; two; patient missing ]
+                            Spatial =
+                                bareRespawn.Spatial
+                                |> withCreepsAt
+                                    [
+                                        "one", { X = 10; Y = 10 }
+                                        "two", { X = 10; Y = 11 }
+                                        "patient", { X = 11; Y = 10 }
+                                    ]
+                        }
+
+                    match IntentPlan.create [] with
+                    | Error conflict -> failtestf "invalid fixture: %A" conflict
+                    | Ok plan -> healReflex colony plan |> IntentPlan.intents
+
+                Expect.equal
+                    (heals 10)
+                    [ HealCreep("one", "patient") ]
+                    "24 closes 10; the second waits"
+
+                Expect.equal
+                    (heals 100)
+                    [ HealCreep("one", "patient"); HealCreep("two", "patient") ]
+                    "a wound deeper than one healer's 24 takes both"
             }
             test "the reflex is idempotent and still acts when fatigued or almost dead" {
                 let exhausted =

@@ -155,6 +155,48 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                     let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
                     Some(FireTower(towerId, target.Id)))
 
+/// The fire reflex's quiet twin (#410): with no hostile at home to shoot, each
+/// tower heals the creep of ours at home with the most hits still owed, the
+/// heal it will land (`Engine.towerHealAt` its range) counted off as it is
+/// planned so two towers do not both pour into a wound the first one closes.
+/// Never on a tick `planFire` fires: the engine runs a tower's heal before its
+/// attack and drops the attack. Ties by name. No energy gate, as `planFire`
+/// has none: a dry tower's heal fails harmlessly.
+let internal planTowerHeal (view: ColonyView) atlas : Intent list =
+    let home = SpatialInfo.homeName view.Spatial
+
+    if not (List.isEmpty (hostilesAtHome view)) then
+        []
+    else
+        let wounded =
+            view.Creeps
+            |> List.filter (fun creep -> creep.Hits.Hits < creep.Hits.HitsMax)
+            |> List.choose (fun creep ->
+                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                |> Option.filter (fun tile -> tile.Room = home)
+                |> Option.map (fun tile ->
+                    creep.Name, (tile, creep.Hits.HitsMax - creep.Hits.Hits)))
+            |> Map.ofList
+
+        ((wounded, []), Atlas.placedTowers atlas)
+        ||> List.fold (fun (owed, heals) (towerId, towerTile) ->
+            owed
+            |> Map.toList
+            |> List.filter (fun (_, (_, left)) -> left > 0)
+            |> List.sortBy (fun (name, (_, left)) -> -left, name)
+            |> List.tryHead
+            |> function
+                | None -> owed, heals
+                | Some(name, (tile, left)) ->
+                    let landed =
+                        RoomPos.range towerTile tile
+                        |> Option.map Engine.towerHealAt
+                        |> Option.defaultValue 0
+
+                    Map.add name (tile, left - landed) owed, HealWithTower(towerId, name) :: heals)
+        |> snd
+        |> List.rev
+
 /// What a controller level allows the room, by kind (Screeps
 /// CONTROLLER_STRUCTURES). One table over the kind and not one per kind,
 /// because the gap rule below subtracts a census keyed by that same kind: a

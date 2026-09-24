@@ -254,7 +254,8 @@ let decideUnarbitrated
     // inside it: derived fresh every tick for the reason on the rule itself.
     let outpostSiteIntents = planOutpostContainers view atlas
 
-    let defenseIntents = planSafeMode view atlas @ planFire view atlas
+    let defenseIntents =
+        planSafeMode view atlas @ planFire view atlas @ planTowerHeal view atlas
 
     // The consignment's send (#349), beside the defence reflexes because it is
     // the same kind of thing: a structure's own verb, read off the view.
@@ -339,7 +340,7 @@ let decideUnarbitrated
         @ taskIntents
         |> Fabot.Core.IntentPlan.create
         |> function
-            | Ok selected -> selfHeal view selected |> Fabot.Core.IntentPlan.intents
+            | Ok selected -> healReflex view selected |> Fabot.Core.IntentPlan.intents
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
     {

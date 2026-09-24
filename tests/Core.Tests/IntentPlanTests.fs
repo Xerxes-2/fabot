@@ -5,11 +5,14 @@ open Fabot.Core.Types
 open Fabot.Core.IntentPlan
 
 // Independent transcription of the supported engine actions. The processor's
-// priority chain occupies indices 0..4; all remaining methods have separate
+// priority chain occupies indices 0..5; all remaining methods have separate
 // channels. Exercise both orders, identical duplicates and distinct actors.
+let private chain = 6
+
 let private candidates name =
     [
         HealCreep(name, "patient")
+        RangedHealCreep(name, "patient")
         RepairStructure(name, "road")
         BuildSite(name, "site")
         AttackCreep(name, "hostile")
@@ -39,7 +42,9 @@ let tests =
                     for j, second in candidates "guard" |> List.indexed do
                         match create [ first; second ] with
                         | Error conflict ->
-                            Expect.isTrue (i = j || (i < 5 && j < 5)) "only shared channels collide"
+                            Expect.isTrue
+                                (i = j || (i < chain && j < chain))
+                                "only shared channels collide"
 
                             Expect.equal
                                 conflict
@@ -51,7 +56,7 @@ let tests =
                                 "retain both candidates"
                         | Ok plan ->
                             Expect.isFalse
-                                (i = j || (i < 5 && j < 5))
+                                (i = j || (i < chain && j < chain))
                                 "suppressed actions cannot be executable"
 
                             Expect.equal (intents plan) [ first; second ] "preserve accepted order"
@@ -70,7 +75,7 @@ let tests =
                 | Error conflict -> Expect.equal conflict.Creep "hauler" "identify the actor"
             }
             test "a complete compatible turn preserves independent channels and ordering" {
-                let turn = candidates "worker" |> List.skip 4
+                let turn = candidates "worker" |> List.skip (chain - 1)
 
                 Expect.equal
                     (accepted turn)
@@ -89,6 +94,7 @@ let tests =
                     [
                         SpawnCreep("worker", [ Work; Carry; Move ], "new")
                         FireTower("worker", "hostile")
+                        HealWithTower("worker", "patient")
                         ActivateSafeMode "worker"
                         PlaceConstructionSite({ Room = "W1N1"; X = 10; Y = 10 }, Road)
                         HarvestSource("worker", "source")

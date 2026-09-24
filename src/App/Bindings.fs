@@ -227,6 +227,8 @@ type IReactor =
 
 type ITower =
     abstract attack: target: obj -> int
+    /// Put hits back on a creep, falling off with range; 10 energy an act.
+    abstract heal: target: obj -> int
 
 /// `send` moves a resource to another room's terminal, paying a fee out of
 /// this terminal's energy; `mod-season5/src/terminal-restriction.js` nulls it
@@ -312,6 +314,8 @@ type ICreep =
     /// itself included. A different act from `attack` in the engine, so a body
     /// carrying both parts does both in one tick.
     abstract heal: target: obj -> int
+    /// `heal` at range 1..3 for RANGED_HEAL_POWER per HEAL part.
+    abstract rangedHeal: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The only
     /// movement API the bot uses; moveTo is not bound.
     abstract move: direction: int -> int

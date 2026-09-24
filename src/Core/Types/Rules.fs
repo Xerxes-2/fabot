@@ -123,6 +123,37 @@ module Engine =
     /// whether we fight at all.
     let healPower = 12
 
+    /// RANGED_HEAL_POWER: what one HEAL part puts back at range 2..3.
+    let rangedHealPower = 4
+
+    /// TOWER_POWER_HEAL: what a tower puts back within its optimal range.
+    let towerPowerHeal = 400
+
+    /// TOWER_OPTIMAL_RANGE: the range a tower acts at full power out to.
+    let towerOptimalRange = 5
+
+    /// TOWER_FALLOFF_RANGE: the range past which a tower's power stops falling.
+    let towerFalloffRange = 20
+
+    /// TOWER_FALLOFF: the share of its power a tower has lost at that range.
+    let towerFalloff = 0.75
+
+    /// A tower's heal at this range (`processor/intents/towers/heal.js`): full
+    /// out to the optimal range, falling linearly to the falloff range and flat
+    /// beyond it, floored.
+    let towerHealAt (range: int) =
+        if range <= towerOptimalRange then
+            towerPowerHeal
+        else
+            let full = float towerPowerHeal
+            let r = min range towerFalloffRange
+
+            full
+            - full * towerFalloff * float (r - towerOptimalRange)
+              / float (towerFalloffRange - towerOptimalRange)
+            |> floor
+            |> int
+
     /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`). The
     /// projection carries a hostile's parts and not its hits, so a raid's
     /// durability is priced at full — the safe direction.

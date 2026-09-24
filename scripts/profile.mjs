@@ -868,6 +868,11 @@ function placeCluster({
         store: store({ used: TOWER_CAPACITY / 2, capacity: TOWER_CAPACITY }),
         hits: 3000,
         hitsMax: 3000,
+        // `Bindings.ITower`'s surface: the fire reflex and, since #410, the
+        // tower heal, which reaches for it the tick a creep of ours at home
+        // is hurt with no hostile in the room.
+        attack: ok,
+        heal: ok,
       }),
     );
   }
@@ -1258,6 +1263,9 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // of these — `attack` on the hostile, `heal` on the guard itself.
     attack: ok,
     heal: ok,
+    // The heal reflex's ranged half (#409): any body with a HEAL part three
+    // tiles from a hurt one reaches for it.
+    rangedHeal: ok,
     pickup: ok,
     move: ok,
     say: ok,

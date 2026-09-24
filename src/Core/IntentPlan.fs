@@ -17,11 +17,13 @@ type Conflict =
 /// order; compatibility does not imply independence from resource availability.
 type Plan = private Plan of Intent list
 
-/// The supported subset of the engine's action channels. The five actions in
-/// Exclusive share its priority chain; the others each have their own channel.
-/// This is deliberately exhaustive over Intent: adding an act requires deciding
-/// where it belongs. Future ranged actions need the engine's overlapping rules,
-/// not an automatic addition to Exclusive.
+/// The supported subset of the engine's action channels. The six actions in
+/// Exclusive share its priority chain — heal, ranged heal, repair, build,
+/// attack, harvest, a total order in the engine's table; the others each have
+/// their own channel. This is deliberately exhaustive over Intent: adding an
+/// act requires deciding where it belongs. `rangedAttack` and
+/// `rangedMassAttack` need the engine's overlapping rules, not an automatic
+/// addition to Exclusive: they stand beside `attack`, `harvest` and `heal`.
 type private Channel =
     | Exclusive
     | Transfer
@@ -54,7 +56,10 @@ let private channel =
     | BuildSite(name, _)
     | RepairStructure(name, _)
     | AttackCreep(name, _)
-    | HealCreep(name, _) -> Some(name, Exclusive)
+    | HealCreep(name, _)
+    // Second in the engine's chain, under `heal` and over everything else in
+    // it (#409) — and over `rangedAttack`, which is not modelled yet.
+    | RangedHealCreep(name, _) -> Some(name, Exclusive)
     | TransferEnergyToStructure(name, _, _) -> Some(name, Transfer)
     | WithdrawFromStore(name, _, _, _) -> Some(name, Withdraw)
     | UpgradeController(name, _) -> Some(name, Upgrade)
@@ -69,6 +74,7 @@ let private channel =
     | PlaceConstructionSite _
     | ActivateSafeMode _
     | FireTower _
+    | HealWithTower _
     // A structure's verb and no creep's: nothing to de-duplicate per body, and
     // two sends in one tick are the engine's business to refuse (#349).
     | SendFromTerminal _ -> None
