@@ -1771,11 +1771,23 @@ let courierTests =
 
                 Expect.isEmpty
                     (reclaimIntents (heldBy "Odiodin" 1))
-                    "their burn is theirs to the last unit: the re-claimer stands by"
+                    "their burn is theirs to the last unit: no flag is taken"
 
                 Expect.isNonEmpty
                     (reclaimIntents (heldBy "Odiodin" 0))
                     "an empty store is taken, with no handover timed"
+
+                // Nor is a re-claimer kept standing by through their run (#415).
+                let reclaimSeat colony =
+                    (planTasksOn colony noThreats |> List.contains (Reclaim reactor)),
+                    ((decideOn colony).Quotas.Rows
+                     |> List.tryFind (fun row -> row.Row = "reserver")
+                     |> Option.map (fun row -> row.Quota))
+
+                Expect.equal
+                    (reclaimSeat (heldBy "Odiodin" 1), reclaimSeat (heldBy "Odiodin" 0))
+                    ((false, Some 0), (true, Some 1))
+                    "no Reclaim and no seat while they burn; both return on their empty store"
 
                 Expect.isNonEmpty
                     (reclaimIntents (heldBy "Shibdib" 800))

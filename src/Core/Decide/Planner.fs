@@ -384,7 +384,13 @@ let planTasks
     // kind census at all: `Errand.place` lays the target under its engine id
     // with no `TargetKind`, so every pool built by sweeping kinds passes it
     // over. A refused errand is already out of that list (`World.scanOf`).
-    let reclaims = view.Errands |> List.map (fun errand -> Reclaim(fst errand.Target))
+    // None while an ally burns in it (#415): there is no flag to take.
+    let reclaims =
+        let allyBurning = errandRoomsAllyBurning view
+
+        view.Errands
+        |> List.filter (fun errand -> not (Set.contains errand.RoomName allyBurning))
+        |> List.map (fun errand -> Reclaim(fst errand.Target))
 
     // One Reserve per reservable outpost controller. The Task stands whatever
     // the reservation has left on it — the ticks remaining size the body, not

@@ -482,12 +482,16 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         // guard (#414): `view.Errands` carries only the errands a chain of
         // Seams reaches, and a raided errand room's seat waits for its guard
         // like an outpost's.
-        @ (view.Errands
+        //
+        // Nor while an ally burns in it (#415): the guard is the room's eyes,
+        // and the seat returns the tick their store reads empty.
+        @ (let raided = errandRoomsRaided view
+           let allyBurning = errandRoomsAllyBurning view
+
+           view.Errands
            |> List.filter (fun errand ->
-               not (
-                   Set.contains errand.RoomName withheld
-                   && Set.contains errand.RoomName (errandRoomsRaided view)
-               ))
+               not (Set.contains errand.RoomName withheld && Set.contains errand.RoomName raided)
+               && not (Set.contains errand.RoomName allyBurning))
            |> List.map (fun _ -> 1))
 
 /// The facts the rows whose sizing is not the bank's answer alone read,

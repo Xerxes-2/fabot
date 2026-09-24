@@ -323,14 +323,10 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // precondition and no cooldown — so what this buys is legibility: an act in
     // the Executor's log is a flag that had been taken from us. Absence is not
     // ours: the body standing here is the colony's only vision of the room, and
-    // a tick with no answer is a tick to act.
-    //
-    // Nor while an ally burns in it (#413): theirs until the store is empty.
+    // a tick with no answer is a tick to act. An ally's burn pools no Reclaim
+    // at all (#413, #415).
     | Reclaim reactorId ->
-        if
-            SpatialInfo.ownsTarget view.Spatial reactorId
-            || Facts.reactorAllyBurning view reactorId
-        then
+        if SpatialInfo.ownsTarget view.Spatial reactorId then
             None
         else
             Some(ClaimReactor(creep.Name, reactorId))
