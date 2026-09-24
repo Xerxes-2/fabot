@@ -169,6 +169,9 @@ type StructureKind =
     /// The terminal (#349). One per room from RCL6, placed behind the
     /// Storage's own pick.
     | Terminal
+    /// A spawn beyond the first (#408). The first is a human's, and the whole
+    /// plan is oriented on it.
+    | Spawn
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -265,6 +268,7 @@ let builtKindOfPlaceable =
     | Rampart -> BuiltKind.Rampart
     | Extractor -> BuiltKind.Extractor
     | Terminal -> BuiltKind.Terminal
+    | Spawn -> BuiltKind.Spawn
 
 /// The kinds Refill keeps fed: the spawn-energy feeders and the towers, the
 /// structures a view projects as Refillables. The controller container and the

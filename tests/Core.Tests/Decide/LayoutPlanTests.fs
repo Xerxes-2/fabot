@@ -907,6 +907,88 @@ let extractorTests =
         ]
 
 [<Tests>]
+let spawnTests =
+    testList
+        "spawns beyond the first"
+        [
+            test
+                "RCL7 places a second spawn on the nearest free pick, ahead of the towers; RCL8 a third" {
+                let at level = decideOn (atLevel level (openRoom 10))
+
+                Expect.isEmpty
+                    (sitesOfKind Spawn (at 6).Intents)
+                    "RCL6 allows the one spawn standing"
+
+                let seventh = (at 7).Intents
+                let spawnSites = sitesOfKind Spawn seventh
+
+                Expect.equal (List.length spawnSites) 1 "RCL7 allows two: one more is asked for"
+
+                for tile in sitesOfKind Tower seventh @ sitesOfKind Extension seventh do
+                    Expect.isLessThan
+                        (orderKey (List.head spawnSites))
+                        (orderKey tile)
+                        "the spawn's pick comes before every tower and extension in the one ordering"
+
+                for kind in [ Storage; Terminal ] do
+                    Expect.isFalse
+                        (List.contains (List.head spawnSites) (sitesOfKind kind seventh))
+                        "and it never takes a store's held tile"
+
+                Expect.equal (List.length (sitesOfKind Spawn (at 8).Intents)) 2 "RCL8 allows three"
+            }
+
+            test "a standing or pending second spawn fills the allowance" {
+                let tile =
+                    List.head (sitesOfKind Spawn (decideOn (atLevel 7 (openRoom 10))).Intents)
+
+                for kind in [ Structure BuiltKind.Spawn; Site BuiltKind.Spawn ] do
+                    let standing = openRoom 10 |> withTargets [ "spawn-2", tile, kind ]
+
+                    Expect.isEmpty
+                        (sitesOfKind Spawn (decideOn (atLevel 7 standing)).Intents)
+                        "the census counts it against the two RCL7 allows"
+            }
+
+            test "the plan's origin is the oldest spawn, whatever order the engine lists them in" {
+                let second =
+                    { spawn with
+                        Name = "Spawn9"
+                        Id = "spawn-9"
+                    }
+
+                let room =
+                    openRoom 10
+                    |> withTargets [ second.Id, { X = 30; Y = 30 }, Structure BuiltKind.Spawn ]
+
+                let listed spawns =
+                    { atLevel 7 room with Spawns = spawns }
+                    |> decideOn
+                    |> fun decision -> placementIntents decision.Intents |> List.sort
+
+                Expect.equal
+                    (listed [ second; spawn ])
+                    (listed [ spawn; second ])
+                    "the engine's listing order moves nothing"
+
+                // And it is the *least* id: at RCL8 the third spawn is seated
+                // beside the one the plan is grown around, not beside the new one.
+                let third spawns =
+                    { atLevel 8 room with Spawns = spawns }
+                    |> decideOn
+                    |> fun decision -> sitesOfKind Spawn decision.Intents
+
+                Expect.isNonEmpty (third [ second; spawn ]) "RCL8 asks for the third"
+
+                for tile in third [ second; spawn ] do
+                    Expect.isLessThanOrEqual
+                        (range tile { X = 25; Y = 25 })
+                        2
+                        "the least id orients the plan: an engine id leads with its creation time"
+            }
+        ]
+
+[<Tests>]
 let storageTests =
     testList
         "storage"

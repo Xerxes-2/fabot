@@ -222,13 +222,17 @@ let private allowanceOf kind level =
     | BuiltKind.Storage, _ -> 1
     | BuiltKind.Terminal, (0 | 1 | 2 | 3 | 4 | 5) -> 0
     | BuiltKind.Terminal, _ -> 1
+    | BuiltKind.Spawn, 0 -> 0
+    | BuiltKind.Spawn, (1 | 2 | 3 | 4 | 5 | 6) -> 1
+    | BuiltKind.Spawn, 7 -> 2
+    | BuiltKind.Spawn, _ -> 3
     | _ -> 0
 
 /// The kinds the clustered horizon sizes, and the ones the ceiling below is
 /// read over. The Storage is not one of them: it reads no horizon at all and
 /// holds its whole allowance from level 0.
 let private clusteredKinds =
-    [ BuiltKind.Extension; BuiltKind.Tower; BuiltKind.Terminal ]
+    [ BuiltKind.Extension; BuiltKind.Tower; BuiltKind.Terminal; BuiltKind.Spawn ]
 
 /// The level past which `allowanceOf` stops growing (ADR-0064): the smallest
 /// level at which every clustered kind already answers its catch-all row,
@@ -290,8 +294,13 @@ let internal planLayout
     // being planned.
     let inHome (tile: RoomPos) = Some tile.Room = home
 
+    // The oldest spawn, which the cluster was grown around (#408): an engine
+    // id leads with its creation time, so the least id is the first spawn and
+    // one the Layout adds later never takes the plan's origin from it. The
+    // spawn list's own order is the engine's, and not a rule.
     let anchor =
         view.Spawns
+        |> List.sortBy (fun s -> s.Id)
         |> List.tryPick (fun s -> Atlas.positionOf atlas s.Id |> Option.filter inHome)
 
     match home, anchor, view.Controller with
@@ -356,6 +365,7 @@ let internal planLayout
         // planned across the terminal's tile at RCL2 is a road orphaned at
         // RCL6.
         let reservedTerminalSlots = gapAt BuiltKind.Terminal allowanceCeiling
+        let spawnSlots = gapAt BuiltKind.Spawn horizon
         let towerSlots = gapAt BuiltKind.Tower horizon
         let extensionSlots = gapAt BuiltKind.Extension horizon
 
@@ -365,6 +375,7 @@ let internal planLayout
         // so a bare room's road plan is identical at every level by
         // construction. It is never narrower than the placement's:
         // `allowanceOf` never decreases and the ceiling is where it stops.
+        let reservedSpawnSlots = gapAt BuiltKind.Spawn allowanceCeiling
         let reservedTowerSlots = gapAt BuiltKind.Tower allowanceCeiling
         let reservedExtensionSlots = gapAt BuiltKind.Extension allowanceCeiling
 
@@ -379,6 +390,7 @@ let internal planLayout
             |> List.truncate (
                 storageSlots
                 + reservedTerminalSlots
+                + reservedSpawnSlots
                 + reservedTowerSlots
                 + reservedExtensionSlots
                 + footingSlots
@@ -695,22 +707,25 @@ let internal planLayout
                         :: served,
                         unserved)
 
-        // The tower and the extensions take the ordering again with the
-        // footings held out — a footing outranks both — and the Storage's and
-        // the terminal's picks held out with them (#349). `towerSlots` and
-        // `extensionSlots`, not the `reserved…` pair: this is the placement,
-        // sized at the horizon, inside the reservation the trunks already
-        // dodged.
+        // The spawns, the tower and the extensions take the ordering again
+        // with the footings held out — a footing outranks all three — and the
+        // Storage's and the terminal's picks held out with them (#349). The
+        // spawns first (#408): the nearest free tile to the first spawn is
+        // where a second one shares its refill round. The `…Slots` and not the
+        // `reserved…` counts: this is the placement, sized at the horizon,
+        // inside the reservation the trunks already dodged.
         let clusterPicks =
             ordering
             |> List.filter (fun tile ->
                 not (List.contains tile storagePick)
                 && not (List.contains tile terminalPick)
                 && not (Set.contains tile footingTiles))
-            |> List.truncate (towerSlots + extensionSlots)
+            |> List.truncate (spawnSlots + towerSlots + extensionSlots)
 
-        let towerTiles, extensionTiles =
-            clusterPicks |> List.splitAt (min towerSlots clusterPicks.Length)
+        let spawnTiles, rest =
+            clusterPicks |> List.splitAt (min spawnSlots clusterPicks.Length)
+
+        let towerTiles, extensionTiles = rest |> List.splitAt (min towerSlots rest.Length)
 
         // The container census the target clause is judged against: a
         // container standing, or a site already going up.
@@ -816,6 +831,7 @@ let internal planLayout
 
         place Storage (storagePick |> List.truncate (gapAt BuiltKind.Storage controller.Level))
         @ place Terminal (terminalPick |> List.truncate (gapAt BuiltKind.Terminal controller.Level))
+        @ place Spawn (spawnTiles |> List.truncate (gapAt BuiltKind.Spawn controller.Level))
         @ place Tower (towerTiles |> List.truncate (gapAt BuiltKind.Tower controller.Level))
         @ place
             Extension
