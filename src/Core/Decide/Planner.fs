@@ -535,8 +535,13 @@ let planTasks
         else
             []
 
+    // Not while a rival's claimer stands beside it (#406), held work
+    // included: the load would burn for the flag it takes next tick.
+    let deliverable = errandRoomsDeliverable view
+
     let reactorRefills =
         view.Errands
+        |> List.filter (fun errand -> Set.contains errand.RoomName deliverable)
         |> List.choose (fun errand ->
             let reactorId = fst errand.Target
             let task = Refill(reactorId, Thorium)

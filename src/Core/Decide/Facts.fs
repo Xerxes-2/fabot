@@ -230,6 +230,23 @@ let internal ourDeposits (view: ColonyView) : string list =
 let internal errandRooms (view: ColonyView) : Set<string> =
     view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
 
+/// The errand rooms a rival's CLAIM body stands in this tick (#406). The flag
+/// may be ours this tick, but `claimReactor` has no precondition, so a load
+/// put in now burns for whoever holds the flag next. An armed rival is the
+/// stand-down's (`Observe.raidDeadlines`); this is the unarmed half. Off
+/// vision alone: no load is drawn without a re-claimer resident to see.
+let internal errandRoomsContested (view: ColonyView) : Set<string> =
+    errandRooms view
+    |> Set.filter (fun room ->
+        view.Hostiles
+        |> List.exists (fun hostile ->
+            hostile.Pos.Room = room && List.contains BodyPart.Claim hostile.Body))
+
+/// The errand rooms a delivery may be drawn for and poured into this tick:
+/// the declared ones less the contested.
+let internal errandRoomsDeliverable (view: ColonyView) : Set<string> =
+    Set.difference (errandRooms view) (errandRoomsContested view)
+
 /// Whether decaying ore standing at this target is this colony's to sweep: a
 /// room we own (#311), a room we declared an errand in (#354: the Reactor's
 /// room has no controller, so "a room we own" made its floor belong to nobody
@@ -424,14 +441,14 @@ let internal oreBesideTheReactor (view: ColonyView) : bool =
 /// (#361).
 let internal courierProgrammeOpen (view: ColonyView) atlas =
     let hasLoad = deliveryLoad view atlas > 0
-    let errandRooms = errandRooms view
+    let deliverable = errandRoomsDeliverable view
 
     let hasResidentReclaimer =
         view.Creeps
         |> List.exists (fun creep ->
             partCount creep.Body BodyPart.Claim > 0
             && (Atlas.creepTile atlas creep.Name
-                |> Option.exists (fun tile -> Set.contains tile.Room errandRooms)))
+                |> Option.exists (fun tile -> Set.contains tile.Room deliverable)))
 
     view.Bank.Capacity >= bodyCost courierPattern.Block
     && hasLoad

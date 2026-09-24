@@ -1515,6 +1515,53 @@ let courierTests =
                     "the exact delivery load waits instead of returning to Storage while the rival owns the sink"
             }
 
+            test
+                "a rival's claimer beside our Reactor closes the draw and the sink though the flag is ours" {
+                let rivalClaimer =
+                    { hostileIn
+                          errandRoom
+                          { X = ringTile.X + 1; Y = ringTile.Y }
+                          [ BodyPart.Claim; Move; Move ] with
+                        Owner = "Shibdib"
+                    }
+
+                let clear = deliveryColony (Some Ownership.Ours)
+
+                let contested =
+                    { clear with
+                        Hostiles = [ rivalClaimer ]
+                    }
+
+                Expect.equal
+                    ((courierRow clear).Quota, (courierRow contested).Quota)
+                    (1, 0)
+                    "the flag is ours this tick and theirs the next: no load is drawn into a flag war"
+
+                Expect.isFalse
+                    (planTasksOn contested noThreats |> List.contains (Refill(reactor, Thorium)))
+                    "and nothing is poured, since the Reactor burns for whoever holds it"
+
+                Expect.isFalse
+                    (planTasksHoldingThorium [ Refill(reactor, Thorium) ] contested
+                     |> List.contains (Refill(reactor, Thorium)))
+                    "not even a load already drawn and held"
+
+                let loaded = courier "courier-contested" |> carrying 500
+
+                let assigned colony =
+                    (decideOn (colony |> withErrandCreep ringTile loaded)).Assignments
+
+                Expect.equal
+                    (Map.tryFind loaded.Name (assigned contested))
+                    (Some(taskId (Refill("sto-1", Thorium))))
+                    "the loaded courier banks it: a flag war is not a flag the re-claimer takes back next tick"
+
+                Expect.equal
+                    (Map.tryFind loaded.Name (assigned clear))
+                    (Some(taskId (Refill(reactor, Thorium))))
+                    "the premise: uncontested, the same body pours"
+            }
+
             test "visible Keeper Reach pre-empts a loaded courier, which re-prices after it clears" {
                 let loaded = courier "courier-fleeing" |> carrying 500
 
