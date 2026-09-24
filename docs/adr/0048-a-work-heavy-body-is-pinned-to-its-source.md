@@ -1,6 +1,6 @@
 # A Work-heavy body is pinned to its source: the empty window's reprieve is the digging range, the dispatch is a light body's rule, and its Upgrade is in place or nowhere
 
-> **Status:** amended by #258, #269
+> **Status:** amended by #258, #269, 0076
 
 > **Amended by #269** on one clause of the banner below, and on nothing this ADR decided: the window that banner names — a Post whose garrison holds some *other* Task this tick, a bare [[dual seat]]'s upgrading through the same empty window — is no longer accepted, because it is no longer open. The seat rule went where the banner itself said it belonged, into the cap: Harvest's Post census is `Atlas.postsOf`, the same one the Post *number* is counted from, and the heavy bodies standing on those tiles are counted against `Garrisons` beside the Task's own holders — **unioned** with them and never summed (ADR 0024 as #269 widened it) — so a manned Post no longer reads vacant to an empty heavy body across the room. The walk-home clause below is untouched and stays a separate reading on purpose: it still asks whether one of the source's Posts has no garrison standing on it, still asks it of **every** Post of the rock, and still asks it at the **current tick** where the cap asks at [[arrival]] — the cap's arrival reading is what lets a successor be sent to the Post its [[expiring]] incumbent is standing on (ADR 0026), and this clause's now-reading is what refuses a full body still walking a tile somebody is on.
 

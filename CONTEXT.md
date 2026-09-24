@@ -95,17 +95,14 @@ The pure step that turns the tick's assigned Tasks into each creep's action Inte
 ### Seat
 A walkable tile adjacent to a source, and the capacity unit of Harvest; a Seat under a [[post]] is the garrison's alone. ADR-0024, ADR-0051.
 
-### Dual Seat
-A [[seat]] that also lies inside the home controller's Upgrade [[work area]], so a creep on it alternates Harvest and Upgrade without moving; the [[home room]]'s kind of [[post]], and the one footing with no empty-window reprieve. ADR-0025, ADR-0042, ADR-0048.
-
 ### Post
-A tile worth garrisoning with a heavy-WORK body — a [[dual seat]], or the [[seat]] under a source [[container]] or its construction site — in every projected room, counted room by room. The unit of the [[anchor]] row's quota, body and charge, of a [[work-heavy body]]'s Harvest cap and [[work area]], and the tile whose standing body counts beside a Task's holders. ADR-0012, ADR-0020, ADR-0021, ADR-0024, ADR-0041, ADR-0042, ADR-0051, ADR-0053.
+A tile worth garrisoning with a heavy-WORK body — the [[seat]] under a source [[container]] or its construction site, at most one per source (the one farthest from the controller) — in every projected room, counted room by room. The unit of the [[anchor]] row's quota, body and charge, of a [[work-heavy body]]'s Harvest cap and [[work area]], and the tile whose standing body counts beside a Task's holders. ADR-0012, ADR-0020, ADR-0021, ADR-0024, ADR-0041, ADR-0042, ADR-0051, ADR-0053, ADR-0076.
 
 ### Container
 A container structure as the [[layout]] places it, per target and never per tile: one source container per source on the [[seat]] nearest its [[trunk]] (an [[outpost]]'s on the Seat with the shortest [[walk]] to the [[seam]], over Seats no site already holds), one controller container in the Upgrade [[work area]], and one mineral container per [[thorium]] deposit from `Tuning.ExtractorLevel`. An outpost's is the switch that admits the room into the economy. ADR-0012, ADR-0023, ADR-0040, ADR-0042, ADR-0057, ADR-0068.
 
 ### Buffer
-The built [[container]] standing in the home room's controller's Upgrade [[work area]] (`Atlas.controllerContainers`): the [[upgrader]] row's drink, a [[refill]] sink of the [[hauler unit]], and what a [[ferry]] is hired against in a child. ADR-0019, ADR-0046.
+The built [[container]] standing in the home room's controller's Upgrade [[work area]] on no [[post]] (`Atlas.controllerContainers`): the [[upgrader]] row's drink, a [[refill]] sink of the [[hauler unit]], and what a [[ferry]] is hired against in a child. ADR-0019, ADR-0046.
 _Avoid_: controller container, upgrade store
 
 ### Work Area

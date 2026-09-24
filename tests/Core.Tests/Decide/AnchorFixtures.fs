@@ -11,8 +11,8 @@ open Fabot.Core.Tests.Decide.Fixtures
 
 /// The heavy-pin fixture: the source in wall at (10,10) with eight open
 /// neighbours, the built container "cont-1" on the Seat (11,10) — the one
-/// Post — and a plain corridor east to the controller at (40,10). No Dual
-/// Seat, so the controller is the only rival Harvest has.
+/// Post — and a plain corridor east to the controller at (40,10), so the
+/// controller is the only rival Harvest has.
 let pinnedRoom =
     { spatial
           [
@@ -51,66 +51,6 @@ let pinnedCrowd ticks (placed: (CreepInfo * Pos) list) =
 
 /// The same colony holding one body: the shape most of these cases take.
 let pinnedColony ticks (creep: CreepInfo) pos = pinnedCrowd ticks [ creep, pos ]
-
-/// The heavy-pin room with a second container "cont-2" on the Seat (9,10),
-/// so the rock carries two Posts: the only shape on which the Post cap's
-/// union of holders and standing bodies is visible.
-let twoPostRoom =
-    { spatial
-          [
-              "src-a", { X = 10; Y = 10 }
-              "cont-1", { X = 11; Y = 10 }
-              "cont-2", { X = 9; Y = 10 }
-              "ctrl-1", { X = 40; Y = 10 }
-          ]
-          (openSeats { X = 10; Y = 10 } @ [ for x in 11..39 -> { X = x; Y = 10 }, Plain ]) with
-        TargetKinds =
-            Map.ofList
-                [
-                    "src-a", Source
-                    "cont-1", Structure BuiltKind.Container
-                    "cont-2", Structure BuiltKind.Container
-                    "ctrl-1", Controller
-                ]
-    }
-
-let twoPostCrowd (placed: (CreepInfo * Pos) list) =
-    { bareRespawn with
-        Spawns = []
-        Refillables = []
-        Sources = [ source "src-a" ]
-        Controller = Some(controllerAt 2)
-        Creeps = placed |> List.map fst
-        Spatial =
-            twoPostRoom
-            |> withHome (fun layer ->
-                { layer with
-                    CreepPositions =
-                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
-                })
-    }
-
-/// The Dual Seat room with a lane out of it, laid along y = 9 from x = 12
-/// to x = 31 and deliberately not along y = 10: the controller stands at
-/// (13,10), and a row through it would either wall the lane or add a
-/// second Seat inside the controller's range and give the rock a second Post.
-let dualSeatLaneColony ticks (placed: (CreepInfo * Pos) list) =
-    { dualSeatColony with
-        Spawns = []
-        Refillables = []
-        Sources = [ drained "src-a" ticks ]
-        Creeps = placed |> List.map fst
-        Spatial =
-            dualSeatRoom
-            |> withHome (fun layer ->
-                { layer with
-                    Terrain =
-                        (layer.Terrain, [ for x in 12..31 -> { X = x; Y = 9 } ])
-                        ||> List.fold (fun acc tile -> TerrainGrid.add tile Plain acc)
-                    CreepPositions =
-                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
-                })
-    }
 
 /// The W12S28 colony with its two source containers taken away, so the
 /// only Post in the projection is whatever an outpost carries — the one

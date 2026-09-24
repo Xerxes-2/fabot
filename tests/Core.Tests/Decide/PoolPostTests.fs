@@ -688,20 +688,21 @@ let restockTests =
                     "the tick the energy lands, the same garrison digs"
             }
 
-            test "a Dual Seat Anchor gets no reprieve: it upgrades in place through the window" {
-                // On a Dual Seat Upgrade is in place: the Anchor upgrades
-                // through the window and rematches Harvest once spent.
+            test
+                "a heavy body at its source keeps Harvest through the window, in upgrade range or not" {
+                // (11,10) is a bare Seat at range 2 of the controller. Being
+                // able to upgrade from it buys no exception (#405): the body
+                // at its rock holds the rock, as on any other Seat.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Sources = [ drained "src-a" 60 ]
                         Creeps = [ anchor "a1" 50 10 ]
-                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
+                        Spatial = unpostedRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
 
                 let {
-                        Assignments = assignments
                         Intents = intents
                         Verdicts = verdicts
                     } =
@@ -709,21 +710,10 @@ let restockTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released(
-                        "a1",
-                        taskId (Harvest "src-a"),
-                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 60))
-                    ))
-                    "no container underfoot, so no garrison exemption"
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "the empty-window reprieve holds on this Seat as on any other"
 
-                Expect.equal
-                    (Map.tryFind "a1" assignments)
-                    (Some(taskId (Upgrade "ctrl-1")))
-                    "the Dual Seat's other half is work it can do standing still"
-
-                Expect.isEmpty
-                    (moveIntentsFor "a1" intents)
-                    "it upgrades in place, it does not walk"
+                Expect.isEmpty (moveIntentsFor "a1" intents) "and it walks nowhere"
             }
 
             test "eight road tiles are eight ticks of waiting, not four" {

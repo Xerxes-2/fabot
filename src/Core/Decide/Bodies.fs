@@ -19,7 +19,7 @@ let workerPattern =
         Block = [ Work; Carry; Move ]
     }
 
-/// The Anchor pattern: the heavy-WORK body cast for a Dual Seat. Two Work keep
+/// The Anchor pattern: the heavy-WORK body cast for a Post. Two Work keep
 /// the block readable as an Anchor (Work > Move, which fatigue parity forbids a
 /// worker body) beside the Carry and Move that pay the walk to the seat.
 let anchorPattern =

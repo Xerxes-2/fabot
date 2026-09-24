@@ -1,5 +1,5 @@
 /// The ground a body works and idles on: Work Areas narrowed to a creep,
-/// Dual Seats, Posts, and the consistency between them.
+/// Posts, and the consistency between them.
 module Fabot.Core.Tests.AtlasGroundTests
 
 open Expecto
@@ -14,7 +14,7 @@ let workAreaForTests =
         [
             // Source at (10,10) with three Seats: (9,10) carries a built
             // container, (11,10) lies inside the controller's Upgrade area,
-            // (10,11) is an ordinary Seat. Both Posts, one plain Seat.
+            // (10,11) is an ordinary Seat. One Post, two plain Seats (#405).
             let posted creeps =
                 { spatial
                       [
@@ -46,8 +46,8 @@ let workAreaForTests =
 
                 Expect.equal
                     (workAreaFor atlas "a" (Harvest "src-a") |> tilesHome atlas)
-                    (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
-                    "the container Seat and the Dual Seat, not the plain Seat"
+                    (Set.singleton { X = 9; Y = 10 })
+                    "the container Seat, not the plain Seats"
 
                 Expect.equal
                     (workArea atlas (Harvest "src-a") |> tilesHome atlas)
@@ -332,106 +332,13 @@ let mayActTests =
         ]
 
 [<Tests>]
-let dualSeatTests =
-    testList
-        "atlas dualSeats"
-        [
-            test "a Dual Seat is a Seat inside the controller's Upgrade Work Area, over all sources" {
-                // Each source has a Seat at range 2 of the controller and
-                // one at range 4; src-a's swamp Seat at (11,11) is in.
-                let atlas =
-                    { spatial
-                          [
-                              "src-a", { X = 10; Y = 10 }
-                              "ctrl-1", { X = 13; Y = 10 }
-                              "src-b", { X = 16; Y = 10 }
-                          ]
-                          [
-                              { X = 9; Y = 10 }, Plain
-                              { X = 11; Y = 10 }, Plain
-                              { X = 11; Y = 11 }, Swamp
-                              { X = 15; Y = 10 }, Plain
-                              { X = 17; Y = 10 }, Plain
-                          ] with
-                        TargetKinds =
-                            Map.ofList [ "src-a", Source; "ctrl-1", Controller; "src-b", Source ]
-                    }
-                    |> snapshotWith []
-                    |> ofView
-
-                Expect.equal
-                    (dualSeatsIn atlas (atlasHome atlas))
-                    (Set.ofList [ { X = 11; Y = 10 }; { X = 11; Y = 11 }; { X = 15; Y = 10 } ])
-                    "exactly the Seats within upgrade range; the range-4 Seats are not"
-            }
-
-            test "an obstacle keeps a Seat out of the Dual Seats: a creep must stand there" {
-                // The lone Seat within upgrade range carries an obstacle structure.
-                let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
-                          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
-                        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
-                    }
-                    |> withObstacles [ { X = 11; Y = 10 } ]
-                    |> snapshotWith []
-                    |> ofView
-
-                Expect.equal
-                    (dualSeatsIn atlas (atlasHome atlas))
-                    Set.empty
-                    "an unstandable Seat is no Dual Seat"
-            }
-
-            test "a room without a controller has no Dual Seats" {
-                let atlas =
-                    { spatial [ "src-a", { X = 10; Y = 10 } ] [ { X = 11; Y = 10 }, Plain ] with
-                        TargetKinds = Map.ofList [ "src-a", Source ]
-                    }
-                    |> snapshotWith []
-                    |> ofView
-
-                Expect.equal
-                    (dualSeatsIn atlas (atlasHome atlas))
-                    Set.empty
-                    "no Upgrade Work Area to intersect"
-            }
-
-            test "a room without sources has no Dual Seats" {
-                let atlas =
-                    { spatial [ "ctrl-1", { X = 13; Y = 10 } ] [ { X = 12; Y = 10 }, Plain ] with
-                        TargetKinds = Map.ofList [ "ctrl-1", Controller ]
-                    }
-                    |> snapshotWith []
-                    |> ofView
-
-                Expect.equal (dualSeatsIn atlas (atlasHome atlas)) Set.empty "no Seats to intersect"
-            }
-
-            test "a source out of upgrade range yields an empty, harmless answer" {
-                let atlas =
-                    { spatial
-                          [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 40; Y = 40 } ]
-                          [ { X = 11; Y = 10 }, Plain; { X = 39; Y = 40 }, Plain ] with
-                        TargetKinds = Map.ofList [ "src-a", Source; "ctrl-1", Controller ]
-                    }
-                    |> snapshotWith []
-                    |> ofView
-
-                Expect.equal
-                    (dualSeatsIn atlas (atlasHome atlas))
-                    Set.empty
-                    "a disjoint intersection is just empty"
-            }
-        ]
-
-[<Tests>]
 let postTests =
     testList
         "atlas posts"
         [
-            test "posts are the Dual Seats plus Seats under built source containers" {
-                // (11,10) is a Dual Seat, (9,10) a Seat under a built container.
+            test "a Seat inside the controller's Upgrade area is no Post without a container" {
+                // (11,10) sits at range 2 of the controller, (9,10) under a
+                // built container: only the container makes a Post (#405).
                 let atlas =
                     { spatial
                           [
@@ -453,13 +360,85 @@ let postTests =
 
                 Expect.equal
                     (postsIn atlas (atlasHome atlas))
-                    (Set.ofList [ { X = 9; Y = 10 }; { X = 11; Y = 10 } ])
-                    "the Dual Seat and the container Seat are both Posts"
+                    (Set.singleton { X = 9; Y = 10 })
+                    "the container Seat alone; the Seat in upgrade range is a plain Seat"
+            }
+
+            test
+                "one source seats one Post: of two containers on its Seats, the one farther from the controller" {
+                // The W11S27 shape (#405): the controller container landed
+                // on a Seat of the rock beside it. (9,9) is at range 3 of the
+                // controller, (11,10) at range 1: the rock's Post is (9,9),
+                // and (11,10) is the controller's buffer.
+                let atlas =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "ctrl-1", { X = 12; Y = 11 }
+                              "can-far", { X = 9; Y = 9 }
+                              "can-near", { X = 11; Y = 10 }
+                          ]
+                          [ { X = 9; Y = 9 }, Plain; { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "ctrl-1", Controller
+                                    "can-far", Structure BuiltKind.Container
+                                    "can-near", Structure BuiltKind.Container
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofView
 
                 Expect.equal
-                    (dualSeatsIn atlas (atlasHome atlas))
+                    (postsIn atlas (atlasHome atlas))
+                    (Set.singleton { X = 9; Y = 9 })
+                    "the farther container is the rock's one Post"
+
+                Expect.equal (postCount atlas) 1 "so the Anchor row is hired once"
+
+                Expect.equal
+                    (controllerContainers atlas)
+                    (Set.singleton "can-near")
+                    "and the nearer one is the controller's buffer"
+            }
+
+            test "two rocks sharing a Seat each name their own Post, never the other's" {
+                // (11,10) seats both rocks. src-b's only container is there;
+                // src-a's first pick is (9,10), so (11,10) is src-b's alone.
+                let atlas =
+                    { spatial
+                          [
+                              "src-a", { X = 10; Y = 10 }
+                              "src-b", { X = 12; Y = 10 }
+                              "can-a", { X = 9; Y = 10 }
+                              "can-b", { X = 11; Y = 10 }
+                          ]
+                          [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    "src-a", Source
+                                    "src-b", Source
+                                    "can-a", Structure BuiltKind.Container
+                                    "can-b", Structure BuiltKind.Container
+                                ]
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (postsOf atlas "src-a" |> tilesHome atlas)
+                    (Set.singleton { X = 9; Y = 10 })
+                    "src-a's one Post, though src-b's stands on its Seat too"
+
+                Expect.equal
+                    (postsOf atlas "src-b" |> tilesHome atlas)
                     (Set.singleton { X = 11; Y = 10 })
-                    "dualSeats is untouched by the container"
+                    "and src-b's"
+
+                Expect.equal (postCount atlas) 2 "two rocks, two Posts"
             }
 
             test "a container construction site is a Post, and no standing one" {
@@ -548,7 +527,7 @@ let postTests =
                 Expect.equal
                     (postsIn atlas (atlasHome atlas))
                     (Set.singleton { X = 9; Y = 10 })
-                    "no Dual Seats, one container Post"
+                    "one container Post"
             }
         ]
 

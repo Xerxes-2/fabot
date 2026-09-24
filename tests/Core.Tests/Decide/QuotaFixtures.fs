@@ -387,8 +387,8 @@ let internal leadCasts body life =
 /// The buffer colony at the live RCL5 bank: the W12S28
 /// corridor — a 3-wide plain field y = 9..11 from x = 8 to 32, the two
 /// sources embedded in wall at (10,10) and (30,10) with their built
-/// containers standing on the Seats (11,10) and (29,10), so two Posts and
-/// no Dual Seat — with the controller at (20,11) and the spawn at (20,10)
+/// containers standing on the Seats (11,10) and (29,10), so two Posts —
+/// with the controller at (20,11) and the spawn at (20,10)
 /// beside it. One spawn and not four, so a tick casts at most one body and
 /// the list a case reads names the row whose gap was answered first.
 ///

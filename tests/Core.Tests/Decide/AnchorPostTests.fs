@@ -76,55 +76,6 @@ let postGarrisonTests =
                 Expect.isNonEmpty (moveIntentsFor "a1" intents) "and the body offered it sets out"
             }
 
-            test "the garrison of a bare Dual Seat holds its Post through an Upgrade" {
-                // The live shape: a drained rock releases its Dual Seat
-                // Anchor `too-early` — a bare Dual Seat carries no reprieve
-                // — and it spends the window upgrading from the very tile
-                // it will dig from. Counting Harvest's holders alone, the
-                // Post read vacant and a second Anchor was dispatched onto it.
-                let colony =
-                    dualSeatLaneColony
-                        60
-                        [
-                            anchor "a1" 50 10, { X = 11; Y = 10 }
-                            anchor "a2" 0 50, { X = 31; Y = 9 }
-                        ]
-
-                let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
-
-                let {
-                        Assignments = assignments
-                        Intents = intents
-                        Verdicts = verdicts
-                    } =
-                    decideFrom remembered colony
-
-                Expect.contains
-                    verdicts
-                    (Verdict.Released(
-                        "a1",
-                        taskId (Harvest "src-a"),
-                        ReleaseReason.Rejected(RejectReason.TooEarly(0, 60))
-                    ))
-                    "the bare Dual Seat carries no empty-window reprieve"
-
-                Expect.equal
-                    (Map.tryFind "a1" assignments)
-                    (Some(taskId (Upgrade "ctrl-1")))
-                    "so it spends the window on the controller two tiles away"
-
-                Expect.contains
-                    verdicts
-                    (Verdict.Unassigned("a2", IdleReason.NoneFree))
-                    "and the Post it is standing on is not vacant for holding something else"
-
-                Expect.isEmpty (harvesters assignments "src-a") "the drained rock waits"
-
-                Expect.isEmpty
-                    (moveIntentsFor "a2" intents)
-                    "and nothing walks twenty tiles onto an occupied tile"
-            }
-
             test "an expiring garrison still hands its Post on" {
                 // The discount is for an incumbent dead when the candidate
                 // arrives: ten ticks left against a walk of ninety-six, so
@@ -145,54 +96,6 @@ let postGarrisonTests =
                     "two Anchors against one Post for the lead's duration is the succession"
             }
 
-            test "a rock with a Post to spare admits a second garrison" {
-                // The union, not a sum: the garrison holds the Harvest it is
-                // standing on, so the holder list and the tile census name
-                // the same body. Added, it would spend both Posts.
-                let colony =
-                    twoPostCrowd
-                        [
-                            anchor "a1" 0 50, { X = 35; Y = 10 }
-                            anchor "g1" 0 50, { X = 11; Y = 10 }
-                        ]
-
-                let remembered = Map.ofList [ "g1", taskId (Harvest "src-a") ]
-
-                let { Assignments = assignments } = decideFrom remembered colony
-
-                Expect.equal
-                    (harvesters assignments "src-a" |> List.sort)
-                    [ "a1"; "g1" ]
-                    "one body on one of two Posts is one garrison, not two"
-            }
-
-            test "both Posts manned, the third heavy body is refused" {
-                // The pairwise rival: every Post carrying a standing heavy
-                // body is full whatever those bodies hold.
-                let colony =
-                    twoPostCrowd
-                        [
-                            anchor "a1" 0 50, { X = 35; Y = 10 }
-                            anchor "g1" 0 50, { X = 11; Y = 10 }
-                            anchor "g2" 0 50, { X = 9; Y = 10 }
-                        ]
-
-                let {
-                        Assignments = assignments
-                        Verdicts = verdicts
-                    } =
-                    decideOn colony
-
-                Expect.contains
-                    verdicts
-                    (Verdict.Unassigned("a1", IdleReason.NoneFree))
-                    "two Posts, two garrisons standing on them, and no third slot"
-
-                Expect.equal
-                    (harvesters assignments "src-a" |> List.sort)
-                    [ "g1"; "g2" ]
-                    "and the rock is worked by the bodies already on it"
-            }
         ]
 
 [<Tests>]

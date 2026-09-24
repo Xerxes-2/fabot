@@ -299,6 +299,15 @@ let logisticsTests =
                     "both stocked containers stay Withdraw Tasks"
             }
 
+            test "a controller container on the rock's Seat is the buffer, and a Refill target" {
+                // #405: the rock's Post is the far container; the one beside
+                // the controller is its buffer though it stands on a Seat.
+                Expect.equal
+                    (refillTasks (planTasksOn seatBufferColony noThreats))
+                    [ "can-near" ]
+                    "the buffer is filled; the rock's own container never is"
+            }
+
             test "a full controller container is no Refill target, but stays a Withdraw" {
                 let snapshot =
                     { haulColony with

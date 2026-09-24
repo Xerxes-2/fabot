@@ -18,7 +18,7 @@ let anchorTests =
                 // Controller far from every Seat, a built container on the
                 // Seat at (9,10), and the Anchor on the plain Seat (10,11).
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 0 50 ]
                         Spatial =
                             { spatial
@@ -88,7 +88,7 @@ let anchorTests =
                     |> withCreepsAt [ "a1", { X = 10; Y = 11 } ]
 
                 let full =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial = room
                     }
@@ -135,9 +135,9 @@ let anchorTests =
                 Expect.isEmpty (moveIntentsFor "a1" intents) "and it stays"
             }
 
-            test "a Dual Seat and banked capacity plan an Anchor body" {
+            test "a Post and banked capacity plan an Anchor body" {
                 let snapshot =
-                    { dualSeatColony with
+                    { postedColony with
                         Creeps = [ worker "w1" 0 50 ]
                     }
 
@@ -154,23 +154,13 @@ let anchorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "without a Dual Seat only generalists are planned" {
-                // Same Seats, controller placed far away: no Seat falls in
-                // its Upgrade Work Area, so there is no Dual Seat to cast for.
+            test "a Seat in the controller's Upgrade range hires no Anchor without a container" {
+                // (11,10) is a Seat at range 2 of the controller, bare: a
+                // tile a body could dig and upgrade from is still no Post
+                // (#405), so only generalists are planned.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-                            dualSeatRoom
-                            |> withHome (fun layer ->
-                                { layer with
-                                    TargetPositions =
-                                        Map.ofList
-                                            [
-                                                "src-a", { X = 10; Y = 10 }
-                                                "ctrl-1", { X = 40; Y = 40 }
-                                            ]
-                                })
                     }
 
                 let { Intents = intents } = decideOn snapshot
@@ -182,17 +172,16 @@ let anchorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "a source-container Post with no Dual Seat casts an Anchor at full bank" {
-                // The W12S28 shape: controller far from every Seat, but a
-                // built container stands on the Seat at (9,10) — a Post,
-                // so the Anchor row comes alive without any Dual Seat.
+            test "a source-container Post out of upgrade range casts an Anchor at full bank" {
+                // The W12S28 shape: controller far from every Seat, and a
+                // built container stands on the Seat at (9,10) — a Post.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ worker "w1" 0 50 ]
                         Spatial =
-                            { dualSeatRoom with
+                            { unpostedRoom with
                                 TargetKinds =
-                                    dualSeatRoom.TargetKinds
+                                    unpostedRoom.TargetKinds
                                     |> Map.add "cont-1" (Structure BuiltKind.Container)
                             }
                             |> withHome (fun layer ->
@@ -224,7 +213,7 @@ let anchorTests =
                 // At RCL4 the bank caps at 1,300 but the Anchor row prices
                 // at 700 (6W1C1M).
                 let snapshot =
-                    { dualSeatColony with
+                    { postedColony with
                         Bank = bank 700 1300
                         Creeps = [ worker "w1" 0 50 ]
                     }
@@ -244,7 +233,7 @@ let anchorTests =
 
             test "a bank short of the capped Anchor's cost still waits" {
                 let snapshot =
-                    { dualSeatColony with
+                    { postedColony with
                         Bank = bank 650 1300
                         Creeps = [ worker "w1" 0 50 ]
                     }
@@ -254,17 +243,18 @@ let anchorTests =
                 Expect.isEmpty (spawnIntents intents) "650 does not buy 6W1C1M"
             }
 
-            test "the Anchor quota counts Posts: a Dual Seat plus a container Seat want two" {
-                // One living Anchor covers the Dual Seat; the built
-                // container on the other Seat is a second Post. The
-                // generalist keeps the supply floor disarmed.
+            test "a bare Seat in upgrade range beside a container Post hires no second Anchor" {
+                // The built container on (9,10) is the rock's Post and one
+                // living Anchor covers it; (11,10), at range 2 of the
+                // controller, is a plain Seat (#405). The generalist keeps
+                // the supply floor disarmed.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                         Spatial =
-                            { dualSeatRoom with
+                            { unpostedRoom with
                                 TargetKinds =
-                                    dualSeatRoom.TargetKinds
+                                    unpostedRoom.TargetKinds
                                     |> Map.add "cont-1" (Structure BuiltKind.Container)
                             }
                             |> withHome (fun layer ->
@@ -278,14 +268,17 @@ let anchorTests =
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
-                    Expect.stringStarts creepName "anchor-" "the second Post's gap is an Anchor gap"
+                    Expect.stringStarts
+                        creepName
+                        "worker-"
+                        "the one Post is manned; the gap is a generalist's"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
             test "a living Anchor fills the quota: the remaining gap goes generalist" {
                 // The generalist keeps the supply floor disarmed.
                 let snapshot =
-                    { dualSeatColony with
+                    { postedColony with
                         Creeps = [ anchor "a1" 0 50; worker "w1" 0 50 ]
                     }
 
@@ -293,14 +286,14 @@ let anchorTests =
 
                 match spawnIntents intents with
                 | [ (_, _, creepName) ] ->
-                    Expect.stringStarts creepName "worker-" "the one Dual Seat is already worked"
+                    Expect.stringStarts creepName "worker-" "the one Post is already worked"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            // Three Seats — (11,10) the Dual Seat, (9,10) and (9,9) ordinary —
+            // Three Seats — (11,10) the Post, (9,10) and (9,9) ordinary —
             // and a second idle spawn drawing from the same bank.
             let threeSeatRoom =
-                dualSeatRoom
+                postedRoom
                 |> withHome (fun layer ->
                     { layer with
                         Terrain =
@@ -320,7 +313,7 @@ let anchorTests =
 
             test "the Anchor gap is filled before generalist gaps" {
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Spawns = [ spawn; secondSpawn ]
                         Bank = bank 600 300
                         Creeps = [ worker "w1" 0 50 ]
@@ -344,7 +337,7 @@ let anchorTests =
                 // of amortization over 1500 is 3.8, rounded up. Four living
                 // leave one gap; the second idle spawn must stay quiet.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Spawns = [ spawn; secondSpawn ]
                         Bank = bank 600 300
                         Creeps = anchor "a1" 0 50 :: [ for i in 1..3 -> worker $"w{i}" 0 50 ]
@@ -359,11 +352,11 @@ let anchorTests =
                     "the Anchor quota lives inside the target, never on top of it"
             }
 
-            test "an empty Anchor on its Dual Seat is assigned Harvest without moving" {
+            test "an empty Anchor on a Seat in upgrade range is assigned Harvest without moving" {
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 0 50 ]
-                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
+                        Spatial = unpostedRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let {
@@ -381,11 +374,11 @@ let anchorTests =
                 Expect.isEmpty (moveIntentsFor "a1" intents) "no movement step is emitted"
             }
 
-            test "a full Anchor on its Dual Seat is assigned Upgrade without moving" {
+            test "a full Anchor on a Seat in upgrade range is assigned Upgrade without moving" {
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
+                        Spatial = unpostedRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let {
@@ -410,9 +403,9 @@ let anchorTests =
             test
                 "alternation is emergent: a filled-up Anchor's Harvest releases and rematches to Upgrade" {
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial = dualSeatRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
+                        Spatial = unpostedRoom |> withCreepsAt [ "a1", { X = 11; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -424,10 +417,10 @@ let anchorTests =
                     "ordinary applicability release + rematch flips the assignment"
             }
 
-            // The Dual Seat room extended east: a plain corridor from
+            // The unposted room extended east: a plain corridor from
             // (12,10) to (30,10) carrying distant mobile work at its end.
             let corridorEast extraTargets =
-                dualSeatRoom
+                unpostedRoom
                 |> withHome (fun layer ->
                     { layer with
                         TargetPositions =
@@ -442,7 +435,7 @@ let anchorTests =
                 // What holds the Anchor here is the body gate, not the
                 // distance: the case below takes the distance away.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
                         Spatial =
@@ -468,7 +461,7 @@ let anchorTests =
                 // be the distance. A container site on the body's own Post
                 // is the exception, and has its own cases.
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
@@ -486,7 +479,7 @@ let anchorTests =
 
             test "a distant Refill flows to the generalist; the empty Anchor harvests" {
                 let snapshot =
-                    { dualSeatColony with
+                    { unpostedColony with
                         Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
                         Creeps = [ anchor "a1" 0 50; worker "g1" 50 0 ]
                         Spatial =
@@ -507,8 +500,8 @@ let anchorTests =
                     "the empty Anchor works its Seat instead"
             }
 
-            test "the disaster fallback still spawns bare worker units beside a Dual Seat" {
-                let snapshot = { dualSeatColony with Creeps = [] }
+            test "the disaster fallback still spawns bare worker units beside an unposted source" {
+                let snapshot = { unpostedColony with Creeps = [] }
                 let { Intents = intents } = decideOn snapshot
 
                 match spawnIntents intents with

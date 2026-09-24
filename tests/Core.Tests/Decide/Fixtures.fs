@@ -607,10 +607,10 @@ let facing hostiles (snapshot: ColonyView) =
                 })
     }
 
-/// A room with one Dual Seat: source at (10,10), controller at (13,10).
-/// The Seat (11,10) sits at range 2 of the controller — inside its Upgrade
-/// Work Area — while (9,10) sits at range 4, an ordinary Seat.
-let dualSeatRoom =
+/// One source at (10,10) and the controller at (13,10). The Seat (11,10)
+/// sits at range 2 of the controller — inside its Upgrade Work Area — while
+/// (9,10) sits at range 4. No container, so no Post (#405).
+let unpostedRoom =
     { spatial
           [ "src-a", { X = 10; Y = 10 }; "ctrl-1", { X = 13; Y = 10 } ]
           [ { X = 9; Y = 10 }, Plain; { X = 11; Y = 10 }, Plain ] with
@@ -621,12 +621,28 @@ let dualSeatRoom =
 let anchor name energy freeCapacity =
     creepWith name energy freeCapacity [ Work; Work; Work; Work; Carry; Move ]
 
-/// The Dual Seat room, one source, controller in place — the base Anchor scenario.
-let dualSeatColony =
+/// The unposted room, one source, controller in place — the base Anchor scenario.
+let unpostedColony =
     { bareRespawn with
         Sources = [ source "src-a" ]
         Controller = Some(controllerAt 2)
-        Spatial = dualSeatRoom
+        Spatial = unpostedRoom
+    }
+
+/// The unposted room with a built container on the Seat (11,10): its one Post.
+let postedRoom =
+    { unpostedRoom with
+        TargetKinds = unpostedRoom.TargetKinds |> Map.add "cont-1" (Structure BuiltKind.Container)
+    }
+    |> withHome (fun layer ->
+        { layer with
+            TargetPositions = layer.TargetPositions |> Map.add "cont-1" { X = 11; Y = 10 }
+        })
+
+/// The base Anchor colony standing on `postedRoom`.
+let postedColony =
+    { unpostedColony with
+        Spatial = postedRoom
     }
 
 let moveIntentsFor name intents =
@@ -914,6 +930,40 @@ let haulColony =
         Spatial = haulRoom
     }
 
+/// The W11S27 shape (#405): the source in wall at (10,10) on a plain field
+/// x = 8..14, y = 8..12, the controller in wall at (12,11). Two containers
+/// stand on the rock's Seats: "can-far" at (9,9), range 3 of the controller,
+/// and "can-near" at (11,10), range 1. The rock's Post is the far one, and the
+/// near one is the controller's buffer. Both start empty.
+let seatBufferRoom =
+    { spatial
+          []
+          [
+              for x in 8..14 do
+                  for y in 8..12 ->
+                      { X = x; Y = y },
+                      (if (x, y) = (10, 10) || (x, y) = (12, 11) then
+                           Wall
+                       else
+                           Plain)
+          ] with
+        Stores = Map.ofList [ "can-far", 0; "can-near", 0 ]
+    }
+    |> withTargets
+        [
+            "src-a", { X = 10; Y = 10 }, Source
+            "ctrl-1", { X = 12; Y = 11 }, Controller
+            "can-far", { X = 9; Y = 9 }, Structure BuiltKind.Container
+            "can-near", { X = 11; Y = 10 }, Structure BuiltKind.Container
+        ]
+
+let seatBufferColony =
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Controller = Some(controllerAt 3)
+        Spatial = seatBufferRoom
+    }
+
 /// A hauler-unit creep: two Carry, one Move — the hauler row's block.
 let hauler name energy freeCapacity =
     creepWith name energy freeCapacity [ Carry; Carry; Move ]
@@ -1012,8 +1062,8 @@ let haulDemandOf snapshot =
 
 /// The W12S28 shape: a 3-wide plain field y = 9..11 from x = 8
 /// to 32, two sources embedded in wall at (10,10) and (30,10) with their
-/// built containers on the Seats (11,10) and (29,10) — two Posts, no Dual
-/// Seat — and the spawn structure at (20,10), eight steps from either
+/// built containers on the Seats (11,10) and (29,10) — two Posts — and the
+/// spawn structure at (20,10), eight steps from either
 /// container.
 let incomeRoom =
     { spatial

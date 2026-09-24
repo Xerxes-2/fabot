@@ -607,11 +607,10 @@ let roomTests =
                         $"{label}: and never blocks an action"
             }
 
-            test "one coordinate standing in two rooms is no Post and no Dual Seat" {
-                // The outpost's controller puts (10,10) inside an Upgrade
-                // area and its container stands on that tile, while at home
+            test "one coordinate standing in two rooms is no Post" {
+                // The outpost's container stands on (10,10), while at home
                 // (10,10) is one of a source's Seats. Unioned across rooms
-                // the coordinate would read as a Dual Seat and a container Post.
+                // the coordinate would read as a container Post.
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -668,11 +667,7 @@ let roomTests =
                         (workArea atlas (Upgrade "ctrl-out") |> tilesIn "W2N1"))
                     "and the outpost controller's Upgrade area holds it too"
 
-                Expect.isEmpty
-                    (dualSeatsIn atlas (atlasHome atlas))
-                    "no Dual Seat is made out of two rooms"
-
-                Expect.isEmpty (postsIn atlas (atlasHome atlas)) "and no Post"
+                Expect.isEmpty (postsIn atlas (atlasHome atlas)) "no Post is made out of two rooms"
 
                 Expect.isEmpty
                     (postsOf atlas "src-home" |> tilesHome atlas)
@@ -730,49 +725,6 @@ let roomTests =
                     "and the outpost rock's Post stands on the same coordinate"
 
                 Expect.equal (postCount atlas) 2 "so the Anchor row is two, never the union's one"
-            }
-
-            test "an outpost's Dual Seat is no Post: the colony upgrades one controller" {
-                // Taken across the border the intersection would name a
-                // tile nobody ever upgrades from, and that tile would be a Post.
-                let home =
-                    { SpatialInfo.empty with
-                        RoomName = Some "W1N1"
-                        TargetKinds = Map.ofList [ "src-out", Source; "ctrl-out", Controller ]
-                    }
-                    |> withHome (fun layer ->
-                        { layer with
-                            Terrain = TerrainGrid.ofList (plainLine [ { X = 20; Y = 20 } ])
-                        })
-
-                let outpost =
-                    { RoomLayer.empty with
-                        Terrain =
-                            TerrainGrid.ofList (
-                                plainLine [ { X = 10; Y = 10 }; { X = 10; Y = 11 } ]
-                            )
-                        TargetPositions =
-                            Map.ofList
-                                [ "src-out", { X = 10; Y = 10 }; "ctrl-out", { X = 10; Y = 12 } ]
-                    }
-
-                let atlas = home |> withNeighbour "W2N1" outpost |> snapshotWith [] |> ofView
-
-                Expect.isTrue
-                    (Set.contains { X = 10; Y = 11 } (seatTilesOf atlas "src-out" |> tilesIn "W2N1"))
-                    "the premise: (10,11) is a Seat of the outpost rock"
-
-                Expect.isTrue
-                    (Set.contains
-                        { X = 10; Y = 11 }
-                        (workArea atlas (Upgrade "ctrl-out") |> tilesIn "W2N1"))
-                    "and the outpost controller's Upgrade area covers it"
-
-                Expect.isEmpty
-                    (postsOf atlas "src-out" |> tilesIn "W2N1")
-                    "yet the rock has no Post: nothing is built on that Seat"
-
-                Expect.equal (postCount atlas) 0 "so the Anchor row hires nobody for it"
             }
 
             test "droppedEnergyIn answers each room's own piles on one coordinate" {
@@ -925,36 +877,6 @@ let heavyPinJoinTests =
                     "and the home body on that same coordinate is beside nothing of the sort"
             }
 
-            test "standsOnDualSeat answers for the colony's own room alone" {
-                // Reading an outpost Seat as a Dual Seat would subtract the
-                // outpost Anchor from the empty-window reprieve.
-                let atlas =
-                    pinnedTwoRooms
-                        [ "home-dual", { X = 10; Y = 11 }; "home-plain", { X = 10; Y = 9 } ]
-                        [ "out-dual", { X = 10; Y = 11 } ]
-                    |> snapshotWith [ worker "home-dual"; worker "home-plain"; worker "out-dual" ]
-                    |> ofView
-
-                Expect.isTrue
-                    (Set.contains { X = 10; Y = 11 } (dualSeatsIn atlas (atlasHome atlas)))
-                    "the premise: the Seat south of the rock is inside the controller's area"
-
-                Expect.isTrue
-                    (standsOnDualSeat atlas "home-dual")
-                    "and the body on it stands on one"
-
-                Expect.isFalse
-                    (standsOnDualSeat atlas "home-plain")
-                    "an ordinary Seat two ranks north is not one"
-
-                Expect.isFalse
-                    (standsOnDualSeat atlas "out-dual")
-                    "and the outpost's own geometry makes none, however it is shaped"
-
-                Expect.isFalse
-                    (standsOnDualSeat atlas "ghost")
-                    "a creep the projection places nowhere stands on nothing (ADR 0004)"
-            }
         ]
 
 [<Tests>]

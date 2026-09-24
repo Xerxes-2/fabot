@@ -510,69 +510,6 @@ let postSiteTests =
                     "so the walk onto its Post is the whole of this tick"
             }
 
-            test "a garrison on the rock's other Post does not strand the body raising the site" {
-                // A rock with a standing container Post and a container site
-                // Post beside it. Read against the standing census the rock
-                // would be occupied by the garrison on the built container,
-                // and the full body one step off its own site would hold no
-                // Task for the rest of its life. The condition reads every
-                // Post.
-                let room =
-                    { spatial
-                          [
-                              "src-a", { X = 10; Y = 10 }
-                              "cont-1", { X = 11; Y = 10 }
-                              "can-a", { X = 9; Y = 10 }
-                          ]
-                          [
-                              { X = 8; Y = 10 }, Plain
-                              { X = 9; Y = 10 }, Plain
-                              { X = 10; Y = 10 }, Wall
-                              { X = 11; Y = 10 }, Plain
-                          ] with
-                        TargetKinds =
-                            Map.ofList
-                                [
-                                    "src-a", Source
-                                    "cont-1", Structure BuiltKind.Container
-                                    "can-a", Site BuiltKind.Container
-                                ]
-                    }
-
-                let colony =
-                    { bareRespawn with
-                        Spawns = []
-                        Refillables = []
-                        Controller = None
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "can-a"; Left = siteOwes } ]
-                        Creeps = [ postBody "a1" 50 0; postBody "g1" 0 50 ]
-                        Spatial =
-                            room
-                            |> withCreepsAt [ "a1", { X = 8; Y = 10 }; "g1", { X = 11; Y = 10 } ]
-                    }
-
-                let {
-                        Assignments = assignments
-                        Intents = intents
-                    } =
-                    decideOn colony
-
-                Expect.equal
-                    (Map.tryFind "a1" assignments)
-                    (Some(taskId (Harvest "src-a")))
-                    "the site Post is standing room the garrison next door is not on"
-
-                Expect.isNonEmpty
-                    (moveIntentsFor "a1" intents)
-                    "so the full body takes the step back onto the site it was cast to raise"
-
-                Expect.equal
-                    (Map.tryFind "g1" assignments)
-                    (Some(taskId (Harvest "src-a")))
-                    "and the garrison on the built container keeps its own Post"
-            }
-
             test "the builder budget prices a commute, and the body on the site pays none" {
                 // `Tuning.OutpostBuilders` prices the commute, and a body
                 // standing on the site spends none of it. Counted inside the

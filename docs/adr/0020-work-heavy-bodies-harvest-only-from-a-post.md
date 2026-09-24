@@ -1,6 +1,6 @@
 # Work-heavy bodies harvest only from a Post
 
-> **Status:** amended by 0045, 0048, 0051
+> **Status:** amended by 0045, 0048, 0051, 0076
 
 > **Revised by ADR 0051** on the rejected option "cap a posted source's Harvest at its Post count": overturned in a narrower form. A light body's Harvest Work Area is the source's Seats *less* its Posts, and its capacity the Seats beyond the Posts — the complement of this ADR's heavy narrowing, so the two kinds of body stand on disjoint tiles. The failure mode the rejection feared (a light crowd with no rock at RCL2–3) ran the other way live: the light crowd kept the Post empty and the Anchor hired for it never got in (#212).
 

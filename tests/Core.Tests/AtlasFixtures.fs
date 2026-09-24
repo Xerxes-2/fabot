@@ -445,8 +445,8 @@ let internal plainLine tiles =
     tiles |> List.map (fun tile -> tile, Plain)
 
 /// A room whose source sits at (10,10) and whose controller is four tiles
-/// south, so the Seats on the source's south rank are Dual Seats and the
-/// rest ordinary; an outpost carries the very same coordinates beside it.
+/// south, so the Seats on the source's south rank lie in its Upgrade area and
+/// the rest do not; an outpost carries the very same coordinates beside it.
 let internal pinnedLayer =
     { RoomLayer.empty with
         Terrain =

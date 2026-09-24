@@ -1,6 +1,6 @@
 # Restock dispatch: a drained source's Harvest is judged at arrival, and a container garrison holds through the empty window
 
-> **Status:** amended by 0048, #258, #269, #285
+> **Status:** amended by 0048, #258, #269, #285, 0076
 
 > **Amended by #285** on one Considered Option's clause and on nothing this ADR decided: "Keep Harvest out of the pool while drained and gate the timer in the Planner with a colony-wide lookahead — rejected: **the Planner is creep-blind**; whether the wait is covered depends on the walker's body and position, which is the Matcher's knowledge." That is where the creep-blindness clause lives, and ADR 0061 narrows it: the Planner now reads exactly one fact about the **assignment table** — which Repairs this colony's living creeps hold, as a set of task ids spelled forward through `taskId` and never parsed — to pick which of the decaying kinds' two lines a structure is judged by. The clause's own stated reason is **intact**: no body, no position, no load and no name reaches the Planner, which is why the seam is a set of ids and not the `Assignments` map. What is overridden is the stronger reading the tree had given it, that the Planner reads nothing about the fleet at all. Harvest's own dispatch, the arrival judgement and the garrison's window are untouched.
 

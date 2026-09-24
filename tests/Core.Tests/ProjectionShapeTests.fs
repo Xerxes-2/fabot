@@ -20,7 +20,8 @@ let private fixtures =
         "receivingColony", receivingColony 10_000
         "deliveryColony", deliveryColony (Some Ownership.Ours)
         "bareRespawn", bareRespawn
-        "dualSeatColony", dualSeatColony
+        "unpostedColony", unpostedColony
+        "postedColony", postedColony
         "trunkColony", trunkColony 6
         "stockColony", Decide.PoolFixtures.stockColony [] (Map.ofList [ "sto-1", 5_000 ])
         "drawColony",

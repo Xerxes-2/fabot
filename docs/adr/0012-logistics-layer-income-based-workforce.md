@@ -1,6 +1,6 @@
 # The logistics layer: containers, Posts, the hauler row, and an income-based workforce
 
-> **Status:** amended by 0016, 0020, 0022, 0037, 0042, 0046, 0049, #216 R4, #234, #260
+> **Status:** amended by 0016, 0020, 0022, 0037, 0042, 0046, 0049, #216 R4, #234, #260, 0076
 
 > **Amended by #260** on the [[container]] family, which gains a **mineral container**: a fourth rule beside the source container's, the controller [[buffer]]'s and the [[outpost]]'s, planned on the Thorium deposit's [[seat]] nearest the **Storage's** [[trunk]] (ADR 0057 decision 1). A deposit has no trunk of its own — nothing paves one to it — so where a source seats its container on the line its own haul leaves by, a mineral's is seated on the line the load is carried down to the [[storage]], which is the `Spawn` half of the routes and never the controller-bound half. Served by this ADR's own target clause as ADR 0040 states it, gated at `Tuning.ExtractorLevel` rather than from level 0 (a container beside a deposit no body can dig is a site the surplus tier builds for nothing), and holding **no** [[link footing]]: a link carries energy and nothing else. Everything this ADR decided about the three containers it named is untouched.
 

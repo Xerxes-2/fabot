@@ -7,32 +7,11 @@ module Fabot.Core.Decide.Planner
 open Fabot.Core
 open Fabot.Core.Types
 
-/// The source container geometry: a tile within range 1 of the given rock is
-/// that rock's container tile. One rule over two kinds of rock — the Layout
-/// asks it of a Thorium deposit too. Named for the source because every other
-/// caller here is a source's, and a deposit's own readers say which rock they
-/// meant (`servingRock`).
+/// The source container geometry the Layout plans by: a tile within range 1 of
+/// the given rock is that rock's container tile. One rule over two kinds of
+/// rock — the Layout asks it of a Thorium deposit too. What a *standing*
+/// container serves is the Post census's (`Atlas.sourceOfPost`), not this.
 let internal servesSource (rockPos: Pos) (tile: Pos) = range tile rockPos <= 1
-
-/// The source a tile of the named room is a container's for: the placed source
-/// standing in that same room within range 1 of it, or None. The one geometry
-/// judgement behind both rules that care about a source container — the
-/// Planner keeps them out of Refill, the hauler quota counts them. The source's
-/// identity and not merely its existence, because the hauler quota prices a
-/// container at that source's own output. Of several sources within range 1
-/// the first in view order answers.
-let internal sourceContainerServes (view: ColonyView) (room: string) (pos: Pos) : string option =
-    view.Sources
-    |> List.tryFind (fun s ->
-        match SpatialInfo.placementOf view.Spatial s.Id with
-        | Some source -> source.Room = room && servesSource (RoomPos.pos source) pos
-        | None -> false)
-    |> Option.map (fun s -> s.Id)
-
-/// Whether a tile of the named room is a source container's at all — the half
-/// of the rule above that the Refill pool asks.
-let private isSourceContainerTile (view: ColonyView) (room: string) (pos: Pos) =
-    sourceContainerServes view room pos |> Option.isSome
 
 /// Whether this colony owns the named room. A room with no control entry is
 /// one the colony cannot see, and an unseen room is not one it owns.
@@ -455,28 +434,14 @@ let planTasks
         |> List.filter (fun id -> stored id >= view.Tuning.PickupThreshold)
         |> List.map (fun id -> Pickup(id, Energy))
 
-    // The haul cycle's outflow: the controller container is one more Refill
-    // target, judged by geometry — it stands inside the Upgrade Work Area the
-    // Layout picked it from, while a source container's tile is never a Refill
-    // target.
+    // The haul cycle's outflow: the controller's buffer is one more Refill
+    // target, and a source container never is.
     let containerRefills =
-        view.Controller
-        |> Option.bind (fun c -> SpatialInfo.placementOf view.Spatial c.Id)
-        |> Option.map (fun controller ->
-            let controllerRoom = controller.Room
-            let controllerPos = RoomPos.pos controller
-            let placed = (SpatialInfo.layerOf view.Spatial controllerRoom).TargetPositions
+        let buffers = Atlas.controllerContainers atlas
 
-            containers
-            |> List.filter (fun id ->
-                match Map.tryFind id placed with
-                | Some pos ->
-                    range pos controllerPos <= 3
-                    && not (isSourceContainerTile view controllerRoom pos)
-                    && stored id < Engine.containerCapacity
-                | None -> false)
-            |> List.map (fun id -> Refill(id, Energy)))
-        |> Option.defaultValue []
+        containers
+        |> List.filter (fun id -> Set.contains id buffers && stored id < Engine.containerCapacity)
+        |> List.map (fun id -> Refill(id, Energy))
 
     // The colony's stock is the outflow's last stop: a standing Storage with
     // room is one more Refill target, on the deepest tier of all.

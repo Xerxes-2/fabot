@@ -1,6 +1,6 @@
 # Post capacity is body-aware: one garrison per Post, and only a garrison's overflow keeps Harvest
 
-> **Status:** amended by 0048, 0051, #216 R5, #230, #269
+> **Status:** amended by 0048, 0051, #216 R5, #230, #269, 0076
 
 > **Amended by #230** on the Considered Option below that rejected a positional tie-break in the release fold — taken, at an altitude this ADR was not looking at. "One tick of suboptimal placement is not worth a positional tie-break" held while the release was a rare oversell memory; ADR 0054's [[refill cluster]] made the shrinking cap a routine event, and the fold's memory order was then deciding, several times a generation, that the body standing in the Work Area with a full store loses its Task to one still walking. So the fold walks a bounded Task's holders nearest-first and the release costs the Task its furthest holder — with a body the Atlas can give no distance for, whether the projection fails to place it or places it somewhere nothing connects, sorting behind every body it can (ADR 0004's escape prices an unplaced creep at 0, which is a ranking price for the capacity gate and not a claim that a body nobody can find is standing on the tile). It is the Matcher's own order over every capped Task, reading the walk the capacity gate already prices, and it knows no Task kinds (ADR 0052 decision 6) — the Post cap itself is unchanged, and the Anchor case is the one the option named.
 

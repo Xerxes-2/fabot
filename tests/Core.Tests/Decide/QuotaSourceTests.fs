@@ -29,6 +29,17 @@ let sourceOutputTests =
             // 600 bank casts.
             let unreservedWorkers = 8
 
+            test "a rock with the buffer on its Seat is hauled from once" {
+                // #405: the controller container on a Seat of the rock is the
+                // buffer, a sink; only the rock's Post ships its output.
+                let { Quotas = quotas } = decideOn seatBufferColony
+
+                Expect.equal
+                    (quotas.HaulerDemand |> List.map (fun row -> RoomPos.pos row.Container))
+                    [ { X = 9; Y = 9 } ]
+                    "one row, at the Post"
+            }
+
             test "the same outpost source is worth twice as much reserved" {
                 Expect.isEmpty
                     (spawnIntents

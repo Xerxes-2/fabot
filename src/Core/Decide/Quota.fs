@@ -106,7 +106,7 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
         Atlas.idsOfKind atlas (Structure BuiltKind.Container)
         |> List.choose (SpatialInfo.placementOf view.Spatial)
         |> List.choose (fun container ->
-            sourceContainerServes view container.Room (RoomPos.pos container)
+            Atlas.sourceOfPost atlas container.Room (RoomPos.pos container)
             |> Option.bind (sourceOutputOf view atlas)
             |> Option.map (fun output -> container, output))
 

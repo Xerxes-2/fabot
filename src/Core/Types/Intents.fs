@@ -224,9 +224,9 @@ type TrunkGoal =
 type UnroutedTrunk = { Source: string; Goal: TrunkGoal }
 
 /// What a container is planned for: a source, the controller, or a mineral.
-/// Judged independently — a dual seat can satisfy a source and the controller
-/// at once. A room has one controller and several sources, so only the
-/// source carries an id.
+/// Judged independently — a Seat inside the Upgrade area can satisfy a source
+/// and the controller at once. A room has one controller and several sources,
+/// so only the source carries an id.
 [<RequireQualifiedAccess>]
 type ContainerTarget =
     | Source of source: string

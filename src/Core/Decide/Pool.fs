@@ -82,11 +82,10 @@ let internal hasSpareRate (view: ColonyView) atlas (sourceId: string) =
 /// whether the walk this body is about to make ends on a tile it can have.
 /// A heavy body alone mans a Post; the candidate never counts against itself.
 ///
-/// Every Post of the rock and not the standing ones alone: the question here
-/// is standing room, and a Post whose container is still a site is a tile a
-/// body stands on and raises. Read off the standing census, a rock carrying a
-/// manned container Post and a site Post beside it would read occupied for a
-/// full body one step off that site, and that body would hold no Task at all.
+/// The rock's Post and not its standing one alone: the question here is
+/// standing room, and a Post whose container is still a site is a tile a body
+/// stands on and raises. Read off the standing census, a site Post with its
+/// garrison on it would read vacant, and a second body would walk onto it.
 ///
 /// Read now and not at arrival, which is where this parts from every other
 /// count of a Post: the arrival discount is safe for the body a cast was aimed
@@ -115,10 +114,8 @@ let internal hasUnmannedPost (view: ColonyView) atlas (creep: CreepInfo) (source
 /// container alone — a hauler drawing the container swaps the Anchor onto the
 /// Seat beside it.
 let private keepsThroughEmptyWindow atlas (creep: CreepInfo) sourceId =
-    garrisons atlas creep sourceId
-    || (Atlas.workHeavy atlas creep.Name
-        && Atlas.standsAtSource atlas creep.Name sourceId
-        && not (Atlas.standsOnDualSeat atlas creep.Name))
+    Atlas.workHeavy atlas creep.Name
+    && Atlas.standsAtSource atlas creep.Name sourceId
 
 
 /// The ticks a Task waits on a restock before there is anything there to work
