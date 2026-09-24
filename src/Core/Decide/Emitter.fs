@@ -394,8 +394,15 @@ let private guardTarget
         else
             posts |> Set.toList |> List.map (range from) |> List.min
 
+    // In an errand room a rival's CLAIM body is a target too (#414): unarmed,
+    // it is what takes the flag.
+    let errandRooms = Facts.errandRooms view
+
     view.Hostiles
-    |> List.filter (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome) && among h)
+    |> List.filter (fun h ->
+        h.Pos.Room = room
+        && (weaponRange h |> Option.isSome || Facts.claimsAFlag errandRooms h)
+        && among h)
     |> List.sortBy (fun h -> distance h, h.Id)
     |> List.tryHead
 

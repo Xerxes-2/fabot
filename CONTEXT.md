@@ -187,7 +187,7 @@ The fixed `[20 Carry; 10 Move]` body that carries one `Tuning.ReactorLoad` — o
 _Avoid_: hauler, runner, delivery creep
 
 ### Guard
-The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in), two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072. ⚔️
+The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in) and one kept in every worked [[errand]] room, where a rival's claimer is its target too, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077. ⚔️
 _Avoid_: defender, bodyguard, soldier
 
 ### Miner
@@ -269,7 +269,7 @@ A room within `Tuning.MaxHops` crossings of the [[home room]] that this colony m
 _Avoid_: remote, franchise, territory
 
 ### Errand
-A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled, and an armed non-Source-Keeper hostile in it makes it a [[stand-down]]. ADR-0060, ADR-0075.
+A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[guard]], which fights a raid where the guard cap wins; a raid the cap loses to makes it a [[stand-down]]. ADR-0060, ADR-0077.
 _Avoid_: goal, mission, remote target
 
 ### Reservation
@@ -307,7 +307,7 @@ The one flat record of the seasonal scoring line at `Memory.fabot.observe.reacto
 The per-creep ring of recent task handovers and movement events, each with its [[verdict]] and tick, written only when something changed and kept only for living creeps. ADR-0009, ADR-0028.
 
 ### Raid log
-The colony's episodic record of [[hostile]] presence in the rooms it works, under `Memory.fabot.observe.colonies.<home>.raids` and read with `observe.mjs raids` / `outposts`: a ring of raid episodes (window, roster, closest approach, losses, damage, closed by the quiet gap), a ring of [[stand-down]] episodes with their deadlines, the rooms last seen owned by a rival with their look ticks, the controllers held by somebody else's CLAIM parts, and the outposts a [[threat]] was last seen in. A record to be read; the stand-down gate is its one reader. ADR-0028, ADR-0034, ADR-0041, ADR-0043, ADR-0047, ADR-0056, ADR-0065, ADR-0075.
+The colony's episodic record of [[hostile]] presence in the rooms it works, under `Memory.fabot.observe.colonies.<home>.raids` and read with `observe.mjs raids` / `outposts`: a ring of raid episodes (window, roster, closest approach, losses, damage, closed by the quiet gap), a ring of [[stand-down]] episodes with their deadlines, the rooms last seen owned by a rival with their look ticks, the controllers held by somebody else's CLAIM parts, and the outposts a [[threat]] was last seen in. A record to be read; the stand-down gate is its one reader. ADR-0028, ADR-0034, ADR-0041, ADR-0043, ADR-0047, ADR-0056, ADR-0065, ADR-0077.
 
 ### Layout record
 The colony-level channel carrying what the [[layout]] could not deliver this tick, under `Memory.fabot.observe.colonies.<home>.layout` and read with `observe.mjs layout`: the [[link footing]]s with no tile, the [[trunk]]s with no path, the [[container]] picks deferred to a standing container, and the declarations refused for want of a chain. Written every tick, empty lists included; nothing reacts to it. ADR-0011, ADR-0017, ADR-0027, ADR-0035, ADR-0040, ADR-0047.
@@ -357,7 +357,7 @@ _Avoid_: keeper radius, SK exclusion
 The hard floor on the controller's downgrade timer, half the level's full timer, inside which Upgrade outranks even the feeding tier so the [[safe-mode reflex]] stays fireable. ADR-0007.
 
 ### Stand-down
-An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there — until a tick read off the threat: an invader core's collapse, a rival reservation's end, an armed raid's longest remaining life, or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0075.
+An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there — until a tick read off the threat: an invader core's collapse, a rival reservation's end, an armed raid's longest remaining life, or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
 
 ### Stronghold
 An invader core of level 1 or more — towers under ramparts and a garrison — whose room is `StandDown.Impassable` and taken out of every chain until its collapse timer runs out. ADR-0074.

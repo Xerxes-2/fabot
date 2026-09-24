@@ -532,13 +532,13 @@ let private rivalDeadlines (view: ColonyView) =
 /// The tick a room stands down to when the raid in it is one the colony has
 /// decided not to fight: the raid's own life, since an Invader in a room
 /// nobody owns never suicides (the engine's suicide branch wants a controller
-/// owner). For an outpost, only a raid the guard row's cap cannot beat: a
-/// withdrawal and a garrison are the same room's two answers, told apart
-/// here. For an errand room, any armed raid but the Source Keepers, since no
-/// guard is hired there. A transit room is neither answer.
+/// owner). Only a raid the guard row's cap cannot beat: a withdrawal and a
+/// garrison are the same room's two answers, told apart here — for an outpost
+/// and, since the guard row fights for it (#414), for an errand room, whose
+/// Source Keepers are terrain and neither open nor extend the clock. A transit
+/// room is neither answer.
 let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
-    let errandRooms =
-        view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
+    let errandRooms = Decide.Facts.errandRooms view
 
     let outpostRooms = Set.ofList outposts.Declared
 
@@ -550,6 +550,7 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
 
         if Set.contains room errandRooms then
             armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
+            && not (Decide.Quota.guardBlocksBeat view room Engine.guardCap)
         else if Set.contains room outpostRooms then
             not (List.isEmpty armed)
             && not (Decide.Quota.guardBlocksBeat view room Engine.guardCap)

@@ -717,6 +717,10 @@ let reclaimerChargeTests =
                 // joins `reserverClaimsOf`'s list, so addend and charge are one number
                 // (why `RowSizing` carries it), scaled onto a CLAIM body's 600-tick
                 // life.
+                //
+                // The errand room also keeps a guard (#414), one more addend at both
+                // banks and charged nowhere else: hence 7 and 8 where the seat alone
+                // was 6 and 7.
                 let atBank capacity =
                     let plain = reserverColony [] (surplusFleet 2) []
 
@@ -739,12 +743,12 @@ let reclaimerChargeTests =
 
                 Expect.equal
                     (atBank 1800)
-                    (5, Some 2, 6, Some 2)
+                    (5, Some 2, 7, Some 2)
                     "at 1,800 the seat is a place of its own and the generalist row is unmoved"
 
                 Expect.equal
                     (atBank 1300)
-                    (7, Some 4, 7, Some 3)
-                    "at 1,300 the same seat costs a generalist, so the target does not rise"
+                    (7, Some 4, 8, Some 3)
+                    "at 1,300 the same seat costs a generalist, so the target rises by the guard alone"
             }
         ]

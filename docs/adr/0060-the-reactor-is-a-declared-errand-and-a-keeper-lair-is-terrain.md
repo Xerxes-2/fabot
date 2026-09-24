@@ -1,6 +1,6 @@
 # The reactor is a declared errand, a keeper lair is terrain, and the programme is W15S28's
 
-> **Status:** accepted, amended by #412, #413
+> **Status:** accepted, amended by #412, #413, 0077
 
 > **Amended by #412** on 2026-09-25, on Odiodin and on nothing else this ADR decided. The standing claim war with **Odiodin** described below is over: Odiodin is a declared ally (`Colony.allies`), their creeps are no hostile, and the re-claimer leaves a Reactor they hold alone while any Thorium is in it, taking the flag only once their store is empty (#413: no timed handover, so no streak is forced across one). Every other rival is taken back on sight exactly as before.
 

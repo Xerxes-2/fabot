@@ -132,12 +132,20 @@ let private reclaimIntents (colony: ColonyView) =
 let private liveDefender =
     List.replicate 5 BodyPart.RangedAttack @ List.replicate 6 Move @ [ Heal ]
 
+/// SlothBot's reactor longbow as it stood in W15S25 on 2026-09-25
+/// (`docs/research/shibdib-reactor-steal.md`): two of them are the squad its
+/// steal mode sends, and they outlast the guard cap.
+let private shibdibLongbow =
+    List.replicate 8 BodyPart.RangedAttack
+    @ List.replicate 10 Move
+    @ List.replicate 2 Heal
+
 [<Tests>]
 let errandStandDownTests =
     testList
-        "an armed player in the errand room is a withdrawal, not a fight no guard can join"
+        "an errand room is guarded like an outpost: fought where the guard cap wins, withdrawn from where it loses"
         [
-            test "the guard-cap comparison cannot excuse a room the guard row does not serve" {
+            test "a raid the guard cap beats is fought: no withdrawal, and the Guard is pooled" {
                 let tick = 100
 
                 let defender =
@@ -146,21 +154,53 @@ let errandStandDownTests =
                         TicksToLive = 600
                     }
 
-                let keeper =
-                    { hostileIn errandRoom { X = 20; Y = 20 } [ RangedAttack; Move ] with
-                        Owner = "Source Keeper"
-                        TicksToLive = 1500
+                let colony =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Time = tick
+                        Hostiles = [ defender ]
+                    }
+
+                Expect.isTrue
+                    (guardBlocksBeat colony errandRoom Engine.guardCap)
+                    "the premise: the cap wins this exchange"
+
+                let log =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony)
+
+                Expect.isFalse
+                    (Set.contains errandRoom (Observe.standDown Tuning.defaults (tick + 1) log).Shut)
+                    "a fight the guard row can win is no withdrawal"
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Guard errandRoom)
+                    "and the errand room is guarded like an outpost"
+            }
+
+            test "a raid the guard cap cannot beat is a withdrawal, clocked to its own life" {
+                let tick = 100
+
+                let longbow id x =
+                    { hostileIn errandRoom { X = x; Y = 28 } shibdibLongbow with
+                        Id = id
+                        Owner = "Shibdib"
+                        TicksToLive = 600
                     }
 
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Time = tick
-                        Hostiles = [ defender; keeper ]
+                        Hostiles = [ longbow "lb-1" 29; longbow "lb-2" 30 ]
                     }
 
-                Expect.isTrue
+                Expect.isFalse
                     (guardBlocksBeat colony errandRoom Engine.guardCap)
-                    "the premise: two guard blocks beat this body, which is why the old deadline opened nothing"
+                    "the premise: SlothBot's two-longbow squad outlasts the cap"
 
                 let log =
                     Observe.RaidState.empty
@@ -171,24 +211,150 @@ let errandStandDownTests =
                         (Planner.outpostFactsOf colony)
 
                 Expect.contains
-                    (Observe.standDown Tuning.defaults (tick + 1) log).Shut
+                    (Observe.standDown Tuning.defaults (tick + 599) log).Shut
                     errandRoom
-                    "an errand has no guard row, so the hostile's own remaining life is its withdrawal clock"
-
-                Expect.contains
-                    (Observe.standDown Tuning.defaults (tick + defender.TicksToLive - 1) log).Shut
-                    errandRoom
-                    "one tick short of the player's deadline the withdrawal still holds, not extended by the keeper"
+                    "withdrawn until the squad's own life runs out"
 
                 Expect.isFalse
                     (Set.contains
                         errandRoom
-                        (Observe.standDown Tuning.defaults (tick + defender.TicksToLive) log).Shut)
-                    "on the deadline the unchanged declaration may return"
+                        (Observe.standDown Tuning.defaults (tick + 600) log).Shut)
+                    "and on the deadline the unchanged declaration may return"
             }
 
             test
-                "the owner and declaration kind are the asymmetry: a Source Keeper is expected, and an Outpost can fight" {
+                "a worked errand room keeps a guard in peace, and its re-claimer waits for it only under a raid" {
+                let guardQuota colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "guard")
+                    |> Option.map (fun row -> row.Quota)
+
+                let quiet =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Bank = bank 2000 2000
+                    }
+
+                Expect.contains
+                    (planTasksOn quiet noThreats)
+                    (Guard errandRoom)
+                    "the guard's Task stands in peace"
+
+                Expect.equal (guardQuota quiet) (Some 1) "and the row keeps one body for it"
+
+                let reserverQuota colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "reserver")
+                    |> Option.map (fun row -> row.Quota)
+
+                Expect.equal
+                    (reserverQuota quiet)
+                    (Some 1)
+                    "in peace the re-claimer's seat stands whether the guard does or not"
+
+                let raided =
+                    { quiet with
+                        Hostiles =
+                            [
+                                { hostileIn
+                                      errandRoom
+                                      { X = 29; Y = 28 }
+                                      [ BodyPart.Claim; Move; Move ] with
+                                    Owner = "Shibdib"
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    (reserverQuota raided)
+                    (Some 0)
+                    "under a raid its seat waits for the guard, as a raided outpost's does"
+
+                let guarded =
+                    raided
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X + 1 }
+                        (creepWith "guard-g" 0 0 Bodies.guardPattern.Block)
+
+                Expect.equal
+                    (reserverQuota guarded)
+                    (Some 1)
+                    "and returns the tick the guard stands"
+            }
+
+            test
+                "the resident guard's relief takes the Task while the incumbent still holds the ring" {
+                let incumbent = creepWith "guard-old" 0 0 Bodies.guardPattern.Block
+                let relief = creepWith "guard-new" 0 0 Bodies.guardPattern.Block
+
+                let colony =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Bank = bank 2000 2000
+                    }
+                    |> withErrandCreep { ringTile with X = ringTile.X + 1 } incumbent
+                    |> withHomeCreep { X = 13; Y = 10 } relief
+
+                let held = Map.ofList [ incumbent.Name, taskId (Guard errandRoom) ]
+                let assignments = (decideFrom held colony).Assignments
+
+                Expect.equal
+                    (Map.tryFind relief.Name assignments, Map.tryFind incumbent.Name assignments)
+                    (Some(taskId (Guard errandRoom)), Some(taskId (Guard errandRoom)))
+                    "the relief sets out now, not the tick the incumbent dies, so the flag is never bare"
+            }
+
+            test "a rival's claimer brings the guard, which swings at it beside the flag" {
+                let claimer =
+                    { hostileIn
+                          errandRoom
+                          { X = ringTile.X + 1; Y = ringTile.Y }
+                          [ BodyPart.Claim; Move; Move ] with
+                        Id = "claimer"
+                        Owner = "Shibdib"
+                    }
+
+                let guard = creepWith "guard-1" 0 0 Bodies.guardPattern.Block
+
+                let colony =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Hostiles = [ claimer ]
+                    }
+                    |> withErrandCreep ringTile guard
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Guard errandRoom)
+                    "the guard's Task stands, and the claimer is its business"
+
+                Expect.contains
+                    (emitOn colony [ guard.Name, Guard errandRoom ])
+                    (AttackCreep(guard.Name, "claimer"))
+                    "and the guard beside it swings at it"
+
+                let atlas = Atlas.ofView colony
+                let threats = threatsOf colony atlas
+
+                Expect.isTrue
+                    (Threats.errandRingIn threats errandRoom
+                     |> Option.exists (Set.contains (RoomPos.at errandRoom ringTile)))
+                    "the guard's ground is the ring around the claimer"
+
+                let quiet = bareHome |> errandColony (Some Ownership.Ours) []
+
+                Expect.equal
+                    (Threats.errandRingIn (threatsOf quiet (Atlas.ofView quiet)) errandRoom
+                     |> Option.map Set.count)
+                    (Some(
+                        Atlas.adjacentWalkableIn
+                            (Atlas.ofView quiet)
+                            errandRoom
+                            (RoomPos.pos (snd reactorErrand.Target))
+                        |> List.length
+                    ))
+                    "and with nothing in the room, the Reactor's own ring"
+            }
+
+            test
+                "a Source Keeper is terrain in an errand room, as the guard-cap fight is an outpost's too" {
                 let tick = 100
 
                 let defender owner =
@@ -315,8 +481,9 @@ let errandStandDownTests =
 
                 let admitted = view Set.empty
 
-                let defender =
-                    { hostileIn errandRoom { X = 29; Y = 28 } liveDefender with
+                let longbow id x =
+                    { hostileIn errandRoom { X = x; Y = 28 } shibdibLongbow with
+                        Id = id
                         Owner = "Shibdib"
                         TicksToLive = 600
                     }
@@ -324,7 +491,7 @@ let errandStandDownTests =
                 let seen =
                     { admitted with
                         Time = 100
-                        Hostiles = [ defender ]
+                        Hostiles = [ longbow "lb-1" 29; longbow "lb-2" 30 ]
                     }
 
                 let log =
@@ -714,6 +881,8 @@ let courierTests =
             test "636 ticks is the cadence, and the fixed body is cast at its boundary" {
                 let fixedBody = List.replicate 20 Carry @ List.replicate 10 Move
 
+                // The errand room's guard already standing (#414), so the one
+                // spawn is the courier row's to read.
                 let staffed =
                     deliveryColony (Some Ownership.Ours)
                     |> withHomeCreeps
@@ -722,6 +891,9 @@ let courierTests =
                             creepWith "hauler-h" 0 1000 fixedBody, { X = 8; Y = 10 }
                             worker "w" 0 50, { X = 9; Y = 10 }
                         ]
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X + 1 }
+                        (creepWith "guard-g" 0 0 Bodies.guardPattern.Block)
 
                 let young = courier "courier-young" |> withLife 865
                 let old = courier "courier-old" |> withLife 864

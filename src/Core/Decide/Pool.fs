@@ -237,10 +237,13 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // ours stands in has no Threat, so no ring. The declared source tiles
         // give the walk a destination; the instant the guard arrives the room
         // is lit and this branch is not taken again.
+        //
+        // In a declared errand room the ground is `Threats.ErrandRing`'s (#414).
         | Guard room ->
-            match Threats.ringIn threats room with
-            | ring when Set.isEmpty ring -> Atlas.sourceRingIn atlas room
-            | ring -> ring
+            match Threats.errandRingIn threats room, Threats.ringIn threats room with
+            | Some ground, _ -> ground
+            | None, ring when Set.isEmpty ring -> Atlas.sourceRingIn atlas room
+            | None, ring -> ring
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with
@@ -921,6 +924,14 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // is the row's own arithmetic, read here a second time so the number
         // the cascade hires against and the number the Matcher counts holders
         // against are one number.
+        //
+        // One over in an errand room (#414): its guard is resident, and its
+        // relief — cast at the incumbent's lead — must take the Task and walk
+        // three crossings while the incumbent still holds the ring. A Guard has
+        // no arrival price for a handover window to be read against, and the
+        // row's count, not this cap, is what buys bodies.
+        | Guard room when Set.contains room (Facts.errandRooms view) ->
+            Capacity.fighters (guardsWanted view room + 1)
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller: a second body there buys nothing.
         | Reserve _

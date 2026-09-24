@@ -64,7 +64,7 @@ let upgraderPattern =
 
 /// ADR-0056
 /// The guard row: the melee body cast the tick a threat is seen in a declared
-/// outpost. One Move per non-Move part, so fatigue parity holds. The order is
+/// outpost, and kept in a worked errand room (#414). One Move per non-Move part, so fatigue parity holds. The order is
 /// a rule and not a layout (#282): the engine destroys parts from the head of
 /// the array, so Tough eats first, Move next (a guard that cannot walk is
 /// already standing on its target), then Attack, and Heal last.

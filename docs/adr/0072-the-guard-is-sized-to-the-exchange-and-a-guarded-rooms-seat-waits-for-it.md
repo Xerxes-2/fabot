@@ -1,6 +1,8 @@
 # The guard is sized to the exchange, and a guarded room's reserver seat waits for it
 
-> **Status:** accepted
+> **Status:** accepted, amended by 0077
+
+> **Amended by 0077** (#414) on 2026-09-25: a guarded room's seat waits for its guard in a raided errand room too, and the errand's Reclaim is no longer ADR 0075's, which 0077 supersedes.
 
 > **Accepted 2026-09-18** on #375; the decision is the user's ("两条都做" — both halves). Implemented by the change that accepted it.
 

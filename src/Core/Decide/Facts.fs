@@ -230,17 +230,37 @@ let internal ourDeposits (view: ColonyView) : string list =
 let internal errandRooms (view: ColonyView) : Set<string> =
     view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
 
+/// Whether a hostile is a rival's CLAIM body standing in one of these errand
+/// rooms: unarmed, and the thing that takes the flag (#406, #414).
+let internal claimsAFlag (errandRooms: Set<string>) (hostile: HostileInfo) =
+    Set.contains hostile.Pos.Room errandRooms
+    && List.contains BodyPart.Claim hostile.Body
+
+/// The errand rooms a raid stands in this tick (#414): an armed hostile that is
+/// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there
+/// to meet, and what the re-claimer's seat waits on while the guard is short.
+let internal errandRoomsRaided (view: ColonyView) : Set<string> =
+    let rooms = errandRooms view
+
+    view.Hostiles
+    |> List.filter (fun hostile ->
+        Set.contains hostile.Pos.Room rooms
+        && hostile.Owner <> "Source Keeper"
+        && (isArmed hostile || List.contains BodyPart.Claim hostile.Body))
+    |> List.map (fun hostile -> hostile.Pos.Room)
+    |> Set.ofList
+
 /// The errand rooms a rival's CLAIM body stands in this tick (#406). The flag
 /// may be ours this tick, but `claimReactor` has no precondition, so a load
-/// put in now burns for whoever holds the flag next. An armed rival is the
-/// stand-down's (`Observe.raidDeadlines`); this is the unarmed half. Off
-/// vision alone: no load is drawn without a re-claimer resident to see.
+/// put in now burns for whoever holds the flag next. Off vision alone: no load
+/// is drawn without a re-claimer resident to see.
 let internal errandRoomsContested (view: ColonyView) : Set<string> =
-    errandRooms view
-    |> Set.filter (fun room ->
-        view.Hostiles
-        |> List.exists (fun hostile ->
-            hostile.Pos.Room = room && List.contains BodyPart.Claim hostile.Body))
+    let rooms = errandRooms view
+
+    view.Hostiles
+    |> List.filter (claimsAFlag rooms)
+    |> List.map (fun hostile -> hostile.Pos.Room)
+    |> Set.ofList
 
 /// Whether an ally is burning in this Reactor (#413): their flag on it and
 /// Thorium in its store, by the Reactor's own row. No row, no vision, and

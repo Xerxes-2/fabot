@@ -197,10 +197,11 @@ let internal declaredOutposts (view: ColonyView) : string list =
 let private reservableOutpostsOf (view: ColonyView) (reservable: string list) : string list =
     reservable |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
-/// The declared outposts a threat stands in this tick: the rooms the guard row
-/// hires a body for, and the rooms `planTasks` pools a Guard in — one
-/// derivation, or a Guard is pooled with no body bought or a body cast with no
-/// Task. A Threat and never "a hostile".
+/// The declared outposts a threat stands in this tick: with the errand rooms
+/// (`guardedErrandsOf`), the rooms the guard row hires a body for and the rooms
+/// `planTasks` pools a Guard in — read by both off `OutpostFacts.Guarded`, or a
+/// Guard is pooled with no body bought or a body cast with no Task. A Threat
+/// and never "a hostile".
 ///
 /// Vision is not the whole of what it reads (#366): the vision in an
 /// *unguarded* outpost is the anchor, the hauler and the reserver, which are
@@ -228,6 +229,17 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
             || (Set.contains room view.ThreatenedOutposts
                 && not (Map.containsKey room view.RoomControl)))
 
+/// ADR-0077
+/// The errand rooms the guard row keeps a body in: every one this colony works
+/// this tick, raid or none — the guard stands on the Reactor's ring and meets
+/// what comes (`Threats.ErrandRing`). A held errand and a withdrawn one are
+/// out of `view.Errands` before this reads it.
+let private guardedErrandsOf (view: ColonyView) : string list =
+    view.Errands
+    |> List.map (fun errand -> errand.RoomName)
+    |> List.distinct
+    |> List.sort
+
 /// The outpost chain's answers for this tick, derived once and carried (#383):
 /// re-entered per reader, the `Controller` census was walked nineteen times a
 /// tick on `--scenario reactor --level 7`. The shape is `RowSizing`'s and
@@ -247,7 +259,8 @@ type OutpostFacts =
         /// The rooms of those controllers, which is what the reserver row
         /// hires per — one body per room the pool offers a controller in.
         ReservableRooms: string list
-        /// The declared outposts a threat stands in.
+        /// The declared outposts a threat stands in, and the errand rooms the
+        /// guard row keeps a body in (#414).
         Guarded: string list
     }
 
@@ -269,14 +282,14 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Declared = declared
         ReservableControllers = reservable
         ReservableRooms = reservableOutpostsOf view reservable
-        Guarded = guardedOutpostsOf view declared
+        Guarded = guardedOutpostsOf view declared @ guardedErrandsOf view
     }
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
 /// from scratch every tick — Tasks are never persisted.
 ///
 /// `held` is the narrow pair of facts this half reads about the colony's own
-/// assignment table (ADR-0061, ADR-0067): all task ids living creeps hold, and
+/// assignment table (ADR-0067): all task ids living creeps hold, and
 /// the subset whose holder still carries Thorium, derived once in `Entry`
 /// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line; a
 /// partially poured delivery reads the second so it cannot move to a different

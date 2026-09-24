@@ -337,7 +337,7 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
         raidHits * raidDamage < ourHits * (ourDamage - raidHealing)
 
 /// ADR-0056
-/// How many guards one raided outpost wants: one, two where one block loses
+/// How many guards one guarded room wants: one, two where one block loses
 /// the exchange. The count reads the raid and never our own answer to it
 /// (#272): priced against the guards standing in the room it was not monotone,
 /// and the reinforcement it bought was evicted on arrival. Vision is the whole
@@ -358,7 +358,7 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
     else
         Engine.guardCap
 
-/// The guard row's quota: `guardsWanted` over every raided outpost, summed.
+/// The guard row's quota: `guardsWanted` over every guarded room, summed.
 let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
     outposts.Guarded |> List.sumBy (guardsWanted view)
 
@@ -478,10 +478,17 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         // cast by the incumbent leaving `living` at its own lead
         // (`Spawns.expiring`), which already prices the successor's walk.
         //
-        // The start condition is the bank gate above and the chain, nothing
-        // else: `view.Errands` carries only the errands a chain of Seams
-        // reaches.
-        @ (view.Errands |> List.map (fun _ -> 1))
+        // The start condition is the bank gate above and the chain, and the
+        // guard (#414): `view.Errands` carries only the errands a chain of
+        // Seams reaches, and a raided errand room's seat waits for its guard
+        // like an outpost's.
+        @ (view.Errands
+           |> List.filter (fun errand ->
+               not (
+                   Set.contains errand.RoomName withheld
+                   && Set.contains errand.RoomName (errandRoomsRaided view)
+               ))
+           |> List.map (fun _ -> 1))
 
 /// The facts the rows whose sizing is not the bank's answer alone read,
 /// derived once for the tick in `decideUnarbitrated`: the casting cascade, the

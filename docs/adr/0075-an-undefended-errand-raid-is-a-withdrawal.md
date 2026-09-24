@@ -1,6 +1,6 @@
 # An undefended errand raid is a withdrawal
 
-> **Status:** accepted
+> **Status:** superseded by 0077
 
 ADR 0060 made an [[errand]] neither an [[outpost]] nor a [[transit room]]: its Reclaim buys a seat in the shared reserver casting row, but ADR 0056's guard row serves only outposts. W15S25 exposed the missing answer at ticks 442,140–444,287: one rival `5 RANGED_ATTACK / 1 HEAL` body killed eight 200-hit re-claimers, while the outpost guard-cap arithmetic called the raid winnable and therefore opened no [[stand-down]]. The colony could buy no guard there, so it replaced each 650-energy body into the same undefended fight.
 
