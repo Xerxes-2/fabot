@@ -134,7 +134,7 @@ let private liveDefender =
 
 /// SlothBot's reactor longbow as it stood in W15S25 on 2026-09-25
 /// (`docs/research/shibdib-reactor-steal.md`): two of them are the squad its
-/// steal mode sends, and they outlast the guard cap.
+/// steal mode sends. A three-block body wins that exchange on paper.
 let private shibdibLongbow =
     List.replicate 8 BodyPart.RangedAttack
     @ List.replicate 10 Move
@@ -143,13 +143,17 @@ let private shibdibLongbow =
 [<Tests>]
 let errandStandDownTests =
     testList
-        "an errand room is guarded like an outpost: fought where the guard cap wins, withdrawn from where it loses"
+        "an errand room is guarded like an outpost: fought where the guard row's reach wins, withdrawn from where it loses"
         [
-            test "a raid the guard cap beats is fought: no withdrawal, and the Guard is pooled" {
+            test
+                "a raid the guard row's reach beats is fought: no withdrawal, and the Guard is pooled" {
+                // SlothBot's two-longbow squad against W15S28's own bank: 5,300 buys
+                // a five-block body, and the row's reach (#417) wins that exchange.
                 let tick = 100
 
-                let defender =
-                    { hostileIn errandRoom { X = 29; Y = 28 } liveDefender with
+                let longbow id x =
+                    { hostileIn errandRoom { X = x; Y = 28 } shibdibLongbow with
+                        Id = id
                         Owner = "Shibdib"
                         TicksToLive = 600
                     }
@@ -157,12 +161,13 @@ let errandStandDownTests =
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Time = tick
-                        Hostiles = [ defender ]
+                        Hostiles = [ longbow "lb-1" 29; longbow "lb-2" 30 ]
+                        Bank = bank 5300 5300
                     }
 
                 Expect.isTrue
-                    (guardBlocksBeat colony errandRoom Engine.guardCap)
-                    "the premise: the cap wins this exchange"
+                    (guardBlocksBeat colony errandRoom (Quota.guardBlocksReach colony))
+                    "the premise: the row's reach wins the exchange"
 
                 let log =
                     Observe.RaidState.empty
@@ -182,7 +187,9 @@ let errandStandDownTests =
                     "and the errand room is guarded like an outpost"
             }
 
-            test "a raid the guard cap cannot beat is a withdrawal, clocked to its own life" {
+            test "a raid beyond the guard row's reach is a withdrawal, clocked to its own life" {
+                // The same squad against a bank that buys one block a body: one
+                // block loses it.
                 let tick = 100
 
                 let longbow id x =
@@ -196,11 +203,12 @@ let errandStandDownTests =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Time = tick
                         Hostiles = [ longbow "lb-1" 29; longbow "lb-2" 30 ]
+                        Bank = bank 1000 1000
                     }
 
                 Expect.isFalse
-                    (guardBlocksBeat colony errandRoom Engine.guardCap)
-                    "the premise: SlothBot's two-longbow squad outlasts the cap"
+                    (guardBlocksBeat colony errandRoom (Quota.guardBlocksReach colony))
+                    "the premise: one block loses to the squad"
 
                 let log =
                     Observe.RaidState.empty
@@ -354,7 +362,7 @@ let errandStandDownTests =
             }
 
             test
-                "a Source Keeper is terrain in an errand room, as the guard-cap fight is an outpost's too" {
+                "a Source Keeper is terrain in an errand room, as the guard row's fight is an outpost's too" {
                 let tick = 100
 
                 let defender owner =
@@ -378,6 +386,7 @@ let errandStandDownTests =
                 let errandRaid =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Hostiles = [ defender "Shibdib" ]
+                        Bank = bank 1000 1000
                     }
 
                 let expectedKeeper =
@@ -397,7 +406,10 @@ let errandStandDownTests =
                     "a Source Keeper is the expected transit hazard, not a player raid on the target"
 
                 Expect.isTrue
-                    (guardBlocksBeat guardServedRoom errandRoom Engine.guardCap)
+                    (guardBlocksBeat
+                        guardServedRoom
+                        errandRoom
+                        (Quota.guardBlocksReach guardServedRoom))
                     "the premise: the declared Outpost can buy the two blocks that win this exchange"
 
                 Expect.isFalse

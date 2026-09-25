@@ -269,7 +269,7 @@ A room within `Tuning.MaxHops` crossings of the [[home room]] that this colony m
 _Avoid_: remote, franchise, territory
 
 ### Errand
-A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[guard]], which fights a raid where the guard cap wins; a raid the cap loses to makes it a [[stand-down]]. ADR-0060, ADR-0077.
+A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[guard]], which fights a raid where the guard row's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077.
 _Avoid_: goal, mission, remote target
 
 ### Reservation

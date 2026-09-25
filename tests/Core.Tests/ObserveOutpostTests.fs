@@ -60,12 +60,15 @@ let outpostTests =
                 // hundred ticks lost two reservers and a guard. An Invader in a room
                 // nobody owns never suicides, so what it has left is the clock.
                 //
-                // Read only for a raid the guard row's cap cannot beat: shutting a room
+                // Read only for a raid the guard row's reach cannot beat: shutting a room
                 // takes it out of the scan set, so a raid that shut it on sight would
                 // hide its own hostiles and buy no guard. Pairwise on the raid's size.
+                // A bank that buys a two-block body: the row's reach (#417) is the
+                // two blocks this case is priced at.
                 let raidIn hostiles =
                     { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles = hostiles |> List.mapi (raiderIn outpostRoom)
+                        Bank = { Available = 0; Capacity = 1_500 }
                     }
 
                 let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
@@ -100,6 +103,7 @@ let outpostTests =
             }
 
             test "two melee blocks cannot use self-heal to win an equal exchange" {
+                // A two-block body, as above: a reach of two blocks.
                 let raid attacks =
                     { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles =
@@ -107,6 +111,7 @@ let outpostTests =
                                 2
                                 (List.replicate attacks Attack @ List.replicate (10 - attacks) Move)
                             |> List.mapi (raiderIn outpostRoom)
+                        Bank = { Available = 0; Capacity = 1_500 }
                     }
 
                 Expect.isEmpty

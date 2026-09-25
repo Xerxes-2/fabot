@@ -300,8 +300,9 @@ let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 /// kills its 1,000 hits, so that raid needs the second block.
 ///
 /// Two readers: the guard row asks it of one block to size the crowd, and the
-/// stand-down asks it of the cap to decide whether the room is a fight or a
-/// withdrawal (`Observe.raidDeadlines`).
+/// stand-down asks it of the biggest body the bank buys (`guardBlocksReach`)
+/// to decide whether the room is a fight or a withdrawal
+/// (`Observe.raidDeadlines`).
 let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     let parts part body = partCountIn body part
 
@@ -361,6 +362,16 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 /// The guard row's quota: `guardsWanted` over every guarded room, summed.
 let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
     outposts.Guarded |> List.sumBy (guardsWanted view)
+
+/// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
+/// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
+/// What the stand-down weighs a raid against. One body and never the row's two
+/// summed: `guardBlocksBeat` grows about as the square of the blocks, and a
+/// raid focuses one body at a time while the second may arrive late, so the
+/// sum would call a fight won that each body loses alone — and each body is
+/// sized to win alone (`guardBlocksFor`).
+let guardBlocksReach (view: ColonyView) : int =
+    min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
 
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the

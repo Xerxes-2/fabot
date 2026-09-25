@@ -14,6 +14,21 @@ let guardRowTests =
     testList
         "the guard row"
         [
+            test "the reach a raid is weighed against is one body, as big as the bank buys" {
+                // #417: one body and never the row's two summed, capped at the most
+                // blocks one body carries.
+                let reachAt capacity =
+                    Quota.guardBlocksReach
+                        { bareRespawn with
+                            Bank = bank capacity capacity
+                        }
+
+                Expect.equal
+                    ([ 700; 1_300; 2_300; 5_300; 12_900 ] |> List.map reachAt)
+                    [ 0; 1; 3; 5; guardBlocksMost ]
+                    "750 a block, and no more than one body's worth"
+            }
+
             test "a clear outpost hires none, and one armed hostile in it hires one" {
                 // The row is 0 for the whole of a colony's ordinary life, and 1 the
                 // tick a threat is seen standing in a declared outpost. Nothing is

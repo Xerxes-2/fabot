@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282
+> **Status:** amended by 0072, #272, #280, #282, #417
+
+> **Amended by #417** on 2026-09-25: the withdrawal line is the biggest single guard body the bank buys (`Quota.guardBlocksReach`), not two blocks; so the bounded loss before a stand-down opens is two bodies of that size, up to 2 × 3,750 energy at RCL7, and no longer two 750-energy blocks.
 
 > **Amended by #375** (ADR 0072) on the guard's size. The row bought whole blocks at the bank's capacity — 2,250 at W15S28's 2,300 against a 1,000-hit invader one block kills — and the reserver row spent the bank down to 650 every tick it got there, so the guard never cast. The body is now the blocks the exchange takes (`guardBlocksFor`, the same `guardBlocksBeat` the count reads), truncated by the bank; the count, its cap and the blindness rule stand.
 

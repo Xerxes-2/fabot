@@ -159,8 +159,10 @@ module Engine =
     /// durability is priced at full — the safe direction.
     let partHits = 100
 
-    /// The most guard blocks one raided [[outpost]] ever buys: the cap is
-    /// where "hire another" stops and "withdraw" begins. ADR-0056
+    /// The most guard **bodies** one guarded room ever buys: where "hire
+    /// another" stops. Each is sized to win the exchange alone, up to what the
+    /// bank buys, and a raid is withdrawn from where the biggest such body
+    /// loses it (`Quota.guardBlocksReach`, #417). ADR-0056
     let guardCap = 2
 
     /// The regeneration of a source in a room carrying an owner or a

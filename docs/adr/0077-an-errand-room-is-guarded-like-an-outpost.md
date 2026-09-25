@@ -1,6 +1,8 @@
 # An errand room is guarded like an outpost
 
-> **Status:** accepted
+> **Status:** accepted, amended by #417
+
+> **Amended by #417** on 2026-09-25, on the line a raid is weighed against and on nothing else. "The guard cap" below read `Engine.guardCap` (two **bodies**) as two **blocks**, far under what the row fields since ADR 0072 sizes each body to win alone. The withdrawal now weighs a raid against the row's reach: the biggest single body the bank buys (`Quota.guardBlocksReach`), since ADR 0072 sizes each body to win alone and a raid focuses one at a time. The first Consequence changes with it: against W15S28's 5,300 bank SlothBot's two-longbow squad is **fought**, not withdrawn from; a kiting ranged body is still #411's.
 
 > **Accepted 2026-09-25** on #414; the user chose to send a guard to defend W15S25 together with our ally Odiodin (#412) — "派个兵去共防" — accepting that damaging SlothBot's creeps puts us on its war list (`docs/research/shibdib-reactor-steal.md` §5).
 
