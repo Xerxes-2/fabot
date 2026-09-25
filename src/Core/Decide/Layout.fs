@@ -917,11 +917,11 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
 /// One creep per controller per tick, the lowest name beside it. Geometry
 /// through the Atlas and not off the projection, so the keeper margin's mask
 /// reaches this rule too.
-let internal planSignatures (view: ColonyView) atlas (text: string) : Intent list =
+let internal planSignatures (view: ColonyView) atlas (textFor: string -> string) : Intent list =
     let signed room =
         Map.tryFind room view.RoomControl
         |> Option.bind (fun control -> control.Sign)
-        |> Option.contains text
+        |> Option.contains (textFor room)
 
     let placed = Atlas.placedCreeps atlas
 
@@ -935,7 +935,7 @@ let internal planSignatures (view: ColonyView) atlas (text: string) : Intent lis
             |> List.map fst
             |> List.sort
             |> List.tryHead
-            |> Option.map (fun name -> SignController(name, id, text))
+            |> Option.map (fun name -> SignController(name, id, textFor at.Room))
         | _ -> None)
 
 /// Colony reflex beside the pipeline: every creep with free carry capacity

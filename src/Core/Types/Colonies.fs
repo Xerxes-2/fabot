@@ -641,11 +641,24 @@ type Colony =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
-    /// What this colony writes on a controller it stands beside (#381): a
-    /// human's line, one for every room, chosen 2026-09-25. The engine caps a
-    /// sign at 100 characters. Flavour on a sign, not a specification.
-    let signature =
-        "F# via Fable. No mutable state was harmed in the making of this room."
+    /// The lines this colony writes on a controller it stands beside (#381),
+    /// chosen by a human on 2026-09-25. The engine caps a sign at 100
+    /// characters. Flavour on a sign, not a specification.
+    let signatures =
+        [
+            "F# via Fable. No mutable state was harmed in the making of this room."
+            "Written in F#, compiled by Fable. Mostly pure functions, occasionally pure chaos."
+            "λ lives here. F# + Fable."
+            "Just an F# bot passing through. Be nice to the haulers."
+        ]
+
+    /// One room's line: picked off the room's name and nothing else, so it is
+    /// the same every tick and the reflex never re-signs a room it has signed.
+    /// Summed over the characters rather than `GetHashCode`, which .NET and
+    /// Fable's JavaScript answer differently.
+    let signatureFor (room: string) : string =
+        let sum = room |> Seq.sumBy int
+        List.item (sum % List.length signatures) signatures
 
     /// The players we have agreed with, by the username the engine spells
     /// them (#412): moved by a human in a commit, like every declaration.

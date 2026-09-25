@@ -18,6 +18,9 @@ let private signatures intents =
 
 /// `reflexColony`'s ground with a controller on it, the colony owning the
 /// room, and whatever line is standing on that controller.
+/// The line the fixtures' home room is signed with: `reflexColony`'s room.
+let private homeLine = Colony.signatureFor ""
+
 let private signColony sign creeps positions =
     { reflexColony "ctrl-1" Controller creeps positions with
         RoomControl = Map.ofList [ "", { ownedRoom with Sign = sign } ]
@@ -33,16 +36,13 @@ let signatureTests =
 
                 Expect.equal
                     (signatures (decideOn colony).Intents)
-                    [ "w1", "ctrl-1", Colony.signature ]
+                    [ "w1", "ctrl-1", homeLine ]
                     "a controller nobody has signed is the case this exists for (ADR 0004: absence is not a match)"
             }
 
             test "a controller already carrying our line is left alone" {
                 let colony =
-                    signColony
-                        (Some Colony.signature)
-                        [ worker "w1" 0 50 ]
-                        [ "w1", { X = 10; Y = 11 } ]
+                    signColony (Some homeLine) [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
 
                 Expect.isEmpty
                     (signatures (decideOn colony).Intents)
@@ -58,7 +58,7 @@ let signatureTests =
 
                 Expect.equal
                     (signatures (decideOn colony).Intents |> List.map (fun (_, _, text) -> text))
-                    [ Colony.signature ]
+                    [ homeLine ]
                     "four of our rooms carried a stranger's flavour text for hundreds of thousands of ticks"
             }
 
@@ -129,10 +129,7 @@ let signatureTests =
                 // The home body stands at (10,11) of *home*, which is the same
                 // pair of numbers as a tile beside the outpost's controller.
                 let athome =
-                    signColony
-                        (Some Colony.signature)
-                        [ worker "w1" 0 50 ]
-                        [ "w1", { X = 10; Y = 11 } ]
+                    signColony (Some homeLine) [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 11 } ]
                     |> withOutpostController [] []
 
                 Expect.isEmpty
@@ -145,16 +142,39 @@ let signatureTests =
 
                 Expect.equal
                     (signatures (decideOn outThere).Intents)
-                    [ "w2", "ctrl-out", Colony.signature ]
+                    [ "w2", "ctrl-out", Colony.signatureFor outpost ]
                     "and the body standing in the outpost signs the outpost's controller"
             }
 
-            test "the line is under the engine's hundred characters" {
+            test "every line is under the engine's hundred characters" {
                 // The engine truncates past 100, so a line that overflows is a
                 // line nobody ever reads the end of.
-                Expect.isLessThanOrEqual
-                    (String.length Colony.signature)
-                    100
-                    "the sign the engine keeps is at most a hundred characters"
+                for line in Colony.signatures do
+                    Expect.isLessThanOrEqual
+                        (String.length line)
+                        100
+                        $"the sign the engine keeps is at most a hundred characters: {line}"
+            }
+
+            test "each room keeps one line of its own, and the rooms do not all share one" {
+                // Picked off the room's name, so a room signed once is never
+                // signed again with another line.
+                let rooms = [ "W12S28"; "W13S28"; "W15S28"; "W11S29"; "W11S27" ]
+
+                Expect.equal
+                    (rooms |> List.map Colony.signatureFor)
+                    (rooms |> List.map Colony.signatureFor)
+                    "the same room, the same line, every tick"
+
+                Expect.isGreaterThan
+                    (rooms |> List.map Colony.signatureFor |> List.distinct |> List.length)
+                    1
+                    "and the colonies' rooms are not all signed alike"
+
+                for room in rooms do
+                    Expect.contains
+                        Colony.signatures
+                        (Colony.signatureFor room)
+                        "a line off the list"
             }
         ]

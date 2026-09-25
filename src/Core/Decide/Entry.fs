@@ -346,7 +346,7 @@ let decideUnarbitrated
 
     // The signature (#381), shaped after the pickup reflex: no walk, no Task,
     // no competition.
-    let signIntents = planSignatures view atlas Colony.signature
+    let signIntents = planSignatures view atlas Colony.signatureFor
 
     let intents =
         defenseIntents
