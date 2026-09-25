@@ -27,10 +27,8 @@ type Threats =
         /// standing in it, less the tiles the Threats stand on — the guard's
         /// Work Area.
         Ring: Map<string, Set<RoomPos>>
-        /// Per declared errand room (#414), the guard's Work Area there: the
-        /// Threats' ring and the ring around every rival CLAIM body, which is
-        /// what takes the flag; and the Reactor's own ring when the room holds
-        /// neither, because the flag is what the guard is there for.
+        /// Per declared errand room (#414), the ranger's Work Area there: the
+        /// Reactor's own ring, which it holds and shoots from (#411).
         ErrandRing: Map<string, Set<RoomPos>>
     }
 
@@ -62,7 +60,7 @@ module Threats =
     let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
         Map.tryFind room threats.Ring |> Option.defaultValue Set.empty
 
-    /// The guard's Work Area in one declared errand room, or None for any
+    /// The ranger's Work Area in one declared errand room, or None for any
     /// other room (#414).
     let errandRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
         Map.tryFind room threats.ErrandRing
@@ -80,8 +78,8 @@ let threatsOf (view: ColonyView) atlas : Threats =
 
     // The hostiles are asked first, so a quiet colony walks nothing for its
     // Threats: neither the rampart census nor any room's own tiles are read on
-    // a tick with nothing in it to run from. Its errand rooms' guard ground,
-    // below, is a ring of eight tiles a Reactor.
+    // a tick with nothing in it to run from. Its errand rooms' ground, below,
+    // is a ring of eight tiles a Reactor.
     let armed =
         match
             view.Hostiles
@@ -152,30 +150,18 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 ErrandRing = Map.empty
             }
 
-    // The errand rooms' guard ground (#414), asked only of a colony that
-    // declares an errand: the Threats' ring there, the ring around every
-    // rival CLAIM body, or the Reactor's own ring when the room holds neither.
+    // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
+    // raid or none. The ranger holding it shoots out to three, which covers a
+    // claimer at the Reactor and any body close enough to shoot back.
     let errandRing =
         view.Errands
         |> List.map (fun errand ->
             let room = errand.RoomName
 
-            let ringAround (pos: Pos) =
-                Atlas.adjacentWalkableIn atlas room pos |> Set.ofList |> RoomPos.setAt room
-
-            let claimers =
-                view.Hostiles
-                |> List.filter (claimsAFlag (Set.singleton room))
-                |> List.map (fun h -> ringAround (RoomPos.pos h.Pos))
-                |> Set.unionMany
-
-            let ring = Set.union (Threats.ringIn armed room) claimers
-
             room,
-            if Set.isEmpty ring then
-                ringAround (RoomPos.pos (snd errand.Target))
-            else
-                ring)
+            Atlas.adjacentWalkableIn atlas room (RoomPos.pos (snd errand.Target))
+            |> Set.ofList
+            |> RoomPos.setAt room)
         |> Map.ofList
 
     { armed with ErrandRing = errandRing }

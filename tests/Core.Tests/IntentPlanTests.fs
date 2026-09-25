@@ -69,6 +69,28 @@ let tests =
                             [ first; second ]
                             "channels belong to actors"
             }
+            test
+                "a ranged attack stands beside heal, attack and harvest, and not beside ranged heal, repair or build" {
+                // #411: the engine's table is not a partition once `rangedAttack` exists.
+                for beside in
+                    [
+                        HealCreep("r", "r")
+                        AttackCreep("r", "h")
+                        HarvestSource("r", "s")
+                        MoveCreep("r", Top)
+                    ] do
+                    Expect.equal
+                        (accepted [ RangedAttackCreep("r", "h"); beside ])
+                        [ RangedAttackCreep("r", "h"); beside ]
+                        "the two act in one tick"
+
+                for suppressing in
+                    [ RangedHealCreep("r", "r"); RepairStructure("r", "w"); BuildSite("r", "x") ] do
+                    Expect.isError
+                        (create [ RangedAttackCreep("r", "h"); suppressing ])
+                        "the engine keeps only one of the two"
+            }
+
             test "different targets still overwrite the same method" {
                 match create [ PickupPile("hauler", "one"); PickupPile("hauler", "two") ] with
                 | Ok _ -> failtest "two pickup targets must not become an executable plan"

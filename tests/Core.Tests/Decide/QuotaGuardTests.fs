@@ -14,6 +14,68 @@ let guardRowTests =
     testList
         "the guard row"
         [
+            test
+                "the ranger row: its heal counts in the exchange, its resident is the knob's size, and a raid one body loses buys two" {
+                // #411, over SlothBot's reactor longbow: 160 ranged damage, 48 heal and
+                // 4,000 hits for two of them.
+                let longbow =
+                    List.replicate 8 BodyPart.RangedAttack
+                    @ List.replicate 10 Move
+                    @ List.replicate 2 Heal
+
+                let errandRoom = reactorErrand.RoomName
+
+                let raidOf count =
+                    { deliveryColony (Some Ownership.Ours) with
+                        Hostiles =
+                            [
+                                for i in 1..count ->
+                                    { hostileIn errandRoom { X = 28 + i; Y = 28 } longbow with
+                                        Id = $"lb-{i}"
+                                        Owner = "Shibdib"
+                                    }
+                            ]
+                        Bank = bank 5300 5300
+                    }
+                    // A worker at home, so the supply floor does not take the spawn.
+                    |> fun colony ->
+                        { colony with
+                            Creeps = worker "w" 0 50 :: colony.Creeps
+                            Spatial = colony.Spatial |> withCreepsAt [ "w", { X = 9; Y = 10 } ]
+                        }
+
+                Expect.equal
+                    (rangerBlocksBeat (raidOf 2) errandRoom 6,
+                     rangerBlocksBeat (raidOf 2) errandRoom 7)
+                    (false, true)
+                    "its heal acts beside its shot: seven blocks out-last the squad, six do not"
+
+                let rangerRow colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "ranger")
+                    |> Option.map (fun row -> row.Quota)
+
+                Expect.equal
+                    (rangerRow (raidOf 2), rangerRow (raidOf 3))
+                    (Some 1, Some 2)
+                    "one body wins the squad; three longbows outlast the largest ranger, so two are bought"
+
+                // In peace the resident is the knob's size, though the bank buys seven.
+                let rangerCast =
+                    (decideOn (raidOf 0)).Intents
+                    |> spawnIntents
+                    |> List.filter (fun (_, _, name) -> name.StartsWith "ranger-")
+                    |> List.map (fun (_, body, _) -> List.length body)
+
+                Expect.equal
+                    rangerCast
+                    [
+                        Tuning.defaults.RangerResidentBlocks
+                        * List.length Bodies.rangerPattern.Block
+                    ]
+                    "the resident is the body a raid meets first"
+            }
+
             test "the reach a raid is weighed against is one body, as big as the bank buys" {
                 // #417: one body and never the row's two summed, capped at the most
                 // blocks one body carries.

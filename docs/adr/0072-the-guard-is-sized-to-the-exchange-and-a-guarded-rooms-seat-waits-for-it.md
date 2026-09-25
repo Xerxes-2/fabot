@@ -1,6 +1,8 @@
 # The guard is sized to the exchange, and a guarded room's reserver seat waits for it
 
-> **Status:** accepted, amended by 0077
+> **Status:** accepted, amended by 0077, 0078
+
+> **Amended by 0078** (#411) on 2026-09-25: the exchange is asked of a ranger's block too, and a ranged block's heal is taken off the raid's damage, since the engine lets it act beside a ranged attack; a melee block's arithmetic is unchanged.
 
 > **Amended by 0077** (#414) on 2026-09-25: a guarded room's seat waits for its guard in a raided errand room too, and the errand's Reclaim is no longer ADR 0075's, which 0077 supersedes.
 

@@ -503,7 +503,7 @@ let rankOfRung =
 /// carries no Work, so the three classes below would answer `Light`. Exported
 /// because the ladder is a body fact a test reads directly.
 let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
-    if isGuardBody creep then Fighter
+    if isFighterBody creep then Fighter
     elif Atlas.workHeavy atlas creep.Name then Heavy
     elif isStandingBody tuning creep then Standing
     else Light
@@ -925,13 +925,13 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // the cascade hires against and the number the Matcher counts holders
         // against are one number.
         //
-        // One over in an errand room (#414): its guard is resident, and its
+        // One over in an errand room (#414): its ranger is resident, and its
         // relief — cast at the incumbent's lead — must take the Task and walk
         // three crossings while the incumbent still holds the ring. A Guard has
         // no arrival price for a handover window to be read against, and the
         // row's count, not this cap, is what buys bodies.
         | Guard room when Set.contains room (Facts.errandRooms view) ->
-            Capacity.fighters (guardsWanted view room + 1)
+            Capacity.fighters (rangersWanted view room + 1)
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller: a second body there buys nothing.
         | Reserve _

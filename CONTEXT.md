@@ -187,8 +187,12 @@ The fixed `[20 Carry; 10 Move]` body that carries one `Tuning.ReactorLoad` — o
 _Avoid_: hauler, runner, delivery creep
 
 ### Guard
-The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in) and one kept in every worked [[errand]] room, where a rival's claimer is its target too, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077. ⚔️
+The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in) and never in an [[errand]] room, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077. ⚔️
 _Avoid_: defender, bodyguard, soldier
+
+### Ranger
+The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, resident on the Reactor's ring at `Tuning.RangerResidentBlocks` in peace and sized to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. Its [[body class]] is Fighter. ADR-0078. 🏹
+_Avoid_: archer, ranged guard
 
 ### Miner
 The store-less [[body pattern]] — Work up to twenty with one Move per `Tuning.MinerWorkPerMove` — that stands on the mineral [[container]] and drops its [[thorium]] into it, one per deposit the colony can dig (owned room, extractor and container standing), cast behind the [[hauler unit]] and ahead of the [[upgrader]]. ADR-0006, ADR-0016, ADR-0057. ⛏
@@ -269,7 +273,7 @@ A room within `Tuning.MaxHops` crossings of the [[home room]] that this colony m
 _Avoid_: remote, franchise, territory
 
 ### Errand
-A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[guard]], which fights a raid where the guard row's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077.
+A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[ranger]], which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
 _Avoid_: goal, mission, remote target
 
 ### Reservation

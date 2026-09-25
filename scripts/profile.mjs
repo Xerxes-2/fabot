@@ -1160,6 +1160,7 @@ function buildStubWorld() {
       // raid at home is the Keep's business (ADR 0034) and casts no guard.
       // `hireFleet` says so if the row is ever cast here.
       guard: [],
+      ranger: [],
     },
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
@@ -1266,6 +1267,9 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // The heal reflex's ranged half (#409): any body with a HEAL part three
     // tiles from a hurt one reaches for it.
     rangedHeal: ok,
+    // The ranger's verb (#411): an errand room's resident shoots from the
+    // Reactor's ring.
+    rangedAttack: ok,
     pickup: ok,
     move: ok,
     say: ok,
@@ -2545,6 +2549,7 @@ function buildOutpostWorld() {
       // buys a *second* guard for the same room, and both belong on the
       // same ring.
       guard: raidStations(outpostRooms),
+      ranger: [],
     },
     // One claimed-tile set per room of the world: the home room's is what
     // furnishing it collected, each outpost's is the obstacles it holds.
@@ -2662,6 +2667,9 @@ function homeStations(furnished) {
     // outposts overrides the key with their raids' own tiles — the `pair`
     // scenario's mother does, below.
     guard: [],
+    // No ranger either: the row holds a declared errand room (#411), and only
+    // the reactor scenario declares one.
+    ranger: [],
   };
 }
 
@@ -3603,11 +3611,11 @@ function buildReactorWorld() {
   // if it is ever cast against such a world.
   stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
   stations.courier = stationsIn(transitRoom, transitCapture, [{ x: 25, y: 25 }]);
-  // The errand room's resident guard (#414, ADR 0077): a worked errand room
-  // keeps one on the Reactor's ring, raid or none, so the row casts it into
-  // this quiet world too. Stood at the reactor's tile, which `nearestFree`
-  // resolves onto the ring, as the re-claimer's is.
-  stations.guard = stationsIn(errandRoom, errandCapture, [errand.tile]);
+  // The errand room's resident ranger (#414, #411): a worked errand room keeps
+  // one on the Reactor's ring, raid or none, so the row casts it into this
+  // quiet world too. Stood at the reactor's tile, which `nearestFree` resolves
+  // onto the ring, as the re-claimer's is.
+  stations.ranger = stationsIn(errandRoom, errandCapture, [errand.tile]);
 
   // The crew that stands *out* in the worked rooms (#370), which is where the
   // live colony's bodies actually are. Read off the season server this tick:

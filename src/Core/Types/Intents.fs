@@ -66,6 +66,11 @@ type Intent =
     /// The same act at range 2..3 for `Engine.rangedHealPower` a part (#409).
     /// The engine lets `heal` suppress it, and it suppresses `attack`.
     | RangedHealCreep of creepName: string * targetName: string
+    /// `rangedAttack` (#411): `Engine.rangedAttackPower` a part on one hostile
+    /// within range 3, by id as `AttackCreep`'s is. It stands beside heal,
+    /// attack and harvest in the engine's table, and not beside ranged heal,
+    /// repair or build.
+    | RangedAttackCreep of creepName: string * hostileId: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string

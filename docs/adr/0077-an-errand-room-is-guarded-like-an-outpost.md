@@ -1,6 +1,8 @@
 # An errand room is guarded like an outpost
 
-> **Status:** accepted, amended by #417
+> **Status:** accepted, amended by #417, 0078
+
+> **Amended by 0078** (#411) on 2026-09-25: the errand room's guard is the **ranger** row's ranged body and not the melee guard; it holds the Reactor's ring and shoots from three tiles, and its resident size in peace is `Tuning.RangerResidentBlocks`. The Consequence that a melee guard cannot close on a kiting longbow is answered by it.
 
 > **Amended by #417** on 2026-09-25, on the line a raid is weighed against and on nothing else. "The guard cap" below read `Engine.guardCap` (two **bodies**) as two **blocks**, far under what the row fields since ADR 0072 sizes each body to win alone. The withdrawal now weighs a raid against the row's reach: the biggest single body the bank buys (`Quota.guardBlocksReach`), since ADR 0072 sizes each body to win alone and a raid focuses one at a time. The first Consequence changes with it: against W15S28's 5,300 bank SlothBot's two-longbow squad is **fought**, not withdrawn from; a kiting ranged body is still #411's.
 

@@ -92,6 +92,7 @@ let private castBodyOf
             ReserverClaims = sizing.ReserverClaims
             MinerWorkPerMove = sizing.MinerWorkPerMove
             GuardBlocks = sizing.GuardBlocks
+            RangerBlocks = sizing.RangerBlocks
         }
         pattern
         view.Bank.Capacity
@@ -301,6 +302,7 @@ let internal planSpawns
                 ReserverClaims = rows.Reserver
                 MinerWorkPerMove = sizing.MinerWorkPerMove
                 GuardBlocks = sizing.GuardBlocks
+                RangerBlocks = sizing.RangerBlocks
             }
 
         let rows: SpecialistRow list =
@@ -318,6 +320,15 @@ let internal planSpawns
                     // bank that cannot hold 750 casts nothing here and yields
                     // to the reserver behind it.
                     Census = isGuardBody
+                }
+                // The errand room's ranged guard (#411), behind the melee one
+                // and for the same reason: a fight is cast before the seats it
+                // protects.
+                {
+                    Name = "ranger"
+                    Pattern = rangerPattern
+                    Quota = rows.Ranger
+                    Census = isRangerBody
                 }
                 {
                     Name = "reserver"

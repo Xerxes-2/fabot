@@ -1,6 +1,6 @@
 # Body patterns are colony facts; creeps still have no role
 
-> **Status:** amended by 0016, 0021, 0050, 0057
+> **Status:** amended by 0016, 0021, 0050, 0057, 0078
 
 > **Amended by #261** (ADR 0057 decision 2) with a **seventh row**, the [[miner]] — the store-less Work body over the mineral container. Two of this ADR's sentences take the strain and neither breaks. "A row is a name and a sizing rule": the row's block is `[Work; Work; Move]` and its rule is one Move per `Tuning.MinerWorkPerMove` Work capped at twenty Work, exempt from ADR 0003's parity for the [[anchor]]'s own reason and then some — this body walks once and never again. And "the row is read back off the parts alone": Work-heavy with **no Carry at all** is the one cut no other row makes, and it is asked *before* the heavy arm, or a `[20 Work; 4 Move]` would read back as an Anchor and fill a quota counted off the [[post]]s. The no-role axiom, the quota law and the cascade stand unchanged.
 

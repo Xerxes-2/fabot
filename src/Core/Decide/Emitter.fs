@@ -264,15 +264,20 @@ let internal applicable
     // was safe would be released the tick it took it and walk three rooms home.
     | Reclaim _ -> has BodyPart.Claim
     // Spelled through the row predicate the body-class ladder reads, so the
-    // gate and `bodyClassOf` cannot disagree. No room clause: the walk to the
-    // work area is what travel cost prices.
-    | Guard _ -> isGuardBody creep
+    // gate and `bodyClassOf` cannot disagree. The room decides which row: an
+    // errand room's Guard is the ranger's (#411), every other the melee
+    // guard's. The walk to the work area is what travel cost prices.
+    | Guard room ->
+        if Set.contains room (Facts.errandRooms view) then
+            isRangerBody creep
+        else
+            isGuardBody creep
     // Two bodies are exempt, for opposite reasons: a Work-heavy body cannot run
     // (the answer for its Post is a rampart), and a Fighter will not. Without
     // the second a guard on the ring is offered both Safety-tier Tasks and kept
     // in the fight by travel cost alone, so the tick a raid steps toward it the
     // body bought to stand still walks away.
-    | Flee -> not (isGuardBody creep) && not heavy && standsInReach threats atlas creep.Name
+    | Flee -> not (isFighterBody creep) && not heavy && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, and `None` where this tick asks
 /// for none: Flee is movement and nothing else, and Reclaim withholds its act
@@ -355,9 +360,10 @@ let private glyphFor =
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
 
-/// The Threat a guard swings at, out of the ones standing in the room its Task
-/// names and passing the caller's own gate: the one nearest a Post of that
-/// room, ties by id; with no Post standing, the nearest to the guard. None
+/// The Threat a fighter acts on — and in an errand room a rival's claimer
+/// first (#414) — out of the ones standing in the room its Task names and
+/// passing the caller's own gate: the one nearest a Post of that room, ties by
+/// id; with no Post standing, the nearest to the fighter. None
 /// where the room holds none, or where the projection places the guard nowhere.
 ///
 /// The gate is the caller's and stands *ahead* of the choice, which narrows
@@ -399,20 +405,32 @@ let private guardTarget
         h.Pos.Room = room
         && (weaponRange h |> Option.isSome || Facts.claimsAFlag errandRooms h)
         && among h)
-    |> List.sortBy (fun h -> distance h, h.Id)
+    // The claimer first in an errand room: it is what takes the flag.
+    |> List.sortBy (fun h -> not (Facts.claimsAFlag errandRooms h), distance h, h.Id)
     |> List.tryHead
 
-/// A Guard chooses one reachable melee target. Self-healing belongs to the
+/// A Guard chooses one reachable target, melee for a guard and within three for
+/// a ranger (#411). Self-healing belongs to the
 /// colony-wide reflex, which reads damage and the same compatibility rules as
 /// execution. Movement remains the mover's alone.
 let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent option =
-    let inSwing (hostile: HostileInfo) =
+    // A ranger shoots whatever stands within three (#411); a guard swings at
+    // what stands beside it.
+    let ranged = isRangerBody creep
+
+    let reach = if ranged then Engine.rangedRange else Engine.meleeRange
+
+    let inReach (hostile: HostileInfo) =
         Atlas.creepTile atlas creep.Name
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
-        |> Option.exists (fun r -> r <= Engine.meleeRange)
+        |> Option.exists (fun r -> r <= reach)
 
-    guardTarget view atlas creep room inSwing
-    |> Option.map (fun hostile -> AttackCreep(creep.Name, hostile.Id))
+    guardTarget view atlas creep room inReach
+    |> Option.map (fun hostile ->
+        if ranged then
+            RangedAttackCreep(creep.Name, hostile.Id)
+        else
+            AttackCreep(creep.Name, hostile.Id))
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
 /// part heals itself if it is hurt, else the most-hurt creep of ours beside it,

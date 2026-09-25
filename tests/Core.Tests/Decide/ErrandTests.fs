@@ -143,12 +143,11 @@ let private shibdibLongbow =
 [<Tests>]
 let errandStandDownTests =
     testList
-        "an errand room is guarded like an outpost: fought where the guard row's reach wins, withdrawn from where it loses"
+        "an errand room is guarded like an outpost: fought where the ranger's reach wins, withdrawn from where it loses"
         [
-            test
-                "a raid the guard row's reach beats is fought: no withdrawal, and the Guard is pooled" {
+            test "a raid the ranger's reach beats is fought: no withdrawal, and the Guard is pooled" {
                 // SlothBot's two-longbow squad against W15S28's own bank: 5,300 buys
-                // a five-block body, and the row's reach (#417) wins that exchange.
+                // a seven-block ranger, and that reach (#417, #411) wins the exchange.
                 let tick = 100
 
                 let longbow id x =
@@ -166,7 +165,7 @@ let errandStandDownTests =
                     }
 
                 Expect.isTrue
-                    (guardBlocksBeat colony errandRoom (Quota.guardBlocksReach colony))
+                    (rangerBlocksBeat colony errandRoom (Quota.rangerBlocksReach colony))
                     "the premise: the row's reach wins the exchange"
 
                 let log =
@@ -187,8 +186,8 @@ let errandStandDownTests =
                     "and the errand room is guarded like an outpost"
             }
 
-            test "a raid beyond the guard row's reach is a withdrawal, clocked to its own life" {
-                // The same squad against a bank that buys one block a body: one
+            test "a raid beyond the ranger's reach is a withdrawal, clocked to its own life" {
+                // The same squad against a bank that buys one ranger block: one
                 // block loses it.
                 let tick = 100
 
@@ -207,7 +206,7 @@ let errandStandDownTests =
                     }
 
                 Expect.isFalse
-                    (guardBlocksBeat colony errandRoom (Quota.guardBlocksReach colony))
+                    (rangerBlocksBeat colony errandRoom (Quota.rangerBlocksReach colony))
                     "the premise: one block loses to the squad"
 
                 let log =
@@ -231,10 +230,10 @@ let errandStandDownTests =
             }
 
             test
-                "a worked errand room keeps a guard in peace, and its re-claimer waits for it only under a raid" {
-                let guardQuota colony =
+                "a worked errand room keeps a ranger in peace, and its re-claimer waits for it only under a raid" {
+                let rangerQuota colony =
                     (decideOn colony).Quotas.Rows
-                    |> List.tryFind (fun row -> row.Row = "guard")
+                    |> List.tryFind (fun row -> row.Row = "ranger")
                     |> Option.map (fun row -> row.Quota)
 
                 let quiet =
@@ -245,9 +244,9 @@ let errandStandDownTests =
                 Expect.contains
                     (planTasksOn quiet noThreats)
                     (Guard errandRoom)
-                    "the guard's Task stands in peace"
+                    "the Task stands in peace"
 
-                Expect.equal (guardQuota quiet) (Some 1) "and the row keeps one body for it"
+                Expect.equal (rangerQuota quiet) (Some 1) "and the row keeps one body for it"
 
                 let reserverQuota colony =
                     (decideOn colony).Quotas.Rows
@@ -281,7 +280,7 @@ let errandStandDownTests =
                     raided
                     |> withErrandCreep
                         { ringTile with X = ringTile.X + 1 }
-                        (creepWith "guard-g" 0 0 Bodies.guardPattern.Block)
+                        (creepWith "ranger-g" 0 0 Bodies.rangerPattern.Block)
 
                 Expect.equal
                     (reserverQuota guarded)
@@ -290,9 +289,9 @@ let errandStandDownTests =
             }
 
             test
-                "the resident guard's relief takes the Task while the incumbent still holds the ring" {
-                let incumbent = creepWith "guard-old" 0 0 Bodies.guardPattern.Block
-                let relief = creepWith "guard-new" 0 0 Bodies.guardPattern.Block
+                "the resident ranger's relief takes the Task while the incumbent still holds the ring" {
+                let incumbent = creepWith "ranger-old" 0 0 Bodies.rangerPattern.Block
+                let relief = creepWith "ranger-new" 0 0 Bodies.rangerPattern.Block
 
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
@@ -310,7 +309,67 @@ let errandStandDownTests =
                     "the relief sets out now, not the tick the incumbent dies, so the flag is never bare"
             }
 
-            test "a rival's claimer brings the guard, which swings at it beside the flag" {
+            test
+                "only a ranger holds an errand room's Guard, and it shoots the claimer first while healing itself" {
+                // Only a ranger may hold an errand room's Guard.
+                let quiet = bareHome |> errandColony (Some Ownership.Ours) []
+                let ranger = creepWith "ranger-r" 0 0 Bodies.rangerPattern.Block
+                let melee = creepWith "guard-m" 0 0 Bodies.guardPattern.Block
+
+                let both =
+                    { quiet with Bank = bank 2000 2000 }
+                    |> withErrandCreep ringTile ranger
+                    |> withErrandCreep { ringTile with X = ringTile.X + 1 } melee
+
+                let assignments = (decideOn both).Assignments
+
+                Expect.equal
+                    (Map.tryFind ranger.Name assignments, Map.tryFind melee.Name assignments)
+                    (Some(taskId (Guard errandRoom)), None)
+                    "the ranged body holds it; a melee one is an outpost's"
+
+                // It shoots the claimer before the longbow, and heals itself the same tick.
+                let claimer =
+                    { hostileIn
+                          errandRoom
+                          { X = ringTile.X; Y = ringTile.Y + 2 }
+                          [ BodyPart.Claim; Move; Move ] with
+                        Id = "claimer"
+                        Owner = "Shibdib"
+                    }
+
+                let bow =
+                    { hostileIn errandRoom { X = ringTile.X + 2; Y = ringTile.Y } shibdibLongbow with
+                        Id = "bow"
+                        Owner = "Shibdib"
+                    }
+
+                let hurt =
+                    { ranger with
+                        Hits = { Hits = 100; HitsMax = 600 }
+                    }
+
+                let fight =
+                    { quiet with
+                        Hostiles = [ bow; claimer ]
+                    }
+                    |> withErrandCreep ringTile hurt
+
+                let intents =
+                    (decideFrom (Map.ofList [ hurt.Name, taskId (Guard errandRoom) ]) fight).Intents
+
+                Expect.contains
+                    intents
+                    (RangedAttackCreep(hurt.Name, "claimer"))
+                    "the claimer first: it takes the flag"
+
+                Expect.contains
+                    intents
+                    (HealCreep(hurt.Name, hurt.Name))
+                    "and its own heal in the same tick"
+            }
+
+            test "a rival's claimer is the ranger's first target beside the flag" {
                 let claimer =
                     { hostileIn
                           errandRoom
@@ -320,7 +379,7 @@ let errandStandDownTests =
                         Owner = "Shibdib"
                     }
 
-                let guard = creepWith "guard-1" 0 0 Bodies.guardPattern.Block
+                let guard = creepWith "ranger-1" 0 0 Bodies.rangerPattern.Block
 
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
@@ -331,12 +390,12 @@ let errandStandDownTests =
                 Expect.contains
                     (planTasksOn colony noThreats)
                     (Guard errandRoom)
-                    "the guard's Task stands, and the claimer is its business"
+                    "the Task stands, and the claimer is its business"
 
                 Expect.contains
                     (emitOn colony [ guard.Name, Guard errandRoom ])
-                    (AttackCreep(guard.Name, "claimer"))
-                    "and the guard beside it swings at it"
+                    (RangedAttackCreep(guard.Name, "claimer"))
+                    "and the ranger beside it shoots it"
 
                 let atlas = Atlas.ofView colony
                 let threats = threatsOf colony atlas
@@ -344,7 +403,7 @@ let errandStandDownTests =
                 Expect.isTrue
                     (Threats.errandRingIn threats errandRoom
                      |> Option.exists (Set.contains (RoomPos.at errandRoom ringTile)))
-                    "the guard's ground is the ring around the claimer"
+                    "the ranger's ground is the Reactor's ring, the claimer within its reach"
 
                 let quiet = bareHome |> errandColony (Some Ownership.Ours) []
 
@@ -905,7 +964,7 @@ let courierTests =
                         ]
                     |> withErrandCreep
                         { ringTile with X = ringTile.X + 1 }
-                        (creepWith "guard-g" 0 0 Bodies.guardPattern.Block)
+                        (creepWith "ranger-g" 0 0 Bodies.rangerPattern.Block)
 
                 let young = courier "courier-young" |> withLife 865
                 let old = courier "courier-old" |> withLife 864

@@ -286,24 +286,35 @@ let internal isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack >
 
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
-/// Whether `blocks` whole `guardPattern` blocks win the exchange against the
-/// raid standing in one room: two clocks compared, cross-multiplied to stay in
-/// whole numbers. Our blocks cannot self-heal while attacking (heal
-/// suppresses attack), so their survival uses the raid's full damage. A raid
-/// that out-heals our damage is never killed. Healers are priced in the
-/// healing and never in the hits. The raid's durability is priced at full off
-/// its parts, because the projection carries a hostile's body and not its
-/// hits; over-stating what it can take is the safe direction.
+/// The ranger cut (#411): a RANGED_ATTACK part and no ATTACK, the guard's cut
+/// taking a body that carries both.
+let internal isRangerParts (parts: Map<BodyPart, int>) =
+    partCount parts RangedAttack > 0 && partCount parts Attack = 0
+
+let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
+
+/// Either fighting row's body: what never flees and walks home when idle.
+let internal isFighterBody (creep: CreepInfo) = isGuardBody creep || isRangerBody creep
+
+/// Whether `blocks` whole blocks of a fighting row win the exchange against
+/// the raid standing in one room: two clocks compared, cross-multiplied to stay
+/// in whole numbers. A melee block cannot self-heal while attacking (heal
+/// suppresses attack), so its survival uses the raid's full damage; a ranged
+/// block's heal acts beside its ranged attack (#411), so it is taken off the
+/// raid's damage. A raid that out-heals our damage is never killed. Healers are
+/// priced in the healing and never in the hits. The raid's durability is priced
+/// at full off its parts, because the projection carries a hostile's body and
+/// not its hits; over-stating what it can take is the safe direction.
 ///
-/// Worked example: a lone smallMelee needs one block; backed by a smallHealer,
-/// its 40 damage kills our 1,000 hits in 25 ticks, before our 30 net damage
-/// kills its 1,000 hits, so that raid needs the second block.
-///
-/// Two readers: the guard row asks it of one block to size the crowd, and the
-/// stand-down asks it of the biggest body the bank buys (`guardBlocksReach`)
-/// to decide whether the room is a fight or a withdrawal
-/// (`Observe.raidDeadlines`).
-let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
+/// Worked example: a lone smallMelee needs one guard block; backed by a
+/// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
+/// net damage kills its 1,000 hits, so that raid needs the second block.
+let private blocksBeat
+    (block: BodyPart list)
+    (view: ColonyView)
+    (room: string)
+    (blocks: int)
+    : bool =
     let parts part body = partCountIn body part
 
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
@@ -321,12 +332,16 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
         |> List.filter isArmed
         |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
 
-    let block = guardPattern.Block
-
     let ourDamage =
         blocks
         * (Engine.attackPower * parts Attack block
            + Engine.rangedAttackPower * parts RangedAttack block)
+
+    let ourHealing =
+        if parts RangedAttack block > 0 then
+            blocks * Engine.healPower * parts Heal block
+        else
+            0
 
     let ourHits = blocks * Engine.partHits * List.length block
 
@@ -334,8 +349,22 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
         true
     elif ourDamage <= raidHealing then
         false
+    elif raidDamage <= ourHealing then
+        true
     else
-        raidHits * raidDamage < ourHits * (ourDamage - raidHealing)
+        raidHits * (raidDamage - ourHealing) < ourHits * (ourDamage - raidHealing)
+
+/// `blocksBeat` for the guard's melee block. Two readers: the guard row asks
+/// it of one block to size the crowd, and the stand-down asks it of the
+/// biggest body the bank buys (`guardBlocksReach`) to decide whether an
+/// outpost is a fight or a withdrawal (`Observe.raidDeadlines`).
+let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
+    blocksBeat guardPattern.Block view room blocks
+
+/// `blocksBeat` for the ranger's block (#411), which the errand room's
+/// stand-down and the ranger row read as the guard's do an outpost's.
+let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
+    blocksBeat rangerPattern.Block view room blocks
 
 /// ADR-0056
 /// How many guards one guarded room wants: one, two where one block loses
@@ -359,9 +388,17 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
     else
         Engine.guardCap
 
-/// The guard row's quota: `guardsWanted` over every guarded room, summed.
+/// The guarded rooms each fighting row serves (#411): the errand rooms are the
+/// ranger's, every other guarded room the guard's.
+let private guardedSplit (view: ColonyView) (outposts: OutpostFacts) =
+    let errandRooms = errandRooms view
+
+    outposts.Guarded
+    |> List.partition (fun room -> not (Set.contains room errandRooms))
+
+/// The guard row's quota: `guardsWanted` over every guarded outpost, summed.
 let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
-    outposts.Guarded |> List.sumBy (guardsWanted view)
+    fst (guardedSplit view outposts) |> List.sumBy (guardsWanted view)
 
 /// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
 /// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
@@ -373,6 +410,11 @@ let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
 let guardBlocksReach (view: ColonyView) : int =
     min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
 
+/// The ranger's twin of `guardBlocksReach` (#411): the biggest ranger body the
+/// bank buys, what an errand room's raid is weighed against.
+let rangerBlocksReach (view: ColonyView) : int =
+    min rangerBlocksMost (view.Bank.Capacity / bodyCost rangerPattern.Block)
+
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the
 /// smallest count `guardBlocksBeat` answers yes to, the largest body where
@@ -383,28 +425,66 @@ let internal guardBlocksFor (view: ColonyView) (room: string) : int =
     |> List.tryFind (guardBlocksBeat view room)
     |> Option.defaultValue guardBlocksMost
 
-/// The blocks the guard row casts this tick: the worst of the guarded rooms'
-/// answers, one where nothing is guarded. Every cast carries it, as the
+/// The blocks the guard row casts this tick: the worst of the guarded
+/// outposts' answers, one where none is guarded. Every cast carries it, as the
 /// reserver row's casts carry the largest outstanding claim: the Matcher pairs
 /// a finished body to a room by travel cost.
 let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
-    match outposts.Guarded |> List.map (guardBlocksFor view) with
+    match fst (guardedSplit view outposts) |> List.map (guardBlocksFor view) with
     | [] -> 1
     | blocks -> List.max blocks
 
-/// Whether the guard row is filled — every body it wants standing or in an
-/// oven. Read by the reserver row. Counted over every living guard and not the
-/// census less its expiring bodies: a guard inside its lead still stands in
-/// the room, so the seat stays open while the row buys the relief.
-let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
-    let living = view.Creeps |> List.filter isGuardBody |> List.length
+/// The ranger blocks one errand room wants (#411): the smallest body that wins
+/// its raid alone, never below `Tuning.RangerResidentBlocks` — the resident a
+/// raid meets first — and the largest body where none wins.
+let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
+    [ 1..rangerBlocksMost ]
+    |> List.tryFind (rangerBlocksBeat view room)
+    |> Option.defaultValue rangerBlocksMost
+    |> max view.Tuning.RangerResidentBlocks
+    |> min rangerBlocksMost
+
+/// How many rangers one errand room wants: one where the largest ranger body
+/// wins alone, two where it does not.
+let internal rangersWanted (view: ColonyView) (room: string) : int =
+    if rangerBlocksBeat view room rangerBlocksMost then
+        1
+    else
+        Engine.guardCap
+
+/// The ranger row's quota: `rangersWanted` over every worked errand room.
+let internal rangerQuota (view: ColonyView) (outposts: OutpostFacts) : int =
+    snd (guardedSplit view outposts) |> List.sumBy (rangersWanted view)
+
+/// The blocks the ranger row casts this tick, the worst errand room's answer.
+let internal rangerBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
+    match snd (guardedSplit view outposts) |> List.map (rangerBlocksFor view) with
+    | [] -> view.Tuning.RangerResidentBlocks
+    | blocks -> List.max blocks
+
+/// Whether a fighting row is filled — every body it wants standing or in an
+/// oven. Read by the reserver row. Counted over every living body of the row
+/// and not the census less its expiring ones: a fighter inside its lead still
+/// stands in the room, so the seat stays open while the row buys the relief.
+let private fightingRowStands
+    (view: ColonyView)
+    (cut: Map<BodyPart, int> -> bool)
+    (quota: int)
+    : bool =
+    let living = view.Creeps |> List.filter (fun creep -> cut creep.Body) |> List.length
 
     let inOven =
-        view.Casting
-        |> List.filter (fun cast -> isGuardParts (partsOf cast.Body))
-        |> List.length
+        view.Casting |> List.filter (fun cast -> cut (partsOf cast.Body)) |> List.length
 
-    living + inOven >= guardQuota view outposts
+    living + inOven >= quota
+
+/// Whether the guard row is filled.
+let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
+    fightingRowStands view isGuardParts (guardQuota view outposts)
+
+/// Whether the ranger row is filled (#411).
+let internal rangerStands (view: ColonyView) (outposts: OutpostFacts) : bool =
+    fightingRowStands view isRangerParts (rangerQuota view outposts)
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -462,10 +542,17 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
     // raider is eating. Keyed to the guard gap and not to the spending, so it
     // flips once and not every cast.
     let withheld =
-        if guardStands view outposts then
-            Set.empty
-        else
-            outposts.Guarded |> Set.ofList
+        let outpostsShort, errandsShort = guardedSplit view outposts
+
+        Set.union
+            (if guardStands view outposts then
+                 Set.empty
+             else
+                 Set.ofList outpostsShort)
+            (if rangerStands view outposts then
+                 Set.empty
+             else
+                 Set.ofList errandsShort)
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
@@ -491,10 +578,10 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         //
         // The start condition is the bank gate above and the chain, and the
         // guard (#414): `view.Errands` carries only the errands a chain of
-        // Seams reaches, and a raided errand room's seat waits for its guard
+        // Seams reaches, and a raided errand room's seat waits for its ranger
         // like an outpost's.
         //
-        // Nor while an ally burns in it (#415): the guard is the room's eyes,
+        // Nor while an ally burns in it (#415): the ranger is the room's eyes,
         // and the seat returns the tick their store reads empty.
         @ (let raided = errandRoomsRaided view
            let allyBurning = errandRoomsAllyBurning view
@@ -522,6 +609,8 @@ type RowSizing =
         /// `guardBlocksWanted`'s answer this tick, carried through to
         /// `BodySizing` so the guard row is sized by the fight and not the bank.
         GuardBlocks: int
+        /// `rangerBlocksWanted`'s answer this tick (#411).
+        RangerBlocks: int
         /// `minerQuota`'s answer this tick. Here for `ReserverClaims`' reason
         /// (#304): the addend of the target and the multiplier of the charge
         /// must be one number, and the walk of the projection is paid once.
@@ -536,6 +625,7 @@ let internal rowSizingOf (view: ColonyView) atlas (outposts: OutpostFacts) : Row
         ReserverClaims = reserverClaimsOf view outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         GuardBlocks = guardBlocksWanted view outposts
+        RangerBlocks = rangerBlocksWanted view outposts
         MinerQuota = minerQuota view atlas
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
@@ -677,6 +767,8 @@ type QuotaRows =
         /// addend, the largest entry prices every cast.
         Reserver: int list
         Guard: int
+        /// One resident ranger per worked errand room, two where one loses (#411).
+        Ranger: int
         Anchor: int
         Hauler: int
         /// One miner per diggable deposit — 0 below RCL6.
@@ -707,6 +799,7 @@ let internal quotaRowsOf
     {
         Reserver = sizing.ReserverClaims
         Guard = guardQuota view outposts
+        Ranger = rangerQuota view outposts
         // One Anchor per Post of every projected room.
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
@@ -812,6 +905,7 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
 
     List.length rows.Reserver
     + rows.Guard
+    + rows.Ranger
     + rows.Anchor
     + rows.Hauler
     + rows.Miner

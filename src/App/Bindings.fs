@@ -316,6 +316,9 @@ type ICreep =
     abstract heal: target: obj -> int
     /// `heal` at range 1..3 for RANGED_HEAL_POWER per HEAL part.
     abstract rangedHeal: target: obj -> int
+    /// Hit one creep within range 3 for RANGED_ATTACK_POWER per RANGED_ATTACK
+    /// part (#411).
+    abstract rangedAttack: target: obj -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The only
     /// movement API the bot uses; moveTo is not bound.
     abstract move: direction: int -> int

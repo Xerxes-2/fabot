@@ -477,6 +477,7 @@ let quotasRecordTests =
                     (quotas.Rows |> List.map (fun r -> r.Row))
                     [
                         "guard"
+                        "ranger"
                         "reserver"
                         "anchor"
                         "hauler"

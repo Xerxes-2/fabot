@@ -369,6 +369,7 @@ let minerCastTests =
                     ((decideOn (richMine 1800)).Quotas.Rows |> List.map (fun row -> row.Row))
                     [
                         "guard"
+                        "ranger"
                         "reserver"
                         "anchor"
                         "hauler"

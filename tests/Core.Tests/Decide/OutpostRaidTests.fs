@@ -644,7 +644,7 @@ let blindGuardTests =
 
                 Expect.isEmpty
                     (attacksOf remembered.Intents)
-                    "and it swings at nothing: a guard with no visible target issues no attack (ADR 0056)"
+                    "and it swings at nothing: a guard with no visible target issues no attack"
 
                 Expect.isEmpty
                     (rejectionsFor "g-home" remembered.Verdicts

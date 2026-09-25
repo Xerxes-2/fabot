@@ -316,7 +316,7 @@ let decideUnarbitrated
         let homeward =
             view.Creeps
             |> List.filter (fun creep ->
-                isGuardBody creep && not (Map.containsKey creep.Name assigned))
+                isFighterBody creep && not (Map.containsKey creep.Name assigned))
             |> List.choose (fun creep ->
                 Atlas.creepRoom atlas creep.Name
                 |> Option.filter (fun room -> room <> home)

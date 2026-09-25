@@ -110,7 +110,7 @@ let patternTableTests =
         "pattern table"
         [
             test
-                "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard and the miner are the table's rows" {
+                "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard, the ranger and the miner are the table's rows" {
                 // The order here is the declaration's and not the casting order
                 // (guard, reserver, Anchor, hauler, upgrader, worker), because nothing
                 // reads this list for a sequence. Every row is cast off a colony fact.
@@ -118,8 +118,10 @@ let patternTableTests =
                 // is not (one Carry and Work/Move pairs for the rest); the guard's
                 // block is bought for a fight (no Work, no Carry, five Move to carry
                 // the five that fight; ten parts, 750 energy, TOUGH first and HEAL
-                // last); the miner's is Work and Move and no Carry at all, the one
-                // shape no other row takes and the cut `patternOfParts` tells it from
+                // last); the ranger's holds an errand room from range (#411), Move
+                // first so damage lames before it disarms; the miner's is Work and
+                // Move and no Carry at all, the one shape no other row takes and the
+                // cut `patternOfParts` tells it from
                 // the Anchor by, with one Move per five Work, capped at twenty Work.
                 // A row is a name and a sizing rule before it is a block.
                 Expect.equal
@@ -164,6 +166,10 @@ let patternTableTests =
                                     Attack
                                     Heal
                                 ]
+                        }
+                        {
+                            Name = "ranger"
+                            Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
                         }
                         {
                             Name = "miner"

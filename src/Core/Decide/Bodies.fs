@@ -79,6 +79,20 @@ let guardPattern =
 /// no colony prices the row at.
 let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
 
+/// ADR-0078
+/// The ranger row: the ranged body an errand room is held with (#411). Move
+/// first, so damage lames it before it disarms it — a ranger holds a ring and
+/// does not chase; then its two ranged parts and its heal, which the engine
+/// lets act beside a ranged attack.
+let rangerPattern =
+    {
+        Name = "ranger"
+        Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
+    }
+
+/// The most whole ranger blocks one body carries under the engine's part cap.
+let rangerBlocksMost = Engine.maxBodyParts / List.length rangerPattern.Block
+
 /// ADR-0057
 /// The miner row: the store-less Work body over the mineral container. The
 /// block is the row's floor rather than its ratio (one Move per
@@ -105,6 +119,7 @@ let patternTable =
         reserverPattern
         upgraderPattern
         guardPattern
+        rangerPattern
         minerPattern
     ]
 
@@ -161,10 +176,11 @@ let internal minerBodyFor perMove capacity =
     List.replicate work Work @ List.replicate move Move
 
 /// The pattern row a body was cast from, read off the parts alone: an ATTACK
-/// part is the guard row, a CLAIM part the reserver row, a Work-heavy body with
-/// no Carry the miner row, a Work-heavy body with one the anchor row, a
-/// standing body at or under that line the upgrader row, no Work beside a Carry
-/// the hauler row, and every other body the generalist.
+/// part is the guard row, a RANGED_ATTACK part the ranger row, a CLAIM part
+/// the reserver row, a Work-heavy body with no Carry the miner row, a
+/// Work-heavy body with one the anchor row, a standing body at or under that
+/// line the upgrader row, no Work beside a Carry the hauler row, and every
+/// other body the generalist.
 ///
 /// Order matters between the miner and anchor arms, and between the anchor and
 /// upgrader arms, and nowhere else. Miner before anchor: both are Work-heavy
@@ -182,6 +198,8 @@ let internal minerBodyFor perMove capacity =
 let internal patternOfParts (tuning: Tuning) heavy parts =
     if partCount parts Attack > 0 then
         guardPattern
+    elif partCount parts RangedAttack > 0 then
+        rangerPattern
     elif partCount parts BodyPart.Claim > 0 then
         reserverPattern
     elif heavy && partCount parts Carry = 0 then
@@ -339,6 +357,11 @@ let private guardBodyFor capacity =
 let internal guardBodyWithin blocks capacity =
     guardBodyFor (min capacity (blocks * bodyCost guardPattern.Block))
 
+/// The ranger row's body at the blocks its errand room wants, whole blocks
+/// under the bank as the guard's are (#411).
+let internal rangerBodyWithin blocks capacity =
+    wholeBlockBodyFor rangerPattern.Block (min capacity (blocks * bodyCost rangerPattern.Block))
+
 /// ADR-0046
 /// The upgrader row's sizing rule: one Carry, and the rest on Work/Move pairs
 /// — `W = M = floor((capacity - 50) / 150)`, never below one pair. Why Move
@@ -375,6 +398,8 @@ type BodySizing =
         /// at 2,250 against a 1,000-hit invader one block kills — and a body
         /// the bank never reaches is a row that never casts.
         GuardBlocks: int
+        /// `Quota.rangerBlocksWanted`'s answer this tick (#411).
+        RangerBlocks: int
     }
 
 /// The sizing a caller holding nothing but a capacity can ask for: every row at
@@ -387,6 +412,7 @@ let largestSizing =
         ReserverClaims = []
         MinerWorkPerMove = Tuning.defaults.MinerWorkPerMove
         GuardBlocks = guardBlocksMost
+        RangerBlocks = rangerBlocksMost
     }
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule.
@@ -408,6 +434,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         | claims -> reserverBodyWithin (List.max claims) capacity
     elif pattern.Name = guardPattern.Name then
         guardBodyWithin sizing.GuardBlocks capacity
+    elif pattern.Name = rangerPattern.Name then
+        rangerBodyWithin sizing.RangerBlocks capacity
     elif pattern.Name = upgraderPattern.Name then
         upgraderBodyFor capacity
     elif pattern.Name = minerPattern.Name then

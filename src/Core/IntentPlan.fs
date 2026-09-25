@@ -21,11 +21,16 @@ type Plan = private Plan of Intent list
 /// Exclusive share its priority chain — heal, ranged heal, repair, build,
 /// attack, harvest, a total order in the engine's table; the others each have
 /// their own channel. This is deliberately exhaustive over Intent: adding an
-/// act requires deciding where it belongs. `rangedAttack` and
-/// `rangedMassAttack` need the engine's overlapping rules, not an automatic
-/// addition to Exclusive: they stand beside `attack`, `harvest` and `heal`.
+/// act requires deciding where it belongs.
+///
+/// An act may hold more than one (#411): the engine's table is not a
+/// partition once `rangedAttack` exists, which ranged heal, repair and build
+/// suppress while heal, attack and harvest do not. So `Ranged` is the second
+/// slot those three take besides Exclusive, and the one `rangedAttack` takes
+/// alone.
 type private Channel =
     | Exclusive
+    | Ranged
     | Transfer
     | Withdraw
     | Upgrade
@@ -50,26 +55,27 @@ type private Channel =
     /// words beside one controller — and the reflex already picks one.
     | Sign
 
-let private channel =
+let private channels =
     function
     | HarvestSource(name, _)
+    | AttackCreep(name, _)
+    | HealCreep(name, _) -> [ name, Exclusive ]
+    // In the chain, and each suppresses `rangedAttack` besides (#411); ranged
+    // heal is second under `heal` (#409).
     | BuildSite(name, _)
     | RepairStructure(name, _)
-    | AttackCreep(name, _)
-    | HealCreep(name, _)
-    // Second in the engine's chain, under `heal` and over everything else in
-    // it (#409) — and over `rangedAttack`, which is not modelled yet.
-    | RangedHealCreep(name, _) -> Some(name, Exclusive)
-    | TransferEnergyToStructure(name, _, _) -> Some(name, Transfer)
-    | WithdrawFromStore(name, _, _, _) -> Some(name, Withdraw)
-    | UpgradeController(name, _) -> Some(name, Upgrade)
-    | ReserveController(name, _) -> Some(name, Reserve)
-    | ClaimController(name, _) -> Some(name, Claim)
-    | ClaimReactor(name, _) -> Some(name, Reclaim)
-    | PickupPile(name, _) -> Some(name, Pickup)
-    | SignController(name, _, _) -> Some(name, Sign)
-    | MoveCreep(name, _) -> Some(name, Move)
-    | SayCreep(name, _) -> Some(name, Say)
+    | RangedHealCreep(name, _) -> [ name, Exclusive; name, Ranged ]
+    | RangedAttackCreep(name, _) -> [ name, Ranged ]
+    | TransferEnergyToStructure(name, _, _) -> [ name, Transfer ]
+    | WithdrawFromStore(name, _, _, _) -> [ name, Withdraw ]
+    | UpgradeController(name, _) -> [ name, Upgrade ]
+    | ReserveController(name, _) -> [ name, Reserve ]
+    | ClaimController(name, _) -> [ name, Claim ]
+    | ClaimReactor(name, _) -> [ name, Reclaim ]
+    | PickupPile(name, _) -> [ name, Pickup ]
+    | SignController(name, _, _) -> [ name, Sign ]
+    | MoveCreep(name, _) -> [ name, Move ]
+    | SayCreep(name, _) -> [ name, Say ]
     | SpawnCreep _
     | PlaceConstructionSite _
     | ActivateSafeMode _
@@ -77,7 +83,7 @@ let private channel =
     | HealWithTower _
     // A structure's verb and no creep's: nothing to de-duplicate per body, and
     // two sends in one tick are the engine's business to refuse (#349).
-    | SendFromTerminal _ -> None
+    | SendFromTerminal _ -> []
 
 /// Reject same-channel duplicates (even identical ones) and engine suppression
 /// pairs, per creep. Nothing is dropped or reordered, and different creeps do
@@ -88,18 +94,19 @@ let create (intents: Intent list) : Result<Plan, Conflict> =
         match remaining with
         | [] -> Ok(Plan intents)
         | intent :: rest ->
-            match channel intent with
-            | None -> collect seen rest
-            | Some(name, slot) ->
-                match Map.tryFind (name, slot) seen with
-                | Some first ->
-                    Error
-                        {
-                            Creep = name
-                            First = first
-                            Second = intent
-                        }
-                | None -> collect (Map.add (name, slot) intent seen) rest
+            let slots = channels intent
+
+            match slots |> List.tryPick (fun slot -> Map.tryFind slot seen) with
+            | Some first ->
+                Error
+                    {
+                        Creep = fst (List.head slots)
+                        First = first
+                        Second = intent
+                    }
+            | None ->
+                let seen = (seen, slots) ||> List.fold (fun seen slot -> Map.add slot intent seen)
+                collect seen rest
 
     collect Map.empty intents
 

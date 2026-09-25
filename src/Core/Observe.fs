@@ -532,10 +532,10 @@ let private rivalDeadlines (view: ColonyView) =
 /// The tick a room stands down to when the raid in it is one the colony has
 /// decided not to fight: the raid's own life, since an Invader in a room
 /// nobody owns never suicides (the engine's suicide branch wants a controller
-/// owner). Only a raid the guard row's reach cannot beat (#417, the biggest
-/// body the bank buys): a withdrawal and a
+/// owner). Only a raid the fighting row's reach cannot beat (#417, the biggest
+/// body the bank buys; the ranger's in an errand room, #411): a withdrawal and a
 /// garrison are the same room's two answers, told apart here — for an outpost
-/// and, since the guard row fights for it (#414), for an errand room, whose
+/// and, since the ranger row fights for it (#414, #411), for an errand room, whose
 /// Source Keepers are terrain and neither open nor extend the clock. A transit
 /// room is neither answer.
 let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
@@ -551,7 +551,7 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
 
         if Set.contains room errandRooms then
             armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
-            && not (Decide.Quota.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
+            && not (Decide.Quota.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
         else if Set.contains room outpostRooms then
             not (List.isEmpty armed)
             && not (Decide.Quota.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))

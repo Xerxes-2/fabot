@@ -106,6 +106,8 @@ let private execute (intent: Intent) : Outcome =
     // ActorMissing. The heal names one of ours twice, through `Game.creeps`.
     | AttackCreep(creepName, hostileId) ->
         withCreepTarget creepName hostileId (fun c t -> c.attack t)
+    | RangedAttackCreep(creepName, hostileId) ->
+        withCreepTarget creepName hostileId (fun c t -> c.rangedAttack t)
     | HealCreep(creepName, targetName) ->
         withOurCreepTarget creepName targetName (fun c t -> c.heal (box t))
     | RangedHealCreep(creepName, targetName) ->

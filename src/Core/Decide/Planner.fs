@@ -198,7 +198,7 @@ let private reservableOutpostsOf (view: ColonyView) (reservable: string list) : 
     reservable |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
 /// The declared outposts a threat stands in this tick: with the errand rooms
-/// (`guardedErrandsOf`), the rooms the guard row hires a body for and the rooms
+/// (`guardedErrandsOf`), the rooms the fighting rows hire a body for and the rooms
 /// `planTasks` pools a Guard in — read by both off `OutpostFacts.Guarded`, or a
 /// Guard is pooled with no body bought or a body cast with no Task. A Threat
 /// and never "a hostile".
@@ -230,8 +230,8 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
                 && not (Map.containsKey room view.RoomControl)))
 
 /// ADR-0077
-/// The errand rooms the guard row keeps a body in: every one this colony works
-/// this tick, raid or none — the guard stands on the Reactor's ring and meets
+/// The errand rooms the ranger row keeps a body in: every one this colony works
+/// this tick, raid or none — the ranger stands on the Reactor's ring and meets
 /// what comes (`Threats.ErrandRing`). A held errand and a withdrawn one are
 /// out of `view.Errands` before this reads it.
 let private guardedErrandsOf (view: ColonyView) : string list =
