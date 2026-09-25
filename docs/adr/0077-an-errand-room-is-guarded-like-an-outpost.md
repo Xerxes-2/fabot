@@ -1,6 +1,8 @@
 # An errand room is guarded like an outpost
 
-> **Status:** accepted, amended by #417, 0078
+> **Status:** accepted, amended by #417, 0078, #420
+
+> **Amended by #420** on 2026-09-26: the errand room is guarded, and its Reclaim pooled and its re-claimer seated, only while there is ore to burn in it — banked, diggable, aboard a body, beside the Reactor, or burning in it for us or an ally (`Facts.fuelledErrands`). Live, W15S28 kept two rangers and a re-claimer on an empty Reactor with nothing banked. The declaration stays, so the ore's return reopens it.
 
 > **Amended by 0078** (#411) on 2026-09-25: the errand room's guard is the **ranger** row's ranged body and not the melee guard; it holds the Reactor's ring and shoots from three tiles, and its resident size in peace is `Tuning.RangerResidentBlocks`. The Consequence that a melee guard cannot close on a kiting longbow is answered by it.
 

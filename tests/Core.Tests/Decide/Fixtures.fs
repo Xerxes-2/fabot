@@ -1986,6 +1986,34 @@ let withReactorStore (held: int) (colony: ColonyView) =
                     reactor)
     }
 
+/// Ore banked in a home Terminal, so a declared errand is fuelled (#420)
+/// whoever holds the Reactor. A Terminal and not a Storage: the delivery
+/// draws from a Storage alone, so this opens no courier programme.
+let withBankedOre (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "term-ore" (Structure BuiltKind.Terminal) colony.Spatial.TargetKinds
+                Thorium = Map.add "term-ore" 1_000 colony.Spatial.Thorium
+            }
+    }
+
+/// The same ore taken away again.
+let withoutBankedOre (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.remove "term-ore" colony.Spatial.TargetKinds
+                Thorium = Map.remove "term-ore" colony.Spatial.Thorium
+            }
+    }
+
+/// The declared Reactor ours and burning, so the errand is fuelled (#420)
+/// without a Storage whose ore would open the courier programme.
+let withBurningReactor (colony: ColonyView) =
+    colony |> withReactorOwner (Some Ownership.Ours) |> withReactorStore 100
+
 /// The buffer lane: a plain corridor three rows deep, the controller
 /// standing at (10,10) as an obstacle, and its upgrade buffer "can-buf" at
 /// (13,10), the outermost tile of the controller's Upgrade Work Area.

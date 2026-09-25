@@ -473,6 +473,49 @@ let internal oreBesideTheReactor (view: ColonyView) : bool =
         SpatialInfo.roomOf view.Spatial id
         |> Option.exists (fun room -> Set.contains room (errandRooms view)))
 
+/// The errands there is ore for (#420): ore stands somewhere it could still
+/// reach the Reactor — a Storage or Terminal of ours, a diggable deposit, a
+/// mineral container, a body's hold, the floor beside the Reactor, or the
+/// Reactor's own store while it burns for us or an ally. What the
+/// garrison and the re-claimer are kept for; the declaration outlives it, so
+/// the ore's return reopens the errand, and a flag taken off an empty Reactor
+/// costs nothing (`claimReactor` has no precondition). Colony-wide rather than
+/// per errand: the ore is the colony's, and any Reactor may take it.
+let internal fuelledErrands (view: ColonyView) : Errand list =
+    let held kinds =
+        view.Spatial.TargetKinds
+        |> Map.exists (fun id kind ->
+            List.contains kind kinds && SpatialInfo.heldIn view.Spatial Thorium id > 0)
+
+    let extractorTiles =
+        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Extractor)
+        |> List.choose (SpatialInfo.placementOf view.Spatial)
+        |> Set.ofList
+
+    // `depositIsDiggable` without the Atlas the Planner does not hold: the
+    // extractor's tile is the deposit's.
+    let diggable depositId =
+        Map.tryFind depositId view.Spatial.Thorium |> Option.defaultValue 0 > 0
+        && SpatialInfo.placementOf view.Spatial depositId
+           |> Option.exists (fun tile -> Set.contains tile extractorTiles)
+
+    let fuelled =
+        held [ Structure BuiltKind.Storage; Structure BuiltKind.Terminal ]
+        || ourDeposits view |> List.exists diggable
+        || ourMineralContainers view
+           |> List.exists (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
+        || view.Creeps |> List.exists (fun creep -> creep.Thorium > 0)
+        || oreBesideTheReactor view
+        || view.Reactors
+           |> List.exists (fun reactor ->
+               reactor.Thorium > 0
+               && (match reactor.Owner with
+                   | ReactorOwner.Ours -> true
+                   | ReactorOwner.Rival username -> Colony.isAlly username
+                   | ReactorOwner.Unowned -> false))
+
+    if fuelled then view.Errands else []
+
 /// Whether the season's delivery programme has all of its current ground
 /// facts (#319, narrowed by #361): a Storage holding a load, and a resident
 /// CLAIM body at a declared Reactor. No remembered switch — each fact closes

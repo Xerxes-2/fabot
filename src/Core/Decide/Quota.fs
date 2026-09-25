@@ -579,15 +579,15 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         //
         // The start condition is the bank gate above and the chain, and the
         // guard (#414): `view.Errands` carries only the errands a chain of
-        // Seams reaches, and a raided errand room's seat waits for its rangers
-        // like an outpost's.
+        // Seams reaches, a raided errand room's seat waits for its rangers
+        // like an outpost's, and none is seated with no ore to burn (#420).
         //
         // Nor while an ally burns in it (#415): the ranger is the room's eyes,
         // and the seat returns the tick their store reads empty.
         @ (let raided = errandRoomsRaided view
            let allyBurning = errandRoomsAllyBurning view
 
-           view.Errands
+           fuelledErrands view
            |> List.filter (fun errand ->
                not (Set.contains errand.RoomName withheld && Set.contains errand.RoomName raided)
                && not (Set.contains errand.RoomName allyBurning))

@@ -64,8 +64,14 @@ let private withErrandCreep pos creep colony =
 /// The shared declaration with the given bodies standing on the given tiles of
 /// the errand room, and the owner entry the act is gated on: `None` leaves it
 /// out altogether, which is what a gapped relay reads.
+///
+/// Ore is banked, so the errand is fuelled (#420).
 let private errandColony owner creeps (colony: ColonyView) =
-    colony |> withReactorErrand |> withReactorOwner owner |> standingInErrand creeps
+    colony
+    |> withReactorErrand
+    |> withReactorOwner owner
+    |> withBankedOre
+    |> standingInErrand creeps
 
 /// The fixtures' home room with nothing of its own to offer, so the pool a
 /// case reads is the errand's and the comparison is pairwise.
@@ -295,6 +301,78 @@ let errandStandDownTests =
                     (reserverQuota oneRanger, reserverQuota guarded)
                     (Some 0, Some 1)
                     "and returns the tick the garrison stands"
+            }
+
+            test "with no ore to burn the errand keeps no garrison and no re-claimer (#420)" {
+                let rows colony =
+                    let quota name =
+                        (decideOn colony).Quotas.Rows
+                        |> List.tryFind (fun row -> row.Row = name)
+                        |> Option.map (fun row -> row.Quota)
+
+                    let pool = planTasksOn colony noThreats
+
+                    List.contains (Guard errandRoom) pool,
+                    List.contains (Reclaim reactor) pool,
+                    quota "ranger",
+                    quota "reserver"
+
+                let burning =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Bank = bank 2000 2000
+                    }
+                    |> withoutBankedOre
+                    |> withReactorStore 100
+
+                let dry = burning |> withReactorStore 0
+
+                let banked =
+                    { dry with
+                        Spatial =
+                            { dry.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "sto-ore"
+                                        (Structure BuiltKind.Storage)
+                                        dry.Spatial.TargetKinds
+                                Thorium = Map.add "sto-ore" 1 dry.Spatial.Thorium
+                            }
+                    }
+
+                let heldBy owner =
+                    { burning with
+                        Reactors =
+                            burning.Reactors
+                            |> List.map (fun reactor ->
+                                { reactor with
+                                    Owner = ReactorOwner.Rival owner
+                                })
+                    }
+
+                Expect.equal
+                    (rows burning)
+                    (true, true, Some 2, Some 1)
+                    "the premise: our burn is guarded and its flag kept"
+
+                Expect.equal
+                    (rows dry)
+                    (false, false, Some 0, Some 0)
+                    "an empty Reactor and an empty bank send nobody"
+
+                Expect.equal
+                    (rows banked)
+                    (rows burning)
+                    "one unit banked is ore to deliver, and the errand reopens"
+
+                Expect.equal
+                    (rows (heldBy "Odiodin"))
+                    (true, false, Some 2, Some 0)
+                    "an ally's burn is still defended, its flag left to them"
+
+                Expect.equal
+                    (rows (heldBy "Shibdib"))
+                    (false, false, Some 0, Some 0)
+                    "a stranger's burn is not ours to defend with nothing of ours to put in"
             }
 
             test
@@ -534,7 +612,14 @@ let errandStandDownTests =
                                     Map.ofList
                                         [ spawn.Id, { X = 25; Y = 25 }; "w1", { X = 24; Y = 25 } ]
                             }
-                        TargetKinds = Map.ofList [ spawn.Id, Structure BuiltKind.Spawn ]
+                        // Ore banked, so the errand is fuelled (#420).
+                        TargetKinds =
+                            Map.ofList
+                                [
+                                    spawn.Id, Structure BuiltKind.Spawn
+                                    "sto-ore", Structure BuiltKind.Storage
+                                ]
+                        Thorium = Map.ofList [ "sto-ore", 1_000 ]
                         Control = Some ownedRoom
                         Controller = Some(controllerAt 5)
                         Spawns = [ spawn ]

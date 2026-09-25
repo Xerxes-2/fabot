@@ -580,7 +580,10 @@ let reclaimerRowTests =
                 let castsAt capacity errand =
                     let colony = reserverColony [] (surplusFleet 2) []
 
-                    (if errand then withReactorErrand colony else colony)
+                    (if errand then
+                         withReactorErrand colony |> withBurningReactor
+                     else
+                         colony)
                     |> fun colony ->
                         { colony with
                             Bank = bank capacity capacity
@@ -611,7 +614,9 @@ let reclaimerRowTests =
                     let incumbent = reserver "rc" |> withLife life
 
                     let colony =
-                        reserverColony [] (surplusFleet 2 @ [ incumbent ]) [] |> withReactorErrand
+                        reserverColony [] (surplusFleet 2 @ [ incumbent ]) []
+                        |> withReactorErrand
+                        |> withBurningReactor
 
                     { colony with
                         Tuning =
@@ -679,6 +684,7 @@ let reclaimerRowTests =
 
                     reserverColony [] (surplusFleet 2 @ [ incumbent ]) []
                     |> withReactorErrand
+                    |> withBurningReactor
                     |> standingIn room [ incumbent, tile ]
                     |> fun colony -> reserverCasts (decideOn colony).Intents
 
@@ -738,8 +744,8 @@ let reclaimerChargeTests =
 
                     (quotas plain).Target,
                     workerRow plain,
-                    (quotas (withReactorErrand plain)).Target,
-                    workerRow (withReactorErrand plain)
+                    (quotas (plain |> withReactorErrand |> withBurningReactor)).Target,
+                    workerRow (plain |> withReactorErrand |> withBurningReactor)
 
                 Expect.equal
                     (atBank 1800)

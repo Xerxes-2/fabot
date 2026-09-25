@@ -232,10 +232,11 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
 /// ADR-0077
 /// The errand rooms the ranger row keeps a body in: every one this colony works
 /// this tick, raid or none — the ranger stands on the Reactor's ring and meets
-/// what comes (`Threats.ErrandRing`). A held errand and a withdrawn one are
-/// out of `view.Errands` before this reads it.
+/// what comes (`Threats.ErrandRing`), while there is ore to burn in it
+/// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
+/// `view.Errands` before this reads it.
 let private guardedErrandsOf (view: ColonyView) : string list =
-    view.Errands
+    fuelledErrands view
     |> List.map (fun errand -> errand.RoomName)
     |> List.distinct
     |> List.sort
@@ -384,11 +385,14 @@ let planTasks
     // kind census at all: `Errand.place` lays the target under its engine id
     // with no `TargetKind`, so every pool built by sweeping kinds passes it
     // over. A refused errand is already out of that list (`World.scanOf`).
-    // None while an ally burns in it (#415): there is no flag to take.
+    // None while an ally burns in it (#415): there is no flag to take. None
+    // with no ore to burn (#420), the seat's own gate: an unseated Reclaim is
+    // what a reserver's relief, born while its incumbent holds the Reserve,
+    // would take and walk off with.
     let reclaims =
         let allyBurning = errandRoomsAllyBurning view
 
-        view.Errands
+        fuelledErrands view
         |> List.filter (fun errand -> not (Set.contains errand.RoomName allyBurning))
         |> List.map (fun errand -> Reclaim(fst errand.Target))
 
