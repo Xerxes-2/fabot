@@ -3603,6 +3603,11 @@ function buildReactorWorld() {
   // if it is ever cast against such a world.
   stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
   stations.courier = stationsIn(transitRoom, transitCapture, [{ x: 25, y: 25 }]);
+  // The errand room's resident guard (#414, ADR 0077): a worked errand room
+  // keeps one on the Reactor's ring, raid or none, so the row casts it into
+  // this quiet world too. Stood at the reactor's tile, which `nearestFree`
+  // resolves onto the ring, as the re-claimer's is.
+  stations.guard = stationsIn(errandRoom, errandCapture, [errand.tile]);
 
   // The crew that stands *out* in the worked rooms (#370), which is where the
   // live colony's bodies actually are. Read off the season server this tick:

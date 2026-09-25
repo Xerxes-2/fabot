@@ -546,6 +546,39 @@ let private remembering (colony: ColonyView) =
     }
 
 [<Tests>]
+let idleGuardTests =
+    testList
+        "an idle guard away from home"
+        [
+            test "walks home, where every guarded room is within the hop budget" {
+                // #416: an idle guard left in an outpost cannot price a Guard four
+                // crossings out; from home it can.
+                let guard = creepWith "g" 0 0 Bodies.guardPattern.Block
+
+                let colony =
+                    { (northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None) with
+                        Creeps = [ guard ]
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withNeighbour
+                                    "W1N2"
+                                    { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                        CreepPositions =
+                                            Map.ofList [ guard.Name, { X = 10; Y = 46 } ]
+                                    }
+                        }
+
+                Expect.contains
+                    (decideOn colony).Intents
+                    (MoveCreep(guard.Name, Bottom))
+                    "with no Task it steps toward the border home lies behind"
+            }
+        ]
+
+[<Tests>]
 let blindGuardTests =
     testList
         "the Guard of an outpost the raid has gone dark in"

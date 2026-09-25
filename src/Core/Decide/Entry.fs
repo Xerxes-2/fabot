@@ -299,13 +299,32 @@ let decideUnarbitrated
     // against a Task in no pool, and the room each one's target was last seen
     // in. They reach the Emitter as nothing and the mover as a crossing. A
     // keep with no pooled Task is a graced one by construction.
+    //
+    // And an idle guard standing outside home walks home (#416): a Guard beyond
+    // the hop budget from an outpost is unpriceable from there, and priced from
+    // home, so the body waits where every guarded room is in reach.
     let crossings =
-        next
-        |> Map.toList
-        |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
-        |> List.choose (fun (name, tid) ->
-            lastSeenIn view tid |> Option.map (fun room -> name, room))
-        |> Map.ofList
+        let graced =
+            next
+            |> Map.toList
+            |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
+            |> List.choose (fun (name, tid) ->
+                lastSeenIn view tid |> Option.map (fun room -> name, room))
+
+        let home = SpatialInfo.homeName view.Spatial
+
+        let homeward =
+            view.Creeps
+            |> List.filter (fun creep ->
+                isGuardBody creep && not (Map.containsKey creep.Name assigned))
+            |> List.choose (fun creep ->
+                Atlas.creepRoom atlas creep.Name
+                |> Option.filter (fun room -> room <> home)
+                |> Option.map (fun _ -> creep.Name, home))
+
+        // Graced last: `Map.ofList` keeps the later entry, so a guard walking a
+        // held Task's crossing keeps that room over home.
+        homeward @ graced |> Map.ofList
 
     let taskIntents = emit view atlas threats assigned
 
