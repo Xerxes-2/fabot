@@ -642,13 +642,10 @@ type Colony =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
     /// What this colony writes on a controller it stands beside (#381): a
-    /// human's line, one for every room. The engine caps a sign at 100
-    /// characters. "Core is pure" and "one projection in, intents out" are the
-    /// compression a hundred characters buys — `decide` also takes the tick's
-    /// assignments and memo and writes the walk tables (`PlanMemo`, #310).
-    /// Flavour on a sign, not a specification.
+    /// human's line, one for every room, chosen 2026-09-25. The engine caps a
+    /// sign at 100 characters. Flavour on a sign, not a specification.
     let signature =
-        "A functional bot. F# compiled by Fable; Core is pure — one projection in, intents out"
+        "F# via Fable. No mutable state was harmed in the making of this room."
 
     /// The players we have agreed with, by the username the engine spells
     /// them (#412): moved by a human in a commit, like every declaration.
