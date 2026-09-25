@@ -15,7 +15,7 @@ let guardRowTests =
         "the guard row"
         [
             test
-                "the ranger row: its heal counts in the exchange, its resident is the knob's size, and a raid one body loses buys two" {
+                "the ranger row: its heal counts in the exchange, its garrison is the knobs' size, and a raid one body loses buys two" {
                 // #411, over SlothBot's reactor longbow: 160 ranged damage, 48 heal and
                 // 4,000 hits for two of them.
                 let longbow =
@@ -56,7 +56,20 @@ let guardRowTests =
                     |> Option.map (fun row -> row.Quota)
 
                 Expect.equal
-                    (rangerRow (raidOf 2), rangerRow (raidOf 3))
+                    ([ 0; 2; 3 ] |> List.map (raidOf >> rangerRow))
+                    [ Some 2; Some 2; Some 2 ]
+                    "the garrison stands in peace as in a raid (#419): a relief cast on sight lands after the fight"
+
+                let lone colony =
+                    { colony with
+                        Tuning =
+                            { colony.Tuning with
+                                RangerResidents = 1
+                            }
+                    }
+
+                Expect.equal
+                    (rangerRow (lone (raidOf 2)), rangerRow (lone (raidOf 3)))
                     (Some 1, Some 2)
                     "one body wins the squad; three longbows outlast the largest ranger, so two are bought"
 
@@ -67,12 +80,13 @@ let guardRowTests =
                     |> List.filter (fun (_, _, name) -> name.StartsWith "ranger-")
                     |> List.map (fun (_, body, _) -> List.length body)
 
-                Expect.equal
+                Expect.isNonEmpty rangerCast "the premise: the garrison is cast in peace"
+
+                Expect.all
                     rangerCast
-                    [
-                        Tuning.defaults.RangerResidentBlocks
-                        * List.length Bodies.rangerPattern.Block
-                    ]
+                    (fun parts ->
+                        parts = Tuning.defaults.RangerResidentBlocks
+                                * List.length Bodies.rangerPattern.Block)
                     "the resident is the body a raid meets first"
             }
 

@@ -191,7 +191,7 @@ The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and nev
 _Avoid_: defender, bodyguard, soldier
 
 ### Ranger
-The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, resident on the Reactor's ring at `Tuning.RangerResidentBlocks` in peace and sized to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. Its [[body class]] is Fighter. ADR-0078. 🏹
+The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, kept on the Reactor's ring as a standing garrison of `Tuning.RangerResidents` bodies of `Tuning.RangerResidentBlocks`, raid or not (#419), each sized up to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. Its [[body class]] is Fighter. ADR-0078. 🏹
 _Avoid_: archer, ranged guard
 
 ### Miner
@@ -273,7 +273,7 @@ A room within `Tuning.MaxHops` crossings of the [[home room]] that this colony m
 _Avoid_: remote, franchise, territory
 
 ### Errand
-A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its resident [[ranger]], which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
+A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its garrison of [[ranger]]s, which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
 _Avoid_: goal, mission, remote target
 
 ### Reservation

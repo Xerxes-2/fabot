@@ -344,10 +344,13 @@ type Tuning =
         /// aboard. A percentage because the risk scales with the leg.
         DeliveryLifeMargin: int
         /// The ranger blocks an errand room is held with in peace (#411): the
-        /// body a raid meets first, at about 1.4 energy a tick for three. The
-        /// row counts heads, so a raid-sized relief is cast only when this
-        /// body dies: the bigger it is, the longer it holds alone.
+        /// body a raid meets first. Seven wins SlothBot's two-longbow squad
+        /// alone (#419), at about 3.3 energy a tick.
         RangerResidentBlocks: int
+        /// The rangers a worked errand room keeps standing, raid or not
+        /// (#419): a relief cast on sight lands some 280 ticks later, after
+        /// the fight, so the second body has to be there already.
+        RangerResidents: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -483,7 +486,8 @@ module Tuning =
             MineContactCliff = 1000
             ReactorLoad = 500
             DeliveryLifeMargin = 25
-            RangerResidentBlocks = 3
+            RangerResidentBlocks = 7
+            RangerResidents = 2
             TerminalEnergy = 4_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636

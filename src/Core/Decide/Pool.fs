@@ -925,13 +925,15 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // the cascade hires against and the number the Matcher counts holders
         // against are one number.
         //
-        // One over in an errand room (#414): its ranger is resident, and its
-        // relief — cast at the incumbent's lead — must take the Task and walk
-        // three crossings while the incumbent still holds the ring. A Guard has
+        // One over per garrison body in an errand room (#414, #419): its
+        // rangers are resident, and each relief — cast at its incumbent's lead,
+        // two of them together when the garrison was cast together — must take
+        // the Task and walk three crossings while the incumbent still holds
+        // the ring. A Guard has
         // no arrival price for a handover window to be read against, and the
         // row's count, not this cap, is what buys bodies.
         | Guard room when Set.contains room (Facts.errandRooms view) ->
-            Capacity.fighters (rangersWanted view room + 1)
+            Capacity.fighters (rangersWanted view room + view.Tuning.RangerResidents)
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller: a second body there buys nothing.
         | Reserve _

@@ -246,7 +246,10 @@ let errandStandDownTests =
                     (Guard errandRoom)
                     "the Task stands in peace"
 
-                Expect.equal (rangerQuota quiet) (Some 1) "and the row keeps one body for it"
+                Expect.equal
+                    (rangerQuota quiet)
+                    (Some 2)
+                    "and the row keeps its garrison for it (#419)"
 
                 let reserverQuota colony =
                     (decideOn colony).Quotas.Rows
@@ -276,37 +279,57 @@ let errandStandDownTests =
                     (Some 0)
                     "under a raid its seat waits for the guard, as a raided outpost's does"
 
-                let guarded =
+                let oneRanger =
                     raided
                     |> withErrandCreep
                         { ringTile with X = ringTile.X + 1 }
                         (creepWith "ranger-g" 0 0 Bodies.rangerPattern.Block)
 
+                let guarded =
+                    oneRanger
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X - 1 }
+                        (creepWith "ranger-h" 0 0 Bodies.rangerPattern.Block)
+
                 Expect.equal
-                    (reserverQuota guarded)
-                    (Some 1)
-                    "and returns the tick the guard stands"
+                    (reserverQuota oneRanger, reserverQuota guarded)
+                    (Some 0, Some 1)
+                    "and returns the tick the garrison stands"
             }
 
             test
-                "the resident ranger's relief takes the Task while the incumbent still holds the ring" {
-                let incumbent = creepWith "ranger-old" 0 0 Bodies.rangerPattern.Block
-                let relief = creepWith "ranger-new" 0 0 Bodies.rangerPattern.Block
+                "each garrison ranger's relief takes the Task while its incumbent still holds the ring" {
+                // #419: a garrison cast together expires together, so both reliefs
+                // are out at once beside both incumbents.
+                let incumbents =
+                    [ "ranger-old-a"; "ranger-old-b" ]
+                    |> List.map (fun name -> creepWith name 0 0 Bodies.rangerPattern.Block)
+
+                let reliefs =
+                    [ "ranger-new-a"; "ranger-new-b" ]
+                    |> List.map (fun name -> creepWith name 0 0 Bodies.rangerPattern.Block)
 
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Bank = bank 2000 2000
                     }
-                    |> withErrandCreep { ringTile with X = ringTile.X + 1 } incumbent
-                    |> withHomeCreep { X = 13; Y = 10 } relief
+                    |> withErrandCreep { ringTile with X = ringTile.X + 1 } incumbents[0]
+                    |> withErrandCreep { ringTile with X = ringTile.X - 1 } incumbents[1]
+                    |> withHomeCreep { X = 13; Y = 10 } reliefs[0]
+                    |> withHomeCreep { X = 14; Y = 10 } reliefs[1]
 
-                let held = Map.ofList [ incumbent.Name, taskId (Guard errandRoom) ]
+                let held =
+                    incumbents
+                    |> List.map (fun creep -> creep.Name, taskId (Guard errandRoom))
+                    |> Map.ofList
+
                 let assignments = (decideFrom held colony).Assignments
 
                 Expect.equal
-                    (Map.tryFind relief.Name assignments, Map.tryFind incumbent.Name assignments)
-                    (Some(taskId (Guard errandRoom)), Some(taskId (Guard errandRoom)))
-                    "the relief sets out now, not the tick the incumbent dies, so the flag is never bare"
+                    (incumbents @ reliefs
+                     |> List.map (fun creep -> Map.tryFind creep.Name assignments))
+                    (List.replicate 4 (Some(taskId (Guard errandRoom))))
+                    "the reliefs set out now, not the tick their incumbents die, so the ring is never half-held"
             }
 
             test
@@ -952,8 +975,8 @@ let courierTests =
             test "636 ticks is the cadence, and the fixed body is cast at its boundary" {
                 let fixedBody = List.replicate 20 Carry @ List.replicate 10 Move
 
-                // The errand room's guard already standing (#414), so the one
-                // spawn is the courier row's to read.
+                // The errand room's garrison already standing (#414, #419), so
+                // the one spawn is the courier row's to read.
                 let staffed =
                     deliveryColony (Some Ownership.Ours)
                     |> withHomeCreeps
@@ -965,6 +988,9 @@ let courierTests =
                     |> withErrandCreep
                         { ringTile with X = ringTile.X + 1 }
                         (creepWith "ranger-g" 0 0 Bodies.rangerPattern.Block)
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X - 1 }
+                        (creepWith "ranger-h" 0 0 Bodies.rangerPattern.Block)
 
                 let young = courier "courier-young" |> withLife 865
                 let old = courier "courier-old" |> withLife 864

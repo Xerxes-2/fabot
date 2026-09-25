@@ -444,13 +444,14 @@ let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
     |> max view.Tuning.RangerResidentBlocks
     |> min rangerBlocksMost
 
-/// How many rangers one errand room wants: one where the largest ranger body
-/// wins alone, two where it does not.
+/// How many rangers one errand room wants: the standing garrison
+/// (`Tuning.RangerResidents`), and two where the largest ranger body loses
+/// the raid alone.
 let internal rangersWanted (view: ColonyView) (room: string) : int =
     if rangerBlocksBeat view room rangerBlocksMost then
-        1
+        view.Tuning.RangerResidents
     else
-        Engine.guardCap
+        max view.Tuning.RangerResidents Engine.guardCap
 
 /// The ranger row's quota: `rangersWanted` over every worked errand room.
 let internal rangerQuota (view: ColonyView) (outposts: OutpostFacts) : int =
@@ -578,7 +579,7 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         //
         // The start condition is the bank gate above and the chain, and the
         // guard (#414): `view.Errands` carries only the errands a chain of
-        // Seams reaches, and a raided errand room's seat waits for its ranger
+        // Seams reaches, and a raided errand room's seat waits for its rangers
         // like an outpost's.
         //
         // Nor while an ally burns in it (#415): the ranger is the room's eyes,

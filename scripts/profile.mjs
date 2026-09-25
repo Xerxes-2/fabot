@@ -3611,8 +3611,8 @@ function buildReactorWorld() {
   // if it is ever cast against such a world.
   stations.miner = mine ? stationsOn(home.room, capture, [mine.seat]) : [];
   stations.courier = stationsIn(transitRoom, transitCapture, [{ x: 25, y: 25 }]);
-  // The errand room's resident ranger (#414, #411): a worked errand room keeps
-  // one on the Reactor's ring, raid or none, so the row casts it into this
+  // The errand room's garrison (#414, #411, #419): a worked errand room keeps
+  // its rangers on the Reactor's ring, raid or none, so the row casts it into this
   // quiet world too. Stood at the reactor's tile, which `nearestFree` resolves
   // onto the ring, as the re-claimer's is.
   stations.ranger = stationsIn(errandRoom, errandCapture, [errand.tile]);
