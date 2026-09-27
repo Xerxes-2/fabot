@@ -592,6 +592,15 @@ let mineHaulTests =
                     (demandOf runOut)
                     "and a deposit with nothing left in it is a mine that is over"
             }
+
+            test "the ore left behind an exhausted deposit asks for no haul" {
+                // #421: the container outlives the deposit and is still drained,
+                // but the term prices the miner's output, and there is none. The
+                // tail rides the haulers the colony already has.
+                Expect.isEmpty
+                    (decideOn (mineHaulColony |> withDepositGone)).Quotas.HaulerDemand
+                    "a mine that is over prices nothing, whatever its container holds"
+            }
         ]
 
 /// `earningMine` with the Storage standing at (14,10) and ore in the mineral

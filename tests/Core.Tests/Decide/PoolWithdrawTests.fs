@@ -887,9 +887,27 @@ let thoriumLegTests =
                     "and the sink is the mine's and not the load's"
             }
 
+            test "the ore left in the mineral container outlives its deposit, and is drawn" {
+                // #421: the mod deletes an exhausted deposit outright, and the
+                // miner's last digs are still in the container. The container is
+                // known by the extractor that stays on the deposit's tile, so the
+                // tail is drained like any other load.
+                let tasks = planTasksOn (mineHaulColony |> withDepositGone) noThreats
+
+                Expect.contains
+                    tasks
+                    (Withdraw("can-min", Thorium))
+                    "the deposit is gone and the ore beside its tile is still ours to fetch"
+
+                Expect.isFalse
+                    (planTasksOn (mineHaulColony |> withDepositGone |> withMineStock 0) noThreats
+                     |> List.contains (Withdraw("can-min", Thorium)))
+                    "and once it is drained nobody comes back for it"
+            }
+
             test "a colony with no mineral container draws nothing, and still has a sink" {
-                // The draw is read off `ourDeposits` and the container on
-                // the deposit's Seat; the Refill off the Storage alone. A
+                // The draw is read off our deposits and extractors and the
+                // container beside them; the Refill off the Storage alone. A
                 // body holding ore is applicable to that Task and nothing
                 // else, so a sink gated on the intake's ground stranded a
                 // hauler mid-haul for the window the Layout takes to

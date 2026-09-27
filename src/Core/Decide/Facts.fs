@@ -358,34 +358,52 @@ let internal reactorTakesALoad (view: ColonyView) (load: int) : bool =
             reactor.Id = reactorId
             && reactor.Thorium + afloat + load <= Engine.reactorCapacity))
 
-/// The mineral containers of this colony's own deposits, in deposit order: the
-/// built container within range 1 of a deposit in the deposit's own room (a
-/// `Pos` names no room, and a container on the same coordinate of an outpost
-/// is not this deposit's). Built alone and never a site: a site holds nothing
-/// (#261). Off `ourDeposits` and never off the container census, which
-/// carries every owner's. Paired with the deposit because the two readers ask
-/// different questions of the same join (#262).
+/// The mineral containers of this colony's own mines, each keyed by what marks
+/// the mine: the built container within range 1 of the mark in the mark's own
+/// room (a `Pos` names no room, and a container on the same coordinate of an
+/// outpost is not this mine's). Built alone and never a site: a site holds
+/// nothing (#261). Off our deposits and extractors and never off the container
+/// census, which carries every owner's. Paired with the mark because the two
+/// readers ask different questions of the same join (#262).
+///
+/// A live mine is marked by its deposit. One whose deposit is gone is marked by
+/// the extractor still standing on that tile (#421): the mod deletes an
+/// exhausted deposit, and the miner's last digs stay in the container.
+/// `depositIsDiggable` reads no for an extractor's id, so only the
+/// Thorium-held readers see these.
 let internal ourMineralContainerPairs (view: ColonyView) : (string * string) list =
     let containers =
         SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Container)
         |> List.choose (fun id ->
             SpatialInfo.placementOf view.Spatial id |> Option.map (fun tile -> id, tile))
 
-    ourDeposits view
-    |> List.choose (fun depositId ->
-        match SpatialInfo.placementOf view.Spatial depositId with
+    let deposits = ourDeposits view
+
+    let depositTiles =
+        deposits |> List.choose (SpatialInfo.placementOf view.Spatial) |> Set.ofList
+
+    let spentExtractors =
+        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Extractor)
+        |> List.filter (inARoomWeOwn view)
+        |> List.filter (fun id ->
+            SpatialInfo.placementOf view.Spatial id
+            |> Option.exists (fun tile -> not (Set.contains tile depositTiles)))
+
+    deposits @ spentExtractors
+    |> List.choose (fun markId ->
+        match SpatialInfo.placementOf view.Spatial markId with
         | None -> None
-        | Some deposit ->
+        | Some mark ->
             containers
             |> List.filter (fun (_, tile) ->
-                tile.Room = deposit.Room && range (RoomPos.pos tile) (RoomPos.pos deposit) <= 1)
+                tile.Room = mark.Room && range (RoomPos.pos tile) (RoomPos.pos mark) <= 1)
             // Ties by id, the way every other tie in this colony falls: a
-            // deposit the Layout ever seated two containers beside answers with
+            // mine the Layout ever seated two containers beside answers with
             // one of them and not with both.
             |> List.map fst
             |> List.sort
             |> List.tryHead
-            |> Option.map (fun containerId -> depositId, containerId))
+            |> Option.map (fun containerId -> markId, containerId))
 
 let internal ourMineralContainers (view: ColonyView) : string list =
     ourMineralContainerPairs view |> List.map snd

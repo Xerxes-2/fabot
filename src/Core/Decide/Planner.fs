@@ -476,9 +476,9 @@ let planTasks
     // The mine-to-Storage leg (ADR-0057 decision 3): the one pair of Tasks in
     // this colony that is not about energy. The intake is the mineral container
     // under the miner's feet; the sink is the Storage, an obstacle nothing can
-    // stand on, so the contact penalty never reaches it. Read off
-    // `ourDeposits` and never off a container census (#261), with the same
-    // borrowed-room filter the energy Withdraws carry.
+    // stand on, so the contact penalty never reaches it. Read off our
+    // deposits and extractors and never off a container census (#261, #421),
+    // with the same borrowed-room filter the energy Withdraws carry.
     let mineralContainers =
         ourMineralContainers view |> List.filter (inABorrowedRoom >> not)
 
