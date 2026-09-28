@@ -521,7 +521,7 @@ module Errand =
         {
             RoomName = "W15S25"
             Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
-            // Held 2026-09-28, t797,5xx: banking ore for a longer burn.
+            // Held 2026-09-28, t807,4xx: banking ore for a longer burn.
             Held = true
         }
 
