@@ -1288,8 +1288,8 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28"; "W15S28"; "W11S29"; "W11S27" ]
-                    "five colonies are declared, in the order a human wrote them (ADR 0047)"
+                    [ "W12S28"; "W13S28"; "W15S28"; "W11S27"; "W17S29" ]
+                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28, its deposit mined out"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
@@ -1390,17 +1390,22 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29"; "W14S28" ]
-                    "the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
+                    [ "W15S27"; "W15S29"; "W14S28"; "W17S29" ]
+                    "the sixth colony's room is a Claim here until it lands (2026-09-28); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
-                // The fourth colony's, declared the day after its spawn stood
-                // (`w12s29-outpost.md`): 81 ticks of haul, the cheapest in the
-                // programme, against 380 of demand over one hauler.
-                Expect.equal
-                    (Colony.outpostsOf Colony.declared "W11S29"
-                     |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W12S29" ]
-                    "the fourth colony works the room on its doorstep"
+                // The fourth colony was given up on 2026-09-28 (`sixth-colony.md`):
+                // a room with no deposit left is worth a GCL slot and nothing
+                // else, and its one outpost went with it.
+                Expect.isEmpty
+                    (Colony.outpostsOf Colony.declared "W11S29")
+                    "the given-up colony works nothing"
+
+                Expect.isFalse
+                    (Colony.declared
+                     |> List.exists (fun colony ->
+                         colony.Outposts
+                         |> List.exists (fun outpost -> outpost.RoomName = "W12S29")))
+                    "and its outpost is nobody's"
 
                 Expect.isEmpty
                     (Colony.outpostsOf Colony.declared "W1N1")

@@ -329,21 +329,6 @@ module Outpost =
             Controller = "6a8caa95dd4872bccd319010", { Room = "W15S27"; X = 6; Y = 9 }
         }
 
-    /// W11S29's first outpost, declared 2026-09-17 off
-    /// `docs/research/w12s29-outpost.md`: one hop east, one source at (40,43)
-    /// hard against the shared border, an **81-tick haul round trip** that
-    /// roughly doubles the fourth colony's income. Two measured liabilities,
-    /// neither a refusal: the source has a single Seat (keep hands off that
-    /// tile), and at RCL3's 800 bank the reserver is `[Claim; Move]`, which
-    /// holds a reservation flat and banks no buffer — the full 10 a tick
-    /// arrives with RCL4's two-CLAIM body.
-    let w12s29: Outpost =
-        {
-            RoomName = "W12S29"
-            Sources = [ "6a8caabadd4872bccd3194ad", { Room = "W12S29"; X = 40; Y = 43 } ]
-            Controller = "6a8caabadd4872bccd3194ac", { Room = "W12S29"; X = 15; Y = 36 }
-        }
-
     /// W15S28's south outpost, declared 2026-09-17 off
     /// `docs/research/outpost-wave-2.md`: cheapest haul of the candidates,
     /// the most Seats (5), about 6.34 energy a tick net. Its one liability:
@@ -369,6 +354,20 @@ module Outpost =
                     "6a8caac6dd4872bccd3195ef", { Room = "W11S27"; X = 46; Y = 33 }
                 ]
             Controller = "6a8caac6dd4872bccd3195ee", { Room = "W11S27"; X = 14; Y = 29 }
+        }
+
+    /// The sixth colony's room, declared 2026-09-28 off
+    /// `docs/research/sixth-colony.md`: the first step into the free belt
+    /// west of W15S28. The ids and tiles are the engine's, read that day.
+    let w17s29: Outpost =
+        {
+            RoomName = "W17S29"
+            Sources =
+                [
+                    "6a8caa7ddd4872bccd318c81", { Room = "W17S29"; X = 12; Y = 30 }
+                    "6a8caa7ddd4872bccd318c83", { Room = "W17S29"; X = 45; Y = 39 }
+                ]
+            Controller = "6a8caa7ddd4872bccd318c82", { Room = "W17S29"; X = 30; Y = 39 }
         }
 
     /// W12S28's west outpost, declared 2026-09-16 off
@@ -767,7 +766,11 @@ module Colony =
                 // the errand's road through W15S26 is out of every chain
                 // while a bunker stands there, so neither draws a hauler
                 // today; when W15S27 reopens this is the nearest of the three.
-                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
+                //
+                // W17S29 joins on 2026-09-28 as the sixth colony's room, so its
+                // controller is a Claim here — **to be taken out of this list
+                // the day that Claim lands** (#404's lesson).
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28; Outpost.w17s29 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.
@@ -776,35 +779,27 @@ module Colony =
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
             }
-            // The fourth colony (2026-09-16, `docs/research/fourth-colony.md`).
-            // No errand, by eight crossings: its 45,000 Thorium moves by
-            // terminal or not at all.
-            {
-                Home = "W11S29"
-                // Its first outpost, one hop east, declared the day after its
-                // own spawn stood (2026-09-17, `w12s29-outpost.md`): the
-                // cheapest haul in the programme at 81 ticks.
-                Outposts = [ Outpost.w12s29 ]
-                Errands = []
-                Mother = Some "W13S28"
-                // Its own 45,000 T — after the banked stock ran out on
-                // 2026-09-18 the **only** ore left that can score — goes into
-                // W15S28's terminal (#349); its own walk is four crossings,
-                // past `Tuning.MaxHops`. **Declared before the terminal it
-                // needs, on purpose**: the pairing is inert without one, and
-                // the tick the Layout stands it the ore has a path with nobody
-                // having to remember — a hand edit at a moment no alarm
-                // watches is how 36,484 T sat unshipped until #349.
-                Consignee = Some "W15S28"
-            }
             // The fifth colony (2026-09-24, `docs/research/fifth-colony.md`).
             // No outposts until its spawn stands, and its ore goes by
-            // terminal, both as the fourth's.
+            // terminal: declared before the terminal it needs, on purpose, so
+            // the ore has a path the tick the Layout stands one.
             {
                 Home = "W11S27"
                 Outposts = []
                 Errands = []
                 Mother = Some "W13S28"
+                Consignee = Some "W15S28"
+            }
+            // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
+            // in the slot W11S29 gave up once its deposit was mined out.
+            // Until the Claim lands it is also W15S28's outpost, which is
+            // what makes its controller a Claim in that pool; it leaves that
+            // list the day the Claim lands, as W11S27 did (#404).
+            {
+                Home = "W17S29"
+                Outposts = []
+                Errands = []
+                Mother = Some "W15S28"
                 Consignee = Some "W15S28"
             }
         ]
