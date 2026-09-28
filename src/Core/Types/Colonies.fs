@@ -358,7 +358,8 @@ module Outpost =
 
     /// The sixth colony's room, declared 2026-09-28 off
     /// `docs/research/sixth-colony.md`: the first step into the free belt
-    /// west of W15S28. The ids and tiles are the engine's, read that day.
+    /// west of W15S28. The ids and tiles are the engine's, read that day. Kept
+    /// as the record of the claim window: W15S28 worked it until t808,328.
     let w17s29: Outpost =
         {
             RoomName = "W17S29"
@@ -767,10 +768,10 @@ module Colony =
                 // while a bunker stands there, so neither draws a hauler
                 // today; when W15S27 reopens this is the nearest of the three.
                 //
-                // W17S29 joins on 2026-09-28 as the sixth colony's room, so its
-                // controller is a Claim here — **to be taken out of this list
-                // the day that Claim lands** (#404's lesson).
-                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28; Outpost.w17s29 ]
+                // W17S29, the sixth colony's room, was a Claim here from
+                // 2026-09-28 until it landed at t808,328; out of this list it
+                // is this colony's nursery and not a room it mines (#404).
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.

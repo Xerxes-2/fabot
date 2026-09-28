@@ -1327,6 +1327,13 @@ let outpostTests =
                      |> List.exists (fun outpost -> outpost.RoomName = Outpost.w11s27.RoomName))
                     "and the fifth colony's room left the same list on its Claim (t702,714, #404), its declaration kept for the same reason"
 
+                Expect.isFalse
+                    (Colony.declared
+                     |> List.exists (fun colony ->
+                         colony.Outposts
+                         |> List.exists (fun outpost -> outpost.RoomName = Outpost.w17s29.RoomName)))
+                    "and the sixth colony's room is nobody's outpost since its Claim (t808,328)"
+
                 // W15S28 is declared and is **not** an outpost of anybody's: it is
                 // owned, so its mother raises it and does not mine it, and
                 // `childrenWhere` gives a room in both lists to the outpost list, the
@@ -1390,8 +1397,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29"; "W14S28"; "W17S29" ]
-                    "the sixth colony's room is a Claim here until it lands (2026-09-28); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
+                    [ "W15S27"; "W15S29"; "W14S28" ]
+                    "the sixth colony's room left this list on its Claim (t808,328, #404); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
                 // The fourth colony was given up on 2026-09-28 (`sixth-colony.md`):
                 // a room with no deposit left is worth a GCL slot and nothing
