@@ -521,9 +521,8 @@ module Errand =
         {
             RoomName = "W15S25"
             Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
-            // Worked again 2026-09-25, t731,3xx: the joint defence with
-            // Odiodin stands (#412–#414) and Odiodin is burning first.
-            Held = false
+            // Held 2026-09-28, t797,5xx: banking ore for a longer burn.
+            Held = true
         }
 
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
