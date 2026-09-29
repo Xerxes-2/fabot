@@ -358,6 +358,21 @@ let harassGuardTests =
                         })
                     (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
                     "a miner at the source and a reserver at the controller: the ground is the miner's alone"
+
+                // The miner stepped just out of reach, off the source, and
+                // back: ground that followed it off the source turned the
+                // ranger to the reserver and back (W18S27, t840,8xx).
+                Expect.equal
+                    (ground
+                        { quiet with
+                            Hostiles =
+                                [
+                                    miner "miner" { X = 15; Y = 7 }
+                                    theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
+                                ]
+                        })
+                    (ground quiet)
+                    "a miner off the source and a reserver at the controller: the ranger holds the source's seats"
             }
         ]
 

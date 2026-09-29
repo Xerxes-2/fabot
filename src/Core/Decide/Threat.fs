@@ -181,11 +181,12 @@ let threatsOf (view: ColonyView) atlas : Threats =
     // A work spot is where the enemy's bodies must stop: within two of the
     // source, where a hauler draws from the miner's pile, and around the
     // controller, within three because a reserver shuffles about it. The
-    // source's come first and the controller's only while nobody works the
-    // source: a reserver keeps its distance from a ranger while a miner must
-    // stand still to harvest, and ground drawn round both turned the ranger
-    // between them, out of reach of either (W18S27, t840,6xx-7xx). The Stand's
-    // seats are within reach of all of the first.
+    // source's come first, and while an enemy miner is anywhere in the room
+    // the ranger holds the Stand's seats rather than turn to the controller:
+    // the miner steps just out of reach and back, and ground that followed
+    // it off the source turned the ranger between it and the reserver, out
+    // of reach of both (W18S27, t840,6xx-8xx). The seats are within reach of
+    // every work spot of the source.
     let harassRing =
         view.Harass
         |> List.map (fun h ->
@@ -199,20 +200,26 @@ let threatsOf (view: ColonyView) atlas : Threats =
             let armedTargets, unarmedTargets =
                 inRoom |> List.filter (guardShoots view errands) |> List.partition isArmed
 
+            let seats = [ 1, RoomPos.pos h.Stand ]
+
             let working =
                 match unarmedTargets |> List.filter (within h.Stand 2) with
-                | [] -> unarmedTargets |> List.filter (within h.Controller 3)
-                | atSource -> atSource
+                | [] when
+                    unarmedTargets |> List.exists (fun hostile -> List.contains Work hostile.Body)
+                    ->
+                    seats
+                | [] ->
+                    unarmedTargets
+                    |> List.filter (within h.Controller 3)
+                    |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
+                | atSource ->
+                    atSource
+                    |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
 
             let ambushed =
-                (armedTargets |> List.map (fun hostile -> 1, RoomPos.pos hostile.Pos))
-                @ (working |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos))
+                (armedTargets |> List.map (fun hostile -> 1, RoomPos.pos hostile.Pos)) @ working
 
-            let around =
-                if List.isEmpty ambushed then
-                    [ 1, RoomPos.pos h.Stand ]
-                else
-                    ambushed
+            let around = if List.isEmpty ambushed then seats else ambushed
 
             let standing =
                 inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
