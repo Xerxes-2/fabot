@@ -371,6 +371,14 @@ let internal planSpawns
                     Quota = rows.Courier
                     Census = fun creep -> patternOf view.Tuning atlas creep = courierPattern
                 }
+                // One body bought once, ahead of the surplus mouths: what it
+                // saves is CPU every tick the salvage room still stands.
+                {
+                    Name = "dismantler"
+                    Pattern = dismantlerPattern
+                    Quota = rows.Dismantler
+                    Census = fun creep -> patternOf view.Tuning atlas creep = dismantlerPattern
+                }
                 // Bodies and not names: `patternOf` rather than
                 // `isStandingBody` alone is what keeps the Anchor row out of
                 // it, since `6W/1C/1M` answers to both descriptions and the

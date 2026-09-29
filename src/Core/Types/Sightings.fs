@@ -521,7 +521,7 @@ module World =
         linkedRecalling (JoinTable()) keeperMargin world
 
     /// What one colony's declaration narrows to this tick, and the union of
-    /// it, in four named halves rather than a positional four (two are
+    /// it, in named halves rather than a positional tuple (three are
     /// `string list`s, so a swapped pair would compile in silence). Declared
     /// inside `World` and never auto-opened, so the names cannot be picked up
     /// by a record literal that meant `Colony`.
@@ -532,10 +532,12 @@ module World =
             Outposts: Outpost list
             /// The errands left after the one narrowing there is.
             Errands: Errand list
+            /// The [[salvage]] rooms left after the same two an errand takes.
+            Salvage: string list
             /// The rooms this colony projects for a child of its own, raised
             /// or re-claimed (#221).
             Borrowed: string list
-            /// The scan set: this colony's home and all three of those, the
+            /// The scan set: this colony's home and all four of those, the
             /// one place that union is spelled.
             Scanned: string list
         }
@@ -551,6 +553,8 @@ module World =
     /// this clause: the gate withdraws work in the room it names and is not
     /// a route lock; the body crossing that room reads its live Threat and
     /// Flee instead. ADR-0066
+    ///
+    /// A [[salvage]] room is narrowed the same two ways.
     ///
     /// The whole `Tuning` and not the hop budget alone: the chain is searched
     /// over the **masked** border rings (`Tuning.keeperMargin`).
@@ -579,6 +583,10 @@ module World =
             Errand.worked gate.Shut colony.Errands
             |> List.filter (Errand.routable reaches tuning.MaxHops colony.Home)
 
+        let salvage =
+            Salvage.worked gate.Shut colony.Salvage
+            |> List.filter (Declaration.routable reaches tuning.MaxHops colony.Home)
+
         // The two halves of what a mother projects for a child of hers,
         // disjoint by construction: a room she is raising is one we own, and
         // a room she may take back is one we do not (#221).
@@ -589,8 +597,9 @@ module World =
         {
             Outposts = outposts
             Errands = errands
+            Salvage = salvage
             Borrowed = borrowed
-            Scanned = Colony.roomsProjected outposts errands borrowed colony.Home
+            Scanned = Colony.roomsProjected outposts errands salvage borrowed colony.Home
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).

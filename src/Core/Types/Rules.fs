@@ -508,7 +508,7 @@ module Tuning =
     /// room's walkable ground around every rock a keeper is pinned to
     /// (`Keepers`). Six today, and **derived rather than chosen** — a function
     /// beside the record and not a field in it, so a human who moves
-    /// `ReachMargin` moves this too: ADR-0060
+    /// `ReachMargin` moves this too:
     ///
     ///     the keeper's pin (1) + its longest weapon (3) + ReachMargin (2)
     ///

@@ -207,6 +207,7 @@ let private declared: Colony list =
                         Held = false
                     }
                 ]
+            Salvage = []
             Mother = None
             Consignee = None
         }

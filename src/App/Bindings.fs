@@ -293,6 +293,8 @@ type ICreep =
     abstract withdraw: target: obj * resource: string -> int
     abstract build: target: obj -> int
     abstract repair: target: obj -> int
+    /// Take a structure's hits down at range 1, DISMANTLE_POWER per WORK part.
+    abstract dismantle: target: obj -> int
     abstract upgradeController: target: obj -> int
     /// Push a neutral controller's reservation up by one tick per CLAIM part.
     /// Range 1; refused on a controller anybody owns.

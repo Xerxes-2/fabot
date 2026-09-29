@@ -793,6 +793,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // No errand, so no Reclaim is pooled and no reserver seat is the
         // re-claimer's.
         Errands = []
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []

@@ -772,6 +772,7 @@ let private splitPair =
             Home = "W1N1"
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = None
             Consignee = None
         }
@@ -779,6 +780,7 @@ let private splitPair =
             Home = "W1N2"
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = None
             Consignee = None
         }
@@ -802,6 +804,7 @@ let private nurseryPair =
                     }
                 ]
             Errands = []
+            Salvage = []
             Mother = None
             Consignee = None
         }
@@ -809,6 +812,7 @@ let private nurseryPair =
             Home = "W1N2"
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = Some "W1N1"
             Consignee = None
         }
@@ -823,6 +827,7 @@ let private raisedPair =
             Home = "W1N1"
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = None
             Consignee = None
         }
@@ -830,6 +835,7 @@ let private raisedPair =
             Home = "W1N2"
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = Some "W1N1"
             Consignee = None
         }
@@ -850,6 +856,7 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
         Colony.roomsProjected
             colony.Outposts
             colony.Errands
+            colony.Salvage
             (Colony.bootstrapping stages colonies colony)
             colony.Home)
 
@@ -1318,6 +1325,7 @@ let twoColonyTests =
                             Home = home
                             Outposts = []
                             Errands = []
+                            Salvage = []
                             Mother = None
                             Consignee = None
                         }
@@ -1325,6 +1333,7 @@ let twoColonyTests =
                             Home = child
                             Outposts = []
                             Errands = []
+                            Salvage = []
                             Mother = Some home
                             Consignee = None
                         }
@@ -1334,6 +1343,7 @@ let twoColonyTests =
                     let colonies = raising home child
 
                     Colony.roomsProjected
+                        []
                         []
                         []
                         (Colony.bootstrapping

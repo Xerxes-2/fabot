@@ -1270,6 +1270,8 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // The ranger's verb (#411): an errand room's resident shoots from the
     // Reactor's ring.
     rangedAttack: ok,
+    // The dismantler's verb (#423): a [[salvage]] room's structures.
+    dismantle: ok,
     pickup: ok,
     move: ok,
     say: ok,

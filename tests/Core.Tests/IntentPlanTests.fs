@@ -5,14 +5,15 @@ open Fabot.Core.Types
 open Fabot.Core.IntentPlan
 
 // Independent transcription of the supported engine actions. The processor's
-// priority chain occupies indices 0..5; all remaining methods have separate
+// priority chain occupies indices 0..6; all remaining methods have separate
 // channels. Exercise both orders, identical duplicates and distinct actors.
-let private chain = 6
+let private chain = 7
 
 let private candidates name =
     [
         HealCreep(name, "patient")
         RangedHealCreep(name, "patient")
+        DismantleStructure(name, "wall")
         RepairStructure(name, "road")
         BuildSite(name, "site")
         AttackCreep(name, "hostile")
@@ -70,13 +71,14 @@ let tests =
                             "channels belong to actors"
             }
             test
-                "a ranged attack stands beside heal, attack and harvest, and not beside ranged heal, repair or build" {
+                "a ranged attack stands beside heal, attack, harvest and dismantle, and not beside ranged heal, repair or build" {
                 // #411: the engine's table is not a partition once `rangedAttack` exists.
                 for beside in
                     [
                         HealCreep("r", "r")
                         AttackCreep("r", "h")
                         HarvestSource("r", "s")
+                        DismantleStructure("r", "w")
                         MoveCreep("r", Top)
                     ] do
                     Expect.equal

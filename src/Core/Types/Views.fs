@@ -111,6 +111,11 @@ type ColonyView =
         /// rules read it — the [[reclaim]] Task's pool and the re-claimer's
         /// seat on the reserver row.
         Errands: Errand list
+        /// The structures standing in this colony's [[salvage]] rooms that its
+        /// dismantler takes down (`Salvage.isTarget`), by id: placed in the
+        /// projection and classified by nothing (`salvaging`), so a rule names
+        /// them from here. Empty once the last one falls.
+        Dismantles: string list
         /// The home room of the colony this one **ships its banked Thorium to**
         /// (`Colony.Consignee`, #349), a declaration and not a sighting: the
         /// far end is outside every scan set this colony holds. A rule may
@@ -144,10 +149,11 @@ type ColonyView =
         Borrowed: BorrowedWork
         /// The declarations this colony's constant names that no chain of
         /// [[seam]]s joins to its home (`Outpost.refused`, `Errand.refused`,
-        /// #243): out of the scan set rather than in it unworkable. Carried
-        /// because the refusal has to be *said* on the [[layout record]];
-        /// empty is the healthy answer and rides here all the same. Each entry
-        /// carries the **kind**, which `RefusedDeclaration` sizes once.
+        /// `Salvage.refused`, #243): out of the scan set rather than in it
+        /// unworkable. Carried because the refusal has to be *said* on the
+        /// [[layout record]]; empty is the healthy answer and rides here all
+        /// the same. Each entry carries the **kind**, which
+        /// `RefusedDeclaration` sizes once.
         Refused: RefusedDeclaration list
         /// What each room this colony **works** was last seen to carry (#151):
         /// the world's sightings, narrowed to the scan set the [[stand-down]]
@@ -373,6 +379,46 @@ module ColonyView =
                 facts.Reactors |> List.filter (fun reactor -> Set.contains reactor.Id targets)
         }
 
+    /// The structures one salvage room's dismantler takes down: the ids vision
+    /// classifies as a salvage target, and has a tile for — and none while
+    /// anybody but us owns or reserves the room, whatever the [[stand-down]]
+    /// makes of that a tick later.
+    let private salvageTargets (facts: RoomFacts) : Set<string> =
+        let nobodyElseHolds =
+            facts.Control
+            |> Option.exists (fun control ->
+                control.Owner = Ownership.Unowned
+                && Option.isNone (RoomControlInfo.heldByOther control))
+
+        if not nobodyElseHolds then
+            Set.empty
+        else
+            facts.TargetKinds
+            |> Map.filter (fun id kind ->
+                Salvage.isTarget kind && Map.containsKey id facts.Layer.TargetPositions)
+            |> Map.keys
+            |> Set.ofSeq
+
+    /// A [[salvage]] room's facts: a [[transit room]]'s ground and bodies, and
+    /// beside them the tile of each structure its dismantler takes down, with
+    /// no kind, hits or store for any of them. ADR-0079
+    let private salvaging (facts: RoomFacts) : RoomFacts =
+        let crossed = transiting facts
+        let targets = salvageTargets facts
+
+        { crossed with
+            Layer =
+                { crossed.Layer with
+                    TargetPositions =
+                        (crossed.Layer.TargetPositions, facts.Layer.TargetPositions)
+                        ||> Map.fold (fun placed id pos ->
+                            if Set.contains id targets then
+                                Map.add id pos placed
+                            else
+                                placed)
+                }
+        }
+
     /// One colony's view of this tick: the rooms it works cut out of the
     /// `World`, the bodies it holds, its own bank and controller, and the
     /// explicit little it may take of a child's. **Pure, and that is the point
@@ -411,6 +457,7 @@ module ColonyView =
 
         let outposts = scan.Outposts
         let errands = scan.Errands
+        let salvageRooms = Set.ofList scan.Salvage
         let bootstrap = scan.Borrowed
         let scanned = scan.Scanned
 
@@ -434,6 +481,7 @@ module ColonyView =
                 room <> home
                 && not (List.contains room bootstrap)
                 && not (Set.contains room errandRooms)
+                && not (Set.contains room salvageRooms)
                 && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
             |> Set.ofList
 
@@ -468,6 +516,11 @@ module ColonyView =
                         { sighting with
                             Targets = lazy (Set.intersect sighting.Targets.Value targets)
                         })
+                elif Set.contains room salvageRooms then
+                    // No memory, as a transit room keeps none: while anything
+                    // stands to take down it is vision, so the room is never
+                    // dark while there is work in it.
+                    room, salvaging facts, None
                 else
                     room, facts, remembered)
 
@@ -587,6 +640,10 @@ module ColonyView =
             // pooling off the declaration would name a target in a room the
             // projection does not hold.
             Errands = errands
+            Dismantles =
+                scan.Salvage
+                |> List.collect (fun room ->
+                    World.roomOf world room |> salvageTargets |> Set.toList)
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee
@@ -616,6 +673,7 @@ module ColonyView =
 
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
                 @ Errand.refused reaches tuning.MaxHops home (Errand.unheld colony.Errands)
+                @ Salvage.refused reaches tuning.MaxHops home colony.Salvage
             // The world's memory of these rooms and of no others (#151), read
             // off the same walk the facts are (#271).
             Sightings =

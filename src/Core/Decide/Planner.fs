@@ -396,6 +396,11 @@ let planTasks
         |> List.filter (fun errand -> not (Set.contains errand.RoomName allyBurning))
         |> List.map (fun errand -> Reclaim(fst errand.Target))
 
+    // One Dismantle per structure standing in a salvage room, off the view's
+    // own list: the projection places each and classifies none, so this is
+    // the one pool that can name them.
+    let dismantles = view.Dismantles |> List.map Dismantle
+
     // One Reserve per reservable outpost controller. The Task stands whatever
     // the reservation has left on it — the ticks remaining size the body, not
     // the pool. Read off the projection's kind census and never off the
@@ -706,6 +711,7 @@ let planTasks
     @ reserves
     @ claims
     @ reclaims
+    @ dismantles
     @ containerRefills
     @ ferryRefills
     @ storageRefills

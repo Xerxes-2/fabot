@@ -170,6 +170,7 @@ let bareRespawn =
         Borrowed = { Rooms = [] }
         Refused = []
         Errands = []
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []
@@ -1808,6 +1809,7 @@ let internal withBareReactorErrand (colony: ColonyView) =
 
     { colony with
         Errands = [ reactorErrand ]
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Spatial =

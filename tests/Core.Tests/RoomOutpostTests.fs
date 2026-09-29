@@ -10,6 +10,35 @@ open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 open Fabot.Core.Tests.RoomInvariantFixtures
 
+/// `linked` over the real captures of the given rooms, built out of the
+/// shell's own predicates (`World.ringWalkable`, `World.groundWalkable`) rather
+/// than a copy of them, which has twice had to move in lockstep. A room no
+/// capture is loaded for is joined to nothing, which keeps the search inside
+/// the rooms the projection would hold.
+let private shippedLinked (rooms: string list) =
+    let rings =
+        rooms
+        |> List.distinct
+        |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
+        |> Map.ofList
+
+    let margin = Tuning.keeperMargin Tuning.defaults
+
+    let walkableIn room tile =
+        match Map.tryFind room rings with
+        | Some(border, _) -> World.ringWalkable margin room border tile
+        | None -> false
+
+    // The far room's ground beside the landing tile, through the same shipped
+    // predicate.
+    let groundIn room tile =
+        match Map.tryFind room rings with
+        | Some(_, terrain) -> World.groundWalkable margin room terrain tile
+        | None -> false
+
+    fun fromRoom toRoom ->
+        Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) (groundIn toRoom) fromRoom toRoom
+
 [<Tests>]
 let outpostDeclarationTests =
     testList
@@ -58,50 +87,14 @@ let outpostDeclarationTests =
                 // `ViewTests` asks this of the **names**; this half needs terrain. The
                 // first declaration to need it is W15S28: two hops out, joined only if
                 // W14S28's two rings are both crossable.
-                //
-                // `linked` is built out of the shell's own predicate
-                // (`World.ringWalkable`), not a copy of it, which has twice had to move
-                // in lockstep. A room no capture is loaded for is joined to nothing,
-                // which keeps the search inside the rooms the projection would hold.
                 // No room declared today is a Source Keeper room, so the mask takes
                 // nothing here.
-                let rings =
-                    Colony.declared
-                    |> List.collect (fun colony ->
-                        Outpost.roomsProjected colony.Outposts colony.Home)
-                    |> List.distinct
-                    |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
-                    |> Map.ofList
-
-                let linked fromRoom toRoom =
-                    let walkableIn room tile =
-                        match Map.tryFind room rings with
-                        | Some(border, _) ->
-                            World.ringWalkable
-                                (Tuning.keeperMargin Tuning.defaults)
-                                room
-                                border
-                                tile
-                        | None -> false
-
-                    // The far room's ground beside the landing tile, through the same
-                    // shipped predicate.
-                    let groundIn room tile =
-                        match Map.tryFind room rings with
-                        | Some(_, terrain) ->
-                            World.groundWalkable
-                                (Tuning.keeperMargin Tuning.defaults)
-                                room
-                                terrain
-                                tile
-                        | None -> false
-
-                    Seam.joinedBy
-                        (walkableIn fromRoom)
-                        (walkableIn toRoom)
-                        (groundIn toRoom)
-                        fromRoom
-                        toRoom
+                let linked =
+                    shippedLinked (
+                        Colony.declared
+                        |> List.collect (fun colony ->
+                            Outpost.roomsProjected colony.Outposts colony.Home)
+                    )
 
                 let unreachable =
                     Colony.declared
@@ -113,6 +106,41 @@ let outpostDeclarationTests =
                 Expect.isEmpty
                     unreachable
                     $"""every declared outpost is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
+            }
+
+            test "a chain of real border rings joins every declared salvage room to its home" {
+                // The outpost case above, over the third declaration kind, the salvage,
+                // through the same shipped predicates: a salvage room no chain
+                // reaches is refused, and its dismantler is never cast.
+                let linked =
+                    shippedLinked (
+                        Colony.declared
+                        |> List.collect (fun colony ->
+                            colony.Home :: Salvage.roomsProjected colony.Salvage colony.Home)
+                    )
+
+                Expect.isNonEmpty
+                    (Colony.declared |> List.collect (fun colony -> colony.Salvage))
+                    "a declaration nobody made is nothing to check"
+
+                let unreachable =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Salvage.refused linked Tuning.defaults.MaxHops colony.Home colony.Salvage
+                        |> List.map (fun entry ->
+                            $"{entry.RoomName} is unreachable from {colony.Home}"))
+
+                Expect.isEmpty
+                    unreachable
+                    $"""every declared salvage room is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
+
+                // W11S29 from W12S28: two crossings, by W12S29. W11S28 is the other
+                // room a shortest walk could cross, and its seam with W11S29 has no
+                // tile to cross by.
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W12S28" "W11S29")
+                    [ [ "W12S28"; "W12S29"; "W11S29" ] ]
+                    "W11S29 is two crossings from W12S28, by W12S29"
             }
 
             test "each declaration names its own capture's furniture, id and tile alike" {

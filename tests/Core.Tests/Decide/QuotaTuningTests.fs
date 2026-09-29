@@ -483,6 +483,7 @@ let quotasRecordTests =
                         "hauler"
                         "miner"
                         "courier"
+                        "dismantler"
                         "upgrader"
                         "worker"
                     ]

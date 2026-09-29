@@ -107,6 +107,17 @@ let minerPattern =
         Block = [ Work; Work; Move ]
     }
 
+/// The dismantler row: Work to take a [[salvage]] room's structures down and
+/// Move to walk there at parity, and no Carry. What a dismantle yields drops on
+/// the floor where there is no store to take it, and a body with no store is
+/// applicable to no energy Task at all. Work beside Move, not heavy, is the
+/// cut `patternOfParts` reads it back off.
+let dismantlerPattern =
+    {
+        Name = "dismantler"
+        Block = [ Work; Move ]
+    }
+
 /// ADR-0006
 /// The pattern table: every body the colony casts is a row here. A future
 /// pattern is one more data row plus its own quota rule, never a new code path.
@@ -121,6 +132,7 @@ let patternTable =
         guardPattern
         rangerPattern
         minerPattern
+        dismantlerPattern
     ]
 
 let bodyCost body =
@@ -140,6 +152,12 @@ let bodyCost body =
 /// upgrader's `11W/1C/11M` is one, and so is the anchor's `6W/1C/1M`.
 let internal standingParts (tuning: Tuning) parts =
     partCount parts Carry * tuning.StandingCarryPerWork < partCount parts Work
+
+/// Whether a counted body is the dismantler row's: Work and no Carry, and not
+/// Work-heavy, which is the miner's. The census arm and the Dismantle Task's
+/// applicability both read it, so the row and the Task cannot disagree.
+let internal isDismantlerParts heavy parts =
+    partCount parts Work > 0 && partCount parts Carry = 0 && not heavy
 
 /// The Work ceiling of the miner row: twenty, the **bank's** ceiling rather
 /// than the engine's part cap — twenty Work and four Move is 2,200 of the 2,300
@@ -178,12 +196,14 @@ let internal minerBodyFor perMove capacity =
 /// The pattern row a body was cast from, read off the parts alone: an ATTACK
 /// part is the guard row, a RANGED_ATTACK part the ranger row, a CLAIM part
 /// the reserver row, a Work-heavy body with no Carry the miner row, a
-/// Work-heavy body with one the anchor row, a standing body at or under that
-/// line the upgrader row, no Work beside a Carry the hauler row, and every
-/// other body the generalist.
+/// Work-heavy body with one the anchor row, any other Work body with no Carry
+/// the dismantler row, a standing body at or under that line the upgrader row,
+/// no Work beside a Carry the hauler row, and every other body the generalist.
 ///
-/// Order matters between the miner and anchor arms, and between the anchor and
-/// upgrader arms, and nowhere else. Miner before anchor: both are Work-heavy
+/// Order matters between the miner and anchor arms, between the anchor and
+/// upgrader arms, and between the dismantler and upgrader arms, and nowhere
+/// else. Dismantler before upgrader: a body with no Carry at all is a standing
+/// body by the Carry-per-Work line. Miner before anchor: both are Work-heavy
 /// and the Carry is the whole difference; without the arm a `[20 Work; 4 Move]`
 /// reads back as an Anchor and retires a garrison from a rock for its whole
 /// life. Anchor before upgrader: `6W/1C/1M` satisfies both, and a body pinned
@@ -206,6 +226,8 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
         minerPattern
     elif heavy then
         anchorPattern
+    elif isDismantlerParts heavy parts then
+        dismantlerPattern
     elif standingParts tuning parts then
         upgraderPattern
     elif partCount parts Work = 0 && partCount parts Carry > 0 then
@@ -321,6 +343,11 @@ let private wholeBlockBodyFor (block: BodyPart list) capacity =
     block
     |> List.distinct
     |> List.collect (fun part -> List.replicate (repeats * partCountIn block part) part)
+
+/// The dismantler row's sizing rule: whole `[Work; Move]` blocks, which a
+/// padded Carry would take off the row's own census.
+let private dismantlerBodyFor capacity =
+    wholeBlockBodyFor dismantlerPattern.Block capacity
 
 /// The hauler row's sizing rule: whole `[Carry; Carry; Move]` blocks and
 /// nothing else. Road parity — two loaded Carry generate two fatigue on a road
@@ -440,6 +467,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         upgraderBodyFor capacity
     elif pattern.Name = minerPattern.Name then
         minerBodyFor sizing.MinerWorkPerMove capacity
+    elif pattern.Name = dismantlerPattern.Name then
+        dismantlerBodyFor capacity
     else
         parityBodyFor pattern capacity
 

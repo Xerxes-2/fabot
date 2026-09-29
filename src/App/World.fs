@@ -681,13 +681,17 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
                 |> List.collect (fun child ->
                     child.Home :: RoomName.transitBetween colony.Home child.Home)
 
-            // The colony's errands and their chains, narrowed by the same
-            // budget for the same reason.
+            // The colony's errands and salvage rooms and their chains, narrowed
+            // by the same budget for the same reason.
             let errands =
                 colony.Errands |> List.filter (Errand.withinHopBudget maxHops colony.Home)
 
+            let salvage =
+                colony.Salvage |> List.filter (Declaration.withinHopBudget maxHops colony.Home)
+
             Outpost.roomsProjected outposts colony.Home
             @ Errand.roomsProjected errands colony.Home
+            @ Salvage.roomsProjected salvage colony.Home
             @ children)
 
     seen @ declared |> List.distinct

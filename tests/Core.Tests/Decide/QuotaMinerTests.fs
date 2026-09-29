@@ -375,6 +375,7 @@ let minerCastTests =
                         "hauler"
                         "miner"
                         "courier"
+                        "dismantler"
                         "upgrader"
                         "worker"
                     ]

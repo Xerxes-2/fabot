@@ -56,7 +56,9 @@ let internal applicable
     // `floor(log10 store.T)` ticks a tick, and never empty it. Thorium never
     // regenerates, so the only thing rationing the dig is the extractor's
     // cooldown, which is `heldByCooldown`'s gate and not applicability's.
-    | Harvest rockId when Atlas.isMineral atlas rockId -> has Work && not (has Carry)
+    // Work-heavy as well (#423): the dismantler is a Work body with no Carry
+    // too, and would otherwise take the mine Post the tick its salvage ends.
+    | Harvest rockId when Atlas.isMineral atlas rockId -> has Work && not (has Carry) && heavy
     // A full garrison keeps digging where it stands; a heavy body still walking
     // is offered the walk only toward a Post of this source with no garrison on
     // it *now* (#258), because the Post cap is counted at arrival and a long
@@ -263,6 +265,9 @@ let internal applicable
     // Ownership is read at `intentFor`, not here: read here, a body whose flag
     // was safe would be released the tick it took it and walk three rooms home.
     | Reclaim _ -> has BodyPart.Claim
+    // The row's own body and no other: a generalist walked two crossings out
+    // for it is a generalist lost to the colony for the walk.
+    | Dismantle _ -> isDismantlerParts heavy creep.Body
     // Spelled through the row predicate the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree. The room decides which row: an
     // errand room's Guard is the ranger's (#411), every other the melee
@@ -335,6 +340,7 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
             None
         else
             Some(ClaimReactor(creep.Name, reactorId))
+    | Dismantle structureId -> Some(DismantleStructure(creep.Name, structureId))
     | Flee -> None
     // The Guard's attack names a hostile chosen at arrival, rather than a
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
@@ -357,6 +363,7 @@ let private glyphFor =
     // fires: standing there holding the Task is the whole of what this body is
     // for. (The miner's is withheld on a cooldown tick; see `emit`.)
     | Reclaim _ -> "☢️"
+    | Dismantle _ -> "🪓"
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
 

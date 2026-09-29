@@ -631,6 +631,7 @@ let errandStandDownTests =
                         Home = "W1N1"
                         Outposts = []
                         Errands = [ reactorErrand ]
+                        Salvage = []
                         Mother = None
                         Consignee = None
                     }

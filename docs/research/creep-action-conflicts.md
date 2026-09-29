@@ -8,7 +8,8 @@ The creep processor contains a `priorities` table. An action runs only when its 
 
 | Present action | Suppresses |
 | --- | --- |
-| `heal` | `repair`, `build`, `attack`, `harvest` |
+| `heal` | `dismantle`, `repair`, `build`, `attack`, `harvest` |
+| `dismantle` | `repair`, `build`, `attack`, `harvest` |
 | `repair` | `build`, `attack`, `harvest` |
 | `build` | `attack`, `harvest` |
 | `attack` | `harvest` |

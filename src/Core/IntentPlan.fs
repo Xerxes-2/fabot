@@ -17,10 +17,10 @@ type Conflict =
 /// order; compatibility does not imply independence from resource availability.
 type Plan = private Plan of Intent list
 
-/// The supported subset of the engine's action channels. The six actions in
-/// Exclusive share its priority chain — heal, ranged heal, repair, build,
-/// attack, harvest, a total order in the engine's table; the others each have
-/// their own channel. This is deliberately exhaustive over Intent: adding an
+/// The supported subset of the engine's action channels. The seven actions in
+/// Exclusive share its priority chain — heal, ranged heal, dismantle, repair,
+/// build, attack, harvest, a total order in the engine's table; the others
+/// each have their own channel. This is deliberately exhaustive over Intent: adding an
 /// act requires deciding where it belongs.
 ///
 /// An act may hold more than one (#411): the engine's table is not a
@@ -59,7 +59,10 @@ let private channels =
     function
     | HarvestSource(name, _)
     | AttackCreep(name, _)
-    | HealCreep(name, _) -> [ name, Exclusive ]
+    | HealCreep(name, _)
+    // In the chain under ranged heal and over repair, and not in the one
+    // `rangedAttack` heads.
+    | DismantleStructure(name, _) -> [ name, Exclusive ]
     // In the chain, and each suppresses `rangedAttack` besides (#411); ranged
     // heal is second under `heal` (#409).
     | BuildSite(name, _)

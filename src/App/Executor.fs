@@ -83,6 +83,8 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName controllerId (fun c t -> c.signController (t, text))
     | RepairStructure(creepName, structureId) ->
         withCreepTarget creepName structureId (fun c t -> c.repair t)
+    | DismantleStructure(creepName, structureId) ->
+        withCreepTarget creepName structureId (fun c t -> c.dismantle t)
     | UpgradeController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.upgradeController t)
     // A declared outpost controller is in the projection without vision, so

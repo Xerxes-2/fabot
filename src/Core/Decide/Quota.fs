@@ -775,6 +775,8 @@ type QuotaRows =
         /// One miner per diggable deposit — 0 below RCL6.
         Miner: int
         Courier: int
+        /// One body while anything stands in a [[salvage]] room to take down.
+        Dismantler: int
         Upgrader: int
         /// How many of `Upgrader` the stock bought (#385): `workforceTarget`
         /// must charge the surplus for these mouths not at all, since they ate
@@ -782,6 +784,19 @@ type QuotaRows =
         UpgraderOnStock: int
         Surplus: int
     }
+
+/// The dismantler row's quota: one body while the colony's [[salvage]] rooms
+/// show anything standing and the bank holds one block, none once the last of
+/// it falls. One and not one per room or per target: nothing is lost while it
+/// takes its time, and the room costs CPU only until it goes dark.
+let internal dismantlerQuota (view: ColonyView) : int =
+    if
+        List.isEmpty view.Dismantles
+        || view.Bank.Capacity < bodyCost dismantlerPattern.Block
+    then
+        0
+    else
+        1
 
 /// The tick's rows, in dependency order, written once so the cascade that
 /// casts a body, the amortization that charges for it and the target that
@@ -806,6 +821,7 @@ let internal quotaRowsOf
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
         Courier = sizing.CourierQuota
+        Dismantler = dismantlerQuota view
         Upgrader = onIncome + onStock
         UpgraderOnStock = onStock
         Surplus = surplus
@@ -911,6 +927,7 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     + rows.Hauler
     + rows.Miner
     + rows.Courier
+    + rows.Dismantler
     + rows.Upgrader
     + workerRow
     |> max view.Tuning.MinWorkforce

@@ -276,6 +276,10 @@ _Avoid_: remote, franchise, territory
 A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its garrison of [[ranger]]s, kept while there is ore to burn in it (#420), which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
 _Avoid_: goal, mission, remote target
 
+### Salvage
+A room a [[colony]] declares to take down the structures of ours still standing there (spawn, extension, tower, storage, terminal, extractor, link, rampart), with a Work-and-Move dismantler and no Carry. Its targets are whatever vision shows standing, so the declaration goes inert when the last one falls. ADR-0079.
+_Avoid_: demolition, cleanup
+
 ### Reservation
 A neutral controller held by this colony's CLAIM parts, which doubles every source in that room, decays by one a tick and caps at 5,000: the economic precondition of an [[outpost]]. **Held** is the colony's word for a room it owns or reserves; the holder is ours, the NPC Invader's or another player's, never a flag. ADR-0042, ADR-0043.
 

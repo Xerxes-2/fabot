@@ -110,7 +110,7 @@ let patternTableTests =
         "pattern table"
         [
             test
-                "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard, the ranger and the miner are the table's rows" {
+                "the worker unit, the Anchor, the hauler, the reserver, the upgrader, the guard, the ranger, the miner and the dismantler are the table's rows" {
                 // The order here is the declaration's and not the casting order
                 // (guard, reserver, Anchor, hauler, upgrader, worker), because nothing
                 // reads this list for a sequence. Every row is cast off a colony fact.
@@ -122,7 +122,9 @@ let patternTableTests =
                 // first so damage lames before it disarms; the miner's is Work and
                 // Move and no Carry at all, the one shape no other row takes and the
                 // cut `patternOfParts` tells it from
-                // the Anchor by, with one Move per five Work, capped at twenty Work.
+                // the Anchor by, with one Move per five Work, capped at twenty Work;
+                // the dismantler's is Work and Move at parity and no Carry either,
+                // told from the miner by not being Work-heavy.
                 // A row is a name and a sizing rule before it is a block.
                 Expect.equal
                     patternTable
@@ -174,6 +176,10 @@ let patternTableTests =
                         {
                             Name = "miner"
                             Block = [ Work; Work; Move ]
+                        }
+                        {
+                            Name = "dismantler"
+                            Block = [ Work; Move ]
                         }
                     ]
                     "every body the colony casts comes from these rows"
@@ -527,6 +533,27 @@ let patternTableTests =
                     "and says which shape it is refusing to size"
             }
 
+            test "the dismantler row builds whole Work/Move blocks and holds no Carry" {
+                // A padded Carry would put the body on every energy Task and take it
+                // off its own row's census.
+                Expect.equal
+                    (bodyFor dismantlerPattern 1000)
+                    (List.replicate 6 Work @ List.replicate 6 Move)
+                    "1,000 buys six blocks, and the 100 left buys nothing"
+
+                Expect.equal
+                    (bodyFor dismantlerPattern 3750)
+                    (List.replicate 25 Work @ List.replicate 25 Move)
+                    "and the richest bank stops at the 50-part cap"
+
+                Expect.equal (bodyFor dismantlerPattern 100) [ Work; Move ] "never below one block"
+
+                for capacity in 150..50..5600 do
+                    Expect.isFalse
+                        (bodyFor dismantlerPattern capacity |> List.contains Carry)
+                        $"no Carry at capacity {capacity}"
+            }
+
             test "spawn planning casts from the pattern table's row" {
                 // An established colony at full capacity: the spawned body
                 // is the table row sized to capacity, and the creep name
@@ -549,5 +576,63 @@ let patternTableTests =
                     Expect.equal body (bodyFor row 550) "body is the row repeated by capacity"
                     Expect.stringStarts creepName $"{row.Name}-" "creep name carries the row's name"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]
+
+/// The rows' living counts off one tick with the given bodies standing, by
+/// row name.
+let private livingByRow (bodies: BodyPart list list) =
+    let colony =
+        { bareRespawn with
+            Bank = bank 2300 2300
+            Creeps = bodies |> List.mapi (fun i body -> creepWith $"c{i}" 0 0 body)
+        }
+
+    (decideOn colony).Quotas.Rows
+    |> List.map (fun row -> row.Row, row.Living)
+    |> Map.ofList
+
+[<Tests>]
+let dismantlerCensusTests =
+    testList
+        "the dismantler's census"
+        [
+            test "a Work/Move body with no Carry reads back as the dismantler, whatever its size" {
+                // Without its own arm it is a standing body — no Carry per Work —
+                // and filled the upgrader row for its whole life.
+                let rows =
+                    livingByRow
+                        [
+                            for capacity in [ 150; 1000; 3750 ] ->
+                                bodyFor dismantlerPattern capacity
+                        ]
+
+                Expect.equal
+                    (Map.tryFind "dismantler" rows)
+                    (Some 3)
+                    "all three are the dismantler row's"
+
+                Expect.equal (Map.tryFind "upgrader" rows) (Some 0) "and none is an upgrader"
+            }
+
+            test "no other row's body reads back as the dismantler" {
+                // Every row the table holds, cast at every bank the colonies stand
+                // at, plus the Anchor and the miner at their smallest: the arm sits
+                // between the miner's and the upgrader's and must take none of them.
+                let others =
+                    patternTable
+                    |> List.filter (fun row -> row.Name <> dismantlerPattern.Name)
+                    |> List.collect (fun row ->
+                        [
+                            for capacity in [ 300; 550; 800; 1300; 1800; 2300; 5600 ] ->
+                                bodyFor row capacity
+                        ])
+
+                let smallest = [ [ Work; Work; Carry; Move ]; [ Work; Work; Move ] ]
+
+                Expect.equal
+                    (livingByRow (others @ smallest) |> Map.tryFind "dismantler")
+                    (Some 0)
+                    "the Carry-less miner is Work-heavy, and every other row carries a Carry or no Work"
             }
         ]

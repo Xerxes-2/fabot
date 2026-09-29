@@ -34,6 +34,7 @@ let snapshotWith creeps spatial =
         Borrowed = { Rooms = [] }
         Refused = []
         Errands = []
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []

@@ -28,6 +28,9 @@ type Intent =
         amount: int option
     | BuildSite of creepName: string * siteId: string
     | RepairStructure of creepName: string * structureId: string
+    /// The dismantle act: a WORK body within range 1 of a structure takes its
+    /// hits down. What the structure yields drops where there is no room for it.
+    | DismantleStructure of creepName: string * structureId: string
     | UpgradeController of creepName: string * controllerId: string
     /// The reserve act: a CLAIM body standing beside a neutral controller
     /// pushes its reservation up by one tick per CLAIM part. Range 1.

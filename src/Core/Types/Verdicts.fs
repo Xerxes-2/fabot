@@ -195,11 +195,14 @@ let declarationKindName =
     function
     | DeclarationKind.Outpost -> "outpost"
     | DeclarationKind.Errand -> "errand"
+    | DeclarationKind.Salvage -> "salvage"
 
 /// The DeclarationKind a wire name spells, or None for a name this vocabulary
 /// does not have.
 let declarationKindOf =
-    reverseOf declarationKindName [ DeclarationKind.Outpost; DeclarationKind.Errand ]
+    reverseOf
+        declarationKindName
+        [ DeclarationKind.Outpost; DeclarationKind.Errand; DeclarationKind.Salvage ]
 
 /// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf.
 /// A carrying vocabulary: the spawn's id rides beside the name.

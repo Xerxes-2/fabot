@@ -31,6 +31,7 @@ let taskId =
     // Identified by the object the declaration names — the engine's own id,
     // so the Memory key survives every tick the room is dark.
     | Reclaim reactorId -> $"reclaim:{reactorId}"
+    | Dismantle structureId -> $"dismantle:{structureId}"
     | Pickup(pileId, resource) -> $"pickup:{pileId}{resourceSuffix resource}"
     // One Flee for the whole colony: every creep inside a Reach is running
     // from the same thing.

@@ -53,6 +53,7 @@ let quiet: ColonyView =
         Borrowed = { Rooms = [] }
         Refused = []
         Errands = []
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []

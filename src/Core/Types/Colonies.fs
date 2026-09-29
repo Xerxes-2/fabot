@@ -4,9 +4,9 @@
 [<AutoOpen>]
 module Fabot.Core.Types.Colonies
 
-/// Which kind of declaration one refusal names: two kinds of room a human
-/// declares, one rule that refuses either, so the channel has to say *what*
-/// it refused.
+/// Which kind of declaration one refusal names: three kinds of room a human
+/// declares, one rule that refuses any, so the channel has to say *what* it
+/// refused.
 [<RequireQualifiedAccess>]
 type DeclarationKind =
     /// A room this colony mines and does not own (`Outpost`).
@@ -14,6 +14,9 @@ type DeclarationKind =
     /// A room this colony walks a body to because it must act on one named
     /// object standing in it (`Errand`).
     | Errand
+    /// A room this colony walks a dismantler to, to take down what of ours
+    /// still stands in it (`Salvage`).
+    | Salvage
 
 /// One declaration this colony cannot work, as the [[layout record]] carries
 /// it: the room a human named, and the kind they named it as. The two
@@ -525,6 +528,56 @@ module Errand =
             Held = true
         }
 
+/// A [[salvage]] room: declared by name alone, because what is taken down in
+/// it is whatever vision shows standing there.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Salvage =
+    /// The kinds a salvage room's dismantler takes down: every ownable kind
+    /// the projection models, and so every one that gives the room's owner
+    /// vision of it. A rampart is one, and the engine turns a dismantle on its
+    /// tile onto it anyway. Roads and containers are nobody's; `Other` is left
+    /// standing, which is the kinds the engine refuses to dismantle (a keeper
+    /// lair, a portal) and the ownable ones nothing models (a lab, a nuker).
+    let isTarget (kind: TargetKind) =
+        match kind with
+        | Structure BuiltKind.Spawn
+        | Structure BuiltKind.Extension
+        | Structure BuiltKind.Tower
+        | Structure BuiltKind.Storage
+        | Structure BuiltKind.Terminal
+        | Structure BuiltKind.Extractor
+        | Structure BuiltKind.Link
+        | Structure BuiltKind.Rampart -> true
+        | Structure BuiltKind.Road
+        | Structure BuiltKind.Container
+        | Structure BuiltKind.Other
+        | Source
+        | Controller
+        | Site _
+        | Dropped _
+        | Tombstone
+        | Mineral -> false
+
+    /// The rooms the colony works this tick: the declared list, less every
+    /// room a [[stand-down]] is withholding (`Outpost.worked`'s twin).
+    let worked (shut: Set<string>) (rooms: string list) : string list =
+        rooms |> List.filter (fun room -> not (Set.contains room shut))
+
+    /// The declared salvage rooms no chain joins to this home
+    /// (`Declaration.refused`).
+    let refused
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (rooms: string list)
+        : RefusedDeclaration list =
+        Declaration.refused linked maxHops home DeclarationKind.Salvage rooms
+
+    /// The rooms one colony's salvage adds to its scan set: each room and
+    /// every room a shortest walk to it could cross (`Errand.roomsProjected`).
+    let roomsProjected (rooms: string list) (home: string) : string list =
+        rooms |> List.collect (fun room -> room :: RoomName.transitBetween home room)
+
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
 /// handed to `ColonyView.ofWorld`: one record and not five derivations, so
@@ -624,6 +677,9 @@ type Colony =
         /// else. Beside `Outposts` and never inside it: an errand room is not
         /// one we mine, and has no controller to be an outpost's.
         Errands: Errand list
+        /// Its [[salvage]] rooms: rooms given up whose structures still stand,
+        /// each of them vision, to be taken down.
+        Salvage: string list
         /// The home room of the [[mother colony]] that raised this one, for as
         /// long as it is still being raised. `None` for a colony that was
         /// never anybody's child and for one that has outgrown its mother.
@@ -687,6 +743,11 @@ module Colony =
                     @ [ Outpost.w11s28 ]
                 // The sector Reactor is six crossings away.
                 Errands = []
+                // W11S29, unclaimed at t807,948 with a spawn, forty extensions,
+                // two towers, a storage and a terminal still standing: each is
+                // vision, and vision is a sweep of the room every tick. Two
+                // crossings by W12S29. Out of this list once the room is dark.
+                Salvage = [ "W11S29" ]
                 Mother = None
                 // 19,848 T banked here with no walk to spend it on; the
                 // terminal stood on 2026-09-17 at (11,43). W15S28 is the one
@@ -733,6 +794,7 @@ module Colony =
                 // Five crossings to the Reactor: the 22,000 Thorium banked
                 // here is ore nothing here can deliver.
                 Errands = []
+                Salvage = []
                 Mother = Some "W12S28"
                 // 16,464 T banked and a terminal at (14,10); same far end and
                 // same reason as W12S28's (#349).
@@ -776,6 +838,7 @@ module Colony =
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.
                 Errands = [ Errand.w15s25 ]
+                Salvage = []
                 Mother = Some "W13S28"
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
@@ -788,6 +851,7 @@ module Colony =
                 Home = "W11S27"
                 Outposts = []
                 Errands = []
+                Salvage = []
                 Mother = Some "W13S28"
                 Consignee = Some "W15S28"
             }
@@ -800,6 +864,7 @@ module Colony =
                 Home = "W17S29"
                 Outposts = []
                 Errands = []
+                Salvage = []
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
             }
@@ -854,10 +919,11 @@ module Colony =
                 {
                     Home = home
                     Outposts = []
-                    // No errand, no mother, nothing to ship: each is a thing
-                    // a human wrote down, and an invented one would buy
-                    // bodies for a constant's slip.
+                    // No errand, no salvage, no mother, nothing to ship: each
+                    // is a thing a human wrote down, and an invented one would
+                    // buy bodies for a constant's slip.
                     Errands = []
+                    Salvage = []
                     Mother = None
                     Consignee = None
                 })
@@ -929,17 +995,20 @@ module Colony =
         colony |> childrenWhere colonies (fun home -> Set.contains home unowned)
 
     /// The rooms one colony projects this tick: its home and its worked
-    /// [[outpost]]s, its [[errand]]s, and the rooms it bootstraps. The whole
-    /// scan set in one sentence, here and not in the shell, because the
-    /// entity lists the Task pool is built from are swept over it too.
+    /// [[outpost]]s, its [[errand]]s, its [[salvage]] rooms, and the rooms it
+    /// bootstraps. The whole scan set in one sentence, here and not in the
+    /// shell, because the entity lists the Task pool is built from are swept
+    /// over it too.
     let roomsProjected
         (outposts: Outpost list)
         (errands: Errand list)
+        (salvage: string list)
         (bootstrap: string list)
         (home: string)
         : string list =
         Outpost.roomsProjected outposts home
         @ Errand.roomsProjected errands home
+        @ Salvage.roomsProjected salvage home
         // A borrowed room carries its transit rooms exactly as an outpost
         // does: a Task in a room no chain reaches is priced at `None`, so a
         // nursery two hops out would be projected and no pioneer could be

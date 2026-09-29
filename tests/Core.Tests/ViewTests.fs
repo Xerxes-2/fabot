@@ -223,6 +223,7 @@ let private declared: Colony list =
                     }
                 ]
             Errands = []
+            Salvage = []
             Mother = None
             Consignee = None
         }
@@ -230,6 +231,7 @@ let private declared: Colony list =
             Home = child
             Outposts = []
             Errands = []
+            Salvage = []
             Mother = Some mother
             Consignee = None
         }
@@ -2669,6 +2671,275 @@ let errandTests =
             }
         ]
 
+// ---- the salvage room ------------------------------------------------------
+
+/// A room given up two crossings south of the mother, by the room the errand
+/// case above crosses. Two hops for that case's reason: a one-hop room would
+/// project no crossing and prove nothing about the walk.
+let private salvageRoom = "W12S30"
+
+/// The mother's declaration with that room to salvage beside her real
+/// outpost, for `errandDeclared`'s reason.
+let private salvageDeclared: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Salvage = [ salvageRoom ]
+            })
+
+/// The ownable structures still standing in it, each on its own tile but the
+/// rampart, which stands over the spawn as the Keep's do.
+let private ownedLeft =
+    [
+        "spawn-old", { X = 3; Y = 3 }, BuiltKind.Spawn
+        "ext-old", { X = 4; Y = 3 }, BuiltKind.Extension
+        "tower-old", { X = 5; Y = 3 }, BuiltKind.Tower
+        "sto-old", { X = 6; Y = 3 }, BuiltKind.Storage
+        "term-old", { X = 7; Y = 3 }, BuiltKind.Terminal
+        "extr-old", { X = 8; Y = 3 }, BuiltKind.Extractor
+        "link-old", { X = 9; Y = 3 }, BuiltKind.Link
+        "ramp-old", { X = 3; Y = 3 }, BuiltKind.Rampart
+    ]
+
+/// The room as vision reads it the tick after its controller was let go: our
+/// structures standing, with the hits and stores the shell files for them,
+/// beside the kinds nobody owns — a road, a container, a rock and the
+/// controller itself.
+let private salvageSeen =
+    let name, facts =
+        roomOf
+            salvageRoom
+            Ownership.Unowned
+            ((ownedLeft |> List.map (fun (id, tile, kind) -> id, tile, Structure kind))
+             @ [
+                 "road-old", { X = 3; Y = 5 }, Structure BuiltKind.Road
+                 "can-old", { X = 4; Y = 5 }, Structure BuiltKind.Container
+                 "src-old", { X = 6; Y = 6 }, Source
+                 "ctrl-old", { X = 8; Y = 8 }, Controller
+             ])
+        |> withSources [ "src-old" ]
+        |> withStores [ "sto-old", 5_000; "term-old", 4; "can-old", 800; "spawn-old", 300 ]
+
+    name,
+    { facts with
+        Hits =
+            facts.Hits
+            |> Map.add "ramp-old" { Hits = 25_000; HitsMax = 300_000 }
+            |> Map.add "road-old" { Hits = 2_000; HitsMax = 5_000 }
+            |> Map.add "tower-old" { Hits = 1_000; HitsMax = 3_000 }
+    }
+
+/// The pair world with the chain to that room in it, both rooms seen.
+let private salvageWorld =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add
+                errandCrossed
+                (snd (
+                    roomOf
+                        errandCrossed
+                        Ownership.Unowned
+                        [ "ctrl-crossing", { X = 6; Y = 5 }, Controller ]
+                ))
+            |> Map.add (fst salvageSeen) (snd salvageSeen)
+    }
+
+/// The same chain gone dark: the last structure has fallen.
+let private darkSalvageWorld =
+    { pairWorld with
+        Rooms = pairWorld.Rooms |> unseen errandCrossed |> unseen salvageRoom
+    }
+
+/// The id a Task names, and None for the two that name none.
+let private namedBy task =
+    match task with
+    | Harvest id
+    | Build id
+    | Repair id
+    | Upgrade id
+    | Reserve id
+    | Claim id
+    | Reclaim id
+    | Dismantle id -> Some id
+    | Pickup(id, _)
+    | Withdraw(id, _)
+    | Refill(id, _) -> Some id
+    | Guard _
+    | Flee -> None
+
+[<Tests>]
+let salvageTests =
+    testList
+        "a salvage room carries the ground, the walk, and the tiles of what is to come down"
+        [
+            test
+                "a seen salvage room lists its ownable structures to dismantle, and classifies none of them" {
+                let view = viewUnder salvageDeclared salvageWorld mother
+                let targets = ownedLeft |> List.map (fun (id, _, _) -> id)
+
+                Expect.equal
+                    (List.sort view.Dismantles)
+                    (List.sort targets)
+                    "every kind a player owns, the rampart and the extractor among them"
+
+                for id, tile, _ in ownedLeft do
+                    Expect.equal
+                        (SpatialInfo.placementOf view.Spatial id)
+                        (Some(RoomPos.at salvageRoom tile))
+                        $"{id} is placed, so a Task naming it can be walked to and acted on"
+
+                    Expect.isFalse
+                        (Map.containsKey id view.Spatial.TargetKinds)
+                        $"{id} is classified by nothing, so no pool that sweeps a kind names it"
+
+                    Expect.isFalse
+                        (Map.containsKey id view.Spatial.Hits)
+                        $"{id} carries no hits: no Repair, and no raid charged for our own dismantling"
+
+                    Expect.isFalse
+                        (Map.containsKey id view.Spatial.Stores)
+                        $"{id} carries no store: nothing is drawn from or poured into it"
+
+                for id in [ "road-old"; "can-old"; "src-old"; "ctrl-old" ] do
+                    Expect.isNone
+                        (SpatialInfo.placementOf view.Spatial id)
+                        $"{id} is nobody's to take down and the room's to keep: not in the view at all"
+            }
+
+            test "nothing in a salvage room is pooled but a Dismantle of each target" {
+                let view = viewUnder salvageDeclared salvageWorld mother
+
+                let room =
+                    (World.roomOf salvageWorld salvageRoom).TargetKinds |> Map.keys |> Set.ofSeq
+
+                let pooledThere =
+                    planTasks
+                        view
+                        (Fabot.Core.Atlas.ofView view)
+                        noThreats
+                        HeldTaskFacts.empty
+                        (outpostFactsOf view)
+                    |> List.filter (fun task ->
+                        namedBy task |> Option.exists (fun id -> Set.contains id room))
+
+                Expect.equal
+                    (pooledThere |> List.sortBy string)
+                    (ownedLeft |> List.map (fun (id, _, _) -> Dismantle id) |> List.sortBy string)
+                    "one Dismantle each, and no Repair, Refill, Withdraw or Harvest out there"
+            }
+
+            test "a salvage room anybody else holds lists nothing to dismantle" {
+                // The tick a claim or a reservation lands, and not a tick later
+                // by way of the stand-down's latch: a structure in a room
+                // another player holds is theirs to lose, and an ally's too.
+                let heldAs (held: RoomControlInfo) =
+                    { salvageWorld with
+                        Rooms =
+                            salvageWorld.Rooms
+                            |> Map.change
+                                salvageRoom
+                                (Option.map (fun facts -> { facts with Control = Some held }))
+                    }
+
+                let reservedBy holder =
+                    { control Ownership.Unowned with
+                        Reservation = Some { Holder = holder; TicksToEnd = 4_000 }
+                    }
+
+                for label, held in
+                    [
+                        "claimed by another player", control Ownership.Rival
+                        "reserved by another player", reservedBy ReservationHolder.Rival
+                        "reserved by the Invader", reservedBy ReservationHolder.Invader
+                        "claimed back by us", control Ownership.Ours
+                    ] do
+                    let view = viewUnder salvageDeclared (heldAs held) mother
+
+                    Expect.isEmpty view.Dismantles $"{label}: nothing to take down"
+
+                    for id, _, _ in ownedLeft do
+                        Expect.isNone
+                            (SpatialInfo.placementOf view.Spatial id)
+                            $"{label}: {id} is not placed for a Task to name"
+
+                let ours =
+                    viewUnder salvageDeclared (heldAs (reservedBy ReservationHolder.Ours)) mother
+
+                Expect.equal
+                    (List.length ours.Dismantles)
+                    (List.length ownedLeft)
+                    "our own reservation leaves the room ours to take down"
+            }
+
+            test "a dark salvage room is projected with nothing to dismantle" {
+                // The last structure fell and the room's vision went with it:
+                // the declaration is inert until a human takes it out.
+                let view = viewUnder salvageDeclared darkSalvageWorld mother
+
+                Expect.isEmpty view.Dismantles "nothing seen standing, nothing to take down"
+
+                Expect.isTrue
+                    (Map.containsKey salvageRoom view.Spatial.Rooms)
+                    "the room is still projected for its ground"
+
+                Expect.isEmpty
+                    view.Refused
+                    "and a room a chain reaches is not refused for being dark"
+            }
+
+            test "a salvage room no chain reaches is refused under its own kind" {
+                let unreachable =
+                    salvageDeclared
+                    |> List.map (fun colony ->
+                        if colony.Home <> mother then
+                            colony
+                        else
+                            { colony with Salvage = [ "W9N9" ] })
+
+                let view = viewUnder unreachable salvageWorld mother
+
+                Expect.equal
+                    view.Refused
+                    [
+                        {
+                            RoomName = "W9N9"
+                            Kind = DeclarationKind.Salvage
+                        }
+                    ]
+                    "named on the layout record as the kind a human declared it as"
+
+                Expect.isEmpty
+                    view.Dismantles
+                    "and nothing is dismantled in a room nothing walks to"
+
+                Expect.isFalse (Map.containsKey "W9N9" view.Spatial.Rooms) "nor is it projected"
+            }
+
+            test "no salvage room is declared as a home, an outpost or an errand" {
+                // The branch order in `ColonyView.ofWorld` reads an errand room
+                // before a salvage one, and a home or an outpost is never
+                // narrowed at all: a room in two lists would be salvaged by
+                // nobody, or salvaged where a human meant it kept.
+                let salvage =
+                    Colony.declared |> List.collect (fun colony -> colony.Salvage) |> Set.ofList
+
+                let kept =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Home :: (colony.Outposts |> List.map (fun o -> o.RoomName))
+                        @ (colony.Errands |> List.map (fun e -> e.RoomName)))
+                    |> Set.ofList
+
+                Expect.isEmpty
+                    (Set.intersect salvage kept |> Set.toList)
+                    "no room is taken down by one list and kept by another"
+            }
+        ]
+
 // ---- the scan set over the masked layer (#317) -----------------------------
 
 /// The chain the live errand walks, as the server has it: W15S28, the two
@@ -2812,6 +3083,7 @@ let private declaringOutpost outpost : Colony =
         Home = keeperHome
         Outposts = [ outpost ]
         Errands = []
+        Salvage = []
         Mother = None
         Consignee = None
     }
@@ -2821,6 +3093,7 @@ let private declaringErrand errand : Colony =
         Home = keeperHome
         Outposts = []
         Errands = [ errand ]
+        Salvage = []
         Mother = None
         Consignee = None
     }

@@ -136,6 +136,7 @@ let internal restockWait (view: ColonyView) task =
     | Reserve _
     | Claim _
     | Reclaim _
+    | Dismantle _
     | Guard _
     | Flee -> 0
 
@@ -176,7 +177,8 @@ let private safetyTier task =
     | Upgrade _
     | Reserve _
     | Claim _
-    | Reclaim _ -> false
+    | Reclaim _
+    | Dismantle _ -> false
 
 /// The room a Task's Work Area lies in: its target's, so the Reach taken out of
 /// it is that room's share. None for Flee, whose area is the creep's own
@@ -191,7 +193,8 @@ let private roomOfWork atlas task =
     | Upgrade id
     | Reserve id
     | Claim id
-    | Reclaim id -> Atlas.targetRoom atlas id
+    | Reclaim id
+    | Dismantle id -> Atlas.targetRoom atlas id
     | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
@@ -763,7 +766,9 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
             Feeding
         | Build _
         | Repair _
-        | Upgrade _ -> Surplus
+        | Upgrade _
+        // Nothing waits on it: the room is only costing CPU while it stands.
+        | Dismantle _ -> Surplus
 
     // Where the pool's Feeding-tier stores stand, so a pickup can be asked
     // whether one of them is under its own pile. Read off the pool and not

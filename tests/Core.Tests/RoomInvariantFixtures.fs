@@ -199,6 +199,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Borrowed = { Rooms = [] }
         Refused = []
         Errands = []
+        Dismantles = []
         Consignee = None
         Crossed = Set.empty
         Reactors = []

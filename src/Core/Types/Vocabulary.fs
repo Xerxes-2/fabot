@@ -136,6 +136,10 @@ type Task =
     /// The act fires only on a tick the reactor is not ours; every other tick
     /// the body holds the Task and stands on the ring.
     | Reclaim of reactorId: string
+    /// Taking a structure down with WORK parts: one per ownable structure
+    /// standing in a declared [[salvage]] room. Named for the act and not for
+    /// the room, so a later pool may name a structure of another kind.
+    | Dismantle of structureId: string
     /// Getting out of a Threat's Reach. The one Task with no target and no
     /// action: its Work Area is the tiles no Threat can hurt, and the Emitter
     /// issues movement for it and nothing else.
