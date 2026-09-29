@@ -934,6 +934,41 @@ let keeperMaskTests =
                 Expect.isFalse
                     (Declaration.routable linked Tuning.defaults.MaxHops "W15S27" "W14S26")
                     "so W15S27 may not declare W14S26: the way out is open and the way home is not"
+
+                // The hop count recalled off the join table answers what the
+                // chain search answers, reads the row it filed the second time,
+                // and files another row under other rooms withheld.
+                let hopTable = JoinTable()
+                let tuning = Tuning.defaults
+                let hopsOf = World.hopsUnder StandDown.none hopTable tuning world
+
+                for home, room in [ "W15S27", "W14S26"; "W15S27", "W15S26"; "W15S26", "W14S26" ] do
+                    Expect.equal
+                        (hopsOf home room)
+                        (Declaration.hops (World.linkedBy margin world) tuning.MaxHops home room)
+                        $"{home} to {room}: the recalled count is the search's"
+
+                let filed = hopTable.Hops.Count
+                hopsOf "W15S27" "W15S26" |> ignore
+                Expect.equal hopTable.Hops.Count filed "asked again, it reads the row"
+
+                let withheld =
+                    World.hopsUnder
+                        { StandDown.none with
+                            Impassable = Set.singleton "W15S26"
+                        }
+                        hopTable
+                        tuning
+                        world
+
+                Expect.isNone
+                    (withheld "W15S27" "W15S26")
+                    "a room withheld from passage is reached by no chain"
+
+                Expect.equal
+                    hopTable.Hops.Count
+                    (filed + 1)
+                    "under its own key, beside the open one"
             }
         ]
 

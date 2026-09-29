@@ -111,6 +111,7 @@ let private sizes () =
             "logEntries"
             ==> (log |> Map.toList |> List.sumBy (fun (_, c) -> List.length c.Entries))
             "joins" ==> joins.Count
+            "hops" ==> joins.Hops.Count
         ]
 
 do
@@ -125,7 +126,10 @@ do
                             "sightings" ==> (fun () -> sightings <- Map.empty)
                             "cpuLine" ==> (fun () -> cpuLine <- None)
                             "observeLog" ==> (fun () -> observeLog <- None)
-                            "joins" ==> (fun () -> joins.Clear())
+                            "joins"
+                            ==> (fun () ->
+                                joins.Joins.Clear()
+                                joins.Hops.Clear())
                         ]
             ]
 

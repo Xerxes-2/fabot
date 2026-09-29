@@ -335,7 +335,17 @@ type RoomSighting =
 /// holds no `|`) and not by the tuple: Fable hashes a string key into a
 /// native JS `Map`, where a tuple key is hashed and compared field by field
 /// on every read, and the scan set's chain search reads this per step.
-type JoinTable = System.Collections.Generic.Dictionary<string, bool>
+///
+/// Beside it, the hop counts the scan set and the harassment casting ask of
+/// the same relation (`World.hopsUnder`): a chain search per declaration per
+/// colony, twice a tick, for an answer that moves only with the rooms the
+/// world holds and the rooms withheld from passage, both of which ride in
+/// its key.
+type JoinTable() =
+    member val Joins = System.Collections.Generic.Dictionary<string, bool>()
+    member val Hops = System.Collections.Generic.Dictionary<string, int>()
+    /// The ordered pairs filed.
+    member this.Count = this.Joins.Count
 
 /// Everything this tick was seen to hold, once. The shell builds one
 /// (`World.ofGame`, the only code that touches `Game`) and
@@ -586,11 +596,11 @@ module World =
                 // `ContainsKey` then the indexer, never `TryGetValue` in a
                 // match: Fable compiles the out-parameter pattern into four
                 // allocations per read (`Atlas.memoised`'s note).
-                if joins.ContainsKey key then
-                    joins.[key]
+                if joins.Joins.ContainsKey key then
+                    joins.Joins.[key]
                 else
                     let joined = linked keeperMargin world fromRoom toRoom
-                    joins.[key] <- joined
+                    joins.Joins.[key] <- joined
                     joined
 
     /// **A room a stronghold holds is not a link** (#382), asked of **both**
@@ -611,6 +621,40 @@ module World =
     let reachesUnder (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
         linkedRecalling joins (Tuning.keeperMargin tuning) world
         |> linkedAvoiding gate.Impassable
+
+    /// `Declaration.hops` over `reachesUnder`, recalled from the join table:
+    /// keyed by everything the chain search reads that is not terrain — the
+    /// keeper margin, the hop budget, the rooms withheld from passage and the
+    /// rooms the world holds, since `linkedRecalling` joins nothing outside
+    /// them. Past 4,096 rows the table is emptied rather than grown: a key
+    /// minted per change of the world's rooms has nothing else to evict it.
+    let hopsUnder (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
+        let reaches = reachesUnder gate joins tuning world
+
+        let stamp =
+            String.concat
+                "|"
+                [
+                    string (Tuning.keeperMargin tuning)
+                    string tuning.MaxHops
+                    String.concat "," gate.Impassable
+                    String.concat "," (Map.keys world.Rooms)
+                ]
+
+        fun (home: string) (room: string) ->
+            let key = stamp + "|" + home + "|" + room
+
+            if joins.Hops.ContainsKey key then
+                match joins.Hops.[key] with
+                | hops when hops < 0 -> None
+                | hops -> Some hops
+            else
+                if joins.Hops.Count >= 4096 then
+                    joins.Hops.Clear()
+
+                let hops = Declaration.hops reaches tuning.MaxHops home room
+                joins.Hops.[key] <- Option.defaultValue -1 hops
+                hops
 
     /// The colony whose home bank holds the most, ties by home name.
     let private largestBank (world: World) (colonies: Colony list) : string option =
@@ -635,7 +679,7 @@ module World =
         (harass: Harassment)
         (world: World)
         : HarassCasting =
-        let reaches = reachesUnder StandDown.none joins tuning world
+        let hopsOf = hopsUnder StandDown.none joins tuning world
 
         let affording =
             living colonies world
@@ -649,7 +693,7 @@ module World =
                     h,
                     affording
                     |> List.choose (fun colony ->
-                        Declaration.hops reaches tuning.MaxHops colony.Home h.RoomName
+                        hopsOf colony.Home h.RoomName
                         |> Option.map (fun hops ->
                             (hops, -(roomOf world colony.Home).Energy.Capacity, colony.Home)))
                     |> List.sort
@@ -737,28 +781,27 @@ module World =
         (world: World)
         (colony: Colony)
         : ScanSet =
-        // One table for both narrowings and every hop inside each: the two
-        // filters ask about overlapping chains out of the same home.
-        let reaches = reachesUnder gate joins tuning world
+        // Every declaration's chain off the one recalled count (`hopsUnder`):
+        // routable is a chain inside the budget both ways.
+        let hopsOf = hopsUnder gate joins tuning world
+
+        let routable room =
+            hopsOf colony.Home room |> Option.isSome
 
         let cast =
             casting.Casters
-            |> List.filter (fun (h, caster) ->
-                caster = Some colony.Home
-                && Declaration.routable reaches tuning.MaxHops colony.Home h.RoomName)
+            |> List.filter (fun (h, caster) -> caster = Some colony.Home && routable h.RoomName)
             |> List.map fst
 
         let outposts =
             Outpost.worked gate.Shut colony.Outposts
-            |> List.filter (Outpost.routable reaches tuning.MaxHops colony.Home)
+            |> List.filter (fun outpost -> routable outpost.RoomName)
 
         let errands =
             Errand.worked gate.Shut colony.Errands
-            |> List.filter (Errand.routable reaches tuning.MaxHops colony.Home)
+            |> List.filter (fun errand -> routable errand.RoomName)
 
-        let salvage =
-            Salvage.worked gate.Shut colony.Salvage
-            |> List.filter (Declaration.routable reaches tuning.MaxHops colony.Home)
+        let salvage = Salvage.worked gate.Shut colony.Salvage |> List.filter routable
 
         // The two halves of what a mother projects for a child of hers,
         // disjoint by construction: a room she is raising is one we own, and
