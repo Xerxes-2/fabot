@@ -252,9 +252,16 @@ let loop () =
     // asks this shell for a census signature that is the decision layer's own.
     // A colony that needs no re-plan passes its turn; one colony alone is
     // always its own turn, so a one-colony world is unchanged.
+    //
+    // The reset tick itself is nobody's turn (#442): every memo is empty, every
+    // colony prices from empty tables under a cold bundle, and the one
+    // re-plan on top of that read 496 ms. Each colony serves
+    // `PlanMemo.deferred` for that tick, and the turns start on the next.
+    let resetTick = Map.isEmpty planMemos
+
     let turn =
-        if List.isEmpty views then
-            0
+        if List.isEmpty views || resetTick then
+            -1
         else
             Game.time % List.length views
 
