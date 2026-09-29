@@ -944,10 +944,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // row's count, not this cap, is what buys bodies.
         | Guard room when Set.contains room (Facts.errandRooms view) ->
             Capacity.fighters (rangersWanted view room + view.Tuning.RangerResidents)
-        // One over in a harassment room, for the relief cast at the
-        // incumbent's lead.
+        // One ranger per harassment room (#439), and its relief beside it
+        // (`Capacity.Relieved`).
         | Guard room when Set.contains room (Facts.harassRooms view) ->
-            Capacity.fighters (rangersWanted view room + 1)
+            Capacity.fighters (rangersWanted view room) |> Capacity.relieving
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller: a second body there buys nothing.
         | Reserve _

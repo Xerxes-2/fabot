@@ -1,10 +1,12 @@
 # An enemy remote is harassed by the colony that can best afford it
 
-> **Status:** amended by #437
+> **Status:** amended by #437, #439
 
 > **Accepted 2026-09-29** on #432, after Trepidimous (W18S26, one spawn) raided W17S29 three times. The user's decision: before any siege, harass their remotes, and allocate the work globally rather than per colony.
 
 > **Amended by #437** on 2026-09-29, the day it was accepted, so W15S28 can harass W18S27. Decision 2's order is now **fewest crossings first**, then the largest bank, then the home name: with the bank first, W13S28 (six crossings) would take W17S26 from W15S28 (four) whenever its capacity passed W15S28's, and flip back when it fell below, each flip a new ranger. The crossings do not move with the bank, so the order does not flip. Decision 3's budget is **six** (ADR 0058's amendment carries the history). A declaration may name a detour, `Harass.Via`, which its caster projects beside the name rectangle.
+
+> **Amended by #439** on 2026-09-29, after two rangers followed Trepidimous's claimer, as fast as they are, across W18S27 for 18 ticks without a shot while its hauler stood idle by the source. Decision 4's ground is now an **ambush**: within ranged reach (3) of each `Enemy` creep standing on a work spot (within 2 of `Stand`, where a hauler draws from the miner's pile, or within 1 of the declaration's new `Controller` tile, both read off the capture), beside each armed target as before, and on `Stand`'s seats while neither stands there. A creep walking elsewhere is shot when it comes into reach and never chased. The room's Guard admits **one** ranger, and its relief beside it only while the incumbent is inside its lead (`Capacity.relieving`), the pair then kept together: the former cap of two let two fresh bodies crowd one room and leave another empty.
 
 We decided five things.
 

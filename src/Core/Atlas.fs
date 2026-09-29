@@ -790,6 +790,13 @@ let adjacentWalkableIn (atlas: Atlas) (room: string) (pos: Pos) : Pos list =
     let weights = weightsOf atlas room
     neighbours pos |> List.filter (walkableAt weights)
 
+/// Walkable tiles within `radius` of `pos` read as a tile of `room`, in
+/// (X, Y) order: `adjacentWalkableIn` at a range other than one, off the same
+/// grid. The tile itself is among them if it is walkable.
+let walkableWithinIn (atlas: Atlas) (room: string) (radius: int) (pos: Pos) : Pos list =
+    let weights = weightsOf atlas room
+    tilesWithin radius pos |> List.filter (walkableAt weights)
+
 /// Every tile of the room a creep may stand on — `adjacentWalkableIn`'s
 /// answer over the whole room, off the same grid and so under the same
 /// terrain, road and obstacle precedence. This is Flee's safe ground, and a

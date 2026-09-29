@@ -311,6 +311,12 @@ let outpostDeclarationTests =
                         h.Stand.Room
                         h.RoomName
                         $"{h.RoomName}: the Stand is a tile of its own room"
+
+                    Expect.equal
+                        (Some h.Controller)
+                        ((load h.RoomName).RealController
+                         |> Option.map (fun (_, pos) -> RoomPos.at h.RoomName pos))
+                        $"{h.RoomName}: the Controller is the capture's controller tile"
             }
 
             test "each declaration names its own capture's furniture, id and tile alike" {

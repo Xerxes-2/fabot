@@ -69,6 +69,11 @@ type Capacity =
         /// Ticks for which a relief and its incumbent are meant to coexist at
         /// this Task (#329). Zero keeps the ordinary arrival-counted cap.
         Handover: int
+        /// Whether a holder inside its lead (the spawn row's `expiring`) is
+        /// out of every cap above, so the relief cast at that lead takes the
+        /// seat beside it (#439). For a Task no arrival is priced for, where
+        /// `Handover` has nothing to be read against. False for every other.
+        Relieved: bool
         /// ADR-0071. An energy budget the holders' loads are counted against,
         /// where every cap above counts holders. The refill cluster's free
         /// energy; None for every other Task.
@@ -85,6 +90,7 @@ module Capacity =
             Garrison = Set.empty
             Exempt = Set.empty
             Handover = 0
+            Relieved = false
             Budget = None
         }
 
@@ -112,6 +118,10 @@ module Capacity =
     /// ticks. The cap remains the permanent seat count; this is only its
     /// handover window (#329).
     let handingOver ticks (capacity: Capacity) = { capacity with Handover = ticks }
+
+    /// Admit a relief beside a holder inside its lead, and no second body
+    /// beside one outside it (#439).
+    let relieving (capacity: Capacity) = { capacity with Relieved = true }
 
     /// A budget the holders' loads are counted against (#374): admitted while
     /// what they carry together falls short of `energy`.

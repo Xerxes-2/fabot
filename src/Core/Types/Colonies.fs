@@ -623,6 +623,9 @@ type Harass =
         /// Where the ranger stands while the room holds no target, or is dark:
         /// the enemy's source, which is where its miner comes back to.
         Stand: RoomPos
+        /// The room's controller tile, where its reserver stands for the
+        /// whole reservation: the other work spot the ranger ambushes (#439).
+        Controller: RoomPos
         /// Rooms a human names for a detour the name rectangle
         /// (`RoomName.transitBetween`) does not hold, projected beside it so
         /// the chain search can find the walk. Empty where no detour is
@@ -819,13 +822,14 @@ module Colony =
     /// The enemy remotes a human has declared for harassment: one list for
     /// the whole bot, each room cast by the colony `World.harassCasters`
     /// names, or refused while none can. Each Stand is the enemy's source
-    /// tile off the committed capture.
+    /// tile off the committed capture, and each Controller the controller's.
     let harass: Harass list =
         [
             {
                 RoomName = "W18S27"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W18S27"; X = 27; Y = 7 }
+                Controller = { Room = "W18S27"; X = 25; Y = 32 }
                 // W15S28's walk there dips south round a wall (#437).
                 Via = [ "W15S29"; "W16S29" ]
             }
@@ -833,6 +837,7 @@ module Colony =
                 RoomName = "W17S26"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W17S26"; X = 28; Y = 10 }
+                Controller = { Room = "W17S26"; X = 8; Y = 21 }
                 Via = []
             }
             // Where their miner went once W17S26 was held (2026-09-29).
@@ -840,6 +845,7 @@ module Colony =
                 RoomName = "W17S25"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W17S25"; X = 18; Y = 19 }
+                Controller = { Room = "W17S25"; X = 15; Y = 36 }
                 Via = []
             }
         ]

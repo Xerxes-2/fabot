@@ -73,13 +73,45 @@ let matchCreeps
         outlivesHandover handover arrival (Map.tryFind name lives)
         && outlives (Atlas.walkTicks atlas name task) (Some candidate.TicksToLive)
 
-    let holdersAt (acc: Assignments) (candidate: CreepInfo) task handover arrival =
+    // Whether each living creep is inside its lead, priced only if asked.
+    let expiringNow =
+        view.Creeps
+        |> List.map (fun c -> c.Name, lazy (expiring view atlas sizing c))
+        |> Map.ofList
+
+    let isExpiring name =
+        Map.tryFind name expiringNow |> Option.exists (fun e -> e.Value)
+
+    // A holder inside its lead is out of a relieved Task's caps (#439): the
+    // relief its row casts at that lead takes the seat beside it.
+    let relieved (capacity: Capacity) name = capacity.Relieved && isExpiring name
+
+    // A relief and its incumbent stay together once both hold a relieved Task,
+    // whatever the lead reads: it moves with the colony's worst room, and a
+    // lead that shrank mid-walk would release the relief. One holding under
+    // half the other's life is a relief pair; two of one generation are not.
+    let reliefPair (acc: Assignments) (creep: CreepInfo) (pooled: PooledTask) =
+        pooled.Capacity.Relieved
+        && (let tid = taskId pooled.Task
+
+            acc
+            |> Map.exists (fun name assigned ->
+                assigned = tid
+                && Map.tryFind name lives
+                   |> Option.exists (fun life ->
+                       2 * min life creep.TicksToLive < max life creep.TicksToLive)))
+
+    let holdersAt (acc: Assignments) (candidate: CreepInfo) task (capacity: Capacity) arrival =
         let tid = taskId task
 
         acc
         |> Map.toList
         |> List.choose (fun (name, assigned) ->
-            if assigned = tid && overlaps candidate task handover arrival name then
+            if
+                assigned = tid
+                && overlaps candidate task capacity.Handover arrival name
+                && not (relieved capacity name)
+            then
                 Some name
             else
                 None)
@@ -130,7 +162,7 @@ let matchCreeps
             // walks the assignment map nor pays for an arrival.
             true
         else
-            let holders = holdersAt acc creep pooled.Task capacity.Handover arrival.Value
+            let holders = holdersAt acc creep pooled.Task capacity arrival.Value
             let cls = classOf creep.Name
 
             let inClass wanted =
@@ -304,10 +336,12 @@ let matchCreeps
                 | None when Option.isSome (graced creep tid) ->
                     Map.add name tid acc, hold loads tid, released
                 | None -> release ReleaseReason.TaskGone
-                // An expiring holder is kept over capacity where a fresh
-                // candidate would be refused.
+                // An expiring holder, or one of a relief pair, is kept over
+                // capacity where a fresh candidate would be refused.
                 | Some pooled ->
-                    match gate (lazy (expiring view atlas sizing creep)) acc creep pooled with
+                    let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
+
+                    match gate escape acc creep pooled with
                     | Error reason -> release (ReleaseReason.Rejected reason)
                     | Ok _ -> Map.add name tid acc, hold loads tid, released)
 

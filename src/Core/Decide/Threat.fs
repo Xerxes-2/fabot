@@ -30,9 +30,10 @@ type Threats =
         /// Per declared errand room (#414), the ranger's Work Area there: the
         /// Reactor's own ring, which it holds and shoots from (#411).
         ErrandRing: Map<string, Set<RoomPos>>
-        /// Per [[harassment room]] (#432), the ranger's Work Area there: the
-        /// walkable tiles beside every target standing in it, and beside the
-        /// declared `Stand` while none does.
+        /// Per [[harassment room]] (#432), the ranger's Work Area there: an
+        /// ambush (#439) — the walkable tiles within ranged reach of every
+        /// enemy creep on a work spot, beside every armed target, and the
+        /// declared `Stand`'s seats while neither stands there.
         HarassRing: Map<string, Set<RoomPos>>
     }
 
@@ -177,30 +178,42 @@ let threatsOf (view: ColonyView) atlas : Threats =
 
     let errands = errandRooms view
 
-    // The harassment rooms' ranger ground: beside what the Guard there may
-    // shoot, else beside the Stand.
+    // A work spot is where the enemy's bodies must stop: within two of the
+    // source, where a hauler draws from the miner's pile, and beside the
+    // controller. The Stand's seats are within reach of all of the first.
     let harassRing =
         view.Harass
         |> List.map (fun h ->
             let room = h.RoomName
 
-            let targets =
-                view.Hostiles
-                |> List.filter (fun hostile ->
-                    hostile.Pos.Room = room && guardShoots view errands hostile)
-                |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+            let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
+
+            let onWorkSpot (hostile: HostileInfo) =
+                [ h.Stand, 2; h.Controller, 1 ]
+                |> List.exists (fun (spot, reach) ->
+                    RoomPos.range spot hostile.Pos |> Option.exists (fun r -> r <= reach))
+
+            let armedTargets, unarmedTargets =
+                inRoom |> List.filter (guardShoots view errands) |> List.partition isArmed
+
+            let ambushed =
+                (armedTargets |> List.map (fun hostile -> 1, RoomPos.pos hostile.Pos))
+                @ (unarmedTargets
+                   |> List.filter onWorkSpot
+                   |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos))
 
             let around =
-                if List.isEmpty targets then
-                    [ RoomPos.pos h.Stand ]
+                if List.isEmpty ambushed then
+                    [ 1, RoomPos.pos h.Stand ]
                 else
-                    targets
+                    ambushed
 
-            let standing = Set.ofList targets
+            let standing =
+                inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
             room,
             around
-            |> List.collect (Atlas.adjacentWalkableIn atlas room)
+            |> List.collect (fun (radius, pos) -> Atlas.walkableWithinIn atlas room radius pos)
             |> List.filter (fun tile -> not (Set.contains tile standing))
             |> Set.ofList
             |> RoomPos.setAt room)

@@ -3284,6 +3284,7 @@ let private harassDeclared: Harass list =
             RoomName = harassRoom
             Enemy = enemy
             Stand = RoomPos.at harassRoom { X = 5; Y = 5 }
+            Controller = RoomPos.at harassRoom { X = 40; Y = 40 }
             Via = []
         }
     ]
@@ -3497,6 +3498,7 @@ let harassViewTests =
                                     RoomName = near
                                     Enemy = enemy
                                     Stand = RoomPos.at near { X = 5; Y = 5 }
+                                    Controller = RoomPos.at near { X = 40; Y = 40 }
                                     Via = []
                                 }
                             ]
@@ -3681,6 +3683,7 @@ let harassViewTests =
                             RoomName = "W9N9"
                             Enemy = enemy
                             Stand = RoomPos.at "W9N9" { X = 5; Y = 5 }
+                            Controller = RoomPos.at "W9N9" { X = 40; Y = 40 }
                             Via = []
                         }
                     ]
