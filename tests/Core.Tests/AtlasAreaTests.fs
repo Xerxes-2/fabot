@@ -301,6 +301,16 @@ let standingTests =
                     (walkableTilesIn atlas (atlasHome atlas))
                     (Set.ofList [ { X = 9; Y = 10 }; { X = 10; Y = 10 }; { X = 10; Y = 11 } ])
                     "every tile the floods price and no other"
+
+                // Flee's safe ground: the same tiles less a Reach, joined to
+                // the room, exactly as the difference mapped over would be.
+                let reach = Set.ofList [ { X = 10; Y = 10 }; { X = 40; Y = 40 }; { X = -1; Y = 3 } ]
+
+                Expect.equal
+                    (walkableTilesExcept atlas (atlasHome atlas) reach)
+                    (Set.difference (walkableTilesIn atlas (atlasHome atlas)) reach
+                     |> RoomPos.setAt (atlasHome atlas))
+                    "the walkable tiles less the Reach, off the grid tile ignored"
             }
 
             test "mayAct judges the tiles it is handed, not the Task's whole area" {

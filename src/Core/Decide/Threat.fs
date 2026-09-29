@@ -153,10 +153,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 Reach = reach
                 Safe =
                     reach
-                    |> Map.map (fun room tiles ->
-                        lazy
-                            (Set.difference (Atlas.walkableTilesIn atlas room) tiles
-                             |> RoomPos.setAt room))
+                    |> Map.map (fun room tiles -> lazy (Atlas.walkableTilesExcept atlas room tiles))
                 Ring = ring
                 ErrandRing = Map.empty
                 HarassRing = Map.empty

@@ -796,6 +796,24 @@ let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
                     posAt index
         ]
 
+/// The same tiles less `except`, joined to the room: Flee's safe ground,
+/// `walkableTilesIn` less a Reach. One pass over the grid and one tree built,
+/// where the difference of two sets mapped into a third built three.
+let walkableTilesExcept (atlas: Atlas) (room: string) (except: Set<Pos>) : Set<RoomPos> =
+    let weights = weightsOf atlas room
+    let excluded = Array.create tileCount false
+
+    for tile in except do
+        if inGrid tile then
+            excluded.[indexOf tile] <- true
+
+    Set.ofList
+        [
+            for index in 0 .. tileCount - 1 do
+                if at index weights >= 0 && not excluded.[index] then
+                    RoomPos.at room (posAt index)
+        ]
+
 /// The tile a creep stands on; None for a creep the projection does not
 /// place — as `positionOf` is the same question about a target — and, like
 /// it, room and tile in one.
