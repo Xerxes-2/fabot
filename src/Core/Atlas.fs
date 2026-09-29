@@ -121,6 +121,11 @@ type Atlas =
             /// built at most once per tick. Only Harvest narrows, so `posts` is
             /// derived once per source.
             HeavyAreas: System.Collections.Generic.Dictionary<Task, Set<RoomPos>>
+            /// A light body's Harvest area — the Seats less the Posts —
+            /// per Task, beside `HeavyAreas` and for its reason: the Matcher
+            /// asks it per creep per candidate, and it is the same set for
+            /// every light body.
+            LightAreas: System.Collections.Generic.Dictionary<Task, Set<RoomPos>>
             /// The [[post]] census per room — the standing Posts with their sites
             /// counted in — built at most once per tick. A pure function of this
             /// tick's grids and kind census, and asked per rock, per candidate and
@@ -355,6 +360,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
+        LightAreas = System.Collections.Generic.Dictionary()
         Posts = System.Collections.Generic.Dictionary()
         StandingPosts = System.Collections.Generic.Dictionary()
         SeatUnions = System.Collections.Generic.Dictionary()
@@ -1332,15 +1338,15 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomP
     // the two kinds of body stand on disjoint tiles of one source and a light
     // crowd cannot squat the tile the Anchor was hired for.
     | Harvest sourceId ->
-        match postsOfIn atlas sourceId with
-        | Some(room, postTiles) when not (Set.isEmpty postTiles) ->
-            // Over the room's own grid and joined once: this runs per creep
-            // per candidate, and a `Set<RoomPos>` difference would compare
-            // a room name at every node of it.
-            workArea atlas task
-            |> Set.filter (fun tile ->
-                not (tile.Room = room && Set.contains (RoomPos.pos tile) postTiles))
-        | _ -> workArea atlas task
+        memoised atlas.LightAreas task (fun () ->
+            match postsOfIn atlas sourceId with
+            | Some(room, postTiles) when not (Set.isEmpty postTiles) ->
+                // Over the room's own grid and joined once: a `Set<RoomPos>`
+                // difference would compare a room name at every node of it.
+                workArea atlas task
+                |> Set.filter (fun tile ->
+                    not (tile.Room = room && Set.contains (RoomPos.pos tile) postTiles))
+            | _ -> workArea atlas task)
     | _ -> workArea atlas task
 
 /// Work Area of a Task for one creep — `narrowedArea` once the rooms agree,
