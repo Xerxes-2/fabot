@@ -835,6 +835,13 @@ module Colony =
                 Stand = { Room = "W17S26"; X = 28; Y = 10 }
                 Via = []
             }
+            // Where their miner went once W17S26 was held (2026-09-29).
+            {
+                RoomName = "W17S25"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W17S25"; X = 18; Y = 19 }
+                Via = []
+            }
         ]
 
     /// The colonies a human has declared, moved by a human in a commit: an

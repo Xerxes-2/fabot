@@ -178,7 +178,11 @@ let outpostDeclarationTests =
 
                 Expect.equal
                     (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
-                    [ "W18S27", [ "W15S28"; "W17S29" ]; "W17S26", [ "W13S28"; "W15S28" ] ]
+                    [
+                        "W18S27", [ "W15S28"; "W17S29" ]
+                        "W17S26", [ "W13S28"; "W15S28" ]
+                        "W17S25", [ "W15S28" ]
+                    ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
                 let detours = RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W18S27"
@@ -203,6 +207,14 @@ let outpostDeclarationTests =
                         [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26" ]
                     ]
                     "W17S26 is four crossings from W15S28, by W15S26 or W16S27 and both into W16S26"
+
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S25")
+                    [
+                        [ "W15S28"; "W15S27"; "W15S26"; "W16S26"; "W17S26"; "W17S25" ]
+                        [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26"; "W17S25" ]
+                    ]
+                    "W17S25 is one crossing past W17S26, by the same two chains"
 
                 Expect.equal
                     (Declaration.hops linked Tuning.defaults.MaxHops "W13S28" "W17S26")
@@ -281,12 +293,12 @@ let outpostDeclarationTests =
 
                 Expect.equal
                     (casting 5_600)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
-                    "W15S28 casts both: W17S29 cannot buy the floor, and W13S28 is two crossings further"
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W17S25", Some "W15S28" ]
+                    "W15S28 casts all three: W17S29 cannot buy the floor, and W13S28 is further or out of the budget"
 
                 Expect.equal
                     (casting 5_650)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W17S25", Some "W15S28" ]
                     "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
 
                 for h in Colony.harass do
