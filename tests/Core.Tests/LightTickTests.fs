@@ -234,13 +234,9 @@ let forcedTests =
                 Expect.equal (LightTick.forced last elsewhere) None "range is within one room"
             }
 
-            test "a full tick that shot or healed forces the next one full" {
+            test "a full tick on which a structure fought forces the next one full" {
                 for fight in
                     [
-                        AttackCreep("digger", "h")
-                        RangedAttackCreep("digger", "h")
-                        HealCreep("digger", "hauler")
-                        RangedHealCreep("digger", "hauler")
                         FireTower("tower", "h")
                         HealWithTower("tower", "hauler")
                         ActivateSafeMode "ctrl"
@@ -252,7 +248,38 @@ let forcedTests =
                     Expect.equal
                         (LightTick.forced fought quiet)
                         (Some LightForce.Fought)
-                        $"%A{fight} is never replayed"
+                        $"%A{fight} forces the next tick full"
+            }
+
+            test "a creep's shot or heal forces nothing on its own, and is never replayed" {
+                // A target still in reach forces the tick on the near rule;
+                // one dead or gone leaves nothing to decide.
+                for shot in
+                    [
+                        AttackCreep("digger", "h")
+                        RangedAttackCreep("digger", "h")
+                        HealCreep("digger", "hauler")
+                        RangedHealCreep("digger", "hauler")
+                    ] do
+                    let full = LightTick.lastFull quiet Map.empty [ shot ]
+
+                    Expect.isFalse full.Fought $"%A{shot} is no structure's fight"
+                    Expect.equal (LightTick.forced full quiet) None $"%A{shot} forces nothing"
+                    Expect.isEmpty (LightTick.intents full quiet) $"%A{shot} is not replayed"
+
+                // And a hostile still within reach forces the tick all the same.
+                let shooting =
+                    LightTick.lastFull quiet Map.empty [ RangedAttackCreep("digger", "h") ]
+
+                let stillThere =
+                    { quiet with
+                        Hostiles = [ hostile 12 12 "Enemy" false ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced shooting stillThere)
+                    (Some(LightForce.HostileNear room))
+                    "the target still near is the near rule's"
             }
 
             test "a creep born or gone since the full tick forces a full tick" {

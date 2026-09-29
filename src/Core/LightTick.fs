@@ -40,7 +40,7 @@ type LastFull =
         Steps: Map<string, RoomPos * RoomPos>
         /// The full tick's repeatable intents, in its own order.
         Work: Intent list
-        /// Whether the full tick shot, healed or raised safe mode.
+        /// Whether a structure of ours fought on the full tick (`fights`).
         Fought: bool
         Hits: Map<string, int>
         Controllers: Map<string, int * bool>
@@ -104,18 +104,22 @@ let private repeatableActor (intent: Intent) : string option =
     | HealWithTower _
     | SendFromTerminal _ -> None
 
-/// Whether an intent shoots, heals or raises safe mode: a tick that holds one
-/// is followed by a full tick, never a light one. Every case named, for the
-/// reason above: a new shot must not replay by default.
+/// Whether an intent is a structure's fight — a tower's shot or heal, or safe
+/// mode raised: a tick that holds one is followed by a full tick, never a
+/// light one. A creep's own shot or heal is not: a body it could still reach
+/// is within `nearRange` and forces the tick full on that rule, and one that
+/// died or ran leaves nothing to decide (live 2026-09-30, 40 of 83 full ticks
+/// were forced by a harassing ranger's shot at a target already gone). Every
+/// case named, so a new shot is a compile error here and not a silent "no".
 let private fights (intent: Intent) : bool =
     match intent with
+    | FireTower _
+    | HealWithTower _
+    | ActivateSafeMode _ -> true
     | AttackCreep _
     | RangedAttackCreep _
     | HealCreep _
     | RangedHealCreep _
-    | FireTower _
-    | HealWithTower _
-    | ActivateSafeMode _ -> true
     | SpawnCreep _
     | PlaceConstructionSite _
     | HarvestSource _
