@@ -343,6 +343,21 @@ let harassGuardTests =
                     "three from the controller is still on it"
 
                 Expect.equal (claimerAt { X = 34; Y = 40 }) (ground quiet) "four from it is not"
+
+                // Both at once: the reserver kept its distance from the ranger
+                // while the miner harvested on, and ground round both turned the
+                // ranger between them (W18S27, t840,7xx).
+                Expect.equal
+                    (ground
+                        { quiet with
+                            Hostiles =
+                                [
+                                    miner "miner" minerTile
+                                    theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
+                                ]
+                        })
+                    (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
+                    "a miner at the source and a reserver at the controller: the ground is the miner's alone"
             }
         ]
 
