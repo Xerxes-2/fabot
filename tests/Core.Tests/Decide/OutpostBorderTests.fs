@@ -67,6 +67,7 @@ let invaderCoreTests =
                                     Walks = untroubled.Memo.Walks
                                     SeamWalks = untroubled.Memo.SeamWalks
                                     FarFields = untroubled.Memo.FarFields
+                                    Narrowed = untroubled.Memo.Narrowed
                                 }
                         }
                         untroubled
@@ -161,6 +162,7 @@ let invaderCoreTests =
                                 Walks = rivalHeld.Memo.Walks
                                 SeamWalks = rivalHeld.Memo.SeamWalks
                                 FarFields = rivalHeld.Memo.FarFields
+                                Narrowed = rivalHeld.Memo.Narrowed
                             }
                     }
                     rivalHeld

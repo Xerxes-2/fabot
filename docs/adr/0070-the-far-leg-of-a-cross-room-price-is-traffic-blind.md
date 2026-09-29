@@ -2,6 +2,8 @@
 
 > **Status:** accepted
 
+> **Amended 2026-09-30**: caller-narrowed far fields no longer ride a per-tick table on the Atlas (`TickFarFields`), which re-flooded a harassment ranger's six-hop chain every tick for an ambush ring standing still; they ride `FarFieldMemo.Narrowed`'s slots across ticks. Bit-identical on every harness scenario, −9% of a `reactor` tick.
+
 > **Accepted 2026-09-18** out of the CPU round on #370; the numbers below are that round's and the decision is the user's. Implemented by the change that accepted it.
 >
 > Two things the document left open, answered by the build. The red test it could not name is `AtlasCrossRoomTests`' *"the traffic-aware far field is recalled for as long as the crowd stands still"* — one body standing in an outpost corridor, priced at 36 + the surcharge — and it is now the pin of this decision instead: the same body costs the empty corridor's 36, while a body in the creep's **own** room still costs 46. And the one far-field table left keeps its name, `PerCensus`, because what it says is now true of every far field rather than of two pricings out of three.
@@ -26,7 +28,7 @@ Two things follow that are worth more than the flood count. The three far-field 
 - A cross-room candidate's ranking price no longer moves when a body stands still in a room along its chain. `MatcherVerdictTests` pins the tie-break tiers, not the far-leg surcharge; the test that would go red is one that stands a creep on a far room's ring tile and expects the price to rise, and none is known — the review round would say.
 - `FarFieldMemo` becomes one table (`PerCensus`) and `occupancySign` retires; `Decide.decideUnarbitrated`'s carry of `TrafficFarFields` between ticks retires with it, which also closes half of #372.
 - ADR 0008's Matcher clause — *"the surcharge flows into travel cost, so the Matcher also sees crowded approaches as dearer"* — is restated: it sees them in the creep's own room. ADR 0008 is not edited.
-- The memo's far table holds `TravelCost` fields under **Task-derived origins only**. A caller-narrowed ask — a Guard's ring, cut out of this tick's Threats (ADR 0033, ADR 0056) — keys on tiles that move every tick, and filed beside the census's fields it would mint a whole chain's field a tick under a census that never moved. Those ride a per-tick table on the Atlas (`TickFarFields`), dropped with it.
+- The memo's far table holds `TravelCost` fields under **Task-derived origins only**. A caller-narrowed ask — a Guard's ring, cut out of this tick's Threats (ADR 0033, ADR 0056) — keys on tiles that move every tick, and filed beside the census's fields it would mint a whole chain's field a tick under a census that never moved. Those ride a table of their own on the memo (`FarFieldMemo.Narrowed`), one slot per derivation less the origins, holding the origins beside the field: read while they are asked again, replaced when they move.
 - A foreign garrison standing in an outpost no longer prices a home creep's ranking away from that outpost: #220's rule — a creep is priced around a body it can never displace — holds on the near leg alone.
 - The reroute attribution (ADR 0030) across a border can now blame the creep's **own** room's traffic alone: the two floods it diffs share the far leg exactly, so a detour it attributes is a crowd in the room the creep is standing in.
 - On the harness the report diff moved one decision: in the `outpost` world two haulers swapped containers — a cross-room near-tie the far leg's surcharge had been breaking — and `pair --level 7` did not move at all.

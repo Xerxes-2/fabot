@@ -162,8 +162,8 @@ let decideUnarbitrated
     // every entry is a pure function of the walking grids and Seam bands of
     // the rooms it names, which the per-room signatures sign. An ask the
     // decision layer narrowed for itself — a Guard's ring off this tick's
-    // Threats — keys on tiles that move every tick and rides
-    // `Atlas.TickFarFields` instead. The tables used to go whole or empty on
+    // Threats — keys on tiles that move every tick and rides a slot of its
+    // own (`FarFieldMemo.Narrowed`). The tables used to go whole or empty on
     // the flat signature, which made every replan a re-flood of the lot;
     // measured by count 2026-09-20 (#388, `docs/profiling.md`): 109,258 heap
     // pops a tick against 9,554 quiet, and evicting per room took the
@@ -175,6 +175,7 @@ let decideUnarbitrated
             {
                 SeamWalks = m.SeamWalks
                 PerCensus = m.FarFields
+                Narrowed = m.Narrowed
             }
         | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
@@ -223,8 +224,15 @@ let decideUnarbitrated
                     Walks = walks
                     SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
+                    Narrowed = farFields.Narrowed
                 }
-            | None -> PlanMemo.deferred signedRooms walks farFields.SeamWalks farFields.PerCensus
+            | None ->
+                PlanMemo.deferred
+                    signedRooms
+                    walks
+                    farFields.SeamWalks
+                    farFields.PerCensus
+                    farFields.Narrowed
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -245,6 +253,7 @@ let decideUnarbitrated
                 Walks = walks
                 SeamWalks = farFields.SeamWalks
                 FarFields = farFields.PerCensus
+                Narrowed = farFields.Narrowed
             }
 
     // The tick's Threats, derived once and shared by every reader.

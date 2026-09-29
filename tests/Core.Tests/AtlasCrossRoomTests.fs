@@ -393,7 +393,7 @@ let crossRoomTests =
                     "and the caller's own tile is priced to itself, not to the Seat behind it"
             }
 
-            test "caller-narrowed origins ride the tick's table, never the census's" {
+            test "caller-narrowed origins ride a slot of their own, never the census's table" {
                 // Origins the decision layer narrowed move every tick (a
                 // Guard's ring is cut out of this tick's `Threats`); filed
                 // in the census-held table they would mint a whole chain's
@@ -420,12 +420,67 @@ let crossRoomTests =
                             (Harvest "src-out")
                             "W1N2"
                             (Set.singleton (at "W1N2" { X = 25; Y = y })))
-                        "the crossing is still priced, off the tick's own table"
+                        "the crossing is still priced, off the narrowed slot"
 
                 Expect.equal
                     held.PerCensus.Count
                     0
                     "eight ticks of a moving goal set leave the census-held table empty"
+
+                Expect.equal
+                    held.Narrowed.Count
+                    1
+                    "and the narrowed table one slot, replaced each tick the goal set moved"
+            }
+
+            test "a narrowed goal set standing still is flooded once, however many ticks ask" {
+                // A harassment ranger's ambush ground stands still for as long
+                // as nobody comes.
+                let snapshot () =
+                    northOfSnapshot
+                        (corridorHome [ "w", { X = 25; Y = 10 } ])
+                        [ { X = 25; Y = 0 }, Plain ]
+                        corridorOutpost
+                        [ { X = 25; Y = 49 }, Plain ]
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                let held = FarFieldMemo.empty ()
+                let ring = Set.singleton (at "W1N2" { X = 25; Y = 45 })
+
+                let priced () =
+                    let atlas = snapshot () |> ofViewRecalling (WalkTable()) held
+                    travelCostToward atlas "w" (Harvest "src-out") "W1N2" ring
+
+                let fieldHeld () =
+                    held.Narrowed |> Seq.map (fun entry -> snd entry.Value) |> Seq.exactlyOne
+
+                Expect.equal (priced ()) (Some 28) "the first tick floods the ring"
+                let flooded = fieldHeld ()
+
+                Expect.equal (priced ()) (Some 28) "the next prices the same crossing"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(fieldHeld (), flooded))
+                    "off the field the first tick filed, not a flood of its own"
+
+                // The same slot a new goal set asks is flooded afresh, and
+                // the price moves with it.
+                let atlas = snapshot () |> ofViewRecalling (WalkTable()) held
+
+                Expect.equal
+                    (travelCostToward
+                        atlas
+                        "w"
+                        (Harvest "src-out")
+                        "W1N2"
+                        (Set.singleton (at "W1N2" { X = 25; Y = 43 })))
+                    (Some 32)
+                    "a moved ring is priced to where it stands now"
+
+                Expect.isFalse
+                    (obj.ReferenceEquals(fieldHeld (), flooded))
+                    "and replaces the field it no longer answers to"
             }
 
             test "every far field rides the census table, whatever the pricing" {

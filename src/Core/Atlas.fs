@@ -105,14 +105,6 @@ type Atlas =
             /// a lead prices a replacement not yet cast, whose factor is in no creep's
             /// entry.
             Walks: WalkTable
-            /// The far fields whose origins are the decision layer's per-tick
-            /// judgement rather than the census's — a Guard's ring, a Flee set — held
-            /// for the tick and dropped with the Atlas. A caller narrows the tiles off
-            /// `Threats`, which move every tick: filed beside the census's fields they
-            /// would mint a key a tick and nothing would evict it. Same shape and same
-            /// keying as `FarFields.PerCensus`, so the two can never answer
-            /// differently for one key; only the lifetime differs.
-            TickFarFields: FarFieldTable
             /// Work Area per Task, built at most once per tick and shared by every
             /// query that stands a creep in one — a mutable table because the key set
             /// is one the view does not carry; the Atlas is rebuilt every tick, so it
@@ -367,7 +359,6 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Routes = System.Collections.Generic.Dictionary()
         FarFields = farFields
         Walks = walks
-        TickFarFields = FarFieldTable()
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
         Posts = System.Collections.Generic.Dictionary()
@@ -1503,7 +1494,7 @@ let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep:
         table.Remove key |> ignore
 
 /// ADR-0032
-/// Drop, from the three census-keyed tables this Atlas was handed, every
+/// Drop, from the four census-keyed tables this Atlas was handed, every
 /// entry that read a room whose census moved — in place, because the tables
 /// are the plan memo's. A spawn walk reads home and every room of every chain
 /// `routes` answers to its goal; since `routes` answers a chain only while the
@@ -1528,12 +1519,14 @@ let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
 
     retain atlas.SeamWalks (fun (fromRoom, toRoom) -> not (touches [ fromRoom; toRoom ]))
     retain atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
+    retain atlas.FarFields.Narrowed (fun (chain, _, _, _, _) -> not (touches chain))
 
 /// Drop every far field whose Task is not in `live` (#392): a Task carries an
 /// object id, so a quiet census leaks one field per Task that ever priced a
 /// far leg. A Task that comes back costs one re-flood.
 let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
     retain atlas.FarFields.PerCensus (fun (_, task, _, _, _, _) -> Set.contains task live)
+    retain atlas.FarFields.Narrowed (fun (_, task, _, _, _) -> Set.contains task live)
 
 /// The first of those chains, or `None` where there is none — what a reader
 /// with no price to choose one with takes (`stepTowardRoom`, whose room is
@@ -1783,6 +1776,14 @@ let private chainedInto
 
         foldChain atlas factor pricing (last, target) (hopsAlong chain |> List.rev)
 
+/// Which of the memo's two far-field tables an ask files in
+/// (`farFieldAlong`).
+type private FieldTable =
+    /// Keyed on the whole derivation, origins included.
+    | PerCensus
+    /// A slot per derivation less the origins, replaced when they move.
+    | Narrowed
+
 /// The same chain memoised colony-wide for one Task and one body, in the
 /// **plan memo's** table under every pricing, so a chain is flooded once per
 /// census rather than once per tick (`docs/research/cpu-headroom.md` §5.1).
@@ -1796,10 +1797,10 @@ let private chainedInto
 /// area while `crossingToward` hands the caller's tiles, and under the old
 /// key whichever flooded first answered for the other (#358).
 ///
-/// The **table is the caller's**: origins the census signs go to
-/// `atlas.FarFields.PerCensus`; origins narrowed off `Threats` move every
-/// tick and would mint a new key a tick that nothing evicts, so
-/// `crossingToward` files into `atlas.TickFarFields`, dropped with the Atlas.
+/// The **table is the caller's** (`FieldTable`): origins the census signs go
+/// to `PerCensus`; origins narrowed off `Threats` may move every tick and
+/// would mint a key a tick that nothing evicts, so `crossingToward` files
+/// into `Narrowed`'s slot, which one ask with other origins replaces.
 ///
 /// **A chain is priced off its own suffix's field** (`cpu-headroom.md` §5.3):
 /// two chains toward one target share a tail, so the recursion memoises the
@@ -1808,7 +1809,7 @@ let private chainedInto
 /// boundary, not an approximation of it. Measured bit-identical.
 let rec private farFieldAlong
     (atlas: Atlas)
-    (table: FarFieldTable)
+    (table: FieldTable)
     (pricing: Pricing)
     (creep: string)
     (task: Task)
@@ -1825,8 +1826,6 @@ let rec private farFieldAlong
         match pricing with
         | Baseline -> TravelCost
         | other -> other
-
-    let key = chain, task, workHeavy atlas creep, factor, keyed, origins
 
     let flood () =
         match chain with
@@ -1851,7 +1850,27 @@ let rec private farFieldAlong
         // bottoms out at anyway.
         | _ -> chainedInto atlas factor keyed chain origins
 
-    memoised table key flood
+    match table with
+    | PerCensus ->
+        memoised
+            atlas.FarFields.PerCensus
+            (chain, task, workHeavy atlas creep, factor, keyed, origins)
+            flood
+    | Narrowed ->
+        let narrowed = atlas.FarFields.Narrowed
+        let slot = chain, task, workHeavy atlas creep, factor, keyed
+
+        match
+            (if narrowed.ContainsKey slot then
+                 Some narrowed.[slot]
+             else
+                 None)
+        with
+        | Some(held, field) when held = origins -> field
+        | _ ->
+            let field = flood ()
+            narrowed.[slot] <- (origins, field)
+            field
 
 /// The near leg of a cross-room join, in the two shapes its callers hand it:
 /// the tick's own per-creep flood, which the join may push further, and one
@@ -2069,11 +2088,11 @@ let private joinedAlong
 
 /// The cross-room price toward an explicit set of origins, filed in the table
 /// the caller says: the census-held one for origins the census signs, the
-/// Atlas's own tick table for origins the decision layer narrowed
-/// (`farFieldAlong`, which states which is which and why).
+/// narrowed slots for origins the decision layer narrowed (`farFieldAlong`,
+/// which states which is which and why).
 let private pricedAcrossInto
     (atlas: Atlas)
-    (table: FarFieldTable)
+    (table: FieldTable)
     (pricing: Pricing)
     (creep: string)
     (task: Task)
@@ -2104,7 +2123,7 @@ let private pricedAcross
     : (int * Pos) option =
     pricedAcrossInto
         atlas
-        atlas.FarFields.PerCensus
+        PerCensus
         pricing
         creep
         task
@@ -2181,8 +2200,8 @@ let private crossingFor
 /// both are answered by the in-room reading beside every caller.
 ///
 /// The tiles are the caller's judgement and move with the tick — a Work Area
-/// less a Reach, a Flee set — so the far fields this prices ride the Atlas's
-/// own `TickFarFields` and never the census-held table (`farFieldAlong`).
+/// less a Reach, a Flee set — so the far fields this prices ride the
+/// narrowed slots and never the census-held table (`farFieldAlong`).
 let private crossingToward
     (atlas: Atlas)
     (pricing: Pricing)
@@ -2198,7 +2217,7 @@ let private crossingToward
             from,
             pricedAcrossInto
                 atlas
-                atlas.TickFarFields
+                Narrowed
                 pricing
                 creep
                 task
@@ -2251,16 +2270,7 @@ let private pricedOffField
         |> List.fold
             (fun best chain ->
                 match
-                    reachedIn
-                        (farFieldAlong
-                            atlas
-                            atlas.FarFields.PerCensus
-                            Walk
-                            creep
-                            task
-                            chain
-                            origins)
-                        from
+                    reachedIn (farFieldAlong atlas PerCensus Walk creep task chain origins) from
                 with
                 | d when d = unreached -> best
                 | d ->

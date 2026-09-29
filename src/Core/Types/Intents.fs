@@ -151,6 +151,17 @@ type FarFieldTable =
         int[]
      >
 
+/// The far fields whose origins the decision layer narrowed for itself — a
+/// Guard's ring cut out of this tick's Threats — one slot per derivation
+/// **less** the origins, the origins held beside the field. A field is read
+/// while the origins it was flooded from are asked again and replaced when
+/// they move.
+type NarrowedFieldTable =
+    System.Collections.Generic.Dictionary<
+        string list * Task * bool * FatigueFactor * Pricing,
+        Pos list * int[]
+     >
+
 /// The walk out to a Seam from every tile of one room's ground, per ordered
 /// room pair, as the flood's whole-tick distance per tile index — the tile's
 /// own entry cost included, which `Atlas.seamWalkTicks` takes back off. Held
@@ -174,9 +185,10 @@ type FarFieldMemo =
         /// stands. Task-derived origins only: an ask the decision layer
         /// narrowed for itself (a Guard's ring cut out of this tick's Threats)
         /// keys on tiles that move every tick and would mint a key a tick here
-        /// with nothing to evict it. Those ride the Atlas's per-tick table
-        /// (`Atlas.TickFarFields`, `Atlas.farFieldAlong`).
+        /// with nothing to evict it. Those ride `Narrowed`.
         PerCensus: FarFieldTable
+        /// The narrowed asks' fields, a slot apiece, on the census's terms.
+        Narrowed: NarrowedFieldTable
     }
 
 [<RequireQualifiedAccess>]
@@ -195,6 +207,7 @@ module FarFieldMemo =
         {
             SeamWalks = SeamWalkTable()
             PerCensus = FarFieldTable()
+            Narrowed = NarrowedFieldTable()
         }
 
 /// What a Link footing is held beside: each planned source container, the
@@ -328,6 +341,8 @@ type PlanMemo =
         /// The far fields flooded under this signature, on the same terms as
         /// `Walks` (`docs/research/cpu-headroom.md` §5.1).
         FarFields: FarFieldTable
+        /// The narrowed far fields, on the same terms.
+        Narrowed: NarrowedFieldTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -359,7 +374,7 @@ module PlanMemo =
     /// stamped with the signature it declined to plan against would be served
     /// forever.
     ///
-    /// The three tables are handed in and not defaulted: a deferred colony
+    /// The four tables are handed in and not defaulted: a deferred colony
     /// declines to plan, not to price. The per-room signatures come with them
     /// because they say which census the tables were filled under, and that
     /// is this tick's, whatever the plan's is (#372).
@@ -368,6 +383,7 @@ module PlanMemo =
         (walks: WalkTable)
         (seamWalks: SeamWalkTable)
         (farFields: FarFieldTable)
+        (narrowed: NarrowedFieldTable)
         : PlanMemo =
         {
             Signature = ""
@@ -383,4 +399,5 @@ module PlanMemo =
             Walks = walks
             SeamWalks = seamWalks
             FarFields = farFields
+            Narrowed = narrowed
         }

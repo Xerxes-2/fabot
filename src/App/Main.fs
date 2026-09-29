@@ -92,6 +92,7 @@ let private sizes () =
                     "walks" ==> memo.Walks.Count
                     "seams" ==> memo.SeamWalks.Count
                     "far" ==> memo.FarFields.Count
+                    "narrowed" ==> memo.Narrowed.Count
                     "sites" ==> List.length memo.SiteIntents
                     "demand" ==> List.length memo.HaulerDemand
                 ])
@@ -513,7 +514,10 @@ let loop () =
                 planMemos
                 |> Map.toList
                 |> List.sumBy (fun (_, memo) ->
-                    memo.Walks.Count + memo.SeamWalks.Count + memo.FarFields.Count)
+                    memo.Walks.Count
+                    + memo.SeamWalks.Count
+                    + memo.FarFields.Count
+                    + memo.Narrowed.Count)
             // Off `World`'s own heap slot, not the world record: a measurement
             // of the shell is not a fact about the game.
             RoomSnapshots = World.roomCosts
