@@ -421,7 +421,7 @@ let loop () =
         raids
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
-        |> Observe.foldRaids Observe.capEpisodes living view (Decide.Planner.outpostFactsOf view)
+        |> Observe.foldRaids Observe.capEpisodes living view decision.OutpostRooms
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's channel, written every tick, empty or not. The refused

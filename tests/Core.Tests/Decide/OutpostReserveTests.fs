@@ -12,7 +12,7 @@ open Fabot.Core.Tests.Decide.OutpostFixtures
 /// `Observe.foldRaids` with the outpost chain's answers derived off the same
 /// view (#383), as the shell hands the same value to both halves.
 let private foldRaidsOf alive (view: ColonyView) prior =
-    Observe.foldRaids Observe.capEpisodes alive view (Planner.outpostFactsOf view) prior
+    Observe.foldRaids Observe.capEpisodes alive view (Planner.outpostFactsOf view).Declared prior
 
 [<Tests>]
 let reserveTests =

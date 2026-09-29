@@ -439,4 +439,8 @@ type Decision =
         /// The cascade's own reading of the workforce this tick, for the
         /// `quotas` view; nothing downstream reads it.
         Quotas: Quotas
+        /// The outpost rooms this colony works, as the outpost chain derived
+        /// them for this tick's decision: the Raid-log fold reads them after
+        /// it rather than deriving the chain a second time.
+        OutpostRooms: string list
     }

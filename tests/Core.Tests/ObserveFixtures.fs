@@ -163,7 +163,7 @@ let raidTick t (colony: ColonyView) state =
         3
         alive
         (atShortGap t colony)
-        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony))
+        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
         state
 
 /// The same fold with the world said separately from the colony: a
@@ -173,7 +173,7 @@ let raidTickIn alive t (colony: ColonyView) state =
         3
         (Set.ofList alive)
         (atShortGap t colony)
-        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony))
+        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
         state
 
 /// The recorded episodes as (opened, last-seen) windows, oldest first.

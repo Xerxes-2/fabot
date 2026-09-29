@@ -553,10 +553,10 @@ let private rivalDeadlines (view: ColonyView) =
 /// (#432): its ranger is weighed against the armed squad standing there, in
 /// every room the colony casts, shut or not, and it is clocked off the
 /// sighting and not the squad's life (#441).
-let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
+let private raidDeadlines (view: ColonyView) (declared: string list) =
     let rangerRooms = Set.union (Decide.Facts.rangerRooms view) view.HarassCast
 
-    let outpostRooms = Set.ofList outposts.Declared
+    let outpostRooms = Set.ofList declared
 
     view.Hostiles
     |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
@@ -586,7 +586,7 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
 
             room, (view.Time + life, StandDownBasis.InvaderRaid))
 
-let private deadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
+let private deadlines (view: ColonyView) (declared: string list) =
     // The stronghold bit is or-ed over a room's sightings where the clock is
     // maxed: a room seen once with a bunker and once with a raider is a room
     // with a bunker in it, whichever deadline is longer.
@@ -596,7 +596,7 @@ let private deadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.Ou
          core.RoomName, (expiry, basis, core.Level >= 1)))
     @ (rivalDeadlines view
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
-    @ (raidDeadlines view outposts
+    @ (raidDeadlines view declared
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
     |> List.groupBy fst
     |> List.map (fun (room, seen) ->
@@ -751,7 +751,7 @@ let foldRaids
     (cap: int)
     (alive: Set<string>)
     (view: ColonyView)
-    (outposts: Fabot.Core.Decide.Planner.OutpostFacts)
+    (declared: string list)
     (prior: RaidState)
     : RaidState =
     let gap = view.Tuning.QuietGap
@@ -874,7 +874,7 @@ let foldRaids
         // A tick that sees nothing (no vision, or a clear room) leaves every
         // stand-down exactly as it found it, clock included.
         Outposts =
-            (prior.Outposts, deadlines view outposts)
+            (prior.Outposts, deadlines view declared)
             ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
@@ -939,7 +939,7 @@ let foldRaids
             let standing =
                 prior.Threatened |> Map.filter (fun _ latch -> view.Time < latch.Until)
 
-            let declared = Set.ofList outposts.Declared
+            let declared = Set.ofList declared
 
             let armedIn room =
                 view.Hostiles

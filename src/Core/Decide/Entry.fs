@@ -382,6 +382,7 @@ let decideUnarbitrated
                 HaulerLoad = plan.HaulerLoad
                 HaulerDemand = plan.HaulerDemand
             }
+        OutpostRooms = outposts.Declared
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:

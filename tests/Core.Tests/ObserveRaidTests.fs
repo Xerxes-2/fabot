@@ -79,7 +79,7 @@ let episodeTests =
                             3
                             (colony.Creeps |> List.map (fun c -> c.Name) |> Set.ofList)
                             seen
-                            (Fabot.Core.Decide.Planner.outpostFactsOf seen)
+                            (Fabot.Core.Decide.Planner.outpostFactsOf seen).Declared
                             state)
                     |> windows
 
