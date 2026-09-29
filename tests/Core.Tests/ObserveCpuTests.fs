@@ -39,6 +39,7 @@ let private costing (ms: float) =
         ExternalMb = 0.0
         MemoRows = 0
         Light = false
+        Forced = None
     }
 
 /// The same reading with a bucket and a replan count of its own, which is
@@ -68,6 +69,23 @@ let cpuSpanTests =
                     (state.Ticks |> List.map (fun sample -> sample.Tick, sample.Light))
                     [ 1, false; 2, true ]
                     "the two populations stay apart on the line"
+            }
+
+            test "a full tick a rule kept from being light says which rule" {
+                let state =
+                    folded
+                        [
+                            1,
+                            { costing 30.0 with
+                                Forced = Some "border"
+                            }
+                            2, costing 30.0
+                        ]
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Tick, sample.Forced))
+                    [ 1, Some "border"; 2, None ]
+                    "the reason rides the row it forced"
             }
 
             test "a span carries the worst tick of its window, not its mean" {
@@ -240,6 +258,7 @@ let cpuTests =
                             ExternalMb = 0.0
                             MemoRows = 0
                             Light = false
+                            Forced = None
                         }
 
                 Expect.equal
@@ -431,6 +450,7 @@ let cpuTests =
                             ExternalMb = 0.0
                             MemoRows = 0
                             Light = false
+                            Forced = None
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -489,6 +509,7 @@ let cpuTests =
                             ExternalMb = 0.0
                             MemoRows = 0
                             Light = false
+                            Forced = None
                         }
 
                 Expect.equal
@@ -542,6 +563,7 @@ let cpuTests =
                             ExternalMb = 0.0
                             MemoRows = 0
                             Light = false
+                            Forced = None
                         }
 
                 Expect.equal
@@ -597,6 +619,7 @@ let cpuTests =
                                     ExternalMb = 0.0
                                     MemoRows = 0
                                     Light = false
+                                    Forced = None
                                 }
                             ]
                     }

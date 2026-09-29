@@ -1212,6 +1212,12 @@ let loadCpu () : CpuState =
                                 // Absent on a full tick's row and on every
                                 // row written before light ticks: a full tick.
                                 Light = jsTypeof raw?light = "boolean" && unbox<bool> raw?light
+                                // Absent on every row but a forced full tick's.
+                                Forced =
+                                    if jsTypeof raw?forced = "string" then
+                                        Some(unbox<string> raw?forced)
+                                    else
+                                        None
                                 // A bare number, decoded on its own: a legacy
                                 // row reads 0.0, told apart from a headless
                                 // sweep by whether `rooms` is there at all.
@@ -1322,6 +1328,10 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     // re-encode as themselves.
     if sample.Light then
         o?light <- true
+
+    match sample.Forced with
+    | Some reason -> o?forced <- reason
+    | None -> ()
 
     o
 

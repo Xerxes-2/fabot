@@ -1057,6 +1057,10 @@ type CpuReadings =
         /// Whether this was a light tick, one that replayed the last full
         /// tick's decision. Its phases that did not run read zero-width.
         Light: bool
+        /// Why a tick that could have been light was full, as
+        /// `LightTick.tag` spells the reason; None for a light tick, and for a
+        /// full tick the cadence made full (after a light tick, or a reset).
+        Forced: string option
     }
 
 /// One tick's cost, split at the loop's phase boundaries, and the count of
@@ -1111,6 +1115,8 @@ type CpuSample =
         /// A light tick's row; `false` for a full tick and a legacy row. Kept
         /// off `CpuPhases` for `Colonies`' reason.
         Light: bool
+        /// The reason a would-be light tick ran full (`CpuReadings.Forced`).
+        Forced: string option
     }
 
 /// One span of ticks, summarised: the coarse record beside the fine one,
@@ -1329,6 +1335,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     MemoRows = readings.MemoRows
                     ExternalMb = external
                     Light = readings.Light
+                    Forced = readings.Forced
                 }
             ]
             |> trim cap

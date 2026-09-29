@@ -1859,6 +1859,12 @@ if (command === "console") {
       console.log(
         `full ticks: ${fulls.length}, mean ${fullMean}  ·  light ticks: ${lights.length}, mean ${lightMean}`,
       );
+      // Which rule kept a would-be light tick full, most first: the reading
+      // the cadence's rules are tuned against.
+      const reasons = {};
+      for (const row of fulls) if (typeof row.forced === "string") reasons[row.forced] = (reasons[row.forced] ?? 0) + 1;
+      const ranked = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+      if (ranked.length > 0) console.log(`  forced full: ${ranked.map(([reason, n]) => `${reason} ${n}`).join(", ")}`);
       console.log("");
     }
 

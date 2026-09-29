@@ -62,6 +62,18 @@ type LightForce =
     | HitsLost of creep: string
     | ControllerChanged of room: string
 
+/// The reason on the CPU line, one short word apiece: which of the rules
+/// keeps the most ticks full is what tuning the cadence reads.
+let tag (reason: LightForce) : string =
+    match reason with
+    | LightForce.ArmedHostile _ -> "armed"
+    | LightForce.HostileNear _ -> "near"
+    | LightForce.Fought -> "fought"
+    | LightForce.CreepsChanged -> "creeps"
+    | LightForce.OnBorder _ -> "border"
+    | LightForce.HitsLost _ -> "hurt"
+    | LightForce.ControllerChanged _ -> "controller"
+
 /// The repeatable work intents, by the creep that acts: a light tick issues
 /// them again from the tile they were decided on. Every case named, so an
 /// Intent added later is a compile error here and not a silent "not work".

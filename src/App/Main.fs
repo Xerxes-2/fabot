@@ -298,6 +298,7 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
             AtProjects = atEntry
             ColonyProjects = []
             Light = true
+            Forced = None
         }
 
 /// The global harassment list, priced once: the declarations and the bank a
@@ -311,7 +312,11 @@ let private harassment: Harassment =
 /// The full tick: the World, every colony's view and decision, the observe
 /// folds and every Memory leaf, and the record the light tick after it
 /// replays.
-let private fullTick (atEntry: float) (seen: LightTick.Glance option) =
+let private fullTick
+    (atEntry: float)
+    (seen: LightTick.Glance option)
+    (forced: LightTick.LightForce option)
+    =
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings laid under it.
     let world =
@@ -683,6 +688,7 @@ let private fullTick (atEntry: float) (seen: LightTick.Glance option) =
             AtProjects = atProjects
             ColonyProjects = List.rev projectedAt
             Light = false
+            Forced = forced |> Option.map LightTick.tag
         }
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
@@ -703,11 +709,13 @@ let loop () =
     // the replay would be wrong. With the cadence off no glance is taken at
     // all, so the flag gives back today's tick and its cost exactly.
     if not Tuning.defaults.LightTicks then
-        fullTick atEntry None
+        fullTick atEntry None None
     else
         let seen = glance ()
 
         match lastFull with
-        | Some(tick, last) when tick = Game.time - 1 && Option.isNone (LightTick.forced last seen) ->
-            lightTick atEntry last seen
-        | _ -> fullTick atEntry (Some seen)
+        | Some(tick, last) when tick = Game.time - 1 ->
+            match LightTick.forced last seen with
+            | None -> lightTick atEntry last seen
+            | forced -> fullTick atEntry (Some seen) forced
+        | _ -> fullTick atEntry (Some seen) None
