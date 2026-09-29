@@ -235,8 +235,8 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
 /// what comes (`Threats.ErrandRing`), while there is ore to burn in it
 /// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
 /// `view.Errands` before this reads it.
-let private guardedErrandsOf (view: ColonyView) : string list =
-    fuelledErrands view
+let private guardedErrandsOf (fuelled: Errand list) : string list =
+    fuelled
     |> List.map (fun errand -> errand.RoomName)
     |> List.distinct
     |> List.sort
@@ -272,6 +272,10 @@ type OutpostFacts =
         /// guard row keeps a body in (#414), the children's homes this
         /// colony defends (#428), and the harassment rooms it casts (#432).
         Guarded: string list
+        /// `fuelledErrands`' answer, which the guard row, the Reclaim pool and
+        /// the reserver row each read: a scan of every target's kind in every
+        /// projected room, derived here once rather than three times a tick.
+        Fuelled: Errand list
     }
 
 /// Derive the chain once, sharing each stage with the next. That sharing is
@@ -286,6 +290,7 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         controllers |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
     let reservable = reservableControllersOf view controllers
+    let fuelled = fuelledErrands view
 
     {
         Claims = claimTargets view
@@ -294,10 +299,11 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         ReservableRooms = reservableOutpostsOf view reservable
         Guarded =
             guardedOutpostsOf view declared
-            @ guardedErrandsOf view
+            @ guardedErrandsOf fuelled
             @ defendedHomesOf view
             // Target or none, as an errand room is kept.
             @ (Facts.harassRooms view |> Set.toList)
+        Fuelled = fuelled
     }
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and
@@ -406,7 +412,7 @@ let planTasks
     let reclaims =
         let allyBurning = errandRoomsAllyBurning view
 
-        fuelledErrands view
+        outposts.Fuelled
         |> List.filter (fun errand -> not (Set.contains errand.RoomName allyBurning))
         |> List.map (fun errand -> Reclaim(fst errand.Target))
 

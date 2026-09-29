@@ -594,7 +594,7 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
         @ (let raided = errandRoomsRaided view
            let allyBurning = errandRoomsAllyBurning view
 
-           fuelledErrands view
+           outposts.Fuelled
            |> List.filter (fun errand ->
                not (Set.contains errand.RoomName withheld && Set.contains errand.RoomName raided)
                && not (Set.contains errand.RoomName allyBurning))
