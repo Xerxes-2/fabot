@@ -209,6 +209,21 @@ type TargetKind =
     /// off it.
     | Mineral
 
+/// `a = b` over two kinds, the case matched first: Fable's generic union
+/// equality is a constructor check and a field walk per call, and the census
+/// scans below ask it once per target in every projected room, almost always
+/// of two different cases.
+let internal sameKind (a: TargetKind) (b: TargetKind) : bool =
+    match a, b with
+    | Source, Source
+    | Controller, Controller
+    | Tombstone, Tombstone
+    | Mineral, Mineral -> true
+    | Structure x, Structure y
+    | Site x, Site y -> x = y
+    | Dropped x, Dropped y -> x = y
+    | _ -> false
+
 /// Whether a projected target is one of the two transient kinds — a pile or a
 /// tombstone/ruin — that stand on a tile without holding it. Both vanish
 /// within a few hundred ticks, so a census that let one keep a construction
@@ -410,7 +425,7 @@ module SpatialInfo =
     let idsOfKindIn (kinds: Map<string, TargetKind>) (kind: TargetKind) : string list =
         kinds
         |> Map.toList
-        |> List.choose (fun (id, k) -> if k = kind then Some id else None)
+        |> List.choose (fun (id, k) -> if sameKind k kind then Some id else None)
 
     /// The same walk over a whole projection's census.
     let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =

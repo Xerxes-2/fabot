@@ -318,3 +318,39 @@ let projectionShapeTests =
                     "the container, the deposit and the pile all carry ore; only the extractor carries a cooldown"
             }
         ]
+
+/// Every case of a fieldless union, by reflection.
+let private casesOf (union: System.Type) : obj list =
+    Microsoft.FSharp.Reflection.FSharpType.GetUnionCases union
+    |> Array.map (fun case -> Microsoft.FSharp.Reflection.FSharpValue.MakeUnion(case, [||]))
+    |> List.ofArray
+
+[<Tests>]
+let kindCensusTests =
+    testList
+        "the kind census"
+        [
+            test "idsOfKindIn answers every kind exactly as filtering the census on (=) does" {
+                // The census scan compares kinds by case tag rather than by
+                // Fable's generic union equality; every case of every field,
+                // enumerated, so a case added later is covered too.
+                let kinds =
+                    [ Source; Controller; Tombstone; Mineral ]
+                    @ (casesOf typeof<BuiltKind>
+                       |> List.map unbox<BuiltKind>
+                       |> List.collect (fun built -> [ Structure built; Site built ]))
+                    @ (casesOf typeof<Resource> |> List.map unbox<Resource> |> List.map Dropped)
+
+                let census =
+                    kinds |> List.mapi (fun index kind -> $"id-{index:D3}", kind) |> Map.ofList
+
+                for kind in kinds do
+                    Expect.equal
+                        (SpatialInfo.idsOfKindIn census kind)
+                        (census
+                         |> Map.toList
+                         |> List.filter (fun (_, k) -> k = kind)
+                         |> List.map fst)
+                        $"{kind}"
+            }
+        ]

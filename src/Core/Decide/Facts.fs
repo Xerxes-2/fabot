@@ -512,7 +512,8 @@ let internal fuelledErrands (view: ColonyView) : Errand list =
     let held kinds =
         view.Spatial.TargetKinds
         |> Map.exists (fun id kind ->
-            List.contains kind kinds && SpatialInfo.heldIn view.Spatial Thorium id > 0)
+            List.exists (sameKind kind) kinds
+            && SpatialInfo.heldIn view.Spatial Thorium id > 0)
 
     let extractorTiles =
         SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Extractor)
