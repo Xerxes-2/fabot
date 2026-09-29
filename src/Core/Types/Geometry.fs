@@ -393,6 +393,43 @@ module RoomName =
 
             search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
 
+    /// The crossings of `routesBy`'s chains, None where it answers none, off
+    /// one visit per room: a hop count needs no chain, and listing every
+    /// shortest chain at `Tuning.MaxHops` six is what the counters paid for.
+    let hopsBy
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (fromRoom: string)
+        (toRoom: string)
+        : int option =
+        if fromRoom = toRoom then
+            Some 0
+        else
+            let rec search (frontier: string list) (seen: Set<string>) (hops: int) =
+                if hops > maxHops || List.isEmpty frontier then
+                    None
+                elif
+                    frontier
+                    |> List.exists (fun room ->
+                        List.contains toRoom (adjacent room) && linked room toRoom)
+                then
+                    Some hops
+                else
+                    let steps =
+                        frontier
+                        |> List.collect (fun room ->
+                            adjacent room
+                            |> List.filter (fun next ->
+                                not (Set.contains next seen) && linked room next))
+                        |> List.distinct
+
+                    search
+                        steps
+                        (List.fold (fun taken room -> Set.add room taken) seen steps)
+                        (hops + 1)
+
+            search [ fromRoom ] (Set.singleton fromRoom) 1
+
     /// The first of those chains, under `adjacent`'s own order. No production
     /// caller today: `AtlasSeamTests` pins that the head of `routesBy` is this
     /// answer, which is what holds the binding in place. Retire it when that

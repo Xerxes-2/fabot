@@ -1018,6 +1018,36 @@ let routeTests =
                     (RoomName.routesBy (fun _ _ -> false) 3 "W13S28" "W13S29")
                     "and a room joined to nothing is reached by no chain"
             }
+
+            test "hopsBy counts the crossings of routesBy's chains without listing them" {
+                // One predicate walls a room off, one is one-way, one walls
+                // a border: every answer is the chains' own length.
+                let predicates =
+                    [
+                        "open", (fun _ _ -> true)
+                        "W14S28 walled", (fun a b -> a <> "W14S28" && b <> "W14S28")
+                        "one-way west",
+                        (fun (a: string) (b: string) -> compare b a >= 0 || a.[1] = b.[1])
+                        "nothing", (fun _ _ -> false)
+                    ]
+
+                let rooms =
+                    [
+                        for x in 11..17 do
+                            for y in 26..30 do
+                                $"W{x}S{y}"
+                    ]
+
+                for name, linked in predicates do
+                    for budget in [ 0; 1; 3; 6 ] do
+                        for there in rooms do
+                            Expect.equal
+                                (RoomName.hopsBy linked budget "W14S28" there)
+                                (RoomName.routesBy linked budget "W14S28" there
+                                 |> List.tryHead
+                                 |> Option.map (fun chain -> List.length chain - 1))
+                                $"{name}, budget {budget}, W14S28 to {there}"
+            }
         ]
 
 [<Tests>]

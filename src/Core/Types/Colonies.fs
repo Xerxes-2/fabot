@@ -53,9 +53,8 @@ module Declaration =
         (room: string)
         : int option =
         if withinHopBudget maxHops home room then
-            match RoomName.routesBy linked maxHops home room with
-            | chain :: _ when RoomName.routesBy linked maxHops room home |> List.isEmpty |> not ->
-                Some(List.length chain - 1)
+            match RoomName.hopsBy linked maxHops home room with
+            | Some hops when RoomName.hopsBy linked maxHops room home |> Option.isSome -> Some hops
             | _ -> None
         else
             None
