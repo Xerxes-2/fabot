@@ -534,11 +534,15 @@ module World =
     /// The far side is asked **twice**: its ring, for whether the engine
     /// lands a body there at all, and its ground, for whether the body can
     /// then step off the landing. ADR-0062
+    ///
+    /// A keeper room with no declared rocks is entered by nothing
+    /// (`Keepers.enterable`), as `Atlas.routes` asks it.
     let linked (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) : bool =
         let walkableIn room =
             ringWalkable keeperMargin room (roomOf world room).Border
 
-        Seam.joinedBy
+        Keepers.enterable toRoom
+        && Seam.joinedBy
             (walkableIn fromRoom)
             (walkableIn toRoom)
             (groundWalkable keeperMargin toRoom (roomOf world toRoom).Layer.Terrain)

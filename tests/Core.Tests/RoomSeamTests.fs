@@ -530,26 +530,44 @@ let keeperMaskTests =
                     onSide tile && terrain <> Wall && not (Keepers.masked margin "W15S26" tile))
                 |> List.map fst
 
-            test "the declaration's rocks are the engine's own, tile for tile" {
-                // Three sources and a mineral, four of the eight centres.
-                // The four lairs are not here because `capture-room.mjs`
-                // keeps sources, controllers and minerals alone (widening it
-                // is #316's), so the lairs stay a hand-read fact.
-                let declared = Keepers.centresIn "W15S26" |> Set.ofList
+            test
+                "the declaration's rocks are the engine's own, tile for tile, in every declared room" {
+                // Three sources and a mineral, four of each room's eight
+                // centres. The four lairs are not here because
+                // `capture-room.mjs` keeps sources, controllers and minerals
+                // alone (widening it is #316's), so the lairs stay a hand-read fact.
+                for KeyValue(room, _) in Keepers.centres do
+                    let declared = Keepers.centresIn room |> Set.ofList
+                    let rocks = (load room).Rocks
 
-                for _, tile in keeperRoom.Rocks do
+                    for _, tile in rocks do
+                        Expect.isTrue
+                            (Set.contains tile declared)
+                            $"{room}: the rock at ({tile.X},{tile.Y}) is a declared keeper centre"
+
+                    Expect.equal
+                        rocks.Length
+                        4
+                        $"{room}: and the capture holds no rock the declaration has not got: three sources and the mineral"
+
                     Expect.isTrue
-                        (Set.contains tile declared)
-                        $"the rock at ({tile.X},{tile.Y}) is a declared keeper centre"
+                        (Keepers.isKeeperRoom room)
+                        $"{room}: and its name says it is a keeper room"
 
                 Expect.equal
-                    keeperRoom.Rocks.Length
-                    4
-                    "and the capture holds no rock the declaration has not got: three sources and the mineral"
+                    (Keepers.centres |> Map.toList |> List.map fst |> Set.ofList)
+                    (Set.ofList
+                        [
+                            for x in 14..16 do
+                                for y in 24..26 do
+                                    if not (x = 15 && y = 25) then
+                                        yield $"W{x}S{y}"
+                        ])
+                    "every keeper room of our sector is declared, and nothing else is"
 
                 Expect.isTrue
-                    (Set.contains { X = 38; Y = 7 } declared)
-                    "the mineral at (38,7) above all, which is the tile every orphaned north crossing traces to"
+                    (Set.contains { X = 38; Y = 7 } (Keepers.centresIn "W15S26" |> Set.ofList))
+                    "W15S26's mineral at (38,7) above all, which is the tile every orphaned north crossing traces to"
             }
 
             test "the mask takes a third of W15S26's ground and the chain still crosses it" {

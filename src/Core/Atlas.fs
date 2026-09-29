@@ -251,8 +251,8 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     let keeperMargin = Tuning.keeperMargin tuning
 
     let maskKeepers (room: string) (grid: int[]) =
-        Keepers.maskedTilesIn keeperMargin room
-        |> List.iter (fun tile -> grid.[indexOf tile] <- -1)
+        Keepers.maskedIndicesIn keeperMargin room
+        |> Array.iter (fun index -> grid.[index] <- -1)
 
     let gridOf (room: string) (foreign: Set<Pos>) (layer: RoomLayer) =
         let ground = Array.create tileCount -1
@@ -1471,7 +1471,8 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
     memoised atlas.Routes (fromRoom, toRoom) (fun () ->
         RoomName.routesBy
             (fun here there ->
-                Seam.joinedBy
+                Keepers.enterable there
+                && Seam.joinedBy
                     (ringWalkable atlas here)
                     (ringWalkable atlas there)
                     (groundWalkable atlas there)

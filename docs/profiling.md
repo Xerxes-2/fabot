@@ -134,7 +134,7 @@ What it stands, and what each thing is there to execute:
   `ViewTests`, where a filter costs less to check than to walk.
 - **`W15S26` masked at the keeper margin**, and `W15S27` beside it, both dark
   and carrying terrain alone. Nothing here masks anything: the mask is the
-  bundle's own `Keepers.maskedTilesIn` at `Tuning.keeperMargin`, and the
+  bundle's own `Keepers.maskedIndicesIn` at `Tuning.keeperMargin`, and the
   three-hop chain `W15S28 → W15S27 → W15S26 → W15S25` is priced over it every
   tick by `World.linked`. The report prints the margin and the tile count it
   read back, so the number in the report is the bundle's and never this

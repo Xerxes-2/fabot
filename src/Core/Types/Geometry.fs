@@ -264,6 +264,15 @@ module RoomName =
         | Some(hereX, hereY), Some(thereX, thereY) -> Some(thereX - hereX, thereY - hereY)
         | _ -> None
 
+    /// Where a room stands inside its sector of ten by ten, read off the name's
+    /// own two numbers mod ten — `W15S26` is (5, 6), whichever way its axes
+    /// run. None for a name outside the grammar.
+    let inSector (roomName: string) : (int * int) option =
+        let own coordinate =
+            if coordinate < 0 then -coordinate - 1 else coordinate
+
+        worldCoordsOf roomName |> Option.map (fun (x, y) -> own x % 10, own y % 10)
+
     /// Whether two rooms share a border: exactly one axis apart by one. Screeps
     /// has no diagonal exit, so `Atlas.borderPairs` names tiles for those four
     /// offsets and no other. The implication runs **one way only**: this reading

@@ -972,9 +972,12 @@ let keeperMaskTests =
             }
 
             test "the bulk mask and the per-tile rule are the same rule" {
-                // The grids are laid from `maskedTilesIn`; the route search
+                // The grids are laid from `maskedIndicesIn`; the route search
                 // asks `masked` per ring tile.
-                let bulk = Keepers.maskedTilesIn margin "W15S26" |> Set.ofList
+                let bulk =
+                    Keepers.maskedIndicesIn margin "W15S26"
+                    |> Array.map (fun index -> { X = index / 50; Y = index % 50 })
+                    |> Set.ofArray
 
                 let pointwise =
                     Set.ofList
@@ -992,5 +995,38 @@ let keeperMaskTests =
                      |> Set.filter (fun tile ->
                          tile.X < 0 || tile.X > 49 || tile.Y < 0 || tile.Y > 49))
                     "and the bulk form is clamped to the grid it indexes"
+            }
+
+            test
+                "the bulk mask at the shipped margin is laid once, and any other margin still follows the rule" {
+                // Every Atlas lays each projected keeper room's grids from it,
+                // twice a room a tick; the answer reads only static facts.
+                Expect.isTrue
+                    (obj.ReferenceEquals(
+                        Keepers.maskedIndicesIn margin "W16S26",
+                        Keepers.maskedIndicesIn margin "W16S26"
+                    ))
+                    "the same array both times: nothing is walked on the second ask"
+
+                for other in [ 0; 2; margin + 1 ] do
+                    let bulk =
+                        Keepers.maskedIndicesIn other "W15S26"
+                        |> Array.map (fun index -> { X = index / 50; Y = index % 50 })
+                        |> Set.ofArray
+
+                    let pointwise =
+                        Set.ofList
+                            [
+                                for x in 0..49 do
+                                    for y in 0..49 do
+                                        if Keepers.masked other "W15S26" { X = x; Y = y } then
+                                            { X = x; Y = y }
+                            ]
+
+                    Expect.equal bulk pointwise $"margin {other}: one rule, two shapes"
+
+                Expect.isEmpty
+                    (Keepers.maskedIndicesIn margin "W15S27")
+                    "an undeclared room masks nothing"
             }
         ]

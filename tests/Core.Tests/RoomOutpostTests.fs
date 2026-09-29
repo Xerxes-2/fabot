@@ -10,34 +10,32 @@ open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 open Fabot.Core.Tests.RoomInvariantFixtures
 
-/// `linked` over the real captures of the given rooms, built out of the
-/// shell's own predicates (`World.ringWalkable`, `World.groundWalkable`) rather
-/// than a copy of them, which has twice had to move in lockstep. A room no
-/// capture is loaded for is joined to nothing, which keeps the search inside
-/// the rooms the projection would hold.
+/// `World.linked` itself over a World built from the real captures of the
+/// given rooms, so no predicate of it is copied here to move in lockstep
+/// (#317, #438). A room no capture is loaded for carries no border and is
+/// joined to nothing, which keeps the search inside the rooms the projection
+/// would hold.
 let private shippedLinked (rooms: string list) =
-    let rings =
-        rooms
-        |> List.distinct
-        |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
-        |> Map.ofList
+    let world =
+        { World.empty with
+            Rooms =
+                rooms
+                |> List.distinct
+                |> List.map (fun room ->
+                    let capture = load room
 
-    let margin = Tuning.keeperMargin Tuning.defaults
+                    room,
+                    { RoomFacts.empty with
+                        Border = capture.Border
+                        Layer =
+                            { RoomLayer.empty with
+                                Terrain = capture.Terrain
+                            }
+                    })
+                |> Map.ofList
+        }
 
-    let walkableIn room tile =
-        match Map.tryFind room rings with
-        | Some(border, _) -> World.ringWalkable margin room border tile
-        | None -> false
-
-    // The far room's ground beside the landing tile, through the same shipped
-    // predicate.
-    let groundIn room tile =
-        match Map.tryFind room rings with
-        | Some(_, terrain) -> World.groundWalkable margin room terrain tile
-        | None -> false
-
-    fun fromRoom toRoom ->
-        Seam.joinedBy (walkableIn fromRoom) (walkableIn toRoom) (groundIn toRoom) fromRoom toRoom
+    World.linked (Tuning.keeperMargin Tuning.defaults) world
 
 [<Tests>]
 let outpostDeclarationTests =
@@ -196,6 +194,8 @@ let outpostDeclarationTests =
                         ([ "W15S28"; "W15S29"; "W16S29" ], 7)
                         $"every shortest chain is six crossings and leaves by the declared detour: {chain}"
 
+                // W16S26's mask (#438) closes neither entry: the south band
+                // lands on the column that climbs to its west exits at y 16..18.
                 Expect.equal
                     (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S26")
                     [

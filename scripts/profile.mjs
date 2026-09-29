@@ -4280,7 +4280,7 @@ function printReactor(world, seeded) {
             "measured the refusal and not the walk"),
   );
 
-  // The mask, off the bundle's own `Keepers.maskedTilesIn` at the margin
+  // The mask, off the bundle's own `Keepers.maskedIndicesIn` at the margin
   // `Tuning.keeperMargin` derives — never a number written here. Over the rooms
   // the world holds terrain for, so a room that enters the chain tomorrow
   // enters this line with it.
@@ -4295,7 +4295,7 @@ function printReactor(world, seeded) {
   if (!globalThis.__fabotKeeperMargin || !globalThis.__fabotMaskedTiles) {
     throw new Error(
       "the bundle must be loaded before the errand block is printed: the mask is read off " +
-        "`Keepers.maskedTilesIn` at `Tuning.keeperMargin`, not off a number in this file (#321)",
+        "`Keepers.maskedIndicesIn` at `Tuning.keeperMargin`, not off a number in this file (#321)",
     );
   }
   const margin = globalThis.__fabotKeeperMargin();
@@ -4697,7 +4697,7 @@ const WORLD_ROOMS_PROBE = `
 // The mask is read the same way and for a second reason besides: what the
 // report has to say about W15S26 is not "the harness masked it" — the
 // harness masks nothing — but how much ground the **bundle's own**
-// `Keepers.maskedTilesIn` takes out of a room the chain crosses, at the
+// `Keepers.maskedIndicesIn` takes out of a room the chain crosses, at the
 // margin `Tuning.keeperMargin` derives. Both are pure functions of
 // constants, so this costs the measured tick nothing.
 //
@@ -4736,7 +4736,7 @@ const DECLARATION_PROBE = `
   globalThis.__fabotTuning = () => TuningModule_defaults;
   globalThis.__fabotKeeperMargin = () => TuningModule_keeperMargin(TuningModule_defaults);
   globalThis.__fabotMaskedTiles = (room) =>
-    Array.from(maskedTilesIn(TuningModule_keeperMargin(TuningModule_defaults), room)).length;
+    Array.from(maskedIndicesIn(TuningModule_keeperMargin(TuningModule_defaults), room)).length;
 }
 `;
 
@@ -4762,7 +4762,7 @@ globalThis.__fabotReactorCodec = {
 // **Exactly one** top-level declaration each, the way
 // `function decideUnarbitrated(` below is counted and for its reason: esbuild
 // hands out bare names by collision order, so a second module bringing its own
-// `maskedTilesIn` would take the bare name or be given `maskedTilesIn_1` — a
+// `maskedIndicesIn` would take the bare name or be given `maskedIndicesIn_1` — a
 // guard that only asks whether the name exists would pass while the probe
 // bound the other module's function.
 const PROBE_BINDINGS = [
@@ -4793,8 +4793,8 @@ const PROBE_BINDINGS = [
     "the margin the reactor scenario's mask line is read at (#321)",
   ],
   [
-    "function maskedTilesIn(",
-    "src/Core/Types/Keepers.fs's `maskedTilesIn`",
+    "function maskedIndicesIn(",
+    "src/Core/Types/Keepers.fs's `maskedIndicesIn`",
     "how much ground the mask takes out of a room the chain crosses (#321)",
   ],
   [

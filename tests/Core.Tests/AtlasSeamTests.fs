@@ -1118,6 +1118,121 @@ let keeperSeamTests =
                         $"W15S26 -> {into}: one band, whichever layer answers it"
             }
 
+            test
+                "a keeper room is read off its name: 4 to 6 on both axes of its sector, the centre excepted" {
+                for room in [ "W15S26"; "W16S26"; "W14S24"; "W24S24"; "E4N6"; "E16S14" ] do
+                    Expect.isTrue (Keepers.isKeeperRoom room) $"{room} is a keeper room"
+
+                for room in [ "W15S25"; "W17S26"; "W15S28"; "W13S26"; "E5N5"; "E3S4"; "not a room" ] do
+                    Expect.isFalse (Keepers.isKeeperRoom room) $"{room} is not"
+            }
+
+            // Plain rooms, ring and ground, under the names given: the ground a
+            // keeper room offers is the name's to answer, not the terrain's.
+            let openRooms (home: string) (rooms: string list) =
+                let ring =
+                    Map.ofList
+                        [
+                            for x in 0 .. Seam.exitEdge do
+                                for y in 0 .. Seam.exitEdge do
+                                    if x = 0 || x = Seam.exitEdge || y = 0 || y = Seam.exitEdge then
+                                        { X = x; Y = y }, Plain
+                        ]
+
+                let ground =
+                    TerrainGrid.ofList
+                        [
+                            for x in 1 .. Seam.exitEdge - 1 do
+                                for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
+                        ]
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some home
+                        Rooms =
+                            rooms
+                            |> List.map (fun room ->
+                                room,
+                                { RoomLayer.empty with
+                                    Terrain = ground
+                                })
+                            |> Map.ofList
+                        Borders = rooms |> List.map (fun room -> room, ring) |> Map.ofList
+                    }
+                    |> snapshotWith []
+                    |> ofView
+
+                let world =
+                    { World.empty with
+                        Rooms =
+                            rooms
+                            |> List.map (fun room ->
+                                room,
+                                { RoomFacts.empty with
+                                    Border = ring
+                                    Layer =
+                                        { RoomLayer.empty with
+                                            Terrain = ground
+                                        }
+                                })
+                            |> Map.ofList
+                    }
+
+                atlas, World.linked margin world
+
+            test
+                "a keeper room with no declared rocks is entered by nothing, and a declaration past it is refused and named" {
+                // W24S24 is a keeper room of the sector west of ours and
+                // `Keepers` declares none of its rocks. The world holds no
+                // W23S23, so the corner through W24S24 is the only chain.
+                Expect.isEmpty (Keepers.centresIn "W24S24") "the premise: nothing is declared there"
+
+                let atlas, linked = openRooms "W23S24" [ "W23S24"; "W24S24"; "W24S23" ]
+
+                Expect.isFalse (linked "W23S24" "W24S24") "the world joins nothing into it"
+                Expect.isTrue (linked "W24S24" "W23S24") "and a body standing in it may still leave"
+
+                Expect.isEmpty
+                    (routes atlas "W23S24" "W24S23")
+                    "the Atlas finds no chain through it"
+
+                Expect.isEmpty (routes atlas "W23S24" "W24S24") "nor one ending in it"
+
+                Expect.equal
+                    (Declaration.refused
+                        linked
+                        Tuning.defaults.MaxHops
+                        "W23S24"
+                        DeclarationKind.Errand
+                        [ "W24S23"; "W24S24" ])
+                    [
+                        {
+                            RoomName = "W24S23"
+                            Kind = DeclarationKind.Errand
+                        }
+                        {
+                            RoomName = "W24S24"
+                            Kind = DeclarationKind.Errand
+                        }
+                    ]
+                    "a declaration reachable only through it, and one in it, are refused and named"
+            }
+
+            test "the same corner through a declared keeper room is a chain" {
+                // W16S26 is declared: its mask narrows the plain, and the
+                // corner from W16S27 round to W17S26 survives it.
+                let atlas, linked = openRooms "W16S27" [ "W16S27"; "W16S26"; "W17S26" ]
+
+                Expect.equal
+                    (routes atlas "W16S27" "W17S26")
+                    [ [ "W16S27"; "W16S26"; "W17S26" ] ]
+                    "the Atlas crosses it"
+
+                Expect.isTrue
+                    (Declaration.routable linked Tuning.defaults.MaxHops "W16S27" "W17S26")
+                    "and the declaration past it stands"
+            }
+
             // A body north of the keeper room walking south toward W15S27
             // the way the vision grace does: no price, the room aimed at is dark.
             let walkingSouthFrom tile =
