@@ -844,20 +844,144 @@ let harassStandDownTests =
         "raid fold: a harassment room's stand-down"
         [
             test
-                "a squad the biggest ranger loses to shuts the room, clocked to the squad's own life" {
+                "a squad the biggest ranger loses to shuts the room until HarassClearTicks after it was last seen there" {
                 let colony =
                     { (harassing quiet) with
                         Hostiles = trepidimousSquad
                         Bank = { Available = 5600; Capacity = 5600 }
                     }
 
-                let state = RaidState.empty |> raidTick 100 colony
+                // The squad crosses once and moves on; the room is in sight.
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 colony
+                    |> raidTick 101 (shutOut colony |> fun c -> { c with Hostiles = [] })
+
+                Expect.contains
+                    (shutAt 149 state)
+                    harassRoom
+                    "withdrawn while the squad may be near"
+
+                Expect.isFalse
+                    (Set.contains harassRoom (shutAt 150 state))
+                    "and harassed again fifty ticks after it was last seen, not when its 700-tick life runs out"
+
+                Expect.equal
+                    (standDowns state)
+                    [ harassRoom, 100, 100, 150, StandDownBasis.HarassSighting ]
+                    "the clock is the last sighting's, and says so"
+            }
+
+            test "the squad seen again while the room is shut moves the clock to that sighting" {
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                // Shut at 100, and the squad still standing there at 130: the
+                // room is off the worked list and still cast.
+                let state = RaidState.empty |> raidTick 100 colony |> raidTick 130 (shutOut colony)
+
+                Expect.contains
+                    (shutAt 179 state)
+                    harassRoom
+                    "shut fifty ticks past the later sighting"
+
+                Expect.isFalse
+                    (Set.contains harassRoom (shutAt 180 state))
+                    "and open on the fiftieth"
+            }
+
+            test "a dark tick neither extends nor erases a harassment room's clock" {
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                // Nothing of ours stands there once it is shut: no hostile, no
+                // controller, for every tick up to and past the deadline.
+                let dark = { shutOut colony with Hostiles = [] }
+
+                let state =
+                    [ 101..160 ]
+                    |> List.fold
+                        (fun state t -> raidTick t dark state)
+                        (RaidState.empty |> raidTick 100 colony)
+
+                Expect.equal
+                    (standDowns state)
+                    [ harassRoom, 100, 100, 150, StandDownBasis.HarassSighting ]
+                    "the row stands as the last sighting wrote it"
+
+                Expect.contains (shutAt 149 state) harassRoom "shut through the blind ticks"
+
+                Expect.isFalse
+                    (Set.contains harassRoom (shutAt 150 state))
+                    "and open on the deadline"
+            }
+
+            test "a sighting there replaces an older raid-life clock and never outlives a core's" {
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                let standing basis expiry =
+                    { RaidState.empty with
+                        Outposts =
+                            [
+                                {
+                                    RoomName = harassRoom
+                                    Opened = 100
+                                    LastSeen = 100
+                                    Expiry = expiry
+                                    Basis = basis
+                                    Stronghold = false
+                                }
+                            ]
+                    }
+
+                // The live case: a 1,338-tick deadline for a squad seen once.
+                Expect.equal
+                    (standing StandDownBasis.InvaderRaid 1_438
+                     |> raidTick 200 (shutOut colony)
+                     |> standDowns)
+                    [ harassRoom, 100, 200, 250, StandDownBasis.HarassSighting ]
+                    "the raid's life is not the room's clock any more"
+
+                Expect.equal
+                    (standing StandDownBasis.CollapseTimer 5_000
+                     |> raidTick 200 (shutOut colony)
+                     |> standDowns)
+                    [ harassRoom, 100, 200, 5_000, StandDownBasis.CollapseTimer ]
+                    "a core's clock is the core's, and the squad does not cut it short"
+            }
+
+            test "an outpost under the same raid keeps the raid's life" {
+                let colony =
+                    { (withDeclaredOutpost harassRoom quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 colony
+                    |> raidTick 101 { colony with Hostiles = [] }
 
                 Expect.contains (shutAt 799 state) harassRoom "withdrawn while the squad lives"
 
                 Expect.isFalse
                     (Set.contains harassRoom (shutAt 800 state))
-                    "and harassed again the tick its life runs out"
+                    "and worked again when it cannot"
+
+                Expect.equal
+                    (standDowns state |> List.map (fun (_, _, _, _, basis) -> basis))
+                    [ StandDownBasis.InvaderRaid ]
+                    "off the raid's life"
             }
 
             test "the enemy's escort the ranger beats is fought, not withdrawn from" {
@@ -925,11 +1049,11 @@ let harassStandDownTests =
                 // the worked list and still cast.
                 let state = RaidState.empty |> raidTick 100 colony |> raidTick 101 (shutOut colony)
 
-                Expect.contains (shutAt 799 state) harassRoom "the squad's stand-down still runs"
+                Expect.contains (shutAt 150 state) harassRoom "the squad's stand-down still runs"
 
                 Expect.isFalse
-                    (Set.contains harassRoom (shutAt 800 state))
-                    "and ends with the squad's life, not at the end of the enemy's reservation"
+                    (Set.contains harassRoom (shutAt 151 state))
+                    "and ends fifty ticks after the squad was last seen, not at the end of the enemy's reservation"
 
                 Expect.equal
                     (state.Episodes |> List.map (fun e -> e.Closest))

@@ -372,6 +372,9 @@ type Tuning =
         /// three outheal and outshoot the enemy's `3M1RA1H` escort and kill an
         /// unarmed miner in about seventeen ticks.
         HarassBlocks: int
+        /// How long a [[harassment room]] stays shut after a squad the ranger
+        /// cannot beat was last seen there (#441).
+        HarassClearTicks: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -509,6 +512,7 @@ module Tuning =
             RangerResidentBlocks = 7
             RangerResidents = 2
             HarassBlocks = 3
+            HarassClearTicks = 50
             TerminalEnergy = 4_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636

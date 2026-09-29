@@ -136,6 +136,21 @@ wire("raids: a stand-down with no expiry costs its row and no other", async () =
   assert.equal(written.outposts[0].room, "W1N2");
 });
 
+wire("raids: every stand-down basis round-trips, #441's harass-sighting included", async () => {
+  const bases = [
+    "collapse-timer",
+    "reservation",
+    "fallback",
+    "rival-reservation",
+    "invader-raid",
+    "harass-sighting",
+  ];
+  const outposts = bases.map((basis, i) => ({ ...outpost, room: `W1N${i + 10}`, basis }));
+  const written = await raidsThrough({ ...emptyRaids, outposts });
+
+  assert.equal(stable(written.outposts), stable(outposts));
+});
+
 wire("raids: a stand-down whose basis is not in the vocabulary costs its row", async () => {
   const written = await raidsThrough({
     ...emptyRaids,

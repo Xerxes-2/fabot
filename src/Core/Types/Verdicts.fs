@@ -270,6 +270,7 @@ let standDownBasisName =
     | StandDownBasis.Fallback -> "fallback"
     | StandDownBasis.RivalReservation -> "rival-reservation"
     | StandDownBasis.InvaderRaid -> "invader-raid"
+    | StandDownBasis.HarassSighting -> "harass-sighting"
 
 /// The wire spelling of each ReservationHolder, on the Raid log's Memory leaf.
 /// Only two of the three are ever written — the leaf records the rooms whose
@@ -298,6 +299,7 @@ let standDownBasisOf =
             StandDownBasis.Fallback
             StandDownBasis.RivalReservation
             StandDownBasis.InvaderRaid
+            StandDownBasis.HarassSighting
         ]
 
 /// A creep's Move Intent: candidate standing tiles for next tick in preference

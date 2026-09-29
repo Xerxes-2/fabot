@@ -605,6 +605,11 @@ if (command === "console") {
     "invader-raid":
       "an invader raid the colony has stopped fighting for — the deadline is the " +
       "raid's own remaining life (ADR 0056, ADR 0043)",
+    // A harassment room's squad (#441): the room is ours to walk back into, so
+    // the clock is the last sighting plus Tuning.HarassClearTicks, not the life.
+    "harass-sighting":
+      "a squad the ranger cannot beat in a harassment room — the deadline is its " +
+      "last sighting plus 50 ticks (ADR 0081)",
   };
 
   // What a row's `last` tick is the last sighting *of*, keyed off the same
@@ -620,6 +625,7 @@ if (command === "console") {
     // A raid is seen as creeps and not as a structure, so what `last` dates
     // here is the last tick one of them was standing in the room (#368).
     "invader-raid": "a raider last seen there",
+    "harass-sighting": "the squad last seen there",
   };
 
   // The stride between looks into a latched room, mirroring

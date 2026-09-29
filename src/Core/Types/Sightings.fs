@@ -135,6 +135,11 @@ type StandDownBasis =
     /// [[guard]] stands there, or the episode has casts left, the room is a
     /// fight and not a withdrawal.
     | InvaderRaid
+    /// A squad the ranger cannot beat, last seen standing in a [[harassment
+    /// room]] (#441): that sighting plus `Tuning.HarassClearTicks`, refreshed
+    /// by every later one. The room is ours to walk back into, so a squad that
+    /// crosses it once shuts it briefly and not for its whole life.
+    | HarassSighting
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =

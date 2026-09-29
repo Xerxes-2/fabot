@@ -550,9 +550,11 @@ let private rivalDeadlines (view: ColonyView) =
 /// and, since the ranger row fights for it (#414, #411), for an errand room, whose
 /// Source Keepers are terrain and neither open nor extend the clock. A transit
 /// room is neither answer. A harassment room is read as an errand room is
-/// (#432): its ranger is weighed against the armed squad standing there.
+/// (#432): its ranger is weighed against the armed squad standing there, in
+/// every room the colony casts, shut or not, and it is clocked off the
+/// sighting and not the squad's life (#441).
 let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
-    let rangerRooms = Decide.Facts.rangerRooms view
+    let rangerRooms = Set.union (Decide.Facts.rangerRooms view) view.HarassCast
 
     let outpostRooms = Set.ofList outposts.Declared
 
@@ -571,15 +573,18 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
         else
             false)
     |> List.map (fun (room, hostiles) ->
-        let raid =
-            if Set.contains room rangerRooms then
-                hostiles |> List.filter (fun hostile -> hostile.Owner <> "Source Keeper")
-            else
-                hostiles
+        if Set.contains room view.HarassCast then
+            room, (view.Time + view.Tuning.HarassClearTicks, StandDownBasis.HarassSighting)
+        else
+            let raid =
+                if Set.contains room rangerRooms then
+                    hostiles |> List.filter (fun hostile -> hostile.Owner <> "Source Keeper")
+                else
+                    hostiles
 
-        let life = raid |> List.map (fun h -> h.TicksToLive) |> List.max
+            let life = raid |> List.map (fun h -> h.TicksToLive) |> List.max
 
-        room, (view.Time + life, StandDownBasis.InvaderRaid))
+            room, (view.Time + life, StandDownBasis.InvaderRaid))
 
 let private deadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
     // The stronghold bit is or-ed over a room's sightings where the clock is
@@ -599,13 +604,31 @@ let private deadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.Ou
         let expiry, basis, _ = found |> List.maxBy (fun (expiry, _, _) -> expiry)
         room, (expiry, basis, found |> List.exists (fun (_, _, bunker) -> bunker)))
 
+/// Whether a harassment sighting replaces this clock rather than racing it
+/// (#441): a squad's life or a rival's reservation is no clock of a room the
+/// colony harasses, and one read before the room was (or before #441) would
+/// outlive the sighting that is. A core's clock is the core's.
+let private harassOverrides (basis: StandDownBasis) =
+    match basis with
+    | StandDownBasis.InvaderRaid
+    | StandDownBasis.RivalReservation -> true
+    | StandDownBasis.CollapseTimer
+    | StandDownBasis.Reservation
+    | StandDownBasis.Fallback
+    | StandDownBasis.HarassSighting -> false
+
 /// Fold one room's sighting into the outpost ring: the room's standing
 /// episode takes it, or the sighting opens one. The re-read only ever moves a
 /// running clock outward, and the basis with it, so reading in a worse
-/// deadline cannot cut a stand-down short.
+/// deadline cannot cut a stand-down short, except a harassment sighting over a
+/// clock `harassOverrides` names, which it replaces.
 let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpisode list) =
     let holds (episode: OutpostEpisode) =
         episode.RoomName = room && standingDown tick episode
+
+    let takes (episode: OutpostEpisode) =
+        expiry > episode.Expiry
+        || basis = StandDownBasis.HarassSighting && harassOverrides episode.Basis
 
     if episodes |> List.exists holds then
         episodes
@@ -613,8 +636,8 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
             if holds episode then
                 { episode with
                     LastSeen = tick
-                    Expiry = max episode.Expiry expiry
-                    Basis = if expiry > episode.Expiry then basis else episode.Basis
+                    Expiry = if takes episode then expiry else episode.Expiry
+                    Basis = if takes episode then basis else episode.Basis
                     // Sticky, where the basis is not: a bunker seen once is a
                     // bunker.
                     Stronghold = episode.Stronghold || stronghold
