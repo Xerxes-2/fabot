@@ -328,3 +328,47 @@ let firstStepIgnoringTrafficTests =
                     "the road lane, not the whole-tick lane at (12,11)"
             }
         ]
+
+[<Tests>]
+let stepPlanTests =
+    testList
+        "atlas step plan"
+        [
+            test "the mover's first step files the tile after it, off the one flood" {
+                // The parked body at (10,13) sends the priced path round it:
+                // (11,13), then back onto the lane at (10,12), then the Seat.
+                let atlas = twoLaneAtlas Plain [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                let home = atlasHome atlas
+
+                firstStepFor atlas "w" (Harvest "src-a") |> ignore
+
+                Expect.equal
+                    (stepPlans atlas)
+                    [ "w", (at home { X = 11; Y = 13 }, at home { X = 10; Y = 12 }) ]
+                    "the first tile and the second, both of the priced path"
+            }
+
+            test "the traffic-blind step files nothing, and never overwrites the mover's" {
+                let atlas = twoLaneAtlas Plain [ "w", { X = 10; Y = 14 }; "b", { X = 10; Y = 13 } ]
+                let home = atlasHome atlas
+
+                firstStepBlindFor atlas "w" (Harvest "src-a") |> ignore
+                Expect.isEmpty (stepPlans atlas) "Baseline is a verdict's reading, not a walk"
+
+                firstStepFor atlas "w" (Harvest "src-a") |> ignore
+                firstStepBlindFor atlas "w" (Harvest "src-a") |> ignore
+
+                Expect.equal
+                    (stepPlans atlas)
+                    [ "w", (at home { X = 11; Y = 13 }, at home { X = 10; Y = 12 }) ]
+                    "the priced lane stands after the blind ask"
+            }
+
+            test "a first step that is the goal has no second, so no plan" {
+                // One plain step onto the Seat: the path ends on its first tile.
+                let atlas = seatPriced Plain Set.empty |> snapshotWith [ worker "w" ] |> ofView
+
+                Expect.isSome (firstStepFor atlas "w" (Harvest "src-a")) "the step is taken"
+                Expect.isEmpty (stepPlans atlas) "and there is nothing beyond it to plan"
+            }
+        ]

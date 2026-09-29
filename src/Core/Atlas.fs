@@ -139,6 +139,14 @@ type Atlas =
             /// The union of every source's Seats in a room, which both of the
             /// above are cut from and the [[working ground]] reads on its own.
             SeatUnions: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            /// Each creep's step plan this tick: the first tile of the path the
+            /// mover's own flood stepped it onto and the tile after it, written
+            /// by the flood-based first step under `TravelCost` alone — never
+            /// `Baseline`'s, which the Resolver asks for its verdict and nobody
+            /// walks. A creep asked twice keeps the last ask; a light tick
+            /// walks it on only while it stands on the first tile, so a
+            /// mismatch costs that creep a tick and nothing else.
+            Steps: System.Collections.Generic.Dictionary<string, RoomPos * RoomPos>
             /// The creeps whose bodies carry more Work parts than Move, read from the
             /// body and never a name. Three readers ask it, so the arithmetic lives
             /// here once.
@@ -364,6 +372,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Posts = System.Collections.Generic.Dictionary()
         StandingPosts = System.Collections.Generic.Dictionary()
         SeatUnions = System.Collections.Generic.Dictionary()
+        Steps = System.Collections.Generic.Dictionary()
         Heavy =
             view.Creeps
             |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
@@ -2487,7 +2496,16 @@ let private firstStepVia
 
             cheapestReached (reachedBy near) goals
             |> Option.map (fun (_, goal) ->
-                RoomPos.at room (posAt (firstStepOn near (indexOf pos) (indexOf goal))))
+                let struct (first, second) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
+                let step = RoomPos.at room (posAt first)
+
+                if pricing = TravelCost then
+                    if second < 0 then
+                        atlas.Steps.Remove creep |> ignore
+                    else
+                        atlas.Steps.[creep] <- (step, RoomPos.at room (posAt second))
+
+                step)
 
 /// The step toward the near side of a crossing already won: the exit tile is
 /// the creep's *own* room's border tile, so aiming at it asks nothing of the
@@ -2672,6 +2690,29 @@ let firstStepToward
     : RoomPos option =
     firstStepVia atlas TravelCost creep goals
     |> Option.orElseWith (fun () -> stepToward atlas creep task room goals)
+
+/// A reading of a creep's steps that leaves its step plan (`Steps`) as the
+/// mover left it, whatever the reading asks: a check that prices a step it
+/// will not take must not become the step the light tick replays.
+let withoutRecording (atlas: Atlas) (creep: string) (read: unit -> 'a) : 'a =
+    let held =
+        if atlas.Steps.ContainsKey creep then
+            Some atlas.Steps.[creep]
+        else
+            None
+
+    let answer = read ()
+
+    match held with
+    | Some plan -> atlas.Steps.[creep] <- plan
+    | None -> atlas.Steps.Remove creep |> ignore
+
+    answer
+
+/// Every creep's step plan as the mover left it this tick (`Atlas.Steps`),
+/// in creep-name order.
+let stepPlans (atlas: Atlas) : (string * (RoomPos * RoomPos)) list =
+    [ for KeyValue(creep, plan) in atlas.Steps -> creep, plan ] |> List.sortBy fst
 
 /// ADR-0018
 /// The first step the same body would take were no tile occupied — the

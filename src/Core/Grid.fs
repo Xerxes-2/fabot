@@ -450,20 +450,27 @@ let internal frontierOf (flood: Flood) : int =
 /// one instead of the other changes nothing but when the work was done.
 let internal reachedIn (dist: int[]) (tile: Pos) : int = dist.[indexOf tile]
 
-/// The first tile of a cheapest path out of `startIndex` toward a goal,
-/// walked back down the predecessor chain. Only ever asked of a goal the
+/// The first tile of a cheapest path out of `startIndex` toward a goal and
+/// the tile after it, walked back down the predecessor chain; the second is
+/// `-1` when the first is the goal itself. Only ever asked of a goal the
 /// flood has settled, and that is enough: every tile of a cheapest path is
-/// strictly cheaper than its end, so the chain is final when the goal is.
-let internal firstStepOn (flood: Flood) (startIndex: int) (goalIndex: int) : int =
-    let rec walk index =
+/// strictly cheaper than its end, so the chain is final when the goal is. The
+/// second tile is what a light tick walks a creep onto (the step plan), read
+/// off the flood the mover already ran.
+let internal firstTwoStepsOn
+    (flood: Flood)
+    (startIndex: int)
+    (goalIndex: int)
+    : struct (int * int) =
+    let rec walk index child =
         let parent = flood.Parents.[index]
 
         if parent = startIndex || parent < 0 then
-            index
+            struct (index, child)
         else
-            walk parent
+            walk parent index
 
-    walk goalIndex
+    walk goalIndex (-1)
 
 /// The flood every origin starts free at — the shape every caller but the far
 /// leg of a cross-room walk wants, since a creep pays nothing to be where it

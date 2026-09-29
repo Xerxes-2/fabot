@@ -478,6 +478,10 @@ type Tuning =
         /// would buy is a body holding a container that was destroyed while
         /// nobody could see it go.
         VisionGrace: int
+        /// Whether a quiet tick after a full one replays that full tick's
+        /// decision instead of deciding (`LightTick`). `false` makes every tick
+        /// full: the one switch that reverses the cadence.
+        LightTicks: bool
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -527,6 +531,7 @@ module Tuning =
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150
+            LightTicks = true
         }
 
     /// The **[[keeper margin]]**: the tiles masked out of a Source Keeper

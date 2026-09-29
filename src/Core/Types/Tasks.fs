@@ -194,6 +194,21 @@ type Direction =
     | Left
     | TopLeft
 
+/// Direction of a single step between adjacent tiles; `None` for a tile and
+/// itself. The Resolver's arbitrated moves and a light tick's replayed ones
+/// both spell a step with it.
+let directionTo (from: Pos) (dest: Pos) : Direction option =
+    match sign (dest.X - from.X), sign (dest.Y - from.Y) with
+    | 0, -1 -> Some Top
+    | 1, -1 -> Some TopRight
+    | 1, 0 -> Some Right
+    | 1, 1 -> Some BottomRight
+    | 0, 1 -> Some Bottom
+    | -1, 1 -> Some BottomLeft
+    | -1, 0 -> Some Left
+    | -1, -1 -> Some TopLeft
+    | _ -> None
+
 /// Every BodyPart — the closed set, for building tables over the vocabulary.
 /// A literal, closed by `Core.Tests`, which fails when this list is short.
 let allBodyParts =

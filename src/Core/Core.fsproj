@@ -32,6 +32,7 @@
     <Compile Include="Decide/Resolver.fs" />
     <Compile Include="Decide/Matcher.fs" />
     <Compile Include="Decide/Entry.fs" />
+    <Compile Include="LightTick.fs" />
     <Compile Include="Observe.fs" />
   </ItemGroup>
   <ItemGroup>

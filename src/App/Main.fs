@@ -133,6 +133,173 @@ do
                         ]
             ]
 
+// The last full tick's record and the tick it was taken on, on the heap: a
+// reset empties it and the next tick is full.
+let mutable private lastFull: (int * LightTick.LastFull) option = None
+
+// Full ticks run since the reset: the replan turn counts these, not
+// `Game.time`, which with light ticks between would hand an even count of
+// colonies half the turns and the other half none.
+let mutable private fullTicks = 0
+
+/// A part of the three that make a hostile armed, destroyed or not, as
+/// `World` reads a hostile's body: a wrong "armed" costs a full tick, a wrong
+/// "unarmed" a shot undecided.
+let private armedPart (part: IBodyPartDef) =
+    part.``type`` = "attack"
+    || part.``type`` = "ranged_attack"
+    || part.``type`` = "heal"
+
+/// What this tick sees of `Game` without a World: our creeps, every hostile
+/// in a visible room, our structures' tiles and our controllers. Built with
+/// `Fresh`, because the full tick keeps it as the last full tick's record.
+let private glance () : LightTick.Glance =
+    let tileOf (room: string) (pos: IRoomPosition) =
+        RoomPos.at room { X = pos.x; Y = pos.y }
+
+    let rooms = objectValues<IRoom> Game.rooms
+
+    {
+        Creeps =
+            objectValues<ICreep> Game.creeps
+            // A body still in its spawn is not yet one the decision holds, as
+            // `World` reads it: it is born, for `CreepsChanged`, when it
+            // emerges.
+            |> Array.filter (fun c -> not c.spawning)
+            |> Array.map (fun c ->
+                c.name,
+                ({
+                    Tile = tileOf c.room.name c.pos
+                    Hits = c.hits
+                }
+                : LightTick.GlanceCreep))
+            |> Fresh.mapOfArray
+        Hostiles =
+            [
+                for room in rooms do
+                    for hostile in room.find findHostileCreeps |> Array.map unbox<ICreep> do
+                        yield
+                            ({
+                                Tile = tileOf room.name hostile.pos
+                                Owner =
+                                    if isNull (box hostile.owner) then
+                                        ""
+                                    else
+                                        hostile.owner.username
+                                Armed = hostile.body |> Array.exists armedPart
+                            }
+                            : LightTick.GlanceHostile)
+            ]
+        Structures =
+            objectValues<IStructure> Game.structures
+            |> Array.map (fun s -> tileOf s.pos.roomName s.pos)
+            |> Array.toList
+        Controllers =
+            rooms
+            |> Array.choose (fun room ->
+                let controller = room.controller
+
+                if not (isNull (box controller)) && controller.my then
+                    Some(room.name, (controller.level, controller.safeMode > 0))
+                else
+                    None)
+            |> Fresh.mapOfArray
+    }
+
+/// The CPU line's write, the same on both kinds of tick: nothing in the bot
+/// reads it back.
+let private writeCpuLine (readings: Observe.CpuReadings) =
+    // One flat leaf keyed by tick: nothing for two colonies to collide over.
+    let prior =
+        if not (ObserveMemory.cpuLineStands ()) then
+            Observe.CpuState.empty
+        else
+            match cpuLine with
+            | Some line -> line
+            | None -> ObserveMemory.loadCpu ()
+
+    let line = Observe.foldCpu Observe.capCpuTicks Game.time readings prior
+
+    // The tick after a global reset writes the line whole, and every tick
+    // after it appends: only a re-encode normalises a phase group this bundle
+    // no longer reads whole (`decodeCpuPhases` answers `None` for a row short
+    // a key, and `observe.mjs cpu` refuses such a row).
+    match cpuLine with
+    | Some _ -> ObserveMemory.appendCpu line
+    | None -> ObserveMemory.saveCpu line
+
+    cpuLine <- Some line
+
+/// Absent on the sim room and the shared-VM runtimes
+/// (`docs/research/engine-testing.md`); 0 there reads as unmeasured. One
+/// call: each crosses the isolate boundary.
+let private heapReading () =
+    if isNull (box Game.cpu?getHeapStatistics) then
+        0.0, 0.0
+    else
+        let h = Game.cpu.getHeapStatistics ()
+        h.used_heap_size / 1048576.0, h.externally_allocated_size / 1048576.0
+
+let private memoRows () =
+    planMemos
+    |> Map.toList
+    |> List.sumBy (fun (_, memo) ->
+        memo.Walks.Count
+        + memo.SeamWalks.Count
+        + memo.FarFields.Count
+        + memo.Narrowed.Count)
+
+/// How many intents the engine took: it charges 0.2 CPU per intent it
+/// executes, so an error code and a missing actor are both counted out.
+let private acceptedOf (outcomes: (Intent * Executor.Outcome) list) =
+    outcomes
+    |> List.sumBy (fun (_, outcome) ->
+        match outcome with
+        | Executor.Ok -> 1
+        | Executor.Failed _
+        | Executor.ActorMissing -> 0)
+
+/// The light tick: the last full tick's work and step plans replayed off the
+/// glance, the positions leaf, the CPU line, and nothing else.
+let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTick.Glance) =
+    let plan =
+        LightTick.intents last seen
+        |> Fabot.Core.IntentPlan.create
+        |> function
+            | Ok plan -> plan
+            | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+
+    // The glance and the replay are this tick's decision; nothing was swept
+    // or projected, so those phases are zero-width.
+    let atDecide = Game.cpu.getUsed ()
+    // `Moved` keeps meaning "moved since the last tick".
+    World.positions () |> ObserveMemory.savePositions
+    let atSave = Game.cpu.getUsed ()
+    let accepted = Executor.run plan |> acceptedOf
+    let heap, external = heapReading ()
+
+    writeCpuLine
+        {
+            AtEntry = atEntry
+            AtSnapshot = atEntry
+            AtDecide = atDecide
+            AtSave = atSave
+            AtExecute = Game.cpu.getUsed ()
+            Intents = accepted
+            Bucket = Game.cpu.bucket
+            Replans = 0
+            ColonyDecides = []
+            ColonyFloods = []
+            HeapMb = heap
+            ExternalMb = external
+            MemoRows = memoRows ()
+            RoomSnapshots = []
+            AtRooms = atEntry
+            AtProjects = atEntry
+            ColonyProjects = []
+            Light = true
+        }
+
 /// The global harassment list, priced once: the declarations and the bank a
 /// colony needs to cast one.
 let private harassment: Harassment =
@@ -141,18 +308,10 @@ let private harassment: Harassment =
         Floor = Bodies.harassFloor Tuning.defaults
     }
 
-// Exported as `loop` on the bundled `main` module; the engine calls it every tick.
-let loop () =
-    // The engine's counter is already running when `loop` is entered: this is
-    // the engine's prelude alone. The Memory parse is not in it: `Memory`
-    // deserializes on first touch, which is `loadRaids` below, so the parse is
-    // charged to the `snapshot` phase. Every reading is taken every tick; a
-    // measurement that switches itself off has absences to explain.
-    let atEntry = Game.cpu.getUsed ()
-    // The flood counters start the tick at zero, so each colony's reading
-    // below is cumulative from here and `foldCpu` can difference it.
-    Grid.Counters.reset ()
-
+/// The full tick: the World, every colony's view and decision, the observe
+/// folds and every Memory leaf, and the record the light tick after it
+/// replays.
+let private fullTick (atEntry: float) (seen: LightTick.Glance option) =
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings laid under it.
     let world =
@@ -255,19 +414,22 @@ let loop () =
     // `Game.time % count` and not "whoever is stalest" because the alternative
     // asks this shell for a census signature that is the decision layer's own.
     // A colony that needs no re-plan passes its turn; one colony alone is
-    // always its own turn, so a one-colony world is unchanged.
+    // always its own turn, so a one-colony world is unchanged. The count is
+    // of full ticks (`fullTicks`): a light tick decides nothing.
     //
     // The reset tick itself is nobody's turn (#442): every memo is empty, every
     // colony prices from empty tables under a cold bundle, and the one
     // re-plan on top of that read 496 ms. Each colony serves
     // `PlanMemo.deferred` for that tick, and the turns start on the next.
     let resetTick = Map.isEmpty planMemos
+    let counted = fullTicks
+    fullTicks <- fullTicks + 1
 
     let turn =
         if List.isEmpty views || resetTick then
             -1
         else
-            Game.time % List.length views
+            counted % List.length views
 
     // The decision is bound and then tupled, and the turn is a DU
     // (`ReplanTurn`), because the first shape shipped broken: as an expression
@@ -468,8 +630,7 @@ let loop () =
     // one write the line never prices. The phase holds the observe folds and
     // the `Game.creeps` sweep as well as the writes.
     let atSave = Game.cpu.getUsed ()
-    // How many intents the engine took: it charges 0.2 CPU per intent it
-    // executes, so an error code and a missing actor are both counted out.
+
     let executionPlan =
         (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
         @ moveIntents
@@ -478,29 +639,28 @@ let loop () =
             | Ok plan -> plan
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
-    let outcomes = Executor.run executionPlan
+    let accepted = Executor.run executionPlan |> acceptedOf
 
-    let accepted =
-        outcomes
-        |> List.sumBy (fun (_, outcome) ->
-            match outcome with
-            | Executor.Ok -> 1
-            | Executor.Failed _
-            | Executor.ActorMissing -> 0)
+    // The record the next tick replays if it is light: where each creep stood
+    // as this tick began, what every colony issued, and the step plans.
+    // None with the cadence off (`Tuning.LightTicks`): no glance was taken.
+    lastFull <-
+        seen
+        |> Option.map (fun seen ->
+            Game.time,
+            LightTick.lastFull
+                seen
+                (decisions
+                 |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Steps)
+                 |> Fresh.mapOfSeq)
+                (executionPlan |> Fabot.Core.IntentPlan.intents))
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it
     // back. The tick's total is the last reading, after the Executor, because
     // the intents are most of what a tick costs.
-    // Absent on the sim room and the shared-VM runtimes
-    // (`docs/research/engine-testing.md`); 0 there reads as unmeasured. One
-    // call: each crosses the isolate boundary.
-    let heapStats =
-        if isNull (box Game.cpu?getHeapStatistics) then
-            None
-        else
-            Some(Game.cpu.getHeapStatistics ())
+    let heap, external = heapReading ()
 
-    let readings: Observe.CpuReadings =
+    writeCpuLine
         {
             AtEntry = atEntry
             AtSnapshot = atSnapshot
@@ -513,47 +673,41 @@ let loop () =
             ColonyDecides = decisions |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
             ColonyFloods =
                 decisions |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
-            HeapMb =
-                heapStats
-                |> Option.map (fun h -> h.used_heap_size / 1048576.0)
-                |> Option.defaultValue 0.0
-            ExternalMb =
-                heapStats
-                |> Option.map (fun h -> h.externally_allocated_size / 1048576.0)
-                |> Option.defaultValue 0.0
-            MemoRows =
-                planMemos
-                |> Map.toList
-                |> List.sumBy (fun (_, memo) ->
-                    memo.Walks.Count
-                    + memo.SeamWalks.Count
-                    + memo.FarFields.Count
-                    + memo.Narrowed.Count)
+            HeapMb = heap
+            ExternalMb = external
+            MemoRows = memoRows ()
             // Off `World`'s own heap slot, not the world record: a measurement
             // of the shell is not a fact about the game.
             RoomSnapshots = World.roomCosts
             AtRooms = World.roomsBegan
             AtProjects = atProjects
             ColonyProjects = List.rev projectedAt
+            Light = false
         }
 
-    // One flat leaf keyed by tick: nothing for two colonies to collide over.
-    let prior =
-        if not (ObserveMemory.cpuLineStands ()) then
-            Observe.CpuState.empty
-        else
-            match cpuLine with
-            | Some line -> line
-            | None -> ObserveMemory.loadCpu ()
+// Exported as `loop` on the bundled `main` module; the engine calls it every tick.
+let loop () =
+    // The engine's counter is already running when `loop` is entered: this is
+    // the engine's prelude alone. The Memory parse is not in it: `Memory`
+    // deserializes on first touch, which is `loadRaids` on a full tick, so the
+    // parse is charged to the `snapshot` phase. Every reading is taken every
+    // tick; a measurement that switches itself off has absences to explain.
+    let atEntry = Game.cpu.getUsed ()
+    // The flood counters start the tick at zero, so each colony's reading
+    // below is cumulative from here and `foldCpu` can difference it.
+    Grid.Counters.reset ()
 
-    let line = Observe.foldCpu Observe.capCpuTicks Game.time readings prior
+    // ADR-0082
+    // Light only straight after a full tick, so never two in a row and never
+    // on the tick after a reset, and only when nothing the glance reads says
+    // the replay would be wrong. With the cadence off no glance is taken at
+    // all, so the flag gives back today's tick and its cost exactly.
+    if not Tuning.defaults.LightTicks then
+        fullTick atEntry None
+    else
+        let seen = glance ()
 
-    // The tick after a global reset writes the line whole, and every tick
-    // after it appends: only a re-encode normalises a phase group this bundle
-    // no longer reads whole (`decodeCpuPhases` answers `None` for a row short
-    // a key, and `observe.mjs cpu` refuses such a row).
-    match cpuLine with
-    | Some _ -> ObserveMemory.appendCpu line
-    | None -> ObserveMemory.saveCpu line
-
-    cpuLine <- Some line
+        match lastFull with
+        | Some(tick, last) when tick = Game.time - 1 && Option.isNone (LightTick.forced last seen) ->
+            lightTick atEntry last seen
+        | _ -> fullTick atEntry (Some seen)

@@ -1845,6 +1845,23 @@ if (command === "console") {
       console.log("");
     }
 
+    // The two populations of the cadence (#443): a light tick replays the
+    // last full one and costs a fraction of it, so the window's mean is a
+    // mixture and each half is read on its own. A row without `light` is a
+    // full tick, which is what every row before the cadence was. The trigger
+    // line below still reads every tick: the mean is what the bucket pays.
+    {
+      const mean = (rows) => rows.reduce((sum, row) => sum + row.ms, 0) / rows.length;
+      const lights = ticks.filter((row) => row.light === true);
+      const fulls = ticks.filter((row) => row.light !== true);
+      const fullMean = fulls.length > 0 ? `${mean(fulls).toFixed(2)} ms` : "—";
+      const lightMean = lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—";
+      console.log(
+        `full ticks: ${fulls.length}, mean ${fullMean}  ·  light ticks: ${lights.length}, mean ${lightMean}`,
+      );
+      console.log("");
+    }
+
     console.log(cpuReport(ticks));
 
     // The coarse spans (#386): the fine window above is a hundred ticks, about

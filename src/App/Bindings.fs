@@ -92,6 +92,10 @@ type IStore =
 type IRoomPosition =
     abstract x: int
     abstract y: int
+    /// The room the position is in. Every `RoomPosition` carries it; the
+    /// light tick's glance reads it off `Game.structures`, whose structures
+    /// carry no room of their own on this binding.
+    abstract roomName: string
 
 type ISource =
     abstract id: string
@@ -345,6 +349,8 @@ type IGame =
     abstract spawns: obj
     /// Hash of creep name -> creep.
     abstract creeps: obj
+    /// Hash of id -> every structure of ours, in every room.
+    abstract structures: obj
     /// Null when no object with that id exists (or it is out of sight).
     abstract getObjectById: id: string -> obj
 

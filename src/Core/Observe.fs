@@ -1054,6 +1054,9 @@ type CpuReadings =
         /// `externally_allocated_size` in MB (#393): where a flood field's
         /// `Int32Array` is counted, and not in `HeapMb`.
         ExternalMb: float
+        /// Whether this was a light tick, one that replayed the last full
+        /// tick's decision. Its phases that did not run read zero-width.
+        Light: bool
     }
 
 /// One tick's cost, split at the loop's phase boundaries, and the count of
@@ -1105,6 +1108,9 @@ type CpuSample =
         MemoRows: int
         /// The off-heap size in MB (#393); zero for a legacy row.
         ExternalMb: float
+        /// A light tick's row; `false` for a full tick and a legacy row. Kept
+        /// off `CpuPhases` for `Colonies`' reason.
+        Light: bool
     }
 
 /// One span of ticks, summarised: the coarse record beside the fine one,
@@ -1322,6 +1328,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     HeapMb = heap
                     MemoRows = readings.MemoRows
                     ExternalMb = external
+                    Light = readings.Light
                 }
             ]
             |> trim cap

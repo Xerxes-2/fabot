@@ -248,6 +248,21 @@ let movementTests =
                 Expect.isEmpty (actionIntents intents) "out of range: no action Intent yet"
             }
 
+            test "the decision carries the walker's step plan: the tile it steps onto and the next" {
+                let snapshot = corridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = 14 } ]
+                let room = SpatialInfo.homeName snapshot.Spatial
+
+                let { Steps = steps } = decideOn snapshot
+
+                Expect.equal
+                    (Map.toList steps)
+                    [
+                        "w1",
+                        (RoomPos.at room { X = 10; Y = 13 }, RoomPos.at room { X = 10; Y = 12 })
+                    ]
+                    "up the corridor two tiles, the first being the move Intent's"
+            }
+
             test "a creep inside its Work Area acts and does not move" {
                 let snapshot =
                     { bareRespawn with

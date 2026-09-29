@@ -1003,7 +1003,7 @@ let routeTests =
 
                 Expect.isEmpty
                     (RoomName.routesBy anywhere 2 "W13S28" "W15S29")
-                    "past the hop budget there is no chain to choose from at all (ADR 0004)"
+                    "past the hop budget there is no chain to choose from at all"
 
                 // W13S29's border is walled end to end, so the L has one
                 // corner left and the chain is unique again.

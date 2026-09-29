@@ -350,19 +350,6 @@ let private arbitrate
     // occupant is answered for out of `Blocked` and `Occupants` instead.
     settled.Tile |> Map.filter (fun creep _ -> Map.containsKey creep byCreep)
 
-/// Direction of a single step between adjacent tiles.
-let private directionTo (from: Pos) (dest: Pos) : Direction option =
-    match sign (dest.X - from.X), sign (dest.Y - from.Y) with
-    | 0, -1 -> Some Top
-    | 1, -1 -> Some TopRight
-    | 1, 0 -> Some Right
-    | 1, 1 -> Some BottomRight
-    | 0, 1 -> Some Bottom
-    | -1, 1 -> Some BottomLeft
-    | -1, 0 -> Some Left
-    | -1, -1 -> Some TopLeft
-    | _ -> None
-
 /// One room's arbitration, settled: what each of its rested creeps was
 /// settled on and what it asked for first, and the fatigued creeps' tiles
 /// and the occupants the settlement was made against — the four things
@@ -449,15 +436,19 @@ let movementOf
     let idleGround room =
         Map.tryFind room idleGrounds |> Option.defaultValue (Set.empty, Set.empty)
 
+    // A reading and not a move, so it leaves the step plan the mover left for
+    // the light tick as it was (`Atlas.withoutRecording`): it prices the
+    // Task's own crossing where a Guard's mover prices the named room's.
     let rerouted name task =
         let area = areaFor threats atlas name task
 
-        match
-            Atlas.firstStep atlas name task area,
-            Atlas.firstStepIgnoringTraffic atlas name task area
-        with
-        | Some priced, Some blind -> priced <> blind
-        | _ -> false
+        Atlas.withoutRecording atlas name (fun () ->
+            match
+                Atlas.firstStep atlas name task area,
+                Atlas.firstStepIgnoringTraffic atlas name task area
+            with
+            | Some priced, Some blind -> priced <> blind
+            | _ -> false)
 
     {
         Order = view.Creeps |> List.map (fun c -> c.Name)

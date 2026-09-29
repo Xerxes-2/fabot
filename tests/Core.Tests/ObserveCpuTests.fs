@@ -38,6 +38,7 @@ let private costing (ms: float) =
         HeapMb = 0.0
         ExternalMb = 0.0
         MemoRows = 0
+        Light = false
     }
 
 /// The same reading with a bucket and a replan count of its own, which is
@@ -60,6 +61,15 @@ let cpuSpanTests =
     testList
         "observe fold: the CPU line's coarse spans"
         [
+            test "a light tick's row says so, and a full tick's does not" {
+                let state = folded [ 1, costing 30.0; 2, { costing 5.0 with Light = true } ]
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Tick, sample.Light))
+                    [ 1, false; 2, true ]
+                    "the two populations stay apart on the line"
+            }
+
             test "a span carries the worst tick of its window, not its mean" {
                 // The engine's per-tick ceiling is 500 ms and a wall, so a window whose
                 // mean is comfortable and whose worst tick is not is exactly the shape a
@@ -229,6 +239,7 @@ let cpuTests =
                             HeapMb = 0.0
                             ExternalMb = 0.0
                             MemoRows = 0
+                            Light = false
                         }
 
                 Expect.equal
@@ -419,6 +430,7 @@ let cpuTests =
                             HeapMb = 0.0
                             ExternalMb = 0.0
                             MemoRows = 0
+                            Light = false
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -476,6 +488,7 @@ let cpuTests =
                             HeapMb = 0.0
                             ExternalMb = 0.0
                             MemoRows = 0
+                            Light = false
                         }
 
                 Expect.equal
@@ -528,6 +541,7 @@ let cpuTests =
                             HeapMb = 0.0
                             ExternalMb = 0.0
                             MemoRows = 0
+                            Light = false
                         }
 
                 Expect.equal
@@ -582,6 +596,7 @@ let cpuTests =
                                     HeapMb = 0.0
                                     ExternalMb = 0.0
                                     MemoRows = 0
+                                    Light = false
                                 }
                             ]
                     }

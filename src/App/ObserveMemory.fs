@@ -1209,6 +1209,9 @@ let loadCpu () : CpuState =
                                 HeapMb = floatOrZero raw "heap"
                                 MemoRows = numberOrZero raw "rows"
                                 ExternalMb = floatOrZero raw "ext"
+                                // Absent on a full tick's row and on every
+                                // row written before light ticks: a full tick.
+                                Light = jsTypeof raw?light = "boolean" && unbox<bool> raw?light
                                 // A bare number, decoded on its own: a legacy
                                 // row reads 0.0, told apart from a headless
                                 // sweep by whether `rooms` is there at all.
@@ -1314,6 +1317,11 @@ let private encodeCpuSample (sample: CpuSample) : obj =
         o?heap <- sample.HeapMb
         o?rows <- sample.MemoRows
         o?ext <- sample.ExternalMb
+
+    // Written only on a light tick, so a full tick's row and a legacy row
+    // re-encode as themselves.
+    if sample.Light then
+        o?light <- true
 
     o
 

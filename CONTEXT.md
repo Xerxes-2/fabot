@@ -25,6 +25,9 @@ _Avoid_: game constant, magic number
 ### Intent
 A single described action the decision layer wants performed this tick (e.g. "creep X harvests source Y"). Intents are data; they do not touch the Screeps API.
 
+### Light tick
+A tick that decides nothing: it re-issues the last full tick's repeatable work (harvest, upgrade, reserve, build, repair, dismantle) for every creep still on the tile it worked from, and steps each walker one tile along its step plan. It follows each full tick unless a hostile in reach, an armed one in sight, a creep born, gone, hurt or on a border ring, a changed controller, or a fight on the full tick forces the tick full. Builds no [[world]] and no [[colony view]]. ADR-0082. 💤
+
 ### Executor
 The thin imperative shell that turns Intents into Screeps API calls — the only layer allowed to act on the game; the [[world]]'s builder may call read-only game methods to build its projection.
 

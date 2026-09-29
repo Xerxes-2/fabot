@@ -68,6 +68,7 @@
     <Compile Include="ObserveOutpostTests.fs" />
     <Compile Include="ObserveCpuTests.fs" />
     <Compile Include="ObserveBreachTests.fs" />
+    <Compile Include="LightTickTests.fs" />
     <Compile Include="WireTests.fs" />
     <Compile Include="ProjectionShapeTests.fs" />
     <Compile Include="RoomInvariantFixtures.fs" />

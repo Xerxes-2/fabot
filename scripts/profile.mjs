@@ -439,8 +439,27 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
     rooms: Object.fromEntries(rooms.map((room) => [room.name, room])),
     spawns: Object.fromEntries(spawns.map((spawn) => [spawn.name, spawn])),
     creeps: Object.fromEntries(creeps.map((creep) => [creep.name, creep])),
+    // Every structure of ours, world-wide, as the engine's hash is: read by
+    // the light tick's glance (#443) and by nothing else. Off each visible
+    // room's `FIND_MY_STRUCTURES`, rebuilt once a tick because a scenario may
+    // move its rooms between ticks, and each carrying the `pos.roomName` the
+    // engine's own objects carry and these stubs do not.
+    get structures() {
+      if (structuresAt !== this.time) {
+        structuresAt = this.time;
+        structuresNow = {};
+        for (const room of Object.values(this.rooms)) {
+          for (const s of room.find(108)) { // FIND_MY_STRUCTURES
+            structuresNow[s.id] = { id: s.id, pos: { x: s.pos.x, y: s.pos.y, roomName: room.name } };
+          }
+        }
+      }
+      return structuresNow;
+    },
     getObjectById: (id) => byId.get(id) ?? null,
   };
+  let structuresAt = null;
+  let structuresNow = {};
   return { game, terrainReads };
 }
 
@@ -4083,16 +4102,11 @@ function printCensusKeyed(classes) {
 // measurement: what a reader compares it against is the tick, and the gap
 // between the two is the projection, the Memory writes and the intents —
 // everything `decide` is not.
-function printDecideByColony(classes, decideMs, ticks, stages) {
+function printDecideByColony(classes, decideMs, tickMs, lightMs, stages) {
   const mean = (rows) =>
     rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0;
-  const tickMs = {
-    all: ticks.all.map((row) => row.ms),
-    perturbed: ticks.perturbed,
-    quiet: ticks.quiet,
-  };
   console.log(
-    "\ndecide by colony — ms per tick of each class (this harness's clock)",
+    "\ndecide by colony — ms per full tick of each class (this harness's clock)",
   );
   console.log(
     `  ${classes.map((c) => c.label.padStart(9)).join("  ")}  colony`,
@@ -4130,7 +4144,13 @@ function printDecideByColony(classes, decideMs, ticks, stages) {
           .padStart(9),
       )
       .join("  ")}  ` +
-      "the whole tick, for comparison (projection, Memory and intents included)",
+      "the whole full tick, for comparison (projection, Memory and intents included)",
+  );
+  // The light ticks (ADR 0082): no World, no view, no decide — the last full
+  // tick's work and step plans replayed off a glance at `Game`.
+  console.log(
+    `  light ticks: ${lightMs.length} of ${lightMs.length + tickMs.all.length}, ` +
+      `mean ${mean(lightMs).toFixed(2)} ms (replayed, nothing decided)`,
   );
 }
 
@@ -5216,6 +5236,17 @@ const recordDecide = (label, calls) => {
 };
 
 const ticks = { all: [], perturbed: [], quiet: [] };
+// The cadence's two populations (ADR 0082): a light tick decides nothing and
+// replays the last full one, so the `decide by colony` table reads the full
+// ticks alone and the light ones are a line of their own. Which kind a tick
+// was is the bundle's own answer, off the row it wrote to its CPU line.
+const fullMs = { all: [], perturbed: [], quiet: [] };
+const lightMs = [];
+const wroteLight = () => {
+  const rows = globalThis.Memory?.fabot?.observe?.cpu?.ticks;
+  const last = Array.isArray(rows) ? rows[rows.length - 1] : undefined;
+  return last?.t === game.time && last.light === true;
+};
 for (let i = 0; i < TICKS; i++) {
   const moved = movesCensus();
   if (moved) world.perturb();
@@ -5237,12 +5268,19 @@ for (let i = 0; i < TICKS; i++) {
   // the `pair` world would print a `decide by colony` table headed by a
   // room this scenario furnished as an outpost and never as a colony, and
   // the two-colony mean under it would be over the wrong two colonies.
+  const light = wroteLight();
   const decided = calls.map((call) => call.home).sort();
-  const declared = [...world.colonies].sort();
+  const declared = light ? [] : [...world.colonies].sort();
   if (
     decided.length !== declared.length ||
     decided.some((home, i) => home !== declared[i])
   ) {
+    if (light) {
+      throw new Error(
+        `the bundle wrote tick ${game.time} as a light tick and ran decide ${calls.length} ` +
+          "times in it: a light tick decides nothing",
+      );
+    }
     throw new Error(
       `the ${scenario} scenario declares ${world.colonies.length} living colon` +
         `${world.colonies.length === 1 ? "y" : "ies"} (${world.colonies.join(", ")}) and the ` +
@@ -5256,6 +5294,12 @@ for (let i = 0; i < TICKS; i++) {
   recordDecide(moved ? "perturbed" : "quiet", calls);
   ticks.all.push({ t: game.time, ms });
   (moved ? ticks.perturbed : ticks.quiet).push(ms);
+  if (light) {
+    lightMs.push(ms);
+  } else {
+    fullMs.all.push(ms);
+    (moved ? fullMs.perturbed : fullMs.quiet).push(ms);
+  }
   game.time++;
   tick++;
 }
@@ -5284,7 +5328,7 @@ const classes = CENSUS_EVERY
   : [{ label: "all", ms: ticks.all.map((row) => row.ms), summary: pooled }];
 
 printReport(classes, pooled, world, ticks.all);
-printDecideByColony(classes, decideMs, ticks, stages);
+printDecideByColony(classes, decideMs, fullMs, lightMs, stages);
 printRaid(world);
 printHeldRepair(heldRepair);
 printReactor(world, seeded);

@@ -443,4 +443,8 @@ type Decision =
         /// them for this tick's decision: the Raid-log fold reads them after
         /// it rather than deriving the chain a second time.
         OutpostRooms: string list
+        /// Each walking creep's step plan, as the mover's flood laid it this
+        /// tick: the tile it asked to step onto and the one after it, both in
+        /// the room it stands in. What a light tick walks it on along.
+        Steps: Map<string, RoomPos * RoomPos>
     }

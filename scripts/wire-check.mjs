@@ -212,6 +212,34 @@ for (const [name, leaf] of [
   });
 }
 
+wire("cpu: a light tick's row round-trips its flag, and a row without one reads as a full tick (#443)", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
+  // A light tick's phases that did not run are zero-width, so the phase
+  // decoder reads the row whole.
+  const light = { t: 11, ms: 12.5, entry: 0.1, snapshot: 0, decide: 0, save: 0.4, execute: 12, intents: 40, bucket: 10000, replans: 0, light: true };
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, light], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.ticks),
+    stable([full, light]),
+    "the light row keeps its flag, the full row stays without the key",
+  );
+
+  // Off-shape flags are a full tick, never a thrown-away row.
+  for (const flag of [false, null, "yes", 1]) {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...full, light: flag }], spans: [] });
+    saveCpu(loadCpu());
+    assert.equal(
+      stable(globalThis.Memory.fabot.observe.cpu.ticks),
+      stable([full]),
+      `a flag of ${JSON.stringify(flag)} reads as a full tick`,
+    );
+  }
+});
+
 wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", async () => {
   const { loadCpu, saveCpu } = await import(MODULE);
 

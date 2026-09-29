@@ -371,18 +371,25 @@ let decideUnarbitrated
             | Ok selected -> healReflex view selected |> Fabot.Core.IntentPlan.intents
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
+    let movement = movementOf view atlas threats pool assigned crossings verbose
+
+    // Read after the mover, which is what fills the table. A pair whose tiles
+    // name two rooms is no plan a light tick could walk.
+    let steps = Atlas.stepPlans atlas |> Fresh.mapOfSeq
+
     {
         Intents = intents
         Assignments = next
         Memo = plan
         Verdicts = verdicts
-        Movement = movementOf view atlas threats pool assigned crossings verbose
+        Movement = movement
         Quotas =
             { quotas with
                 HaulerLoad = plan.HaulerLoad
                 HaulerDemand = plan.HaulerDemand
             }
         OutpostRooms = outposts.Declared
+        Steps = steps
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:
