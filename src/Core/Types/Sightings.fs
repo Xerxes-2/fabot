@@ -330,7 +330,12 @@ type RoomSighting =
 /// (`linkedBy`, `scanOf`, `creepColonies`, `ColonyView.ofWorld`); what is
 /// forbidden is a **static** holding one, shared across Expecto's parallel
 /// lists (#310, `ParallelSafetyTests`).
-type JoinTable = System.Collections.Generic.Dictionary<int * string * string, bool>
+///
+/// Keyed by the three joined into one string (`margin|from|to`; a room name
+/// holds no `|`) and not by the tuple: Fable hashes a string key into a
+/// native JS `Map`, where a tuple key is hashed and compared field by field
+/// on every read, and the scan set's chain search reads this per step.
+type JoinTable = System.Collections.Generic.Dictionary<string, bool>
 
 /// Everything this tick was seen to hold, once. The shell builds one
 /// (`World.ofGame`, the only code that touches `Game`) and
@@ -576,7 +581,7 @@ module World =
             if not (Map.containsKey fromRoom world.Rooms && Map.containsKey toRoom world.Rooms) then
                 false
             else
-                let key = (keeperMargin, fromRoom, toRoom)
+                let key = $"{keeperMargin}|{fromRoom}|{toRoom}"
 
                 // `ContainsKey` then the indexer, never `TryGetValue` in a
                 // match: Fable compiles the out-parameter pattern into four
