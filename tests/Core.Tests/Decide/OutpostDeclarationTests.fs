@@ -1358,6 +1358,7 @@ let outpostTests =
                         (Colony.errandsOf Colony.declared "W13S28")
                         []
                         [ "W15S28" ]
+                        []
                         "W13S28")
                     [ "W13S28"; "W13S29"; "W15S28"; "W14S28" ]
                     "the home, its one outpost and the child two hops out, with W14S28 behind them: it is W15S28's since 2026-09-20, so it reaches this scan set as a transit room and sorts after the declared ones"
@@ -1378,6 +1379,7 @@ let outpostTests =
                         (Colony.errandsOf Colony.declared "W13S28")
                         []
                         [ "W15S28"; "W11S29" ]
+                        []
                         "W13S28")
                     [
                         "W13S28"

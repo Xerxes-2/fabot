@@ -1007,16 +1007,23 @@ module Colony =
     let reclaiming (unowned: Set<string>) (colonies: Colony list) (colony: Colony) : string list =
         colony |> childrenWhere colonies (fun home -> Set.contains home unowned)
 
+    /// The declared children of this colony whose home it **defends** this
+    /// tick (`World.defends`, handed in off the world as the stages are to
+    /// `bootstrapping`): the homes its guard row guards.
+    let defending (defends: string -> bool) (colonies: Colony list) (colony: Colony) : string list =
+        colony |> childrenWhere colonies defends
+
     /// The rooms one colony projects this tick: its home and its worked
-    /// [[outpost]]s, its [[errand]]s, its [[salvage]] rooms, and the rooms it
-    /// bootstraps. The whole scan set in one sentence, here and not in the
-    /// shell, because the entity lists the Task pool is built from are swept
-    /// over it too.
+    /// [[outpost]]s, its [[errand]]s, its [[salvage]] rooms, the rooms it
+    /// bootstraps, and the children's homes it defends. The whole scan set in
+    /// one sentence, here and not in the shell, because the entity lists the
+    /// Task pool is built from are swept over it too.
     let roomsProjected
         (outposts: Outpost list)
         (errands: Errand list)
         (salvage: string list)
         (bootstrap: string list)
+        (defended: string list)
         (home: string)
         : string list =
         Outpost.roomsProjected outposts home
@@ -1026,14 +1033,14 @@ module Colony =
         // does: a Task in a room no chain reaches is priced at `None`, so a
         // nursery two hops out would be projected and no pioneer could be
         // sent to it — found live on 2026-09-10, when W15S28 was claimed two
-        // hops from its mother.
-        @ (bootstrap
+        // hops from its mother. A defended home's guard walks the same chain.
+        @ ((bootstrap @ defended)
            |> List.collect (fun room -> room :: RoomName.transitBetween home room))
         |> List.distinct
 
     /// The colony that cast one creep, read off its own name: creep names are
     /// `{pattern}-{tick}-{spawn}`. None when no known spawn's name is in it.
-    let private castBy (spawnHomes: (string * string) list) (creep: string) : string option =
+    let castBy (spawnHomes: (string * string) list) (creep: string) : string option =
         spawnHomes
         |> List.filter (fun (spawn, _) -> creep.Contains spawn)
         |> List.sortByDescending (fun (spawn, _) -> (spawn: string).Length)

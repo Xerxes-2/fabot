@@ -145,6 +145,38 @@ let outpostTests =
                         $"{owner} in a room the colony only crosses is no stand-down"
             }
 
+            test "a child's home its mother defends opens no stand-down" {
+                // #428: the raid that stands a declared outpost down, in the
+                // same room read as a defended home instead.
+                let defended = "W13S28"
+                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+
+                let raidedAs (colony: ColonyView) =
+                    { colony with
+                        Hostiles = overwhelming |> List.mapi (raiderIn defended)
+                        Bank = { Available = 0; Capacity = 1_500 }
+                    }
+
+                Expect.isNonEmpty
+                    (standDowns (
+                        RaidState.empty
+                        |> raidTick 100 (raidedAs (quiet |> withDeclaredOutpost defended))
+                    ))
+                    "the premise: declared as an outpost, the room is stood down from"
+
+                Expect.isEmpty
+                    (standDowns (
+                        RaidState.empty
+                        |> raidTick
+                            100
+                            (raidedAs
+                                { quiet with
+                                    Borrowed = { Rooms = []; Defended = [ defended ] }
+                                })
+                    ))
+                    "as a defended home it is not"
+            }
+
             test "an invader core opens a stand-down that runs to its collapse timer" {
                 // The only deadline the engine hands over already absolute: the shell
                 // added this tick to `ticksRemaining` on the way in (#133).

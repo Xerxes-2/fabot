@@ -187,7 +187,7 @@ The fixed `[20 Carry; 10 Move]` body that carries one `Tuning.ReactorLoad` — o
 _Avoid_: hauler, runner, delivery creep
 
 ### Guard
-The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in) and never in an [[errand]] room, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077. ⚔️
+The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in), and one per child's home its [[mother colony]] defends, and never in an [[errand]] room, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077, ADR-0080. ⚔️
 _Avoid_: defender, bodyguard, soldier
 
 ### Ranger
@@ -242,7 +242,7 @@ _Avoid_: phase, generation, tier
 A declared [[colony]] whose home room this colony does not own yet, projected and worked as an [[outpost]] of the mother until the [[claim]] lands. ADR-0047.
 
 ### Mother colony
-The declared [[colony]] that raises another: it projects, mines and reserves the child's room until the child stands on its own, first through its outpost list and then through the child's `Mother` field, and takes a lost child back for a [[claim]]. ADR-0047.
+The declared [[colony]] that raises another: it projects, mines and reserves the child's room until the child stands on its own, first through its outpost list and then through the child's `Mother` field, and takes a lost child back for a [[claim]]. Past that it projects the child's home, as a [[transit room]], while the home is beaten — an armed raid out-heals its towers and safe mode is off — and while a [[guard]] it sends there still stands on the way. ADR-0047, ADR-0080.
 _Avoid_: parent colony, host colony, parent (as the field)
 
 ### Nursery
@@ -254,7 +254,7 @@ The second [[stage]] of a child [[colony]]'s life, from the tick a spawn stands 
 _Avoid_: bootstrap phase, adolescence, borrowing period
 
 ### Borrowed work
-What one [[colony]] may take of another's, named on its [[colony view]] and bounded: the home rooms of the children it is raising (their Upgrade and Builds, and a bootstrapping child's [[buffer]] for the [[ferry]]) and of the children it has lost (a [[claim]]). ADR-0047, ADR-0052.
+What one [[colony]] may take of another's, named on its [[colony view]] and bounded: the home rooms of the children it is raising (their Upgrade and Builds, and a bootstrapping child's [[buffer]] for the [[ferry]]) and of the children it has lost (a [[claim]]), and a beaten child's home it defends (a Guard and nothing else). ADR-0047, ADR-0052, ADR-0080.
 _Avoid_: shared work, cross-colony pool
 
 ### Foreign bodies

@@ -241,6 +241,14 @@ let private guardedErrandsOf (view: ColonyView) : string list =
     |> List.distinct
     |> List.sort
 
+/// The children's homes this colony defends (`BorrowedWork.Defended`) that an
+/// armed hostile stands in this tick. The scan set already asked the harder
+/// question; this is the vision half every other guarded room is read by.
+let private defendedHomesOf (view: ColonyView) : string list =
+    view.Borrowed.Defended
+    |> List.filter (fun room ->
+        view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && isArmed h))
+
 /// The outpost chain's answers for this tick, derived once and carried (#383):
 /// re-entered per reader, the `Controller` census was walked nineteen times a
 /// tick on `--scenario reactor --level 7`. The shape is `RowSizing`'s and
@@ -260,8 +268,9 @@ type OutpostFacts =
         /// The rooms of those controllers, which is what the reserver row
         /// hires per — one body per room the pool offers a controller in.
         ReservableRooms: string list
-        /// The declared outposts a threat stands in, and the errand rooms the
-        /// guard row keeps a body in (#414).
+        /// The declared outposts a threat stands in, the errand rooms the
+        /// guard row keeps a body in (#414), and the children's homes this
+        /// colony defends (#428).
         Guarded: string list
     }
 
@@ -283,7 +292,7 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Declared = declared
         ReservableControllers = reservable
         ReservableRooms = reservableOutpostsOf view reservable
-        Guarded = guardedOutpostsOf view declared @ guardedErrandsOf view
+        Guarded = guardedOutpostsOf view declared @ guardedErrandsOf view @ defendedHomesOf view
     }
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and

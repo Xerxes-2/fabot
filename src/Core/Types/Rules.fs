@@ -129,6 +129,16 @@ module Engine =
     /// TOWER_POWER_HEAL: what a tower puts back within its optimal range.
     let towerPowerHeal = 400
 
+    /// TOWER_POWER_ATTACK: what a tower takes off within its optimal range.
+    let towerPowerAttack = 600
+
+    /// TOWER_CAPACITY: the energy one tower's store holds.
+    let towerCapacity = 1000
+
+    /// TOWER_ENERGY_COST: the energy one tower act spends; a tower holding
+    /// less does nothing.
+    let towerEnergyCost = 10
+
     /// TOWER_OPTIMAL_RANGE: the range a tower acts at full power out to.
     let towerOptimalRange = 5
 
@@ -138,14 +148,14 @@ module Engine =
     /// TOWER_FALLOFF: the share of its power a tower has lost at that range.
     let towerFalloff = 0.75
 
-    /// A tower's heal at this range (`processor/intents/towers/heal.js`): full
-    /// out to the optimal range, falling linearly to the falloff range and flat
-    /// beyond it, floored.
-    let towerHealAt (range: int) =
+    /// A tower act of this power at this range (`processor/intents/towers/`):
+    /// full out to the optimal range, falling linearly to the falloff range
+    /// and flat beyond it, floored. Heal and attack share the curve.
+    let private towerPowerAt (power: int) (range: int) =
         if range <= towerOptimalRange then
-            towerPowerHeal
+            power
         else
-            let full = float towerPowerHeal
+            let full = float power
             let r = min range towerFalloffRange
 
             full
@@ -153,6 +163,12 @@ module Engine =
               / float (towerFalloffRange - towerOptimalRange)
             |> floor
             |> int
+
+    /// A tower's heal at this range.
+    let towerHealAt (range: int) = towerPowerAt towerPowerHeal range
+
+    /// A tower's attack at this range: `towerHealAt`'s twin.
+    let towerAttackAt (range: int) = towerPowerAt towerPowerAttack range
 
     /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`). The
     /// projection carries a hostile's parts and not its hits, so a raid's

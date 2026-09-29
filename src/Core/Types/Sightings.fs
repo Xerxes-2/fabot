@@ -35,6 +35,30 @@ type HostileInfo =
         TicksToLive: int
     }
 
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module HostileInfo =
+    /// ADR-0033. The range a hostile can hurt a creep from, or None for one
+    /// that cannot.
+    let weaponRange (hostile: HostileInfo) : int option =
+        [
+            if List.contains Attack hostile.Body then
+                Engine.meleeRange
+            if List.contains RangedAttack hostile.Body then
+                Engine.rangedRange
+        ]
+        |> function
+            | [] -> None
+            | ranges -> Some(List.max ranges)
+
+    /// Whether a hostile can hurt anything at all: `weaponRange` asked as a
+    /// yes/no, written once because many rules turn on it.
+    let isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
+
+    /// What a hostile heals a tick, its HEAL parts priced unboosted: the
+    /// projection carries no boosts.
+    let healing (hostile: HostileInfo) : int =
+        Engine.healPower * partCountIn hostile.Body Heal
+
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
 /// `Hostiles` nor the fire reflex, whose sweep is `FIND_HOSTILE_CREEPS`. It is
@@ -357,6 +381,65 @@ module World =
     let roomOf (world: World) (room: string) : RoomFacts =
         Map.tryFind room world.Rooms |> Option.defaultValue RoomFacts.empty
 
+    /// ADR-0080
+    /// Whether a colony's home cannot hold the raid standing in it this tick:
+    /// the room is ours, an armed hostile that is not an ally is there, safe
+    /// mode is off, and the raid heals at least what the towers holding a
+    /// shot's energy land at the falloff range.
+    let homeBeaten (facts: RoomFacts) : bool =
+        let raid =
+            facts.Hostiles |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
+
+        let towers =
+            facts.Refillables
+            |> List.filter (fun r ->
+                r.Kind = BuiltKind.Tower
+                && Engine.towerCapacity - r.FreeCapacity >= Engine.towerEnergyCost)
+            |> List.length
+
+        facts.Control
+        |> Option.exists (fun control -> control.Owner = Ownership.Ours && not control.SafeMode)
+        && List.exists HostileInfo.isArmed raid
+        && List.sumBy HostileInfo.healing raid
+           >= towers * Engine.towerAttackAt Engine.towerFalloffRange
+
+    /// Every spawn's name beside the room it stands in: what `Colony.castBy`
+    /// reads a creep's caster off.
+    let spawnHomes (world: World) : (string * string) list =
+        world.Rooms
+        |> Map.toList
+        |> List.collect (fun (name, facts) ->
+            facts.Spawns |> List.map (fun spawn -> spawn.Name, name))
+
+    /// Whether a guard `mother` cast stands in one of these rooms. The
+    /// casters are read only once a guard body is found there.
+    let private guardCastIn (world: World) (mother: string) (rooms: string list) : bool =
+        let standing =
+            world.Creeps
+            |> List.filter (fun creep ->
+                isGuardParts creep.Info.Body && List.contains creep.Room rooms)
+
+        not (List.isEmpty standing)
+        && (let homes = spawnHomes world
+
+            standing
+            |> List.exists (fun creep -> Colony.castBy homes creep.Info.Name = Some mother))
+
+    /// Whether a mother defends one child's home this tick: while it is
+    /// beaten, and past that while a guard she cast still stands on the
+    /// defended chain (the home and the rooms between) outside the rooms she
+    /// projects anyway. The second half is the latch, read off the world and
+    /// kept nowhere: a raid the towers hold again once her guard has come
+    /// keeps the room hers, so the guard is not handed to a child with no
+    /// Guard to give it; and a guard left on the chain when the raid ends
+    /// stays placed and walks home. It lets go the tick the last one walks
+    /// out.
+    let defends (world: World) (covered: string list) (mother: string) (child: string) : bool =
+        homeBeaten (roomOf world child)
+        || child :: RoomName.transitBetween mother child
+           |> List.filter (fun room -> not (List.contains room covered))
+           |> guardCastIn world mother
+
     /// The rooms we own this tick, off the control entry vision paid for: one
     /// of the two facts a colony has to pass to be **living**.
     let ownedRooms (world: World) : Set<string> =
@@ -537,7 +620,10 @@ module World =
             /// The rooms this colony projects for a child of its own, raised
             /// or re-claimed (#221).
             Borrowed: string list
-            /// The scan set: this colony's home and all four of those, the
+            /// The children's homes this colony defends this tick
+            /// (`Colony.defending`).
+            Defended: string list
+            /// The scan set: this colony's home and all five of those, the
             /// one place that union is spelled.
             Scanned: string list
         }
@@ -594,12 +680,17 @@ module World =
             Colony.bootstrapping stages colonies colony
             @ Colony.reclaiming unowned colonies colony
 
+        let covered = Colony.roomsProjected outposts errands salvage borrowed [] colony.Home
+
+        let defended = Colony.defending (defends world covered colony.Home) colonies colony
+
         {
             Outposts = outposts
             Errands = errands
             Salvage = salvage
             Borrowed = borrowed
-            Scanned = Colony.roomsProjected outposts errands salvage borrowed colony.Home
+            Defended = defended
+            Scanned = Colony.roomsProjected outposts errands salvage borrowed defended colony.Home
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).
@@ -682,15 +773,9 @@ module World =
                     world
                     colony)
 
-        let spawnHomes =
-            world.Rooms
-            |> Map.toList
-            |> List.collect (fun (name, facts) ->
-                facts.Spawns |> List.map (fun spawn -> spawn.Name, name))
-
         Colony.creepColonies
             projections
-            spawnHomes
+            (spawnHomes world)
             (world.Creeps |> List.map (fun creep -> creep.Info.Name, Some creep.Room))
 
     /// `creepColoniesRecalling` over a table of this call's own (`linkedBy`).

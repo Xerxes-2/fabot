@@ -167,7 +167,7 @@ let bareRespawn =
         // child, declares no errand, and every tick has vision. "W1N2"
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
-        Borrowed = { Rooms = [] }
+        Borrowed = { Rooms = []; Defended = [] }
         Refused = []
         Errands = []
         Dismantles = []
@@ -1052,6 +1052,20 @@ let quotaOf snapshot =
     let { Memo = memo } = decideOn snapshot
     memo.HaulerQuota
 
+/// One named row of the tick's `Quotas`: observability, never a number
+/// anything downstream reads.
+let rowOf name colony =
+    (decideOn colony).Quotas.Rows |> List.tryFind (fun row -> row.Row = name)
+
+let guardQuotaOf colony =
+    rowOf "guard" colony |> Option.map (fun row -> row.Quota)
+
+/// This tick's guard casts, by the row name every creep name carries.
+let guardCasts intents =
+    spawnIntents intents
+    |> List.filter (fun (_, _, name: string) -> name.StartsWith "guard-")
+    |> List.map (fun (_, body, _) -> body)
+
 /// The haul this ColonyView prices, summed over its source and mineral
 /// containers — the numbers the quota above divides, the mine's apart. A rock's own rate lives here,
 /// where the shaping rules the quota carries (#279's floor for a haul that
@@ -1684,7 +1698,7 @@ let asNursery (colony: ColonyView) =
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
         // The shell borrows a nursery for the mother the tick it is
         // claimed; the pool's budget reads that field.
-        Borrowed = { Rooms = [ "W1N2" ] }
+        Borrowed = { Rooms = [ "W1N2" ]; Defended = [] }
         // Declared and owned with no spawn of ours standing in it is the
         // whole of `Nursery`, so the shell would derive exactly this entry.
         Stages = Map.add "W1N2" Nursery colony.Stages
@@ -2096,7 +2110,7 @@ let ferryMother stage =
         RoomControl = Map.ofList [ "W1N1", ownedRoom; "W1N2", ownedRoom ]
         Declared = [ "W1N1"; "W1N2" ]
         Stages = Map.ofList [ "W1N1", Independent; "W1N2", stage ]
-        Borrowed = { Rooms = [ "W1N2" ] }
+        Borrowed = { Rooms = [ "W1N2" ]; Defended = [] }
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some "W1N1"

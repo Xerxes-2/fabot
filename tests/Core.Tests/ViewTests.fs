@@ -1168,7 +1168,7 @@ let colonyViewTests =
 
                 Expect.isFalse
                     (Map.containsKey outpost view.RoomControl)
-                    "while what vision pays for is absent (ADR 0004)"
+                    "while what vision pays for is absent"
             }
 
             test "the declaration reaches the view whole" {
@@ -1289,6 +1289,332 @@ let colonyViewTests =
                     (Map.tryFind "buf-child" (viewOf pairWorld mother).Spatial.Stores)
                     (Some 400)
                     "and the one stage the lend exists at still carries it"
+            }
+        ]
+
+/// The pair world a few levels on: the child independent at RCL4, so its
+/// mother raises it no more and projects nothing of it on a quiet tick, with
+/// one tower per entry of `towers`, holding that much energy.
+let private independentChild (towers: int list) : World =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.change
+                child
+                (Option.map (fun (facts: RoomFacts) ->
+                    { facts with
+                        Controller =
+                            facts.Controller |> Option.map (fun ctrl -> { ctrl with Level = 4 })
+                        Refillables =
+                            towers
+                            |> List.mapi (fun i energy ->
+                                {
+                                    Id = $"tower-{i}"
+                                    FreeCapacity = Engine.towerCapacity - energy
+                                    Kind = BuiltKind.Tower
+                                })
+                    }))
+    }
+
+/// One change to the child's room.
+let private inChild (change: RoomFacts -> RoomFacts) (world: World) : World =
+    { world with
+        Rooms = world.Rooms |> Map.change child (Option.map change)
+    }
+
+/// A squad in the child's home: one attacker and two healers of `heals`
+/// HEAL parts each, W17S29's live raid being two of seven.
+let private raidedBy owner (heals: int) =
+    inChild (fun facts ->
+        { facts with
+            Hostiles =
+                [
+                    "atk", [ Attack; Move ]
+                    "med-1", List.replicate heals Heal @ [ Move ]
+                    "med-2", List.replicate heals Heal @ [ Move ]
+                ]
+                |> List.mapi (fun i (id, parts) ->
+                    {
+                        Id = id
+                        Owner = owner
+                        Pos = { Room = child; X = 5 + i; Y = 5 }
+                        Body = parts
+                        TicksToLive = 1000
+                    })
+        })
+
+/// The one-tower child under a Trepidimous squad of `heals` a healer.
+let private raided heals =
+    independentChild [ 1000 ] |> raidedBy "Trepidimous" heals
+
+let private underSafeMode =
+    inChild (fun facts ->
+        { facts with
+            Control = facts.Control |> Option.map (fun ctrl -> { ctrl with SafeMode = true })
+        })
+
+let private heldBy owner =
+    inChild (fun facts ->
+        { facts with
+            Control = Some(control owner)
+        })
+
+/// A guard of ours standing in `room`; whose it is, is the spawn in its name.
+let private withGuard name room (world: World) =
+    let guard = creep name room
+
+    { world with
+        Creeps =
+            { guard with
+                Info =
+                    { guard.Info with
+                        Body = Map.ofList [ Attack, 3; Move, 5; Heal, 1 ]
+                    }
+            }
+            :: world.Creeps
+        Rooms =
+            world.Rooms
+            |> Map.change
+                room
+                (Option.map (fun facts ->
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                CreepPositions =
+                                    Map.add name { X = 5; Y = 7 } facts.Layer.CreepPositions
+                            }
+                    }))
+    }
+
+/// The Guards a colony pools off the view the shell builds for it.
+let private guardsPooled (view: ColonyView) =
+    let atlas = Atlas.ofView view
+
+    Planner.planTasks
+        view
+        atlas
+        (threatsOf view atlas)
+        HeldTaskFacts.empty
+        (Planner.outpostFactsOf view)
+    |> List.filter (function
+        | Guard _ -> true
+        | _ -> false)
+
+/// The mother's guard, and one of the child's: `Spawn1` is hers, `Spawn2`
+/// the child's.
+let private hers = "guard-990-Spawn1"
+let private childs = "guard-990-Spawn2"
+
+/// A child two hops from the mother, W13S28 between them as a room nobody
+/// declares, for the chain a guard walks home along.
+let private farChild = "W14S28"
+
+let private farDeclared: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home = child then
+            { colony with Home = farChild }
+        else
+            colony)
+
+let private farWorld: World =
+    let rooms =
+        pairWorld.Rooms
+        |> Map.remove child
+        |> unseen child
+        |> Map.add
+            farChild
+            (roomOf farChild Ownership.Ours [ $"ctrl-{farChild}", { X = 8; Y = 8 }, Controller ]
+             |> ourColony "Spawn2" 4 1300
+             |> snd)
+
+    { pairWorld with
+        Rooms = rooms
+        Creeps = [ creep "worker-900-Spawn1" mother ]
+    }
+
+[<Tests>]
+let defendedHomeTests =
+    testList
+        "a mother defends a child's home its towers cannot hold"
+        [
+            test
+                "the mother projects a raided child's home, as a room she crosses and works nothing in" {
+                // W17S29's live raid (#428): 14 HEAL parts put back 168 a tick
+                // against the 150 its one tower lands at the falloff range.
+                let raided = viewOf (raided 7) mother
+                let quiet = viewOf (independentChild [ 1000 ]) mother
+
+                Expect.isEmpty quiet.Borrowed.Defended "the premise: a quiet child is none of hers"
+
+                Expect.isFalse
+                    (Map.containsKey child quiet.Spatial.Rooms)
+                    "and she projects nothing of an independent child on a quiet tick"
+
+                Expect.equal
+                    raided.Borrowed.Defended
+                    [ child ]
+                    "raided, the child's home is hers to defend"
+
+                Expect.isTrue
+                    (Map.containsKey child raided.Spatial.Rooms)
+                    "so its ground is in her projection"
+
+                Expect.containsAll
+                    (raided.Hostiles |> List.map (fun h -> h.Id))
+                    [ "atk"; "med-1"; "med-2" ]
+                    "and the raid stands in her view"
+
+                Expect.isFalse
+                    ([ "ctrl-W13S28"; "spawn-child"; "site-child"; "can-child" ]
+                     |> List.exists (fun id -> Map.containsKey id raided.Spatial.TargetKinds))
+                    "but nothing of the child's is work of hers: the room narrows as a transit room"
+
+                Expect.isFalse
+                    (List.contains child raided.Borrowed.Rooms)
+                    "and it is no room she raises"
+            }
+
+            test
+                "one world, both views: the mother pools the Guard of the beaten home, the child none" {
+                let world = raided 7
+
+                Expect.equal
+                    (guardsPooled (viewOf world mother))
+                    [ Guard child ]
+                    "the mother's pool holds the Guard, under the child's name"
+
+                Expect.isEmpty (guardsPooled (viewOf world child)) "and the child's holds none"
+            }
+
+            test "a child under safe mode is not defended" {
+                Expect.isEmpty
+                    (viewOf (raided 7 |> underSafeMode) mother).Borrowed.Defended
+                    "safe mode holds the room without her"
+            }
+
+            test "a child whose towers out-damage the raid's heal is not defended" {
+                let defendedWith towers =
+                    (viewOf (independentChild towers |> raidedBy "Trepidimous" 7) mother)
+                        .Borrowed.Defended
+
+                Expect.isEmpty
+                    (defendedWith [ 1000; 1000 ])
+                    "two towers land 300 against 168 of heal"
+
+                Expect.equal
+                    (defendedWith [ 1000; 5 ])
+                    [ child ]
+                    "and a tower too dry to fire is no tower"
+
+                Expect.isEmpty
+                    (viewOf (raided 6) mother).Borrowed.Defended
+                    "12 HEAL parts put back 144, which one tower out-damages"
+            }
+
+            test "an ally's squad is no raid" {
+                Expect.isEmpty
+                    (viewOf (independentChild [ 1000 ] |> raidedBy "Odiodin" 7) mother)
+                        .Borrowed.Defended
+                    "an ally's creep is never hostile"
+            }
+
+            test "a child's home a rival holds is not hers to defend" {
+                Expect.isEmpty
+                    (viewOf (raided 7 |> heldBy Ownership.Rival) mother).Borrowed.Defended
+                    "a lost home is the stand-down's business, not the guard's"
+            }
+
+            test
+                "her guard in the home keeps it hers while the raid stands, though the towers now hold it" {
+                // One healer down mid-fight: 144 heal, which the tower beats.
+                let healerDown = raided 6
+                let guarded = healerDown |> withGuard hers child
+
+                Expect.isEmpty
+                    (viewOf healerDown mother).Borrowed.Defended
+                    "the premise: the home is not beaten"
+
+                Expect.equal
+                    (viewOf guarded mother).Borrowed.Defended
+                    [ child ]
+                    "with her guard standing in it, the home stays hers"
+
+                Expect.equal
+                    (Map.tryFind hers (holdersOf guarded))
+                    (Some mother)
+                    "so the guard is not handed to a child with no Guard to give it"
+
+                Expect.equal
+                    (guardsPooled (viewOf guarded mother))
+                    [ Guard child ]
+                    "and her pool still holds the Guard it is fighting"
+
+                Expect.isEmpty
+                    (viewOf (healerDown |> withGuard childs child) mother).Borrowed.Defended
+                    "a guard of the child's own standing at home holds nothing for her"
+            }
+
+            test
+                "with the raid gone, her guard in the home stays hers and fights nothing, until it walks out" {
+                let left = independentChild [ 1000 ] |> withGuard hers child
+
+                Expect.equal
+                    (viewOf left mother).Borrowed.Defended
+                    [ child ]
+                    "the home stays in her scan"
+
+                Expect.equal
+                    (Map.tryFind hers (holdersOf left))
+                    (Some mother)
+                    "the guard stays hers"
+
+                Expect.isEmpty (guardsPooled (viewOf left mother)) "with nothing to fight in it"
+
+                Expect.isEmpty
+                    (viewOf (independentChild [ 1000 ] |> withGuard hers mother) mother)
+                        .Borrowed.Defended
+                    "and once it is home, the child's home is none of hers"
+            }
+
+            test "a guard of hers left between the two homes when the raid ends is still placed" {
+                let stranded = farWorld |> withGuard hers child
+                let view = viewUnder farDeclared stranded mother
+
+                Expect.equal
+                    view.Borrowed.Defended
+                    [ farChild ]
+                    "the chain stays in her scan while her guard stands on it"
+
+                Expect.equal
+                    (Atlas.creepRoom (Atlas.ofView view) hers)
+                    (Some child)
+                    "so the guard is placed in the room between, where it can be walked home"
+
+                let home = viewUnder farDeclared (farWorld |> withGuard hers mother) mother
+
+                Expect.isEmpty home.Borrowed.Defended "and once it is home, the chain lets go"
+
+                Expect.isFalse
+                    (Map.containsKey child home.Spatial.Rooms)
+                    "and the room between leaves her projection"
+            }
+
+            test "the child's own view is unchanged by its mother's defence" {
+                let raided = viewOf (raided 7) child
+                let quiet = viewOf (independentChild [ 1000 ]) child
+
+                Expect.isEmpty raided.Borrowed.Defended "a colony defends no home of its own"
+
+                Expect.equal
+                    (raided.Spatial.Rooms |> Map.keys |> List.ofSeq)
+                    (quiet.Spatial.Rooms |> Map.keys |> List.ofSeq)
+                    "and projects the rooms it would on a quiet tick"
+
+                Expect.equal
+                    raided.Spatial.TargetKinds
+                    quiet.Spatial.TargetKinds
+                    "with every target of its own"
             }
         ]
 

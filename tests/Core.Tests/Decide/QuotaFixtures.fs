@@ -320,20 +320,6 @@ let internal banked capacity (colony: ColonyView) =
         Bank = bank 8000 capacity
     }
 
-/// The `guard` row of the tick's `Quotas`: observability, never a number
-/// anything downstream reads.
-let internal rowOf name colony =
-    (decideOn colony).Quotas.Rows |> List.tryFind (fun row -> row.Row = name)
-
-let internal guardQuotaOf colony =
-    rowOf "guard" colony |> Option.map (fun row -> row.Quota)
-
-/// This tick's guard casts, by the row name every creep name carries.
-let internal guardCasts intents =
-    spawnIntents intents
-    |> List.filter (fun (_, _, name: string) -> name.StartsWith "guard-")
-    |> List.map (fun (_, body, _) -> body)
-
 /// The Anchor #203 met, spelled as the colony really held it: `6W/1C/1M`,
 /// standing full on a full container. One Carry and one Move, and yet
 /// nothing that can put a single energy into an extension — a standing

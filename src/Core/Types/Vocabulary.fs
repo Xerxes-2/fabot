@@ -66,6 +66,12 @@ let partsOf (body: BodyPart list) : Map<BodyPart, int> =
 let partCount (parts: Map<BodyPart, int>) part =
     parts |> Map.tryFind part |> Option.defaultValue 0
 
+/// The guard cut, over parts: an ATTACK part, the one cut no other row of
+/// ours makes. One predicate for a living body and one still in an oven, and
+/// for the mother reading which of her bodies still stand on a defended
+/// chain (`World.defends`), so none of them can drift.
+let isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
+
 /// How many of one part a body still in the oven holds, counted off the list
 /// itself: for the rules that ask about a single part, where building a map
 /// to read one key out of it is the dearer spelling.

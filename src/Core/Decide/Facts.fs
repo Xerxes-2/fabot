@@ -186,24 +186,11 @@ let internal keepDamaged (view: ColonyView) : bool =
     SpatialInfo.structureHits view.Spatial
     |> List.exists (fun (_, kind, hits) -> isKeep kind && hits.Hits < hits.HitsMax)
 
-/// ADR-0033. The range a hostile can hurt a creep from, or None for one that
-/// cannot.
-let internal weaponRange (hostile: HostileInfo) : int option =
-    [
-        if List.contains Attack hostile.Body then
-            Engine.meleeRange
-        if List.contains RangedAttack hostile.Body then
-            Engine.rangedRange
-    ]
-    |> function
-        | [] -> None
-        | ranges -> Some(List.max ranges)
+/// `HostileInfo.weaponRange`, under the name every rule here reads it by.
+let internal weaponRange (hostile: HostileInfo) : int option = HostileInfo.weaponRange hostile
 
-/// Whether a hostile can hurt anything at all: `weaponRange` asked as a yes/no.
-/// Written once because four rules turn on it: whose hits the guard beat
-/// counts, whether a room stands down, whether safe mode fires, and whether a
-/// Reach is derived at all.
-let internal isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
+/// `HostileInfo.isArmed`, likewise.
+let internal isArmed (hostile: HostileInfo) : bool = HostileInfo.isArmed hostile
 
 /// Whether a projected target stands in a room this player owns, which is how
 /// every rule of the season's ore answers "is this ours?" (#261, #311).

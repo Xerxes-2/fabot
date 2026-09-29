@@ -50,7 +50,7 @@ let quiet: ColonyView =
         Declared = []
         Stages = Map.empty
         Foreign = Set.empty
-        Borrowed = { Rooms = [] }
+        Borrowed = { Rooms = []; Defended = [] }
         Refused = []
         Errands = []
         Dismantles = []

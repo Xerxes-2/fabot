@@ -279,11 +279,7 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
 let private upgradeDrainOf body =
     partCountIn body Work * Engine.upgradeDrainPerWork
 
-/// The guard cut, over parts: an ATTACK part, the one cut no other row of
-/// this colony makes. One predicate for a living body and one still in an
-/// oven, so the two cannot drift.
-let internal isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
-
+/// `isGuardParts` asked of a living body.
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
 /// The ranger cut (#411): a RANGED_ATTACK part and no ATTACK, the guard's cut
@@ -325,7 +321,7 @@ let private blocksBeat
             Engine.attackPower * parts Attack h.Body
             + Engine.rangedAttackPower * parts RangedAttack h.Body)
 
-    let raidHealing = raid |> List.sumBy (fun h -> Engine.healPower * parts Heal h.Body)
+    let raidHealing = raid |> List.sumBy HostileInfo.healing
 
     let raidHits =
         raid

@@ -15,6 +15,10 @@ type BorrowedWork =
         /// to make. Both narrow to the same three kinds, because a Claim asks
         /// for exactly what an Upgrade does.
         Rooms: string list
+        /// The children's homes this colony **defends** this tick
+        /// (`Colony.defending`): projected as transit rooms, so nothing of
+        /// them is work but the Guard the planner pools there.
+        Defended: string list
     }
 
 /// One colony's whole reading of this tick: its home room's projection, the
@@ -662,7 +666,11 @@ module ColonyView =
                     |> List.filter (fun (name, _) -> not (Set.contains name names))
                     |> List.map (snd >> RoomPos.at room))
                 |> Set.ofList
-            Borrowed = { Rooms = bootstrap }
+            Borrowed =
+                {
+                    Rooms = bootstrap
+                    Defended = scan.Defended
+                }
             // Read off the whole declaration and not off `scanned`, where these
             // rooms have just been subtracted (#243); asked over the **masked**
             // border rings the scan set's own narrowing was asked over, and

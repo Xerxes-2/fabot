@@ -858,6 +858,7 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
             colony.Errands
             colony.Salvage
             (Colony.bootstrapping stages colonies colony)
+            []
             colony.Home)
 
 /// The mother of the pair, carrying exactly the creeps the membership rule
@@ -1350,6 +1351,7 @@ let twoColonyTests =
                             (Map.ofList [ child, Nursery ])
                             colonies
                             (List.head colonies))
+                        []
                         home
 
                 Expect.equal
@@ -1691,6 +1693,91 @@ let twoColonyTests =
                 Expect.isFalse
                     (List.contains (taskId (Harvest "src-home")) child)
                     "nor the mother's in the child's"
+            }
+        ]
+
+/// W17S29's live raid (#428), filed in the pair's north room: one
+/// `18M17A` and two `11M7H`, 168 heal a tick against the 150 one tower lands
+/// at the falloff range.
+let private homeRaid =
+    [
+        yield
+            { hostileIn
+                  "W1N2"
+                  { X = 10; Y = 44 }
+                  (List.replicate 17 Attack @ List.replicate 18 Move) with
+                Id = "atk"
+            }
+        for i in 1..2 ->
+            { hostileIn "W1N2" { X = 10; Y = 45 } (List.replicate 7 Heal @ List.replicate 11 Move) with
+                Id = $"med-{i}"
+            }
+    ]
+
+/// The mother while the child's home is beaten: W1N2 is on her view as a
+/// defended home (`BorrowedWork.Defended`), projected as the ground her
+/// guard crosses and nothing more, with a W15S28-sized bank to cast from.
+let private defendingMother raid =
+    let colony = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+    { colony with
+        Spawns = [ spawn ]
+        Bank = bank 5_600 5_600
+        Hostiles = raid
+        Borrowed = { Rooms = []; Defended = [ "W1N2" ] }
+    }
+
+/// The child in the same tick: its own home under the same raid, and a bank
+/// that buys one guard block.
+let private raidedChildColony raid =
+    { childColony [ childCast, { X = 10; Y = 44 } ] with
+        Spawns = [ spawn ]
+        Bank = bank 1_300 1_300
+        Hostiles = raid
+    }
+
+let private guardsIn tasks =
+    tasks
+    |> List.filter (function
+        | Guard _ -> true
+        | _ -> false)
+
+[<Tests>]
+let defendedHomeTests =
+    testList
+        "a mother defends a child's home"
+        [
+            test
+                "the mother pools the Guard of a beaten child's home, and her guard row casts for it" {
+                let raided = defendingMother homeRaid
+                let quiet = defendingMother []
+
+                Expect.isEmpty
+                    (guardsIn (planTasksOn quiet noThreats))
+                    "the premise: a defended home with nobody in it is no fight"
+
+                Expect.equal
+                    (guardsIn (planTasksOn raided noThreats))
+                    [ Guard "W1N2" ]
+                    "raided, the child's home is one Guard in her pool, under the room's name"
+
+                Expect.equal
+                    (guardQuotaOf raided)
+                    (Some 2)
+                    "one guard loses the raid alone, so the row wants two"
+
+                Expect.equal
+                    (guardCasts (decideOn raided).Intents |> List.map List.length)
+                    [ Engine.maxBodyParts ]
+                    "and her spawn casts one, the biggest a body carries"
+            }
+
+            test "the child's own guard row casts nothing for its home" {
+                let raided = raidedChildColony homeRaid
+
+                Expect.isEmpty (guardsIn (planTasksOn raided noThreats)) "no Guard in its own home"
+
+                Expect.isEmpty (guardCasts (decideOn raided).Intents) "and no guard cast for it"
             }
         ]
 
