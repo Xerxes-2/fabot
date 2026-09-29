@@ -886,6 +886,74 @@ let arbitrationTests =
                     "and with the step and the tile beside it walled it takes the third, rather than bouncing across the border"
             }
 
+            test "a ring creep whose way on is across the tile it stands on holds it" {
+                // #436: the engine carries any body ending its tick on the
+                // ring across, moved or not. Stepped along the border
+                // instead, a loaded body lands fatigued, is grounded there,
+                // and is carried back — forever. W1N2's corridor is x = 10,
+                // so the band's exits are (9,0) (10,0) (11,0) and (8,0)'s
+                // landing has no ground beside it.
+                let on (ring: Map<Pos, Terrain>) (pos: Pos) =
+                    let colony =
+                        northBorderColony { X = 10; Y = 38 }
+                        |> withNorthOutpost (Some { X = 10; Y = 44 })
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Borders = Map.add "W1N1" ring colony.Spatial.Borders
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w", pos ]
+                                })
+                    }
+
+                let at (pos: Pos) task =
+                    resolveOn (on plainRing pos) [ "w", task ] |> moveIntents
+
+                Expect.isEmpty
+                    (at { X = 10; Y = 0 } (Harvest "src-out"))
+                    "bound across the tile it stands on, it stays and the engine carries it over"
+
+                Expect.equal
+                    (at { X = 10; Y = 0 } (Harvest "src-home"))
+                    [ "w", Bottom ]
+                    "bound for its own room, it steps off the ring as before"
+
+                Expect.equal
+                    (at { X = 8; Y = 0 } (Harvest "src-out"))
+                    [ "w", Right ]
+                    "on a tile that lands nowhere it can walk off, it walks to the crossing as before"
+
+                // The crossings either side swamp: its own is cheaper than
+                // theirs by more than the step back onto it from (10,1), so
+                // the price wins the tile it stands on and must not walk the
+                // body inward to reach it.
+                let swampSides =
+                    plainRing |> Map.add { X = 9; Y = 0 } Swamp |> Map.add { X = 11; Y = 0 } Swamp
+
+                Expect.isEmpty
+                    (resolveOn (on swampSides { X = 10; Y = 0 }) [ "w", Harvest "src-out" ]
+                     |> moveIntents)
+                    "and where the price wins its own tile it stays, rather than stepping in to walk back onto it"
+
+                // #151: a body crossing for a room it cannot see is walked by
+                // the compass, not the price, and holds the same way.
+                Expect.isEmpty
+                    (resolve
+                        (on plainRing { X = 10; Y = 0 })
+                        (Atlas.ofView (on plainRing { X = 10; Y = 0 }))
+                        noThreats
+                        []
+                        Map.empty
+                        (Map.ofList [ "w", "W1N2" ])
+                        Set.empty
+                     |> fst
+                     |> moveIntents)
+                    "and so does a body crossing for a room it cannot see"
+            }
+
             test "head-on with alternating fatigue, both bodies arrive — over ticks, not one" {
                 // Two bodies meeting head-on in a lane, tired on opposite
                 // ticks so the tick both could swap never comes, walked until

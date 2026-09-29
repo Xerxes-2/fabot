@@ -1,6 +1,8 @@
 # Traffic re-prices a route; fatigue grounds a creep
 
-> **Status:** accepted
+> **Status:** amended by #436
+
+> **Amended by #436**: a creep standing on the crossing its walk takes is no longer bounced along the border but waits on it, since the engine carries it across for free.
 
 A live jam: builders stalled behind seated harvesters while the console
 spammed `MoveCreep failed: -11` (ERR_TIRED) every tick. ADR 0001's

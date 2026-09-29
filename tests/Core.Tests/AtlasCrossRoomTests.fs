@@ -1051,18 +1051,12 @@ let crossRoomStepTests =
             }
 
             test "a creep parked on the ring prices and crosses from the tile it stands on" {
-                // A flood never relaxes onto the ring but *seeds* its origin
-                // whatever that tile weighs, so a creep parked on the ring
-                // is already beside every crossing next to it (#175).
-                // Whether it should be aimed sideways along the ring is
-                // #146's open question.
-                //
-                // Standing on the home ring at (24,0): priced at (25,0) it
-                // pays one onto the exit and eight in the outpost, nine;
-                // priced at (24,0) it would first step to (25,1) and pay
-                // ten. Read the ring off the near side instead and both
-                // cost ten, the tie falls to (24,0), and the creep is
-                // walked inland to cross where it was never priced.
+                // A creep parked on the ring stands on a crossing already, and
+                // the engine carries a body ending its tick there across without
+                // a move (#436): the wait costs a tick of the walk and no
+                // fatigue, so the ranking price charges it nothing and the step
+                // along the ring to (25,0) — which would buy nothing but the
+                // fatigue it lands with — loses to standing still.
                 let atlas =
                     northOf
                         (corridorHome [ "w", { X = 24; Y = 0 } ])
@@ -1079,17 +1073,58 @@ let crossRoomStepTests =
                 Expect.equal
                     (walkTicks atlas "w" (Harvest "src-out"))
                     (Some 9)
-                    "no approach to pay, the exit's own tick, and eight in the outpost"
+                    "no approach to pay, the tick it waits to be carried, and eight in the outpost"
 
                 Expect.equal
                     (travelCost atlas "w" (Harvest "src-out"))
-                    (Some 18)
-                    "and the same join in the ranking price's own units"
+                    (Some 16)
+                    "and in the ranking price the eight alone: waiting spends no fatigue"
 
                 Expect.equal
                     (firstStepFor atlas "w" (Harvest "src-out"))
-                    (Some { X = 25; Y = 0 })
-                    "so the step is the crossing the price was paid at, taken off the ring"
+                    (Some { X = 24; Y = 0 })
+                    "so the step is the tile it stands on, the crossing the price was paid at"
+            }
+
+            test "a tie between the crossing a creep stands on and a lower one falls to its own" {
+                // Open plain both sides, the source far west: every crossing
+                // from x=14 to the creep's own ties on the sum, and the
+                // lowest-exit tie-break would walk it inland along the ring
+                // (#436's second review) where the tile it stands on carries
+                // it across for nothing.
+                let ground =
+                    [
+                        for x in 1..48 do
+                            for y in 1..48 -> { X = x; Y = y }
+                    ]
+
+                let ring y =
+                    [ for x in 1..48 -> { X = x; Y = y }, Plain ]
+
+                let atlas =
+                    northOf
+                        { RoomLayer.empty with
+                            Terrain = TerrainGrid.ofList (plainLine ground)
+                            CreepPositions = Map.ofList [ "w", { X = 40; Y = 0 } ]
+                        }
+                        (ring 0)
+                        { RoomLayer.empty with
+                            Terrain =
+                                TerrainGrid.ofList (
+                                    plainLine (
+                                        ground |> List.filter (fun p -> p <> { X = 5; Y = 40 })
+                                    )
+                                )
+                            TargetPositions = Map.ofList [ "src-out", { X = 5; Y = 40 } ]
+                        }
+                        (ring 49)
+                        [ "src-out", Source ]
+                        [ worker "w" ]
+
+                Expect.equal
+                    (firstStepFor atlas "w" (Harvest "src-out"))
+                    (Some { X = 40; Y = 0 })
+                    "the crossing it stands on wins the tie"
             }
 
             test "two crossings tied on the sum fall to the lowest exit, not to the cheaper half" {

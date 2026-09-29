@@ -17,8 +17,9 @@ let private idleRank = System.Int32.MaxValue
 /// Task it cannot reach is parked on the Task's rank. The order is the whole
 /// of the preference. One tile is never a candidate: the creep's own when it
 /// is a Seam (#142), since a creep ending its tick on the ring is moved out of
-/// the room again. The Task goes to `stepToward` beside the area, which is
-/// what gives a creep matched across a border somewhere to walk. A body
+/// the room again — unless across is where its step is taking it (#436). The
+/// Task goes to `stepToward` beside the area, which is what gives a creep
+/// matched across a border somewhere to walk. A body
 /// crossing for a room it cannot see keeps crossing (#151): the vision grace
 /// hands the mover the room its target was last seen in and nothing else,
 /// which is enough for `Atlas.stepTowardRoom`, and it is its own arrival that
@@ -79,9 +80,13 @@ let private moveIntentFor
 
     // A body that has not arrived: the step it asked for, the ways around it,
     // and no Work Area at all — it is standing outside the one it is walking
-    // to, so nothing it is pushed off is work.
+    // to, so nothing it is pushed off is work. A step onto its own tile is the
+    // crossing it stands on, and it holds that and nothing else.
     let travelling rank step =
-        intent rank (step :: detour step) Set.empty
+        if step = pos then
+            intent rank [ pos ] Set.empty
+        else
+            intent rank (step :: detour step) Set.empty
 
     // The graced holder's crossing (#151), asked before the Task branches
     // because it is the one body with neither. No Seam to that room — it is

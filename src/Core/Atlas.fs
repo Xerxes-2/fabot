@@ -1902,7 +1902,8 @@ let private boundOn (leg: NearLeg) (tiles: Pos list) : int =
 /// the two rooms laid side by side, and real: crossing a border displaces a
 /// creep twice for one move. The winning exit comes back beside the price,
 /// so the mover aims at the Seam it was ranked on; the minimum is over
-/// `(sum, exit)` pairs, so ties fall to the lowest (X, Y) exit.
+/// `(sum, exit)` pairs, so ties fall to the crossing the creep stands on and
+/// then to the lowest (X, Y) exit.
 let private joinedAcross
     (atlas: Atlas)
     (pricing: Pricing)
@@ -1927,12 +1928,24 @@ let private joinedAcross
     let crossings =
         band
         |> List.choose (fun (exitTile, landing) ->
-            match
-                exitPrice atlas stepPrices fromRoom exitTile,
-                nearestReached far (besideExit farGround landing)
-            with
-            | Some crossing, Some departure ->
-                Some(crossing + departure, exitTile, besideExitFrom nearGround from exitTile)
+            // #436: the crossing a creep already stands on is not stepped
+            // onto — the engine carries a body ending its tick on the ring
+            // across without a move. Waiting for it spends no fatigue, but
+            // the walk still counts the tick.
+            let crossing, approach =
+                if exitTile = from then
+                    exitPrice atlas stepPrices fromRoom exitTile
+                    |> Option.map (fun _ ->
+                        match pricing with
+                        | Walk -> 1
+                        | _ -> 0),
+                    [ from ]
+                else
+                    exitPrice atlas stepPrices fromRoom exitTile,
+                    besideExitFrom nearGround from exitTile
+
+            match crossing, nearestReached far (besideExit farGround landing) with
+            | Some crossing, Some departure -> Some(crossing + departure, exitTile, approach)
             | _ -> None)
         // On the sum of the two terms alone, a primitive key over a list the
         // band already ordered: the answer does not depend on this order —
@@ -1965,10 +1978,13 @@ let private joinedAcross
             | Some arrival ->
                 let sum = arrival + rest
 
+                // A tie falls to the crossing the creep stands on, then to
+                // the lowest exit (#436).
+                let ahead bestExit =
+                    bestExit = from || (exitTile <> from && bestExit <= exitTile)
+
                 match best with
-                | Some(bestSum, bestExit) when
-                    bestSum < sum || (bestSum = sum && bestExit <= exitTile)
-                    ->
+                | Some(bestSum, bestExit) when bestSum < sum || (bestSum = sum && ahead bestExit) ->
                     ()
                 | _ -> best <- Some(sum, exitTile)
 
@@ -2442,13 +2458,17 @@ let private stepOnto
         // The near side the price was taken over, origin and all
         // (`besideExitFrom`, #175): a creep the engine parked on the
         // ring beside the winning crossing steps onto it from there,
-        // exactly as it was priced to.
-        let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
-
-        if List.contains from approach then
-            Some(RoomPos.at creepRoom exitTile)
+        // exactly as it was priced to — and holds the one it stands on
+        // (`joinedAcross`, #436).
+        if exitTile = from then
+            Some(RoomPos.at creepRoom from)
         else
-            firstStepVia atlas pricing creep (RoomPos.setAt creepRoom (Set.ofList approach)))
+            let approach = besideExitFrom (weightsOf atlas creepRoom) from exitTile
+
+            if List.contains from approach then
+                Some(RoomPos.at creepRoom exitTile)
+            else
+                firstStepVia atlas pricing creep (RoomPos.setAt creepRoom (Set.ofList approach)))
 
 /// The step a creep takes toward a Task whose target stands in another room:
 /// the near side of the Seam `pricedAcross` paid at, taken out of that same
@@ -2561,13 +2581,17 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
                 let ground = weightsOf atlas creepRoom
                 let exits = band |> List.map fst
 
-                // Standing beside a crossing already: step onto it, exactly as
-                // `stepAcross` does for the exit it priced. The band's own (X, Y)
-                // order settles a body standing beside two of them.
+                // Standing on a crossing, hold it as `stepOnto` does (#436);
+                // beside one, step onto it, exactly as `stepAcross` does for the
+                // exit it priced. The band's own (X, Y) order settles a body
+                // standing beside two of them.
                 let beside =
-                    exits
-                    |> List.tryFind (fun exit ->
-                        List.contains from (besideExitFrom ground from exit))
+                    if List.contains from exits then
+                        Some from
+                    else
+                        exits
+                        |> List.tryFind (fun exit ->
+                            List.contains from (besideExitFrom ground from exit))
 
                 match beside with
                 | Some exit -> Some(RoomPos.at creepRoom exit)

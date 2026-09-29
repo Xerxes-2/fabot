@@ -109,7 +109,7 @@ _Avoid_: controller container, upgrade store
 The tiles a creep may stand on while performing its Task: the passable tiles within the action's range of the target, narrowed for a [[work-heavy body]] to its source's [[post]]s (or the bare [[seat]]s at home only) and taken less the target room's [[reach]]; the Safety tier's two Tasks derive theirs from the threat facts instead. Unreachable or empty makes the Task inapplicable. ADR-0020, ADR-0033, ADR-0045, ADR-0056.
 
 ### Seam
-A tile on a room's border and the tile it lands you on in the neighbouring room — never a place to stand, answered off the border layer, and a crossing only when the far room's ground reaches the landing. The joint a cross-room [[walk]] is summed at along a chain of at most `Tuning.MaxHops`, and the anchor an [[outpost]]'s [[container]] pick is measured to. ADR-0036, ADR-0041, ADR-0042, ADR-0058, ADR-0059, ADR-0062.
+A tile on a room's border and the tile it lands you on in the neighbouring room — never a place to stay, save to be carried across it, answered off the border layer, and a crossing only when the far room's ground reaches the landing. The joint a cross-room [[walk]] is summed at along a chain of at most `Tuning.MaxHops`, and the anchor an [[outpost]]'s [[container]] pick is measured to. ADR-0036, ADR-0041, ADR-0042, ADR-0058, ADR-0059, ADR-0062.
 
 ### Orphan
 A [[seam]] crossing whose landing tile has no ground of the far room's beside it, and therefore not a crossing; what makes a band directed. ADR-0062.
