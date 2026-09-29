@@ -120,6 +120,14 @@ type ColonyView =
         /// projection and classified by nothing (`salvaging`), so a rule names
         /// them from here. Empty once the last one falls.
         Dismantles: string list
+        /// The [[harassment room]]s this colony casts this tick
+        /// (`World.harassCaster`), less those its [[stand-down]] shuts: what
+        /// the ranger's Guard and its unarmed targets are read off.
+        Harass: Harass list
+        /// Every harassment room this colony casts, the shut ones included:
+        /// the rooms the [[raid log]] reads as ours to attack, never as a
+        /// raid on us.
+        HarassCast: Set<string>
         /// The home room of the colony this one **ships its banked Thorium to**
         /// (`Colony.Consignee`, #349), a declaration and not a sighting: the
         /// far end is outside every scan set this colony holds. A rule may
@@ -153,7 +161,8 @@ type ColonyView =
         Borrowed: BorrowedWork
         /// The declarations this colony's constant names that no chain of
         /// [[seam]]s joins to its home (`Outpost.refused`, `Errand.refused`,
-        /// `Salvage.refused`, #243): out of the scan set rather than in it
+        /// `Salvage.refused`, #243), and the harassment rooms no colony casts,
+        /// said by the largest bank alone: out of the scan set rather than in it
         /// unworkable. Carried because the refusal has to be *said* on the
         /// [[layout record]]; empty is the healthy answer and rides here all
         /// the same. Each entry carries the **kind**, which
@@ -423,6 +432,50 @@ module ColonyView =
                 }
         }
 
+    /// The containers one harassment room's dismantler takes down: every
+    /// one vision places there, and none in a room anybody owns or anybody
+    /// but the declared enemy reserves — an ally's hold or ours is never
+    /// the enemy's remote.
+    let private harassTargets (enemy: string) (facts: RoomFacts) : Set<string> =
+        let enemyRemote =
+            facts.Control
+            |> Option.exists (fun control ->
+                control.Owner = Ownership.Unowned
+                && control.Reservation
+                   |> Option.forall (fun held ->
+                       held.Holder = ReservationHolder.Rival && held.Username = enemy))
+
+        if not enemyRemote then
+            Set.empty
+        else
+            facts.TargetKinds
+            |> Map.filter (fun id kind ->
+                kind = Structure BuiltKind.Container
+                && Map.containsKey id facts.Layer.TargetPositions)
+            |> Map.keys
+            |> Set.ofSeq
+
+    /// A [[harassment room]]'s facts: a [[transit room]]'s ground and bodies,
+    /// hostiles included, and the tile of each container its dismantler takes
+    /// down, with no kind, hits or store — so nothing Refills, Withdraws from
+    /// or Repairs it.
+    let private harassing (enemy: string) (facts: RoomFacts) : RoomFacts =
+        let crossed = transiting facts
+        let targets = harassTargets enemy facts
+
+        { crossed with
+            Layer =
+                { crossed.Layer with
+                    TargetPositions =
+                        (crossed.Layer.TargetPositions, facts.Layer.TargetPositions)
+                        ||> Map.fold (fun placed id pos ->
+                            if Set.contains id targets then
+                                Map.add id pos placed
+                            else
+                                placed)
+                }
+        }
+
     /// One colony's view of this tick: the rooms it works cut out of the
     /// `World`, the bodies it holds, its own bank and controller, and the
     /// explicit little it may take of a child's. **Pure, and that is the point
@@ -438,6 +491,7 @@ module ColonyView =
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
+        (harass: Harassment)
         (gate: StandDown)
         (holders: Map<string, string>)
         (world: World)
@@ -455,6 +509,7 @@ module ColonyView =
                 stages
                 (World.unownedHomes colonies world)
                 colonies
+                harass
                 gate
                 world
                 colony
@@ -462,6 +517,10 @@ module ColonyView =
         let outposts = scan.Outposts
         let errands = scan.Errands
         let salvageRooms = Set.ofList scan.Salvage
+
+        let harassEnemies =
+            scan.Harass |> List.map (fun h -> h.RoomName, h.Enemy) |> Map.ofList
+
         let bootstrap = scan.Borrowed
         let scanned = scan.Scanned
 
@@ -486,6 +545,7 @@ module ColonyView =
                 && not (List.contains room bootstrap)
                 && not (Set.contains room errandRooms)
                 && not (Set.contains room salvageRooms)
+                && not (Map.containsKey room harassEnemies)
                 && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
             |> Set.ofList
 
@@ -526,7 +586,10 @@ module ColonyView =
                     // dark while there is work in it.
                     room, salvaging facts, None
                 else
-                    room, facts, remembered)
+                    match Map.tryFind room harassEnemies with
+                    // No memory, as a transit room keeps none.
+                    | Some enemy -> room, harassing enemy facts, None
+                    | None -> room, facts, remembered)
 
         let worked = narrowed |> List.map (fun (room, facts, _) -> room, facts)
 
@@ -645,9 +708,14 @@ module ColonyView =
             // projection does not hold.
             Errands = errands
             Dismantles =
-                scan.Salvage
-                |> List.collect (fun room ->
-                    World.roomOf world room |> salvageTargets |> Set.toList)
+                (scan.Salvage
+                 |> List.collect (fun room ->
+                     World.roomOf world room |> salvageTargets |> Set.toList))
+                @ (scan.Harass
+                   |> List.collect (fun h ->
+                       World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
+            Harass = scan.Harass
+            HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee
@@ -682,6 +750,15 @@ module ColonyView =
                 Outpost.refused reaches tuning.MaxHops home colony.Outposts
                 @ Errand.refused reaches tuning.MaxHops home (Errand.unheld colony.Errands)
                 @ Salvage.refused reaches tuning.MaxHops home colony.Salvage
+                @ (if World.harassReporter colonies world = Some home then
+                       scan.Uncast
+                       |> List.map (fun h ->
+                           {
+                               RoomName = h.RoomName
+                               Kind = DeclarationKind.Harass
+                           })
+                   else
+                       [])
             // The world's memory of these rooms and of no others (#151), read
             // off the same walk the facts are (#271).
             Sightings =
@@ -701,4 +778,4 @@ module ColonyView =
         (world: World)
         (colony: Colony)
         : ColonyView =
-        ofWorldRecalling (JoinTable()) tuning colonies gate holders world colony
+        ofWorldRecalling (JoinTable()) tuning colonies Harassment.none gate holders world colony

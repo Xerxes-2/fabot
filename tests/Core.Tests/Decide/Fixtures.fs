@@ -85,6 +85,7 @@ let reservedRoom ours ticksToEnd : RoomControlInfo =
                         else
                             ReservationHolder.Rival
                     TicksToEnd = ticksToEnd
+                    Username = if ours then "fabot" else "rival"
                 }
         SafeMode = false
         Sign = None
@@ -102,6 +103,7 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
                 {
                     Holder = ReservationHolder.Invader
                     TicksToEnd = ticksToEnd
+                    Username = "Invader"
                 }
         SafeMode = false
         Sign = None
@@ -171,6 +173,8 @@ let bareRespawn =
         Refused = []
         Errands = []
         Dismantles = []
+        Harass = []
+        HarassCast = Set.empty
         Consignee = None
         Crossed = Set.empty
         Reactors = []
@@ -1824,6 +1828,8 @@ let internal withBareReactorErrand (colony: ColonyView) =
     { colony with
         Errands = [ reactorErrand ]
         Dismantles = []
+        Harass = []
+        HarassCast = Set.empty
         Consignee = None
         Crossed = Set.empty
         Spatial =
@@ -2217,4 +2223,13 @@ let withTombstoneIn room id amount (colony: ColonyView) =
                 { layer with
                     TargetPositions = Map.add id { X = 26; Y = 25 } layer.TargetPositions
                 }
+    }
+
+/// The colony casting one [[harassment room]] (#432) that no stand-down
+/// shuts: the declaration on the worked list and in the cast set, as
+/// `ColonyView.ofWorld` lays it.
+let casting (declaration: Harass) (colony: ColonyView) =
+    { colony with
+        Harass = [ declaration ]
+        HarassCast = Set.singleton declaration.RoomName
     }

@@ -1618,10 +1618,10 @@ let defendedHomeTests =
             }
         ]
 
-/// The room the declaration below reaches for and cannot: W16S28 is four
+/// The room the declaration below reaches for and cannot: W17S28 is five
 /// steps west of the mother's W12S28, one past `Tuning.MaxHops`, so what the
 /// test pins is the boundary rather than a far-away room.
-let private tooFar = "W16S28"
+let private tooFar = "W17S28"
 
 /// The mother's declaration with that room added beside her real outpost.
 /// Two outposts and not one, so every assertion below is read against the
@@ -1787,9 +1787,7 @@ let transitTests =
                 // furniture.
                 let view = viewUnder twoHopDeclaration twoHopWorld mother
 
-                Expect.isEmpty
-                    view.Refused
-                    "the premise: a two-hop declaration is not refused (ADR 0058)"
+                Expect.isEmpty view.Refused "the premise: a two-hop declaration is not refused"
 
                 Expect.isTrue
                     (Map.containsKey crossed view.Spatial.Rooms)
@@ -3173,7 +3171,13 @@ let salvageTests =
 
                 let reservedBy holder =
                     { control Ownership.Unowned with
-                        Reservation = Some { Holder = holder; TicksToEnd = 4_000 }
+                        Reservation =
+                            Some
+                                {
+                                    Holder = holder
+                                    TicksToEnd = 4_000
+                                    Username = "rival"
+                                }
                     }
 
                 for label, held in
@@ -3263,6 +3267,349 @@ let salvageTests =
                 Expect.isEmpty
                     (Set.intersect salvage kept |> Set.toList)
                     "no room is taken down by one list and kept by another"
+            }
+        ]
+
+// ---- the harassment room (#432) ------------------------------------------
+
+/// An enemy remote one crossing south of the mother and two from the child,
+/// so both colonies' chains reach it and the bank decides which casts it.
+let private harassRoom = "W12S29"
+
+let private enemy = "Trepidimous"
+
+let private harassDeclared: Harass list =
+    [
+        {
+            RoomName = harassRoom
+            Enemy = enemy
+            Stand = RoomPos.at harassRoom { X = 5; Y = 5 }
+        }
+    ]
+
+/// A hostile of the given owner standing in the harassment room.
+let private harassHostile id owner (body: BodyPart list) : HostileInfo =
+    {
+        Id = id
+        Owner = owner
+        Pos = RoomPos.at harassRoom { X = 6; Y = 6 }
+        Body = body
+        TicksToLive = 1000
+    }
+
+/// The room as vision reads it: the enemy's container by its source, the
+/// source and the controller, the enemy's miner and a third player's scout.
+let private harassSeen (control: RoomControlInfo) =
+    let name, facts =
+        roomOf
+            harassRoom
+            Ownership.Unowned
+            [
+                "can-enemy", { X = 5; Y = 6 }, Structure BuiltKind.Container
+                "road-enemy", { X = 4; Y = 6 }, Structure BuiltKind.Road
+                "src-enemy", { X = 5; Y = 5 }, Source
+                "ctrl-enemy", { X = 8; Y = 8 }, Controller
+            ]
+        |> withSources [ "src-enemy" ]
+        |> withStores [ "can-enemy", 1_200 ]
+
+    name,
+    { facts with
+        Control = Some control
+        Hits = facts.Hits |> Map.add "can-enemy" { Hits = 200_000; HitsMax = 250_000 }
+        Hostiles =
+            [
+                harassHostile "miner" enemy [ Work; Work; Move ]
+                harassHostile "scout" "Somebody" [ Move ]
+            ]
+    }
+
+let private reservedFor username =
+    { control Ownership.Unowned with
+        Reservation =
+            Some
+                {
+                    Holder = ReservationHolder.Rival
+                    TicksToEnd = 4_000
+                    Username = username
+                }
+    }
+
+/// A home's bank at this capacity, full.
+let private bankOf capacity (facts: RoomFacts) =
+    { facts with
+        Energy =
+            {
+                Available = capacity
+                Capacity = capacity
+            }
+    }
+
+/// The pair world with the harassment room in it, seen under this control
+/// entry, and both banks set: the one fact the caster turns on.
+let private harassWorldAt control motherCapacity childCapacity =
+    { pairWorld with
+        Rooms =
+            pairWorld.Rooms
+            |> Map.add (fst (harassSeen control)) (snd (harassSeen control))
+            |> Map.change mother (Option.map (bankOf motherCapacity))
+            |> Map.change child (Option.map (bankOf childCapacity))
+    }
+
+/// The same with the mother's bank past the harassment floor (2,100).
+let private harassWorld control childCapacity =
+    harassWorldAt control 2400 childCapacity
+
+/// One colony's view under a global harassment list and a stand-down gate:
+/// the production path, with the holders cut over the same list, at the
+/// floor the shipped tick prices.
+let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
+    let colony = declared |> List.find (fun colony -> colony.Home = home)
+    let joins = JoinTable()
+
+    let harass: Harassment =
+        {
+            Rooms = rooms
+            Floor = Bodies.harassFloor Tuning.defaults
+        }
+
+    let holders =
+        World.creepColoniesRecalling
+            joins
+            Tuning.defaults
+            declared
+            harass
+            (World.living declared world)
+            noneShut
+            world
+
+    ColonyView.ofWorldRecalling joins Tuning.defaults declared harass gate holders world colony
+
+/// The same under the open gate.
+let private harassView harass world home =
+    harassViewUnder StandDown.none harass world home
+
+[<Tests>]
+let harassViewTests =
+    testList
+        "a harassment room is cast by the largest bank that reaches it, and carries the ground and the enemy's containers"
+        [
+            test
+                "the largest bank within the budget casts the room, and the other does not project it" {
+                let world = harassWorld (reservedFor enemy) 300
+
+                let mothers = harassView harassDeclared world mother
+                let childs = harassView harassDeclared world child
+
+                Expect.equal
+                    (mothers.Harass |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "the mother's 2,400 casts it"
+
+                Expect.isTrue (Map.containsKey harassRoom mothers.Spatial.Rooms) "and projects it"
+
+                Expect.isEmpty childs.Harass "the child's 300 does not"
+
+                Expect.isFalse
+                    (Map.containsKey harassRoom childs.Spatial.Rooms)
+                    "and does not project the room, though its chain reaches it"
+
+                // The bank turned round: the child's 2,700 over the mother's 2,400.
+                let richer = harassWorld (reservedFor enemy) 2700
+
+                Expect.equal
+                    ((harassView harassDeclared richer child).Harass
+                     |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "the caster follows the bank, whoever declared nothing"
+
+                Expect.isEmpty
+                    (harassView harassDeclared richer mother).Harass
+                    "and one colony only casts it"
+            }
+
+            test
+                "a colony whose bank cannot buy the harassment floor is no caster, however near: the room is refused until one can" {
+                let floorBanks = Bodies.harassFloor Tuning.defaults
+                // The mother reaches the room and holds the larger bank, one
+                // energy short of three ranger blocks.
+                let poor = harassWorldAt (reservedFor enemy) (floorBanks - 1) 300
+
+                for home in [ mother; child ] do
+                    let view = harassView harassDeclared poor home
+
+                    Expect.isEmpty view.Harass $"{home} casts nothing"
+
+                    Expect.isFalse
+                        (Map.containsKey harassRoom view.Spatial.Rooms)
+                        $"{home} projects nothing of the room"
+
+                    Expect.isEmpty view.Dismantles $"{home} dismantles nothing"
+
+                Expect.equal
+                    (harassView harassDeclared poor mother).Refused
+                    [
+                        {
+                            RoomName = harassRoom
+                            Kind = DeclarationKind.Harass
+                        }
+                    ]
+                    "the larger bank names the room once"
+
+                Expect.isEmpty
+                    (harassView harassDeclared poor child).Refused
+                    "and the child does not"
+
+                // The bank reaches the floor, nothing else moving: cast, and
+                // no longer refused.
+                let enough = harassWorldAt (reservedFor enemy) floorBanks 300
+                let cast = harassView harassDeclared enough mother
+
+                Expect.equal
+                    (cast.Harass |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "the tick the bank buys three ranger blocks, the colony casts the room"
+
+                Expect.isEmpty cast.Refused "and the refusal is gone"
+            }
+
+            test
+                "a harassment room carries its ground, its hostiles and its container's tile, and nothing else" {
+                let view = harassView harassDeclared (harassWorld (reservedFor enemy) 300) mother
+
+                Expect.equal view.Dismantles [ "can-enemy" ] "the enemy's container is to come down"
+
+                Expect.equal
+                    (SpatialInfo.placementOf view.Spatial "can-enemy")
+                    (Some(RoomPos.at harassRoom { X = 5; Y = 6 }))
+                    "placed, so the Dismantle can be walked to"
+
+                Expect.isFalse
+                    (Map.containsKey "can-enemy" view.Spatial.TargetKinds)
+                    "classified by nothing: no Withdraw or Refill names it"
+
+                Expect.isFalse (Map.containsKey "can-enemy" view.Spatial.Hits) "no hits: no Repair"
+                Expect.isFalse (Map.containsKey "can-enemy" view.Spatial.Stores) "no store"
+
+                for id in [ "road-enemy"; "src-enemy"; "ctrl-enemy" ] do
+                    Expect.isNone
+                        (SpatialInfo.placementOf view.Spatial id)
+                        $"{id} is not ours to work: not in the view at all"
+
+                Expect.isFalse
+                    (view.Sources |> List.exists (fun source -> source.Id = "src-enemy"))
+                    "its rock is not pooled"
+
+                Expect.equal
+                    (view.Hostiles
+                     |> List.filter (fun h -> h.Pos.Room = harassRoom)
+                     |> List.map (fun h -> h.Id))
+                    [ "miner"; "scout" ]
+                    "every hostile standing there reaches the view; which are targets is the Guard's"
+
+                Expect.isFalse
+                    (Map.containsKey harassRoom view.Sightings)
+                    "and no memory, as a transit room"
+            }
+
+            test
+                "a harassment room its caster stands down from stays in the scan set as a transit room" {
+                let gate =
+                    { StandDown.none with
+                        Shut = Set.singleton harassRoom
+                    }
+
+                let view =
+                    harassViewUnder gate harassDeclared (harassWorld (reservedFor enemy) 300) mother
+
+                Expect.isEmpty view.Harass "no Guard, no ranger kept there"
+                Expect.isEmpty view.Dismantles "and nothing to take down"
+
+                Expect.isTrue
+                    (Set.contains harassRoom view.Crossed)
+                    "but crossed, so a ranger standing there is placed and walks home"
+
+                Expect.equal
+                    view.HarassCast
+                    (Set.singleton harassRoom)
+                    "and still cast, so the raid log goes on reading the room as ours"
+            }
+
+            test "a room held by anybody but the enemy yields no container" {
+                let dismantlesUnder control =
+                    (harassView harassDeclared (harassWorld control 300) mother).Dismantles
+
+                Expect.equal
+                    (dismantlesUnder (control Ownership.Unowned))
+                    [ "can-enemy" ]
+                    "a room nobody reserves: the enemy's remote gone quiet"
+
+                for label, held in
+                    [
+                        "an ally's reservation", reservedFor "Odiodin"
+                        "a third player's reservation", reservedFor "Somebody"
+                        "ours",
+                        { control Ownership.Unowned with
+                            Reservation =
+                                Some
+                                    {
+                                        Holder = ReservationHolder.Ours
+                                        TicksToEnd = 4_000
+                                        Username = "fabot"
+                                    }
+                        }
+                        "an owner", control Ownership.Rival
+                    ] do
+                    Expect.isEmpty (dismantlesUnder held) $"{label}: nothing to take down"
+            }
+
+            test "a harassment room no colony reaches is refused once, by the largest bank" {
+                let far =
+                    [
+                        {
+                            RoomName = "W9N9"
+                            Enemy = enemy
+                            Stand = RoomPos.at "W9N9" { X = 5; Y = 5 }
+                        }
+                    ]
+
+                let world = harassWorld (reservedFor enemy) 300
+
+                Expect.equal
+                    (harassView far world mother).Refused
+                    [
+                        {
+                            RoomName = "W9N9"
+                            Kind = DeclarationKind.Harass
+                        }
+                    ]
+                    "the mother's bank is the largest, so she names it"
+
+                Expect.isEmpty
+                    (harassView far world child).Refused
+                    "and the child does not name it twice"
+            }
+
+            test "no harassment room is a declared home, outpost, errand or salvage room" {
+                // The branch order in `ColonyView.ofWorld` reads every other kind
+                // ahead of a harassment room.
+                let kept =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Home :: (colony.Outposts |> List.map (fun o -> o.RoomName))
+                        @ (colony.Errands |> List.map (fun e -> e.RoomName))
+                        @ colony.Salvage)
+                    |> Set.ofList
+
+                Expect.isEmpty
+                    (Colony.harass
+                     |> List.filter (fun h -> Set.contains h.RoomName kept)
+                     |> List.map (fun h -> h.RoomName))
+                    "no room is harassed by one list and kept by another"
+
+                Expect.isTrue
+                    (Colony.harass |> List.forall (fun h -> not (Colony.isAlly h.Enemy)))
+                    "and no ally is anybody's enemy"
             }
         ]
 

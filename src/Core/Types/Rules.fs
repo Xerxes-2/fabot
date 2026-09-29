@@ -367,6 +367,11 @@ type Tuning =
         /// (#419): a relief cast on sight lands some 280 ticks later, after
         /// the fight, so the second body has to be there already.
         RangerResidents: int
+        /// The ranger blocks a [[harassment room]] is worked with at least
+        /// (#432), and so what a caster's bank must buy (`Bodies.harassFloor`):
+        /// three outheal and outshoot the enemy's `3M1RA1H` escort and kill an
+        /// unarmed miner in about seventeen ticks.
+        HarassBlocks: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -416,10 +421,9 @@ type Tuning =
         BootstrapLevel: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
-        /// search stops at. Three, which is what reaches the rooms beyond the
-        /// ring of five the one-hop model could name; there is no upper bound
-        /// in the arithmetic, only in the CPU, which is why the bound is
-        /// written down. ADR-0058
+        /// search stops at. Four since #432. There is no upper bound in the
+        /// arithmetic, only in the CPU, which is why the bound is written
+        /// down. ADR-0058
         MaxHops: int
         /// What a swamp tile costs a **trunk**: three against plain's two,
         /// where a walking creep pays `Engine.swampWeight`, ten. Once paved a
@@ -504,6 +508,7 @@ module Tuning =
             DeliveryLifeMargin = 25
             RangerResidentBlocks = 7
             RangerResidents = 2
+            HarassBlocks = 3
             TerminalEnergy = 4_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636
@@ -511,7 +516,7 @@ module Tuning =
             HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3
-            MaxHops = 3
+            MaxHops = 4
             TrunkSwampWeight = 3
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime

@@ -4670,7 +4670,15 @@ const WORLD_ROOMS_PROBE = `
   const cons = (head, tail) => new (nil.constructor)(head, tail);
   globalThis.__fabotWorldRooms = (seen) =>
     Array.from(
-      worldRooms(hops, ColonyModule_declared, seen.reduceRight((tail, room) => cons(room, tail), nil)),
+      worldRooms(
+        hops,
+        ColonyModule_declared,
+        ColonyModule_harass,
+        // Every home affords the harassment floor: the superset of the
+        // rooms the shell could read, since no scenario bank is known here.
+        () => true,
+        seen.reduceRight((tail, room) => cons(room, tail), nil),
+      ),
     );
 }
 `;
@@ -4767,6 +4775,11 @@ const PROBE_BINDINGS = [
     "var ColonyModule_declared ",
     "src/Core/Types/Colonies.fs's `Colony.declared`",
     "the declared colonies, their outposts and their errands (#287, #321)",
+  ],
+  [
+    "var ColonyModule_harass ",
+    "src/Core/Types/Colonies.fs's `Colony.harass`",
+    "the harassment rooms whose chains the world holds terrain for (#432)",
   ],
   [
     "var TuningModule_defaults ",

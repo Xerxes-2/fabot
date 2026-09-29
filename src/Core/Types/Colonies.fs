@@ -4,7 +4,7 @@
 [<AutoOpen>]
 module Fabot.Core.Types.Colonies
 
-/// Which kind of declaration one refusal names: three kinds of room a human
+/// Which kind of declaration one refusal names: four kinds of room a human
 /// declares, one rule that refuses any, so the channel has to say *what* it
 /// refused.
 [<RequireQualifiedAccess>]
@@ -17,6 +17,9 @@ type DeclarationKind =
     /// A room this colony walks a dismantler to, to take down what of ours
     /// still stands in it (`Salvage`).
     | Salvage
+    /// An enemy's remote a colony walks a ranger to, to kill its creeps and
+    /// take down its containers (`Harass`).
+    | Harass
 
 /// One declaration this colony cannot work, as the [[layout record]] carries
 /// it: the room a human named, and the kind they named it as. The two
@@ -593,6 +596,46 @@ module Salvage =
     let roomsProjected (rooms: string list) (home: string) : string list =
         rooms |> List.collect (fun room -> room :: RoomName.transitBetween home room)
 
+/// A [[harassment room]]: an enemy's remote, declared once for the whole
+/// bot and cast by whichever colony can best afford it this tick
+/// (`World.harassCaster`), never by a colony's own declaration.
+type Harass =
+    {
+        RoomName: string
+        /// The one player whose creeps and containers are targets there, by
+        /// the username the engine spells. Nobody else's are: an ally's never,
+        /// a third player's never, a Source Keeper never.
+        Enemy: string
+        /// Where the ranger stands while the room holds no target, or is dark:
+        /// the enemy's source, which is where its miner comes back to.
+        Stand: RoomPos
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Harass =
+    /// The declarations worked this tick: the list, less every room a
+    /// [[stand-down]] is withholding (`Outpost.worked`'s twin).
+    let worked (shut: Set<string>) (harass: Harass list) : Harass list =
+        harass |> List.filter (fun h -> not (Set.contains h.RoomName shut))
+
+    /// The rooms the caster's harassment adds to its scan set: each room and
+    /// every room a shortest walk to it could cross (`Errand.roomsProjected`).
+    let roomsProjected (harass: Harass list) (home: string) : string list =
+        harass
+        |> List.collect (fun h -> h.RoomName :: RoomName.transitBetween home h.RoomName)
+
+/// The global harassment list as one tick reads it: the declarations, and
+/// the bank capacity a colony needs to cast any of them at all — the
+/// harassment floor's price (`Bodies.harassFloor`), handed in because the
+/// ranger's block is `decide`'s to know.
+type Harassment = { Rooms: Harass list; Floor: int }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Harassment =
+    /// No harassment room declared: the shape every caller outside the
+    /// shipped tick asks in.
+    let none: Harassment = { Rooms = []; Floor = 0 }
+
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
 /// handed to `ColonyView.ofWorld`: one record and not five derivations, so
@@ -738,6 +781,24 @@ module Colony =
 
     /// Whether the engine's username is one of `allies`.
     let isAlly (username: string) = Set.contains username allies
+
+    /// The enemy remotes a human has declared for harassment: one list for
+    /// the whole bot, each room cast by the colony `World.harassCaster`
+    /// names, or refused while none can. Each Stand is the enemy's source
+    /// tile off the committed capture.
+    let harass: Harass list =
+        [
+            {
+                RoomName = "W18S27"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W18S27"; X = 27; Y = 7 }
+            }
+            {
+                RoomName = "W17S26"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W17S26"; X = 28; Y = 10 }
+            }
+        ]
 
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an

@@ -128,6 +128,14 @@ do
                         ]
             ]
 
+/// The global harassment list, priced once: the declarations and the bank a
+/// colony needs to cast one.
+let private harassment: Harassment =
+    {
+        Rooms = Colony.harass
+        Floor = Bodies.harassFloor Tuning.defaults
+    }
+
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
     // The engine's counter is already running when `loop` is entered: this is
@@ -143,7 +151,11 @@ let loop () =
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings laid under it.
     let world =
-        World.ofGame Tuning.defaults.MaxHops Colony.declared (ObserveMemory.loadPositions ())
+        World.ofGame
+            Tuning.defaults.MaxHops
+            Colony.declared
+            harassment
+            (ObserveMemory.loadPositions ())
         |> World.recalling sightings
 
     sightings <- world.Sightings
@@ -179,6 +191,7 @@ let loop () =
             joins
             Tuning.defaults
             Colony.declared
+            harassment
             colonies
             (gates |> Map.map (fun _ gate -> gate.Shut))
             world
@@ -198,6 +211,7 @@ let loop () =
                     joins
                     Tuning.defaults
                     Colony.declared
+                    harassment
                     (gateOf colony.Home)
                     holders
                     world

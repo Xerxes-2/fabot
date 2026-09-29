@@ -2007,7 +2007,8 @@ let private joinedOn
 /// once more over the chains. A one-hop pair is the call it always was, to
 /// the digit and to the flood. Cost: one memoised far leg per chain, and per
 /// creep one band scan per chain plus whatever relaxation a `Resuming` near
-/// leg owes the second band; at `Tuning.MaxHops` = 3 that is at most three.
+/// leg owes the second band — one per shortest chain `RoomName.routesBy`
+/// finds inside `Tuning.MaxHops`.
 ///
 /// A reader that prices two journeys over one chain must not call this
 /// twice: two independent minima sum to a trip no chain realises
@@ -2634,7 +2635,7 @@ let firstStepIgnoringTraffic
 /// `Declaration.routable` admits a declaration only where a chain runs both
 /// ways. This leg's far field is `chainedInto` direct, there being no creep to
 /// key `farFieldAlong` on, so a second chain is a second chained flood per
-/// leg, bounded by `Tuning.MaxHops` = 3 inside a census-keyed row.
+/// leg, bounded by `Tuning.MaxHops` = 4 inside a census-keyed row.
 let haulRoundTripTicks
     (atlas: Atlas)
     (body: BodyPart list)

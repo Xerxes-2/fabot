@@ -794,6 +794,8 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // re-claimer's.
         Errands = []
         Dismantles = []
+        Harass = []
+        HarassCast = Set.empty
         Consignee = None
         Crossed = Set.empty
         Reactors = []

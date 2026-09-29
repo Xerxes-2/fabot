@@ -598,6 +598,44 @@ module World =
         linkedRecalling joins (Tuning.keeperMargin tuning) world
         |> linkedAvoiding gate.Impassable
 
+    /// The colony whose home bank holds the most, ties by home name.
+    let private largestBank (world: World) (colonies: Colony list) : string option =
+        colonies
+        |> List.sortBy (fun colony -> -(roomOf world colony.Home).Energy.Capacity, colony.Home)
+        |> List.tryHead
+        |> Option.map (fun colony -> colony.Home)
+
+    /// ADR-0081
+    /// The colony that casts one [[harassment room]] this tick: among the
+    /// living colonies whose bank buys the harassment floor
+    /// (`Harassment.Floor`) and whose chain reaches the room inside the hop
+    /// budget, the one whose bank holds the most, ties by home name; None
+    /// while no colony is both. Stateless, and the same answer for every
+    /// colony that asks, so exactly one projects the room. Asked over the
+    /// open gate: a caster's own stand-down withdraws its work and hands the
+    /// room to nobody else.
+    let harassCaster
+        (joins: JoinTable)
+        (tuning: Tuning)
+        (floor: int)
+        (colonies: Colony list)
+        (world: World)
+        (room: string)
+        : string option =
+        let reaches = reachesUnder StandDown.none joins tuning world
+
+        living colonies world
+        |> List.filter (fun colony ->
+            (roomOf world colony.Home).Energy.Capacity >= floor
+            && Declaration.routable reaches tuning.MaxHops colony.Home room)
+        |> largestBank world
+
+    /// The living colony that says a [[harassment room]] no colony casts out
+    /// loud (`ColonyView.Refused`): the largest bank of all, on the caster's
+    /// own order, so a room no colony can cast is still named once.
+    let harassReporter (colonies: Colony list) (world: World) : string option =
+        living colonies world |> largestBank world
+
     /// `linkedRecalling` over a table of this call's own — the shape a test
     /// asks in. The shell never calls this.
     let linkedBy (keeperMargin: int) (world: World) : string -> string -> bool =
@@ -623,8 +661,19 @@ module World =
             /// The children's homes this colony defends this tick
             /// (`Colony.defending`).
             Defended: string list
-            /// The scan set: this colony's home and all five of those, the
-            /// one place that union is spelled.
+            /// The [[harassment room]]s this colony casts (`harassCaster`),
+            /// less the ones its [[stand-down]] shuts.
+            Harass: Harass list
+            /// Every harassment room this colony casts, the shut ones
+            /// included.
+            Cast: Harass list
+            /// The harassment rooms no colony casts this tick, as this
+            /// colony's reading of `harassCaster` found them.
+            Uncast: Harass list
+            /// The scan set: this colony's home and all six of those, the
+            /// one place that union is spelled. A cast harassment room its
+            /// stand-down shuts stays in it, as a transit room: a ranger
+            /// standing there is still placed, and walks home.
             Scanned: string list
         }
 
@@ -642,6 +691,9 @@ module World =
     ///
     /// A [[salvage]] room is narrowed the same two ways.
     ///
+    /// A [[harassment room]] is the one declaration read off the global list
+    /// and not the colony's: kept by the colony that casts it.
+    ///
     /// The whole `Tuning` and not the hop budget alone: the chain is searched
     /// over the **masked** border rings (`Tuning.keeperMargin`).
     let scanRecalling
@@ -650,6 +702,7 @@ module World =
         (stages: Map<string, ColonyStage>)
         (unowned: Set<string>)
         (colonies: Colony list)
+        (harass: Harassment)
         // The gate whole and not its `Shut` set alone (#382): the scan set
         // asks which rooms are withheld from work, and which of those cannot
         // be crossed either.
@@ -660,6 +713,18 @@ module World =
         // One table for both narrowings and every hop inside each: the two
         // filters ask about overlapping chains out of the same home.
         let reaches = reachesUnder gate joins tuning world
+
+        let casters =
+            harass.Rooms
+            |> List.map (fun h ->
+                h, harassCaster joins tuning harass.Floor colonies world h.RoomName)
+
+        let cast =
+            casters
+            |> List.filter (fun (h, caster) ->
+                caster = Some colony.Home
+                && Declaration.routable reaches tuning.MaxHops colony.Home h.RoomName)
+            |> List.map fst
 
         let outposts =
             Outpost.worked gate.Shut colony.Outposts
@@ -690,7 +755,13 @@ module World =
             Salvage = salvage
             Borrowed = borrowed
             Defended = defended
-            Scanned = Colony.roomsProjected outposts errands salvage borrowed defended colony.Home
+            Harass = Harass.worked gate.Shut cast
+            Cast = cast
+            Uncast = casters |> List.filter (snd >> Option.isNone) |> List.map fst
+            Scanned =
+                Colony.roomsProjected outposts errands salvage borrowed defended colony.Home
+                @ Harass.roomsProjected cast colony.Home
+                |> List.distinct
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).
@@ -705,7 +776,7 @@ module World =
         (world: World)
         (colony: Colony)
         : ScanSet =
-        scanRecalling (JoinTable()) tuning stages unowned colonies gate world colony
+        scanRecalling (JoinTable()) tuning stages unowned colonies Harassment.none gate world colony
 
     /// The declared homes that stand empty this tick: ours to take back if
     /// they ever were ours, and the candidates a human means to take. A room
@@ -725,6 +796,7 @@ module World =
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
+        (harass: Harassment)
         (gate: StandDown)
         (world: World)
         (colony: Colony)
@@ -736,6 +808,7 @@ module World =
                 (stages tuning colonies world)
                 (unownedHomes colonies world)
                 colonies
+                harass
                 gate
                 world
                 colony
@@ -750,6 +823,7 @@ module World =
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
+        (harass: Harassment)
         (running: Colony list)
         (shut: Map<string, Set<string>>)
         (world: World)
@@ -762,6 +836,7 @@ module World =
                     joins
                     tuning
                     colonies
+                    harass
                     { StandDown.none with
                         // **Passability is deliberately not asked here** (#382):
                         // a body already standing inside a bunker's room is
@@ -786,4 +861,4 @@ module World =
         (shut: Map<string, Set<string>>)
         (world: World)
         : Map<string, string> =
-        creepColoniesRecalling (JoinTable()) tuning colonies running shut world
+        creepColoniesRecalling (JoinTable()) tuning colonies Harassment.none running shut world

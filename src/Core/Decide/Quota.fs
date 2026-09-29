@@ -384,13 +384,13 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
     else
         Engine.guardCap
 
-/// The guarded rooms each fighting row serves (#411): the errand rooms are the
-/// ranger's, every other guarded room the guard's.
+/// The guarded rooms each fighting row serves (#411): the errand rooms and the
+/// harassment rooms (#432) are the ranger's, every other guarded room the
+/// guard's.
 let private guardedSplit (view: ColonyView) (outposts: OutpostFacts) =
-    let errandRooms = errandRooms view
+    let rangers = rangerRooms view
 
-    outposts.Guarded
-    |> List.partition (fun room -> not (Set.contains room errandRooms))
+    outposts.Guarded |> List.partition (fun room -> not (Set.contains room rangers))
 
 /// The guard row's quota: `guardsWanted` over every guarded outpost, summed.
 let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
@@ -432,28 +432,39 @@ let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int
 
 /// The ranger blocks one errand room wants (#411): the smallest body that wins
 /// its raid alone, never below `Tuning.RangerResidentBlocks` — the resident a
-/// raid meets first — and the largest body where none wins.
+/// raid meets first — and the largest body where none wins. A harassment
+/// room's floor is `Tuning.HarassBlocks` (#432).
 let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
+    let floor =
+        if Set.contains room (harassRooms view) then
+            view.Tuning.HarassBlocks
+        else
+            view.Tuning.RangerResidentBlocks
+
     [ 1..rangerBlocksMost ]
     |> List.tryFind (rangerBlocksBeat view room)
     |> Option.defaultValue rangerBlocksMost
-    |> max view.Tuning.RangerResidentBlocks
+    |> max floor
     |> min rangerBlocksMost
 
 /// How many rangers one errand room wants: the standing garrison
 /// (`Tuning.RangerResidents`), and two where the largest ranger body loses
-/// the raid alone.
+/// the raid alone. One in a harassment room (#432): a raid that one loses is
+/// the room's [[stand-down]].
 let internal rangersWanted (view: ColonyView) (room: string) : int =
-    if rangerBlocksBeat view room rangerBlocksMost then
+    if Set.contains room (harassRooms view) then
+        1
+    elif rangerBlocksBeat view room rangerBlocksMost then
         view.Tuning.RangerResidents
     else
         max view.Tuning.RangerResidents Engine.guardCap
 
-/// The ranger row's quota: `rangersWanted` over every worked errand room.
+/// The ranger row's quota: `rangersWanted` over every worked errand and
+/// harassment room.
 let internal rangerQuota (view: ColonyView) (outposts: OutpostFacts) : int =
     snd (guardedSplit view outposts) |> List.sumBy (rangersWanted view)
 
-/// The blocks the ranger row casts this tick, the worst errand room's answer.
+/// The blocks the ranger row casts this tick, the worst room's answer.
 let internal rangerBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
     match snd (guardedSplit view outposts) |> List.map (rangerBlocksFor view) with
     | [] -> view.Tuning.RangerResidentBlocks

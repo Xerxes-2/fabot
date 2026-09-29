@@ -1058,8 +1058,8 @@ let keeperSeamTests =
             }
 
             test "the chain from W15S28 to the Reactor's room still exists over the masked layer" {
-                // Three crossings, `Tuning.MaxHops` exactly, so no slack for
-                // a detour. The rings are the fixture's and the mask is the
+                // Three crossings, and only the shortest chains are searched,
+                // so no detour. The rings are the fixture's and the mask is the
                 // declaration's; the terrain's own say is `RoomSeamTests`'.
                 Expect.equal
                     (routes (masked ()) "W15S28" "W15S25")

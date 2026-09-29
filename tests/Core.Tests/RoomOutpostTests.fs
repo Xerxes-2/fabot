@@ -143,6 +143,69 @@ let outpostDeclarationTests =
                     "W11S29 is two crossings from W12S28, by W12S29"
             }
 
+            test
+                "a chain of real border rings joins every harassment room to the colonies in the running for it" {
+                // The caster is the largest bank among the colonies that buy
+                // the harassment floor and whose chain reaches the room inside
+                // the hop budget; the ground decides who is in the running,
+                // the bank the rest (`ViewTests`). W17S26: W15S28 alone,
+                // four crossings by W15S27 and W16S26 — its west edge and
+                // W16S27's are wall, and W17S27's north is, so W17S29 has no
+                // chain of three. W18S27: W17S29 alone, three crossings — no
+                // chain of four from W15S28 turns west past W16S27's wall.
+                let homes =
+                    Colony.declared
+                    |> List.map (fun colony -> colony.Home)
+                    |> List.filter (fun home ->
+                        Colony.harass
+                        |> List.exists (fun h ->
+                            Declaration.withinHopBudget Tuning.defaults.MaxHops home h.RoomName))
+
+                let linked =
+                    shippedLinked (
+                        homes
+                        |> List.collect (fun home ->
+                            home
+                            :: Harass.roomsProjected
+                                (Colony.harass
+                                 |> List.filter (fun h ->
+                                     Declaration.withinHopBudget
+                                         Tuning.defaults.MaxHops
+                                         home
+                                         h.RoomName))
+                                home)
+                    )
+
+                let castersOf room =
+                    homes
+                    |> List.filter (fun home ->
+                        Declaration.routable linked Tuning.defaults.MaxHops home room)
+
+                Expect.equal
+                    (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
+                    [ "W18S27", [ "W17S29" ]; "W17S26", [ "W15S28" ] ]
+                    "each harassment room is reached, both ways, by exactly the colony the ground allows"
+
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S26")
+                    [
+                        [ "W15S28"; "W15S27"; "W15S26"; "W16S26"; "W17S26" ]
+                        [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26" ]
+                    ]
+                    "W17S26 is four crossings from W15S28, by W15S26 or W16S27 and both into W16S26"
+
+                for h in Colony.harass do
+                    Expect.contains
+                        (List.map snd (load h.RoomName).RealSources)
+                        (RoomPos.pos h.Stand)
+                        $"{h.RoomName}: the Stand is the enemy's source tile"
+
+                    Expect.equal
+                        h.Stand.Room
+                        h.RoomName
+                        $"{h.RoomName}: the Stand is a tile of its own room"
+            }
+
             test "each declaration names its own capture's furniture, id and tile alike" {
                 // Compared against the capture rather than a literal: two literals of
                 // the same ids agree with each other and with nothing the server said.

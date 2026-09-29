@@ -442,7 +442,14 @@ let private approachAt (view: ColonyView) : Approach option =
     // Armed hostiles alone: a `1 MOVE` scout at range 1 is neither a probe
     // nor a loss, and one was once read as the raid (#376). The scouts stay
     // on the roster.
-    let armed = view.Hostiles |> List.filter Decide.Facts.isArmed
+    //
+    // Nor anything in a harassment room this colony casts, shut or not
+    // (#432): the raid there is ours.
+    let armed =
+        view.Hostiles
+        |> List.filter (fun hostile ->
+            Decide.Facts.isArmed hostile
+            && not (Set.contains hostile.Pos.Room view.HarassCast))
 
     if List.isEmpty armed then
         None
@@ -520,9 +527,14 @@ let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
 /// `deadlineOf`'s reservation branch: a player's claimer that stops coming
 /// re-takes nothing. Ownership is not here: the engine gives it no end, so it
 /// stays the latch `RivalHeld` remembers.
+///
+/// Never in a harassment room this colony casts, shut or not (#432): the
+/// enemy's reservation is the room's whole reason for being declared, and
+/// read in a shut one it would stretch the squad's stand-down to its own.
 let private rivalDeadlines (view: ColonyView) =
     view.RoomControl
     |> Map.toList
+    |> List.filter (fun (room, _) -> not (Set.contains room view.HarassCast))
     |> List.choose (fun (room, control) ->
         control
         |> RoomControlInfo.heldBy ReservationHolder.Rival
@@ -537,9 +549,10 @@ let private rivalDeadlines (view: ColonyView) =
 /// garrison are the same room's two answers, told apart here — for an outpost
 /// and, since the ranger row fights for it (#414, #411), for an errand room, whose
 /// Source Keepers are terrain and neither open nor extend the clock. A transit
-/// room is neither answer.
+/// room is neither answer. A harassment room is read as an errand room is
+/// (#432): its ranger is weighed against the armed squad standing there.
 let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planner.OutpostFacts) =
-    let errandRooms = Decide.Facts.errandRooms view
+    let rangerRooms = Decide.Facts.rangerRooms view
 
     let outpostRooms = Set.ofList outposts.Declared
 
@@ -549,7 +562,7 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
     |> List.filter (fun (room, hostiles) ->
         let armed = hostiles |> List.filter Decide.Facts.isArmed
 
-        if Set.contains room errandRooms then
+        if Set.contains room rangerRooms then
             armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
             && not (Decide.Quota.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
         else if Set.contains room outpostRooms then
@@ -559,7 +572,7 @@ let private raidDeadlines (view: ColonyView) (outposts: Fabot.Core.Decide.Planne
             false)
     |> List.map (fun (room, hostiles) ->
         let raid =
-            if Set.contains room errandRooms then
+            if Set.contains room rangerRooms then
                 hostiles |> List.filter (fun hostile -> hostile.Owner <> "Source Keeper")
             else
                 hostiles

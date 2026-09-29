@@ -35,6 +35,8 @@ let snapshotWith creeps spatial =
         Refused = []
         Errands = []
         Dismantles = []
+        Harass = []
+        HarassCast = Set.empty
         Consignee = None
         Crossed = Set.empty
         Reactors = []
@@ -657,7 +659,7 @@ let internal chainOfThree home homeRing middleRing middle farRing far kinds cree
     |> ofView
 
 /// Four rooms in the same line, W1N1 through W1N4: a chain three crossings
-/// long, at `Tuning.MaxHops`' own budget.
+/// long, one under `Tuning.MaxHops`' budget.
 let internal chainOfFour
     (home: RoomLayer)
     homeRing

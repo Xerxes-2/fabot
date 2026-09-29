@@ -501,6 +501,7 @@ let private seenFacts
                                     {
                                         Holder = holder
                                         TicksToEnd = c.reservation.ticksToEnd
+                                        Username = c.reservation.username
                                     }
                     }
             )
@@ -651,7 +652,13 @@ let private factsOf
 /// colony's scan set: narrowing the world by the gates would put the shell in
 /// the business of deciding which rooms matter. A seen room no colony works
 /// costs the full `seenFacts` sweep; that is bounded by where our bodies stand.
-let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list) : string list =
+let private worldRooms
+    (maxHops: int)
+    (colonies: Colony list)
+    (harass: Harass list)
+    (affords: string -> bool)
+    (seen: string list)
+    : string list =
     let declared =
         colonies
         |> List.filter (fun colony -> List.contains colony.Home seen)
@@ -689,9 +696,22 @@ let private worldRooms (maxHops: int) (colonies: Colony list) (seen: string list
             let salvage =
                 colony.Salvage |> List.filter (Declaration.withinHopBudget maxHops colony.Home)
 
+            // Every harassment room and its chain, for every home within the
+            // budget whose bank buys the harassment floor: which of them casts
+            // it is read off the world this is choosing rooms for
+            // (`World.harassCaster`).
+            let harassed =
+                if affords colony.Home then
+                    harass
+                    |> List.filter (fun h ->
+                        Declaration.withinHopBudget maxHops colony.Home h.RoomName)
+                else
+                    []
+
             Outpost.roomsProjected outposts colony.Home
             @ Errand.roomsProjected errands colony.Home
             @ Salvage.roomsProjected salvage colony.Home
+            @ Harass.roomsProjected harassed colony.Home
             @ children)
 
     seen @ declared |> List.distinct
@@ -711,7 +731,12 @@ let mutable roomCosts: (string * float) list = []
 /// four-spawn home's 1.23 (#370).
 let mutable roomsBegan: float = 0.0
 
-let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, RoomPos>) : World =
+let ofGame
+    (maxHops: int)
+    (colonies: Colony list)
+    (harass: Harassment)
+    (lastPositions: Map<string, RoomPos>)
+    : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
     // The name the engine spells us, off the controller of a room one of our
@@ -767,7 +792,14 @@ let ofGame (maxHops: int) (colonies: Colony list) (lastPositions: Map<string, Ro
     roomsBegan <- Game.cpu.getUsed ()
 
     let rooms =
-        worldRooms maxHops colonies seen
+        worldRooms
+            maxHops
+            colonies
+            harass.Rooms
+            (fun home ->
+                roomSeen home
+                |> Option.exists (fun room -> room.energyCapacityAvailable >= harass.Floor))
+            seen
         |> List.map (fun roomName ->
             let facts =
                 factsOf

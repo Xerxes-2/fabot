@@ -30,6 +30,10 @@ type Threats =
         /// Per declared errand room (#414), the ranger's Work Area there: the
         /// Reactor's own ring, which it holds and shoots from (#411).
         ErrandRing: Map<string, Set<RoomPos>>
+        /// Per [[harassment room]] (#432), the ranger's Work Area there: the
+        /// walkable tiles beside every target standing in it, and beside the
+        /// declared `Stand` while none does.
+        HarassRing: Map<string, Set<RoomPos>>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -40,6 +44,7 @@ let noThreats =
         Safe = Map.empty
         Ring = Map.empty
         ErrandRing = Map.empty
+        HarassRing = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -64,6 +69,11 @@ module Threats =
     /// other room (#414).
     let errandRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
         Map.tryFind room threats.ErrandRing
+
+    /// The ranger's Work Area in one harassment room, or None for any other
+    /// room.
+    let harassRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
+        Map.tryFind room threats.HarassRing
 
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room: weapon range plus the margin in Chebyshev tiles, less every tile under
@@ -148,6 +158,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                              |> RoomPos.setAt room))
                 Ring = ring
                 ErrandRing = Map.empty
+                HarassRing = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -164,4 +175,38 @@ let threatsOf (view: ColonyView) atlas : Threats =
             |> RoomPos.setAt room)
         |> Map.ofList
 
-    { armed with ErrandRing = errandRing }
+    let errands = errandRooms view
+
+    // The harassment rooms' ranger ground: beside what the Guard there may
+    // shoot, else beside the Stand.
+    let harassRing =
+        view.Harass
+        |> List.map (fun h ->
+            let room = h.RoomName
+
+            let targets =
+                view.Hostiles
+                |> List.filter (fun hostile ->
+                    hostile.Pos.Room = room && guardShoots view errands hostile)
+                |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+
+            let around =
+                if List.isEmpty targets then
+                    [ RoomPos.pos h.Stand ]
+                else
+                    targets
+
+            let standing = Set.ofList targets
+
+            room,
+            around
+            |> List.collect (Atlas.adjacentWalkableIn atlas room)
+            |> List.filter (fun tile -> not (Set.contains tile standing))
+            |> Set.ofList
+            |> RoomPos.setAt room)
+        |> Map.ofList
+
+    { armed with
+        ErrandRing = errandRing
+        HarassRing = harassRing
+    }

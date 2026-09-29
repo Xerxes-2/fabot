@@ -54,6 +54,8 @@ let quiet: ColonyView =
         Refused = []
         Errands = []
         Dismantles = []
+        Harass = []
+        HarassCast = Set.empty
         Consignee = None
         Crossed = Set.empty
         Reactors = []
@@ -239,7 +241,12 @@ let visible room reservation (colony: ColonyView) =
 /// A reservation on that controller, carrying the engine's own *relative*
 /// count of what is left to run on it.
 let heldBy holder ticks =
-    Some { Holder = holder; TicksToEnd = ticks }
+    Some
+        {
+            Holder = holder
+            TicksToEnd = ticks
+            Username = "rival"
+        }
 
 /// The room as vision answers for it when another player owns the
 /// controller outright: the clockless withdrawal, a rival's reservation

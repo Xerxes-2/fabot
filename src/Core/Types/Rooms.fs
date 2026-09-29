@@ -195,6 +195,11 @@ type ReservationInfo =
         /// hold only where `Holder` is `Ours`; under `Invader` and `Rival` it is
         /// the deadline the stand-down runs to.
         TicksToEnd: int
+        /// The username the engine answers the hold with. Read by one rule,
+        /// the [[harassment room]]'s (#432): a room reserved by anyone but the
+        /// declared enemy yields no container to take down, and `Holder`
+        /// cannot tell an ally's claimer from the enemy's.
+        Username: string
     }
 
 /// Whose a thing is, as the colony reads it: three answers and not a username.
@@ -237,8 +242,7 @@ type RoomControlInfo =
         /// price the colony's own sources at five.
         Owner: Ownership
         /// The reservation standing on the room's controller; None where nothing
-        /// reserves it. *Which* rival holds it is deliberately not carried, no
-        /// rule reading a rival's name.
+        /// reserves it.
         Reservation: ReservationInfo option
         /// Whether the room's controller is under safe mode this tick.
         /// Carried per room and not on the colony's own controller alone:

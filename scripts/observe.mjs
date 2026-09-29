@@ -1080,11 +1080,12 @@ if (command === "console") {
   // typechecked.** `declarationKindName` is a closed table (`Verdicts.fs`,
   // round-tripped in `WireTests`), so a row whose kind is a string this
   // channel does not know is a wire shape that has moved under it — and the
-  // operator's whole next act is to open one of the three lists this word
-  // names. Guarding `room` alone and then printing `kind ?? "(no kind)"`
-  // would be the confident half-answer the paragraph above refuses, written
-  // three lines under it.
-  const declarationKinds = ["outpost", "errand", "salvage"];
+  // operator's whole next act is to open the declaration list this word
+  // names: a colony's own, or `Colony.harass` for the whole bot. Guarding
+  // `room` alone and then printing `kind ?? "(no kind)"` would be the
+  // confident half-answer the paragraph above refuses, written three lines
+  // under it.
+  const declarationKinds = ["outpost", "errand", "salvage", "harass"];
   for (const entry of refused) {
     if (
       typeof entry !== "object" ||

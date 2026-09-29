@@ -191,7 +191,7 @@ The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and nev
 _Avoid_: defender, bodyguard, soldier
 
 ### Ranger
-The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, kept on the Reactor's ring as a standing garrison of `Tuning.RangerResidents` bodies of `Tuning.RangerResidentBlocks`, raid or not (#419), each sized up to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. Its [[body class]] is Fighter. ADR-0078. 🏹
+The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, kept on the Reactor's ring as a standing garrison of `Tuning.RangerResidents` bodies of `Tuning.RangerResidentBlocks`, raid or not (#419), each sized up to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. One also works each [[harassment room]], at no fewer than `Tuning.HarassBlocks`. Its [[body class]] is Fighter. ADR-0078, ADR-0081. 🏹
 _Avoid_: archer, ranged guard
 
 ### Miner
@@ -279,6 +279,10 @@ _Avoid_: goal, mission, remote target
 ### Salvage
 A room a [[colony]] declares to take down the structures of ours still standing there (spawn, extension, tower, storage, terminal, extractor, link, rampart), with a Work-and-Move dismantler and no Carry. Its targets are whatever vision shows standing, so the declaration goes inert when the last one falls. ADR-0079.
 _Avoid_: demolition, cleanup
+
+### Harassment room
+An enemy's remote, declared once for the whole bot (`Colony.harass`) with the one player whose creeps and containers are targets there. Each tick it is cast by the living [[colony]] with the largest bank among those that buy the harassment floor (`Tuning.HarassBlocks` ranger blocks) and whose chain reaches it inside the hop budget; while none does, it is refused. That colony keeps a [[ranger]] there, which shoots the enemy's creeps, unarmed ones included, and a dismantler takes the enemy's containers down. An ally's creep, a third player's and a Source Keeper are never unarmed targets. A squad the ranger cannot beat makes it a [[stand-down]]. ADR-0081.
+_Avoid_: raid target, siege, enemy outpost
 
 ### Reservation
 A neutral controller held by this colony's CLAIM parts, which doubles every source in that room, decays by one a tick and caps at 5,000: the economic precondition of an [[outpost]]. **Held** is the colony's word for a room it owns or reserves; the holder is ours, the NPC Invader's or another player's, never a flag. ADR-0042, ADR-0043.

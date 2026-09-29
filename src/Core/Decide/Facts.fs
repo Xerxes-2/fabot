@@ -218,11 +218,32 @@ let internal ourDeposits (view: ColonyView) : string list =
 let internal errandRooms (view: ColonyView) : Set<string> =
     view.Errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
 
+/// The [[harassment room]]s this colony casts this tick, as a set.
+let internal harassRooms (view: ColonyView) : Set<string> =
+    view.Harass |> List.map (fun h -> h.RoomName) |> Set.ofList
+
+/// Whether a hostile is the declared enemy's, standing in the harassment room
+/// that names it: armed or not, a target there. Nobody else's creep is.
+let internal harassTarget (view: ColonyView) (hostile: HostileInfo) : bool =
+    view.Harass
+    |> List.exists (fun h -> h.RoomName = hostile.Pos.Room && h.Enemy = hostile.Owner)
+
 /// Whether a hostile is a rival's CLAIM body standing in one of these errand
 /// rooms: unarmed, and the thing that takes the flag (#406, #414).
 let internal claimsAFlag (errandRooms: Set<string>) (hostile: HostileInfo) =
     Set.contains hostile.Pos.Room errandRooms
     && List.contains BodyPart.Claim hostile.Body
+
+/// The rooms whose Guard is the ranger's: the errand rooms and the
+/// harassment rooms (#411, #432). Every other guarded room is the guard's.
+let internal rangerRooms (view: ColonyView) : Set<string> =
+    Set.union (errandRooms view) (harassRooms view)
+
+/// What a Guard in its room may shoot: an armed hostile, a rival's claimer in
+/// an errand room, and the declared enemy's creep in a harassment room.
+/// `Emitter.guardTarget` and the harassment ring read this one predicate.
+let internal guardShoots (view: ColonyView) (errandRooms: Set<string>) (hostile: HostileInfo) =
+    isArmed hostile || claimsAFlag errandRooms hostile || harassTarget view hostile
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there

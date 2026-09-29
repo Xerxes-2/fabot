@@ -270,10 +270,11 @@ let internal applicable
     | Dismantle _ -> isDismantlerParts heavy creep.Body
     // Spelled through the row predicate the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree. The room decides which row: an
-    // errand room's Guard is the ranger's (#411), every other the melee
-    // guard's. The walk to the work area is what travel cost prices.
+    // errand room's Guard is the ranger's (#411), and a harassment room's
+    // (#432), every other the melee guard's. The walk to the work area is what
+    // travel cost prices.
     | Guard room ->
-        if Set.contains room (Facts.errandRooms view) then
+        if Set.contains room (Facts.rangerRooms view) then
             isRangerBody creep
         else
             isGuardBody creep
@@ -407,13 +408,13 @@ let private guardTarget
     // it is what takes the flag.
     let errandRooms = Facts.errandRooms view
 
+    // In a harassment room the declared enemy's unarmed creeps are targets
+    // too (#432), after its armed ones.
     view.Hostiles
-    |> List.filter (fun h ->
-        h.Pos.Room = room
-        && (weaponRange h |> Option.isSome || Facts.claimsAFlag errandRooms h)
-        && among h)
+    |> List.filter (fun h -> h.Pos.Room = room && Facts.guardShoots view errandRooms h && among h)
     // The claimer first in an errand room: it is what takes the flag.
-    |> List.sortBy (fun h -> not (Facts.claimsAFlag errandRooms h), distance h, h.Id)
+    |> List.sortBy (fun h ->
+        not (Facts.claimsAFlag errandRooms h), not (isArmed h), distance h, h.Id)
     |> List.tryHead
 
 /// A Guard chooses one reachable target, melee for a guard and within three for

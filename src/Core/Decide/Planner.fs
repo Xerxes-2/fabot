@@ -269,8 +269,8 @@ type OutpostFacts =
         /// hires per — one body per room the pool offers a controller in.
         ReservableRooms: string list
         /// The declared outposts a threat stands in, the errand rooms the
-        /// guard row keeps a body in (#414), and the children's homes this
-        /// colony defends (#428).
+        /// guard row keeps a body in (#414), the children's homes this
+        /// colony defends (#428), and the harassment rooms it casts (#432).
         Guarded: string list
     }
 
@@ -292,7 +292,12 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Declared = declared
         ReservableControllers = reservable
         ReservableRooms = reservableOutpostsOf view reservable
-        Guarded = guardedOutpostsOf view declared @ guardedErrandsOf view @ defendedHomesOf view
+        Guarded =
+            guardedOutpostsOf view declared
+            @ guardedErrandsOf view
+            @ defendedHomesOf view
+            // Target or none, as an errand room is kept.
+            @ (Facts.harassRooms view |> Set.toList)
     }
 
 /// Planner: rebuild this tick's full Task pool from the colony view. Pure and

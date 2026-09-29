@@ -807,3 +807,164 @@ let damageTests =
                     "an open episode carries this tick's hits into the next"
             }
         ]
+
+/// An enemy remote the colony harasses (#432), one crossing from home.
+let private harassRoom = "W12S29"
+
+let private harassing =
+    Fabot.Core.Tests.Decide.Fixtures.casting
+        {
+            RoomName = harassRoom
+            Enemy = "Trepidimous"
+            Stand = RoomPos.at harassRoom { X = 25; Y = 25 }
+        }
+
+/// The same room cast and shut: off the worked list, still in the cast set.
+let private shutOut (colony: ColonyView) = { colony with Harass = [] }
+
+/// Trepidimous's raid squad as it stood outside W17S29: `18M17A` and two
+/// `11M7H`, 510 damage and 168 heal a tick.
+let private trepidimousSquad =
+    [
+        List.replicate 18 Move @ List.replicate 17 Attack
+        List.replicate 11 Move @ List.replicate 7 Heal
+        List.replicate 11 Move @ List.replicate 7 Heal
+    ]
+    |> List.mapi (fun i body ->
+        { raiderIn harassRoom i body with
+            Owner = "Trepidimous"
+            TicksToLive = 700
+        })
+
+[<Tests>]
+let harassStandDownTests =
+    testList
+        "raid fold: a harassment room's stand-down"
+        [
+            test
+                "a squad the biggest ranger loses to shuts the room, clocked to the squad's own life" {
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                let state = RaidState.empty |> raidTick 100 colony
+
+                Expect.contains (shutAt 799 state) harassRoom "withdrawn while the squad lives"
+
+                Expect.isFalse
+                    (Set.contains harassRoom (shutAt 800 state))
+                    "and harassed again the tick its life runs out"
+            }
+
+            test "the enemy's escort the ranger beats is fought, not withdrawn from" {
+                let escort =
+                    { raiderIn harassRoom 1 [ Move; Move; Move; RangedAttack; Heal ] with
+                        Owner = "Trepidimous"
+                    }
+
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = [ escort ]
+                        Bank = { Available = 2100; Capacity = 2100 }
+                    }
+
+                Expect.isEmpty
+                    (RaidState.empty |> raidTick 100 colony |> shutAt 101)
+                    "three ranger blocks beat a 3M1RA1H"
+            }
+
+            test "the enemy's reservation of the room it harasses is no stand-down" {
+                let colony =
+                    harassing quiet |> visible harassRoom (heldBy ReservationHolder.Rival 4_000)
+
+                Expect.isEmpty
+                    (RaidState.empty |> raidTick 100 colony |> shutAt 101)
+                    "the enemy holding its remote is why the room is declared"
+
+                // Beside it, a room nobody harasses under the same hold is shut.
+                Expect.contains
+                    (RaidState.empty
+                     |> raidTick
+                         100
+                         (visible harassRoom (heldBy ReservationHolder.Rival 4_000) quiet)
+                     |> shutAt 101)
+                    harassRoom
+                    "the same hold anywhere else is the stand-down it always was"
+            }
+
+            test
+                "a room the squad shut stays ours: the enemy's reservation stretches no stand-down, and the squad is no approach" {
+                let ranger = ours "ranger-1"
+
+                // Our ranger standing beside the squad, under the enemy's hold.
+                let colony =
+                    { (harassing quiet) with
+                        Creeps = [ ranger ]
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                        Spatial =
+                            { quiet.Spatial with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            harassRoom,
+                                            { RoomLayer.empty with
+                                                CreepPositions =
+                                                    Map.ofList [ ranger.Name, { X = 26; Y = 25 } ]
+                                            }
+                                        ]
+                            }
+                    }
+                    |> visible harassRoom (heldBy ReservationHolder.Rival 4_000)
+
+                // The tick after: the gate has shut the room, so it is off
+                // the worked list and still cast.
+                let state = RaidState.empty |> raidTick 100 colony |> raidTick 101 (shutOut colony)
+
+                Expect.contains (shutAt 799 state) harassRoom "the squad's stand-down still runs"
+
+                Expect.isFalse
+                    (Set.contains harassRoom (shutAt 800 state))
+                    "and ends with the squad's life, not at the end of the enemy's reservation"
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun e -> e.Closest))
+                    [ None ]
+                    "the squad standing in the shut room measures no approach on us"
+            }
+
+            test "our own attack on the enemy's creeps is no approach on us" {
+                let ranger = ours "ranger-1"
+
+                let colony =
+                    { (harassing quiet) with
+                        Creeps = [ ranger ]
+                        Hostiles =
+                            [
+                                { raiderIn harassRoom 1 [ Move; RangedAttack ] with
+                                    Owner = "Trepidimous"
+                                }
+                            ]
+                        Spatial =
+                            { quiet.Spatial with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            harassRoom,
+                                            { RoomLayer.empty with
+                                                CreepPositions =
+                                                    Map.ofList [ ranger.Name, { X = 26; Y = 25 } ]
+                                            }
+                                        ]
+                            }
+                    }
+
+                Expect.equal
+                    ((RaidState.empty |> raidTick 100 colony).Episodes
+                     |> List.map (fun e -> e.Closest))
+                    [ None ]
+                    "the episode records the roster, and measures no approach"
+            }
+        ]

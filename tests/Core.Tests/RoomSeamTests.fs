@@ -553,8 +553,8 @@ let keeperMaskTests =
             }
 
             test "the mask takes a third of W15S26's ground and the chain still crosses it" {
-                // Three crossings is `Tuning.MaxHops` exactly: no slack for
-                // a detour round a room the mask closed.
+                // Three crossings, and only the shortest chains are searched:
+                // no detour round a room the mask closed.
                 let raw =
                     keeperRoom.Terrain
                     |> TerrainGrid.toList

@@ -241,9 +241,14 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // give the walk a destination; the instant the guard arrives the room
         // is lit and this branch is not taken again.
         //
-        // In a declared errand room the ground is `Threats.ErrandRing`'s (#414).
+        // In a declared errand room the ground is `Threats.ErrandRing`'s (#414),
+        // in a harassment room `Threats.HarassRing`'s (#432).
         | Guard room ->
-            match Threats.errandRingIn threats room, Threats.ringIn threats room with
+            let declared =
+                Threats.errandRingIn threats room
+                |> Option.orElse (Threats.harassRingIn threats room)
+
+            match declared, Threats.ringIn threats room with
             | Some ground, _ -> ground
             | None, ring when Set.isEmpty ring -> Atlas.sourceRingIn atlas room
             | None, ring -> ring
@@ -939,6 +944,10 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // row's count, not this cap, is what buys bodies.
         | Guard room when Set.contains room (Facts.errandRooms view) ->
             Capacity.fighters (rangersWanted view room + view.Tuning.RangerResidents)
+        // One over in a harassment room, for the relief cast at the
+        // incumbent's lead.
+        | Guard room when Set.contains room (Facts.harassRooms view) ->
+            Capacity.fighters (rangersWanted view room + 1)
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // One holder per controller: a second body there buys nothing.
         | Reserve _
