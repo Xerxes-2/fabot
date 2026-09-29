@@ -1568,23 +1568,40 @@ let private besideExitFrom (grid: int[]) (origin: Pos) (tile: Pos) : Pos list =
 /// The cheapest a flood reached any tile of a set at, and None when it reached
 /// none — the one read every arrival at a set of tiles goes through.
 /// Unreachable is an absence and never a number. The tile comes back beside
-/// the price: of equally cheap goals the lowest tile wins, and `List.min`
-/// over the pair settles that tie the same way everywhere. A second argmin
-/// elsewhere agrees on every number and splits on every tie, which is how a
-/// body comes to be walked toward one goal and ranked at another.
+/// the price: of equally cheap goals the lowest tile wins, the order
+/// `List.min` over the pair settled it in. A second argmin elsewhere agrees on
+/// every number and splits on every tie, which is how a body comes to be
+/// walked toward one goal and ranked at another. One pass and no pair built:
+/// Fable's generic `compare` on a tuple is most of what the pair cost.
 let private cheapestReached (reached: Pos -> int) (tiles: Pos list) : (int * Pos) option =
-    tiles
-    |> List.choose (fun tile ->
+    let mutable best = unreached
+    let mutable bestTile = Unchecked.defaultof<Pos>
+
+    for tile in tiles do
         let d = reached tile
-        if d = unreached then None else Some(d, tile))
-    |> function
-        | [] -> None
-        | reachable -> Some(List.min reachable)
+
+        if
+            d <> unreached
+            && (d < best
+                || d = best && (tile.X < bestTile.X || tile.X = bestTile.X && tile.Y < bestTile.Y))
+        then
+            best <- d
+            bestTile <- tile
+
+    if best = unreached then None else Some(best, bestTile)
 
 /// The price alone, for the readers that arrive at a set and never name which
 /// tile they arrived on.
 let private nearestReached (reached: Pos -> int) (tiles: Pos list) : int option =
-    cheapestReached reached tiles |> Option.map fst
+    let mutable best = unreached
+
+    for tile in tiles do
+        let d = reached tile
+
+        if d < best then
+            best <- d
+
+    if best = unreached then None else Some best
 
 /// What this body pays to step onto an exit tile, priced by the same rule every
 /// other step is: one tick only for a plain exit under a body at fatigue
