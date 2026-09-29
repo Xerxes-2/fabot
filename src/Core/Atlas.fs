@@ -1479,24 +1479,18 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
             fromRoom
             toRoom)
 
-/// The table with only the entries `keep` answers for, rebuilt in place
-/// through `Clear` rather than removed entry by entry (#397): the bundled
-/// `Dictionary.Remove` splices an entry out of its bucket and leaves the
-/// emptied bucket in the hash map, on the order of 100 B per key hash ever held, where
-/// `Clear` resets the map. Walked on a census move only, hundreds of ticks
-/// apart, so the per-tick eviction's leftovers are swept here.
-let private rebuilt (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep: 'k -> bool) =
-    let kept = ResizeArray()
+/// The table with only the entries `keep` answers for, in place. Keys are
+/// collected before anything is removed: a `Dictionary` may not be mutated
+/// under its own enumeration.
+let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep: 'k -> bool) =
+    let stale = ResizeArray()
 
-    for KeyValue(key, value) in table do
-        if keep key then
-            kept.Add((key, value))
+    for KeyValue(key, _) in table do
+        if not (keep key) then
+            stale.Add key
 
-    if kept.Count < table.Count then
-        table.Clear()
-
-        for key, value in kept do
-            table.[key] <- value
+    for key in stale do
+        table.Remove key |> ignore
 
 /// ADR-0032
 /// Drop, from the three census-keyed tables this Atlas was handed, every
@@ -1507,16 +1501,13 @@ let private rebuilt (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep
 /// cross-room spawn walk. A Seam walk reads its first room and is evicted on
 /// either, over-invalidating being the cheap error. A far field reads exactly
 /// its chain.
-///
-/// Keys are collected before anything is removed: a `Dictionary` may not be
-/// mutated under its own enumeration.
 let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
     let touches (rooms: string list) = rooms |> List.exists moved.Contains
 
     let departed =
         moved |> Set.exists (fun room -> not (Map.containsKey room atlas.Spatial.Rooms))
 
-    rebuilt atlas.Walks (fun (_, _, goalRoom) ->
+    retain atlas.Walks (fun (_, _, goalRoom) ->
         if goalRoom = atlas.Home then
             not (moved.Contains atlas.Home)
         else
@@ -1525,23 +1516,14 @@ let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
                 touches (atlas.Home :: goalRoom :: List.concat (routes atlas atlas.Home goalRoom))
             ))
 
-    rebuilt atlas.SeamWalks (fun (fromRoom, toRoom) -> not (touches [ fromRoom; toRoom ]))
-    rebuilt atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
+    retain atlas.SeamWalks (fun (fromRoom, toRoom) -> not (touches [ fromRoom; toRoom ]))
+    retain atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
 
 /// Drop every far field whose Task is not in `live` (#392): a Task carries an
 /// object id, so a quiet census leaks one field per Task that ever priced a
-/// far leg. A Task that comes back costs one re-flood. In place and not
-/// `rebuilt`: this runs every tick, and the buckets it leaves are swept by
-/// the next census move (#397).
+/// far leg. A Task that comes back costs one re-flood.
 let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
-    let stale = ResizeArray()
-
-    for KeyValue((_, task, _, _, _, _) as key, _) in atlas.FarFields.PerCensus do
-        if not (Set.contains task live) then
-            stale.Add key
-
-    for key in stale do
-        atlas.FarFields.PerCensus.Remove key |> ignore
+    retain atlas.FarFields.PerCensus (fun (_, task, _, _, _, _) -> Set.contains task live)
 
 /// The first of those chains, or `None` where there is none — what a reader
 /// with no price to choose one with takes (`stepTowardRoom`, whose room is
