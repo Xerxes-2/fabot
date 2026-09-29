@@ -374,6 +374,21 @@ module Outpost =
             Controller = "6a8caa7ddd4872bccd318c82", { Room = "W17S29"; X = 30; Y = 39 }
         }
 
+    /// W17S29's first outpost, declared 2026-09-29 (#427): one hop east, its
+    /// sources (23,22) and (17,43) 49 and 41 steps from Spawn9, on the chain
+    /// W15S28 raised it by.
+    /// The ids and tiles are the committed capture's.
+    let w16s29: Outpost =
+        {
+            RoomName = "W16S29"
+            Sources =
+                [
+                    "6a8caa89dd4872bccd318e4b", { Room = "W16S29"; X = 23; Y = 22 }
+                    "6a8caa89dd4872bccd318e4d", { Room = "W16S29"; X = 17; Y = 43 }
+                ]
+            Controller = "6a8caa89dd4872bccd318e4c", { Room = "W16S29"; X = 23; Y = 32 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`: one hop, one source at a 210-tick
     /// round trip, about 6.25 energy a tick net, and the cheapest tick of the
@@ -857,12 +872,10 @@ module Colony =
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
-            // Until the Claim lands it is also W15S28's outpost, which is
-            // what makes its controller a Claim in that pool; it leaves that
-            // list the day the Claim lands, as W11S27 did (#404).
+            // Claimed t808,328, and off W15S28's outposts since (#404).
             {
                 Home = "W17S29"
-                Outposts = []
+                Outposts = [ Outpost.w16s29 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"
