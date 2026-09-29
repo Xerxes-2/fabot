@@ -66,10 +66,11 @@ let builtKindTests =
                         BuiltKind.Storage, Some WholeLine.Full
                         BuiltKind.Link, None
                         BuiltKind.Rampart, Some WholeLine.Floor
-                        // Neither decays, and neither's hits reach the
-                        // projection.
+                        // An extractor does not decay, and its hits never
+                        // reach the projection.
                         BuiltKind.Extractor, None
-                        BuiltKind.Terminal, None
+                        // The terminal is of the Keep (#422).
+                        BuiltKind.Terminal, Some WholeLine.Full
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 
@@ -84,8 +85,8 @@ let builtKindTests =
 
                 Expect.equal
                     (allBuiltKinds |> List.filter isKeep)
-                    [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage ]
-                    "the spawn, the tower and the Storage are the Keep"
+                    [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage; BuiltKind.Terminal ]
+                    "the spawn, the tower, the Storage and the terminal are the Keep"
 
                 Expect.equal
                     (allBuiltKinds |> List.filter isStored)
@@ -106,7 +107,13 @@ let builtKindTests =
                 // on nothing else: a chewed road is ordinary decay.
                 Expect.equal
                     (allBuiltKinds |> List.filter isDefence)
-                    [ BuiltKind.Spawn; BuiltKind.Tower; BuiltKind.Storage; BuiltKind.Rampart ]
+                    [
+                        BuiltKind.Spawn
+                        BuiltKind.Tower
+                        BuiltKind.Storage
+                        BuiltKind.Rampart
+                        BuiltKind.Terminal
+                    ]
                     "the Keep and the ramparts over it are what a raid's damage is read on"
 
                 // Ownership is asked of every kind that has an owner and a

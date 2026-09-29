@@ -221,7 +221,7 @@ The season's scoring resource and the one resource beside energy this colony nam
 _Avoid_: mineral (the engine's word for the object), ore
 
 ### Keep
-The structures worth defending — the spawn, every tower and the [[storage]]: each ramparted, repaired to full, and a reason to fire the [[safe-mode reflex]] when damaged, from `Independent` up. ADR-0034.
+The structures worth defending — the spawn, every tower, the [[storage]] and the terminal (#422): each ramparted, repaired to full, and a reason to fire the [[safe-mode reflex]] when damaged, from `Independent` up. ADR-0034.
 _Avoid_: base, core
 
 ### Rampart

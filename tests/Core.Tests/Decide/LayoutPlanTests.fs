@@ -1070,9 +1070,17 @@ let storageTests =
                     (sitesOfKind Terminal intents)
                     "the standing census fills the allowance"
 
+                // Its rampart is no footprint (#422).
                 Expect.isFalse
-                    (List.contains { X = 24; Y = 26 } (placedTiles intents))
+                    (List.contains
+                        { X = 24; Y = 26 }
+                        (placedTiles intents |> List.except (sitesOfKind Rampart intents)))
                     "and the tower behind it takes the next tile, not this one"
+
+                Expect.contains
+                    (sitesOfKind Rampart intents)
+                    { X = 24; Y = 26 }
+                    "a standing terminal is a Keep structure and gets its cover"
             }
 
             test "RCL3 places no Storage yet still holds its tile against the cluster" {

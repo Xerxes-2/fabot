@@ -772,10 +772,11 @@ let repairTests =
                     |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
                     |> withHits "tower-1" BuiltKind.Tower 4999 5000
                     |> withHits "sto-1" BuiltKind.Storage 4999 5000
+                    |> withHits "term-1" BuiltKind.Terminal 2999 3000
 
                 Expect.equal
                     (repairTasks (planTasksOn dented noThreats))
-                    [ "spawn-1"; "sto-1"; "tower-1" ]
+                    [ "spawn-1"; "sto-1"; "term-1"; "tower-1" ]
                     "one hit off max is hungry, on every Keep structure"
 
                 let whole =

@@ -119,6 +119,13 @@ let private homeFacts =
         name,
         { facts with
             Cooldowns = Map.ofList [ "ext-1", 3 ]
+            // The terminal is of the Keep (#422), so its hits are carried.
+            Hits =
+                Map.ofList
+                    [
+                        "sto-1", { Hits = 10_000; HitsMax = 10_000 }
+                        "term-1", { Hits = 3_000; HitsMax = 3_000 }
+                    ]
             Controller =
                 Some
                     {

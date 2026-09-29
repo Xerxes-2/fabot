@@ -297,17 +297,14 @@ let isKeep =
     function
     | BuiltKind.Spawn
     | BuiltKind.Tower
-    | BuiltKind.Storage -> true
+    | BuiltKind.Storage
+    | BuiltKind.Terminal -> true
     | BuiltKind.Extension
     | BuiltKind.Road
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
-    // Not in the Keep yet, and a real question (#349): a terminal holding the
-    // season's ore is worth more than the Storage beside it. Answering yes
-    // moves three rules at once, so it waits for a terminal standing.
-    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds a raid's damage is charged on: the Keep and the ramparts that
@@ -317,13 +314,13 @@ let isDefence =
     | BuiltKind.Spawn
     | BuiltKind.Tower
     | BuiltKind.Storage
+    | BuiltKind.Terminal
     | BuiltKind.Rampart -> true
     | BuiltKind.Extension
     | BuiltKind.Road
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
-    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// The kinds whose projection has to ask the engine who owns them: every
@@ -335,13 +332,13 @@ let needsOwner =
     | BuiltKind.Spawn
     | BuiltKind.Tower
     | BuiltKind.Storage
+    | BuiltKind.Terminal
     | BuiltKind.Rampart -> true
     | BuiltKind.Extension
     | BuiltKind.Road
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
-    | BuiltKind.Terminal
     | BuiltKind.Other -> false
 
 /// Where a kind is whole — which of the three rules judges its hits, never the
@@ -367,14 +364,11 @@ let wholeLine =
     | BuiltKind.Rampart -> Some WholeLine.Floor
     | BuiltKind.Spawn
     | BuiltKind.Tower
-    | BuiltKind.Storage -> Some WholeLine.Full
+    | BuiltKind.Storage
+    | BuiltKind.Terminal -> Some WholeLine.Full
     | BuiltKind.Extension
     | BuiltKind.Link
     | BuiltKind.Extractor
-    // A terminal does not decay, and nothing reads its hits, so Repair never
-    // asks after it — the same answer the extensions get and for the same
-    // reason (#349).
-    | BuiltKind.Terminal
     | BuiltKind.Other -> None
 
 /// The kinds whose stored energy enters the projection: the containers, the

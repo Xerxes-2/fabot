@@ -762,9 +762,9 @@ let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 let pendingRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Site BuiltKind.Rampart)
 
-/// Tiles holding a standing Keep structure — the spawn, the tower and the
-/// Storage: what a rampart covers, the tick the structure stands. A site is
-/// not covered until it is a structure.
+/// Tiles holding a standing Keep structure — the spawn, the tower, the
+/// Storage and the terminal: what a rampart covers, the tick the structure
+/// stands. A site is not covered until it is a structure.
 let keepTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesWhereIn atlas room (function
         | Structure built -> isKeep built

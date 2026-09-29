@@ -142,6 +142,21 @@ let rampartTests =
                     "three Posts and the Keep, from the rule and not a count"
             }
 
+            test "a standing terminal is covered like the Storage beside it" {
+                // #422: the terminal is of the Keep, and its tile is ramparted
+                // the tick it stands.
+                let room =
+                    keepRoom
+                    |> withTargets [ "term-1", { X = 26; Y = 24 }, Structure BuiltKind.Terminal ]
+
+                let { Intents = intents } = decideOn (atLevel 6 room)
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    (List.sort ({ X = 26; Y = 24 } :: keepCover))
+                    "the Keep's cover grows by the terminal's tile and by nothing else"
+            }
+
             test "a container that is no Post is left bare" {
                 // The rule covers the Keep and the Posts, and a container off
                 // every Seat is neither: the upgrade buffer's own container
@@ -193,6 +208,15 @@ let wholeKeep =
 /// The same Keep one hit off max on the spawn — all the second arm reads:
 /// the Keep does not decay, so below max means it was damaged.
 let dentedSpawn = wholeKeep |> withHits "spawn-1" BuiltKind.Spawn 4999 5000
+
+/// The same colony with its tower placed, so the undefended arm (#217) is
+/// out of the question and only the Keep arm can fire.
+let towered (snapshot: ColonyView) =
+    { snapshot with
+        Spatial =
+            snapshot.Spatial
+            |> withTargets [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
+    }
 
 [<Tests>]
 let safeModeTests =
@@ -333,11 +357,12 @@ let safeModeTests =
 
             test "a dented Keep with a hostile in the room fires" {
                 // The second arm stands on its own: this hostile carries no CLAIM, so
-                // only the damage speaks. Each of the three in turn; the tower is the
-                // dismantler test below.
+                // only the damage speaks. Each in turn; the tower is the
+                // dismantler test below. The tower stands, or the undefended
+                // arm would fire on the armed hostile whatever the hits read.
                 let fires snapshot =
                     let { Intents = intents } =
-                        decideOn (snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
+                        decideOn (towered snapshot |> facing [ hostile [ Tough; Attack; Move ] ])
 
                     activations intents
 
@@ -350,6 +375,11 @@ let safeModeTests =
                     (fires (wholeKeep |> withHits "sto-1" BuiltKind.Storage 4999 5000))
                     [ "ctrl-1" ]
                     "the Storage is the room's largest store, and it is of the Keep"
+
+                Expect.equal
+                    (fires (wholeKeep |> withHits "term-1" BuiltKind.Terminal 2999 3000))
+                    [ "ctrl-1" ]
+                    "the terminal holds the season's ore, and it is of the Keep (#422)"
             }
 
             test "a dented Keep in an empty room holds the stock" {
@@ -360,14 +390,7 @@ let safeModeTests =
             }
 
             test "a full Keep with a hostile in the room fires nothing while a tower stands" {
-                let snapshot =
-                    { wholeKeep with
-                        Spatial =
-                            wholeKeep.Spatial
-                            |> withTargets
-                                [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
-                    }
-                    |> facing [ hostile [ Attack; Attack; Move ] ]
+                let snapshot = towered wholeKeep |> facing [ hostile [ Attack; Attack; Move ] ]
 
                 let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (activations intents) "an intact Keep is not yet certain harm"
