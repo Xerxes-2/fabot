@@ -51,14 +51,6 @@ let internal noTraffic: bool[] = Array.create tileCount false
 /// read a whole room at a time. Shared by all three grids and never written.
 let internal noGround: int[] = Array.create tileCount -1
 
-/// The weight of raw ground: plain 2, swamp 10, wall impassable — written as
-/// the -1 the weight table marks impassable with. The one place the engine's
-/// terrain prices live, so no grid drifts from another.
-let internal terrainWeight terrain =
-    match terrain with
-    | Plain -> 2
-    | Swamp -> Engine.swampWeight
-    | Wall -> -1
 
 /// A creep's fatigue factor from its body and current load: every part
 /// except Move and except empty Carry generates fatigue — the engine loads

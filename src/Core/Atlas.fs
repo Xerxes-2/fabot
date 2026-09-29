@@ -247,15 +247,9 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         |> Array.iter (fun index -> grid.[index] <- -1)
 
     let gridOf (room: string) (foreign: Set<Pos>) (layer: RoomLayer) =
-        let ground = Array.create tileCount -1
-
-        // The grid is strided exactly as this array is (`Geometry.indexOf`),
-        // so the terrain walks straight in by index: no `Pos` is built and no
-        // tree is walked, which is the whole of #278. The bounds guard lives
-        // in `TerrainGrid`'s own entries, and a slot it holds is in range by
-        // construction.
-        layer.Terrain
-        |> TerrainGrid.iterIndexed (fun index terrain -> ground.[index] <- terrainWeight terrain)
+        // Priced once with the terrain (`TerrainGrid.Weights`) and copied,
+        // because the mask and the passes below write into it.
+        let ground = Array.copy layer.Terrain.Weights
 
         maskKeepers room ground
 

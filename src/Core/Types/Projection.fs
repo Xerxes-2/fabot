@@ -31,7 +31,27 @@ type Terrain =
 /// A record around the array and not the bare array, so the projection cannot
 /// be handed a differently-strided array by accident and equality is the
 /// record's, which is what the fixtures compare.
-type TerrainGrid = internal { Tiles: Terrain option[] }
+///
+/// `Weights` is the same grid priced — `terrainWeight` per tile, -1 where
+/// absent — laid once where the tiles are, because the Atlas lays every
+/// projected room's ground from it every tick and the terrain is fixed for
+/// the life of the process: pricing it again per tick was 70% of the Atlas's
+/// construction on `reactor`.
+type TerrainGrid =
+    internal
+        {
+            Tiles: Terrain option[]
+            Weights: int[]
+        }
+
+/// The weight of raw ground: plain 2, swamp 10, wall impassable — written as
+/// the -1 the weight table marks impassable with. The one place the engine's
+/// terrain prices live, so no grid drifts from another.
+let internal terrainWeight terrain =
+    match terrain with
+    | Plain -> 2
+    | Swamp -> Engine.swampWeight
+    | Wall -> -1
 
 /// Reading and writing a `TerrainGrid`. The names and the argument order are
 /// `Map`'s on purpose: this module replaced a `Map<Pos, Terrain>` at forty-odd
@@ -40,9 +60,20 @@ type TerrainGrid = internal { Tiles: Terrain option[] }
 [<RequireQualifiedAccess>]
 module TerrainGrid =
 
+    /// The only way a grid is made, so `Weights` cannot drift from `Tiles`.
+    let private ofTiles (tiles: Terrain option[]) : TerrainGrid =
+        {
+            Tiles = tiles
+            Weights =
+                tiles
+                |> Array.map (function
+                    | Some terrain -> terrainWeight terrain
+                    | None -> -1)
+        }
+
     /// The grid no room carries: every tile absent. Never written to, being
     /// shared by every caller that asks for one.
-    let empty: TerrainGrid = { Tiles = Array.create tileCount None }
+    let empty: TerrainGrid = ofTiles (Array.create tileCount None)
 
     let tryFind (pos: Pos) (grid: TerrainGrid) : Terrain option =
         if inGrid pos then grid.Tiles.[indexOf pos] else None
@@ -59,7 +90,7 @@ module TerrainGrid =
         else
             let tiles = Array.copy grid.Tiles
             tiles.[indexOf pos] <- Some terrain
-            { Tiles = tiles }
+            ofTiles tiles
 
     let remove (pos: Pos) (grid: TerrainGrid) : TerrainGrid =
         if not (inGrid pos) then
@@ -67,7 +98,7 @@ module TerrainGrid =
         else
             let tiles = Array.copy grid.Tiles
             tiles.[indexOf pos] <- None
-            { Tiles = tiles }
+            ofTiles tiles
 
     let ofList (tiles: (Pos * Terrain) list) : TerrainGrid =
         let grid = Array.create tileCount None
@@ -76,7 +107,7 @@ module TerrainGrid =
             if inGrid pos then
                 grid.[indexOf pos] <- Some terrain
 
-        { Tiles = grid }
+        ofTiles grid
 
     /// Every tile the grid carries, in `indexOf` order — which is (X, Y)
     /// order, the order `Map.toList` answered in and every "ties by (X, Y)"
@@ -119,7 +150,7 @@ module TerrainGrid =
             | Some terrain -> tiles.[index] <- Some(change (posAt index) terrain)
             | None -> ()
 
-        { Tiles = tiles }
+        ofTiles tiles
 
     let exists (predicate: Pos -> Terrain -> bool) (grid: TerrainGrid) : bool =
         let mutable found = false
