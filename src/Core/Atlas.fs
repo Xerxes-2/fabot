@@ -1457,7 +1457,8 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
 /// fewest crossings, ends included, and empty where none lies inside the hop
 /// budget: `RoomName.routesBy` over `seams`, out to `Tuning.MaxHops`. A room
 /// the projection does not carry has no ring and is joined to nothing, so the
-/// search stays inside the rooms `RoomName.transitBetween` put in the world.
+/// search stays inside the rooms `RoomName.transitBetween` (and a harassment
+/// room's `Via`) put in the world.
 /// Memoised per ordered pair, the empty answer included.
 ///
 /// **Which chain is walked is not decided here** (#288): two chains of the
@@ -2659,7 +2660,7 @@ let firstStepIgnoringTraffic
 /// `Declaration.routable` admits a declaration only where a chain runs both
 /// ways. This leg's far field is `chainedInto` direct, there being no creep to
 /// key `farFieldAlong` on, so a second chain is a second chained flood per
-/// leg, bounded by `Tuning.MaxHops` = 4 inside a census-keyed row.
+/// leg, bounded by `Tuning.MaxHops` inside a census-keyed row.
 let haulRoundTripTicks
     (atlas: Atlas)
     (body: BodyPart list)

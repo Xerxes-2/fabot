@@ -25,6 +25,7 @@ let private declaration =
         RoomName = harassRoom
         Enemy = enemy
         Stand = RoomPos.at harassRoom standTile
+        Via = []
     }
 
 /// The enemy's container, beside its source.

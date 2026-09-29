@@ -1,8 +1,10 @@
 # An enemy remote is harassed by the colony that can best afford it
 
-> **Status:** accepted
+> **Status:** amended by #437
 
 > **Accepted 2026-09-29** on #432, after Trepidimous (W18S26, one spawn) raided W17S29 three times. The user's decision: before any siege, harass their remotes, and allocate the work globally rather than per colony.
+
+> **Amended by #437** on 2026-09-29, the day it was accepted, so W15S28 can harass W18S27. Decision 2's order is now **fewest crossings first**, then the largest bank, then the home name: with the bank first, W13S28 (six crossings) would take W17S26 from W15S28 (four) whenever its capacity passed W15S28's, and flip back when it fell below, each flip a new ranger. The crossings do not move with the bank, so the order does not flip. Decision 3's budget is **six** (ADR 0058's amendment carries the history). A declaration may name a detour, `Harass.Via`, which its caster projects beside the name rectangle.
 
 We decided five things.
 
@@ -14,13 +16,14 @@ We decided five things.
 
 ## Consequences
 
-- The ground decides who is in the running before the bank does. W16S27's west edge, W17S27's east and north, and W15S28's west are wall. So W17S26 is reached by W15S28 alone (four crossings), and W18S27 by W17S29 alone (three). W15S28 casts W17S26. W18S27 waits, refused: W17S29's 1,300 does not buy the floor, and it takes the room over, with no commit, the tick its capacity reaches 2,100.
-- The shell reads a harassment room's chain only for the homes that afford the floor, so W17S29 pays for none of it today. A rich colony still reads the chain toward a room it cannot route to (W15S28 toward W18S27); the chain is known only once the world is read.
+- The ground decides who is in the running before the bank does. W16S27's west edge, W17S27's east and north, and W15S28's west are wall. W17S26 is reached by W15S28 (four crossings) and W13S28 (six). W18S27 is reached by W17S29 (three) and by W15S28 (six, only over its `Via`, W15S29 and W16S29). W15S28 casts both: W17S29's 1,300 does not buy the floor. W17S29 takes W18S27 over, with no commit, the tick its capacity reaches 2,100.
+- The shell reads a harassment room's chain, its `Via` included, only for the homes that afford the floor and are within the budget by name, so W17S29 pays for none of it today. W13S28 reads both rooms' rectangles, which puts W13S26, W14S26 and W14S27 in the world as terrain alone; a rich colony still reads the chain toward a room it cannot route to, since the chain is known only once the world is read.
 - The chains to W17S26 cross the Source Keeper room W16S26, and one of them W15S26 too. Their keepers enter the raid log's roster as noise; they open no stand-down there.
-- The caster projects the room's chain, about ten rooms for W15S28, and pays their CPU while the declaration stands.
+- The caster projects the room's chain, twelve rooms for W15S28 across both rooms, and pays their CPU while the declaration stands.
 - The ranger row casts one size: while an errand is also worked, the harassment ranger is cast at the errand's seven blocks.
 - A ranger crossing a transit room does not flee. The stand-down only protects the target room.
 - A caster flip (a bank or terrain change) leaves bodies in a transit room only the old caster projected unplaced for the tick.
+- W16S29 is W17S29's outpost and a room of W15S28's detour. While a stand-down shuts it, W15S28 alone projects it, so W15S28 adopts W17S29's bodies standing there (ADR 0058's transit adoption) and W17S29 may lose them to W15S28's work. Accepted: refusing adoption in a transit room would leave those bodies unplaced instead.
 
 ## Considered options
 

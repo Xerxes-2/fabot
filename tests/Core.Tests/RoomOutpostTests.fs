@@ -145,14 +145,8 @@ let outpostDeclarationTests =
 
             test
                 "a chain of real border rings joins every harassment room to the colonies in the running for it" {
-                // The caster is the largest bank among the colonies that buy
-                // the harassment floor and whose chain reaches the room inside
-                // the hop budget; the ground decides who is in the running,
-                // the bank the rest (`ViewTests`). W17S26: W15S28 alone,
-                // four crossings by W15S27 and W16S26 — its west edge and
-                // W16S27's are wall, and W17S27's north is, so W17S29 has no
-                // chain of three. W18S27: W17S29 alone, three crossings — no
-                // chain of four from W15S28 turns west past W16S27's wall.
+                // Who reaches each room over the captures; who of those casts it
+                // is `World.harassCasters`, asked below at the live banks.
                 let homes =
                     Colony.declared
                     |> List.map (fun colony -> colony.Home)
@@ -161,20 +155,23 @@ let outpostDeclarationTests =
                         |> List.exists (fun h ->
                             Declaration.withinHopBudget Tuning.defaults.MaxHops home h.RoomName))
 
-                let linked =
-                    shippedLinked (
-                        homes
-                        |> List.collect (fun home ->
-                            home
-                            :: Harass.roomsProjected
-                                (Colony.harass
-                                 |> List.filter (fun h ->
-                                     Declaration.withinHopBudget
-                                         Tuning.defaults.MaxHops
-                                         home
-                                         h.RoomName))
-                                home)
-                    )
+                // Every room `World.ofGame` puts in the world for these homes'
+                // harassment (`worldRooms`): each room, its rectangle and its Via.
+                let rooms =
+                    homes
+                    |> List.collect (fun home ->
+                        home
+                        :: Harass.roomsProjected
+                            (Colony.harass
+                             |> List.filter (fun h ->
+                                 Declaration.withinHopBudget
+                                     Tuning.defaults.MaxHops
+                                     home
+                                     h.RoomName))
+                            home)
+                    |> List.distinct
+
+                let linked = shippedLinked rooms
 
                 let castersOf room =
                     homes
@@ -183,8 +180,21 @@ let outpostDeclarationTests =
 
                 Expect.equal
                     (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
-                    [ "W18S27", [ "W17S29" ]; "W17S26", [ "W15S28" ] ]
-                    "each harassment room is reached, both ways, by exactly the colony the ground allows"
+                    [ "W18S27", [ "W15S28"; "W17S29" ]; "W17S26", [ "W13S28"; "W15S28" ] ]
+                    "each harassment room is reached, both ways, by exactly the colonies the ground allows"
+
+                let detours = RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W18S27"
+
+                Expect.contains
+                    detours
+                    [ "W15S28"; "W15S29"; "W16S29"; "W16S28"; "W17S28"; "W17S27"; "W18S27" ]
+                    "W18S27 is six crossings from W15S28, south round the wall and back north"
+
+                for chain in detours do
+                    Expect.equal
+                        (List.truncate 3 chain, List.length chain)
+                        ([ "W15S28"; "W15S29"; "W16S29" ], 7)
+                        $"every shortest chain is six crossings and leaves by the declared detour: {chain}"
 
                 Expect.equal
                     (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S26")
@@ -193,6 +203,91 @@ let outpostDeclarationTests =
                         [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26" ]
                     ]
                     "W17S26 is four crossings from W15S28, by W15S26 or W16S27 and both into W16S26"
+
+                Expect.equal
+                    (Declaration.hops linked Tuning.defaults.MaxHops "W13S28" "W17S26")
+                    (Some 6)
+                    "and six from W13S28"
+
+                // The live banks (2026-09-29); W12S28 and W11S27 are past the
+                // budget of both rooms.
+                let banks w13s28 =
+                    [
+                        "W12S28", 5_600
+                        "W13S28", w13s28
+                        "W15S28", 5_600
+                        "W11S27", 1_800
+                        "W17S29", 1_300
+                    ]
+
+                let casting w13s28 =
+                    let banks = banks w13s28
+
+                    let world =
+                        { World.empty with
+                            Rooms =
+                                (rooms @ List.map fst banks)
+                                |> List.distinct
+                                |> List.map (fun name ->
+                                    let capture = load name
+
+                                    let facts =
+                                        { RoomFacts.empty with
+                                            Border = capture.Border
+                                            Layer =
+                                                { RoomLayer.empty with
+                                                    Terrain = capture.Terrain
+                                                }
+                                        }
+
+                                    name,
+                                    match List.tryFind (fst >> (=) name) banks with
+                                    | None -> facts
+                                    | Some(_, bank) ->
+                                        { facts with
+                                            Control =
+                                                Some
+                                                    {
+                                                        Owner = Ownership.Ours
+                                                        Reservation = None
+                                                        SafeMode = false
+                                                        Sign = None
+                                                    }
+                                            Spawns =
+                                                [
+                                                    {
+                                                        Name = $"spawn-{name}"
+                                                        Id = $"spawn-{name}"
+                                                        RoomName = name
+                                                        IsSpawning = false
+                                                    }
+                                                ]
+                                            Energy = { Available = bank; Capacity = bank }
+                                        })
+                                |> Map.ofList
+                        }
+
+                    (World.harassCasters
+                        (JoinTable())
+                        Tuning.defaults
+                        Colony.declared
+                        {
+                            Rooms = Colony.harass
+                            Floor = Bodies.harassFloor Tuning.defaults
+                        }
+                        world)
+                        .Casters
+                    |> List.map (fun (h, caster) -> h.RoomName, caster)
+
+                Expect.equal
+                    (casting 5_600)
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
+                    "W15S28 casts both: W17S29 cannot buy the floor, and W13S28 is two crossings further"
+
+                Expect.equal
+                    (casting 5_650)
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
+                    "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
 
                 for h in Colony.harass do
                     Expect.contains
@@ -519,17 +614,18 @@ let errandDeclarationTests =
                     [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ] ]
                     "the reactor is three crossings from W15S28, by W15S27 and W15S26"
 
-                // The reason no other colony declares it: five and six crossings, so a
-                // price into the room from either is `None`.
-                for home, hops in [ "W13S28", 5; "W12S28", 6 ] do
-                    Expect.equal
-                        (RoomName.hopsBetween home "W15S25")
-                        (Some hops)
-                        $"{home} is {hops} crossings from the reactor, outside the hop budget"
+                // W13S28 could run it inside the budget, five crossings out; W15S28's
+                // three is the shortest walk to the reactor, which is why it declares it.
+                Expect.isTrue
+                    (Errand.routable linked Tuning.defaults.MaxHops "W13S28" Errand.w15s25)
+                    "W13S28 could run the errand"
 
-                    Expect.isFalse
-                        (Errand.routable linked Tuning.defaults.MaxHops home Errand.w15s25)
-                        $"so {home} could not run this errand even if a human wrote it there"
+                Expect.equal
+                    ([ "W15S28"; "W13S28" ]
+                     |> List.map (fun home ->
+                         Declaration.hops linked Tuning.defaults.MaxHops home "W15S25"))
+                    [ Some 3; Some 5 ]
+                    "and W15S28's chain is the shorter"
             }
 
             test "every declared errand names a tile its own capture holds as ground" {

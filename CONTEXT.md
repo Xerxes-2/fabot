@@ -281,7 +281,7 @@ A room a [[colony]] declares to take down the structures of ours still standing 
 _Avoid_: demolition, cleanup
 
 ### Harassment room
-An enemy's remote, declared once for the whole bot (`Colony.harass`) with the one player whose creeps and containers are targets there. Each tick it is cast by the living [[colony]] with the largest bank among those that buy the harassment floor (`Tuning.HarassBlocks` ranger blocks) and whose chain reaches it inside the hop budget; while none does, it is refused. That colony keeps a [[ranger]] there, which shoots the enemy's creeps, unarmed ones included, and a dismantler takes the enemy's containers down. An ally's creep, a third player's and a Source Keeper are never unarmed targets. A squad the ranger cannot beat makes it a [[stand-down]]. ADR-0081.
+An enemy's remote, declared once for the whole bot (`Colony.harass`) with the one player whose creeps and containers are targets there. Each tick it is cast, among the living [[colony]]s that buy the harassment floor (`Tuning.HarassBlocks` ranger blocks) and whose chain reaches it inside the hop budget, by the one fewest crossings away, then the one with the larger bank; while none does, it is refused. A declaration may name `Via` rooms, a detour round a walled border that the caster projects beside its shortest-walk rectangle. That colony keeps a [[ranger]] there, which shoots the enemy's creeps, unarmed ones included, and a dismantler takes the enemy's containers down. An ally's creep, a third player's and a Source Keeper are never unarmed targets. A squad the ranger cannot beat makes it a [[stand-down]]. ADR-0081.
 _Avoid_: raid target, siege, enemy outpost
 
 ### Reservation

@@ -44,6 +44,22 @@ module Declaration =
         RoomName.hopsBetween home room
         |> Option.exists (fun hops -> hops >= 1 && hops <= maxHops)
 
+    /// The crossings of the shortest chain out to a room `routable` accepts,
+    /// None where it refuses it.
+    let hops
+        (linked: string -> string -> bool)
+        (maxHops: int)
+        (home: string)
+        (room: string)
+        : int option =
+        if withinHopBudget maxHops home room then
+            match RoomName.routesBy linked maxHops home room with
+            | chain :: _ when RoomName.routesBy linked maxHops room home |> List.isEmpty |> not ->
+                Some(List.length chain - 1)
+            | _ -> None
+        else
+            None
+
     /// Whether a chain actually joins the two (#259): `linked` per border, so
     /// a creep could really walk there. The budget is inside it —
     /// `RoomName.routesBy` searches no deeper, so a room this accepts is one
@@ -61,9 +77,7 @@ module Declaration =
         (home: string)
         (room: string)
         : bool =
-        withinHopBudget maxHops home room
-        && RoomName.routesBy linked maxHops home room |> List.isEmpty |> not
-        && RoomName.routesBy linked maxHops room home |> List.isEmpty |> not
+        hops linked maxHops home room |> Option.isSome
 
     /// The declared rooms of one kind that no chain joins to this home, each
     /// under the kind it was declared as (#243). Such a room is unpriceable:
@@ -285,8 +299,8 @@ module Outpost =
     /// The third colony's room, declared 2026-09-10 off
     /// `docs/research/third-colony.md`: two sources, a d3 Thorium deposit of
     /// 22,000, and the one site left after the risk screen from which the
-    /// sector Reactor is inside `Tuning.MaxHops` (three crossings by W15S27
-    /// and the Source Keeper room W15S26). Two hops from its home through
+    /// sector Reactor is three crossings away (by W15S27 and the Source Keeper
+    /// room W15S26), the hop budget then. Two hops from its home through
     /// W14S28; declared as W13S28's outpost and as a colony of its own on the
     /// same day, the candidate-colony arrangement. Source order is the
     /// capture's (`tests/Core.Tests/rooms/W15S28.room`).
@@ -609,6 +623,11 @@ type Harass =
         /// Where the ranger stands while the room holds no target, or is dark:
         /// the enemy's source, which is where its miner comes back to.
         Stand: RoomPos
+        /// Rooms a human names for a detour the name rectangle
+        /// (`RoomName.transitBetween`) does not hold, projected beside it so
+        /// the chain search can find the walk. Empty where no detour is
+        /// needed.
+        Via: string list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -618,11 +637,12 @@ module Harass =
     let worked (shut: Set<string>) (harass: Harass list) : Harass list =
         harass |> List.filter (fun h -> not (Set.contains h.RoomName shut))
 
-    /// The rooms the caster's harassment adds to its scan set: each room and
-    /// every room a shortest walk to it could cross (`Errand.roomsProjected`).
+    /// The rooms the caster's harassment adds to its scan set: each room,
+    /// every room a shortest walk to it could cross (`Errand.roomsProjected`),
+    /// and the detour a human named (`Via`).
     let roomsProjected (harass: Harass list) (home: string) : string list =
         harass
-        |> List.collect (fun h -> h.RoomName :: RoomName.transitBetween home h.RoomName)
+        |> List.collect (fun h -> h.RoomName :: h.Via @ RoomName.transitBetween home h.RoomName)
 
 /// The global harassment list as one tick reads it: the declarations, and
 /// the bank capacity a colony needs to cast any of them at all — the
@@ -806,11 +826,14 @@ module Colony =
                 RoomName = "W18S27"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W18S27"; X = 27; Y = 7 }
+                // W15S28's walk there dips south round a wall (#437).
+                Via = [ "W15S29"; "W16S29" ]
             }
             {
                 RoomName = "W17S26"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W17S26"; X = 28; Y = 10 }
+                Via = []
             }
         ]
 

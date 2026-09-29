@@ -2,7 +2,7 @@
 
 > **Status:** amended by 0059, 0060, 0070, 0081, #326
 
-> **Amended by ADR 0081** on 2026-09-29: the hop budget is **four**, not three, so a harassment room four crossings from the colony that can afford it is reachable. The search still stops at the first layer that reaches the goal, so no declaration reached in three takes a different chain.
+> **Amended by ADR 0081** on 2026-09-29: the hop budget is **six**, not three — four on #432 for W17S26, six on #437 for W15S28's walk to W18S27, which dips south round a wall. The search still stops at the first layer that reaches the goal, so no declaration reached in three takes a different chain. And a harassment room may name the rooms of a detour (`Harass.Via`), which its caster projects beside the rectangle `transitBetween` gives: the widening the Consequences below say a detour would need, made by hand for one room.
 
 > **Narrowed by ADR 0070** on 2026-09-18: the Consequence below that reads *"a one-hop price is the same price, to the digit"* holds under `Walk` and no longer under `TravelCost`, whose far leg since that ADR prices no crowd — so a cross-room ranking price taken beside a body standing in the far room moved by the [[occupancy surcharge]], and the harness's `outpost` world has one such near-tie falling the other way.
 

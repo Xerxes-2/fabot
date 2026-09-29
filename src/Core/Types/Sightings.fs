@@ -609,10 +609,11 @@ module World =
     /// The colony that casts each [[harassment room]] this tick: among the
     /// living colonies whose bank buys the harassment floor
     /// (`Harassment.Floor`) and whose chain reaches the room inside the hop
-    /// budget, the one whose bank holds the most, ties by home name; None
-    /// while no colony is both. Stateless, and decided once for every colony,
-    /// so exactly one projects the room. Asked over the open gate: a caster's
-    /// own stand-down withdraws its work and hands the room to nobody else.
+    /// budget, the one fewest crossings from it, then the one whose bank
+    /// holds the most, then by home name (#437); None while no colony is
+    /// both. Stateless, and decided once for every colony, so exactly one
+    /// projects the room. Asked over the open gate: a caster's own stand-down
+    /// withdraws its work and hands the room to nobody else.
     let harassCasters
         (joins: JoinTable)
         (tuning: Tuning)
@@ -633,14 +634,18 @@ module World =
                 |> List.map (fun h ->
                     h,
                     affording
-                    |> List.filter (fun colony ->
-                        Declaration.routable reaches tuning.MaxHops colony.Home h.RoomName)
-                    |> largestBank world)
+                    |> List.choose (fun colony ->
+                        Declaration.hops reaches tuning.MaxHops colony.Home h.RoomName
+                        |> Option.map (fun hops ->
+                            (hops, -(roomOf world colony.Home).Energy.Capacity, colony.Home)))
+                    |> List.sort
+                    |> List.tryHead
+                    |> Option.map (fun (_, _, home) -> home))
         }
 
     /// The living colony that says a [[harassment room]] no colony casts out
-    /// loud (`ColonyView.Refused`): the largest bank of all, on the caster's
-    /// own order, so a room no colony can cast is still named once.
+    /// loud (`ColonyView.Refused`): the largest bank of all, ties by home
+    /// name, so a room no colony can cast is still named once.
     let harassReporter (colonies: Colony list) (world: World) : string option =
         living colonies world |> largestBank world
 

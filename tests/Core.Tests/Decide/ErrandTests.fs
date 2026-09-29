@@ -2064,9 +2064,9 @@ let crossedSweepTests =
             }
         ]
 
-/// The consignment: W12S28 and W13S28 sit five and six crossings from the
-/// Reactor, outside `Tuning.MaxHops`, so the ore moves by terminal or not at
-/// all. Three rules haul it (`Planner`) and one ships it (`Layout`).
+/// The consignment: W12S28 and W13S28 sit six and five crossings from the
+/// Reactor and declare no errand there, so their ore moves by terminal or not
+/// at all. Three rules haul it (`Planner`) and one ships it (`Layout`).
 [<Tests>]
 let consignmentTests =
     testList

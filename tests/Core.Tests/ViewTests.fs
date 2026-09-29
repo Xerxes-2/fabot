@@ -1618,10 +1618,10 @@ let defendedHomeTests =
             }
         ]
 
-/// The room the declaration below reaches for and cannot: W17S28 is five
+/// The room the declaration below reaches for and cannot: W19S28 is seven
 /// steps west of the mother's W12S28, one past `Tuning.MaxHops`, so what the
 /// test pins is the boundary rather than a far-away room.
-let private tooFar = "W17S28"
+let private tooFar = "W19S28"
 
 /// The mother's declaration with that room added beside her real outpost.
 /// Two outposts and not one, so every assertion below is read against the
@@ -3284,6 +3284,7 @@ let private harassDeclared: Harass list =
             RoomName = harassRoom
             Enemy = enemy
             Stand = RoomPos.at harassRoom { X = 5; Y = 5 }
+            Via = []
         }
     ]
 
@@ -3394,10 +3395,10 @@ let private harassView harass world home =
 [<Tests>]
 let harassViewTests =
     testList
-        "a harassment room is cast by the largest bank that reaches it, and carries the ground and the enemy's containers"
+        "a harassment room is cast by the nearest colony that affords it, and carries the ground and the enemy's containers"
         [
             test
-                "the largest bank within the budget casts the room, and the other does not project it" {
+                "the nearest colony that buys the floor casts the room, and the other does not project it" {
                 let world = harassWorld (reservedFor enemy) 300
 
                 let mothers = harassView harassDeclared world mother
@@ -3416,18 +3417,28 @@ let harassViewTests =
                     (Map.containsKey harassRoom childs.Spatial.Rooms)
                     "and does not project the room, though its chain reaches it"
 
-                // The bank turned round: the child's 2,700 over the mother's 2,400.
+                // The child's 2,700 over the mother's 2,400: the mother is one
+                // crossing from the room, the child two.
                 let richer = harassWorld (reservedFor enemy) 2700
 
                 Expect.equal
-                    ((harassView harassDeclared richer child).Harass
+                    ((harassView harassDeclared richer mother).Harass
                      |> List.map (fun h -> h.RoomName))
                     [ harassRoom ]
-                    "the caster follows the bank, whoever declared nothing"
+                    "the nearer colony keeps it at the smaller bank"
 
                 Expect.isEmpty
-                    (harassView harassDeclared richer mother).Harass
+                    (harassView harassDeclared richer child).Harass
                     "and one colony only casts it"
+
+                // The mother below the floor: the room goes to the child.
+                let poorMother = harassWorldAt (reservedFor enemy) 300 2700
+
+                Expect.equal
+                    ((harassView harassDeclared poorMother child).Harass
+                     |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "the caster is the nearest colony that affords the floor, whoever declared nothing"
             }
 
             test "the tick's casting, decided once, is the caster every colony's view reads" {
@@ -3456,6 +3467,76 @@ let harassViewTests =
                         (casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster))
                         [ harassRoom, List.tryExactlyOne castBy ]
                         $"banks {motherBank}/{childBank}: one caster, the one whose view casts it"
+            }
+
+            test
+                "the colony fewest crossings from the room casts it at any bank that buys the floor; the bank breaks equal crossings, the name last" {
+                // W13S29: one crossing from the child, two from the mother and
+                // from a third colony at W14S28.
+                let near = "W13S29"
+                let third = "W14S28"
+
+                let colonies =
+                    declared
+                    @ [
+                        {
+                            Home = third
+                            Outposts = []
+                            Errands = []
+                            Salvage = []
+                            Mother = None
+                            Consignee = None
+                        }
+                    ]
+
+                let harass: Harassment =
+                    {
+                        Rooms =
+                            [
+                                {
+                                    RoomName = near
+                                    Enemy = enemy
+                                    Stand = RoomPos.at near { X = 5; Y = 5 }
+                                    Via = []
+                                }
+                            ]
+                        Floor = Bodies.harassFloor Tuning.defaults
+                    }
+
+                let casterAt motherBank childBank thirdBank =
+                    let world = harassWorldAt (reservedFor enemy) motherBank childBank
+
+                    let world =
+                        { world with
+                            Rooms =
+                                world.Rooms
+                                |> Map.add near (snd (roomOf near Ownership.Unowned []))
+                                |> Map.add
+                                    third
+                                    (snd (
+                                        roomOf third Ownership.Ours []
+                                        |> ourColony "Spawn3" 5 thirdBank
+                                    ))
+                        }
+
+                    (World.harassCasters (JoinTable()) Tuning.defaults colonies harass world)
+                        .Casters
+                    |> List.map (fun (h, caster) -> h.RoomName, caster)
+
+                Expect.equal
+                    (casterAt 2700 2400 2700)
+                    [ near, Some child ]
+                    "the child's one crossing over two, at the smaller bank"
+
+                Expect.equal
+                    (casterAt 2400 300 2700)
+                    [ near, Some third ]
+                    "two crossings each: the larger bank"
+
+                Expect.equal
+                    (casterAt 2400 300 2400)
+                    [ near, Some mother ]
+                    "two crossings each and the banks tied: the name"
             }
 
             test
@@ -3600,6 +3681,7 @@ let harassViewTests =
                             RoomName = "W9N9"
                             Enemy = enemy
                             Stand = RoomPos.at "W9N9" { X = 5; Y = 5 }
+                            Via = []
                         }
                     ]
 

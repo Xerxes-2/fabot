@@ -611,9 +611,9 @@ let planTasks
     // banked ore into its own terminal, and the one that takes an arriving
     // consignment out of it. What actually crosses the map is
     // `planConsignment` in `Layout` — a structure intent, not a body. Three
-    // rooms of `send` replace five and six crossings of walk: W12S28 and
-    // W13S28 sit outside `Tuning.MaxHops` of the Reactor, so no courier row of
-    // theirs can ever be opened.
+    // rooms of `send` replace six and five crossings of walk: W12S28 and
+    // W13S28 declare no Reactor errand (`Errand.w15s25` is W15S28's), so no
+    // courier row of theirs is ever opened.
     let terminals = idsOfKind (Structure BuiltKind.Terminal)
 
     let terminalRoom id =

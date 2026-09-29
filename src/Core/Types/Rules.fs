@@ -421,9 +421,9 @@ type Tuning =
         BootstrapLevel: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
-        /// search stops at. Four since #432. There is no upper bound in the
-        /// arithmetic, only in the CPU, which is why the bound is written
-        /// down. ADR-0058
+        /// search stops at. Six since #437, for W15S28's walk to W18S27. There
+        /// is no upper bound in the arithmetic, only in the CPU, which is why
+        /// the bound is written down. ADR-0058
         MaxHops: int
         /// What a swamp tile costs a **trunk**: three against plain's two,
         /// where a walking creep pays `Engine.swampWeight`, ten. Once paved a
@@ -516,7 +516,7 @@ module Tuning =
             HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3
-            MaxHops = 4
+            MaxHops = 6
             TrunkSwampWeight = 3
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
