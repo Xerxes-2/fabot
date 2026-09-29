@@ -10,7 +10,12 @@ open Fabot.Core.LightTick
 let private room = "W1N1"
 let private tile x y = RoomPos.at room { X = x; Y = y }
 
-let private creepAt x y hits : GlanceCreep = { Tile = tile x y; Hits = hits }
+let private creepAt x y hits : GlanceCreep =
+    {
+        Tile = tile x y
+        Hits = hits
+        Inward = None
+    }
 
 /// A quiet world: two creeps of ours, a spawn, one controller at level 5, and
 /// nobody else.
@@ -297,10 +302,11 @@ let forcedTests =
                 Expect.equal (LightTick.forced last gone) (Some LightForce.CreepsChanged) "gone"
             }
 
-            test "a creep standing on its room's border ring forces a full tick, on every edge" {
+            test
+                "a creep on the border ring with no ground inward forces a full tick, on every edge" {
                 // It crossed on the full tick and stands on the neighbour's
                 // ring; standing still there, the engine carries it straight
-                // back, so the light tick may not leave it be.
+                // back, so a light tick with no step for it may not run.
                 for x, y in [ 0, 20; 49, 20; 20, 0; 20, 49 ] do
                     let crossed =
                         { stepped with
@@ -311,6 +317,7 @@ let forcedTests =
                                     {
                                         Tile = RoomPos.at "W2N1" { X = x; Y = y }
                                         Hits = 500
+                                        Inward = None
                                     }
                         }
 
@@ -320,6 +327,68 @@ let forcedTests =
                         $"on ({x},{y})"
 
                 Expect.equal (LightTick.forced last stepped) None "and one tile in, nothing"
+            }
+
+            test "a creep on the border ring with ground inward steps onto it, and forces nothing" {
+                let crossed =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add
+                                "hauler"
+                                {
+                                    Tile = RoomPos.at "W2N1" { X = 0; Y = 20 }
+                                    Hits = 500
+                                    Inward = Some Right
+                                }
+                    }
+
+                Expect.equal
+                    (LightTick.forced last crossed)
+                    None
+                    "the step off the ring is the light tick's"
+
+                Expect.contains
+                    (LightTick.intents last crossed)
+                    (MoveCreep("hauler", Right))
+                    "and it takes it"
+            }
+
+            test "inward is straight in, else an inward diagonal, onto ground, never onto the ring" {
+                let open' _ = true
+                let wall (walled: Pos list) (tile: Pos) = not (List.contains tile walled)
+
+                Expect.equal (LightTick.inward open' { X = 0; Y = 20 }) (Some Right) "west edge"
+                Expect.equal (LightTick.inward open' { X = 49; Y = 20 }) (Some Left) "east edge"
+                Expect.equal (LightTick.inward open' { X = 20; Y = 0 }) (Some Bottom) "north edge"
+                Expect.equal (LightTick.inward open' { X = 20; Y = 49 }) (Some Top) "south edge"
+
+                Expect.equal
+                    (LightTick.inward (wall [ { X = 1; Y = 20 } ]) { X = 0; Y = 20 })
+                    (Some TopRight)
+                    "straight in walled: the first diagonal"
+
+                Expect.equal
+                    (LightTick.inward
+                        (wall [ { X = 1; Y = 20 }; { X = 1; Y = 19 } ])
+                        { X = 0; Y = 20 })
+                    (Some BottomRight)
+                    "and the other"
+
+                Expect.isNone
+                    (LightTick.inward
+                        (wall [ { X = 1; Y = 19 }; { X = 1; Y = 20 }; { X = 1; Y = 21 } ])
+                        { X = 0; Y = 20 })
+                    "all three walled: none"
+
+                Expect.equal
+                    (LightTick.inward open' { X = 0; Y = 1 })
+                    (Some Right)
+                    "beside a corner, the diagonal onto the ring is never offered"
+
+                Expect.isNone
+                    (LightTick.inward open' { X = 20; Y = 20 })
+                    "off the ring there is no inward step"
             }
 
             test "a creep that lost hits forces a full tick, and one healed does not" {

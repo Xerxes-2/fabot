@@ -95,6 +95,16 @@ let private terrainOf (roomName: string) : RoomTerrain =
         terrainMemo.[roomName] <- tiles
         tiles
 
+/// Whether a tile of a room's ground may be stepped on as far as the terrain
+/// says, off the same memoised read: the light tick's inward step off the
+/// border ring (`LightTick.inward`). A structure on it is not looked at.
+let groundWalkableAt (roomName: string) (pos: Pos) : bool =
+    match TerrainGrid.tryFind pos (terrainOf roomName).Ground with
+    | Some Plain
+    | Some Swamp -> true
+    | Some Wall
+    | None -> false
+
 /// The absolute tick a structure's collapse timer runs out at, or None.
 /// `effects` is undefined on an object nothing is applied to, and a deployed
 /// core carries other effects, so the array is searched by id. `Game.time +`

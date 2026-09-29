@@ -171,6 +171,10 @@ let private glance () : LightTick.Glance =
                 ({
                     Tile = tileOf c.room.name c.pos
                     Hits = c.hits
+                    Inward =
+                        LightTick.inward
+                            (World.groundWalkableAt c.room.name)
+                            { X = c.pos.x; Y = c.pos.y }
                 }
                 : LightTick.GlanceCreep))
             |> Fresh.mapOfArray

@@ -7,8 +7,14 @@ module Fabot.Core.LightTick
 
 open Fabot.Core.Types
 
-/// One creep of ours as the glance reads it: where it stands and its hits.
-type GlanceCreep = { Tile: RoomPos; Hits: int }
+/// One creep of ours as the glance reads it: where it stands, its hits, and —
+/// for a creep on its room's border ring — the step off it (`inward`).
+type GlanceCreep =
+    {
+        Tile: RoomPos
+        Hits: int
+        Inward: Direction option
+    }
 
 /// One hostile creep in a visible room. `Armed` is any Attack, RangedAttack
 /// or Heal part in its body.
@@ -54,10 +60,10 @@ type LightForce =
     | HostileNear of room: string
     | Fought
     | CreepsChanged
-    /// A creep of ours on its room's border ring: the engine carries a body
-    /// that ends a tick there into the neighbour, so one that crossed on the
-    /// full tick and stood still on the light one would be carried straight
-    /// back, and every crossing would bounce for ever.
+    /// A creep of ours on its room's border ring with no ground to step onto
+    /// (`inward`): the engine carries a body that ends a tick there into the
+    /// neighbour, so one that crossed on the full tick and stood still on the
+    /// light one would be carried straight back.
     | OnBorder of creep: string
     | HitsLost of creep: string
     | ControllerChanged of room: string
@@ -73,6 +79,49 @@ let tag (reason: LightForce) : string =
     | LightForce.OnBorder _ -> "border"
     | LightForce.HitsLost _ -> "hurt"
     | LightForce.ControllerChanged _ -> "controller"
+
+/// Whether a tile is on its room's border ring.
+let private onRing (tile: Pos) =
+    tile.X = 0
+    || tile.Y = 0
+    || tile.X = Engine.roomSide - 1
+    || tile.Y = Engine.roomSide - 1
+
+/// The step off the border ring into the room, for a creep standing on it: a
+/// body on the ring at the start of a tick has always just crossed in (the
+/// engine carries one that ends a tick there), so the room it stands in is the
+/// one it is walking into. Straight in, else either inward diagonal, onto
+/// ground the terrain lets it stand on; None off the ring, or with all three
+/// walled. A body on the tile it steps to costs the crossing one tick: the
+/// engine carries it back, and the next full tick sends it again.
+let inward (walkable: Pos -> bool) (tile: Pos) : Direction option =
+    let last = Engine.roomSide - 1
+
+    let candidates =
+        if tile.X = 0 then [ Right; TopRight; BottomRight ]
+        elif tile.X = last then [ Left; TopLeft; BottomLeft ]
+        elif tile.Y = 0 then [ Bottom; BottomRight; BottomLeft ]
+        elif tile.Y = last then [ Top; TopRight; TopLeft ]
+        else []
+
+    let stepTo direction =
+        let dx, dy =
+            match direction with
+            | Top -> 0, -1
+            | TopRight -> 1, -1
+            | Right -> 1, 0
+            | BottomRight -> 1, 1
+            | Bottom -> 0, 1
+            | BottomLeft -> -1, 1
+            | Left -> -1, 0
+            | TopLeft -> -1, -1
+
+        { X = tile.X + dx; Y = tile.Y + dy }
+
+    candidates
+    |> List.tryFind (fun direction ->
+        let next = stepTo direction
+        not (onRing next) && walkable next)
 
 /// The repeatable work intents, by the creep that acts: a light tick issues
 /// them again from the tile they were decided on. Every case named, so an
@@ -207,14 +256,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
     let onBorder () =
         now.Creeps
         |> Map.tryPick (fun name creep ->
-            let tile = RoomPos.pos creep.Tile
-
-            if
-                tile.X = 0
-                || tile.Y = 0
-                || tile.X = Engine.roomSide - 1
-                || tile.Y = Engine.roomSide - 1
-            then
+            if onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward then
                 Some(LightForce.OnBorder name)
             else
                 None)
@@ -257,6 +299,11 @@ let intents (last: LastFull) (now: Glance) : Intent list =
 
     [
         for KeyValue(name, creep) in now.Creeps do
+            match creep.Inward with
+            | Some direction when onRing (RoomPos.pos creep.Tile) ->
+                yield MoveCreep(name, direction)
+            | _ -> ()
+
             if Map.tryFind name last.Standing = Some creep.Tile then
                 yield! Map.tryFind name work |> Option.defaultValue []
 
