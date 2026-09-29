@@ -598,7 +598,7 @@ module Salvage =
 
 /// A [[harassment room]]: an enemy's remote, declared once for the whole
 /// bot and cast by whichever colony can best afford it this tick
-/// (`World.harassCaster`), never by a colony's own declaration.
+/// (`World.harassCasters`), never by a colony's own declaration.
 type Harass =
     {
         RoomName: string
@@ -635,6 +635,20 @@ module Harassment =
     /// No harassment room declared: the shape every caller outside the
     /// shipped tick asks in.
     let none: Harassment = { Rooms = []; Floor = 0 }
+
+/// The global harassment list as one tick decided it (`World.harassCasters`):
+/// each room beside the colony that casts it, None while no colony can.
+/// Decided once and handed to every colony's reading, so there is one answer
+/// to read and not one derivation per colony.
+type HarassCasting =
+    {
+        Casters: (Harass * string option) list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module HarassCasting =
+    /// No harassment room declared.
+    let none: HarassCasting = { Casters = [] }
 
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
@@ -783,7 +797,7 @@ module Colony =
     let isAlly (username: string) = Set.contains username allies
 
     /// The enemy remotes a human has declared for harassment: one list for
-    /// the whole bot, each room cast by the colony `World.harassCaster`
+    /// the whole bot, each room cast by the colony `World.harassCasters`
     /// names, or refused while none can. Each Stand is the enemy's source
     /// tile off the committed capture.
     let harass: Harass list =

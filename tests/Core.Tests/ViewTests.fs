@@ -3373,17 +3373,19 @@ let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
             Floor = Bodies.harassFloor Tuning.defaults
         }
 
+    let casting = World.harassCasters joins Tuning.defaults declared harass world
+
     let holders =
         World.creepColoniesRecalling
             joins
             Tuning.defaults
             declared
-            harass
+            casting
             (World.living declared world)
             noneShut
             world
 
-    ColonyView.ofWorldRecalling joins Tuning.defaults declared harass gate holders world colony
+    ColonyView.ofWorldRecalling joins Tuning.defaults declared casting gate holders world colony
 
 /// The same under the open gate.
 let private harassView harass world home =
@@ -3426,6 +3428,34 @@ let harassViewTests =
                 Expect.isEmpty
                     (harassView harassDeclared richer mother).Harass
                     "and one colony only casts it"
+            }
+
+            test "the tick's casting, decided once, is the caster every colony's view reads" {
+                let harass: Harassment =
+                    {
+                        Rooms = harassDeclared
+                        Floor = Bodies.harassFloor Tuning.defaults
+                    }
+
+                let floorBanks = Bodies.harassFloor Tuning.defaults
+
+                for motherBank, childBank in [ 2400, 300; 2400, 2700; floorBanks - 1, 300 ] do
+                    let world = harassWorldAt (reservedFor enemy) motherBank childBank
+
+                    let casting =
+                        World.harassCasters (JoinTable()) Tuning.defaults declared harass world
+
+                    let castBy =
+                        [ mother; child ]
+                        |> List.filter (fun home ->
+                            Set.contains
+                                harassRoom
+                                (harassView harassDeclared world home).HarassCast)
+
+                    Expect.equal
+                        (casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster))
+                        [ harassRoom, List.tryExactlyOne castBy ]
+                        $"banks {motherBank}/{childBank}: one caster, the one whose view casts it"
             }
 
             test

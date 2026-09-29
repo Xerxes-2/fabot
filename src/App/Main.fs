@@ -180,6 +180,11 @@ let loop () =
     let gateOf home =
         gates |> Map.tryFind home |> Option.defaultValue StandDown.none
 
+    // Which colony casts each harassment room, decided once for every
+    // colony's reading below (#434).
+    let casting =
+        World.harassCasters joins Tuning.defaults Colony.declared harassment world
+
     // Every creep filed under the colony that holds it this tick, cut once
     // and handed to each view: two colonies holding one creep would write two
     // Tasks into the one flat `assignments` leaf. An argument to the view and
@@ -191,7 +196,7 @@ let loop () =
             joins
             Tuning.defaults
             Colony.declared
-            harassment
+            casting
             colonies
             (gates |> Map.map (fun _ gate -> gate.Shut))
             world
@@ -211,7 +216,7 @@ let loop () =
                     joins
                     Tuning.defaults
                     Colony.declared
-                    harassment
+                    casting
                     (gateOf colony.Home)
                     holders
                     world

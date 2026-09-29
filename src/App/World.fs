@@ -699,7 +699,7 @@ let private worldRooms
             // Every harassment room and its chain, for every home within the
             // budget whose bank buys the harassment floor: which of them casts
             // it is read off the world this is choosing rooms for
-            // (`World.harassCaster`).
+            // (`World.harassCasters`).
             let harassed =
                 if affords colony.Home then
                     harass

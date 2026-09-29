@@ -121,7 +121,7 @@ type ColonyView =
         /// them from here. Empty once the last one falls.
         Dismantles: string list
         /// The [[harassment room]]s this colony casts this tick
-        /// (`World.harassCaster`), less those its [[stand-down]] shuts: what
+        /// (`World.harassCasters`), less those its [[stand-down]] shuts: what
         /// the ranger's Guard and its unarmed targets are read off.
         Harass: Harass list
         /// Every harassment room this colony casts, the shut ones included:
@@ -491,7 +491,7 @@ module ColonyView =
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
-        (harass: Harassment)
+        (casting: HarassCasting)
         (gate: StandDown)
         (holders: Map<string, string>)
         (world: World)
@@ -509,7 +509,7 @@ module ColonyView =
                 stages
                 (World.unownedHomes colonies world)
                 colonies
-                harass
+                casting
                 gate
                 world
                 colony
@@ -778,4 +778,4 @@ module ColonyView =
         (world: World)
         (colony: Colony)
         : ColonyView =
-        ofWorldRecalling (JoinTable()) tuning colonies Harassment.none gate holders world colony
+        ofWorldRecalling (JoinTable()) tuning colonies HarassCasting.none gate holders world colony
