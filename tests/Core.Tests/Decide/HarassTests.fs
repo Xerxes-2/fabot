@@ -326,21 +326,23 @@ let harassGuardTests =
                     (Some(within Engine.rangedRange haulerTile (Set.ofList [ haulerTile ])))
                     "the hauler two from the source: the ranger stands within three of it"
 
-                // The controller is worked from beside it alone.
-                Expect.equal
-                    (ground
+                // A reserver shuffles around the controller rather than
+                // standing beside it (W18S27's Infinity271: 26,31 → 25,30 →
+                // 24,29), and ground that dropped it at two flipped every step.
+                let claimerAt tile =
+                    ground
                         { quiet with
-                            Hostiles =
-                                [
-                                    theirs
-                                        "claimer"
-                                        enemy
-                                        { X = 32; Y = 40 }
-                                        [ BodyPart.Claim; Move ]
-                                ]
-                        })
-                    (ground quiet)
-                    "two from the controller is not on it"
+                            Hostiles = [ theirs "claimer" enemy tile [ BodyPart.Claim; Move ] ]
+                        }
+
+                let threeOff = { X = 33; Y = 43 }
+
+                Expect.equal
+                    (claimerAt threeOff)
+                    (Some(within Engine.rangedRange threeOff (Set.ofList [ threeOff ])))
+                    "three from the controller is still on it"
+
+                Expect.equal (claimerAt { X = 34; Y = 40 }) (ground quiet) "four from it is not"
             }
         ]
 

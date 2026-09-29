@@ -179,8 +179,11 @@ let threatsOf (view: ColonyView) atlas : Threats =
     let errands = errandRooms view
 
     // A work spot is where the enemy's bodies must stop: within two of the
-    // source, where a hauler draws from the miner's pile, and beside the
-    // controller. The Stand's seats are within reach of all of the first.
+    // source, where a hauler draws from the miner's pile, and around the
+    // controller — within three rather than only beside it, because a reserver shuffles
+    // on and off the tile beside it and the ground flipped with every step,
+    // stranding the ranger between it and the miner (W18S27, t840,6xx). The
+    // Stand's seats are within reach of all of the first.
     let harassRing =
         view.Harass
         |> List.map (fun h ->
@@ -189,7 +192,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
             let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
 
             let onWorkSpot (hostile: HostileInfo) =
-                [ h.Stand, 2; h.Controller, 1 ]
+                [ h.Stand, 2; h.Controller, 3 ]
                 |> List.exists (fun (spot, reach) ->
                     RoomPos.range spot hostile.Pos |> Option.exists (fun r -> r <= reach))
 
