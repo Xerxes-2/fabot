@@ -1078,3 +1078,87 @@ let supplyFloorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
+
+/// #460's colony: the two-Post short haul at RCL2's 550 capacity, one idle
+/// spawn, a generalist standing (so the supply floor is quiet) and the bodies
+/// the case names beside it.
+let private harvestFloorColony available fleet casting =
+    { bareRespawn with
+        Spawns = [ spawn ]
+        Bank = bank available 550
+        Sources = [ source "src-a"; source "src-b" ]
+        Spatial = shortHaulRoom
+        Creeps = worker "w1" 0 50 :: fleet
+        Casting = casting
+    }
+
+let private anchorCasts colony =
+    spawnIntents (decideOn colony).Intents
+    |> List.filter (fun (_, _, name) -> name.StartsWith "anchor-")
+    |> List.map (fun (_, body, _) -> body)
+
+[<Tests>]
+let harvestFloorTests =
+    testList
+        "the harvest floor"
+        [
+            test "#460: no harvester, a worker standing, 300 of 550: the anchor is cast from 300" {
+                // W12S26: its one anchor aged out, the row priced at 550, and the
+                // worker that could fill the extensions had nothing to draw.
+                match spawnIntents (decideOn (harvestFloorColony 300 [] [])).Intents with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts creepName "anchor-" "income is bought before every row"
+
+                    Expect.equal
+                        body
+                        [ Work; Work; Carry; Move ]
+                        "sized from what is banked, never from the 550 the extensions cannot reach"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "an anchor standing: the row sizes at capacity as today" {
+                let oneStanding available =
+                    anchorCasts (harvestFloorColony available [ anchor "a1" 0 50 ] [])
+
+                Expect.equal
+                    (oneStanding 300, oneStanding 550)
+                    ([], [ [ Work; Work; Work; Work; Carry; Move ] ])
+                    "the second Post waits for a full bank and gets the capacity body"
+            }
+
+            test "a harvester in the oven answers the floor exactly once (#156)" {
+                let inOven =
+                    [
+                        {
+                            Name = "anchor-14-Spawn9"
+                            Body = [ Work; Work; Carry; Move ]
+                        }
+                    ]
+
+                Expect.isEmpty
+                    (anchorCasts (harvestFloorColony 300 [] inOven))
+                    "a second anchor out of the same stranded bank is the oversell"
+            }
+
+            test "a full bank does not arm it: the anchor row casts at capacity" {
+                Expect.equal
+                    (anchorCasts (harvestFloorColony 550 [] []))
+                    [ [ Work; Work; Work; Work; Carry; Move ] ]
+                    "the capacity body is buyable, so nothing is cast small"
+            }
+
+            test "no creeps at all: the disaster fallback still answers" {
+                match
+                    spawnIntents
+                        (decideOn
+                            { harvestFloorColony 300 [] [] with
+                                Creeps = []
+                            })
+                            .Intents
+                with
+                | [ (_, body, creepName) ] ->
+                    Expect.stringStarts creepName "worker-" "time-to-first-creep outranks the floor"
+                    Expect.equal body [ Work; Carry; Move ] "and it is still the worker unit"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+        ]

@@ -235,7 +235,9 @@ let anchorTests =
                 let snapshot =
                     { postedColony with
                         Bank = bank 650 1300
-                        Creeps = [ worker "w1" 0 50 ]
+                        // The miner is a harvester, so the harvest floor (#460)
+                        // leaves the Post's gap to the capacity-priced row.
+                        Creeps = [ worker "w1" 0 50; miner "m1" ]
                     }
 
                 let { Intents = intents } = decideOn snapshot

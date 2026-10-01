@@ -457,7 +457,29 @@ let internal planSpawns
             else
                 1
 
-        // The seats in casting order: the supply floor, the table's own
+        // The supply floor's rule for income instead of refill (#460): a
+        // colony with a Post and no body standing or casting that harvests
+        // it casts its first Anchor from what is banked, while the extensions
+        // are short. A worker that can refill reads as covered above and
+        // still has nothing to draw.
+        let harvestFloor =
+            if
+                filled
+                |> List.forall (fun (row, _, _, _) -> row.Pattern <> anchorPattern || row.Quota = 0)
+                || view.Bank.Available >= view.Bank.Capacity
+                || view.Creeps
+                   |> List.exists (fun creep -> isAnchorBody creep || isMinerBody creep)
+                // Exactly once, as above: a harvester in the oven answers.
+                || casting
+                   |> List.exists (fun cast ->
+                       let pattern = patternOfCast view.Tuning cast
+                       pattern = anchorPattern || pattern = minerPattern)
+            then
+                0
+            else
+                1
+
+        // The seats in casting order: the two floors, the table's own
         // order, and last the generalist, whose seats are whatever the
         // whole-fleet deficit has left. The deficit gates the worker row
         // alone: the whole-fleet gap less the rows above is exactly that
@@ -466,8 +488,12 @@ let internal planSpawns
 
         let seats =
             List.replicate
+                harvestFloor
+                (castFromBank anchorPattern (fun bank ->
+                    sizedBodyFor rowSizing anchorPattern bank.Available))
+            @ List.replicate
                 supplyFloor
-                // The one row sized from `Available` (with the disaster
+                // Sized from `Available` like the harvest floor (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
             @ (filled
@@ -477,7 +503,7 @@ let internal planSpawns
                        (castFromBank row.Pattern (fun bank ->
                            sizedBodyFor rowSizing row.Pattern bank.Capacity))))
             @ List.replicate
-                (deficit - (supplyFloor + specialistSeats) |> max 0)
+                (deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
 
 

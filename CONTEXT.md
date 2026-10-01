@@ -385,7 +385,10 @@ An invader core of level 1 or more — towers under ramparts and a garrison — 
 The zero-creep spawning rule: an empty colony spawns bare [[worker unit]]s from whatever [[room energy]] is banked right now, ignoring the remainder — time-to-first-creep outranks spending the bank. ADR-0006.
 
 ### Supply floor
-The one spawning row that is a floor and not a quota: a colony holding no living body that can put energy into an extension casts one hauler in front of every row, sized from the [[room energy]] banked right now. ADR-0050.
+A spawning row that is a floor and not a quota: a colony holding no living body that can put energy into an extension casts one hauler in front of every row, sized from the [[room energy]] banked right now. ADR-0050.
+
+### Harvest floor
+The [[supply floor]]'s twin for income (#460): a colony with a Post, no [[anchor]] or miner standing or casting, and extensions short of full casts one Anchor in front of every row, sized from the [[room energy]] banked right now. ADR-0050.
 
 ## Avoided terms
 
