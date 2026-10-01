@@ -597,6 +597,7 @@ let private seenFacts
                     // hostile is found *in* this room, which is what places it.
                     Pos = RoomPos.at room.name (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                    Hits = c.hits
                     TicksToLive = c.ticksToLive
                 }
                 : HostileInfo)

@@ -2450,3 +2450,119 @@ let keeperTests =
                     "and a Guard cast on it would have nowhere of ours to stand either (ADR 0056)"
             }
         ]
+
+/// The fixtures' errand room laid as one row of plain floor, y 43 from x 18
+/// to 30, beside the Reactor's south edge, with these hostiles in it: ground
+/// narrow enough that a Reach covers the whole of it.
+let private errandCorridor (hostiles: (string * Pos * BodyPart list) list) =
+    let colony = bareRespawn |> withReactorErrand
+    let room = reactorErrand.RoomName
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Hostiles =
+            hostiles
+            |> List.map (fun (id, pos, body) -> { hostileIn room pos body with Id = id })
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                room
+                { layer with
+                    Terrain = TerrainGrid.ofList [ for x in 18..30 -> { X = x; Y = 43 }, Plain ]
+                }
+    }
+
+[<Tests>]
+let raidPartTests =
+    testList
+        "a raid's live parts and its healers (#451)"
+        [
+            test "a hostile's active parts are the tail its hits still cover" {
+                let body = [ Tough; Tough; Heal; Attack; Move ]
+
+                let active hits part =
+                    HostileInfo.activeCount
+                        { hostileAt "h" { X = 1; Y = 1 } body with
+                            Hits = hits
+                        }
+                        part
+
+                Expect.equal (active 500 Heal, active 500 Tough) (1, 2) "whole, every part acts"
+                Expect.equal (active 300 Heal, active 300 Tough) (1, 0) "the head goes first"
+                Expect.equal (active 201 Heal) 1 "a part with one hit left still acts"
+
+                Expect.equal
+                    (active 200 Heal, active 200 Attack)
+                    (0, 1)
+                    "and one with none does not"
+            }
+
+            test "a raid's healer is a target while its HEAL still acts" {
+                // The ranger reaches the medic and not the brawler it heals.
+                let ranger = creepWith "ranger-1" 0 0 Bodies.rangerPattern.Block
+
+                let shot medicHits =
+                    let colony =
+                        errandCorridor
+                            [
+                                "brawler", { X = 30; Y = 43 }, [ Attack; Move ]
+                                "medic", { X = 28; Y = 43 }, [ Heal; Move; Move ]
+                            ]
+                        |> fun colony ->
+                            { colony with
+                                Hostiles =
+                                    colony.Hostiles
+                                    |> List.map (fun h ->
+                                        if h.Id = "medic" then { h with Hits = medicHits } else h)
+                            }
+                        |> standingInErrand [ ranger, { X = 25; Y = 43 } ]
+
+                    emit
+                        colony
+                        (Atlas.ofView colony)
+                        noThreats
+                        (Map.ofList [ ranger.Name, Guard reactorErrand.RoomName ])
+                    |> List.contains (RangedAttackCreep(ranger.Name, "medic"))
+
+                Expect.isTrue (shot 300) "a whole healer beside the brawler is the raid's"
+                Expect.isFalse (shot 200) "one whose HEAL is gone is not"
+            }
+        ]
+
+[<Tests>]
+let rangerGroundTests =
+    testList
+        "the ranger's ground under a raid (#451)"
+        [
+            test "with no kite ground and no safe ground, the ranger stands farthest from the melee" {
+                // Three brawlers three apart: every tile within three of the
+                // head is within two of a brawler, and their Reach covers the
+                // whole corridor. The threats' ring is beside them.
+                let brawlers = [ 21; 24; 27 ] |> List.map (fun x -> { X = x; Y = 43 })
+
+                let colony =
+                    errandCorridor (
+                        brawlers |> List.mapi (fun i pos -> $"b{i}", pos, [ Attack; Move ])
+                    )
+
+                let room = reactorErrand.RoomName
+                let threats = threatsOf colony (Atlas.ofView colony)
+
+                Expect.isEmpty
+                    (Threats.safeIn threats room)
+                    "the premise: the Reach covers everything"
+
+                let ground =
+                    Threats.guardGroundIn threats room
+                    |> Option.defaultValue Set.empty
+                    |> Set.map RoomPos.pos
+
+                Expect.isNonEmpty ground "the ranger has ground to stand on"
+
+                Expect.all
+                    ground
+                    (fun tile ->
+                        brawlers |> List.forall (fun b -> range b tile > Engine.meleeRange + 1))
+                    "and none of it within two of a brawler"
+            }
+        ]

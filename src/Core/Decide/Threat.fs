@@ -38,6 +38,16 @@ type Threats =
         /// enemy creep on a work spot, beside every armed target, and the
         /// declared `Stand`'s seats while neither stands there.
         HarassRing: Map<string, Set<RoomPos>>
+        /// Per ranger room (`Facts.rangerRooms`) under a raid or a rival's
+        /// claimer (#451), the ranger's ground there ahead of every other: in
+        /// a resident room whose raid no ranger wins (`Facts.outmatched`), the
+        /// room's safe set; else, while a melee body stands there or the kill
+        /// order's head is a claimer, the kite ground — the tiles within three
+        /// of that head, less every tile a melee body reaches in a step and a
+        /// swing, and less swamp near one — or the safe set where that is
+        /// empty. With a melee body there and both empty, the tiles farthest
+        /// from it, never the threats' ring beside it.
+        Kite: Map<string, Set<RoomPos>>
         /// The rooms whose `Ring` is a held exit's ground (#450): where the
         /// Planner keeps a living guard's Guard pooled, and hires for none.
         Held: Set<string>
@@ -52,6 +62,7 @@ let noThreats =
         Ring = Map.empty
         ResidentRing = Map.empty
         HarassRing = Map.empty
+        Kite = Map.empty
         Held = Set.empty
     }
 
@@ -82,6 +93,17 @@ module Threats =
     /// room.
     let harassRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
         Map.tryFind room threats.HarassRing
+
+    /// A Guard's ground in one room, or None where the room has none and the
+    /// pool falls back to the source ring (#366): the ranger's kite ground
+    /// (#451), else the resident or harassment ground, else the threats' ring.
+    /// A ranger room's Guard is a ranger's alone, so its kite ground is never
+    /// handed to a melee guard.
+    let guardGroundIn (threats: Threats) (room: string) : Set<RoomPos> option =
+        Map.tryFind room threats.Kite
+        |> Option.orElse (residentRingIn threats room)
+        |> Option.orElse (harassRingIn threats room)
+        |> Option.orElse (Some(ringIn threats room) |> Option.filter (Set.isEmpty >> not))
 
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room: weapon range plus the margin in Chebyshev tiles, less every tile under
@@ -164,6 +186,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 Ring = ring
                 ResidentRing = Map.empty
                 HarassRing = Map.empty
+                Kite = Map.empty
                 Held = Set.empty
             }
 
@@ -181,7 +204,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
     // perimeter seals inside (#446) — the one tile the claim lives or dies by,
     // and what a rival's tapper walks to. In peace only: with an armed Threat
     // in the home there is no resident ground, and the garrison takes the
-    // Threats' ring as #428's guard did.
+    // Threats' ring as #428's guard did, or its `Kite` ground (#451).
     let raised =
         raisedHomes view
         |> Set.filter (fun room -> not (Map.containsKey room armed.Ring))
@@ -253,6 +276,115 @@ let threatsOf (view: ColonyView) atlas : Threats =
             |> RoomPos.setAt room)
         |> Map.ofList
 
+    // The ranger's ground under a raid (#451). Engine actions resolve on the
+    // tick's starting tiles and a melee body must start adjacent to swing, so
+    // a ranger ending each tick two clear of every melee body is never hit
+    // while it has a free step; a swamp tile costs it that step.
+    //
+    // A melee body hits what ends a tick within a step and a swing of it, and
+    // on swamp within a few tiles of one the ranger loses the step it would
+    // have stepped away with.
+    let stepAndSwing = Engine.meleeRange + 1
+    let swampReach = Engine.meleeRange + 3
+
+    let rangers = rangerRooms view
+
+    // The ranger rooms an armed raid, or a rival's claimer, stands in.
+    let contested =
+        view.Hostiles
+        |> List.filter (fun hostile ->
+            Set.contains hostile.Pos.Room rangers
+            && (Map.containsKey hostile.Pos.Room armed.Ring || claimsAFlag resident hostile))
+        |> List.map (fun hostile -> hostile.Pos.Room)
+        |> List.distinct
+
+    let kite =
+        contested
+        |> List.choose (fun room ->
+            let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
+
+            let melee =
+                inRoom
+                |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
+                |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+
+            let standing =
+                inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
+
+            let gap (tile: Pos) =
+                melee |> List.map (fun m -> range m tile) |> List.min
+
+            let clearOfMelee reach (tile: Pos) = List.isEmpty melee || gap tile > reach
+
+            let rank = killRank view room
+
+            let head =
+                inRoom
+                |> List.filter (guardShoots view resident)
+                |> List.sortBy (fun hostile -> rank hostile, hostile.Id)
+                |> List.tryHead
+
+            // The tiles within three of the kill order's head that no melee
+            // body reaches.
+            let aroundHead () =
+                match head with
+                | None -> Set.empty
+                | Some target ->
+                    Atlas.walkableWithinIn atlas room Engine.rangedRange (RoomPos.pos target.Pos)
+                    |> List.filter (fun tile ->
+                        not (Set.contains tile standing)
+                        && clearOfMelee stepAndSwing tile
+                        && not (
+                            Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)
+                        ))
+                    |> Set.ofList
+                    |> RoomPos.setAt room
+
+            // Forced only where it is the answer: two thousand tiles (#371).
+            let safe () = Threats.safeIn armed room
+
+            // Nowhere to kite and nowhere safe: the room's tiles farthest from
+            // the melee, or, where every one is within a step and a swing,
+            // the tiles our rangers already hold.
+            let farthest () =
+                let ground =
+                    Atlas.walkableTilesIn atlas room
+                    |> Set.filter (fun tile -> not (Set.contains tile standing))
+
+                let held =
+                    view.Creeps
+                    |> List.filter (fun creep -> partCount creep.Body RangedAttack > 0)
+                    |> List.choose (fun creep ->
+                        SpatialInfo.creepPlacementOf view.Spatial creep.Name)
+                    |> List.filter (fun tile -> tile.Room = room)
+                    |> Set.ofList
+
+                if Set.isEmpty ground then
+                    held
+                else
+                    let widest = ground |> Seq.map gap |> Seq.max
+
+                    if widest <= stepAndSwing && not (Set.isEmpty held) then
+                        held
+                    else
+                        ground |> Set.filter (fun tile -> gap tile = widest) |> RoomPos.setAt room
+
+            let claimerLeads = head |> Option.exists (claimsAFlag resident)
+
+            [
+                if Set.contains room resident && outmatched view room then
+                    safe
+                elif not (List.isEmpty melee) || claimerLeads then
+                    aroundHead
+                    safe
+                if not (List.isEmpty melee) then
+                    farthest
+            ]
+            |> List.tryPick (fun ground ->
+                let tiles = ground ()
+                if Set.isEmpty tiles then None else Some(room, tiles)))
+        |> Map.ofList
+
     // The held exits' ground (#450): the tiles within a melee guard's reach of
     // the run its room's last armed Threat left by, less the ring, whose exit
     // tiles the engine carries a body standing on across the border. Only in a
@@ -286,5 +418,6 @@ let threatsOf (view: ColonyView) atlas : Threats =
             ||> List.fold (fun ring (room, ground) -> Map.add room ground ring)
         ResidentRing = residentRing
         HarassRing = harassRing
+        Kite = kite
         Held = holds |> List.map fst |> Set.ofList
     }

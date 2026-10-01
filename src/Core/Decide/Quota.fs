@@ -292,87 +292,6 @@ let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
 /// Either fighting row's body: what never flees and walks home when idle.
 let internal isFighterBody (creep: CreepInfo) = isGuardBody creep || isRangerBody creep
 
-/// What a body deals a tick, off its part counts: melee and ranged, unboosted.
-let private damageOf (parts: BodyPart -> int) =
-    Engine.attackPower * parts Attack
-    + Engine.rangedAttackPower * parts RangedAttack
-
-/// What a body of ours heals itself a tick while it fights: a ranged body's
-/// heal acts beside its shot (#411), and a melee body's is suppressed by its
-/// own attack, so it heals nothing.
-let private selfHealOf (parts: BodyPart -> int) =
-    if parts RangedAttack > 0 then
-        Engine.healPower * parts Heal
-    else
-        0
-
-/// Whether our side — this damage, healing and hits a tick — wins the exchange
-/// against the raid standing in one room: two clocks compared,
-/// cross-multiplied to stay in whole numbers. A raid that out-heals our damage
-/// is never killed. Healers are priced in the healing and never in the hits.
-/// The raid's durability is priced at full off its parts, because the
-/// projection carries a hostile's body and not its hits; over-stating what it
-/// can take is the safe direction.
-let private exchangeWon
-    (view: ColonyView)
-    (room: string)
-    (ourDamage: int)
-    (ourHealing: int)
-    (ourHits: int)
-    : bool =
-    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-
-    let raidDamage = raid |> List.sumBy (fun h -> damageOf (partCountIn h.Body))
-
-    let raidHealing = raid |> List.sumBy HostileInfo.healing
-
-    let raidHits =
-        raid
-        |> List.filter isArmed
-        |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
-
-    if raidDamage = 0 then
-        true
-    elif ourDamage <= raidHealing then
-        false
-    elif raidDamage <= ourHealing then
-        true
-    else
-        raidHits * (raidDamage - ourHealing) < ourHits * (ourDamage - raidHealing)
-
-/// Whether `blocks` whole blocks of a fighting row win `exchangeWon`, each
-/// block's damage and self-heal (`selfHealOf`) times the count.
-///
-/// Worked example: a lone smallMelee needs one guard block; backed by a
-/// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
-/// net damage kills its 1,000 hits, so that raid needs the second block.
-let private blocksBeat
-    (block: BodyPart list)
-    (view: ColonyView)
-    (room: string)
-    (blocks: int)
-    : bool =
-    let parts = partCountIn block
-
-    exchangeWon
-        view
-        room
-        (blocks * damageOf parts)
-        (blocks * selfHealOf parts)
-        (blocks * Engine.partHits * List.length block)
-
-/// `blocksBeat` for the guard's melee block. Two readers: the guard row asks
-/// it of one block to size the crowd, and the stand-down asks it of the
-/// biggest body the bank buys (`guardBlocksReach`) to decide whether an
-/// outpost is a fight or a withdrawal (`Observe.raidDeadlines`).
-let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
-    blocksBeat guardPattern.Block view room blocks
-
-/// `blocksBeat` for the ranger's block (#411), which the errand room's
-/// stand-down and the ranger row read as the guard's do an outpost's.
-let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
-    blocksBeat rangerPattern.Block view room blocks
-
 /// Whether a towerless room of ours holds the raid standing in it without
 /// safe mode (#448): some one armed body of ours standing there, whichever
 /// colony holds it (`ColonyView.Defenders`), wins `exchangeWon` alone on its
@@ -381,9 +300,7 @@ let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 let internal homeHolds (view: ColonyView) (room: string) : bool =
     Map.tryFind room view.Defenders
     |> Option.defaultValue []
-    |> List.exists (fun creep ->
-        let parts = partCount creep.Body
-        exchangeWon view room (damageOf parts) (selfHealOf parts) creep.Hits.Hits)
+    |> List.exists (fun creep -> bodyWins view room (partCount creep.Body) creep.Hits.Hits)
 
 /// ADR-0056
 /// How many guards one guarded room wants: one, two where one block loses
@@ -471,30 +388,27 @@ let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
     |> min rangerBlocksMost
 
 /// How many rangers one resident room wants: the standing garrison
-/// (`Tuning.RangerResidents`), and two where the largest ranger body loses
-/// the raid alone. A raised home whose towers cannot hold its raid
+/// (`Tuning.RangerResidents`). A raised home whose towers cannot hold its raid
 /// (`BorrowedWork.Defended`, #428) and whose resident loses it alone adds
 /// #428's relief, `Engine.guardCap` raid-sized bodies, on top of the garrison
-/// (#447) — while some ranger size wins it, for a relief that loses too only
-/// feeds the raid; past that the home is the child's safe mode's, and the
-/// garrison stays. One in a harassment room (#432): a raid that one loses is
-/// the room's [[stand-down]].
+/// (#447). A resident room whose raid no ranger size wins (`outmatched`)
+/// wants none (#451): a body cast into it only feeds the raid, so the home
+/// is the child's safe mode's, and the garrison already standing keeps its
+/// Guard (the pool's cap counts it) on safe ground. One in a harassment room
+/// (#432): a raid that one loses is the room's [[stand-down]].
 let internal rangersWanted (view: ColonyView) (room: string) : int =
-    if Set.contains room (raisedHomes view) then
-        if
-            List.contains room view.Borrowed.Defended
-            && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
-            && rangerBlocksBeat view room rangerBlocksMost
-        then
-            view.Tuning.RangerResidents + Engine.guardCap
-        else
-            view.Tuning.RangerResidents
-    elif Set.contains room (harassRooms view) then
+    if Set.contains room (harassRooms view) then
         1
-    elif rangerBlocksBeat view room rangerBlocksMost then
-        view.Tuning.RangerResidents
+    elif outmatched view room then
+        0
+    elif
+        Set.contains room (raisedHomes view)
+        && List.contains room view.Borrowed.Defended
+        && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
+    then
+        view.Tuning.RangerResidents + Engine.guardCap
     else
-        max view.Tuning.RangerResidents Engine.guardCap
+        view.Tuning.RangerResidents
 
 /// The ranger row's quota: `rangersWanted` over every worked errand and
 /// harassment room.

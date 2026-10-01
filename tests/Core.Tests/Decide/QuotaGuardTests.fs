@@ -15,7 +15,7 @@ let guardRowTests =
         "the guard row"
         [
             test
-                "the ranger row: its heal counts in the exchange, its garrison is the knobs' size, and a raid one body loses buys two" {
+                "the ranger row: its heal counts in the exchange, its garrison is the knobs' size, and a raid no body wins buys none" {
                 // #411, over SlothBot's reactor longbow: 160 ranged damage, 48 heal and
                 // 4,000 hits for two of them.
                 let longbow =
@@ -56,8 +56,8 @@ let guardRowTests =
                     |> Option.map (fun row -> row.Quota)
 
                 Expect.equal
-                    ([ 0; 2; 3 ] |> List.map (raidOf >> rangerRow))
-                    [ Some 2; Some 2; Some 2 ]
+                    ([ 0; 2 ] |> List.map (raidOf >> rangerRow))
+                    [ Some 2; Some 2 ]
                     "the garrison stands in peace as in a raid (#419): a relief cast on sight lands after the fight"
 
                 let lone colony =
@@ -69,9 +69,9 @@ let guardRowTests =
                     }
 
                 Expect.equal
-                    (rangerRow (lone (raidOf 2)), rangerRow (lone (raidOf 3)))
-                    (Some 1, Some 2)
-                    "one body wins the squad; three longbows outlast the largest ranger, so two are bought"
+                    (rangerRow (lone (raidOf 2)), rangerRow (raidOf 3))
+                    (Some 1, Some 0)
+                    "one body wins the squad; three longbows outlast the largest ranger, so none is fed to them (#451)"
 
                 // In peace the resident is the knob's size, though the bank buys seven.
                 let rangerCast =

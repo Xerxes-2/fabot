@@ -241,18 +241,10 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // give the walk a destination; the instant the guard arrives the room
         // is lit and this branch is not taken again.
         //
-        // In a resident room the ground is `Threats.ResidentRing`'s (#414,
-        // #447) where it has one — a raised home's only in peace — and in a
-        // harassment room `Threats.HarassRing`'s (#432).
+        // Which ground is the Guard's otherwise is `Threats.guardGroundIn`'s.
         | Guard room ->
-            let declared =
-                Threats.residentRingIn threats room
-                |> Option.orElse (Threats.harassRingIn threats room)
-
-            match declared, Threats.ringIn threats room with
-            | Some ground, _ -> ground
-            | None, ring when Set.isEmpty ring -> Atlas.sourceRingIn atlas room
-            | None, ring -> ring
+            Threats.guardGroundIn threats room
+            |> Option.defaultWith (fun () -> Atlas.sourceRingIn atlas room)
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with

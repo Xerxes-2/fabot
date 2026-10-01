@@ -2,6 +2,8 @@
 
 > **Status:** accepted
 
+> **Amended 2026-10-02** by #451: under a raid with a melee body a ranger kites (tiles within three of its target, none within two of a melee body) instead of holding the threats' ring; a raid's healer is a target, and the kill order is lowest effective hits after a claimer at the controller or Reactor; a fighter pre-heals an adjacent fighter in a Reach; and a raid no ranger size wins gets neither resident nor relief cast into it, its residents holding safe ground.
+
 > **Amended 2026-10-01** by #447: point 3's garrison also holds each child's home its mother raises (`Nursery`, `Bootstrapping`, `Weaning`), on the child controller's ring, by the same row and count; a raised home that is beaten (ADR 0080) adds `Engine.guardCap` raid-sized rangers on top while some ranger size wins the raid, and the melee guard row does not cast for it. Under an armed raid the garrison holds the threats' ring, not the controller's.
 
 > **Amended 2026-09-25** by #419: point 3's resident is now a standing **garrison** — `Tuning.RangerResidents` (2) bodies of `Tuning.RangerResidentBlocks` (7) — because a relief cast on sight of the squad lands some 280 ticks later, after the fight.

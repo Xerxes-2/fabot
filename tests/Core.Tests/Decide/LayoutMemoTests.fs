@@ -405,6 +405,7 @@ let censusSignatureTests =
                                     Owner = "raider"
                                     Pos = RoomPos.at "W1N1" { X = 30; Y = 25 }
                                     Body = [ Attack; Move ]
+                                    Hits = 200
                                     TicksToLive = Engine.creepLifetime
                                 }
                             ]
@@ -459,6 +460,7 @@ let censusSignatureTests =
                                     Owner = "raider"
                                     Pos = RoomPos.at "W1N2" { X = 26; Y = 26 }
                                     Body = [ Attack; Move ]
+                                    Hits = 200
                                     TicksToLive = Engine.creepLifetime
                                 }
                             ]

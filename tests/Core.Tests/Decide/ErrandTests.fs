@@ -522,6 +522,50 @@ let errandStandDownTests =
             }
 
             test
+                "a rival's claimer is the first target on its whole approach, and the ranger's ground is around it" {
+                // #451: `claimReactor` has no cooldown and lands the tick the
+                // claimer stands beside the Reactor, so the shots it takes on
+                // the way in are the only ones that count. Five off, escorted.
+                let claimer =
+                    { hostileIn errandRoom { X = 25; Y = 39 } [ BodyPart.Claim; Move; Move ] with
+                        Id = "claimer"
+                        Owner = "Shibdib"
+                    }
+
+                let bow =
+                    { hostileIn errandRoom { X = 26; Y = 38 } shibdibLongbow with
+                        Id = "bow"
+                        Owner = "Shibdib"
+                    }
+
+                let guard = creepWith "ranger-1" 0 0 Bodies.rangerPattern.Block
+
+                let colony =
+                    { (bareHome |> errandColony (Some Ownership.Ours) []) with
+                        Hostiles = [ bow; claimer ]
+                    }
+                    |> withErrandCreep { X = 25; Y = 41 } guard
+
+                Expect.contains
+                    (emitOn colony [ guard.Name, Guard errandRoom ])
+                    (RangedAttackCreep(guard.Name, "claimer"))
+                    "the claimer before the longbow, five tiles off the Reactor"
+
+                let ground =
+                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) errandRoom
+                    |> Option.defaultValue Set.empty
+
+                Expect.isNonEmpty ground "the ranger has ground to stand on"
+
+                Expect.all
+                    ground
+                    (fun tile ->
+                        RoomPos.range tile claimer.Pos
+                        |> Option.exists (fun r -> r <= Engine.rangedRange))
+                    "and every tile of it shoots the claimer"
+            }
+
+            test
                 "a Source Keeper is terrain in an errand room, as the guard row's fight is an outpost's too" {
                 let tick = 100
 

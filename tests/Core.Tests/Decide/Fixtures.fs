@@ -180,6 +180,7 @@ let bareRespawn =
         Perimeter = []
         Defenders = Map.empty
         NurseryControllers = Map.empty
+        LoadedTowers = Map.empty
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []
@@ -598,6 +599,7 @@ let hostileAt id pos body : HostileInfo =
         Owner = "raider"
         Pos = RoomPos.at "" pos
         Body = body
+        Hits = Engine.partHits * List.length body
         // A full Invader life: a fixture that said otherwise would be
         // making a claim about the stand-down rather than about the raid.
         TicksToLive = Engine.creepLifetime

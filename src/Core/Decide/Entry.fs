@@ -385,7 +385,7 @@ let decideUnarbitrated
         @ taskIntents
         |> Fabot.Core.IntentPlan.create
         |> function
-            | Ok selected -> healReflex view selected |> Fabot.Core.IntentPlan.intents
+            | Ok selected -> healReflex view threats selected |> Fabot.Core.IntentPlan.intents
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
     let movement = movementOf view atlas threats pool assigned crossings verbose

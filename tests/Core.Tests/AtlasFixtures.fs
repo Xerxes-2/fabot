@@ -41,6 +41,7 @@ let snapshotWith creeps spatial =
         Perimeter = []
         Defenders = Map.empty
         NurseryControllers = Map.empty
+        LoadedTowers = Map.empty
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []

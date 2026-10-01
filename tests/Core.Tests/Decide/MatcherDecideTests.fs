@@ -823,7 +823,7 @@ let selfHealTests =
 
         match IntentPlan.create actions with
         | Error conflict -> failtestf "invalid fixture: %A" conflict
-        | Ok plan -> healReflex colony plan |> IntentPlan.intents
+        | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
 
     testList
         "self-heal reflex"
@@ -914,7 +914,7 @@ let selfHealTests =
 
                     match IntentPlan.create [] with
                     | Error conflict -> failtestf "invalid fixture: %A" conflict
-                    | Ok plan -> healReflex colony plan |> IntentPlan.intents
+                    | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
 
                 let at x = { X = x; Y = 10 }
 
@@ -932,6 +932,76 @@ let selfHealTests =
                     (heals [ medic, at 10; hurt "farther" 150, at 14 ])
                     "and four tiles off is out of reach"
             }
+            test "a fighter pre-heals an adjacent fighter standing in a Reach, at full hits" {
+                // #451: the engine credits a heal before its death check, so the
+                // heal that saves a body is the one cast before it is hurt.
+                let ranger name =
+                    creepWith name 0 0 Bodies.rangerPattern.Block
+
+                let heals hostiles =
+                    let colony =
+                        { bareRespawn with
+                            Creeps = [ ranger "a"; ranger "b" ]
+                            Spatial =
+                                bareRespawn.Spatial
+                                |> withCreepsAt [ "a", { X = 10; Y = 10 }; "b", { X = 11; Y = 10 } ]
+                        }
+                        |> facing hostiles
+
+                    match IntentPlan.create [] with
+                    | Error conflict -> failtestf "invalid fixture: %A" conflict
+                    | Ok plan ->
+                        healReflex colony (threatsOf colony (Atlas.ofView colony)) plan
+                        |> IntentPlan.intents
+
+                Expect.isEmpty (heals []) "the premise: whole and out of any Reach, nobody heals"
+
+                Expect.equal
+                    (heals [ hostileAt "bow" { X = 14; Y = 10 } [ RangedAttack; Move ] ])
+                    [ HealCreep("a", "b"); HealCreep("b", "a") ]
+                    "each heals the other before the shot lands"
+            }
+
+            test "a wounded fighter heals itself before it pre-heals a whole one beside it" {
+                // #451: a shield is spent by a body that owes nothing; one that
+                // is bleeding closes its own wound first.
+                let block = Bodies.rangerPattern.Block
+                let full = Engine.partHits * List.length block
+
+                let ranger =
+                    { creepWith "ranger" 0 0 block with
+                        Hits = { Hits = full * 2 / 5; HitsMax = full }
+                    }
+
+                let guard = creepWith "guard" 0 0 Bodies.guardPattern.Block
+
+                let colony =
+                    { bareRespawn with
+                        Creeps = [ ranger; guard ]
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withCreepsAt
+                                [ "ranger", { X = 10; Y = 10 }; "guard", { X = 11; Y = 10 } ]
+                    }
+                    |> facing [ hostileAt "bow" { X = 14; Y = 10 } [ RangedAttack; Move ] ]
+
+                let heals =
+                    match IntentPlan.create [] with
+                    | Error conflict -> failtestf "invalid fixture: %A" conflict
+                    | Ok plan ->
+                        healReflex colony (threatsOf colony (Atlas.ofView colony)) plan
+                        |> IntentPlan.intents
+
+                Expect.contains
+                    heals
+                    (HealCreep("ranger", "ranger"))
+                    "the ranger closes its own wound"
+
+                Expect.isFalse
+                    (List.contains (HealCreep("ranger", "guard")) heals)
+                    "and does not spend the heal on the whole guard"
+            }
+
             test "a second healer does not pour into a wound the first one closes" {
                 let patient missing =
                     { creepWith "patient" 0 0 [ Move ] with
@@ -957,7 +1027,7 @@ let selfHealTests =
 
                     match IntentPlan.create [] with
                     | Error conflict -> failtestf "invalid fixture: %A" conflict
-                    | Ok plan -> healReflex colony plan |> IntentPlan.intents
+                    | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
 
                 Expect.equal
                     (heals 10)

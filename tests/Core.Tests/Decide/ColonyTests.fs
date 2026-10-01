@@ -1857,6 +1857,19 @@ let defendedHomeTests =
                     "and her spawn casts one, the biggest a body carries"
             }
 
+            test "her melee guard's ground under a melee raid is still the threats' ring" {
+                // #451's kite ground is a ranger's: a melee guard closes.
+                let raided = defendingMother homeRaid
+                let threats = threatsOf raided (Atlas.ofView raided)
+
+                Expect.isNonEmpty (Threats.ringIn threats "W1N2") "the premise: a ring stands"
+
+                Expect.equal
+                    (Threats.guardGroundIn threats "W1N2")
+                    (Some(Threats.ringIn threats "W1N2"))
+                    "and the Guard takes it"
+            }
+
             test "the child's own guard row casts nothing for its home" {
                 let raided = raidedChildColony homeRaid
 
@@ -1873,6 +1886,34 @@ let private rangerQuotaOf colony =
 let private garrisonMother stage =
     { ferryMother stage with
         Bank = bank 5_600 5_600
+    }
+
+/// The Bootstrapping mother with the child's home opened to a floor wide
+/// enough to kite on — plain but for these swamp tiles — her rangers standing
+/// in it, and this raid.
+let private openGarrison (swamps: Pos list) (rangers: (CreepInfo * Pos) list) raid =
+    let colony = garrisonMother Bootstrapping
+    let layer = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Hostiles = raid
+        Creeps = (rangers |> List.map fst) @ colony.Creeps
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { layer with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 2..47 do
+                                    for y in 2..47 ->
+                                        let tile = { X = x; Y = y }
+                                        tile, (if List.contains tile swamps then Swamp else Plain)
+                            ]
+                    CreepPositions =
+                        rangers |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
     }
 
 [<Tests>]
@@ -1926,11 +1967,13 @@ let raisedHomeGarrisonTests =
             test
                 "under an armed raid the garrison's ground is the threats' ring, as #428's guard's was" {
                 // A Guard takes the resident ring where there is one and the
-                // threats' otherwise (`Pool.areaFor`): a raised home's resident
-                // ring is its peace-time ground only, so the garrison chases.
+                // threats' otherwise (`Threats.guardGroundIn`): a raised home's
+                // resident ring is its peace-time ground only, so the garrison
+                // chases. A lone longbow: no melee body to kite (#451), and
+                // a raid the garrison wins.
                 let raided =
                     { garrisonMother Bootstrapping with
-                        Hostiles = homeRaid
+                        Hostiles = [ hostileIn "W1N2" { X = 10; Y = 44 } [ RangedAttack; Move ] ]
                     }
 
                 let atlas = Atlas.ofView raided
@@ -1940,9 +1983,167 @@ let raisedHomeGarrisonTests =
                     (Threats.residentRingIn threats "W1N2")
                     "no resident ground while an armed hostile stands in the home"
 
-                Expect.isNonEmpty
-                    (Threats.ringIn threats "W1N2")
-                    "so the Guard takes the threats' ring"
+                Expect.isNonEmpty (Threats.ringIn threats "W1N2") "the threats' ring stands"
+
+                Expect.equal
+                    (Threats.guardGroundIn threats "W1N2")
+                    (Some(Threats.ringIn threats "W1N2"))
+                    "and the Guard takes it"
+            }
+
+            test
+                "under a melee raid the garrison kites: nothing within two of a melee body, nor swamp near one" {
+                // #451: on the threats' ring a ranger stood beside both melee
+                // bodies at W17S25 and took 1,020 a tick. The 10A2H raid is one
+                // an eight-block ranger wins, so the room is a fight, not a
+                // withdrawal to safe ground.
+                let brawler = { X = 20; Y = 30 }
+                let swamp = { X = 23; Y = 30 }
+
+                let raided =
+                    openGarrison
+                        [ swamp ]
+                        []
+                        [
+                            hostileIn
+                                "W1N2"
+                                brawler
+                                (List.replicate 10 Attack
+                                 @ List.replicate 2 Heal
+                                 @ List.replicate 12 Move)
+                        ]
+
+                let ground =
+                    Threats.guardGroundIn (threatsOf raided (Atlas.ofView raided)) "W1N2"
+                    |> Option.defaultValue Set.empty
+                    |> Set.map RoomPos.pos
+
+                Expect.isNonEmpty ground "the ranger has ground to stand on"
+
+                Expect.all
+                    ground
+                    (fun tile -> range brawler tile = Engine.rangedRange)
+                    "only the tiles it shoots the brawler from and the brawler cannot reach in a step and a swing"
+
+                Expect.isFalse
+                    (Set.contains swamp ground)
+                    "and no swamp a melee body stands four from"
+            }
+
+            test
+                "the garrison shoots the raid's healer before a full-hits melee, and a tapper at the controller first" {
+                // #451: `guardShoots` counted only armed bodies, so the 11M7H
+                // healers keeping W17S25's raid alive were never targets.
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+                let shot raid =
+                    let colony = openGarrison [] [ ranger, { X = 12; Y = 46 } ] raid
+
+                    emit
+                        colony
+                        (Atlas.ofView colony)
+                        noThreats
+                        (Map.ofList [ ranger.Name, Guard "W1N2" ])
+                    |> List.choose (function
+                        | RangedAttackCreep(name, target) when name = ranger.Name -> Some target
+                        | _ -> None)
+
+                Expect.equal
+                    (shot homeRaid)
+                    [ "med-1" ]
+                    "the healer, whose hits are fewer, before the melee it heals"
+
+                // Forty TOUGH: more hits than any of the raid, and still first.
+                let tapper =
+                    { hostileIn
+                          "W1N2"
+                          { X = 11; Y = 47 }
+                          (List.replicate 40 Tough
+                           @ List.replicate 3 BodyPart.Claim
+                           @ List.replicate 3 Move) with
+                        Id = "tapper"
+                    }
+
+                Expect.equal
+                    (shot (tapper :: homeRaid))
+                    [ "tapper" ]
+                    "a CLAIM body beside our controller first"
+            }
+
+            test "a healer our damage breaks is shot before a melee body with fewer hits" {
+                // #451: the healer leads because the shots out-pace its heal,
+                // not because it is the weaker: 1,100 hits against 300.
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+                let raid =
+                    [
+                        { hostileIn "W1N2" { X = 10; Y = 44 } [ Attack; Move; Move ] with
+                            Id = "brawler"
+                        }
+                        { hostileIn "W1N2" { X = 10; Y = 45 } (Heal :: List.replicate 10 Move) with
+                            Id = "medic"
+                        }
+                    ]
+
+                let colony = openGarrison [] [ ranger, { X = 12; Y = 46 } ] raid
+
+                Expect.equal
+                    (emit
+                        colony
+                        (Atlas.ofView colony)
+                        noThreats
+                        (Map.ofList [ ranger.Name, Guard "W1N2" ])
+                     |> List.choose (function
+                         | RangedAttackCreep(name, target) when name = ranger.Name -> Some target
+                         | _ -> None))
+                    [ "medic" ]
+                    "the healer, whose one heal our 140 out-paces"
+            }
+
+            test "a towered home whose towers turn the raid is no withdrawal for its garrison" {
+                // #451: W17S29's raid out-heals the largest ranger alone, but
+                // three loaded towers land 450 more at the falloff range, so
+                // the home is a fight and its garrison keeps fighting ground.
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+                let raided towers =
+                    { openGarrison [] [ ranger, { X = 30; Y = 10 } ] homeRaid with
+                        LoadedTowers = Map.ofList [ "W1N2", towers ]
+                    }
+
+                Expect.equal
+                    (rangerQuotaOf (raided 0))
+                    (Some 0)
+                    "the premise: no ranger alone wins it"
+
+                let towered = raided 3
+
+                Expect.equal
+                    (rangerQuotaOf towered)
+                    (Some Tuning.defaults.RangerResidents)
+                    "with the towers, the garrison is kept and cast for"
+
+                let threats = threatsOf towered (Atlas.ofView towered)
+
+                Expect.notEqual
+                    (Threats.guardGroundIn threats "W1N2")
+                    (Some(Threats.safeIn threats "W1N2"))
+                    "and it holds fighting ground, not the safe set"
             }
 
             test
@@ -1985,14 +2186,22 @@ let raisedHomeGarrisonTests =
                     "and the ranger row adds #428's relief to the garrison"
             }
 
-            test "a raid no ranger size wins draws no relief beyond the garrison" {
+            test
+                "a raid no ranger size wins casts no resident, and the residents there hold safe ground" {
                 // #447: W17S29's squad heals 168 a tick against an eight-block
-                // ranger's 160, so a relief of any size only feeds it; the home
+                // ranger's 160, so a body of any size only feeds it; the home
                 // is its own safe mode's (#448), and no stand-down withdraws
-                // the garrison from it.
+                // the garrison from it. #451: nor is a resident cast into it,
+                // and the ones standing keep out of its reach.
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
                 let beaten =
-                    { garrisonMother Bootstrapping with
-                        Hostiles = homeRaid
+                    { openGarrison [] [ ranger, { X = 30; Y = 10 } ] homeRaid with
                         Borrowed =
                             {
                                 Rooms = [ "W1N2" ]
@@ -2000,10 +2209,23 @@ let raisedHomeGarrisonTests =
                             }
                     }
 
+                Expect.equal (rangerQuotaOf beaten) (Some 0) "no ranger cast for it"
+
                 Expect.equal
-                    (rangerQuotaOf beaten)
-                    (Some Tuning.defaults.RangerResidents)
-                    "the garrison, and nothing on top"
+                    (guardsIn (planTasksOn beaten noThreats))
+                    [ Guard "W1N2" ]
+                    "the Guard stands for the one already there"
+
+                let threats = threatsOf beaten (Atlas.ofView beaten)
+
+                Expect.isNonEmpty
+                    (Threats.safeIn threats "W1N2")
+                    "the premise: the room has safe ground"
+
+                Expect.equal
+                    (Threats.guardGroundIn threats "W1N2")
+                    (Some(Threats.safeIn threats "W1N2"))
+                    "and it is the resident's ground"
             }
         ]
 

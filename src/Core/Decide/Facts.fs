@@ -268,13 +268,213 @@ let internal residentRooms (view: ColonyView) : Set<string> =
 let internal rangerRooms (view: ColonyView) : Set<string> =
     Set.union (residentRooms view) (harassRooms view)
 
-/// What a Guard in its room may shoot: an armed hostile, a rival's claimer in
-/// a resident room, and the declared enemy's creep in a harassment room.
-/// `Emitter.guardTarget` and the harassment ring read this one predicate.
+/// Whether two tiles stand within `reach` of each other; never across rooms.
+let private within (reach: int) (a: RoomPos) (b: RoomPos) =
+    RoomPos.range a b |> Option.exists (fun r -> r <= reach)
+
+/// Whether a hostile is a raid's healer (#451): unarmed, with a HEAL part
+/// still acting, and standing within three of an armed hostile — part of the
+/// raid, which it keeps alive.
+let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
+    not (isArmed hostile)
+    && HostileInfo.activeCount hostile Heal > 0
+    && view.Hostiles
+       |> List.exists (fun other ->
+           isArmed other && within Engine.rangedRange other.Pos hostile.Pos)
+
+/// What a Guard in its room may shoot: an armed hostile, a rival's claimer or
+/// a raid's healer (#451) in a resident room, and the declared enemy's creep
+/// in a harassment room. `Emitter.guardTarget` and the harassment ring read
+/// this one predicate.
 let internal guardShoots (view: ColonyView) (residentRooms: Set<string>) (hostile: HostileInfo) =
     isArmed hostile
     || claimsAFlag residentRooms hostile
     || harassTarget view hostile
+    || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
+
+/// What a body deals a tick, off its part counts: melee and ranged, unboosted.
+let private damageOf (parts: BodyPart -> int) =
+    Engine.attackPower * parts Attack
+    + Engine.rangedAttackPower * parts RangedAttack
+
+/// What a body of ours heals itself a tick while it fights: a ranged body's
+/// heal acts beside its shot (#411), and a melee body's is suppressed by its
+/// own attack, so it heals nothing.
+let private selfHealOf (parts: BodyPart -> int) =
+    if parts RangedAttack > 0 then
+        Engine.healPower * parts Heal
+    else
+        0
+
+/// Which band of the kill order a target falls in (#451), first band first.
+type KillTier =
+    /// A rival's CLAIM body in a resident room, anywhere in it:
+    /// `claimReactor` has no cooldown and a controller attack lands the tick
+    /// it stands beside, so the whole approach is the only window.
+    | Claimer
+    /// A raid's healer whose heal our damage reaching it outpaces.
+    | BrokenHealer
+    /// The rest of the raid: an armed body, or a healer we do not break.
+    | Raid
+    /// Anything else the Guard may shoot.
+    | Bystander
+
+/// One target's place in the kill order, compared field by field.
+[<Struct>]
+type KillRank =
+    {
+        Tier: KillTier
+        /// Its hits, plus the heal that reaches it this tick, less our damage
+        /// that does. Without a lock this all but locks itself: the target we
+        /// hurt stays the lowest.
+        EffectiveHits: int
+    }
+
+/// The kill order's leading key for one room's targets (#451), smallest
+/// first; the caller breaks ties. Outside a ranger's room (an outpost's
+/// melee guard) the raid first and nothing more.
+let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRank =
+    if not (Set.contains room (rangerRooms view)) then
+        fun hostile ->
+            {
+                Tier = (if isArmed hostile then Raid else Bystander)
+                EffectiveHits = 0
+            }
+    else
+        let resident = residentRooms view
+
+        let healers =
+            view.Hostiles
+            |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
+
+        let fighters =
+            view.Creeps
+            |> List.choose (fun creep ->
+                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                |> Option.map (fun at -> at, partCount creep.Body))
+
+        // A heal and a swing each reach one tile, a ranged heal and shot three.
+        let healOn (hostile: HostileInfo) =
+            healers
+            |> List.sumBy (fun healer ->
+                match RoomPos.range healer.Pos hostile.Pos with
+                | Some r when r <= Engine.meleeRange -> HostileInfo.healing healer
+                | Some r when r <= Engine.rangedRange ->
+                    HostileInfo.healing healer * Engine.rangedHealPower / Engine.healPower
+                | _ -> 0)
+
+        let damageOn (hostile: HostileInfo) =
+            fighters
+            |> List.sumBy (fun (at, parts) ->
+                match RoomPos.range at hostile.Pos with
+                | Some r when r <= Engine.meleeRange -> damageOf parts
+                | Some r when r <= Engine.rangedRange ->
+                    damageOf (fun part -> if part = Attack then 0 else parts part)
+                | _ -> 0)
+
+        fun hostile ->
+            let heal = healOn hostile
+            let damage = damageOn hostile
+            let healer = raidHealer view hostile
+
+            {
+                Tier =
+                    if claimsAFlag resident hostile then Claimer
+                    elif healer && damage > heal then BrokenHealer
+                    elif isArmed hostile || healer then Raid
+                    else Bystander
+                EffectiveHits = hostile.Hits + heal - damage
+            }
+
+/// Whether our side — this damage, healing and hits a tick — wins the exchange
+/// against the raid standing in one room: two clocks compared,
+/// cross-multiplied to stay in whole numbers. A raid that out-heals our damage
+/// is never killed. Healers are priced in the healing and never in the hits.
+/// The raid's durability is priced at full off its parts; over-stating what
+/// it can take is the safe direction.
+let internal exchangeWon
+    (view: ColonyView)
+    (room: string)
+    (ourDamage: int)
+    (ourHealing: int)
+    (ourHits: int)
+    : bool =
+    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+    let raidDamage = raid |> List.sumBy (fun h -> damageOf (partCountIn h.Body))
+
+    let raidHealing = raid |> List.sumBy HostileInfo.healing
+
+    let raidHits =
+        raid
+        |> List.filter isArmed
+        |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
+
+    if raidDamage = 0 then
+        true
+    elif ourDamage <= raidHealing then
+        false
+    elif raidDamage <= ourHealing then
+        true
+    else
+        raidHits * (raidDamage - ourHealing) < ourHits * (ourDamage - raidHealing)
+
+/// `exchangeWon` for one body of these active part counts and hits: what a
+/// body standing in the room is weighed by (`Quota.homeHolds`).
+let internal bodyWins (view: ColonyView) (room: string) (parts: BodyPart -> int) (hits: int) =
+    exchangeWon view room (damageOf parts) (selfHealOf parts) hits
+
+/// Whether `blocks` whole blocks of a fighting row win `exchangeWon`, each
+/// block's damage and self-heal (`selfHealOf`) times the count, beside
+/// `besideDamage` a tick that is not a body's. Here and not in `Quota`
+/// because the ranger's ground reads it too (`outmatched`).
+///
+/// Worked example: a lone smallMelee needs one guard block; backed by a
+/// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
+/// net damage kills its 1,000 hits, so that raid needs the second block.
+let private blocksBeat
+    (block: BodyPart list)
+    (besideDamage: int)
+    (view: ColonyView)
+    (room: string)
+    (blocks: int)
+    : bool =
+    let parts = partCountIn block
+
+    exchangeWon
+        view
+        room
+        (blocks * damageOf parts + besideDamage)
+        (blocks * selfHealOf parts)
+        (blocks * Engine.partHits * List.length block)
+
+/// `blocksBeat` for the guard's melee block. Two readers: the guard row asks
+/// it of one block to size the crowd, and the stand-down asks it of the
+/// biggest body the bank buys (`guardBlocksReach`) to decide whether an
+/// outpost is a fight or a withdrawal (`Observe.raidDeadlines`).
+let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
+    blocksBeat guardPattern.Block 0 view room blocks
+
+/// `blocksBeat` for the ranger's block (#411), which the errand room's
+/// stand-down and the ranger row read as the guard's do an outpost's.
+let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
+    blocksBeat rangerPattern.Block 0 view room blocks
+
+/// Whether no ranger body of any size wins the raid standing in a room alone
+/// (#451): a raid the ranger row casts nobody into, and the residents already
+/// there hold the room's safe ground against. A raised home's loaded towers
+/// fight beside it, priced at the falloff range.
+let internal outmatched (view: ColonyView) (room: string) : bool =
+    let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
+
+    not (
+        blocksBeat
+            rangerPattern.Block
+            (towers * Engine.towerAttackAt Engine.towerFalloffRange)
+            view
+            room
+            rangerBlocksMost
+    )
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there

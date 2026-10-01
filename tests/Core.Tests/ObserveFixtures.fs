@@ -60,6 +60,7 @@ let quiet: ColonyView =
         Perimeter = []
         Defenders = Map.empty
         NurseryControllers = Map.empty
+        LoadedTowers = Map.empty
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []
@@ -78,6 +79,7 @@ let raider id owner pos body : HostileInfo =
         Owner = owner
         Pos = RoomPos.at raidRoom pos
         Body = body
+        Hits = Engine.partHits * List.length body
         TicksToLive = Engine.creepLifetime
     }
 
@@ -202,6 +204,7 @@ let raiderIn room i body : HostileInfo =
         Owner = "Invader"
         Pos = RoomPos.at room { X = 25; Y = 25 }
         Body = body
+        Hits = Engine.partHits * List.length body
         TicksToLive = Engine.creepLifetime
     }
 

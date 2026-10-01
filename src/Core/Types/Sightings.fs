@@ -30,6 +30,9 @@ type HostileInfo =
         /// of ours on the same coordinate of another room as range 0.
         Pos: RoomPos
         Body: BodyPart list
+        /// Hits left (#451): what a fight's kill order reads, and with the
+        /// engine taking parts from the head, which of `Body` still act.
+        Hits: int
         /// Ticks this hostile has left. An Invader standing in a room nobody
         /// owns never suicides — the engine's suicide branch wants a
         /// controller owner and an [[outpost]] has none — so what it has left
@@ -61,6 +64,17 @@ module HostileInfo =
     /// projection carries no boosts.
     let healing (hostile: HostileInfo) : int =
         Engine.healPower * partCountIn hostile.Body Heal
+
+    /// How many of one part still act: the engine destroys parts from the
+    /// head of the body, so the live ones are the tail its hits still cover,
+    /// a part with any hit left counting whole.
+    let activeCount (hostile: HostileInfo) (part: BodyPart) : int =
+        let live = (hostile.Hits + Engine.partHits - 1) / Engine.partHits
+
+        hostile.Body
+        |> List.skip (max 0 (List.length hostile.Body - live))
+        |> List.filter ((=) part)
+        |> List.length
 
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
@@ -461,6 +475,14 @@ module World =
             facts.Control
             |> Option.exists (fun control -> control.Owner = Ownership.Ours && control.SafeMode))
 
+    /// How many towers of ours in the room hold a shot's energy this tick.
+    let loadedTowers (facts: RoomFacts) : int =
+        facts.Refillables
+        |> List.filter (fun r ->
+            r.Kind = BuiltKind.Tower
+            && Engine.towerCapacity - r.FreeCapacity >= Engine.towerEnergyCost)
+        |> List.length
+
     /// ADR-0080
     /// Whether a colony's home cannot hold the raid standing in it this tick:
     /// the room is ours, an armed hostile that is not an ally is there, safe
@@ -470,12 +492,7 @@ module World =
         let raid =
             facts.Hostiles |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
 
-        let towers =
-            facts.Refillables
-            |> List.filter (fun r ->
-                r.Kind = BuiltKind.Tower
-                && Engine.towerCapacity - r.FreeCapacity >= Engine.towerEnergyCost)
-            |> List.length
+        let towers = loadedTowers facts
 
         facts.Control
         |> Option.exists (fun control -> control.Owner = Ownership.Ours && not control.SafeMode)

@@ -2274,6 +2274,8 @@ function furnishOutpost(capture, register, structure, raided = false, homeRoom =
         owner: { username: INVADER_OWNER },
         pos,
         body: SMALL_MELEE.map((type) => ({ type })),
+        // Whole: `World.ofGame` projects it as `HostileInfo.Hits` (#451).
+        hits: SMALL_MELEE.length * 100,
         // The clock ADR 0056 re-clocks the stand-down to. Ungated on a
         // hostile creep in the engine, and this raider spends all of it:
         // `findAttack.js` suicides only where the controller has an owner,

@@ -554,8 +554,9 @@ let private rivalDeadlines (view: ColonyView) =
 /// every room the colony casts, shut or not, and it is clocked off the
 /// sighting and not the squad's life (#441). A raised child's home is no
 /// room to withdraw from (#447), as a defended one is not (#428), whatever
-/// the raid: one no ranger wins keeps its garrison and draws no relief
-/// (`Quota.rangersWanted`), and is the child's safe mode's.
+/// the raid: one no ranger wins keeps its garrison, on safe ground, and has
+/// nobody cast into it (`Quota.rangersWanted`, #451); it is the child's safe
+/// mode's.
 let private raidDeadlines (view: ColonyView) (declared: string list) =
     let rangerRooms =
         Set.difference
@@ -572,10 +573,10 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
 
         if Set.contains room rangerRooms then
             armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
-            && not (Decide.Quota.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
+            && not (Decide.Facts.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
         else if Set.contains room outpostRooms then
             not (List.isEmpty armed)
-            && not (Decide.Quota.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
+            && not (Decide.Facts.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
         else
             false)
     |> List.map (fun (room, hostiles) ->

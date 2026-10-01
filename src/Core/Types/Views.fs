@@ -79,7 +79,7 @@ type ColonyView =
         /// last tick anything of ours could see the room, and that fewer than
         /// `Tuning.ThreatMemory` ticks have passed — enough to hire **one**
         /// guard and pool its Guard. What it may not: what it is made of or
-        /// how many there are (`Quota.guardBlocksBeat` reads bodies, and there
+        /// how many there are (`Facts.guardBlocksBeat` reads bodies, and there
         /// are none here). Not a withdrawal: the room is worked, which tells
         /// it apart from `StandDown.Shut`. **Vision overrules it**
         /// (`Planner.guardedOutposts` consults it only where there is none).
@@ -149,6 +149,10 @@ type ColonyView =
         /// room's name (#449): the level its Upgrade waits on, and the stock
         /// its mother fires. A Nursery runs no tick of its own to read it.
         NurseryControllers: Map<string, ControllerInfo>
+        /// The towers of ours holding a shot's energy (`World.loadedTowers`)
+        /// in each child's home this colony raises, under its room's name
+        /// (#451): what its garrison fights beside. No entry for none.
+        LoadedTowers: Map<string, int>
         /// Whether safe mode is running in any room of ours this tick
         /// (`World.safeModeRunning`), the same answer handed to every colony:
         /// the engine runs one per shard and refuses a second with ERR_BUSY.
@@ -776,6 +780,13 @@ module ColonyView =
                 |> List.choose (fun room ->
                     (World.roomOf world room).Controller
                     |> Option.map (fun controller -> room, controller))
+                |> Fresh.mapOfList
+            LoadedTowers =
+                bootstrap
+                |> List.choose (fun room ->
+                    match World.loadedTowers (World.roomOf world room) with
+                    | 0 -> None
+                    | towers -> Some(room, towers))
                 |> Fresh.mapOfList
             SafeModeRunning = World.safeModeRunning world
             Crossed = transit

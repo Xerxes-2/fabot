@@ -368,10 +368,10 @@ let private glyphFor =
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
 
-/// The Threat a fighter acts on — and in an errand room a rival's claimer
-/// first (#414) — out of the ones standing in the room its Task names and
-/// passing the caller's own gate: the one nearest a Post of that room, ties by
-/// id; with no Post standing, the nearest to the fighter. None
+/// The Threat a fighter acts on out of the ones standing in the room its Task
+/// names and passing the caller's own gate: first by the kill order
+/// (`Facts.killRank`, #451), then the one nearest a Post of that room, ties
+/// by id; with no Post standing, the nearest to the fighter. None
 /// where the room holds none, or where the projection places the guard nowhere.
 ///
 /// The gate is the caller's and stands *ahead* of the choice, which narrows
@@ -410,12 +410,15 @@ let private guardTarget
 
     // In a harassment room the declared enemy's unarmed creeps are targets
     // too (#432), after its armed ones.
-    view.Hostiles
-    |> List.filter (fun h -> h.Pos.Room = room && Facts.guardShoots view residentRooms h && among h)
-    // The claimer first: it is what takes the flag or the controller.
-    |> List.sortBy (fun h ->
-        not (Facts.claimsAFlag residentRooms h), not (isArmed h), distance h, h.Id)
-    |> List.tryHead
+    match
+        view.Hostiles
+        |> List.filter (fun h ->
+            h.Pos.Room = room && Facts.guardShoots view residentRooms h && among h)
+    with
+    | [] -> None
+    | targets ->
+        let rank = Facts.killRank view room
+        targets |> List.sortBy (fun h -> rank h, distance h, h.Id) |> List.tryHead
 
 /// A Guard chooses one reachable target, melee for a guard and within three for
 /// a ranger (#411). Self-healing belongs to the
@@ -447,19 +450,47 @@ let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: strin
 /// construction or another chosen action. Each heal is counted off its
 /// patient's missing hits as it is planned, so two healers do not both pour
 /// into a wound one of them closes.
-let healReflex (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
+///
+/// A fighter that owes nothing pre-heals (#451): first an adjacent fighter of
+/// ours standing in a Reach, at full hits too, since the engine credits a heal
+/// before its death check; then the reflex above; then itself where it stands
+/// in a Reach. A wounded fighter heals itself first.
+let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPlan.Plan) =
     let healParts (creep: CreepInfo) =
         Map.tryFind Heal creep.Body |> Option.defaultValue 0
 
     let tileOf (creep: CreepInfo) =
         SpatialInfo.creepPlacementOf view.Spatial creep.Name
 
+    let inReach (creep: CreepInfo) =
+        tileOf creep
+        |> Option.exists (fun tile ->
+            Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room))
+
     let missing =
         view.Creeps
         |> List.map (fun creep -> creep.Name, creep.Hits.HitsMax - creep.Hits.Hits)
         |> Map.ofList
 
-    let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
+    // An adjacent fighter in a Reach, the deepest owed first: a pre-heal
+    // already planned leaves it owing less, so a second healer turns to
+    // another.
+    let shieldFor (healer: CreepInfo) (owed: Map<string, int>) =
+        tileOf healer
+        |> Option.bind (fun at ->
+            view.Creeps
+            |> List.filter (fun other ->
+                other.Name <> healer.Name
+                && isFighterBody other
+                && inReach other
+                && tileOf other
+                   |> Option.bind (RoomPos.range at)
+                   |> Option.exists (fun r -> r <= Engine.meleeRange))
+            |> List.sortBy (fun other -> -(Map.find other.Name owed), other.Name)
+            |> List.tryHead
+            |> Option.map (fun other -> other, Engine.meleeRange))
+
+    let woundFor (healer: CreepInfo) (owed: Map<string, int>) =
         if Map.find healer.Name owed > 0 then
             Some(healer, 0)
         else
@@ -479,6 +510,15 @@ let healReflex (view: ColonyView) (plan: Fabot.Core.IntentPlan.Plan) =
                 |> List.sortBy (fun (other, r) ->
                     (r > Engine.meleeRange), -(Map.find other.Name owed), other.Name)
                 |> List.tryHead)
+
+    // A shield is spent only by a fighter that owes nothing itself.
+    let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
+        if isFighterBody healer && Map.find healer.Name owed <= 0 then
+            shieldFor healer owed
+            |> Option.orElse (woundFor healer owed)
+            |> Option.orElse (if inReach healer then Some(healer, 0) else None)
+        else
+            woundFor healer owed
 
     ((plan, missing), view.Creeps)
     ||> List.fold (fun (plan, owed) healer ->

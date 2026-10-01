@@ -1352,6 +1352,7 @@ let private raidedBy owner (heals: int) =
                         Owner = owner
                         Pos = { Room = child; X = 5 + i; Y = 5 }
                         Body = parts
+                        Hits = Engine.partHits * List.length parts
                         TicksToLive = 1000
                     })
         })
@@ -2414,6 +2415,7 @@ let allyTests =
                         Owner = owner
                         Pos = RoomPos.at mother { X = 20; Y = 20 }
                         Body = [ RangedAttack; Heal; Move ]
+                        Hits = 300
                         TicksToLive = 1_000
                     }
 
@@ -3424,6 +3426,7 @@ let private harassHostile id owner (body: BodyPart list) : HostileInfo =
         Owner = owner
         Pos = RoomPos.at harassRoom { X = 6; Y = 6 }
         Body = body
+        Hits = Engine.partHits * List.length body
         TicksToLive = 1000
     }
 
