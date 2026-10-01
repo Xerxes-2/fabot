@@ -878,12 +878,11 @@ module Colony =
                 // question is never which room is best but **which colony
                 // can pay**, and this room's terrain is in the world already.
                 //
-                // W12S26, the seventh colony's room, is a Claim here from
-                // 2026-10-01 — **to be taken out of this list the day that
-                // Claim lands** (#404). Its chain crosses W12S27, already ours.
+                // W12S26, the seventh colony's room, was a Claim here from
+                // 2026-10-01 until it landed at t881,062 (#404).
                 Outposts =
                     (Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27"))
-                    @ [ Outpost.w11s28; Outpost.w12s26 ]
+                    @ [ Outpost.w11s28 ]
                 // The sector Reactor is six crossings away.
                 Errands = []
                 // W11S29, unclaimed at t807,948 with a spawn, forty extensions,

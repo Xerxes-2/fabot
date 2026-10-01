@@ -1310,8 +1310,8 @@ let outpostTests =
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W12S27"; "W11S28"; "W12S26" ]
-                    "the north outpost, since 2026-09-16 the west one, and since 2026-10-01 the seventh colony's room as a Claim until it lands (#404): the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
+                    [ "W12S27"; "W11S28" ]
+                    "the north outpost and, since 2026-09-16, the west one; the seventh colony's room W12S26 left this list on its Claim (t881,062, #404): the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
 
                 Expect.isFalse
                     (Colony.declared |> List.exists (fun colony -> colony.Home = "W17S25"))
@@ -1445,8 +1445,8 @@ let outpostTests =
 
                 Expect.equal
                     (Outpost.roomsProjected outposts "W12S28")
-                    [ "W12S28"; "W12S27"; "W11S28"; "W12S26" ]
-                    "so the mother's projection covers the home room and its three outposts — and W11S28 was in its scan set already, as a transit room of the chain to the nursery, which is exactly why that declaration is the cheapest tick of the three the wave-2 survey priced"
+                    [ "W12S28"; "W12S27"; "W11S28" ]
+                    "so the outposts' projection covers the home room and its two outposts (the nursery W12S26 reaches the scan set by the children clause, not this one) — and W11S28 was in its scan set already, as a transit room of the chain to the nursery, which is exactly why that declaration is the cheapest tick of the three the wave-2 survey priced"
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {
