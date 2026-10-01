@@ -1,6 +1,8 @@
 # An errand room is held by a ranged guard
 
-> **Status:** accepted
+> **Status:** accepted, amended by 0083
+
+> **Amended by 0083** (#452, #456) on 2026-10-02: a squad's kiter is guns before legs, the resident ranger keeping its interleaved `[M;M;M;R;R;H]` blocks; and "No medic row" is reversed for squads, whose medic body now exists (no row casts it until #453).
 
 > **Amended 2026-10-02** by #451: under a raid with a melee body a ranger kites (tiles within three of its target, none within two of a melee body) instead of holding the threats' ring; a raid's healer is a target, and the kill order is lowest effective hits after a claimer at the controller or Reactor; a fighter pre-heals an adjacent fighter in a Reach; and a raid no ranger size wins gets neither resident nor relief cast into it, its residents holding safe ground.
 

@@ -572,7 +572,7 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
         let armed = hostiles |> List.filter Decide.Facts.isArmed
 
         if Set.contains room rangerRooms then
-            armed |> List.exists (fun hostile -> hostile.Owner <> "Source Keeper")
+            hostiles |> List.exists Decide.Facts.isRaider
             && not (Decide.Facts.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
         else if Set.contains room outpostRooms then
             not (List.isEmpty armed)
@@ -585,7 +585,7 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
         else
             let raid =
                 if Set.contains room rangerRooms then
-                    hostiles |> List.filter (fun hostile -> hostile.Owner <> "Source Keeper")
+                    hostiles |> List.filter (Decide.Facts.isKeeper >> not)
                 else
                     hostiles
 

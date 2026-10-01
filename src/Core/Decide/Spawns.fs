@@ -411,6 +411,7 @@ let internal planSpawns
                 Casting = List.length casting
                 HaulerLoad = 0
                 HaulerDemand = []
+                Fights = []
                 Rows =
                     (filled
                      |> List.map (fun (row, alive, inOven, _) ->

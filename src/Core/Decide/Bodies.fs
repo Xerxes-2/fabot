@@ -93,6 +93,33 @@ let rangerPattern =
 /// The most whole ranger blocks one body carries under the engine's part cap.
 let rangerBlocksMost = Engine.maxBodyParts / List.length rangerPattern.Block
 
+/// The squad's melee front (`docs/research/squads.md` §4.6): one fixed
+/// body, MOVE then ATTACK, so damage lames it before it disarms it — a
+/// brawler in contact is already standing on its target. Its ATTACK strikes
+/// back at every melee that hits it. No row casts it yet.
+let brawlerPattern =
+    {
+        Name = "brawler"
+        Block = List.replicate 25 Move @ List.replicate 25 Attack
+    }
+
+/// The squad's healer: one fixed body, MOVE then HEAL, walking behind the
+/// brawler it pre-heals. No row casts it yet.
+let medicPattern =
+    {
+        Name = "medic"
+        Block = List.replicate 18 Move @ List.replicate 18 Heal
+    }
+
+/// The squad's ranged member, which out-walks melee rather than holding a
+/// ring: guns before legs, so damage disarms it before it lames it — the
+/// ranger's order reversed. 5,600, an RCL7 bank. No row casts it yet.
+let kiterPattern =
+    {
+        Name = "kiter"
+        Block = List.replicate 16 RangedAttack @ List.replicate 24 Move @ List.replicate 8 Heal
+    }
+
 /// ADR-0057
 /// The miner row: the store-less Work body over the mineral container. The
 /// block is the row's floor rather than its ratio (one Move per
@@ -484,3 +511,27 @@ let bodyFor pattern capacity =
 /// The generalist body: the worker row of the pattern table, sized to
 /// capacity.
 let workerBodyFor capacity = bodyFor workerPattern capacity
+
+/// One composition `Facts.squadWins` prices: the bodies cast together.
+type Squad =
+    {
+        Name: string
+        Members: BodyPart list list
+    }
+
+/// The compositions a raid no single body wins is priced against, cheapest
+/// first: the melee duo, the duo with a kiter, and three kiters.
+let squadCatalogue =
+    let duo = [ brawlerPattern.Block; medicPattern.Block ]
+
+    [
+        { Name = "duo"; Members = duo }
+        {
+            Name = "duo+kiter"
+            Members = duo @ [ kiterPattern.Block ]
+        }
+        {
+            Name = "3×kiter"
+            Members = List.replicate 3 kiterPattern.Block
+        }
+    ]

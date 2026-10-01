@@ -856,7 +856,9 @@ let private tileObject (tile: RoomPos) =
 
 /// The cascade's workforce arithmetic this tick, one leaf per colony
 /// beside the Layout record: `{ target, living, casting, rows: [{ row,
-/// quota, living, casting }] }`. Written every tick and read by
+/// quota, living, casting }], load, haul, fights: [{ room, ranger, squads:
+/// [{ squad, cost, stand, kite }] }] }`, `kite` null for a squad with a
+/// melee member. Written every tick and read by
 /// `observe.mjs quotas`; silence writes `rows: []` and `target 0`.
 let saveQuotas (home: string) (quotas: Quotas) =
     let o = createEmpty<obj>
@@ -902,6 +904,27 @@ let saveQuotas (home: string) (quotas: Quotas) =
                 |> List.toArray
 
             r)
+        |> List.toArray
+
+    o?fights <-
+        quotas.Fights
+        |> List.map (fun fight ->
+            let f = createEmpty<obj>
+            f?room <- fight.Room
+            f?ranger <- fight.Ranger
+
+            f?squads <-
+                fight.Squads
+                |> List.map (fun price ->
+                    let s = createEmpty<obj>
+                    s?squad <- price.Squad
+                    s?cost <- price.Cost
+                    s?stand <- price.Stand
+                    s?kite <- price.Kite |> Option.map box |> Option.defaultValue null
+                    s)
+                |> List.toArray
+
+            f)
         |> List.toArray
 
     writeColonyLeaf home "quotas" o

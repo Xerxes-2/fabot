@@ -1565,6 +1565,25 @@ if (command === "console") {
         }
       }
     }
+    // The squad exchange (#452, ADR 0083), report-only: per resident room a
+    // raid stands in, the largest ranger beside the room's towers, and each
+    // catalogue squad standing in contact and kiting (`n/a` for a squad with
+    // melee, which cannot kite). A bundle older than the leaf writes no
+    // `fights`, said as such rather than as "no raid".
+    if (!Array.isArray(stored.fights)) {
+      console.log("  fights: not recorded (a bundle older than #452)");
+    } else {
+      const yn = (b) => (b == null ? "n/a" : b ? "wins" : "loses");
+      for (const f of stored.fights) {
+        console.log(`  fight ${f.room}: the largest ranger with the towers ${yn(f.ranger)}`);
+        for (const s of f.squads ?? []) {
+          console.log(
+            `    ${String(s.squad).padEnd(9)} ${String(s.cost).padStart(6)}e  ` +
+              `standing ${yn(s.stand).padEnd(5)}  kiting ${yn(s.kite)}`,
+          );
+        }
+      }
+    }
   }
 } else if (command === "layout") {
   // ---- layout: what the Layout could not deliver ------------------------

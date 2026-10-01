@@ -393,6 +393,28 @@ type RowQuota =
         Casting: int
     }
 
+/// One catalogue squad's price against one room's raid (#452): its energy,
+/// and whether it wins standing in contact and kiting out of melee reach.
+type SquadPrice =
+    {
+        Squad: string
+        Cost: int
+        Stand: bool
+        /// None for a squad with a melee member, which cannot kite.
+        Kite: bool option
+    }
+
+/// The squad exchange beside the single-body one, for one resident room a
+/// raid stands in (#452). Report-only: nothing casts or engages off it yet.
+type FightReport =
+    {
+        Room: string
+        /// Whether the largest ranger body wins the raid alone, beside the
+        /// room's loaded towers: `Facts.outmatched`'s reading, negated.
+        Ranger: bool
+        Squads: SquadPrice list
+    }
+
 /// The tick's workforce arithmetic as the cascade saw it: the whole
 /// target, the living and casting counts it was measured against, and one
 /// `RowQuota` per row. `Rows` empty and `Target` zero is the cascade's
@@ -407,6 +429,8 @@ type Quotas =
         HaulerLoad: int
         /// The hauler quota's own arithmetic, per source container.
         HaulerDemand: HaulDemandRow list
+        /// The squad exchange, per raided resident room (#452).
+        Fights: FightReport list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -419,6 +443,7 @@ module Quotas =
             Rows = []
             HaulerLoad = 0
             HaulerDemand = []
+            Fights = []
         }
 
 /// What one tick of deciding returns: the Intents to execute, the

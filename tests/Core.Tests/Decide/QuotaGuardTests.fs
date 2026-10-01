@@ -672,6 +672,255 @@ let guardRowTests =
             }
         ]
 
+/// The raid parked on W17S25's controller at t880,341 (`docs/research/squads.md`
+/// §1.2), part for part as the replays show Trepidimous build them: MOVE
+/// first, the weapon, one MOVE last; the healers MOVE then HEAL; and the
+/// 3-CLAIM tapper. Stood in `room`.
+let private w17s25RaidIn room =
+    let melee = List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ]
+    let healer = List.replicate 11 Move @ List.replicate 7 Heal
+    let tapper = List.replicate 3 Move @ List.replicate 3 BodyPart.Claim
+
+    let at id x y body =
+        { hostileIn room { X = x; Y = y } body with
+            Id = id
+            Owner = "Trepidimous"
+        }
+
+    [
+        at "Eternity536" 26 41 melee
+        at "Prime803" 27 42 melee
+        at "Prism305" 26 40 healer
+        at "Paragon722" 27 41 healer
+        at "Rune908" 26 42 tapper
+    ]
+
+/// The t880,341 raid in the errand room, a resident room of ours.
+let private w17s25Raid =
+    { deliveryColony (Some Ownership.Ours) with
+        Hostiles = w17s25RaidIn reactorErrand.RoomName
+    }
+
+[<Tests>]
+let squadExchangeTests =
+    testList
+        "the squad exchange"
+        [
+            let room = reactorErrand.RoomName
+            // The resident we sent: 21M 14R 7H, the seven blocks 4,900 buys.
+            let r7 = bodyFor rangerPattern 4900
+            let duo = [ brawlerPattern.Block; medicPattern.Block ]
+            let trio = List.replicate 3 kiterPattern.Block
+            let wins members kite = squadWins w17s25Raid room members kite
+
+            let fight members kite =
+                squadFight w17s25Raid room members kite KillOrder
+
+            let won ticks = { Won = true; Ticks = ticks }
+
+            test "one resident R7 loses the t880,341 raid, standing or kiting" {
+                Expect.equal
+                    (wins [ r7 ] false, wins [ r7 ] true)
+                    (false, false)
+                    "140 damage against 168 heal: nothing of theirs dies"
+            }
+
+            // The tick each fight ends on: the research simulator's (`squads.md`
+            // §3.2) plus the tapper, which the kill order shoots first in a
+            // resident room as the Emitter does.
+            test "two resident R7s win it only while they kite, by about t56" {
+                Expect.equal
+                    (wins [ r7; r7 ] false, fight [ r7; r7 ] true)
+                    (false, won 56)
+                    "in contact 1,020 a tick kills both; out of reach they grind the healers down"
+            }
+
+            test "three kiters win it kiting, by about t29, and lose it standing" {
+                Expect.equal
+                    (wins trio false, fight trio true)
+                    (false, won 29)
+                    "480 damage breaks the healers, but only while the melee never land"
+            }
+
+            test "the melee duo wins it standing, healer first, by t6" {
+                Expect.equal
+                    (fight duo false)
+                    (won 6)
+                    "strike-back costs each of their melee 750 a tick, and the medic pre-heals the brawler"
+            }
+
+            test
+                "the kill order decides the fight: the R7 pair kiting wins healer first and loses melee first" {
+                Expect.equal
+                    (fight [ r7; r7 ] true,
+                     (squadFight w17s25Raid room [ r7; r7 ] true MeleeFirst).Won)
+                    (won 56, false)
+                    "280 against melee the healers top up 168 a tick does not disarm both in sixty ticks"
+            }
+
+            test
+                "the duo's order is the raid's choice: struck at the brawler, melee first ends a tick sooner" {
+                // The research loses the duo melee first only when the raid
+                // strikes our medic; this model's raid always strikes our front.
+                Expect.equal
+                    ((squadFight w17s25Raid room duo false MeleeFirst), fight duo false)
+                    (won 5, won 6)
+                    "strike-back disarms their melee whichever we shoot"
+            }
+
+            test "a trade that leaves neither side a weapon on the same tick is lost" {
+                let duel =
+                    { w17s25Raid with
+                        Hostiles = [ hostileIn room { X = 26; Y = 41 } [ Attack ] ]
+                    }
+
+                // 30 each way, and 30 more back off each other's ATTACK:
+                // both bodies fall on the second tick.
+                Expect.isFalse
+                    (squadWins duel room [ [ Attack ] ] false)
+                    "mutual destruction is not a win"
+            }
+
+            test "a Source Keeper beside the raid is no part of it" {
+                let keeper =
+                    { hostileIn room { X = 10; Y = 10 } (List.replicate 20 Attack) with
+                        Id = "keeper"
+                        Owner = "Source Keeper"
+                    }
+
+                let tapperAndKeeper =
+                    { w17s25Raid with
+                        Hostiles =
+                            keeper
+                            :: (w17s25Raid.Hostiles |> List.filter (fun h -> h.Id = "Rune908"))
+                    }
+
+                Expect.isTrue
+                    (squadWins tapperAndKeeper room [ r7 ] false)
+                    "the room selection leaves the keeper out, and so does the price"
+            }
+
+            test "a home's loaded towers fight beside the squad" {
+                let towered towers =
+                    { w17s25Raid with
+                        LoadedTowers = Map.ofList [ room, towers ]
+                    }
+
+                Expect.equal
+                    (squadWins (towered 0) room [ r7 ] true, squadWins (towered 2) room [ r7 ] true)
+                    (false, true)
+                    "two towers' 300 at the falloff range lift the lone R7's 140 over the raid's 168 heal"
+            }
+
+            test "a raid with no weapon is won by anybody, and an empty squad wins nothing armed" {
+                let tapperOnly =
+                    { w17s25Raid with
+                        Hostiles = w17s25Raid.Hostiles |> List.filter (fun h -> h.Id = "Rune908")
+                    }
+
+                Expect.isTrue
+                    (squadWins tapperOnly room [ r7 ] false)
+                    "nothing of theirs can hurt us"
+
+                Expect.isFalse (wins [] false) "nobody of ours, nobody to win it"
+            }
+
+            test "the catalogue is the duo, the duo and a kiter, and three kiters, at their costs" {
+                Expect.equal
+                    (squadCatalogue
+                     |> List.map (fun squad -> squad.Name, squad.Members |> List.sumBy bodyCost))
+                    [ "duo", 8650; "duo+kiter", 14250; "3×kiter", 16800 ]
+                    "the compositions S1 prices, cheapest first"
+            }
+
+            test
+                "the decision reports each catalogue squad beside the largest ranger, kiting priced for the all-ranged alone" {
+                let price squad cost stand kite =
+                    {
+                        Squad = squad
+                        Cost = cost
+                        Stand = stand
+                        Kite = kite
+                    }
+
+                Expect.equal
+                    (decideOn w17s25Raid).Quotas.Fights
+                    [
+                        {
+                            Room = room
+                            Ranger = false
+                            Squads =
+                                [
+                                    price "duo" 8650 true None
+                                    price "duo+kiter" 14250 true None
+                                    price "3×kiter" 16800 false (Some true)
+                                ]
+                        }
+                    ]
+                    "no ranger wins it alone; the duo wins it standing, three kiters only kiting"
+
+                Expect.isEmpty
+                    (decideOn (deliveryColony (Some Ownership.Ours))).Quotas.Fights
+                    "a quiet room reports no fight"
+            }
+
+            test "the report's ranger answer counts a home's loaded towers, as the stand-down does" {
+                // Half the raid: one melee, one healer and the tapper.
+                let half towers =
+                    { w17s25Raid with
+                        Hostiles =
+                            w17s25Raid.Hostiles
+                            |> List.filter (fun h -> h.Id <> "Prime803" && h.Id <> "Paragon722")
+                        LoadedTowers = Map.ofList [ room, towers ]
+                    }
+
+                let ranger towers =
+                    (decideOn (half towers)).Quotas.Fights |> List.map (fun f -> f.Ranger)
+
+                Expect.equal
+                    (ranger 0, ranger 2)
+                    ([ false ], [ true ])
+                    "two towers' 300 turn the largest ranger's lost exchange"
+            }
+
+            test "a harassment room's armed enemies get no fight report" {
+                let harassed = "W9N9"
+
+                let colony =
+                    { deliveryColony (Some Ownership.Ours) with
+                        Hostiles = w17s25RaidIn harassed
+                        Harass =
+                            [
+                                {
+                                    RoomName = harassed
+                                    Enemy = "Trepidimous"
+                                    Stand = RoomPos.at harassed { X = 20; Y = 20 }
+                                    Controller = RoomPos.at harassed { X = 25; Y = 25 }
+                                    Via = []
+                                    Blocks = None
+                                }
+                            ]
+                    }
+
+                Expect.isEmpty
+                    (decideOn colony).Quotas.Fights
+                    "the enemy's room and towers: no squad is priced there"
+            }
+
+            test
+                "kiting holds for a squad at least as fast as the raid's melee, with ground to kite to" {
+                let safe = Set.ofList [ RoomPos.at room { X = 10; Y = 10 } ]
+                let slow = [ RangedAttack; RangedAttack; Move ]
+
+                Expect.equal
+                    (kiteHolds w17s25Raid safe room trio,
+                     kiteHolds w17s25Raid Set.empty room trio,
+                     kiteHolds w17s25Raid safe room [ slow ])
+                    (true, false, false)
+                    "a tile a tick against their tile a tick; no safe tile, or two ticks a tile, is no kite"
+            }
+        ]
+
 [<Tests>]
 let supplyFloorTests =
     testList

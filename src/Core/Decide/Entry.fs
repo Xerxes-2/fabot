@@ -404,6 +404,7 @@ let decideUnarbitrated
             { quotas with
                 HaulerLoad = plan.HaulerLoad
                 HaulerDemand = plan.HaulerDemand
+                Fights = fightReports view threats
             }
         OutpostRooms = outposts.Declared
         Steps = steps

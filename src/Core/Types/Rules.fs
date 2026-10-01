@@ -170,10 +170,15 @@ module Engine =
     /// A tower's attack at this range: `towerHealAt`'s twin.
     let towerAttackAt (range: int) = towerPowerAt towerPowerAttack range
 
-    /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`). The
-    /// projection carries a hostile's parts and not its hits, so a raid's
-    /// durability is priced at full — the safe direction.
+    /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`).
     let partHits = 100
+
+    /// The parts of a body that still act at these hits: the engine destroys
+    /// parts from the head, so the live ones are the tail its hits still
+    /// cover, a part with any hit left counting whole.
+    let liveParts (body: BodyPart list) (hits: int) : BodyPart list =
+        let live = (hits + partHits - 1) / partHits
+        body |> List.skip (max 0 (List.length body - live))
 
     /// The most guard **bodies** one guarded room ever buys: where "hire
     /// another" stops. Each is sized to win the exchange alone, up to what the

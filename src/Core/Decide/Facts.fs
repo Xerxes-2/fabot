@@ -199,6 +199,13 @@ let internal weaponRange (hostile: HostileInfo) : int option = HostileInfo.weapo
 /// `HostileInfo.isArmed`, likewise.
 let internal isArmed (hostile: HostileInfo) : bool = HostileInfo.isArmed hostile
 
+/// Whether a hostile is a Source Keeper: the room's own NPC, never a raid.
+let internal isKeeper (hostile: HostileInfo) : bool = hostile.Owner = "Source Keeper"
+
+/// Whether a hostile raids a resident room: armed, and not a Source Keeper.
+let internal isRaider (hostile: HostileInfo) : bool =
+    isArmed hostile && not (isKeeper hostile)
+
 /// Whether a projected target stands in a room this player owns, which is how
 /// every rule of the season's ore answers "is this ours?" (#261, #311).
 /// `FIND_MINERALS`, `FIND_STRUCTURES` and `FIND_DROPPED_RESOURCES` all carry
@@ -330,6 +337,30 @@ type KillRank =
         EffectiveHits: int
     }
 
+/// What one target's band in the kill order is read off: what it is, and the
+/// heal and our damage that reach it this tick.
+[<Struct>]
+type private KillFacts =
+    {
+        ClaimsAFlag: bool
+        RaidHealer: bool
+        Armed: bool
+        HealOn: int
+        DamageOn: int
+    }
+
+/// One target's band in the kill order: the one rule the Emitter's live order
+/// (`killRank`) and `squadFight`'s simulated one share.
+let private killTier (target: KillFacts) =
+    if target.ClaimsAFlag then
+        Claimer
+    elif target.RaidHealer && target.DamageOn > target.HealOn then
+        BrokenHealer
+    elif target.Armed || target.RaidHealer then
+        Raid
+    else
+        Bystander
+
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's
 /// melee guard) the raid first and nothing more.
@@ -375,14 +406,17 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
         fun hostile ->
             let heal = healOn hostile
             let damage = damageOn hostile
-            let healer = raidHealer view hostile
 
             {
                 Tier =
-                    if claimsAFlag resident hostile then Claimer
-                    elif healer && damage > heal then BrokenHealer
-                    elif isArmed hostile || healer then Raid
-                    else Bystander
+                    killTier
+                        {
+                            ClaimsAFlag = claimsAFlag resident hostile
+                            RaidHealer = raidHealer view hostile
+                            Armed = isArmed hostile
+                            HealOn = heal
+                            DamageOn = damage
+                        }
                 EffectiveHits = hostile.Hits + heal - damage
             }
 
@@ -460,21 +494,300 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     blocksBeat rangerPattern.Block 0 view room blocks
 
+/// What a room's loaded towers land a tick on one target, priced at the
+/// falloff range: a raised home's, beside whatever body of ours fights there.
+let private towerDamageIn (view: ColonyView) (room: string) =
+    let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
+    towers * Engine.towerAttackAt Engine.towerFalloffRange
+
 /// Whether no ranger body of any size wins the raid standing in a room alone
 /// (#451): a raid the ranger row casts nobody into, and the residents already
 /// there hold the room's safe ground against. A raised home's loaded towers
 /// fight beside it, priced at the falloff range.
 let internal outmatched (view: ColonyView) (room: string) : bool =
-    let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
+    not (blocksBeat rangerPattern.Block (towerDamageIn view room) view room rangerBlocksMost)
 
-    not (
-        blocksBeat
-            rangerPattern.Block
-            (towers * Engine.towerAttackAt Engine.towerFalloffRange)
-            view
-            room
-            rangerBlocksMost
-    )
+/// One body in `squadFight`: its parts, head first, and the hits it has
+/// left, which is the engine's whole account of which parts still act.
+[<Struct>]
+type private Combatant =
+    {
+        Parts: BodyPart list
+        Left: int
+        /// Its hits whole: the cap on its heal.
+        Full: int
+        /// A rival's CLAIM body in a resident room: the kill order's first band.
+        Claims: bool
+    }
+
+/// The longest fight `squadFight` plays out: one not won in sixty ticks is
+/// not won.
+let private squadTicksMost = 60
+
+/// The most bodies, both sides together, `squadFight` prices; a bigger field
+/// is priced lost.
+let private squadBodiesMost = 10
+
+/// Whom our side shoots in `squadFight`: the kill order the Emitter plays
+/// (`killTier`), or the raid's armed bodies ahead of its healers — the order
+/// the research priced the duo losing with, kept to show the order matters.
+type SquadAim =
+    | KillOrder
+    | MeleeFirst
+
+/// How a squad fight ends: whether we hold a weapon when the raid holds
+/// none, and the tick it is decided on.
+type SquadFight = { Won: bool; Ticks: int }
+
+/// What one combatant's live parts do this tick, counted once: the ATTACK,
+/// RANGED_ATTACK and HEAL parts its hits still cover.
+[<Struct>]
+type private Strength = { Swings: int; Shots: int; Heals: int }
+
+let private strengthOf (c: Combatant) : Strength =
+    let none = { Swings = 0; Shots = 0; Heals = 0 }
+
+    if c.Left <= 0 then
+        none
+    else
+        Engine.liveParts c.Parts c.Left
+        |> List.fold
+            (fun s part ->
+                match part with
+                | Attack -> { s with Swings = s.Swings + 1 }
+                | RangedAttack -> { s with Shots = s.Shots + 1 }
+                | Heal -> { s with Heals = s.Heals + 1 }
+                | _ -> s)
+            none
+
+let private armedWith (s: Strength) = s.Swings > 0 || s.Shots > 0
+
+/// The kill order's bands as numbers, first band smallest.
+let private bandOf =
+    function
+    | Claimer -> 0
+    | BrokenHealer -> 1
+    | Raid -> 2
+    | Bystander -> 3
+
+/// One side's heal this tick, given the damage each of its bodies takes:
+/// each healer in turn pre-heals the body most threatened — the damage
+/// coming plus the hits already missing, less the heal already given it —
+/// all heal adjacent. A body that swings this tick heals nothing, its attack
+/// suppressing its heal.
+let private healsOf
+    (side: Combatant array)
+    (strength: Strength array)
+    (incoming: int array)
+    (swung: bool array)
+    =
+    let n = Array.length side
+    let given = Array.zeroCreate n
+
+    let need j =
+        incoming[j] + side[j].Full - side[j].Left - given[j]
+
+    for i in 0 .. n - 1 do
+        let power = Engine.healPower * strength[i].Heals
+
+        if side[i].Left > 0 && power > 0 && not swung[i] then
+            let mutable best = -1
+
+            for j in 0 .. n - 1 do
+                if side[j].Left > 0 && (best < 0 || need j > need best) then
+                    best <- j
+
+            if best >= 0 && need best > 0 then
+                given[best] <- given[best] + power
+
+    given
+
+/// ADR-0083
+/// How this squad, cast whole and arriving together, fights the raid standing
+/// in one room, beside the room's loaded towers: the bounded simulation the
+/// ADR describes, on start-of-tick parts. Our fire re-picks the kill order's
+/// head each tick as the Emitter does, with no lock: every body reaching
+/// every body, effective hits order as hits do, so the target we hurt stays
+/// the head unless a band above it opens. Source Keepers are no part of it.
+let squadFight
+    (view: ColonyView)
+    (room: string)
+    (members: BodyPart list list)
+    (kite: bool)
+    (aim: SquadAim)
+    : SquadFight =
+    let resident = residentRooms view
+
+    let combatant parts hits claims =
+        {
+            Parts = parts
+            Left = hits
+            Full = Engine.partHits * List.length parts
+            Claims = claims
+        }
+
+    let raid =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room && not (isKeeper h))
+        |> List.map (fun h -> combatant h.Body h.Hits (claimsAFlag resident h))
+        |> Array.ofList
+
+    let ours =
+        members
+        |> List.map (fun body -> combatant body (Engine.partHits * List.length body) false)
+        |> Array.ofList
+
+    let towers = towerDamageIn view room
+
+    let melee (s: Strength) =
+        if kite then 0 else Engine.attackPower * s.Swings
+
+    let shot (s: Strength) =
+        melee s + Engine.rangedAttackPower * s.Shots
+
+    let bandFor (c: Combatant) (s: Strength) raidHeal ourDamage =
+        let armed = armedWith s
+
+        match aim with
+        | KillOrder ->
+            bandOf (
+                killTier
+                    {
+                        ClaimsAFlag = c.Claims
+                        RaidHealer = s.Heals > 0 && not armed
+                        Armed = armed
+                        HealOn = raidHeal
+                        DamageOn = ourDamage
+                    }
+            )
+        | MeleeFirst ->
+            if c.Claims then 0
+            elif armed then 1
+            else 2
+
+    // The kill order's head: band, then hits, then the first standing.
+    let targetOf (raid: Combatant array) (raidS: Strength array) raidHeal ourDamage =
+        let mutable best = -1
+        let mutable bestBand = 0
+
+        for i in 0 .. Array.length raid - 1 do
+            if raid[i].Left > 0 then
+                let band = bandFor raid[i] raidS[i] raidHeal ourDamage
+
+                if
+                    best < 0 || band < bestBand || band = bestBand && raid[i].Left < raid[best].Left
+                then
+                    best <- i
+                    bestBand <- band
+
+        best
+
+    // The raid's front: our first standing body with ATTACK, else our lowest.
+    let frontOf (ours: Combatant array) (oursS: Strength array) =
+        let mutable brawler = -1
+        let mutable lowest = -1
+
+        for i in 0 .. Array.length ours - 1 do
+            if ours[i].Left > 0 then
+                if brawler < 0 && oursS[i].Swings > 0 then
+                    brawler <- i
+
+                if lowest < 0 || ours[i].Left < ours[lowest].Left then
+                    lowest <- i
+
+        if brawler >= 0 then brawler else lowest
+
+    let settle (side: Combatant array) (strength: Strength array) (damage: int array) =
+        let swung = strength |> Array.map (fun s -> melee s > 0)
+        let heal = healsOf side strength damage swung
+
+        side
+        |> Array.mapi (fun i c ->
+            if c.Left <= 0 then
+                c
+            else
+                { c with
+                    Left = min c.Full (c.Left - damage[i] + heal[i]) |> max 0
+                })
+
+    let tick (ours: Combatant array) oursS (raid: Combatant array) raidS =
+        let toOurs = Array.zeroCreate (Array.length ours)
+        let toRaid = Array.zeroCreate (Array.length raid)
+        let raidHeal = raidS |> Array.sumBy (fun s -> Engine.healPower * s.Heals)
+        let ourDamage = towers + (oursS |> Array.sumBy shot)
+        let target = targetOf raid raidS raidHeal ourDamage
+        toRaid[target] <- toRaid[target] + ourDamage
+
+        if not kite then
+            for i in 0 .. Array.length ours - 1 do
+                if oursS[i].Swings > 0 then
+                    toOurs[i] <- toOurs[i] + Engine.attackPower * raidS[target].Swings
+
+        let front = frontOf ours oursS
+        toOurs[front] <- toOurs[front] + (raidS |> Array.sumBy shot)
+
+        if not kite then
+            for i in 0 .. Array.length raid - 1 do
+                if raidS[i].Swings > 0 then
+                    toRaid[i] <- toRaid[i] + Engine.attackPower * oursS[front].Swings
+
+        settle ours oursS toOurs, settle raid raidS toRaid
+
+    // Ours asked first: a trade that disarms both sides on one tick is lost.
+    let rec fight t ours raid =
+        let oursS = Array.map strengthOf ours
+        let raidS = Array.map strengthOf raid
+
+        if not (Array.exists armedWith oursS) || t >= squadTicksMost then
+            { Won = false; Ticks = t }
+        elif not (Array.exists armedWith raidS) then
+            { Won = true; Ticks = t }
+        else
+            let ours, raid = tick ours oursS raid raidS
+            fight (t + 1) ours raid
+
+    if Array.length ours + Array.length raid <= squadBodiesMost then
+        fight 0 ours raid
+    else
+        { Won = false; Ticks = 0 }
+
+/// Whether this squad wins the raid in one room (`squadFight`, the kill
+/// order's aim). Report-only until muster (#453).
+let squadWins (view: ColonyView) (room: string) (members: BodyPart list list) (kite: bool) : bool =
+    (squadFight view room members kite KillOrder).Won
+
+/// Whether this squad can keep out of the raid's melee reach for the whole
+/// fight (`docs/research/squads.md` §4.8): no member carries ATTACK, the
+/// slowest walks a plain tile at least as fast as the raid's fastest melee,
+/// and `safe`, the room's ground no Threat reaches, is not empty.
+let kiteHolds
+    (view: ColonyView)
+    (safe: Set<RoomPos>)
+    (room: string)
+    (members: BodyPart list list)
+    : bool =
+    // Whole ticks a plain tile takes: a MOVE pays off two fatigue a tick, and
+    // every other part makes two.
+    let plainTicks (body: BodyPart list) =
+        let factor = Grid.emptyFactorOf body
+
+        if factor.MoveParts = 0 then
+            System.Int32.MaxValue
+        else
+            max 1 ((factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts)
+
+    let raidMelee =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room && not (isKeeper h))
+        |> List.map (fun h -> Engine.liveParts h.Body h.Hits)
+        |> List.filter (List.contains Attack)
+
+    not (Set.isEmpty safe)
+    && not (List.isEmpty members)
+    && members |> List.forall (List.contains Attack >> not)
+    && (List.isEmpty raidMelee
+        || (members |> List.map plainTicks |> List.max)
+           <= (raidMelee |> List.map plainTicks |> List.min))
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there
@@ -485,8 +798,7 @@ let internal errandRoomsRaided (view: ColonyView) : Set<string> =
     view.Hostiles
     |> List.filter (fun hostile ->
         Set.contains hostile.Pos.Room rooms
-        && hostile.Owner <> "Source Keeper"
-        && (isArmed hostile || List.contains BodyPart.Claim hostile.Body))
+        && (isRaider hostile || claimsAFlag rooms hostile))
     |> List.map (fun hostile -> hostile.Pos.Room)
     |> Set.ofList
 

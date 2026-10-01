@@ -1,6 +1,8 @@
 # A mother guards a child's home its towers cannot hold
 
-> **Status:** accepted
+> **Status:** accepted, amended by 0083
+
+> **Amended by 0083** (#452) on 2026-10-02: once muster exists (#453), a defended home whose raid no single body wins is answered by the catalogue's cheapest winning squad, not by `Engine.guardCap` bodies of the size that would win alone; where no squad wins, the stand-down and safe mode stand.
 
 > **Accepted 2026-09-29** on #428, under a live threat: a Trepidimous squad (`18M17A` and two `11M7H`, 168 heal a tick) staged two rooms from W17S29, an RCL4 child with one tower and safe mode on cooldown.
 

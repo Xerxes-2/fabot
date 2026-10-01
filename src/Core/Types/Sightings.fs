@@ -65,16 +65,9 @@ module HostileInfo =
     let healing (hostile: HostileInfo) : int =
         Engine.healPower * partCountIn hostile.Body Heal
 
-    /// How many of one part still act: the engine destroys parts from the
-    /// head of the body, so the live ones are the tail its hits still cover,
-    /// a part with any hit left counting whole.
+    /// How many of one part still act (`Engine.liveParts`).
     let activeCount (hostile: HostileInfo) (part: BodyPart) : int =
-        let live = (hostile.Hits + Engine.partHits - 1) / Engine.partHits
-
-        hostile.Body
-        |> List.skip (max 0 (List.length hostile.Body - live))
-        |> List.filter ((=) part)
-        |> List.length
+        partCountIn (Engine.liveParts hostile.Body hostile.Hits) part
 
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither

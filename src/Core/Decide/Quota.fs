@@ -423,6 +423,43 @@ let internal rangerBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : in
     | [] -> view.Tuning.RangerResidentBlocks
     | blocks -> List.max blocks
 
+/// The squad exchange beside the single-body one, for `observe quotas` alone
+/// (#452): per resident room a raider stands in, whether the largest ranger
+/// wins it beside the room's towers (`outmatched`'s reading), and what each
+/// catalogue squad does standing and, for an all-ranged one, kiting. A
+/// harassment room is the enemy's, under its towers, and is not priced.
+let internal fightReports (view: ColonyView) (threats: Threats) : FightReport list =
+    let rooms = residentRooms view
+
+    view.Hostiles
+    |> List.filter (fun hostile -> Set.contains hostile.Pos.Room rooms && isRaider hostile)
+    |> List.map (fun hostile -> hostile.Pos.Room)
+    |> List.distinct
+    |> List.sort
+    |> List.map (fun room ->
+        let safe = Threats.safeIn threats room
+
+        {
+            Room = room
+            Ranger = not (outmatched view room)
+            Squads =
+                squadCatalogue
+                |> List.map (fun squad ->
+                    {
+                        Squad = squad.Name
+                        Cost = List.sumBy bodyCost squad.Members
+                        Stand = squadWins view room squad.Members false
+                        Kite =
+                            if squad.Members |> List.exists (List.contains Attack) then
+                                None
+                            else
+                                Some(
+                                    kiteHolds view safe room squad.Members
+                                    && squadWins view room squad.Members true
+                                )
+                    })
+        })
+
 /// Whether a fighting row is filled — every body it wants standing or in an
 /// oven. Read by the reserver row. Counted over every living body of the row
 /// and not the census less its expiring ones: a fighter inside its lead still

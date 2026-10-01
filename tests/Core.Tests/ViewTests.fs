@@ -2795,7 +2795,7 @@ let errandTests =
 
                 Expect.isNone
                     (Map.tryFind reactor blind.Spatial.Owners)
-                    "absent the tick the relay gaps, which the act reads as *not ours* (ADR 0004)"
+                    "absent the tick the relay gaps, which the act reads as *not ours*"
             }
 
             test "the errand is projected by the colony that declares it and by no other" {

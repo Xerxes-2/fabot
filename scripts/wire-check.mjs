@@ -873,7 +873,47 @@ wire("quotas: silence writes the shape observe.mjs destructures", async () => {
 
   assert.equal(
     stable(globalThis.Memory.fabot.observe.colonies[home].quotas),
-    stable({ target: 0, living: 0, casting: 0, rows: [], load: 0, haul: [] }),
+    stable({ target: 0, living: 0, casting: 0, rows: [], load: 0, haul: [], fights: [] }),
+  );
+});
+
+wire("quotas: a fight row writes the room, the ranger answer and each squad's price, kite null for melee", async () => {
+  const { saveQuotas } = await import(MODULE);
+  const { QuotasModule_silent, Quotas, FightReport, SquadPrice } = await import(
+    "../build/fable/Core/Types/Verdicts.js"
+  );
+  const { ofArray } = await import(LIST);
+  const s = QuotasModule_silent;
+  const fight = new FightReport(
+    "W17S25",
+    false,
+    ofArray([new SquadPrice("duo", 8650, true, undefined), new SquadPrice("3×kiter", 16800, false, true)]),
+  );
+  const quotas = new Quotas(
+    s.Target,
+    s.Living,
+    s.Casting,
+    s.Rows,
+    s.HaulerLoad,
+    s.HaulerDemand,
+    ofArray([fight]),
+  );
+
+  globalThis.Memory = memoryWith("quotas", undefined);
+  saveQuotas(home, quotas);
+
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.colonies[home].quotas.fights),
+    stable([
+      {
+        room: "W17S25",
+        ranger: false,
+        squads: [
+          { squad: "duo", cost: 8650, stand: true, kite: null },
+          { squad: "3×kiter", cost: 16800, stand: false, kite: true },
+        ],
+      },
+    ]),
   );
 });
 

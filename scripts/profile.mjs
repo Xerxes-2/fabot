@@ -46,8 +46,18 @@
 //            entry, the priced three-hop chain (ADR 0059) or the
 //            `Reclaim` Task at the end of it. ADR 0056's rule, one
 //            programme further on.
+//   siege    `pair`, with the raid Trepidimous parked on W17S25's
+//            controller at t880,341 (`docs/research/squads.md` §1.2:
+//            2 × 18M17A, 2 × 11M7H and a 3-CLAIM tapper) standing on the
+//            child's: a raised home under a raid no ranger wins. The
+//            kill order, the kite ground, the safe-mode reflex, the
+//            resident stand-down and the squad exchange (ADR 0083) are
+//            paths no other scenario's ms include. The child is in its
+//            bootstrap window rather than a spawnless nursery, because
+//            this harness furnishes a home off its spawn; every raised
+//            home is read by the same rules.
 //
-// The two scenarios that stand an outpost — `outpost` and `pair` — also
+// The scenarios that stand an outpost — `outpost`, `pair` and `siege` — also
 // take `--raided`, which puts one armed hostile in the first of them: the
 // engine's own `smallMelee`, standing beside that room's rock. Until it
 // there was no hostile anywhere in this harness, so `Threats.Safe`, Flee
@@ -96,16 +106,16 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { report as cpuReport } from "./cpu-trigger.mjs";
 
-const SCENARIOS = ["stub", "outpost", "young", "pair", "reactor"];
+const SCENARIOS = ["stub", "outpost", "young", "pair", "reactor", "siege"];
 // The scenarios `--raided` means anything for: a raid stands in an outpost,
-// and these are the two that furnish one. Refused elsewhere rather than
+// and these are the ones that furnish one. Refused elsewhere rather than
 // quietly ignored — a flag that named no hostile and printed no raid would
 // have a reader comparing an ordinary run against itself and calling it the
 // cost of a raid.
-const RAIDABLE = ["outpost", "pair"];
+const RAIDABLE = ["outpost", "pair", "siege"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
-  " [--scenario stub|outpost|young|pair|reactor] [--level 1..8] [--raided]" +
+  " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -128,7 +138,7 @@ const USAGE =
 // the scenario itself asks `Tuning` for the level its mine stands at, so a
 // default left behind by a change to that field costs the run its mine and the
 // `mine` block reports which of the two rooms was measured.
-const DEFAULT_LEVEL = { stub: 5, outpost: 5, young: 1, pair: 2, reactor: 6 };
+const DEFAULT_LEVEL = { stub: 5, outpost: 5, young: 1, pair: 2, reactor: 6, siege: 2 };
 
 // The mother's level in the `pair` scenario. Pinned rather than flagged:
 // ADR 0052's scenario is "an RCL5 mother with a bootstrapping child", and
@@ -2801,6 +2811,74 @@ function buildYoungWorld() {
   };
 }
 
+// The raid of `docs/research/squads.md` §1.2, part for part as the replays
+// show Trepidimous build it: MOVE first, the weapon, one MOVE last; the
+// healers MOVE then HEAL; and the tapper. Named as the t880,341 snapshot
+// named them.
+const SIEGE_MELEE = [...Array(17).fill("move"), ...Array(17).fill("attack"), "move"];
+const SIEGE_HEALER = [...Array(11).fill("move"), ...Array(7).fill("heal")];
+const SIEGE_TAPPER = [...Array(3).fill("move"), ...Array(3).fill("claim")];
+const SIEGE = [
+  ["Eternity536", SIEGE_MELEE],
+  ["Prime803", SIEGE_MELEE],
+  ["Prism305", SIEGE_HEALER],
+  ["Paragon722", SIEGE_HEALER],
+  ["Rune908", SIEGE_TAPPER],
+];
+const SIEGE_OWNER = "Trepidimous";
+
+// Stand the siege on a furnished home: each body on the nearest free tile to
+// the controller, as the raid parked a 2×2 block around it, and into the
+// room's FIND_HOSTILE_CREEPS table. Each tile joins the home's claimed sets
+// first, so the garrison is stood beside the block and not under it.
+function furnishSiege(home, register) {
+  const origin = home.capture.controller.pos;
+  const hostiles = SIEGE.map(([name, body]) => {
+    const pos = nearestFree(home.capture, origin, new Set([...home.taken, ...home.occupied]));
+    home.taken.add(keyOf(pos));
+    home.occupied.add(keyOf(pos));
+    return register({
+      id: `siege-${name}`,
+      name,
+      owner: { username: SIEGE_OWNER },
+      pos,
+      body: body.map((type) => ({ type })),
+      hits: body.length * 100,
+      ticksToLive: CREEP_LIFE_TIME,
+    });
+  });
+  home.finds[103].push(...hostiles);
+  return hostiles;
+}
+
+// What the siege did, read off the bundle's own Memory as `printRaid` reads
+// its raid: the hostiles, and each colony's squad exchange as the `quotas`
+// leaf wrote it (#452) — so a run that never reached the exchange says so.
+function printSiege(world) {
+  if (!world.siege) return;
+  const { room, hostiles } = world.siege;
+  console.log(
+    `\nsiege — ${room} holds ${SIEGE_OWNER}'s t880,341 raid at ` +
+      `${hostiles.map((h) => `${h.name} ${keyOf(h.pos)}`).join(", ")}`,
+  );
+  const colonies = globalThis.Memory?.fabot?.observe?.colonies ?? {};
+  const reports = Object.entries(colonies).flatMap(([home, leaves]) =>
+    (leaves?.quotas?.fights ?? []).map((fight) => ({ home, fight })),
+  );
+  if (reports.length === 0) {
+    console.log("  squad exchange: no colony reported a fight, so this run never priced one");
+  }
+  for (const { home, fight } of reports) {
+    const verdict = (b) => (b == null ? "n/a" : b ? "wins" : "loses");
+    console.log(
+      `  ${home} prices ${fight.room}: the largest ranger with the towers ${verdict(fight.ranger)}; ` +
+        fight.squads
+          .map((s) => `${s.squad} standing ${verdict(s.stand)}, kiting ${verdict(s.kite)}`)
+          .join("; "),
+    );
+  }
+}
+
 // Two colonies in one tick, which is what every live tick has been since
 // W13S28's spawn stood (ADR 0047, #191): the mother W12S28 with her one
 // declared outpost, and the child W13S28 bootstrapping beside her. What
@@ -2809,7 +2887,7 @@ function buildYoungWorld() {
 // over each, the mother projecting the child's room as a bootstrap layer
 // while it is under `Tuning.BootstrapLevel` (#192), and the report prices
 // each colony's `decide` on its own row.
-function buildPairWorld() {
+function buildPairWorld({ siege = false } = {}) {
   const { byId, register, structure } = worldRegistry();
 
   const motherCapture = loadCapture(HOME_ROOM);
@@ -2850,6 +2928,7 @@ function buildPairWorld() {
     furnishOutpost(capture, register, structure, RAIDED && i === 0, HOME_ROOM),
   );
   const raid = raidOf(outpostRooms);
+  const siegeHostiles = siege ? furnishSiege(child, register) : [];
 
   // The crew the bundle does not hire, on the mother's side alone: one
   // hauler per outpost container, standing the far end of a round trip
@@ -2970,6 +3049,9 @@ function buildPairWorld() {
     creeps,
     byId,
     raid,
+    siege: siegeHostiles.length
+      ? { room: childCapture.name, hostiles: siegeHostiles }
+      : null,
     perturb: pavingPerturbation({
       spare,
       structures: mother.finds[107],
@@ -3964,6 +4046,7 @@ const WORLDS = {
   young: buildYoungWorld,
   pair: buildPairWorld,
   reactor: buildReactorWorld,
+  siege: () => buildPairWorld({ siege: true }),
 };
 
 const buildWorld = () => WORLDS[scenario]();
@@ -5341,6 +5424,7 @@ const classes = CENSUS_EVERY
 printReport(classes, pooled, world, ticks.all);
 printDecideByColony(classes, decideMs, fullMs, lightMs, stages);
 printRaid(world);
+printSiege(world);
 printHeldRepair(heldRepair);
 printReactor(world, seeded);
 

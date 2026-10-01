@@ -15,6 +15,7 @@ npm run profile -- --scenario young            # one colony at RCL1, on a 300 ba
 npm run profile -- --scenario pair             # an RCL5 mother and her child
 npm run profile -- --scenario outpost --raided # one raider in the first outpost
 npm run profile -- --scenario reactor          # the season's programme: a mine and an errand
+npm run profile -- --scenario siege            # pair, with t880,341's raid on the child's controller
 npm run profile -- --level 4                   # build the colony at another RCL
 ```
 
@@ -63,6 +64,7 @@ never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 | `young`   | `W13S28` alone as a colony at RCL1 on a 300 bank: two source containers, nothing else built (no road, rampart or buffer below `Colony.bootstrapLevel`)                                                     | RCL1          |
 | `pair`    | the shape of the tick the live bot runs (ADR 0047, ADR 0052): the mother `W12S28` at RCL5 with outpost `W12S27`, and the child `W13S28` bootstrapping with its own Spawn2 at `16,12`; prints a `decide by colony` table | child RCL2    |
 | `reactor` | the season's programme (ADR 0057, ADR 0060): the third colony `W15S28` at RCL6 with its Thorium deposit dug — a standing extractor, the mine container on its Seat and a pile on the mine post — and the sector Reactor in `W15S25` declared as an **errand** three crossings out, by `W15S27` and the Source Keeper room `W15S26`, with the re-claimer standing on the reactor's own ring; prints an `errand` block and a `mine` block | RCL6          |
+| `siege`   | `pair`, with the raid Trepidimous parked on W17S25's controller at t880,341 (`docs/research/squads.md` §1.2: 2 × 18M17A, 2 × 11M7H, a 3-CLAIM tapper) standing on the child's: a raised home under a raid no ranger wins — kill order, kite ground, safe-mode reflex, resident stand-down and the squad exchange (ADR 0083); prints a `siege` block with each colony's squad prices. A bootstrapping child rather than a spawnless nursery, read by the same raised-home rules | child RCL2 |
 
 The levels are the shape being profiled and not today's live RCL — the live
 pair passed RCL6 on ADR 0055's move. What every scenario standing a declared
