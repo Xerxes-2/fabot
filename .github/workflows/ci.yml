@@ -44,14 +44,10 @@ jobs:
       - name: Install npm dependencies
         run: nix develop -c npm ci --no-audit --no-fund
 
-      - name: Format check
-        run: nix develop -c npm run format:check
-
-      - name: ADR check
-        run: bash scripts/adr-check.sh
-
+      # The local gate whole: format check, ADR gate, dotnet test and the wire
+      # gate (scripts/wire-check.mjs), which dotnet test cannot see.
       - name: Test
-        run: nix develop -c dotnet test
+        run: nix develop -c npm test
 
       - name: Build bundle
         run: nix develop -c npm run build

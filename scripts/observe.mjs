@@ -40,6 +40,31 @@
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
 //                                       bounded window is the only one-shot read
+//   observe.mjs cpu [--all]             the last 20 rows of the CPU line, or
+//                                       every row with --all; the summaries
+//                                       always read the whole window
+//   observe.mjs eval '<expr>' [--seconds N]
+//                                       run an expression in the game console
+//                                       and print what it echoes back (wait at
+//                                       most N seconds, default 10)
+//   observe.mjs room <name> [--json]    a room as the API sees it now: owner,
+//                                       controller, structures by type, and
+//                                       every creep by owner with its action
+//   observe.mjs wait --ticks N          return once N game ticks have passed
+//                                       (gives up after 20 minutes)
+//   observe.mjs health [--colony <home>] [--samples K]
+//                                       one line per anomaly after a deploy:
+//                                       idle creeps, creeps that did not move
+//                                       over K position samples, creeps outside
+//                                       their colony's rooms, stand-downs,
+//                                       standing breaches, and the CPU split
+//   observe.mjs history <room> <tick> [--json]
+//                                       the room-history replay at that tick:
+//                                       objects by type and owner, and every
+//                                       actionLog entry of the tick
+//   observe.mjs probe [--json]          read Memory.__probe written by a bundle
+//                                       `scripts/probe.mjs` wrapped: ms/tick and
+//                                       calls/tick per colony:function
 // Every read takes --json to emit the raw stored structure for jq.
 //
 // `raids`, `outposts`, `layout`, `quotas` and `breaches` are one colony's
@@ -49,56 +74,85 @@
 // `Colony.declared`, so "first" is the first home the bot wrote a leaf for,
 // which is declaration order because the loop writes in it.
 import { connect, fail } from "./screeps-api.mjs";
-import { report as cpuReport } from "./cpu-trigger.mjs";
+import { gunzipSync } from "node:zlib";
+import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
   "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
   "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | " +
   "breaches [--colony <home>] [--json] | " +
-  "reactor [--json] | cpu [--json] | " +
+  "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
-  "console --seconds N";
+  "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
+  "wait --ticks N | health [--colony <home>] [--samples K] | " +
+  "history <room> <tick> [--json] | probe [--json]";
 
 const rawArgs = process.argv.slice(2);
 const json = rawArgs.includes("--json");
+const all = rawArgs.includes("--all");
 
-// Pull --seconds N and --colony <home> out wherever they stand; what
-// remains is positional.
-let seconds;
-let colonyArg;
+// Pull the valued flags out wherever they stand; what remains is positional.
+// A flag's value is whatever follows it, so a flag at the end, or one in
+// front of another flag, is caught below rather than read as a default.
+const VALUED = ["--seconds", "--colony", "--ticks", "--samples"];
+const flags = {};
 const args = [];
 for (let i = 0; i < rawArgs.length; i++) {
-  if (rawArgs[i] === "--json") continue;
-  if (rawArgs[i] === "--seconds") {
-    seconds = Number(rawArgs[++i]);
-  } else if (rawArgs[i] === "--colony") {
-    colonyArg = rawArgs[++i];
+  if (rawArgs[i] === "--json" || rawArgs[i] === "--all") continue;
+  if (VALUED.includes(rawArgs[i])) {
+    flags[rawArgs[i]] = rawArgs[++i];
   } else {
     args.push(rawArgs[i]);
   }
 }
+const seconds = flags["--seconds"] === undefined ? undefined : Number(flags["--seconds"]);
+const colonyArg = flags["--colony"];
 const [command, ...rest] = args;
 // timeline's one positional is a creep name; verbose's are an action and a name.
 const creepArg = rest[0];
 const [action, actionName] = rest;
 
-if (
-  ![
-    "tasks",
-    "timeline",
-    "raids",
-    "outposts",
-    "layout",
-    "quotas",
-    "breaches",
-    "reactor",
-    "cpu",
-    "verbose",
-    "console",
-  ].includes(command)
-)
-  fail(usage);
+// Which flags each command takes; any other flag is a usage error, so a
+// typo never runs a command that silently ignored what was asked of it.
+const ACCEPTS = {
+  tasks: ["--json"],
+  timeline: ["--json"],
+  raids: ["--colony", "--json"],
+  outposts: ["--colony", "--json"],
+  layout: ["--colony", "--json"],
+  quotas: ["--colony", "--json"],
+  breaches: ["--colony", "--json"],
+  reactor: ["--json"],
+  cpu: ["--json", "--all"],
+  verbose: ["--json"],
+  console: ["--seconds"],
+  eval: ["--seconds"],
+  room: ["--json"],
+  wait: ["--ticks"],
+  health: ["--colony", "--samples"],
+  history: ["--json"],
+  probe: ["--json"],
+};
+
+if (!Object.hasOwn(ACCEPTS, command ?? "")) fail(usage);
+for (const flag of [...VALUED, "--json", "--all"]) {
+  if (rawArgs.includes(flag) && !ACCEPTS[command].includes(flag)) fail(usage);
+}
+for (const flag of VALUED) {
+  if (rawArgs.includes(flag) && (flags[flag] === undefined || flags[flag].startsWith("--"))) {
+    fail(
+      flag === "--colony"
+        ? "--colony needs a home room name, e.g. --colony W12S28"
+        : `${flag} needs a value, e.g. ${flag} 5`,
+    );
+  }
+}
+const positiveInt = (flag) => {
+  const n = Number(flags[flag]);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+
 if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
   if (!["add", "remove", "clear"].includes(action)) fail(usage);
@@ -107,20 +161,43 @@ if (command === "verbose" && action !== undefined) {
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
 }
-if (command !== "console" && seconds !== undefined) fail(usage);
-// The colony-keyed commands are exactly the channels that split by home
-// (ADR 0047); anywhere else the flag would name a colony nothing reads.
-if (rawArgs.includes("--colony")) {
-  if (!["raids", "outposts", "layout", "quotas", "breaches"].includes(command)) fail(usage);
-  // The flag eats the next argument, so a bare `--colony` at the end, or one
-  // in front of `--json`, would silently read the default colony instead of
-  // the one the operator asked for.
-  if (colonyArg === undefined || colonyArg.startsWith("--")) {
-    fail("--colony needs a home room name, e.g. --colony W12S28");
+if (command === "eval" && seconds !== undefined && !(Number.isFinite(seconds) && seconds > 0)) {
+  fail("eval --seconds N takes a positive number");
+}
+// The server rejects a large console expression outright; past this it is
+// a file to upload, not a line to type.
+const EVAL_MAX = 1000;
+const expression = rest.join(" ");
+if (command === "eval") {
+  if (expression.trim() === "") fail("eval needs an expression, e.g. observe.mjs eval 'Game.time'");
+  if (expression.length > EVAL_MAX) {
+    fail(
+      `eval expression is ${expression.length} chars; the server rejects large console ` +
+        `expressions, so this refuses anything over ${EVAL_MAX}. Shorten it, or read the ` +
+        "value off Memory instead.",
+    );
   }
 }
+const roomName = rest[0];
+const ROOM = /^[WE]\d+[NS]\d+$/;
+if ((command === "room" || command === "history") && !(roomName && ROOM.test(roomName))) {
+  fail(`${command} needs a room name like W15S28\n${usage}`);
+}
+const historyTick = Number(rest[1]);
+if (command === "history" && !(Number.isInteger(historyTick) && historyTick > 0)) {
+  fail(`history needs a tick, e.g. history W15S28 877000\n${usage}`);
+}
+// The harness blocks `sleep`, so an agent waits on the game's own clock; a
+// cap keeps a typo from parking it for an hour.
+const WAIT_CAP_MS = 20 * 60 * 1000;
+const waitTicks = positiveInt("--ticks");
+if (command === "wait" && waitTicks === undefined) fail("wait needs --ticks N (a positive integer)");
+const samples = flags["--samples"] === undefined ? 5 : positiveInt("--samples");
+if (command === "health" && !(samples >= 2 && samples <= 30)) {
+  fail("health --samples K takes an integer from 2 to 30: one sample cannot show a creep standing still");
+}
 
-const { api, shard } = await connect();
+const { api, shard, url } = await connect();
 
 const memoryGet = async (path) => {
   const res = await api.userMemoryGet(path, shard).catch((err) => {
@@ -182,6 +259,65 @@ const colonyLeaf = async (leaf) => {
 // stand-downs — stays in its command, because those differ deliberately.
 const raidLeaf = () => colonyLeaf("raids");
 
+// How many CPU rows `cpu` prints without `--all`.
+const CPU_ROWS = 20;
+
+// The CPU line's rows that carry a tick and a total; `cpu` and `health`
+// read the same rows.
+const readableCpu = (row) => row && typeof row.t === "number" && typeof row.ms === "number";
+
+// The two populations of the cadence (#443): a light tick replays the
+// last full one and costs a fraction of it, so the window's mean is a
+// mixture and each half is read on its own. A row without `light` is a
+// full tick, which is what every row before the cadence was. `forced` is
+// which rule kept a would-be light tick full, most first: the reading the
+// cadence's rules are tuned against.
+const cadence = (ticks) => {
+  const mean = (rows) => rows.reduce((sum, row) => sum + row.ms, 0) / rows.length;
+  const lights = ticks.filter((row) => row.light === true);
+  const fulls = ticks.filter((row) => row.light !== true);
+  const reasons = {};
+  for (const row of fulls) if (typeof row.forced === "string") reasons[row.forced] = (reasons[row.forced] ?? 0) + 1;
+  const ranked = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+  return {
+    mean: ticks.length > 0 ? mean(ticks) : NaN,
+    max: ticks.length > 0 ? Math.max(...ticks.map((row) => row.ms)) : NaN,
+    fulls: fulls.length,
+    lights: lights.length,
+    fullMean: fulls.length > 0 ? `${mean(fulls).toFixed(2)} ms` : "—",
+    lightMean: lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—",
+    forced: ranked.map(([reason, n]) => `${reason} ${n}`).join(", "),
+  };
+};
+
+// The game clock. Every live command that has to know "now" reads it here.
+const gameTime = async () => {
+  const res = await api.gameTime(shard).catch((err) => fail(`time read failed: ${err.message ?? err}`));
+  if (typeof res?.time !== "number") fail(`time read failed: ${JSON.stringify(res)}`);
+  return res.time;
+};
+
+// Resolve after `ms` without the shell's `sleep`.
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A body as counts by part, `16w 16c 16m`, in the order the parts first
+// appear; `tough` and `claim` keep enough letters to stay apart.
+const PART = { work: "w", carry: "c", move: "m", attack: "a", ranged_attack: "r", heal: "h", tough: "t", claim: "cl" };
+const bodySummary = (body) => {
+  const counts = new Map();
+  for (const part of body ?? []) counts.set(part.type, (counts.get(part.type) ?? 0) + 1);
+  return [...counts].map(([type, n]) => `${n}${PART[type] ?? type}`).join(" ");
+};
+
+// The actions a creep logged this tick, `attack→24,31 move`; the engine
+// writes every key and nulls the ones that did not happen. `say` is left
+// out: this bot says something every tick and it is never an action.
+const actionSummary = (log) =>
+  Object.entries(log ?? {})
+    .filter(([name, at]) => at && name !== "say")
+    .map(([name, at]) => (typeof at === "object" && "x" in at ? `${name}→${at.x},${at.y}` : name))
+    .join(" ");
+
 // ---- console: a bounded subscription, the one non-Memory command --------
 
 if (command === "console") {
@@ -198,6 +334,396 @@ if (command === "console") {
     api.socket.disconnect();
     process.exit(0);
   }, seconds * 1000);
+} else if (command === "eval") {
+  // ---- eval: one console expression, and what it echoes back -------------
+
+  // The result arrives on the console socket a tick later, never in the
+  // POST's answer, so the socket is open before the expression goes out.
+  // The first event carrying a result or an error is the answer; its log
+  // lines ride with it only when the expression itself logs, because the
+  // bot's own lines share that event.
+  const limit = seconds ?? 10;
+  let posted = false;
+  let answered;
+  const answer = new Promise((resolve) => (answered = resolve));
+  await api.socket.connect().catch((err) => fail(`socket connect failed: ${err.message ?? err}`));
+  await api.socket.subscribe("console", (event) => {
+    if (!posted) return;
+    const messages = event.data?.messages ?? {};
+    const results = messages.results ?? [];
+    const error = event.data?.error;
+    if (results.length === 0 && !error) return;
+    if (expression.includes("console.log")) for (const line of messages.log ?? []) console.log(line);
+    for (const line of results) console.log(line);
+    if (error) console.log(`[error] ${error}`);
+    answered(true);
+  });
+  const res = await api
+    .req("POST", "/api/user/console", { expression, shard })
+    .catch((err) => fail(`console post failed: ${err.message ?? err}`));
+  if (res?.ok !== 1) fail(`console post failed: ${JSON.stringify(res)}`);
+  posted = true;
+  setTimeout(() => answered(false), limit * 1000);
+  const got = await answer;
+  api.socket.disconnect();
+  if (!got) fail(`no console result within ${limit} s — the tick may be slow; try --seconds ${limit * 2}`);
+  process.exit(0);
+} else if (command === "room") {
+  // ---- room: what the API sees in one room right now --------------------
+
+  const res = await api
+    .req("GET", "/api/game/room-objects", { room: roomName, shard })
+    .catch((err) => fail(`room read failed: ${err.message ?? err}`));
+  if (res?.ok !== 1) fail(`room read failed: ${JSON.stringify(res)}`);
+  if (json) {
+    console.log(JSON.stringify({ objects: res.objects, users: res.users }, null, 2));
+  } else {
+    const now = await gameTime();
+    const objects = res.objects ?? [];
+    const who = (id) => res.users?.[id]?.username ?? id ?? "—";
+    console.log(`${roomName} at t${now}`);
+
+    const controller = objects.find((o) => o.type === "controller");
+    if (!controller) {
+      console.log("  no controller (highway, keeper or centre room)");
+    } else if (controller.user) {
+      const safe = controller.safeMode > now ? `, safe mode until t${controller.safeMode}` : "";
+      console.log(
+        `  owner ${who(controller.user)}, RCL ${controller.level}, progress ${controller.progress}` +
+          `, downgrade at t${controller.downgradeTime}${safe}, ${controller.safeModeAvailable ?? 0} safe modes banked`,
+      );
+    } else if (controller.reservation) {
+      console.log(
+        `  reserved by ${who(controller.reservation.user)} until t${controller.reservation.endTime}` +
+          ` (${controller.reservation.endTime - now} ticks)`,
+      );
+    } else {
+      console.log("  unowned, unreserved");
+    }
+
+    // Structures are counted by type; the room's furniture and debris on a
+    // line of their own, so a count of ramparts is never read next to a
+    // count of tombstones.
+    const FURNITURE = ["source", "mineral", "deposit", "tombstone", "ruin", "energy", "constructionSite", "controller"];
+    const countBy = (list) => {
+      const counts = new Map();
+      for (const o of list) counts.set(o.type, (counts.get(o.type) ?? 0) + 1);
+      return [...counts].map(([type, n]) => `${type} ${n}`).join(", ") || "none";
+    };
+    const nonCreeps = objects.filter((o) => o.type !== "creep" && o.type !== "powerCreep");
+    console.log(`  structures: ${countBy(nonCreeps.filter((o) => !FURNITURE.includes(o.type)))}`);
+    console.log(`  other: ${countBy(nonCreeps.filter((o) => FURNITURE.includes(o.type) && o.type !== "controller"))}`);
+
+    const creeps = objects.filter((o) => o.type === "creep" || o.type === "powerCreep");
+    const owners = new Map();
+    for (const c of creeps) owners.set(who(c.user), [...(owners.get(who(c.user)) ?? []), c]);
+    if (owners.size === 0) console.log("  no creeps");
+    for (const [owner, list] of owners) {
+      console.log(`  ${owner} (${list.length}):`);
+      const width = Math.max(...list.map((c) => (c.name ?? "").length));
+      for (const c of list.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))) {
+        console.log(
+          `    ${(c.name ?? c._id).padEnd(width)}  ${`${c.x},${c.y}`.padEnd(5)}  hits ${c.hits}/${c.hitsMax}` +
+            `  ${bodySummary(c.body)}${c.spawning ? "  (spawning)" : ""}  ${actionSummary(c.actionLog)}`.trimEnd(),
+        );
+      }
+    }
+  }
+} else if (command === "wait") {
+  // ---- wait: block on the game clock, not the shell's ---------------------
+
+  const began = Date.now();
+  const start = await gameTime();
+  const target = start + waitTicks;
+  let now = start;
+  while (now < target) {
+    if (Date.now() - began > WAIT_CAP_MS) {
+      fail(`gave up after 20 minutes at t${now}, ${target - now} ticks short of t${target}`);
+    }
+    await pause(1500);
+    now = await gameTime();
+  }
+  console.log(`t${start} → t${now} (${now - start} ticks in ${((Date.now() - began) / 1000).toFixed(0)} s)`);
+} else if (command === "health") {
+  // ---- health: the anomalies a deploy can show, one line each -------------
+
+  // Read off what the bot already writes — the Transition log's task
+  // cursor, the positions leaf, each colony's Raid log, breach log and
+  // quotas, and the CPU line — plus the API's view of each home for the
+  // spawn names a creep's name ends in. Nothing here needs new bot code,
+  // and nothing here is a verdict: each line is a thing to go and look at.
+  const observe = await memoryGet("fabot.observe");
+  if (observe == null || typeof observe !== "object") {
+    fail("no observe subtree at Memory.fabot.observe — the bundle is not writing one");
+  }
+  const colonies = observe.colonies && typeof observe.colonies === "object" ? observe.colonies : {};
+  const allHomes = Object.keys(colonies);
+  if (colonyArg !== undefined && !allHomes.includes(colonyArg)) {
+    fail(`no colony "${colonyArg}" here; the homes with a record are [${allHomes.join(", ")}].`);
+  }
+  const homes = colonyArg !== undefined ? [colonyArg] : allHomes;
+
+  // K position samples, one per tick. A read that comes back identical to
+  // the last is the same tick served twice, not a colony that froze, so it
+  // is not counted; the loop is capped so a stopped bot cannot hang it.
+  const positions = [];
+  const sampleCap = Date.now() + Math.max(120, samples * 15) * 1000;
+  let last = "";
+  while (positions.length < samples) {
+    const leaf = positions.length === 0 ? observe.positions : await memoryGet("fabot.observe.positions");
+    const text = JSON.stringify(leaf ?? {});
+    if (text !== last && leaf && typeof leaf === "object") {
+      positions.push(leaf);
+      last = text;
+    } else if (Date.now() > sampleCap) {
+      fail(
+        `the positions leaf stopped changing after ${positions.length} of ${samples} samples — ` +
+          "the bot is not finishing ticks (see observe cpu)",
+      );
+    }
+    if (positions.length < samples) await pause(1200);
+  }
+  const now = await gameTime();
+  const latest = positions[positions.length - 1];
+
+  // Which home spawned each creep: the name ends in its spawn's name, and
+  // the API names every spawn in every home.
+  const spawnHome = new Map();
+  await Promise.all(
+    allHomes.map(async (home) => {
+      const res = await api.req("GET", "/api/game/room-objects", { room: home, shard }).catch(() => null);
+      for (const o of res?.objects ?? []) if (o.type === "spawn") spawnHome.set(o.name, home);
+    }),
+  );
+  const homeOf = (name) => spawnHome.get(name.slice(name.lastIndexOf("-") + 1));
+
+  // The rooms a colony works, as far as Memory says: its home, the rooms its
+  // haul rows mine, and every room its Raid log and breach log name.
+  const worked = new Map();
+  for (const home of allHomes) {
+    const c = colonies[home] ?? {};
+    const rooms = new Set([home]);
+    for (const row of c.quotas?.haul ?? []) if (typeof row?.room === "string") rooms.add(row.room);
+    for (const row of c.raids?.outposts ?? []) if (typeof row?.room === "string") rooms.add(row.room);
+    for (const key of ["rivalHeld", "holds", "threatened", "placed"]) {
+      for (const room of Object.keys(c.raids?.[key] ?? {})) rooms.add(room);
+    }
+    for (const row of c.breaches?.rows ?? []) if (typeof row?.room === "string") rooms.add(row.room);
+    worked.set(home, rooms);
+  }
+
+  const lines = [];
+  const counts = { idle: 0, still: 0, away: 0, standDown: 0, breach: 0 };
+  const names = Object.keys(latest)
+    .filter((name) => colonyArg === undefined || homeOf(name) === colonyArg)
+    .sort();
+  const where = (name) => `${latest[name].r} ${latest[name].x},${latest[name].y}`;
+
+  // Idle: the task cursor says unassigned, with the reason and the tick it
+  // was said on.
+  const idle = new Set();
+  for (const name of names) {
+    const record = observe.creeps?.[name];
+    const verdict = record?.lastTask;
+    if (verdict?.kind !== "unassigned") continue;
+    const since = [...(record.log ?? [])].reverse().find((entry) => entry?.v?.kind === "unassigned");
+    counts.idle++;
+    idle.add(name);
+    lines.push(`idle     ${name} (${verdict.reason}) at ${where(name)}${since ? ` since t${since.t}` : ""}`);
+  }
+
+  // Standing still over every sample while holding a Task that is done on
+  // the way somewhere — a haul, a pickup, a claim, a flight. Work done in
+  // place (harvest, build, repair, upgrade, reserve, dismantle, guard) is
+  // still by design, and an idle creep already has its line above.
+  const assignments = (await memoryGet("fabot.assignments")) ?? {};
+  const IN_PLACE = ["harvest", "build", "repair", "upgrade", "reserve", "reclaim", "dismantle", "guard"];
+  for (const name of names) {
+    const kind = typeof assignments[name] === "string" ? assignments[name].split(":")[0] : undefined;
+    if (idle.has(name) || IN_PLACE.includes(kind)) continue;
+    const seen = positions.map((p) => p[name]);
+    if (seen.some((p) => !p)) continue;
+    if (seen.every((p) => p.r === seen[0].r && p.x === seen[0].x && p.y === seen[0].y)) {
+      counts.still++;
+      lines.push(`still    ${name} at ${where(name)} for ${samples} samples, task ${assignments[name] ?? "none"}`);
+    }
+  }
+
+  // Outside every room its colony works, on every sample: a creep merely
+  // passing through is in a worked room on one of them.
+  for (const name of names) {
+    const home = homeOf(name);
+    const rooms = home && worked.get(home);
+    if (!rooms) continue;
+    const seen = positions.map((p) => p[name]).filter(Boolean);
+    if (seen.length === samples && seen.every((p) => !rooms.has(p.r))) {
+      counts.away++;
+      lines.push(`away     ${name} at ${where(name)}, outside ${home}'s rooms`);
+    }
+  }
+
+  for (const home of homes) {
+    const raids = colonies[home]?.raids ?? {};
+    for (const row of raids.outposts ?? []) {
+      if (typeof row?.expiry === "number" && row.expiry > now) {
+        counts.standDown++;
+        lines.push(
+          `stand-down ${row.room} (${home}) until t${row.expiry}, ${row.expiry - now} ticks left, ${row.basis}`,
+        );
+      }
+    }
+    for (const [room, held] of Object.entries(raids.rivalHeld ?? {})) {
+      counts.standDown++;
+      lines.push(`rival-held ${room} (${home}) since t${held?.since}`);
+    }
+    for (const row of colonies[home]?.breaches?.rows ?? []) {
+      counts.breach++;
+      lines.push(
+        `breach   ${row.kind} ${row.room}${row.subject ? ` ${row.subject}` : ""} amount ${row.amount}` +
+          ` (${home}), standing ${row.last - row.first} ticks`,
+      );
+    }
+  }
+
+  for (const line of lines) console.log(line);
+
+  // The CPU line: its mean and the cadence's halves, and whether it is
+  // still being written — a row more than a few ticks old is a bot that
+  // is not finishing ticks, the first thing a bad deploy shows.
+  const cpuRows = Array.isArray(observe.cpu?.ticks) ? observe.cpu.ticks.filter(readableCpu) : [];
+  if (cpuRows.length === 0) {
+    console.log("cpu      no CPU rows at Memory.fabot.observe.cpu");
+  } else {
+    const c = cadence(cpuRows);
+    const lastRow = cpuRows[cpuRows.length - 1];
+    const lag = now - lastRow.t;
+    const flag = c.mean > MEAN_MS || c.max > TICK_MS ? "  !" : "";
+    console.log(
+      `cpu      mean ${c.mean.toFixed(1)} ms over ${cpuRows.length} ticks, max ${c.max.toFixed(1)}` +
+        ` · full ${c.fulls} at ${c.fullMean} · light ${c.lights} at ${c.lightMean}` +
+        (typeof lastRow.bucket === "number" ? ` · bucket ${lastRow.bucket}` : "") +
+        flag,
+    );
+    if (lag > 5) console.log(`stale    the last CPU row is t${lastRow.t}, ${lag} ticks behind the clock`);
+  }
+
+  console.log(
+    `t${now} · ${homes.length} colon${homes.length === 1 ? "y" : "ies"} · ${names.length} creeps · ` +
+      `idle ${counts.idle} · still ${counts.still} · away ${counts.away} · ` +
+      `stand-downs ${counts.standDown} · breaches ${counts.breach}` +
+      ` (away is a guess off the rooms Memory names)`,
+  );
+} else if (command === "history") {
+  // ---- history: the room-history replay at one tick -----------------------
+
+  // One file per hundred ticks, gzip, no auth: the first tick holds whole
+  // objects and every later tick a deep-merge diff, `null` for removed. So
+  // the tick asked for is the file's first tick with every diff up to it
+  // applied.
+  const base = Math.floor(historyTick / 100) * 100;
+  const href = `${new URL(url).origin}/room-history/${shard}/${roomName}/${base}.json`;
+  const res = await fetch(href).catch((err) => fail(`history fetch failed: ${err.message ?? err}`));
+  if (!res.ok) {
+    fail(`no history at ${href} (HTTP ${res.status}) — the newest 100-200 ticks are not written yet`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  let text;
+  try {
+    text = gunzipSync(buffer).toString();
+  } catch {
+    text = buffer.toString();
+  }
+  const chunk = JSON.parse(text);
+  const deepMerge = (into, diff) => {
+    for (const [key, value] of Object.entries(diff)) {
+      if (value === null) delete into[key];
+      else if (value && typeof value === "object" && !Array.isArray(value) && into[key] && typeof into[key] === "object")
+        deepMerge(into[key], value);
+      else into[key] = value;
+    }
+  };
+  const state = {};
+  const ticks = Object.keys(chunk.ticks ?? {})
+    .map(Number)
+    .filter((t) => t <= historyTick)
+    .sort((a, b) => a - b);
+  for (const t of ticks) {
+    for (const [id, o] of Object.entries(chunk.ticks[t] ?? {})) {
+      if (o === null) delete state[id];
+      else if (!state[id]) state[id] = structuredClone(o);
+      else deepMerge(state[id], o);
+    }
+  }
+  if (!Object.hasOwn(chunk.ticks ?? {}, String(historyTick))) {
+    fail(`t${historyTick} is not in ${href}; it holds t${Object.keys(chunk.ticks ?? {}).join(", t")}`);
+  }
+  if (json) {
+    console.log(JSON.stringify({ tick: historyTick, objects: state }, null, 2));
+  } else {
+    // The file names owners by id; the API turns the few ids into names.
+    const objects = Object.values(state);
+    const ids = [...new Set(objects.map((o) => o.user).filter(Boolean))];
+    const usernames = new Map(
+      await Promise.all(
+        ids.map(async (id) => {
+          const found = await api.req("GET", "/api/user/find", { id }).catch(() => null);
+          return [id, found?.user?.username ?? id];
+        }),
+      ),
+    );
+    const who = (id) => usernames.get(id) ?? id ?? "—";
+    console.log(`${roomName} at t${historyTick} (replayed from t${base})`);
+    const controller = objects.find((o) => o.type === "controller");
+    if (controller?.user) console.log(`  owner ${who(controller.user)}, RCL ${controller.level}`);
+    else if (controller?.reservation) console.log(`  reserved by ${who(controller.reservation.user)}`);
+    const byKind = new Map();
+    for (const o of objects) {
+      const key = o.type === "creep" ? `creep(${who(o.user)})` : o.type;
+      byKind.set(key, (byKind.get(key) ?? 0) + 1);
+    }
+    console.log(`  objects: ${[...byKind].map(([key, n]) => `${key} ${n}`).join(", ")}`);
+    for (const c of objects.filter((o) => o.type === "creep").sort((a, b) => who(a.user).localeCompare(who(b.user)))) {
+      console.log(
+        `  ${who(c.user).padEnd(12)} ${(c.name ?? c._id).padEnd(24)} ${`${c.x},${c.y}`.padEnd(5)}` +
+          `  hits ${c.hits}/${c.hitsMax}  ${bodySummary(c.body)}  ${actionSummary(c.actionLog)}`.trimEnd(),
+      );
+    }
+    const acting = objects.filter((o) => o.type !== "creep" && actionSummary(o.actionLog));
+    for (const o of acting) {
+      console.log(`  ${o.type} ${o.x},${o.y}  ${actionSummary(o.actionLog)}`);
+    }
+  }
+} else if (command === "probe") {
+  // ---- probe: what a bundle wrapped by scripts/probe.mjs measured ---------
+
+  // The wire shape the wrapper writes, every tick of its window:
+  //   { ticks, to, window, fns: { "<colony>:<function>": [ms, calls] } }
+  // summed over the window, so a row divided by `ticks` is its per-tick
+  // cost. A gzip string under a `gz:` prefix is read too.
+  let stored = await memoryGet("__probe");
+  if (typeof stored === "string" && stored.startsWith("gz:")) {
+    stored = JSON.parse(gunzipSync(Buffer.from(stored.slice(3), "base64")).toString());
+  }
+  if (!stored?.fns || typeof stored.ticks !== "number" || stored.ticks <= 0) {
+    fail(
+      "no probe at Memory.__probe — upload a bundle wrapped by scripts/probe.mjs and " +
+        "wait past its first measured tick",
+    );
+  }
+  if (json) {
+    console.log(JSON.stringify(stored, null, 2));
+  } else {
+    const windowNote = typeof stored.window === "number" ? ` of ${stored.window}` : "";
+    console.log(`probe: ${stored.ticks}${windowNote} ticks measured, last at t${stored.to}`);
+    const rows = Object.entries(stored.fns).sort((a, b) => b[1][0] - a[1][0]);
+    const width = Math.max(...rows.map(([key]) => key.length));
+    console.log(`${"colony:function".padEnd(width)}  ${"ms/tick".padStart(8)}  ${"calls/tick".padStart(10)}`);
+    for (const [key, [ms, calls]] of rows) {
+      console.log(
+        `${key.padEnd(width)}  ${(ms / stored.ticks).toFixed(2).padStart(8)}  ${(calls / stored.ticks).toFixed(1).padStart(10)}`,
+      );
+    }
+  }
 } else if (command === "verbose") {
   // ---- verbose: the list beside the log, read and written in place ------
 
@@ -1483,8 +2009,7 @@ if (command === "console") {
   // count of hidden rows is said out loud beside the judgement, and a leaf
   // whose rows are all off the shape says how many are there rather than
   // reporting a bundle that has written nothing.
-  const readable = (row) => row && typeof row.t === "number" && typeof row.ms === "number";
-  const ticks = stored.ticks.filter(readable);
+  const ticks = stored.ticks.filter(readableCpu);
   const unreadable = stored.ticks.length - ticks.length;
 
   // The phase columns, in the order the loop reads them and spelt exactly
@@ -1607,8 +2132,15 @@ if (command === "console") {
       ].join("  "),
     );
 
-    for (const row of ticks) {
+    // The table is the last rows only unless `--all` asks: a hundred rows
+    // scroll the summaries off the screen, and every summary below still
+    // reads the whole window.
+    const shown = all ? ticks : ticks.slice(-CPU_ROWS);
+    for (const row of shown) {
       console.log([String(row.t).padStart(width), ms(row.ms), ...cells(row)].join("  "));
+    }
+    if (shown.length < ticks.length) {
+      console.log(`(last ${shown.length} of ${ticks.length} rows; --all prints every row)`);
     }
 
     console.log("");
@@ -1845,26 +2377,14 @@ if (command === "console") {
       console.log("");
     }
 
-    // The two populations of the cadence (#443): a light tick replays the
-    // last full one and costs a fraction of it, so the window's mean is a
-    // mixture and each half is read on its own. A row without `light` is a
-    // full tick, which is what every row before the cadence was. The trigger
-    // line below still reads every tick: the mean is what the bucket pays.
+    // The cadence's two halves; the trigger line below still reads every
+    // tick, because the mean is what the bucket pays.
     {
-      const mean = (rows) => rows.reduce((sum, row) => sum + row.ms, 0) / rows.length;
-      const lights = ticks.filter((row) => row.light === true);
-      const fulls = ticks.filter((row) => row.light !== true);
-      const fullMean = fulls.length > 0 ? `${mean(fulls).toFixed(2)} ms` : "—";
-      const lightMean = lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—";
+      const { fulls, lights, fullMean, lightMean, forced } = cadence(ticks);
       console.log(
-        `full ticks: ${fulls.length}, mean ${fullMean}  ·  light ticks: ${lights.length}, mean ${lightMean}`,
+        `full ticks: ${fulls}, mean ${fullMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
-      // Which rule kept a would-be light tick full, most first: the reading
-      // the cadence's rules are tuned against.
-      const reasons = {};
-      for (const row of fulls) if (typeof row.forced === "string") reasons[row.forced] = (reasons[row.forced] ?? 0) + 1;
-      const ranked = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
-      if (ranked.length > 0) console.log(`  forced full: ${ranked.map(([reason, n]) => `${reason} ${n}`).join(", ")}`);
+      if (forced) console.log(`  forced full: ${forced}`);
       console.log("");
     }
 

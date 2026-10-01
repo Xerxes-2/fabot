@@ -102,6 +102,13 @@ case "$MODE" in
       total=$(citations | wc -l); ceiling=$(cat "$CEILING_FILE")
       if [ "$total" -gt "$ceiling" ]; then
         echo "citations above the ceiling: $total > $ceiling (scripts/adr-ceiling)"; fail=1
+        # The ceiling is never raised: pay for the new citation by dropping a
+        # duplicate. The cheapest are an ADR's second and later citations, in
+        # tests first (an assertion message rarely needs the number).
+        echo "candidates — ADRs cited more than once, test sites first:"
+        citations | awk -F: '{n[$3]++; site[$3]=site[$3] " " $1 ":" $2} END {for (a in n) if (n[a] > 1) print a, site[a]}' \
+          | tr ' ' '\n' | awk 'NF' | awk '/^[0-9]{4}$/ {adr=$0; next} {print (index($0, "tests/") == 1 ? 0 : 1) "\t" adr "\t" $0}' \
+          | sort -k1,1n -k2,2 | head -8 | awk -F'\t' '{printf "  ADR %s  %s\n", $2, $3}'
       fi
     fi
     [ "$fail" -eq 0 ] && echo "adr-check: ok"
