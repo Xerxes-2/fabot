@@ -9,9 +9,9 @@ module Fabot.Core.Types.Tasks
 /// capacity scope cuts along it; `Carrier` never found that reader and was
 /// folded into `Light` (#233).
 type BodyClass =
-    /// ADR-0056. An ATTACK part: the guard row's shape, first in the ladder
-    /// because a guard carries no Work and no Carry and would otherwise fall
-    /// into `Light`.
+    /// ADR-0056. A fighting row's body — an ATTACK or RANGED_ATTACK part, or
+    /// a squad's medic — first in the ladder because a fighter carries no
+    /// Work and no Carry and would otherwise fall into `Light`.
     | Fighter
     /// More Work than Move: the garrison's shape.
     | Heavy
@@ -21,6 +21,25 @@ type BodyClass =
     /// Everything else: the worker unit, and beside it the bodies with no
     /// Work part at all (the hauler unit and the reserver).
     | Light
+
+/// A [[squad]] member's place in it: what a `Fight`'s capacity counts per
+/// role. A cast carries its role in its name (`Bodies.squadRoleOf`).
+type SquadRole =
+    /// The melee front.
+    | Brawler
+    /// The healer walking behind it.
+    | Medic
+    /// The ranged member.
+    | Kiter
+
+[<RequireQualifiedAccess>]
+module SquadRole =
+    /// Every role, in the order a squad casts them.
+    let all = [ Brawler; Medic; Kiter ]
+
+    /// How many of these slots are this role's.
+    let slots (role: SquadRole) (roles: SquadRole list) =
+        roles |> List.filter ((=) role) |> List.length
 
 /// Which crowd a cap is a number about. Carried beside its number rather than
 /// spelled in a field name on one side and a class predicate on the other:
@@ -43,6 +62,10 @@ type CapScope =
     /// "not a Fighter" between them — `Commuters` and `Generalists` each
     /// contain the class.
     | Fighters
+    /// Holders of one squad role. A Task carrying any role cap is
+    /// held by role bodies alone: a candidate of a role with no slot, or of
+    /// no role, is refused.
+    | Role of SquadRole
 
 /// ADR-0052. How many creeps a pooled Task admits at once, set by the Planner
 /// and counted by the Matcher, which knows no Task kinds: every seat rule
@@ -136,6 +159,15 @@ module Capacity =
     /// else at all.
     let fighters n =
         unbounded |> capping CapScope.Fighters n
+
+    /// A Fight's cap: its squad's slots per role, every role written
+    /// so a role the squad has no slot for is a cap of nothing.
+    let roles (slots: SquadRole list) =
+        SquadRole.all
+        |> List.fold
+            (fun capacity role ->
+                capping (CapScope.Role role) (SquadRole.slots role slots) capacity)
+            unbounded
 
     /// The number one crowd is capped at, or None where that crowd is
     /// unbounded: the read at the other end of `capping`.

@@ -40,6 +40,9 @@ let taskId =
     // stands in it: a raid that loses a creep is the same fight and must be
     // the same identity, or anti-thrash would re-match the guard mid-swing.
     | Guard room -> $"guard:{room}"
+    // Keyed on the room for the Guard's reason: a squad that loses a member
+    // is the same fight.
+    | Fight room -> $"fight:{room}"
 
 /// The target inside a Task id: what `taskId` writes between its first colon
 /// and the next one (neither an object id nor a room name holds a colon).
@@ -117,6 +120,12 @@ type HeldTaskFacts =
     {
         All: Set<string>
         WithThorium: Set<string>
+        /// Each held Task id's living holders, by name.
+        Holders: Map<string, string list>
+        /// Every resident room a Fight is pooled for this tick, with the squad
+        /// priced for it (`fights`): derived once off the holders, and read by
+        /// the ground, the pool, the caps and the rows alike.
+        Fights: Map<string, Squad>
     }
 
 [<RequireQualifiedAccess>]
@@ -125,31 +134,13 @@ module HeldTaskFacts =
         {
             All = Set.empty
             WithThorium = Set.empty
+            Holders = Map.empty
+            Fights = Map.empty
         }
 
-/// The Planner's narrow view of the assignment table, filtered to the living:
-/// `Assignments` arrives from Memory and may name a creep that died last tick,
-/// the Matcher drops those silently, but `planTasks` runs first. Not filtered
-/// to task kinds: a reader that wants one kind writes the key it wants and
-/// asks, as `isHungry` does.
-let internal heldTaskFacts (view: ColonyView) (assignments: Assignments) : HeldTaskFacts =
-    let living = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
-
-    assignments
-    |> Map.fold
-        (fun facts name tid ->
-            match Map.tryFind name living with
-            | None -> facts
-            | Some creep ->
-                {
-                    All = Set.add tid facts.All
-                    WithThorium =
-                        if creep.Thorium > 0 then
-                            Set.add tid facts.WithThorium
-                        else
-                            facts.WithThorium
-                })
-        HeldTaskFacts.empty
+    /// One Task id's living holders.
+    let holdersOf (held: HeldTaskFacts) (tid: string) : string list =
+        Map.tryFind tid held.Holders |> Option.defaultValue []
 
 /// Whether a structure of this kind, carrying these hits, is hungry: its
 /// kind's line, and for the decaying kinds the held fact picks which of the
@@ -291,13 +282,21 @@ let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
 
 /// What a Guard in its room may shoot: an armed hostile, a rival's claimer or
 /// a raid's healer (#451) in a resident room, and the declared enemy's creep
-/// in a harassment room. `Emitter.guardTarget` and the harassment ring read
-/// this one predicate.
-let internal guardShoots (view: ColonyView) (residentRooms: Set<string>) (hostile: HostileInfo) =
+/// in a harassment room. In a room a Fight is pooled for, any healer: one
+/// whose raid is dead is still the raid's. `Emitter.guardTarget` and the
+/// harassment ring read this one predicate.
+let internal guardShoots
+    (view: ColonyView)
+    (residentRooms: Set<string>)
+    (fighting: Set<string>)
+    (hostile: HostileInfo)
+    =
     isArmed hostile
     || claimsAFlag residentRooms hostile
     || harassTarget view hostile
     || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
+    || Set.contains hostile.Pos.Room fighting
+       && HostileInfo.activeCount hostile Heal > 0
 
 /// What a body deals a tick, off its part counts: melee and ranged, unboosted.
 let private damageOf (parts: BodyPart -> int) =
@@ -752,7 +751,7 @@ let squadFight
         { Won = false; Ticks = 0 }
 
 /// Whether this squad wins the raid in one room (`squadFight`, the kill
-/// order's aim). Report-only until muster (#453).
+/// order's aim): what prices a Fight's squad (`fightSquadIn`).
 let squadWins (view: ColonyView) (room: string) (members: BodyPart list list) (kite: bool) : bool =
     (squadFight view room members kite KillOrder).Won
 
@@ -788,6 +787,146 @@ let kiteHolds
     && (List.isEmpty raidMelee
         || (members |> List.map plainTicks |> List.max)
            <= (raidMelee |> List.map plainTicks |> List.min))
+
+/// Whether the resident garrison's size loses the raid standing in a room
+/// beside its loaded towers: what pools a Fight there.
+let internal residentsLose (view: ColonyView) (room: string) : bool =
+    not (
+        blocksBeat
+            rangerPattern.Block
+            (towerDamageIn view room)
+            view
+            room
+            view.Tuning.RangerResidentBlocks
+    )
+
+/// The squad a room's fight record latched (`FightLatch.Squad`), or None.
+let private latchedSquad (view: ColonyView) (room: string) : Squad option =
+    Map.tryFind room view.Fought
+    |> Option.bind (fun latch -> latch.Squad)
+    |> Option.bind (fun name -> squadCatalogue |> List.tryFind (fun squad -> squad.Name = name))
+
+/// Ticks since a room's latched fight record last saw its raid, or None for a
+/// room with no record, or one that latched no squad.
+let private sinceFightSeen (view: ColonyView) (room: string) : int option =
+    match Map.tryFind room view.Fought, latchedSquad view room with
+    | Some latch, Some _ -> Some(view.Time - latch.Seen)
+    | _ -> None
+
+/// Whether the raid record keeps a room's Fight pooled: its squad latched and
+/// its raid seen within `Tuning.FightHoldTicks`.
+let internal fightHeld (view: ColonyView) (room: string) : bool =
+    sinceFightSeen view room
+    |> Option.exists (fun since -> since <= view.Tuning.FightHoldTicks)
+
+/// Whether a room's Fight dropped less than `Tuning.FightHoldTicks` ago, so no
+/// squad is cast for it: a raid that comes back as each squad lands is not
+/// paid 8,650 a time.
+let internal fightCooling (view: ColonyView) (room: string) : bool =
+    sinceFightSeen view room
+    |> Option.exists (fun since ->
+        since > view.Tuning.FightHoldTicks && since < 2 * view.Tuning.FightHoldTicks)
+
+/// Whether a raid the residents lose stands in a room for a second time inside
+/// `Tuning.FightConfirmTicks`, its first on the record: what first pools its
+/// Fight, and what the record latches its squad on.
+let private fightConfirmed (view: ColonyView) (room: string) : bool =
+    view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && isRaider h)
+    && Map.tryFind room view.Fought
+       |> Option.exists (fun latch -> view.Time - latch.Seen <= view.Tuning.FightConfirmTicks)
+    && residentsLose view room
+
+/// The cheapest catalogue squad that wins a room's raid standing
+/// (`squadWins`) and whose every body this colony's bank holds, or None.
+/// Standing and never kiting: a launched squad meets the raid in contact.
+let internal pricedSquad (view: ColonyView) (room: string) : Squad option =
+    let castable (squad: Squad) =
+        not (List.isEmpty view.Spawns)
+        && squad.Members |> List.forall (fun body -> bodyCost body <= view.Bank.Capacity)
+
+    squadCatalogue
+    |> List.filter castable
+    |> List.sortBy (fun squad -> List.sumBy bodyCost squad.Members)
+    |> List.tryFind (fun squad -> squadWins view room squad.Members false)
+
+/// The squad a resident room's raid is fought with, or None: the one its
+/// record latched, else the one `pricedSquad` names. Pooled once its raid is
+/// confirmed (`fightConfirmed`), and kept while the latched record holds it,
+/// or while a holder stands by it with a raider or the tapper still there.
+let private fightSquadIn (view: ColonyView) (holders: Map<string, string list>) (room: string) =
+    let resident = residentRooms view
+    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let raided = inRoom |> List.exists isRaider
+
+    let held =
+        Map.tryFind (taskId (Fight room)) holders |> Option.exists (List.isEmpty >> not)
+
+    let latched = latchedSquad view room
+
+    let pooled =
+        raided && residentsLose view room && Option.isSome latched
+        || fightConfirmed view room
+        || fightHeld view room
+        || held && (raided || inRoom |> List.exists (claimsAFlag resident))
+
+    if Set.contains room resident && pooled then
+        latched |> Option.orElse (pricedSquad view room)
+    else
+        None
+
+/// Every resident room a Fight is pooled for this tick, with its squad. A
+/// quiet colony with no record and no holder asks no room.
+let private fights (view: ColonyView) (holders: Map<string, string list>) : Map<string, Squad> =
+    let resident = residentRooms view
+
+    let asked =
+        (view.Hostiles |> List.map (fun h -> h.Pos.Room))
+        @ (view.Fought |> Map.keys |> List.ofSeq)
+        @ (resident
+           |> Set.toList
+           |> List.filter (fun room -> Map.containsKey (taskId (Fight room)) holders))
+        |> List.distinct
+        |> List.filter (fun room -> Set.contains room resident)
+
+    asked
+    |> List.choose (fun room ->
+        fightSquadIn view holders room |> Option.map (fun squad -> room, squad))
+    |> Map.ofList
+
+/// The Planner's narrow view of the assignment table, filtered to the living:
+/// `Assignments` arrives from Memory and may name a creep that died last tick,
+/// the Matcher drops those silently, but `planTasks` runs first. Not filtered
+/// to task kinds: a reader that wants one kind writes the key it wants and
+/// asks, as `isHungry` does.
+let heldTaskFacts (view: ColonyView) (assignments: Assignments) : HeldTaskFacts =
+    let living = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+
+    let held =
+        assignments
+        |> Map.fold
+            (fun facts name tid ->
+                match Map.tryFind name living with
+                | None -> facts
+                | Some creep ->
+                    { facts with
+                        All = Set.add tid facts.All
+                        WithThorium =
+                            if creep.Thorium > 0 then
+                                Set.add tid facts.WithThorium
+                            else
+                                facts.WithThorium
+                        Holders =
+                            Map.add tid (name :: HeldTaskFacts.holdersOf facts tid) facts.Holders
+                    })
+            HeldTaskFacts.empty
+
+    { held with
+        Fights = fights view held.Holders
+    }
+
+/// The roles one squad's bodies fill, in its cast order.
+let internal squadRoles (squad: Squad) : SquadRole list =
+    squad.Members |> List.choose (partsOf >> squadRoleOfParts)
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there

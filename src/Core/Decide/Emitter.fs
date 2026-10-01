@@ -275,9 +275,13 @@ let internal applicable
     // travel cost prices.
     | Guard room ->
         if Set.contains room (Facts.rangerRooms view) then
-            isRangerBody creep
+            isRangerRowBody creep
         else
-            isGuardBody creep
+            isGuardRowBody creep
+    // A squad cast, or once the squad launches a resident of the room whose
+    // parts fit a slot (`FightGround.Roles`); how many of each role is the
+    // capacity's.
+    | Fight room -> Option.isSome (Threats.fightRoleOf threats room creep.Name)
     // Two bodies are exempt, for opposite reasons: a Work-heavy body cannot run
     // (the answer for its Post is a rampart), and a Fighter will not. Without
     // the second a guard on the ring is offered both Safety-tier Tasks and kept
@@ -345,7 +349,8 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     | Flee -> None
     // The Guard's attack names a hostile chosen at arrival, rather than a
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
-    | Guard _ -> None
+    | Guard _
+    | Fight _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
 /// legible in the viewer at one glyph per creep.
@@ -367,6 +372,7 @@ let private glyphFor =
     | Dismantle _ -> "🪓"
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
+    | Fight _ -> "🛡️"
 
 /// The Threat a fighter acts on out of the ones standing in the room its Task
 /// names and passing the caller's own gate: first by the kill order
@@ -383,6 +389,7 @@ let private glyphFor =
 let private guardTarget
     (view: ColonyView)
     atlas
+    (fighting: Set<string>)
     (creep: CreepInfo)
     (room: string)
     (among: HostileInfo -> bool)
@@ -413,7 +420,7 @@ let private guardTarget
     match
         view.Hostiles
         |> List.filter (fun h ->
-            h.Pos.Room = room && Facts.guardShoots view residentRooms h && among h)
+            h.Pos.Room = room && Facts.guardShoots view residentRooms fighting h && among h)
     with
     | [] -> None
     | targets ->
@@ -424,7 +431,13 @@ let private guardTarget
 /// a ranger (#411). Self-healing belongs to the
 /// colony-wide reflex, which reads damage and the same compatibility rules as
 /// execution. Movement remains the mover's alone.
-let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: string) : Intent option =
+let private guardIntent
+    (view: ColonyView)
+    atlas
+    (fighting: Set<string>)
+    (creep: CreepInfo)
+    (room: string)
+    : Intent option =
     // A ranger shoots whatever stands within three (#411); a guard swings at
     // what stands beside it.
     let ranged = isRangerBody creep
@@ -436,7 +449,7 @@ let private guardIntent (view: ColonyView) atlas (creep: CreepInfo) (room: strin
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
         |> Option.exists (fun r -> r <= reach)
 
-    guardTarget view atlas creep room inReach
+    guardTarget view atlas fighting creep room inReach
     |> Option.map (fun hostile ->
         if ranged then
             RangedAttackCreep(creep.Name, hostile.Id)
@@ -583,8 +596,14 @@ let private actionIntents
     : Intent list =
     let drained = restockWait view task > 0
 
+    let fighting = Threats.fightRooms threats
+
     match task with
-    | Guard room -> guardIntent view atlas creep room |> Option.toList
+    | Guard room -> guardIntent view atlas fighting creep room |> Option.toList
+    // A medic's act is the heal reflex's; a brawler swings and a kiter shoots
+    // as a guard and a ranger do.
+    | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
+    | Fight room -> guardIntent view atlas fighting creep room |> Option.toList
     | _ ->
         if
             mayActNow threats atlas creep.Name task

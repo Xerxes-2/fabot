@@ -334,8 +334,14 @@ let decideUnarbitrated
                 Narrowed = farFields.Narrowed
             }
 
+    // The narrow facts the Planner reads about the colony's own decisions:
+    // the task ids its living creeps hold, their holders, which still carry
+    // Thorium, and the Fights pooled off them, off the table the Matcher wrote
+    // last tick. Derived before the Threats, which lay each Fight's ground.
+    let held = heldTaskFacts view assignments
+
     // The tick's Threats, derived once and shared by every reader.
-    let threats = threatsOf view atlas
+    let threats = threatsOfHeld view atlas held
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
@@ -355,20 +361,13 @@ let decideUnarbitrated
     // `outpostControllers` 9.1, each walking the kind census.
     let outposts = outpostFactsOf view
 
-    let sizing = rowSizingOf view atlas outposts
-
-    // The narrow facts the Planner reads about the colony's own decisions:
-    // the task ids its living creeps hold, and which holders still carry
-    // Thorium, off the table the Matcher wrote last tick. Derived before the
-    // pool, because this is the one place with both the assignments and the
-    // fleet.
-    let held = heldTaskFacts view assignments
+    let sizing = rowSizingOf view atlas threats outposts
 
     let tasks = planTasks view atlas threats held outposts
 
     // Every entry's priority and capacity, set once here and read by the
     // Matcher and the mover.
-    let pool = planPool view atlas tasks
+    let pool = planPool view atlas threats tasks
 
     // A far field whose Task is not in the tick's list is dead weight the
     // census never evicts (#392). Every far leg priced this tick — by the

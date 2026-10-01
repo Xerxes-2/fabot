@@ -578,6 +578,24 @@ let incomeWorkforceTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
+            test "a squad cast standing with no Fight takes no worker's seat" {
+                // The same fleet a worker short, and a brawler left over from
+                // a fight: counted against its own row and nowhere else.
+                let snapshot =
+                    { richestIncomeColony with
+                        Creeps =
+                            creepWith "brawler-1" 0 0 Bodies.brawlerPattern.Block
+                            :: richestIncomeFleet 1
+                    }
+
+                let { Intents = intents } = decideOn snapshot
+
+                match spawnIntents intents with
+                | [ (_, _, creepName) ] ->
+                    Expect.stringStarts creepName "worker-" "the worker is still cast"
+                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
             test "at the 1800 bank the whole fleet is 2 Anchors + 1 hauler + 2 workers" {
                 // The premise the case above rests on, and #208's upper
                 // half: nothing here is capped by the Anchor row's cast,

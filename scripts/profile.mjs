@@ -1190,6 +1190,10 @@ function buildStubWorld() {
       // `hireFleet` says so if the row is ever cast here.
       guard: [],
       ranger: [],
+      // A squad fights in a room the colony raises: none here.
+      brawler: [],
+      medic: [],
+      kiter: [],
     },
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
@@ -2583,6 +2587,10 @@ function buildOutpostWorld() {
       // same ring.
       guard: raidStations(outpostRooms),
       ranger: [],
+      // A squad fights in a room the colony raises: none here.
+      brawler: [],
+      medic: [],
+      kiter: [],
     },
     // One claimed-tile set per room of the world: the home room's is what
     // furnishing it collected, each outpost's is the obstacles it holds.
@@ -2703,6 +2711,12 @@ function homeStations(furnished) {
     // No ranger either: the row holds a declared errand room (#411), and only
     // the reactor scenario declares one.
     ranger: [],
+    // A squad is cast only where a raid stands in a room the colony
+    // raises and its bank holds a medic's 5,400; it musters short of the
+    // raid, so the spawn is where a frozen world stands it.
+    brawler: at([furnished.spawnPos]),
+    medic: at([furnished.spawnPos]),
+    kiter: at([furnished.spawnPos]),
   };
 }
 

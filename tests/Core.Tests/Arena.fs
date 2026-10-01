@@ -12,7 +12,8 @@
 /// each (`decideUnarbitrated`) and arbitrates every room's moves once
 /// (`resolveRooms`) — `Main.fullTick` less Memory. What the arena leaves out,
 /// and says so: the [[stand-down]] gate (the Raid log is Memory's, so every
-/// colony decides under `StandDown.none`), harassment casting
+/// colony decides under `StandDown.none`, its fight record alone carried, as
+/// `Observe.foldFights` folds it), harassment casting
 /// (`HarassCasting.none`), the round-robin replan (every colony is
 /// `ReplanTurn.Now`), and light ticks (`LightTick`): every tick is a full one.
 ///
@@ -153,6 +154,9 @@ type Carried =
         Towered: Set<string>
         ExitWatches: Map<string, ExitWatch>
         LastPositions: Map<string, RoomPos>
+        /// Each colony's fight record (`Observe.foldFights`), by home: the one
+        /// part of the Raid log the arena carries.
+        Fought: Map<string, Map<string, FightLatch>>
     }
 
 /// The arena's whole state between ticks.
@@ -322,6 +326,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Towered = Set.empty
                 ExitWatches = Map.empty
                 LastPositions = Map.empty
+                Fought = Map.empty
             }
     }
 
@@ -630,27 +635,30 @@ let private decideOurs (a: Arena) : Intent list * Carried =
     let holders =
         World.creepColoniesRecalling joins tuning a.Colonies casting living Map.empty world
 
-    let decisions =
+    let fought home =
+        Map.tryFind home a.Carried.Fought |> Option.defaultValue Map.empty
+
+    let decided =
         living
         |> List.map (fun c ->
-            let view =
-                ColonyView.ofWorldRecalling
-                    joins
-                    tuning
-                    a.Colonies
-                    casting
-                    StandDown.none
-                    holders
-                    world
-                    c
+            let gate =
+                { StandDown.none with
+                    Fought = fought c.Home
+                }
 
-            c.Home,
-            decideUnarbitrated
-                view
-                a.Carried.Assignments
-                Set.empty
-                (Map.tryFind c.Home a.Carried.Memos)
-                ReplanTurn.Now)
+            let view =
+                ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate holders world c
+
+            (c.Home, Observe.foldFights view (fought c.Home)),
+            (c.Home,
+             decideUnarbitrated
+                 view
+                 a.Carried.Assignments
+                 Set.empty
+                 (Map.tryFind c.Home a.Carried.Memos)
+                 ReplanTurn.Now))
+
+    let decisions = decided |> List.map snd
 
     let moves, _ = resolveRooms (decisions |> List.map (fun (_, d) -> d.Movement))
 
@@ -670,6 +678,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Sightings = world.Sightings
         Towered = world.Towered
         ExitWatches = world.ExitWatches
+        Fought = decided |> List.map fst |> Map.ofList
     }
 
 // ---------------------------------------------------------------------------

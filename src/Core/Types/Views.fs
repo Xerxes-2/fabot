@@ -84,6 +84,8 @@ type ColonyView =
         /// it apart from `StandDown.Shut`. **Vision overrules it**
         /// (`Planner.guardedOutposts` consults it only where there is none).
         ThreatenedOutposts: Set<string>
+        /// Each resident room's [[fight]] record (`StandDown.Fought`).
+        Fought: Map<string, FightLatch>
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one.
         ConstructionSites: ConstructionSiteInfo list
@@ -708,6 +710,7 @@ module ColonyView =
             // intersect them with the projected outposts anyway.
             HeldOutposts = gate.HeldOutposts
             ThreatenedOutposts = gate.ThreatenedOutposts
+            Fought = gate.Fought
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
             // An ally's creep is no hostile (#412): this is the one entry every

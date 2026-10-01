@@ -485,3 +485,35 @@ let thoriumApplicabilityTests =
                     "and one already holding ore has one Task: put it down"
             }
         ]
+
+[<Tests>]
+let fightCapacityTests =
+    testList
+        "a Fight's capacity per role"
+        [
+            test "a two-role capacity admits a brawler and a medic and refuses a second brawler" {
+                let at x = RoomPos.at "W1N1" { X = x; Y = 8 }
+
+                let squad =
+                    [
+                        creepWith "brawler-1" 0 0 brawlerPattern.Block, at 10
+                        creepWith "brawler-2" 0 0 brawlerPattern.Block, at 12
+                        creepWith "medic-1" 0 0 medicPattern.Block, at 11
+                    ]
+
+                let decision = decideOn (fightingMother (w17s25RaidIn "W1N2") squad)
+
+                let holders =
+                    decision.Assignments
+                    |> Map.filter (fun _ tid -> tid = taskId (Fight "W1N2"))
+                    |> Map.keys
+                    |> List.ofSeq
+
+                Expect.contains holders "medic-1" "the medic takes the medic's slot"
+
+                Expect.equal
+                    (holders |> List.filter (fun name -> name.StartsWith "brawler") |> List.length)
+                    1
+                    "one brawler takes the brawler's slot, and the second is refused"
+            }
+        ]

@@ -672,29 +672,6 @@ let guardRowTests =
             }
         ]
 
-/// The raid parked on W17S25's controller at t880,341 (`docs/research/squads.md`
-/// §1.2), part for part as the replays show Trepidimous build them: MOVE
-/// first, the weapon, one MOVE last; the healers MOVE then HEAL; and the
-/// 3-CLAIM tapper. Stood in `room`.
-let private w17s25RaidIn room =
-    let melee = List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ]
-    let healer = List.replicate 11 Move @ List.replicate 7 Heal
-    let tapper = List.replicate 3 Move @ List.replicate 3 BodyPart.Claim
-
-    let at id x y body =
-        { hostileIn room { X = x; Y = y } body with
-            Id = id
-            Owner = "Trepidimous"
-        }
-
-    [
-        at "Eternity536" 26 41 melee
-        at "Prime803" 27 42 melee
-        at "Prism305" 26 40 healer
-        at "Paragon722" 27 41 healer
-        at "Rune908" 26 42 tapper
-    ]
-
 /// The t880,341 raid in the errand room, a resident room of ours.
 let private w17s25Raid =
     { deliveryColony (Some Ownership.Ours) with
@@ -918,6 +895,72 @@ let squadExchangeTests =
                      kiteHolds w17s25Raid safe room [ slow ])
                     (true, false, false)
                     "a tile a tick against their tile a tick; no safe tile, or two ticks a tile, is no kite"
+            }
+        ]
+
+/// The squad rows' casts this tick, in casting order.
+let private squadCasts colony =
+    castRows (decideOn colony).Intents
+    |> List.filter (fun row -> List.contains row [ "brawler"; "medic"; "kiter" ])
+
+[<Tests>]
+let squadRowTests =
+    testList
+        "the squad rows"
+        [
+            test "a pooled Fight's roles cast in order: the brawler, then the medic" {
+                let raid = w17s25RaidIn "W1N2"
+                let at x = RoomPos.at "W1N1" { X = x; Y = 8 }
+
+                // A hauler standing, so no floor casts ahead of the rows.
+                let withCrew bodies =
+                    fightingMother raid ((hauler "hauler-1" 0 100, at 20) :: bodies)
+
+                Expect.equal
+                    (squadCasts (withCrew []))
+                    [ "brawler" ]
+                    "the brawler first, and the bank it leaves holds no medic"
+
+                Expect.equal
+                    (squadCasts (withCrew [ creepWith "brawler-1" 0 0 brawlerPattern.Block, at 10 ]))
+                    [ "medic" ]
+                    "with the brawler standing, the medic"
+
+                Expect.equal
+                    (squadCasts (
+                        withCrew
+                            [
+                                creepWith "brawler-1" 0 0 brawlerPattern.Block, at 10
+                                creepWith "medic-1" 0 0 medicPattern.Block, at 11
+                            ]
+                    ))
+                    []
+                    "and with both, nothing more"
+            }
+
+            test
+                "a squad cast reads back as its own row by name and fills no guard's, ranger's or worker's" {
+                let eightBlocks = List.replicate 8 rangerPattern.Block |> List.concat
+
+                let colony =
+                    { fightingMother [] [] with
+                        Creeps =
+                            [
+                                creepWith "brawler-1" 0 0 brawlerPattern.Block
+                                creepWith "medic-1" 0 0 medicPattern.Block
+                                creepWith "kiter-1" 0 0 kiterPattern.Block
+                                // The kiter's counts, cast by the ranger row.
+                                creepWith "ranger-1" 0 0 eightBlocks
+                            ]
+                    }
+
+                let living row =
+                    rowOf row colony |> Option.map (fun r -> r.Living)
+
+                Expect.equal
+                    ([ "brawler"; "medic"; "kiter"; "guard"; "ranger"; "worker" ] |> List.map living)
+                    [ Some 1; Some 1; Some 1; Some 0; Some 1; Some 0 ]
+                    "each body in its own row"
             }
         ]
 

@@ -514,6 +514,50 @@ let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
                 None)
         |> Map.ofArray
 
+// One fought room on the wire: `{ seen, squad }`, the tick its raid was last
+// seen and the catalogue name of the squad it latched, `squad` absent while
+// it latched none. An object for `encodeThreat`'s reason.
+let private encodeFight (latch: FightLatch) =
+    let o = createEmpty<obj>
+    o?seen <- latch.Seen
+
+    match latch.Squad with
+    | Some name -> o?squad <- name
+    | None -> ()
+
+    o
+
+// A checker and not a cast: a `seen` that is not a number would hold a Fight,
+// or bar its cast, for ever. A dropped entry costs the room its record. A
+// `squad` that is no string reads as none latched, which re-prices the squad
+// and costs the room nothing else.
+let private fightMapOf (raw: obj) : Map<string, FightLatch> =
+    if isNull raw then
+        Map.empty
+    else
+        objectEntries raw
+        |> Array.choose (fun (key, value) ->
+            try
+                if isNull value || jsTypeof value <> "object" then
+                    None
+                else
+                    let squad =
+                        if jsTypeof value?squad = "string" then
+                            Some(unbox<string> value?squad)
+                        else
+                            None
+
+                    Some(
+                        key,
+                        {
+                            Seen = numberOf value "seen"
+                            Squad = squad
+                        }
+                    )
+            with _ ->
+                None)
+        |> Map.ofArray
+
 // One latched room on the wire: `{ since, lastLooked }`, the tick the gate
 // shut on and the tick of the last look, which the next look's stride is
 // measured from.
@@ -793,6 +837,7 @@ let loadRaids (home: string) : RaidState =
             RivalHeld = latchMapOf raids?rivalHeld
             Holds = holdMapOf raids?holds
             Threatened = threatMapOf raids?threatened
+            Fought = fightMapOf raids?fought
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -839,6 +884,7 @@ let saveRaids (home: string) (state: RaidState) =
     raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf encodeLatch
     raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
     raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
+    raids?fought <- state.Fought |> Map.toSeq |> hashOf encodeFight
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)

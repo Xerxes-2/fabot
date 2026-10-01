@@ -158,3 +158,9 @@ type Task =
     /// room, a colony fact derived off `Threats` as [[flee]]'s safe set is.
     /// ADR-0056
     | Guard of roomName: string
+    /// Killing a raid in a resident room with a [[squad]] (#453): one Task
+    /// per room whose residents lose and a catalogue squad wins, beside the
+    /// room's Guard, held by the role bodies its capacity counts. Its Work
+    /// Area is the rally ground until the squad launches, and the fighting
+    /// ground after.
+    | Fight of roomName: string

@@ -70,6 +70,7 @@ const emptyRaids = {
   rivalHeld: {},
   holds: {},
   threatened: {},
+  fought: {},
   living: [],
   placed: {},
   hits: {},
@@ -107,6 +108,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     rivalHeld: { W1N3: { since: 100, lastLooked: 150 } },
     holds: { W1N4: { holder: "invader", until: 900 } },
     threatened: { W1N5: { until: 800 } },
+    fought: { W1N6: { seen: 700, squad: "duo" }, W1N7: { seen: 690 } },
     living: ["w1", "w2"],
     placed: { w1: { room: "W1N2", x: 8, y: 49 } },
     hits: { "struct-1": 3000 },
@@ -124,6 +126,30 @@ wire("raids: #275's null latch costs its own entry and not the state", async () 
 
   assert.equal(stable(written.rivalHeld), stable({ W1N4: { since: 100, lastLooked: 150 } }));
   assert.equal(written.episodes.length, 1, "the rest of the leaf survives the bad entry");
+});
+
+wire("raids: a fought room with no seen tick costs its own entry, and a legacy leaf reads none", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    fought: { W1N6: { seen: "soon" }, W1N7: null, W1N8: { seen: 700 } },
+  });
+
+  assert.equal(stable(written.fought), stable({ W1N8: { seen: 700 } }));
+
+  const { fought, ...legacy } = emptyRaids;
+  assert.equal(stable((await raidsThrough(legacy)).fought), stable({}));
+});
+
+wire("raids: a fought room with no squad, or one that is no name, reads unlatched", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    fought: { W1N6: { seen: 700 }, W1N7: { seen: 690, squad: 3 }, W1N8: { seen: 680, squad: "duo" } },
+  });
+
+  assert.equal(
+    stable(written.fought),
+    stable({ W1N6: { seen: 700 }, W1N7: { seen: 690 }, W1N8: { seen: 680, squad: "duo" } }),
+  );
 });
 
 wire("raids: a stand-down with no expiry costs its row and no other", async () => {

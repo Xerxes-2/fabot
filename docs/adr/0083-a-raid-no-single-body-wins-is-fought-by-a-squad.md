@@ -1,6 +1,8 @@
 # A raid no single body wins is fought by a squad, priced and launched as a whole
 
-> **Status:** accepted
+> **Status:** accepted, amended by #453
+
+> **Amended 2026-10-02** by #453 (S2, muster): decision 3's muster is a Safety-tier `Fight of room` Task, pooled beside the room's Guard once a raid the residents lose stands in a resident room on two ticks inside `Tuning.FightConfirmTicks`, and held for `Tuning.FightHoldTicks` after that raid is last seen. The squad it is first pooled with is latched in the Raid log's fight record and read by every rule until the record drops: a raid that shrinks or steps out never re-prices it. Its members are the casts holding it, each role read off the cast's name, and counted against the squad rows alone, never the fleet; a resident joins only after launch, and only into a slot its parts fit. The squad waits on rally ground short of the target, never in a Source Keeper's or a rival's room, and none is cast for a room with no rally ground. It launches only with every slot held by a living member and its casts together, and a lost member sends the survivors back to rally until the squad is whole again; launch is derived from positions and never stored. With the room empty a launched squad holds its resident ring. The #447 relief gives way to the squad only once it launches. Spawn time is not priced.
 
 > **Accepted 2026-10-02** on #452 and #456, the user deciding: we are already fighting Trepidimous; the melee duo is built first; the nearest RCL7 mother in reach casts it, one duo per engagement. Research: `docs/research/squads.md`.
 

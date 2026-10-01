@@ -282,6 +282,20 @@ let private upgradeDrainOf body =
 /// `isGuardParts` asked of a living body.
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
+/// Whether a name is a squad cast's, which no other row's census counts.
+let private isSquadCast (name: string) = Option.isSome (squadRoleByName name)
+
+/// The guard row's own cut, over a name and parts: an ATTACK body that is no
+/// squad cast.
+let internal isGuardRowCut (name: string) (parts: Map<BodyPart, int>) =
+    isGuardParts parts && not (isSquadCast name)
+
+let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.Body
+
+/// Whether a body is a squad's medic.
+let internal isMedicBody (creep: CreepInfo) =
+    squadRoleOf creep.Name creep.Body = Some Medic
+
 /// The ranger cut (#411): a RANGED_ATTACK part and no ATTACK, the guard's cut
 /// taking a body that carries both.
 let internal isRangerParts (parts: Map<BodyPart, int>) =
@@ -289,8 +303,16 @@ let internal isRangerParts (parts: Map<BodyPart, int>) =
 
 let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
 
-/// Either fighting row's body: what never flees and walks home when idle.
-let internal isFighterBody (creep: CreepInfo) = isGuardBody creep || isRangerBody creep
+/// The ranger row's own cut: a ranger body that is no kiter cast.
+let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
+    isRangerParts parts && not (isSquadCast name)
+
+let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
+
+/// Any fighting row's body, a squad's medic among them: what never flees and
+/// walks home when idle.
+let internal isFighterBody (creep: CreepInfo) =
+    isGuardBody creep || isRangerBody creep || isMedicBody creep
 
 /// Whether a towerless room of ours holds the raid standing in it without
 /// safe mode (#448): some one armed body of ours standing there, whichever
@@ -397,12 +419,16 @@ let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
 /// wants none (#451): a body cast into it only feeds the raid, so the home
 /// is the child's safe mode's, and the garrison already standing keeps its
 /// Guard (the pool's cap counts it) on safe ground. One in a harassment room
-/// (#432): a raid that one loses is the room's [[stand-down]].
-let internal rangersWanted (view: ColonyView) (room: string) : int =
+/// (#432): a raid that one loses is the room's [[stand-down]]. A launched
+/// squad is the relief: none is cast beside it, and none is held back while
+/// it musters.
+let internal rangersWanted (view: ColonyView) (threats: Threats) (room: string) : int =
     if Set.contains room (harassRooms view) then
         1
     elif outmatched view room then
         0
+    elif Threats.fightLaunchedIn threats room then
+        view.Tuning.RangerResidents
     elif
         Set.contains room (raisedHomes view)
         && List.contains room view.Borrowed.Defended
@@ -414,8 +440,8 @@ let internal rangersWanted (view: ColonyView) (room: string) : int =
 
 /// The ranger row's quota: `rangersWanted` over every worked errand and
 /// harassment room.
-let internal rangerQuota (view: ColonyView) (outposts: OutpostFacts) : int =
-    snd (guardedSplit view outposts) |> List.sumBy (rangersWanted view)
+let internal rangerQuota (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : int =
+    snd (guardedSplit view outposts) |> List.sumBy (rangersWanted view threats)
 
 /// The blocks the ranger row casts this tick, the worst room's answer.
 let internal rangerBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
@@ -466,23 +492,52 @@ let internal fightReports (view: ColonyView) (threats: Threats) : FightReport li
 /// stands in the room, so the seat stays open while the row buys the relief.
 let private fightingRowStands
     (view: ColonyView)
-    (cut: Map<BodyPart, int> -> bool)
+    (cut: string -> Map<BodyPart, int> -> bool)
     (quota: int)
     : bool =
-    let living = view.Creeps |> List.filter (fun creep -> cut creep.Body) |> List.length
+    let living =
+        view.Creeps
+        |> List.filter (fun creep -> cut creep.Name creep.Body)
+        |> List.length
 
     let inOven =
-        view.Casting |> List.filter (fun cast -> cut (partsOf cast.Body)) |> List.length
+        view.Casting
+        |> List.filter (fun cast -> cut cast.Name (partsOf cast.Body))
+        |> List.length
 
     living + inOven >= quota
 
 /// Whether the guard row is filled.
 let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
-    fightingRowStands view isGuardParts (guardQuota view outposts)
+    fightingRowStands view isGuardRowCut (guardQuota view outposts)
+
+/// One squad role's row quota: every pooled Fight's slots of the role, less
+/// the residents already filling them, in each room whose Fight is not
+/// barred from a cast (`Facts.fightCooling`) and has a rally ground to wait
+/// on.
+let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) : int =
+    threats.Fight
+    |> Map.toList
+    |> List.filter (fun (room, ground) ->
+        not (fightCooling view room) && not (Set.isEmpty ground.Rally))
+    |> List.sumBy (fun (_, ground) ->
+        SquadRole.slots role (squadRoles ground.Squad)
+        - (ground.Residents |> Map.filter (fun _ held -> held = role) |> Map.count)
+        |> max 0)
+
+/// Whether the squad rows are filled: every role's casts standing or in an
+/// oven.
+let private squadStands (view: ColonyView) (threats: Threats) : bool =
+    SquadRole.all
+    |> List.forall (fun role ->
+        fightingRowStands
+            view
+            (fun name _ -> squadRoleByName name = Some role)
+            (squadQuota view threats role))
 
 /// Whether the ranger row is filled (#411).
-let internal rangerStands (view: ColonyView) (outposts: OutpostFacts) : bool =
-    fightingRowStands view isRangerParts (rangerQuota view outposts)
+let internal rangerStands (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : bool =
+    fightingRowStands view isRangerRowCut (rangerQuota view threats outposts)
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -521,7 +576,11 @@ let internal minerQuota (view: ColonyView) atlas : int =
 /// it: the reserver is the only body such a room ever holds, so a read off
 /// vision alone would go dark the tick the last one died and hire the next
 /// (`Planner.reservableControllers`).
-let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int list =
+let internal reserverClaimsOf
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    : int list =
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
@@ -547,7 +606,7 @@ let internal reserverClaimsOf (view: ColonyView) (outposts: OutpostFacts) : int 
                  Set.empty
              else
                  Set.ofList outpostsShort)
-            (if rangerStands view outposts then
+            (if rangerStands view threats outposts && squadStands view threats then
                  Set.empty
              else
                  Set.ofList errandsShort)
@@ -617,10 +676,15 @@ type RowSizing =
         CourierQuota: int
     }
 
-let internal rowSizingOf (view: ColonyView) atlas (outposts: OutpostFacts) : RowSizing =
+let internal rowSizingOf
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    : RowSizing =
     {
         AnchorPostCaps = postWorkCapsOf view atlas
-        ReserverClaims = reserverClaimsOf view outposts
+        ReserverClaims = reserverClaimsOf view threats outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         GuardBlocks = guardBlocksWanted view outposts
         RangerBlocks = rangerBlocksWanted view outposts
@@ -767,6 +831,8 @@ type QuotaRows =
         Guard: int
         /// One resident ranger per worked errand room, two where one loses (#411).
         Ranger: int
+        /// A pooled Fight's squad, role by role (`squadQuota`).
+        Squad: Map<SquadRole, int>
         Anchor: int
         Hauler: int
         /// One miner per diggable deposit — 0 below RCL6.
@@ -801,6 +867,7 @@ let internal dismantlerQuota (view: ColonyView) : int =
 let internal quotaRowsOf
     (view: ColonyView)
     atlas
+    (threats: Threats)
     (outposts: OutpostFacts)
     (sizing: RowSizing)
     haulerQuota
@@ -812,7 +879,11 @@ let internal quotaRowsOf
     {
         Reserver = sizing.ReserverClaims
         Guard = guardQuota view outposts
-        Ranger = rangerQuota view outposts
+        Ranger = rangerQuota view threats outposts
+        Squad =
+            SquadRole.all
+            |> List.map (fun role -> role, squadQuota view threats role)
+            |> Map.ofList
         // One Anchor per Post of every projected room.
         Anchor = Atlas.postCount atlas
         Hauler = haulerQuota
@@ -830,7 +901,9 @@ let internal quotaRowsOf
 /// `Tuning.MinWorkforce`. An unposted source of an outpost contributes nothing:
 /// the seat-crew justification presumes the walk is cheap. The guard and miner
 /// rows are addends so that a body hired off the ground is not read as one of
-/// the generalists the income paid for.
+/// the generalists the income paid for. The squad rows are no addend: their
+/// casts stand outside the fleet (`Spawns.planSpawns`), so one idling after
+/// its fight holds no worker's seat.
 let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: QuotaRows) =
     let home = SpatialInfo.homeName view.Spatial
 

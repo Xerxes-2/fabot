@@ -40,6 +40,14 @@ let matchCreeps
 
     let classOf name = Map.tryFind name classes
 
+    // Each living body's squad role, for a Fight's per-role caps.
+    let roles =
+        view.Creeps
+        |> List.choose (fun c -> squadRoleOf c.Name c.Body |> Option.map (fun role -> c.Name, role))
+        |> Map.ofList
+
+    let roleOf name = Map.tryFind name roles
+
     // ADR-0002. The crowding component of the matching key: every holder,
     // counted at this tick, never at arrival — spreading creeps over Tasks is
     // a judgement about now.
@@ -191,6 +199,8 @@ let matchCreeps
                 | CapScope.Standing -> (=) Standing
                 | CapScope.Generalists -> fun c -> c <> Heavy && c <> Standing
                 | CapScope.Fighters -> (=) Fighter
+                // Counted by role and never by class (`capsHold`).
+                | CapScope.Role _ -> fun _ -> false
 
             let counted =
                 function
@@ -200,6 +210,8 @@ let matchCreeps
                 | CapScope.Standing -> standingRow
                 | CapScope.Generalists -> all - heavy - standingRow
                 | CapScope.Fighters -> inClass Fighter |> List.length
+                | CapScope.Role role ->
+                    holders |> List.filter (fun name -> roleOf name = Some role) |> List.length
 
             // Every cap on the Task holds, or the candidate is refused. A cap
             // whose crowd the candidate's own class does not fall in is not its
@@ -211,6 +223,13 @@ let matchCreeps
                     // The one cap that refuses a class outright rather than
                     // counting it (`CapScope.Fighters`).
                     | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
+                    // A role's slots are its own bodies'; a body of no role is
+                    // refused by every one of them, and the Task writes all three.
+                    | CapScope.Role role ->
+                        match roleOf creep.Name with
+                        | Some own when own = role -> counted scope < limit
+                        | Some _ -> true
+                        | None -> false
                     | _ ->
                         match cls with
                         | Some c when appliesTo scope c -> counted scope < limit

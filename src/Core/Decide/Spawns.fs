@@ -13,11 +13,9 @@ open Fabot.Core.Types
 /// cascade that reached the hauler arm first would read a reserver as a hauler.
 let private isReserverBody (creep: CreepInfo) = partCount creep.Body BodyPart.Claim > 0
 
-let private hasCourierName (name: string) = name.StartsWith "courier-"
-
 /// The hauler row's census: Carry parts and no Work.
 let private isHaulerBody (creep: CreepInfo) =
-    not (hasCourierName creep.Name)
+    not (isNamedFor courierPattern creep.Name)
     && partCount creep.Body Work = 0
     && partCount creep.Body Carry > 0
 
@@ -27,25 +25,21 @@ let private isHaulerBody (creep: CreepInfo) =
 let private castIsHeavy parts =
     partCount parts Work > partCount parts Move
 
-/// The pattern row a living body was cast from. The fixed courier is read from
-/// the row prefix written by this cascade because its 20C/10M counts are also
-/// a 1,500-capacity hauler; every other row remains readable from its parts.
+/// The pattern row a living body was cast from: its name's, for the rows read
+/// back that way (`patternByName`), and its parts' for every other.
 let private patternOf (tuning: Tuning) atlas (creep: CreepInfo) =
-    if hasCourierName creep.Name then
-        courierPattern
-    else
-        patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body
+    patternByName creep.Name
+    |> Option.defaultWith (fun () ->
+        patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body)
 
 /// The row a body **still in the oven** was bought for: the same rule over the
-/// same name and counts. The name matters only for the courier collision above;
-/// preserving it also prevents a 1,500-capacity hauler in one oven from filling
-/// the courier row's gap in another.
+/// same name and counts. Preserving the name also prevents a 1,500-capacity
+/// hauler in one oven from filling the courier row's gap in another.
 let private patternOfCast (tuning: Tuning) (cast: CastingInfo) =
-    if hasCourierName cast.Name then
-        courierPattern
-    else
+    patternByName cast.Name
+    |> Option.defaultWith (fun () ->
         let parts = partsOf cast.Body
-        patternOfParts tuning (castIsHeavy parts) parts
+        patternOfParts tuning (castIsHeavy parts) parts)
 
 /// Whether a living body can put energy into an extension.
 let private canRefill (tuning: Tuning) atlas (creep: CreepInfo) =
@@ -199,7 +193,7 @@ let internal planSpawns
         // Every specialist row's quota in one value, read once because every
         // row is an addend of the target *and* a gap of its own in the
         // cascade.
-        let rows = quotaRowsOf view atlas outposts sizing haulerQuota
+        let rows = quotaRowsOf view atlas threats outposts sizing haulerQuota
 
         let target = workforceTarget view atlas tasks rows
 
@@ -219,7 +213,14 @@ let internal planSpawns
             |> List.filter (fun cast -> patternOfCast view.Tuning cast = pattern)
             |> List.length
 
-        let deficit = target - (List.length living + List.length casting)
+        // The fleet the target is a number about: every body but the squad's
+        // casts, which answer to their own rows alone (`workforceTarget`).
+        let inFleet name = Option.isNone (squadRoleByName name)
+
+        let deficit =
+            target
+            - (living |> List.filter (fun creep -> inFleet creep.Name) |> List.length)
+            - (casting |> List.filter (fun cast -> inFleet cast.Name) |> List.length)
 
         // ADR-0006
         // A body is sized to the bank's capacity and cast the tick the bank
@@ -305,6 +306,18 @@ let internal planSpawns
                 RangerBlocks = sizing.RangerBlocks
             }
 
+        let squadRows: SpecialistRow list =
+            SquadRole.all
+            |> List.map (fun role ->
+                let pattern = squadPatternOf role
+
+                {
+                    Name = pattern.Name
+                    Pattern = pattern
+                    Quota = Map.find role rows.Squad
+                    Census = fun creep -> squadRoleByName creep.Name = Some role
+                })
+
         let rows: SpecialistRow list =
             [
                 // Counted over the fleet against a quota derived per room,
@@ -319,7 +332,7 @@ let internal planSpawns
                     // Priced at capacity like every row but the floor, so a
                     // bank that cannot hold 750 casts nothing here and yields
                     // to the reserver behind it.
-                    Census = isGuardBody
+                    Census = isGuardRowBody
                 }
                 // The errand room's ranged guard (#411), behind the melee one
                 // and for the same reason: a fight is cast before the seats it
@@ -328,8 +341,12 @@ let internal planSpawns
                     Name = "ranger"
                     Pattern = rangerPattern
                     Quota = rows.Ranger
-                    Census = isRangerBody
+                    Census = isRangerRowBody
                 }
+                // A pooled Fight's squad (#453), its roles in the order they
+                // cast: the brawler the medic walks behind, then the medic,
+                // then the kiters. Each row's census is its casts, by name.
+                yield! squadRows
                 {
                     Name = "reserver"
                     Pattern = reserverPattern
@@ -401,9 +418,14 @@ let internal planSpawns
                 let inOven = castOf row.Pattern
                 row, alive, inOven, row.Quota - alive - inOven |> max 0)
 
+        // The rows the target and the deficit count: every row but the
+        // squad's.
+        let fleetRows =
+            filled |> List.filter (fun (row, _, _, _) -> not (isSquadPattern row.Pattern))
+
         // The tick's arithmetic, written down for the `quotas` view.
         let quotas: Quotas =
-            let specialists = filled |> List.sumBy (fun (row, _, _, _) -> row.Quota)
+            let specialists = fleetRows |> List.sumBy (fun (row, _, _, _) -> row.Quota)
 
             {
                 Target = target
@@ -484,7 +506,7 @@ let internal planSpawns
         // whole-fleet deficit has left. The deficit gates the worker row
         // alone: the whole-fleet gap less the rows above is exactly that
         // row's remainder while every specialist row is at or under quota.
-        let specialistSeats = filled |> List.sumBy (fun (_, _, _, gap) -> gap)
+        let specialistSeats = fleetRows |> List.sumBy (fun (_, _, _, gap) -> gap)
 
         let seats =
             List.replicate

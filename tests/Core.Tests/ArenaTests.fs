@@ -349,7 +349,7 @@ let private w17s25 (x: int) (y: int) = RoomPos.at "W17S25" { X = x; Y = y }
 /// is a nursery raised by W17S26 here — live its mother was W15S28, five
 /// crossings off; the arena's mother is the neighbour so one seam joins them,
 /// which moves nothing inside W17S25.
-let private siege (ours: Body list) =
+let private besieged (raid: Body list) (ours: Body list) =
     let mother =
         room "W17S26"
         |> withController Ownership.Ours None 7 0
@@ -365,6 +365,9 @@ let private siege (ours: Body list) =
             }
         ]
 
+    arena 880_341 [ mother; child ] colonies (ours @ raid)
+
+let private siege (ours: Body list) =
     let controller = w17s25 15 36
 
     let raid =
@@ -386,7 +389,7 @@ let private siege (ours: Body list) =
             body "Rune908" trep trepTapper (w17s25 16 37) (Some(Tap controller))
         ]
 
-    arena 880_341 [ mother; child ] colonies (ours @ raid)
+    besieged raid ours
 
 /// Odiodin's garrison (§1.4): `20M16R4H`, MOVE first.
 let private garrison = parts [ Move, 20; RangedAttack, 16; Heal, 4 ]
@@ -605,6 +608,289 @@ let arenaScenarioTests =
 
                     Expect.isNone (diedOn ranger trace) "the resident lives"
             }
+
+            test "the W17S25 siege: a duo musters short of the raid, launches whole, and kills it" {
+                let brawler = "brawler-880000-Spawn8"
+                let medic = "medic-880000-Spawn8"
+                let duo = [ brawler; medic ]
+                let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
+
+                // Two starts in the mother's room, the last before the raid on
+                // the chain: apart, and together.
+                for brawlerAt, medicAt in [ w17s26 10 40, w17s26 40 40; w17s26 20 30, w17s26 21 30 ] do
+                    let ours =
+                        [
+                            body
+                                brawler
+                                Side.Ours
+                                Fabot.Core.Decide.Bodies.brawlerPattern.Block
+                                brawlerAt
+                                None
+                            body
+                                medic
+                                Side.Ours
+                                Fabot.Core.Decide.Bodies.medicPattern.Block
+                                medicAt
+                                None
+                        ]
+
+                    let _, trace = siege ours |> run 150
+                    let failure = $"from {brawlerAt}, {medicAt}\n{describe trace}"
+
+                    let firstIn id =
+                        pathOf id trace
+                        |> List.tryFind (fun (_, s) -> s.At.Room = "W17S25")
+                        |> Option.map fst
+
+                    // Neither enters alone: the medic crosses on the brawler's
+                    // heels — a crossing is three ticks for the one behind —
+                    // and on the first tick either stands within three of the
+                    // raid, the other stands beside it.
+                    match firstIn brawler, firstIn medic with
+                    | Some b, Some m ->
+                        Expect.isLessThanOrEqual (abs (b - m)) 3 $"entered together\n{failure}"
+                    | entered -> failtest $"both entered: {entered}\n{failure}"
+
+                    let contact =
+                        trace
+                        |> List.tryFind (fun t ->
+                            t.Bodies
+                            |> List.exists (fun s ->
+                                List.contains s.Id duo
+                                && t.Bodies
+                                   |> List.exists (fun r ->
+                                       List.contains r.Id raidIds
+                                       && RoomPos.range s.At r.At
+                                          |> Option.exists (fun d -> d <= 3))))
+
+                    match contact with
+                    | Some t ->
+                        let at id =
+                            t.Bodies
+                            |> List.tryFind (fun s -> s.Id = id)
+                            |> Option.map (fun s -> s.At)
+
+                        match at brawler, at medic with
+                        | Some x, Some y ->
+                            Expect.isTrue
+                                (RoomPos.range x y |> Option.exists (fun r -> r <= 2))
+                                $"t{t.Tick}: together at first contact\n{failure}"
+                        | _ -> failtest $"both stood at first contact, t{t.Tick}\n{failure}"
+                    | None -> failtest $"the duo never reached the raid\n{failure}"
+
+                    // The whole raid: a healer whose melee are dead is still
+                    // the raid's while the Fight is pooled.
+                    for id in raidIds do
+                        Expect.isSome (diedOn id trace) $"{id} dies\n{failure}"
+
+                    for id in duo do
+                        Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+            }
+
+            test
+                "a lone brawler waits at the rally ground while the residents hold the room and shoot its tapper" {
+                let brawler = "brawler-880000-Spawn8"
+                let residents = [ "ranger-879853-Spawn8"; "ranger-879854-Spawn8" ]
+
+                // Twelve ATTACK: a seven-block resident loses it alone, and
+                // the duo wins it. No medic is cast here, so the squad never
+                // completes.
+                let raid =
+                    [
+                        body
+                            "Eternity536"
+                            trep
+                            (parts [ Move, 12; Attack, 12 ])
+                            (w17s25 16 36)
+                            (Some(Chase(Nearest, Some(w17s25 16 36, 4))))
+                        body "Rune908" trep trepTapper (w17s25 16 37) (Some(Tap(w17s25 15 36)))
+                    ]
+
+                let ours =
+                    [
+                        body
+                            brawler
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.brawlerPattern.Block
+                            (RoomPos.at "W17S26" { X = 20; Y = 30 })
+                            None
+                        body residents[0] Side.Ours r7 (w17s25 20 38) None
+                        body residents[1] Side.Ours r7 (w17s25 19 39) None
+                    ]
+
+                let _, trace = besieged raid ours |> run 60
+                let failure = describe trace
+
+                Expect.isTrue
+                    (pathOf brawler trace |> List.forall (fun (_, s) -> s.At.Room = "W17S26"))
+                    $"the brawler never enters alone\n{failure}"
+
+                for id in residents do
+                    Expect.isTrue
+                        (pathOf id trace |> List.forall (fun (_, s) -> s.At.Room = "W17S25"))
+                        $"{id} never leaves the room\n{failure}"
+
+                Expect.isTrue
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Ours
+                         |> List.exists (function
+                             | RangedAttackCreep(name, "Rune908") -> List.contains name residents
+                             | _ -> false)))
+                    $"a resident shoots the tapper\n{failure}"
+
+                Expect.isSome (diedOn "Rune908" trace) $"and kills it\n{failure}"
+            }
+
+            test
+                "a duo chasing a melee that runs across the room is not called back to the rally ground" {
+                let brawler = "brawler-880000-Spawn8"
+                let medic = "medic-880000-Spawn8"
+                let duo = [ brawler; medic ]
+
+                // Parked until the duo is inside, then running to the far
+                // north-west of the room, where it stands and fights.
+                let raid =
+                    [
+                        body
+                            "Eternity536"
+                            trep
+                            (parts [ Move, 12; Attack, 12 ])
+                            (w17s25 16 36)
+                            (Some(
+                                Phases
+                                    [
+                                        44, Chase(Nearest, Some(w17s25 16 36, 4))
+                                        10_000, GoTo(w17s25 6 17)
+                                    ]
+                            ))
+                    ]
+
+                let ours =
+                    [
+                        body
+                            brawler
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.brawlerPattern.Block
+                            (RoomPos.at "W17S26" { X = 20; Y = 30 })
+                            None
+                        body
+                            medic
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.medicPattern.Block
+                            (RoomPos.at "W17S26" { X = 21; Y = 30 })
+                            None
+                    ]
+
+                let _, trace = besieged raid ours |> run 120
+                let failure = describe trace
+
+                match diedOn "Eternity536" trace with
+                | None -> failtest $"the melee dies\n{failure}"
+                | Some dead ->
+                    Expect.isTrue
+                        (pathOf "Eternity536" trace
+                         |> List.tryLast
+                         |> Option.bind (fun (_, s) -> RoomPos.range s.At (w17s25 16 36))
+                         |> Option.exists (fun r -> r > 5))
+                        $"the premise: it ran before it died\n{failure}"
+
+                    for id in duo do
+                        let path = pathOf id trace |> List.filter (fun (t, _) -> t <= dead)
+
+                        match path |> List.tryFindIndex (fun (_, s) -> s.At.Room = "W17S25") with
+                        | None -> failtest $"{id} enters the room\n{failure}"
+                        | Some first ->
+                            Expect.isTrue
+                                (path
+                                 |> List.skip first
+                                 |> List.forall (fun (_, s) -> s.At.Room = "W17S25"))
+                                $"{id} stays in the room through the chase\n{failure}"
+
+                        Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+            }
+
+            test
+                "a brawler killed in contact sends its medic back to the rally ground, never into the melee" {
+                let brawler = "brawler-880000-Spawn8"
+                let medic = "medic-880000-Spawn8"
+                let anchor = w17s25 17 37
+
+                // Three melee abreast, each chasing only what stands within
+                // two of their anchor: the brawler beside them, never the
+                // medic behind it.
+                let melee id x =
+                    body id trep trepMelee (w17s25 x 38) (Some(Chase(Nearest, Some(anchor, 2))))
+
+                let raid = [ melee "Eternity536" 16; melee "Prime803" 17; melee "Ruin1" 18 ]
+
+                let ours =
+                    [
+                        // Its legs already gone: it dies inside two ticks.
+                        { body
+                              brawler
+                              Side.Ours
+                              Fabot.Core.Decide.Bodies.brawlerPattern.Block
+                              (w17s25 17 39)
+                              None with
+                            Hits = 2500
+                        }
+                        body
+                            medic
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.medicPattern.Block
+                            (w17s25 17 40)
+                            None
+                    ]
+
+                // The duo latched and launched: the fight already joined.
+                let start = besieged raid ours
+
+                let joined =
+                    { start with
+                        Carried =
+                            { start.Carried with
+                                Fought =
+                                    Map.ofList
+                                        [
+                                            "W17S26",
+                                            Map.ofList
+                                                [
+                                                    "W17S25",
+                                                    {
+                                                        Seen = start.Time - 1
+                                                        Squad = Some "duo"
+                                                    }
+                                                ]
+                                        ]
+                            }
+                    }
+
+                let _, trace = joined |> run 60
+                let failure = describe trace
+                let melees = raid |> List.map (fun b -> b.Id)
+
+                match diedOn brawler trace with
+                | None -> failtest $"the premise: the brawler dies\n{failure}"
+                | Some dead ->
+                    for t in trace |> List.filter (fun t -> t.Tick >= dead) do
+                        match t.Bodies |> List.tryFind (fun s -> s.Id = medic) with
+                        | None -> ()
+                        | Some m ->
+                            Expect.isFalse
+                                (t.Bodies
+                                 |> List.exists (fun r ->
+                                     List.contains r.Id melees
+                                     && RoomPos.range m.At r.At |> Option.exists (fun d -> d <= 1)))
+                                $"t{t.Tick}: the medic stands beside no melee\n{failure}"
+
+                Expect.isNone (diedOn medic trace) $"the medic lives\n{failure}"
+
+                Expect.equal
+                    (pathOf medic trace |> List.tryLast |> Option.map (fun (_, s) -> s.At.Room))
+                    (Some "W17S26")
+                    $"and waits on the rally ground short of the room\n{failure}"
+            }
         ]
 
 let private w18s25 (x: int) (y: int) = RoomPos.at "W18S25" { X = x; Y = y }
@@ -796,5 +1082,94 @@ let arenaBorderTests =
                 Expect.isEmpty
                     (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
                     $"the ranger did not follow\n{describe trace}"
+            }
+
+            test
+                "a raid that steps out and back in meets the same duo, holding the controller's ring meanwhile" {
+                let brawler = "brawler-880000-Spawn8"
+                let medic = "medic-880000-Spawn8"
+                let duo = [ brawler; medic ]
+                let controller = w17s25 15 36
+
+                // Twelve ATTACK, parked until the duo is on its way, then out
+                // to W18S25 for a while and back to the controller.
+                let raid =
+                    body
+                        "Eternity536"
+                        trep
+                        (parts [ Move, 12; Attack, 12 ])
+                        (w17s25 16 36)
+                        (Some(
+                            Phases
+                                [
+                                    40, Chase(Nearest, Some(w17s25 16 36, 4))
+                                    160, GoTo(w18s25 44 17)
+                                    10_000, GoTo(w17s25 16 36)
+                                ]
+                        ))
+
+                let ours =
+                    [
+                        body
+                            brawler
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.brawlerPattern.Block
+                            (RoomPos.at "W17S26" { X = 20; Y = 30 })
+                            None
+                        body
+                            medic
+                            Side.Ours
+                            Fabot.Core.Decide.Bodies.medicPattern.Block
+                            (RoomPos.at "W17S26" { X = 21; Y = 30 })
+                            None
+                    ]
+
+                let final, trace = nurseryWest (raid :: ours) |> run 280
+                let failure = describe trace
+
+                let left = crossingsInto "Eternity536" "W18S25" trace
+                let back = crossingsInto "Eternity536" "W17S25" trace
+                Expect.isNonEmpty left $"the premise: the raid steps out\n{failure}"
+                Expect.isNonEmpty back $"and back in\n{failure}"
+
+                // On the tick it steps back in, the duo stands on the ring it
+                // held while the room was empty.
+                match standingAt (List.head back) trace with
+                | standing ->
+                    let at id =
+                        standing |> List.tryFind (fun s -> s.Id = id) |> Option.map (fun s -> s.At)
+
+                    Expect.isTrue
+                        (at brawler
+                         |> Option.bind (fun tile -> RoomPos.range tile controller)
+                         |> Option.exists (fun r -> r <= 1))
+                        $"t{List.head back}: the brawler on the controller's ring\n{failure}"
+
+                    Expect.isTrue
+                        (at medic |> Option.exists (fun tile -> tile.Room = "W17S25"))
+                        $"t{List.head back}: the medic in the room with it\n{failure}"
+
+                Expect.isTrue
+                    (trace
+                     |> List.forall (fun t ->
+                         t.Ours
+                         |> List.forall (function
+                             | SpawnCreep(_, _, name) ->
+                                 [ "brawler-"; "medic-"; "kiter-" ]
+                                 |> List.forall (fun row -> not (name.StartsWith row))
+                             | _ -> true)))
+                    $"no squad body is cast beside it\n{failure}"
+
+                Expect.equal
+                    (Map.tryFind "W17S26" final.Carried.Fought
+                     |> Option.bind (Map.tryFind "W17S25")
+                     |> Option.bind (fun latch -> latch.Squad))
+                    (Some "duo")
+                    "the duo stays the room's squad throughout"
+
+                Expect.isSome (diedOn "Eternity536" trace) $"the raid dies\n{failure}"
+
+                for id in duo do
+                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
             }
         ]

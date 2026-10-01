@@ -361,6 +361,10 @@ let planTasks
     //
     // And one per held exit a living guard already holds the Guard of (#450):
     // the hold keeps that guard on the exit, and is no room the row hires for.
+    //
+    // And one Fight per room a squad fights in (#453), beside the room's
+    // Guard: its residents hold the Guard while the squad musters, and those
+    // no slot fits go on holding it once it launches.
     let guards =
         let holding =
             threats.Held
@@ -369,7 +373,8 @@ let planTasks
                 && not (List.contains room outposts.Guarded))
             |> Set.toList
 
-        outposts.Guarded @ holding |> List.map Guard
+        (outposts.Guarded @ holding |> List.map Guard)
+        @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
 
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —

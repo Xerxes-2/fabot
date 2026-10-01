@@ -152,6 +152,7 @@ let bareRespawn =
         RoomControl = homeControl
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
+        Fought = Map.empty
         ConstructionSites = []
         Creeps = []
         Hostiles = []
@@ -489,13 +490,16 @@ let planTasksHoldingThorium (holding: Task list) view =
         view
         (Atlas.ofView view)
         noThreats
-        { All = ids; WithThorium = ids }
+        { HeldTaskFacts.empty with
+            All = ids
+            WithThorium = ids
+        }
         (Planner.outpostFactsOf view)
 
 /// This tick's pool with its priorities and capacities, over the
 /// snapshot's own Atlas — what the Matcher and the mover are both handed.
 let poolOn snapshot =
-    planPool snapshot (Atlas.ofView snapshot) (planTasksOn snapshot noThreats)
+    planPool snapshot (Atlas.ofView snapshot) noThreats (planTasksOn snapshot noThreats)
 
 /// Run the Resolver at its own seam: assigned Tasks as data over the
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
@@ -2175,6 +2179,84 @@ let ferryMother stage =
                     TargetPositions =
                         Map.ofList
                             [ "ctrl-child", { X = 10; Y = 46 }; "can-child", { X = 10; Y = 45 } ]
+                }
+    }
+
+/// The raid parked on W17S25's controller at t880,341 (`docs/research/squads.md`
+/// §1.2), part for part as the replays show Trepidimous build them: MOVE
+/// first, the weapon, one MOVE last; the healers MOVE then HEAL; and the
+/// 3-CLAIM tapper. Stood in `room`.
+let w17s25RaidIn room =
+    let melee = List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ]
+    let healer = List.replicate 11 Move @ List.replicate 7 Heal
+    let tapper = List.replicate 3 Move @ List.replicate 3 BodyPart.Claim
+
+    let at id x y body =
+        { hostileIn room { X = x; Y = y } body with
+            Id = id
+            Owner = "Trepidimous"
+        }
+
+    [
+        at "Eternity536" 26 41 melee
+        at "Prime803" 27 42 melee
+        at "Prism305" 26 40 healer
+        at "Paragon722" 27 41 healer
+        at "Rune908" 26 42 tapper
+    ]
+
+/// `ferryMother` raising W1N2 at `Bootstrapping` and able to cast a squad:
+/// two idle spawns, an RCL7 bank, a wide plain floor on both sides of
+/// the border, this raid in the child's home and seen there the tick before
+/// too (an unlatched fight record, `Tuning.FightConfirmTicks`), and these
+/// bodies of hers each on its tile in either room.
+let fightingMother raid (bodies: (CreepInfo * RoomPos) list) =
+    let colony = ferryMother Bootstrapping
+
+    let seenBefore =
+        raid
+        |> List.map (fun (hostile: HostileInfo) ->
+            hostile.Pos.Room, { Seen = colony.Time - 1; Squad = None })
+        |> Map.ofList
+
+    let placedIn room =
+        bodies
+        |> List.filter (fun (_, tile) -> tile.Room = room)
+        |> List.map (fun (creep, tile) -> creep.Name, RoomPos.pos tile)
+        |> Map.ofList
+
+    let floor ys =
+        TerrainGrid.ofList
+            [
+                for x in 2..47 do
+                    for y in ys -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Spawns =
+            [
+                spawn
+                { spawn with
+                    Name = "Spawn2"
+                    Id = "spawn-2"
+                }
+            ]
+        Bank = bank 5_600 5_600
+        Hostiles = raid
+        Fought = seenBefore
+        Creeps = bodies |> List.map fst
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = floor [ 1..10 ]
+                    CreepPositions = placedIn "W1N1"
+                })
+            |> withNeighbour
+                "W1N2"
+                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                    Terrain = floor [ 2..48 ]
+                    CreepPositions = placedIn "W1N2"
                 }
     }
 

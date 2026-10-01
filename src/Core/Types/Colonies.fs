@@ -705,6 +705,18 @@ module HarassCasting =
     /// No harassment room declared.
     let none: HarassCasting = { Casters = []; Floors = Map.empty }
 
+/// One resident room's [[fight]] record (`RaidState.Fought`).
+type FightLatch =
+    {
+        /// The last tick its raid was seen there.
+        Seen: int
+        /// The catalogue name of the squad its Fight was first pooled with
+        /// (`Bodies.squadCatalogue`): every reader of the Fight reads this
+        /// squad until the record drops. None until the raid is seen a second
+        /// time inside `Tuning.FightConfirmTicks`, which is what pools it.
+        Squad: string option
+    }
+
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
 /// handed to `ColonyView.ofWorld`: one record and not five derivations, so
@@ -756,6 +768,10 @@ type StandDown =
         /// live W11S28). It ends by its own clock (`Tuning.ThreatMemory`)
         /// because a raid nobody can see is a raid nothing ends.
         ThreatenedOutposts: Set<string>
+        /// Each resident room's [[fight]] record (`RaidState.Fought`): what
+        /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
+        /// was last seen, and casts nothing for the room as long again.
+        Fought: Map<string, FightLatch>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -769,6 +785,7 @@ module StandDown =
             Rechecked = Set.empty
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
+            Fought = Map.empty
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

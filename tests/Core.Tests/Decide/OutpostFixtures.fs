@@ -478,7 +478,8 @@ let internal healers count =
 /// `decide` runs them.
 let internal pooledOf colony =
     let atlas = Atlas.ofView colony
-    planPool colony atlas (planTasksOn colony (threatsOf colony atlas))
+    let threats = threatsOf colony atlas
+    planPool colony atlas threats (planTasksOn colony threats)
 
 let internal entryFor task pool =
     pool |> List.tryFind (fun (entry: PooledTask) -> entry.Task = task)

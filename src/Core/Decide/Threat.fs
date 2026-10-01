@@ -6,6 +6,46 @@ module Fabot.Core.Decide.Threat
 open Fabot.Core
 open Fabot.Core.Types
 
+/// One `Fight`'s ground this tick (#453), off the squad's holders: the rally
+/// ground until the squad launches, the fighting ground after.
+type FightGround =
+    {
+        /// The squad the room's Fight is fought with (`HeldTaskFacts.Fights`),
+        /// latched by its fight record.
+        Squad: Squad
+        /// Derived each tick from where the casts stand, never stored: every
+        /// slot filled by a living body, a cast holding the Fight or a
+        /// resident fitting it, and each cast holder on the rally ground or
+        /// with the squad — within two of the leader, the leader within two
+        /// of another; or, once in, every cast holder standing in the room or
+        /// at its crossing. Never without a rally ground, nor with a slot
+        /// empty.
+        Launched: bool
+        /// The rally ground: tiles beside the crossing toward the room, in
+        /// the last room on the chain from home short of it that is neither a
+        /// Source Keeper's nor a rival's, clear of the border and of that
+        /// room's Reach. Empty where no chain reaches the room.
+        Rally: Set<RoomPos>
+        /// A brawler's ground: the rally ground, or, launched, the kill
+        /// order's head's ring, and the room's resident ring while no target
+        /// stands there.
+        Front: Set<RoomPos>
+        /// A medic's: the rally ground, or, launched, the tiles beside the
+        /// leader no melee body stands beside — behind the brawler it
+        /// pre-heals, where the raid's melee strike the brawler and take its
+        /// strike-back — else the tiles beside the leader; the rally ground
+        /// with no leader to walk behind, never the front.
+        Behind: Set<RoomPos>
+        /// A kiter's: the rally ground, or, launched, the kite ground.
+        Ranged: Set<RoomPos>
+        /// The bodies the Fight admits, by name and role: every squad cast,
+        /// and once launched each resident that fits a slot.
+        Roles: Map<string, SquadRole>
+        /// The room's residents — holders of its Guard or its Fight that are
+        /// no squad cast — whose parts fit one of its slots, by role.
+        Residents: Map<string, SquadRole>
+    }
+
 /// ADR-0033. Derived once a tick and shared by the applicability gate, Flee's
 /// Work Area and the spawn hold. Keyed by the room the hostile stands in: a
 /// `Set<Pos>` cannot say which room's tiles it holds, so the room rides on the
@@ -41,16 +81,22 @@ type Threats =
         /// Per ranger room (`Facts.rangerRooms`) under a raid or a rival's
         /// claimer (#451), the ranger's ground there ahead of every other: in
         /// a resident room whose raid no ranger wins (`Facts.outmatched`), the
-        /// room's safe set; else, while a melee body stands there or the kill
-        /// order's head is a claimer, the kite ground — the tiles within three
-        /// of that head, less every tile a melee body reaches in a step and a
-        /// swing, and less swamp near one — or the safe set where that is
-        /// empty. With a melee body there and both empty, the tiles farthest
-        /// from it, never the threats' ring beside it.
+        /// room's safe set, laid only while a ranger of ours stands there or
+        /// holds its Guard (`threatsOfHeld`);
+        /// else, while a melee body stands there or the kill order's head is
+        /// a claimer, the kite ground — the tiles within three of that head,
+        /// less every tile a melee body reaches in a step and a swing, and
+        /// less swamp near one. With a melee body there and that empty, the
+        /// tiles farthest from it, never the threats' ring beside it. A room
+        /// whose squad has launched holds the squad's kite ground
+        /// (`threatsOfHeld`).
         Kite: Map<string, Set<RoomPos>>
         /// The rooms whose `Ring` is a held exit's ground (#450): where the
         /// Planner keeps a living guard's Guard pooled, and hires for none.
         Held: Set<string>
+        /// Per room a Fight is pooled for (`Facts.fights`), its ground
+        /// (`threatsOfHeld`); empty off `threatsOf`.
+        Fight: Map<string, FightGround>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -64,6 +110,7 @@ let noThreats =
         HarassRing = Map.empty
         Kite = Map.empty
         Held = Set.empty
+        Fight = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -105,10 +152,88 @@ module Threats =
         |> Option.orElse (harassRingIn threats room)
         |> Option.orElse (Some(ringIn threats room) |> Option.filter (Set.isEmpty >> not))
 
+    /// The role a body holds a room's Fight in, or None where the Fight does
+    /// not admit it.
+    let fightRoleOf (threats: Threats) (room: string) (creep: string) : SquadRole option =
+        Map.tryFind room threats.Fight
+        |> Option.bind (fun ground -> Map.tryFind creep ground.Roles)
+
+    /// One member's ground in a Fight's room, by its role; empty for a room
+    /// with no Fight ground or a body it does not admit.
+    let fightGroundIn (threats: Threats) (room: string) (creep: string) : Set<RoomPos> =
+        match Map.tryFind room threats.Fight, fightRoleOf threats room creep with
+        | Some ground, Some Medic -> ground.Behind
+        | Some ground, Some Kiter -> ground.Ranged
+        | Some ground, Some Brawler -> ground.Front
+        | _ -> Set.empty
+
+    /// Whether a room's squad has launched.
+    let fightLaunchedIn (threats: Threats) (room: string) : bool =
+        Map.tryFind room threats.Fight |> Option.exists (fun ground -> ground.Launched)
+
+    /// The rooms a Fight is pooled for.
+    let fightRooms (threats: Threats) : Set<string> = threats.Fight |> Map.keys |> Set.ofSeq
+
+/// The kill order's head among one room's targets (`Facts.killRank`), ties by
+/// id; each target's rank priced once, not once a comparison.
+let private killHead (view: ColonyView) (room: string) (targets: HostileInfo list) =
+    match targets with
+    | [] -> None
+    | _ ->
+        let rank = killRank view room
+
+        targets
+        |> List.map (fun hostile -> (rank hostile, hostile.Id), hostile)
+        |> List.minBy fst
+        |> snd
+        |> Some
+
+// The ranger's ground under a raid (#451). Engine actions resolve on the
+// tick's starting tiles and a melee body must start adjacent to swing, so a
+// ranger ending each tick two clear of every melee body is never hit while it
+// has a free step; a swamp tile costs it that step.
+//
+// A melee body hits what ends a tick within a step and a swing of it, and on
+// swamp within a few tiles of one the ranger loses the step it would have
+// stepped away with.
+let private stepAndSwing = Engine.meleeRange + 1
+let private swampReach = Engine.meleeRange + 3
+
+/// The tiles of one room within three of the kill order's head that no melee
+/// body reaches in a step and a swing, less swamp near one: the kite ground.
+let private kiteGroundIn
+    atlas
+    (room: string)
+    (inRoom: HostileInfo list)
+    (head: HostileInfo option)
+    =
+    let melee =
+        inRoom
+        |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
+        |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+
+    let standing =
+        inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
+
+    let clearOfMelee reach (tile: Pos) =
+        melee |> List.forall (fun m -> range m tile > reach)
+
+    match head with
+    | None -> Set.empty
+    | Some target ->
+        Atlas.walkableWithinIn atlas room Engine.rangedRange (RoomPos.pos target.Pos)
+        |> List.filter (fun tile ->
+            not (Set.contains tile standing)
+            && clearOfMelee stepAndSwing tile
+            && not (Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)))
+        |> Set.ofList
+        |> RoomPos.setAt room
+
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room: weapon range plus the margin in Chebyshev tiles, less every tile under
-/// one of our standing ramparts in that room.
-let threatsOf (view: ColonyView) atlas : Threats =
+/// one of our standing ramparts in that room. The held facts say which rangers
+/// hold each room's Guard, which an outmatched room's safe ground is laid for.
+let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threats =
     // Under safe mode a hostile in a room of ours can hurt nothing, so it is no
     // Threat and has no Reach.
     let shielded room =
@@ -188,6 +313,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 HarassRing = Map.empty
                 Kite = Map.empty
                 Held = Set.empty
+                Fight = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -242,7 +368,9 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 RoomPos.range spot hostile.Pos |> Option.exists (fun r -> r <= reach)
 
             let armedTargets, unarmedTargets =
-                inRoom |> List.filter (guardShoots view resident) |> List.partition isArmed
+                inRoom
+                |> List.filter (guardShoots view resident Set.empty)
+                |> List.partition isArmed
 
             let seats = [ 1, RoomPos.pos h.Stand ]
 
@@ -276,17 +404,6 @@ let threatsOf (view: ColonyView) atlas : Threats =
             |> RoomPos.setAt room)
         |> Map.ofList
 
-    // The ranger's ground under a raid (#451). Engine actions resolve on the
-    // tick's starting tiles and a melee body must start adjacent to swing, so
-    // a ranger ending each tick two clear of every melee body is never hit
-    // while it has a free step; a swamp tile costs it that step.
-    //
-    // A melee body hits what ends a tick within a step and a swing of it, and
-    // on swamp within a few tiles of one the ranger loses the step it would
-    // have stepped away with.
-    let stepAndSwing = Engine.meleeRange + 1
-    let swampReach = Engine.meleeRange + 3
-
     let rangers = rangerRooms view
 
     // The ranger rooms an armed raid, or a rival's claimer, stands in.
@@ -314,33 +431,28 @@ let threatsOf (view: ColonyView) atlas : Threats =
             let gap (tile: Pos) =
                 melee |> List.map (fun m -> range m tile) |> List.min
 
-            let clearOfMelee reach (tile: Pos) = List.isEmpty melee || gap tile > reach
-
-            let rank = killRank view room
-
             let head =
                 inRoom
-                |> List.filter (guardShoots view resident)
-                |> List.sortBy (fun hostile -> rank hostile, hostile.Id)
-                |> List.tryHead
+                |> List.filter (guardShoots view resident Set.empty)
+                |> killHead view room
 
-            // The tiles within three of the kill order's head that no melee
-            // body reaches.
-            let aroundHead () =
-                match head with
-                | None -> Set.empty
-                | Some target ->
-                    Atlas.walkableWithinIn atlas room Engine.rangedRange (RoomPos.pos target.Pos)
-                    |> List.filter (fun tile ->
-                        not (Set.contains tile standing)
-                        && clearOfMelee stepAndSwing tile
-                        && not (
-                            Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)
-                        ))
-                    |> Set.ofList
-                    |> RoomPos.setAt room
+            let aroundHead () = kiteGroundIn atlas room inRoom head
 
-            // Forced only where it is the answer: two thousand tiles (#371).
+            // The safe set, two thousand tiles (#371), is the outmatched
+            // room's answer alone, and only for a ranger of ours to hold it:
+            // one standing there, or one holding its Guard on the way in.
+            let rangerHere =
+                lazy
+                    (let guarding =
+                        HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+
+                     view.Creeps
+                     |> List.exists (fun creep ->
+                         partCount creep.Body RangedAttack > 0
+                         && (Set.contains creep.Name guarding
+                             || SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                                |> Option.exists (fun tile -> tile.Room = room))))
+
             let safe () = Threats.safeIn armed room
 
             // Nowhere to kite and nowhere safe: the room's tiles farthest from
@@ -371,13 +483,15 @@ let threatsOf (view: ColonyView) atlas : Threats =
 
             let claimerLeads = head |> Option.exists (claimsAFlag resident)
 
+            let outmatchedHere = Set.contains room resident && outmatched view room
+
             [
-                if Set.contains room resident && outmatched view room then
-                    safe
+                if outmatchedHere then
+                    if rangerHere.Value then
+                        safe
                 elif not (List.isEmpty melee) || claimerLeads then
                     aroundHead
-                    safe
-                if not (List.isEmpty melee) then
+                if not (List.isEmpty melee) && (not outmatchedHere || rangerHere.Value) then
                     farthest
             ]
             |> List.tryPick (fun ground ->
@@ -421,3 +535,306 @@ let threatsOf (view: ColonyView) atlas : Threats =
         Kite = kite
         Held = holds |> List.map fst |> Set.ofList
     }
+
+/// This tick's Threats as a colony holding nothing would see them: no Fight,
+/// and an outmatched room's safe ground only for a ranger standing in it.
+let threatsOf (view: ColonyView) atlas : Threats =
+    threatsHeldBy view atlas HeldTaskFacts.empty
+
+/// How near the crossing it waits beside the rally ground lies, in tiles:
+/// room for a squad on the near side of the exit.
+let private rallyReach = 3
+
+/// How far from the leader a member may stand and still be with it.
+let private squadSpread = 2
+
+/// How close to a room's border a body in the room beside it stands at its
+/// crossing: the exit tile and the one inside it. The rally ground keeps
+/// clear of both, so a body there has left it.
+let private crossingGap = 1
+
+/// Tiles from a tile to the nearest edge of its room.
+let private edgeGap (tile: Pos) =
+    min (min tile.X (Engine.roomSide - 1 - tile.X)) (min tile.Y (Engine.roomSide - 1 - tile.Y))
+
+/// The range between two tiles across a border too: a member a step behind
+/// its leader over a crossing is beside it. The exit tiles either side of a
+/// border are one tile, the engine carrying a body from one to the other, so
+/// the rooms overlap by a row. None between rooms that share no border.
+let private rangeAcross (a: RoomPos) (b: RoomPos) : int option =
+    if a.Room = b.Room then
+        RoomPos.range a b
+    else
+        let span = Engine.roomSide - 1
+
+        RoomName.offsetOf a.Room b.Room
+        |> Option.filter (fun (dx, dy) -> abs dx + abs dy = 1)
+        |> Option.map (fun (dx, dy) ->
+            max (abs (b.X + span * dx - a.X)) (abs (b.Y + span * dy - a.Y)))
+
+/// Whether a tile stands at the crossing into a room from the room beside it:
+/// the room's own nearest tile, across the border, within a step of the exit.
+let private atCrossingInto (room: string) (tile: RoomPos) =
+    RoomName.offsetOf tile.Room room
+    |> Option.filter (fun (dx, dy) -> abs dx + abs dy = 1)
+    |> Option.exists (fun (dx, dy) ->
+        let across value offset =
+            let low = Engine.roomSide * offset
+            max 0 (max (low - value) (value - (low + Engine.roomSide - 1)))
+
+        max (across tile.X dx) (across tile.Y dy) <= crossingGap + 1)
+
+/// The crossing a squad musters beside on a chain from home to its target:
+/// out of the last room short of the target that is neither a Source Keeper's
+/// nor a rival's — home, which is neither, at the last — toward the next room
+/// on the chain. None for a chain of one room.
+let rallyHop (rivals: Set<string>) (chain: string list) : (string * string) option =
+    chain
+    |> List.pairwise
+    |> List.rev
+    |> List.tryFind (fun (from, _) ->
+        not (Keepers.isKeeperRoom from) && not (Set.contains from rivals))
+
+/// The tick's Threats with each pooled Fight's ground on it
+/// (`HeldTaskFacts.Fights`), its squad whoever holds the room's Fight. A
+/// launched squad's room keeps its residents on the kite ground.
+let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: Threats) : Threats =
+    if Map.isEmpty held.Fights then
+        threats
+    else
+        let home = SpatialInfo.homeName view.Spatial
+        let resident = residentRooms view
+        let fighting = held.Fights |> Map.keys |> Set.ofSeq
+
+        let tileOf name =
+            SpatialInfo.creepPlacementOf view.Spatial name
+
+        let bodies =
+            view.Creeps |> List.map (fun creep -> creep.Name, creep.Body) |> Map.ofList
+
+        // Every squad cast of this colony, by the role its name carries.
+        let casts =
+            view.Creeps
+            |> List.choose (fun creep ->
+                squadRoleByName creep.Name |> Option.map (fun role -> creep.Name, role))
+            |> Map.ofList
+
+        // The ground beside the middle of the crossing from one room into the
+        // next, clear of the border and of the room's Reach.
+        let besideCrossing (from: string) (into: string) =
+            match Atlas.seams atlas from into |> List.map fst with
+            | [] -> Set.empty
+            | exits ->
+                let middle = List.item (List.length exits / 2) exits
+                let reach = Threats.reachIn threats from
+
+                Atlas.walkableWithinIn atlas from rallyReach middle
+                |> List.filter (fun tile ->
+                    edgeGap tile > crossingGap && not (Set.contains tile reach))
+                |> Set.ofList
+                |> RoomPos.setAt from
+
+        let rallyFor room =
+            Atlas.route atlas home room
+            |> Option.bind (rallyHop view.Spatial.RivalRooms)
+            |> Option.map (fun (from, into) -> besideCrossing from into)
+            |> Option.defaultValue Set.empty
+
+        let groundOf room (squad: Squad) =
+            let slots = squadRoles squad
+            let tid = taskId (Fight room)
+
+            // The casts holding the room's Fight, by role.
+            let members =
+                HeldTaskFacts.holdersOf held tid
+                |> List.choose (fun name ->
+                    Map.tryFind name casts |> Option.map (fun role -> name, role))
+                |> List.sort
+
+            // The room's residents whose parts fit one of its slots.
+            let residents =
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                @ HeldTaskFacts.holdersOf held tid
+                |> List.filter (fun name -> not (Map.containsKey name casts))
+                |> List.choose (fun name ->
+                    Map.tryFind name bodies
+                    |> Option.bind squadRoleOfParts
+                    |> Option.filter (fun role -> List.contains role slots)
+                    |> Option.map (fun role -> name, role))
+                |> Map.ofList
+
+            let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+            let targets = inRoom |> List.filter (guardShoots view resident fighting)
+            let head = killHead view room targets
+            let rally = rallyFor room
+
+            // Every slot filled, by a cast holding the Fight or a resident
+            // that fits it.
+            let filled =
+                SquadRole.all
+                |> List.forall (fun role ->
+                    SquadRole.slots role (List.map snd members)
+                    + (residents |> Map.filter (fun _ fits -> fits = role) |> Map.count)
+                    >= SquadRole.slots role slots)
+
+            // The front leads: a brawler, else a kiter, else whoever holds.
+            let ranked =
+                members
+                |> List.sortBy (fun (name, role) ->
+                    (match role with
+                     | Brawler -> 0
+                     | Kiter -> 1
+                     | Medic -> 2),
+                    name)
+
+            let leader = ranked |> List.tryHead |> Option.map fst
+
+            // Each cast on the rally ground, or with the squad: the others
+            // within two of the leader, and the leader within two of one of
+            // them. A leader is never with the squad by standing on its own
+            // tile, so a recast brawler far off the rally ground is not.
+            let together =
+                members
+                |> List.forall (fun (name, _) ->
+                    tileOf name
+                    |> Option.exists (fun tile ->
+                        Set.contains tile rally
+                        || members
+                           |> List.exists (fun (other, _) ->
+                               other <> name
+                               && (Some name = leader || Some other = leader)
+                               && tileOf other
+                                  |> Option.bind (rangeAcross tile)
+                                  |> Option.exists (fun r -> r <= squadSpread))))
+
+            // Gone in, and held there while every cast stands in the room or
+            // at its crossing: a brawler chasing its target, or carried over
+            // the border off an exit tile, is not called back to the rally
+            // ground.
+            let entered =
+                members
+                |> List.forall (fun (name, _) ->
+                    tileOf name
+                    |> Option.exists (fun tile -> tile.Room = room || atCrossingInto room tile))
+
+            // Never with a slot empty: a squad that loses a member, or whose
+            // replacement is on its way, waits on the rally ground until it is
+            // whole again.
+            let launched =
+                not (Set.isEmpty rally)
+                && not (List.isEmpty members)
+                && filled
+                && (together || entered)
+
+            // The tiles beside a tile no hostile stands on, in its room.
+            let besideIn (tile: RoomPos) =
+                let taken =
+                    view.Hostiles
+                    |> List.filter (fun h -> h.Pos.Room = tile.Room)
+                    |> List.map (fun h -> RoomPos.pos h.Pos)
+                    |> Set.ofList
+
+                Atlas.adjacentWalkableIn atlas tile.Room (RoomPos.pos tile)
+                |> List.filter (fun pos -> not (Set.contains pos taken))
+                |> List.map (RoomPos.at tile.Room)
+
+            // The head's ring, and the tile of every brawler of ours already
+            // swinging at a target or lamed: a body that can no longer walk
+            // is not walked off the fight, where its medic heals its legs back.
+            let swinging =
+                members
+                |> List.filter (snd >> (=) Brawler)
+                |> List.choose (fun (name, _) ->
+                    tileOf name |> Option.map (fun tile -> tile, Map.tryFind name bodies))
+                |> List.filter (fun (tile, body) ->
+                    body |> Option.exists (fun parts -> partCount parts Move = 0)
+                    || targets
+                       |> List.exists (fun h ->
+                           RoomPos.range tile h.Pos
+                           |> Option.exists (fun r -> r <= Engine.meleeRange)))
+                |> List.map fst
+                |> Set.ofList
+
+            // With no target in the room, its resident ring — the
+            // controller's of a raised home, the Reactor's of an errand room
+            // — which the squad holds while the Fight stays pooled.
+            let front =
+                match head with
+                | Some target -> besideIn target.Pos |> Set.ofList |> Set.union swinging
+                | None ->
+                    Threats.residentRingIn threats room
+                    |> Option.defaultWith (fun () -> Threats.ringIn threats room)
+
+            // Behind the leader, out of every melee body's swing where the
+            // ground allows: the raid then strikes the brawler, whose ATTACK
+            // strikes back, and not the medic.
+            let behind =
+                // The member a medic walks behind: the leading cast that is no
+                // medic.
+                match ranked |> List.tryFind (snd >> (<>) Medic) |> Option.bind (fst >> tileOf) with
+                | Some tile ->
+                    // Clear of every melee body by `reach`: past a step and a
+                    // swing first, so one that closes this tick cannot strike
+                    // the next, then past a swing.
+                    let clearBy reach (pos: RoomPos) =
+                        view.Hostiles
+                        |> List.forall (fun h ->
+                            HostileInfo.activeCount h Attack = 0
+                            || RoomPos.range pos h.Pos |> Option.forall (fun r -> r > reach))
+
+                    let around = besideIn tile
+
+                    [ Engine.meleeRange + 1; Engine.meleeRange ]
+                    |> List.tryPick (fun reach ->
+                        match around |> List.filter (clearBy reach) with
+                        | [] -> None
+                        | clear -> Some(Set.ofList clear))
+                    |> Option.defaultValue (Set.ofList around)
+                // No one to walk behind: never the front.
+                | None -> rally
+
+            let kite =
+                match kiteGroundIn atlas room inRoom head with
+                | tiles when Set.isEmpty tiles ->
+                    Map.tryFind room threats.Kite |> Option.defaultValue front
+                | tiles -> tiles
+
+            let launchedOr ground = if launched then ground else rally
+
+            {
+                Squad = squad
+                Launched = launched
+                Rally = rally
+                Front = launchedOr front
+                Behind = launchedOr behind
+                Ranged = launchedOr kite
+                Roles =
+                    if launched then
+                        Map.fold (fun roles name role -> Map.add name role roles) casts residents
+                    else
+                        casts
+                Residents = residents
+            }
+
+        let grounds = held.Fights |> Map.map groundOf
+
+        // A launched squad's residents that fit no slot hold the kite ground
+        // beside it, as its kiters do, and never the safe set.
+        let kite =
+            (threats.Kite, grounds)
+            ||> Map.fold (fun kite room ground ->
+                if ground.Launched && not (Set.isEmpty ground.Ranged) then
+                    Map.add room ground.Ranged kite
+                else
+                    kite)
+
+        { threats with
+            Fight = grounds
+            Kite = kite
+        }
+
+/// The tick's Threats off what the colony holds (`heldTaskFacts`): an
+/// outmatched room's safe ground for every ranger holding its Guard, wherever
+/// it stands, and each pooled Fight's ground.
+let threatsOfHeld (view: ColonyView) atlas (held: HeldTaskFacts) : Threats =
+    threatsHeldBy view atlas held |> withFights view atlas held

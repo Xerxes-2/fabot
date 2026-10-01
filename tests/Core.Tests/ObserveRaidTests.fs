@@ -1095,3 +1095,93 @@ let harassStandDownTests =
                     "the episode records the roster, and measures no approach"
             }
         ]
+
+/// A resident room's raid record (`foldFights`), on `fightingMother`'s child
+/// home at this tick, under this raid.
+let private fightRecordAt time raid =
+    { Decide.Fixtures.fightingMother raid [] with
+        Time = time
+    }
+
+/// A raid of this many ATTACK, a MOVE each, in the child's home.
+let private meleeOf n =
+    [
+        Decide.Fixtures.hostileIn
+            "W1N2"
+            { X = 26; Y = 40 }
+            (List.replicate n Move @ List.replicate n Attack)
+    ]
+
+[<Tests>]
+let fightRecordTests =
+    testList
+        "raid fold: the fight record"
+        [
+            test
+                "opened unlatched by a raid the residents lose, and latched with its squad on a second sighting inside FightConfirmTicks" {
+                let confirm = Tuning.defaults.FightConfirmTicks
+                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
+
+                let opened = foldFights (fightRecordAt 1_000 lost) Map.empty
+
+                Expect.equal
+                    opened
+                    (Map.ofList [ "W1N2", { Seen = 1_000; Squad = None } ])
+                    "a raid the residents lose opens it, latching nothing"
+
+                Expect.isEmpty
+                    (foldFights (fightRecordAt 1_000 (meleeOf 2)) Map.empty)
+                    "one they win opens nothing"
+
+                Expect.equal
+                    (foldFights (fightRecordAt (1_000 + confirm) lost) opened)
+                    (Map.ofList
+                        [
+                            "W1N2",
+                            {
+                                Seen = 1_000 + confirm
+                                Squad = Some "duo"
+                            }
+                        ])
+                    "seen again inside FightConfirmTicks, it latches the squad the Fight is pooled with"
+
+                Expect.equal
+                    (foldFights (fightRecordAt (1_001 + confirm) lost) opened)
+                    (Map.ofList [ "W1N2", { Seen = 1_001 + confirm; Squad = None } ])
+                    "seen again later, it opens afresh"
+
+                Expect.isEmpty
+                    (foldFights (fightRecordAt (1_001 + confirm) []) opened)
+                    "and with no second sighting it is dropped"
+            }
+
+            test
+                "a latched record keeps its squad: moved on while it holds, left alone while it bars a cast" {
+                let hold = Tuning.defaults.FightHoldTicks
+                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
+
+                let latched = Map.ofList [ "W1N2", { Seen = 1_000; Squad = Some "3×kiter" } ]
+
+                let at seen =
+                    Map.ofList [ "W1N2", { Seen = seen; Squad = Some "3×kiter" } ]
+
+                Expect.equal
+                    (foldFights (fightRecordAt 1_100 []) latched)
+                    latched
+                    "a quiet tick keeps it as it was"
+
+                Expect.equal
+                    (foldFights (fightRecordAt (1_000 + hold) (meleeOf 2)) latched)
+                    (at (1_000 + hold))
+                    "any raid moves it on while it holds the Fight, a shrunk one too, and the squad stays"
+
+                Expect.equal
+                    (foldFights (fightRecordAt (1_001 + hold) lost) latched)
+                    latched
+                    "while it bars a second cast, a raid moves nothing"
+
+                Expect.isEmpty
+                    (foldFights (fightRecordAt (1_000 + 2 * hold) []) latched)
+                    "and it is dropped once the bar runs out"
+            }
+        ]

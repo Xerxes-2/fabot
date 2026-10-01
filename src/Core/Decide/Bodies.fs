@@ -96,7 +96,7 @@ let rangerBlocksMost = Engine.maxBodyParts / List.length rangerPattern.Block
 /// The squad's melee front (`docs/research/squads.md` §4.6): one fixed
 /// body, MOVE then ATTACK, so damage lames it before it disarms it — a
 /// brawler in contact is already standing on its target. Its ATTACK strikes
-/// back at every melee that hits it. No row casts it yet.
+/// back at every melee that hits it.
 let brawlerPattern =
     {
         Name = "brawler"
@@ -104,7 +104,7 @@ let brawlerPattern =
     }
 
 /// The squad's healer: one fixed body, MOVE then HEAL, walking behind the
-/// brawler it pre-heals. No row casts it yet.
+/// brawler it pre-heals.
 let medicPattern =
     {
         Name = "medic"
@@ -113,7 +113,7 @@ let medicPattern =
 
 /// The squad's ranged member, which out-walks melee rather than holding a
 /// ring: guns before legs, so damage disarms it before it lames it — the
-/// ranger's order reversed. 5,600, an RCL7 bank. No row casts it yet.
+/// ranger's order reversed. 5,600, an RCL7 bank.
 let kiterPattern =
     {
         Name = "kiter"
@@ -158,6 +158,9 @@ let patternTable =
         upgraderPattern
         guardPattern
         rangerPattern
+        brawlerPattern
+        medicPattern
+        kiterPattern
         minerPattern
         dismantlerPattern
     ]
@@ -265,6 +268,60 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
         haulerPattern
     else
         workerPattern
+
+/// The rows whose casts are read back off the name the cascade gives them
+/// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
+/// also a hauler, a kiter's counts are an eight-block ranger's, a brawler is
+/// an ATTACK body as a guard is, and a medic has no part a row reads.
+let private namedRows =
+    [ courierPattern; brawlerPattern; medicPattern; kiterPattern ]
+
+/// Whether a creep's name says it was cast by this row.
+let isNamedFor (pattern: BodyPattern) (name: string) = name.StartsWith(pattern.Name + "-")
+
+/// The row a creep's name says it was cast by, of the rows read that way.
+let patternByName (name: string) : BodyPattern option =
+    namedRows |> List.tryFind (fun pattern -> isNamedFor pattern name)
+
+/// The row that casts one squad role.
+let squadPatternOf (role: SquadRole) : BodyPattern =
+    match role with
+    | Brawler -> brawlerPattern
+    | Medic -> medicPattern
+    | Kiter -> kiterPattern
+
+/// The squad role a cast carries in its name.
+let squadRoleByName (name: string) : SquadRole option =
+    SquadRole.all
+    |> List.tryFind (fun role -> isNamedFor (squadPatternOf role) name)
+
+/// Whether a row is one of the squad's: its bodies fixed, and counted against
+/// its own row and never the fleet's.
+let isSquadPattern (pattern: BodyPattern) =
+    SquadRole.all
+    |> List.exists (fun role -> (squadPatternOf role).Name = pattern.Name)
+
+/// The slot a body's parts fit, for a body that is no squad cast — a resident
+/// ranger: ATTACK and no HEAL, HEAL and no weapon, or no ATTACK and the
+/// kiter's guns (an eight-block ranger's). A smaller ranger fits no slot.
+let squadRoleOfParts (parts: Map<BodyPart, int>) : SquadRole option =
+    let attack = partCount parts Attack
+    let ranged = partCount parts RangedAttack
+    let heal = partCount parts Heal
+
+    if attack > 0 && heal = 0 then
+        Some Brawler
+    elif heal > 0 && attack = 0 && ranged = 0 then
+        Some Medic
+    elif attack = 0 && ranged >= partCountIn kiterPattern.Block RangedAttack then
+        Some Kiter
+    else
+        None
+
+/// A creep's squad role: its name's, and its parts' only where its name
+/// carries none.
+let squadRoleOf (name: string) (parts: Map<BodyPart, int>) : SquadRole option =
+    squadRoleByName name |> Option.orElse (squadRoleOfParts parts)
 
 /// Whether a body can take energy out of a store and put it into an extension:
 /// the body half of `Refill`'s gate and of `Withdraw`'s read back together,
@@ -500,6 +557,9 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         minerBodyFor sizing.MinerWorkPerMove capacity
     elif pattern.Name = dismantlerPattern.Name then
         dismantlerBodyFor capacity
+    // The squad's bodies are fixed: the catalogue priced these.
+    elif isSquadPattern pattern then
+        pattern.Block
     else
         parityBodyFor pattern capacity
 

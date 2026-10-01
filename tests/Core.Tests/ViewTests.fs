@@ -1076,14 +1076,16 @@ let colonyViewTests =
                 // entry pins both halves as the colony really reaches them.
                 let guardIn view =
                     let atlas = Atlas.ofView view
+                    let threats = threatsOf view atlas
 
                     Pool.planPool
                         view
                         atlas
+                        threats
                         (Planner.planTasks
                             view
                             atlas
-                            (threatsOf view atlas)
+                            threats
                             HeldTaskFacts.empty
                             (Planner.outpostFactsOf view))
                     |> List.tryFind (fun entry -> entry.Task = Guard outpost)
@@ -3208,7 +3210,7 @@ let private darkSalvageWorld =
         Rooms = pairWorld.Rooms |> unseen errandCrossed |> unseen salvageRoom
     }
 
-/// The id a Task names, and None for the two that name none.
+/// The id a Task names, and None for the three that name none.
 let private namedBy task =
     match task with
     | Harvest id
@@ -3223,6 +3225,7 @@ let private namedBy task =
     | Withdraw(id, _)
     | Refill(id, _) -> Some id
     | Guard _
+    | Fight _
     | Flee -> None
 
 [<Tests>]

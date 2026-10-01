@@ -468,6 +468,17 @@ type Tuning =
         /// (#450), at most: 100, long enough for a kiter's step out and back,
         /// short enough that one gone for good costs the guard little.
         ExitHoldTicks: int
+        /// How long a [[fight]] stays pooled after its raid was last seen, and
+        /// how long after that no squad is cast for the room again: 300, the
+        /// duo's two casts (150 and 108 ticks in one oven) and its walk to the
+        /// rally ground, so a raid that steps out while the squad is on its way
+        /// does not strand it.
+        FightHoldTicks: int
+        /// How close together a raid's two sightings must fall for its
+        /// [[fight]] to be pooled: 20. A raid that means to stay is seen
+        /// again the next tick; one that flicks over an exit tile and back is
+        /// seen once, and is not worth the squad's 8,650.
+        FightConfirmTicks: int
         /// How often a [[stand-down]] latched on another player's **ownership**
         /// is looked at again (#165): the room is re-admitted to the scan set
         /// for one tick, and to nothing else, so one tick of vision can clear
@@ -544,6 +555,8 @@ module Tuning =
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
             ExitHoldTicks = 100
+            FightHoldTicks = 300
+            FightConfirmTicks = 20
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150

@@ -869,7 +869,8 @@ let private actionOn =
     | Repair id
     | Upgrade id -> Some(id, 3)
     | Flee
-    | Guard _ -> None
+    | Guard _
+    | Fight _ -> None
 
 /// The colony's [[refill cluster]] as this tick's Atlas holds it — the one
 /// `RefillCluster.ofRefillables` laid at construction. The Planner's Refill

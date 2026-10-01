@@ -303,6 +303,53 @@ let errandStandDownTests =
                     "and returns the tick the garrison stands"
             }
 
+            test
+                "under a raid its garrison loses, the re-claimer's seat waits for the squad as well" {
+                let reserverQuota colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "reserver")
+                    |> Option.map (fun row -> row.Quota)
+
+                // Twelve ATTACK: the garrison's seven blocks lose it, the duo
+                // wins it. Seen the tick before as well, so its Fight is pooled.
+                let errand = bareHome |> errandColony (Some Ownership.Ours) []
+
+                let garrisoned =
+                    { errand with
+                        Bank = bank 5_600 5_600
+                        Fought = Map.ofList [ errandRoom, { Seen = errand.Time - 1; Squad = None } ]
+                        Hostiles =
+                            [
+                                { hostileIn
+                                      errandRoom
+                                      { ringTile with X = ringTile.X + 3 }
+                                      (List.replicate 12 Move @ List.replicate 12 Attack) with
+                                    Owner = "Trepidimous"
+                                }
+                            ]
+                    }
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X + 1 }
+                        (creepWith "ranger-g" 0 0 Bodies.rangerPattern.Block)
+                    |> withErrandCreep
+                        { ringTile with X = ringTile.X - 1 }
+                        (creepWith "ranger-h" 0 0 Bodies.rangerPattern.Block)
+
+                let squad =
+                    garrisoned
+                    |> withErrandCreep
+                        { ringTile with Y = ringTile.Y + 1 }
+                        (creepWith "brawler-1" 0 0 Bodies.brawlerPattern.Block)
+                    |> withErrandCreep
+                        { ringTile with Y = ringTile.Y - 1 }
+                        (creepWith "medic-1" 0 0 Bodies.medicPattern.Block)
+
+                Expect.equal
+                    (reserverQuota garrisoned, reserverQuota squad)
+                    (Some 0, Some 1)
+                    "the garrison standing, the seat waits until the squad does"
+            }
+
             test "with no ore to burn the errand keeps no garrison and no re-claimer (#420)" {
                 let rows colony =
                     let quota name =

@@ -138,6 +138,7 @@ let internal restockWait (view: ColonyView) task =
     | Reclaim _
     | Dismantle _
     | Guard _
+    | Fight _
     | Flee -> 0
 
 /// ADR-0025. The walk and the wait that hold a Task up for this creep, or None
@@ -159,15 +160,16 @@ let internal tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: La
         | _ -> None
     | _ -> None
 
-/// ADR-0056. Whether a Task stands in the Safety tier: Flee and Guard. A
-/// predicate, because the two rules that turn on it (`areaFor` skipping the
+/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard and Fight.
+/// A predicate, because the two rules that turn on it (`areaFor` skipping the
 /// Reach subtraction, `threatened` written beneath it) are asked before
-/// `planPool` ranks anything, and `tierOf` ranks exactly these two into
-/// `Safety`. Exhaustive on purpose.
+/// `planPool` ranks anything, and `tierOf` ranks exactly these into `Safety`.
+/// Exhaustive on purpose.
 let private safetyTier task =
     match task with
     | Flee
-    | Guard _ -> true
+    | Guard _
+    | Fight _ -> true
     | Harvest _
     | Withdraw _
     | Pickup _
@@ -198,7 +200,8 @@ let private roomOfWork atlas task =
     | Pickup(id, _)
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
-    | Guard room -> Some room
+    | Guard room
+    | Fight room -> Some room
     | Flee -> None
 
 /// Whether a tile stands in the Reach on a Task's own room, or None when the
@@ -245,6 +248,8 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         | Guard room ->
             Threats.guardGroundIn threats room
             |> Option.defaultWith (fun () -> Atlas.sourceRingIn atlas room)
+        // The member's own ground, rally or fight (`Threats.fightGroundIn`).
+        | Fight room -> Threats.fightGroundIn threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with
@@ -256,6 +261,14 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
 /// every caller asks both.
 let internal mayActNow (threats: Threats) atlas (creep: string) task =
     Atlas.mayAct atlas creep task (areaFor threats atlas creep task)
+
+/// The room a Fight's ground lies in: the rally ground's room until launch,
+/// the Task's own after. Read off the tiles, which name it.
+let private groundRoom (room: string) (area: Set<RoomPos>) =
+    if Set.isEmpty area then
+        room
+    else
+        (Set.minElement area).Room
 
 /// The travel cost of a Task for a creep, priced over the tiles it may
 /// actually work from this tick, so a candidate whose cold remainder is walled
@@ -273,6 +286,9 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
     | Guard room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
+    | Fight room ->
+        let area = areaFor threats atlas creep task
+        Atlas.travelCostToward atlas creep task (groundRoom room area) area
     | _ ->
         match areaFor threats atlas creep task with
         | area when Set.isEmpty area -> Atlas.travelCost atlas creep task
@@ -287,6 +303,7 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
 let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
     | Guard room -> Atlas.firstStepToward atlas creep task room area
+    | Fight room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | _ -> Atlas.firstStep atlas creep task area
 
 /// Whether the Reach has taken the whole of a Task's Work Area: it had
@@ -433,7 +450,7 @@ let private insideDowngradeDeadline (view: ColonyView) =
 /// with the constants and `Rung` below because the ladder is one fact, and
 /// the test that walks every rank and rung of it (#237) reads it here.
 type Tier =
-    /// Flee and Guard: above every other tier and above the downgrade
+    /// Flee, Guard and Fight: above every other tier and above the downgrade
     /// deadline too, because no other work matters while a creep is being
     /// killed.
     | Safety
@@ -518,7 +535,7 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
 /// entry ranks and how many bodies it admits, and between them they are
 /// everything the Matcher knows about a Task. Every exception the colony has
 /// learned about ordering and crowding lands here and nowhere else.
-let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
+let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : PooledTask list =
     let bank = view.Bank.Capacity
 
     // The three loads a store is divided by, each the row's own cast at the
@@ -689,9 +706,12 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
     let tierOf task =
         match task with
         | Flee -> Safety
-        // The tier holds two Tasks and no ordering between them: Flee is
-        // inapplicable to a Fighter and a Guard applicable to nothing else.
-        | Guard _ -> Safety
+        // The tier holds three Tasks and no ordering between them: Flee is
+        // inapplicable to a Fighter, a Guard and a Fight to nothing else, and
+        // a room's Guard and its Fight admit different bodies until its squad
+        // launches.
+        | Guard _
+        | Fight _ -> Safety
         | Harvest _ -> Feeding
         // A decision made here, because nothing else made it: the ADRs fix the
         // reserver row's casting order and say nothing about its matching
@@ -942,12 +962,17 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // no arrival price for a handover window to be read against, and the
         // row's count, not this cap, is what buys bodies.
         | Guard room when Set.contains room (Facts.residentRooms view) ->
-            Capacity.fighters (rangersWanted view room + view.Tuning.RangerResidents)
+            Capacity.fighters (rangersWanted view threats room + view.Tuning.RangerResidents)
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
         | Guard room when Set.contains room (Facts.harassRooms view) ->
-            Capacity.fighters (rangersWanted view room) |> Capacity.relieving
+            Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
         | Guard room -> Capacity.fighters (guardsWanted view room)
+        // The squad's slots, one cap per role.
+        | Fight room ->
+            Map.tryFind room threats.Fight
+            |> Option.map (fun ground -> Capacity.roles (squadRoles ground.Squad))
+            |> Option.defaultValue (Capacity.roles [])
         // One holder per controller: a second body there buys nothing.
         | Reserve _
         | Claim _ -> Capacity.total 1

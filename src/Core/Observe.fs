@@ -380,6 +380,11 @@ type RaidState =
         /// (`Tuning.ThreatMemory`), since nothing in the engine counts a raid
         /// down. Bounded by the declared outposts.
         Threatened: Map<string, ThreatLatch>
+        /// The resident rooms a raid their residents lose was seen in
+        /// (`foldFights`), each against the last tick it was: what holds a
+        /// Fight pooled through the ticks its raid steps out, and then bars a
+        /// second cast. Bounded by the resident rooms.
+        Fought: Map<string, FightLatch>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -410,6 +415,7 @@ module RaidState =
             RivalHeld = Map.empty
             Holds = Map.empty
             Threatened = Map.empty
+            Fought = Map.empty
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -748,7 +754,54 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.filter (fun (_, latch) -> tick < latch.Until)
             |> List.map fst
             |> Set.ofList
+        Fought = state.Fought
     }
+
+/// The fight half of the Raid-log fold: a resident room's record is opened,
+/// latching nothing, on a tick a raid its residents lose stands there, and
+/// latches the squad its Fight is pooled with (`Facts.pricedSquad`) when that
+/// raid is seen again inside `Tuning.FightConfirmTicks`
+/// (`Facts.fightConfirmed`); an unlatched record no raid confirms in time is
+/// dropped. A latched record is moved on by every tick a raid stands there
+/// while it still holds the Fight, left alone while it bars a second cast
+/// (`Facts.fightCooling`), and dropped once that bar runs out. Rooms the
+/// colony cannot see this tick keep what they had.
+let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string, FightLatch> =
+    let hold = view.Tuning.FightHoldTicks
+
+    let standing =
+        prior
+        |> Map.filter (fun _ latch ->
+            let since = view.Time - latch.Seen
+
+            match latch.Squad with
+            | Some _ -> since < 2 * hold
+            | None -> since <= view.Tuning.FightConfirmTicks)
+
+    let seen squad = { Seen = view.Time; Squad = squad }
+
+    view.Hostiles
+    |> List.filter Decide.Facts.isRaider
+    |> List.map (fun hostile -> hostile.Pos.Room)
+    |> List.distinct
+    |> List.filter (fun room -> Set.contains room (Decide.Facts.residentRooms view))
+    |> List.fold
+        (fun rooms room ->
+            match Map.tryFind room rooms with
+            | Some({ Squad = Some _ } as latch) when view.Time - latch.Seen <= hold ->
+                Map.add room (seen latch.Squad) rooms
+            | Some { Squad = Some _ } -> rooms
+            | _ when not (Decide.Facts.residentsLose view room) -> rooms
+            // Unlatched and still standing: the raid's second sighting in time.
+            | Some _ ->
+                Map.add
+                    room
+                    (seen (
+                        Decide.Facts.pricedSquad view room |> Option.map (fun squad -> squad.Name)
+                    ))
+                    rooms
+            | None -> Map.add room (seen None) rooms)
+        standing
 
 /// ADR-0028
 /// The Raid-log fold: this tick's view plus the previous Raid log produce the
@@ -966,6 +1019,7 @@ let foldRaids
                         rooms
                 else
                     Map.remove room rooms)
+        Fought = foldFights view prior.Fought
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged

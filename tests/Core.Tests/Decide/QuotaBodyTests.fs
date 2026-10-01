@@ -173,6 +173,22 @@ let patternTableTests =
                             Name = "ranger"
                             Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
                         }
+                        // The squad's three roles, each one fixed body.
+                        {
+                            Name = "brawler"
+                            Block = List.replicate 25 Move @ List.replicate 25 Attack
+                        }
+                        {
+                            Name = "medic"
+                            Block = List.replicate 18 Move @ List.replicate 18 Heal
+                        }
+                        {
+                            Name = "kiter"
+                            Block =
+                                List.replicate 16 RangedAttack
+                                @ List.replicate 24 Move
+                                @ List.replicate 8 Heal
+                        }
                         {
                             Name = "miner"
                             Block = [ Work; Work; Move ]

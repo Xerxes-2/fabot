@@ -2226,6 +2226,56 @@ let raisedHomeGarrisonTests =
                     (Threats.guardGroundIn threats "W1N2")
                     (Some(Threats.safeIn threats "W1N2"))
                     "and it is the resident's ground"
+
+                let unheld = { beaten with Creeps = [] }
+
+                Expect.isFalse
+                    (Map.containsKey "W1N2" (threatsOf unheld (Atlas.ofView unheld)).Kite)
+                    "with no ranger of ours standing there, its two thousand tiles are never walked"
+            }
+
+            test
+                "a ranger holding the Guard of a room no ranger size wins has its safe ground there before it walks in" {
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+                let garrison = openGarrison [] [] homeRaid
+
+                // Standing nowhere in the room: on its way back in.
+                let away =
+                    { garrison with
+                        Creeps = ranger :: garrison.Creeps
+                        Borrowed =
+                            {
+                                Rooms = [ "W1N2" ]
+                                Defended = [ "W1N2" ]
+                            }
+                    }
+
+                let threatsHeld (held: HeldTaskFacts) =
+                    let atlas = Atlas.ofView away
+                    threatsOfHeld away atlas held
+
+                let guarding = heldTaskFacts away (Map.ofList [ "ranger-1", taskId (Guard "W1N2") ])
+
+                Expect.isFalse
+                    (Map.containsKey "W1N2" (threatsHeld HeldTaskFacts.empty).Kite)
+                    "the premise: holding nothing, it is handed nothing"
+
+                let threats = threatsHeld guarding
+
+                Expect.isNonEmpty
+                    (Threats.safeIn threats "W1N2")
+                    "the premise: the room has safe ground"
+
+                Expect.equal
+                    (Threats.guardGroundIn threats "W1N2")
+                    (Some(Threats.safeIn threats "W1N2"))
+                    "holding the Guard, its ground is the room's safe ground, not the threats' ring"
             }
         ]
 
@@ -2896,7 +2946,7 @@ let borrowedRoomBudgetTests =
                 let capOf loads id =
                     let view = twoBuffers loads
 
-                    planPool view (Atlas.ofView view) (planTasksOn view noThreats)
+                    planPool view (Atlas.ofView view) noThreats (planTasksOn view noThreats)
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity
