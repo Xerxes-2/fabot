@@ -2,66 +2,55 @@
 
 ## Code hygiene
 
-- Formatter: Fantomas (local dotnet tool). Run `npm run format` before committing; CI-style check: `npm run format:check`. Style knobs live in `.editorconfig`.
-- A new `Decide` test goes in the file its *domain* owns, never one named after the ticket: the table is in `docs/agents/orchestration.md` § Where a new Decide test goes.
-- **An Atlas fixture is a function, never a module-level value** — and the function captures no Atlas of its own. Expecto runs test lists in parallel and an Atlas memoises onto mutable `Dictionary` tables, so one static Atlas shared by two lists is two threads writing one table: wrong numbers, sometimes a throw, at roughly one run in ten (#310). `ParallelSafetyTests` fails the build on any static that reaches one, reading both the declared type and the value's runtime type.
-- **The wire has its own gate** (#294): `tests/Core.Tests` references Core alone, so `src/App/ObserveMemory.fs` — every Memory leaf the bot reads and writes — is covered by `scripts/wire-check.mjs` and by nothing else. It drives every `load*`/`save*` over the built Fable output — load, then save, then compare the wire — and asserts the documented degradation: one bad row costs that row (ADR 0028), an absent, null or wrong-type leaf reads empty, a legacy shape still reads, and nothing invents a tick. That last one is the class #275's second defect belongs to: `unbox<int>` is erased by Fable, so an off-shape value compiles to `| 0` and a stand-down's expiry of zero reads as *spent*. The raid log, the creep log, the reactor reading and the positions leaf carry the full malformed-leaf table; the CPU line, the breach log and the two write-only leaves (`saveQuotas`, `saveLayout`, read by `observe.mjs` and by nothing in F#) carry less. Run by `npm test` after `dotnet test`, and by `npm run wire` alone. A new leaf or a changed wire key wants a case here; `dotnet test` cannot see either.
-- **A few percent cannot be measured on a workstation** (#384): the same bundle measured 3.28 and 4.74 ms/tick in one evening here, while a game and a VM were running. `scripts/bench-remote.sh <base.js> <fix.js> [pairs] [profile args]` runs an interleaved A/B on a quiet box over ssh; five runs of one bundle there span 0.8%. It needs only node and the built bundle, so the box needs no dotnet. Judge a result by how many pairs point the same way, not by two means subtracted. When the clock cannot settle it, count instead: map-tree inserts, `find` calls and fact calls per tick are deterministic and a 30% cut in them is a fact.
-- **A collection that outlives the tick is built by `Fresh`** (#401): Fable emits a `Map`/`Set` comparer as an arrow at the construction site, and V8 keeps the defining function's context — every variable a sibling closure captured — alive through it. Built inline in `Observe.fold`, each tick's Transition log retained the previous tick's, forever. `Fresh.mapOfList/mapOfSeq/mapOfArray/setOfSeq` capture nothing; per-tick collections may be built anywhere.
-- Lint: the F# compiler with `TreatWarningsAsErrors` + `--warnon:1182` (unused bindings), set in `Directory.Build.props`. A clean `npm run build` / `dotnet test` is the lint gate.
-- `[<Emit>]` binding stubs use `_`-prefixed params (args are used positionally via `$0`, invisible to the compiler).
-- An `[<Emit>]` accessor with a real body (the checked index that runs on .NET, e.g. the Atlas flood's `at`) names its params normally: the .NET body uses them.
+Each rule's reason is in `docs/agents/hygiene.md`.
+
+- Fantomas formats (`npm run format`); `npm test` checks it. Lint is the compiler: `TreatWarningsAsErrors` + `--warnon:1182`.
+- A new `Decide` test goes in the file its *domain* owns, never one named after the ticket: `docs/agents/orchestration.md` § Where a new Decide test goes.
+- An Atlas fixture is a function that captures no Atlas of its own (`ParallelSafetyTests` enforces it).
+- A new Memory leaf or a changed wire key gets a case in `scripts/wire-check.mjs`: `dotnet test` cannot see `src/App/ObserveMemory.fs`.
+- A collection that outlives the tick is built by `Fresh.*`.
+- Edit F# with the Edit tool; a python/sed rewrite of a source file breaks on its anchors.
+- A CPU claim is an interleaved A/B with identical Memory fingerprints; a few percent needs `scripts/bench-remote.sh` or a count.
+- `[<Emit>]` stubs take `_`-prefixed params; an `[<Emit>]` accessor with a real .NET body names them normally.
 
 ## ADRs
-- Write an ADR only if the decision is hard to reverse, surprising without
-  context, and a real trade-off. Tuning and behavioural details get a one-line
-  why-comment or a test name instead.
-- Changing a decision: mark the old ADR `superseded by NNNN` and remove its
-  code citations in the same commit.
-- Cite an ADR in code once, at the site that implements it, as `// ADR-NNNN`.
-  Never restate its reasoning in a comment.
-- Skip superseded ADRs unless asked for history.
-  `bash scripts/adr-check.sh --index` lists the live ones.
+
+- Write one only if the decision is hard to reverse, surprising without context, and a real trade-off. Tuning gets a one-line why-comment or a test name.
+- Changing a decision: mark the old ADR `superseded by NNNN` and remove its code citations in the same commit.
+- Cite an ADR in code once, at the site that implements it, as `// ADR-NNNN`; never restate its reasoning. The citation count is capped (`scripts/adr-ceiling`, never raised): a new citation is paid for by removing a duplicate one.
+- `bash scripts/adr-check.sh --index` lists the live ADRs; skip superseded ones unless asked for history.
 
 ## Version control
 
-This repo uses **jj** (colocated with git). All VCS mutations go through `jj`; git is read-only.
+**jj** (colocated with git): every mutation goes through `jj`; git is read-only. Solo repo: no PRs, no feature branches, work on `main`.
 
 ### Shipping an issue
 
-Solo repo: no PRs, no feature branches. Work on `main` directly.
-
-Before pushing (the point of no return — pushed commits become immutable):
-
-1. `npm run format` and `npm run build` / `npm test` are clean. `npm test` is `dotnet test` and then the wire gate; it leaves `dist/` alone, so the artifact a deploy uploads survives a test run.
+1. `npm test` (format check, ADR gate, `dotnet test`, wire gate) and `npm run build` are clean.
 2. `/code-review` has run on the diff and its findings are resolved.
+3. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
+4. `jj bookmark set main -r @`, then `jj ship` (the gates again, then `jj git push`). A pushed change is immutable.
+5. `npm run deploy` uploads the built bundle to the live server; the first tick after it is a cold reset.
 
-Then:
+Squash TDD slices into one change per issue; push per issue.
 
-3. `jj describe` the change with a conventional-commit subject and a
-   `Fixes #<n>` trailer (one line per issue; the keyword does not
-   distribute across a comma-separated list).
-4. `jj git push`. GitHub closes the referenced issues on push to `main`.
-   jj marks the pushed change immutable and opens a fresh empty change
-   on top.
+A live firefight the user flags may be fixed in the current session without the subagent loop; steps 1, 3 and 4 still apply.
 
-Squash TDD slices into one change per issue before step 3; push per
-issue, not per slice.
+### Working alongside
+
+- A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
+- Stop a background job with TaskStop; `pkill -f` matches its own shell.
+- A second session working at the same time takes its own `jj workspace add`, or stays read-only.
+
+## Live game
+
+`npm run observe -- <cmd>`: `health` first after a deploy, then `cpu`, `tasks`, `timeline <creep>`, `raids`, `outposts`, `room <name>`, `eval '<expr>'`, `history <room> <tick>`, `wait --ticks N`. The full list is its usage line.
+
+CPU: `npm run profile -- --scenario <s>` (harness), `npm run cpuprofile -- build/fabot.cpuprofile flat <fn>` (where a function's time goes), and for live attribution `npm run probe` wraps named functions in `dist/main.js`, uploaded with `npm run upload`, read with `observe probe`, undone by `npm run deploy`.
 
 ## Agent skills
 
-### Issue tracker
-
-Issues live in GitHub Issues (Xerxes-2/fabot) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
-
-### Orchestration
-
-Queueing several `ready-for-agent` issues through subagents. See `docs/agents/orchestration.md`.
+- Issue tracker: GitHub Issues (Xerxes-2/fabot) via `gh`. See `docs/agents/issue-tracker.md`.
+- Triage labels: the default five roles. See `docs/agents/triage-labels.md`.
+- Domain docs: `CONTEXT.md` (grep it for the term you need) + `docs/adr/`. See `docs/agents/domain.md`.
+- Orchestration of a queue of `ready-for-agent` issues: `docs/agents/orchestration.md`.

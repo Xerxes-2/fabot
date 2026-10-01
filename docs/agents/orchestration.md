@@ -84,7 +84,7 @@ are dated records and stay as written, so follow the test *name* they quote, not
 ## The per-issue loop
 
 1. **Implement.** One agent, test-first, until `npm run format`, `npm run build` and
-   `dotnet test` are clean.
+   `npm test` (format check, ADR gate, `dotnet test`, wire gate) are clean.
 2. **Review**, all at once over the same diff. `/code-review` carries the spec and standards
    lenses and satisfies the pre-push condition in `AGENTS.md`. Beside it run a third agent
    for the **adversarial** lens: break it, with a concrete failure scenario — inputs in,
