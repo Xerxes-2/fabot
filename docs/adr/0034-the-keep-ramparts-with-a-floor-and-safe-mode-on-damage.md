@@ -1,6 +1,12 @@
 # The Keep: ramparts with a floor, safe mode on damage, and the raid's cost in hits
 
-> **Status:** amended by 0061 (#285), #201, #214, #217, #422
+> **Status:** amended by 0061 (#285), #201, #214, #217, #422, #446, #448, #449
+
+> **Amended by #449**: the reflex runs over each [[nursery]] too, fired by its mother, which raises it and runs its only tick; no Keep stands there, so its Keep arm is idle.
+
+> **Amended by #448**: #217's undefended arm holds while one armed body of ours standing in the home, whichever colony holds it, wins the exchange against the raid alone. The Keep arm and the CLAIM arm are unconditional: a garrison buys time only while the Keep is untouched.
+
+> **Amended by #446**: "Ramparts over the Keep and the Posts, and nowhere else" adds a colony's declared perimeter, the tiles that seal its home at its exits' chokes, placed on the same gate and floor once a tower stands in the room.
 
 > **Amended by #422**: the terminal joins the Keep. It holds the season's ore, stands bare at 3,000 hits, and damage to it fired nothing; all three rules now apply to it.
 

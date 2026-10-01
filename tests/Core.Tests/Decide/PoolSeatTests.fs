@@ -852,6 +852,32 @@ let repairTests =
                     "one level up the same rampart is hungry under the same floor"
             }
 
+            test "a perimeter rampart under the floor is repaired like a Keep one" {
+                // #446: a choke's rampart is one rampart more, on the Keep's
+                // floor and the Keep's gate; nothing asks where it stands.
+                let floor = 100_000
+                let max = 300_000
+
+                let declaring (colony: ColonyView) =
+                    { colony with
+                        Perimeter = [ { X = 2; Y = 15 } ]
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "ram-p", { X = 2; Y = 15 }, Structure BuiltKind.Rampart ]
+                    }
+                    |> withHits "ram-p" BuiltKind.Rampart (floor - 1) max
+
+                Expect.equal
+                    (repairTasks (planTasksOn (bareRespawn |> withLevel 3 |> declaring) noThreats))
+                    [ "ram-p" ]
+                    "under the floor at the level ramparts are kept: hungry"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (bareRespawn |> withLevel 2 |> declaring) noThreats))
+                    "below the gate it decays away, as a Keep rampart does"
+            }
+
             test "a surplus creep is sent to repair: assignment, intent and bubble" {
                 // Feeding satisfied — the spawn is full, the creep can carry no
                 // more — so the surplus tier is all that is left, and the

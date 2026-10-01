@@ -408,7 +408,14 @@ let censusSignatureTests =
                                     TicksToLive = Engine.creepLifetime
                                 }
                             ]
-                        ConstructionSites = [ { Id = "site-9"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-9"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Spatial =
                             { colony.Spatial with
                                 Hits = Map.ofList [ "ext-1", { Hits = 1; HitsMax = 3000 } ]

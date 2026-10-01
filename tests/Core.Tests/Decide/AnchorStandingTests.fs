@@ -19,7 +19,15 @@ let standingBodyTests =
                 // standing body's Carry holds fifty against eleven Work, so
                 // the trip would idle eleven Work for every tick delivered.
                 let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-                let sites = [ { Id = "site-1"; Left = siteOwes } ]
+
+                let sites =
+                    [
+                        {
+                            Id = "site-1"
+                            Left = siteOwes
+                            Begun = false
+                        }
+                    ]
 
                 Expect.equal
                     (laneAssignment site sites upgraderBody)
@@ -40,7 +48,16 @@ let standingBodyTests =
                 let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
 
                 Expect.equal
-                    (laneAssignment site [ { Id = "site-1"; Left = siteOwes } ] anchorBody)
+                    (laneAssignment
+                        site
+                        [
+                            {
+                                Id = "site-1"
+                                Left = siteOwes
+                                Begun = false
+                            }
+                        ]
+                        anchorBody)
                     None
                     "one Carry against six Work is a commute, whichever row cast it and whichever way it walks"
             }
@@ -141,7 +158,13 @@ let standingBodyTests =
                 let lane level =
                     bufferLaneFlow
                         [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-                        [ { Id = "site-1"; Left = siteOwes } ]
+                        [
+                            {
+                                Id = "site-1"
+                                Left = siteOwes
+                                Begun = false
+                            }
+                        ]
                         (creepWith "w" 100 0 (bodyFor workerPattern 300))
                     |> withLevel level
 
@@ -260,7 +283,13 @@ let standingBodyTests =
 
                 Expect.equal
                     (assignedWith
-                        [ { Id = "site-1"; Left = siteOwes } ]
+                        [
+                            {
+                                Id = "site-1"
+                                Left = siteOwes
+                                Begun = false
+                            }
+                        ]
                         [ "site-1", { X = 12; Y = 10 }, Site BuiltKind.Extension ])
                     (Some(taskId (Harvest "src-a")))
                     "and a site one step away does not move it — the rule only writes down what the rank already did"

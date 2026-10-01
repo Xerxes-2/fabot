@@ -37,7 +37,14 @@ let partApplicabilityTests =
                 let snapshot =
                     { bareRespawn with
                         Sources = [ source "src-a" ]
-                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Controller = Some(controllerAt 2)
                         Creeps = [ creepWith "hauler" 25 25 [ Carry; Move ] ]
                     }

@@ -210,6 +210,7 @@ let private declared: Colony list =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
     ]
 

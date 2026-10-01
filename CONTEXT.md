@@ -190,11 +190,11 @@ The fixed `[20 Carry; 10 Move]` body that carries one `Tuning.ReactorLoad` — o
 _Avoid_: hauler, runner, delivery creep
 
 ### Guard
-The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in), and one per child's home its [[mother colony]] defends, and never in an [[errand]] room, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077, ADR-0080. ⚔️
+The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in), and one per child's home its [[mother colony]] defends once the child is `Independent`, and never in an [[errand]] room or a home the mother still raises, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077, ADR-0080. ⚔️
 _Avoid_: defender, bodyguard, soldier
 
 ### Ranger
-The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, kept on the Reactor's ring as a standing garrison of `Tuning.RangerResidents` bodies of `Tuning.RangerResidentBlocks`, raid or not (#419), each sized up to win its raid alone when one stands. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. One also works each [[harassment room]], at no fewer than `Tuning.HarassBlocks`. Its [[body class]] is Fighter. ADR-0078, ADR-0081. 🏹
+The ranged [[body pattern]] an [[errand]] room is held with (#411): `[Move×3; RangedAttack×2; Heal]` a block, kept on the Reactor's ring as a standing garrison of `Tuning.RangerResidents` bodies of `Tuning.RangerResidentBlocks`, raid or not (#419), each sized up to win its raid alone when one stands. The same garrison holds the controller's ring of each child's home its [[mother colony]] raises, from the claim until the child is `Independent` (#447), with `Engine.guardCap` more on top while that home is beaten, one resident loses its raid alone and the largest ranger wins it; under an armed raid there it holds the threats' ring instead. It shoots any armed hostile or rival claimer within three tiles, the claimer first, and its heal acts beside its shot. One also works each [[harassment room]], at no fewer than `Tuning.HarassBlocks`. Its [[body class]] is Fighter. ADR-0078, ADR-0081. 🏹
 _Avoid_: archer, ranged guard
 
 ### Miner
@@ -228,7 +228,7 @@ The structures worth defending — the spawn, every tower, the [[storage]] and t
 _Avoid_: base, core
 
 ### Rampart
-The walkable defensive structure the [[layout]] places over every standing [[keep]] structure and every [[post]] a [[container]] stands on, kept above a floor of hits by [[repair]]; a creep on its own rampart is in no [[reach]]. ADR-0034.
+The walkable defensive structure the [[layout]] places over every standing [[keep]] structure, every [[post]] a [[container]] stands on and every tile of the colony's declared perimeter (#446), kept above a floor of hits by [[repair]]; a creep on its own rampart is in no [[reach]]. ADR-0034.
 
 ### Link footing
 A tile the [[layout]] reserves for a link beside each planned source [[container]], the controller container and the [[storage]]: off every [[trunk]] and other footing, nearest the spawn, the one structure footing allowed on [[working ground]], and unfilled at RCL5 because the hauler row is already at its floor. A footing the fold finds no tile for is recorded on the [[layout record]]. ADR-0022, ADR-0027, ADR-0035, ADR-0038, ADR-0042, ADR-0049.
@@ -245,11 +245,11 @@ _Avoid_: phase, generation, tier
 A declared [[colony]] whose home room this colony does not own yet, projected and worked as an [[outpost]] of the mother until the [[claim]] lands. ADR-0047.
 
 ### Mother colony
-The declared [[colony]] that raises another: it projects, mines and reserves the child's room until the child stands on its own, first through its outpost list and then through the child's `Mother` field, and takes a lost child back for a [[claim]]. Past that it projects the child's home, as a [[transit room]], while the home is beaten — an armed raid out-heals its towers and safe mode is off — and while a [[guard]] it sends there still stands on the way. ADR-0047, ADR-0080.
+The declared [[colony]] that raises another: it projects, mines and reserves the child's room until the child stands on its own, first through its outpost list and then through the child's `Mother` field, and takes a lost child back for a [[claim]]. While it raises the child it keeps a [[ranger]] garrison in the child's home. Past that it projects the child's home, as a [[transit room]], while the home is beaten — an armed raid out-heals its towers and safe mode is off — and while a [[guard]] it sends there still stands on the way. ADR-0047, ADR-0080.
 _Avoid_: parent colony, host colony, parent (as the field)
 
 ### Nursery
-The first [[stage]] of a child [[colony]]'s life — claimed by us with no spawn of ours standing yet — still projected by its [[mother colony]] as an [[outpost]], with every site in it feeding-tier [[build]] outside the outpost builders' budget. ADR-0047, ADR-0052.
+The first [[stage]] of a child [[colony]]'s life — claimed by us with no spawn of ours standing yet — still projected by its [[mother colony]] as an [[outpost]], with every site in it feeding-tier [[build]] outside the outpost builders' budget — except at controller level 1, where the mother pools its Upgrade on the Feeding tier and its sites wait (#449) — and its [[safe-mode reflex]] fired by the mother. ADR-0047, ADR-0052.
 _Avoid_: child colony (as the state), colony under construction
 
 ### Bootstrap window
@@ -337,7 +337,7 @@ The colony-level channel carrying what is broken right now, under `Memory.fabot.
 The glyph an assigned creep says over its head each tick, one per [[task]] (⛏ Harvest · 📥 Withdraw · 🧲 Pickup · 🔋 Refill · 🔨 Build · 🔧 Repair · ⚡ Upgrade · 🚩 Reserve · 🏴 Claim · 🏃 Flee · ⚔️ Guard). Observability only; unassigned creeps show nothing.
 
 ### Safe-mode reflex
-The colony reflex that emits `ActivateSafeMode` when a CLAIM-part [[hostile]] stands within range 3 of the home controller, when a [[keep]] structure is below full hits with a hostile in the [[home room]], or — with no tower standing — on the first armed hostile; gated only on stock remaining and safe mode not running. ADR-0007, ADR-0015, ADR-0034.
+The colony reflex that emits `ActivateSafeMode` when a CLAIM-part [[hostile]] stands within range 3 of the home controller, when a [[keep]] structure is below full hits with a hostile in the [[home room]], or — with no tower standing — on the first armed hostile unless one armed body of ours standing there, whoever holds it, wins the exchange alone (#448); gated only on stock remaining and safe mode not running. A mother runs it over each [[nursery]] she raises too (#449). ADR-0007, ADR-0015, ADR-0034.
 
 ### Signature reflex
 The reflex that writes `Colony.signature`, a human's line, onto any controller the projection places whose sign is not already that line, by any creep of ours within range 1 of it. A reflex and never a [[task]]: it sends nobody anywhere.

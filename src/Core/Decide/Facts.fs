@@ -235,22 +235,46 @@ let internal harassTarget (view: ColonyView) (hostile: HostileInfo) : bool =
     view.Harass
     |> List.exists (fun h -> h.RoomName = hostile.Pos.Room && h.Enemy = hostile.Owner)
 
-/// Whether a hostile is a rival's CLAIM body standing in one of these errand
-/// rooms: unarmed, and the thing that takes the flag (#406, #414).
-let internal claimsAFlag (errandRooms: Set<string>) (hostile: HostileInfo) =
-    Set.contains hostile.Pos.Room errandRooms
+/// Whether a hostile is a rival's CLAIM body standing in one of these
+/// resident rooms: unarmed, and the thing that takes the flag (#406, #414) or
+/// attacks a raised child's controller (#447).
+let internal claimsAFlag (residentRooms: Set<string>) (hostile: HostileInfo) =
+    Set.contains hostile.Pos.Room residentRooms
     && List.contains BodyPart.Claim hostile.Body
 
-/// The rooms whose Guard is the ranger's: the errand rooms and the
+/// The children's homes this colony is raising (#447): its borrowed rooms at
+/// `Nursery`, `Bootstrapping` or `Weaning`, `Colony.bootstrapping`'s half of
+/// them. A lost child's home, the other half, has no stage.
+let internal raisedHomes (view: ColonyView) : Set<string> =
+    view.Borrowed.Rooms
+    |> List.filter (fun room ->
+        match roomStage view room with
+        | Some Nursery
+        | Some Bootstrapping
+        | Some Weaning -> true
+        | Some Independent
+        | None -> false)
+    |> Set.ofList
+
+/// The rooms the ranger row keeps its resident garrison in, raid or none
+/// (#419): the errand rooms, and the children's homes this colony raises
+/// (#447). One rule for both, read by the row, the pool's cap, the ground and
+/// the target.
+let internal residentRooms (view: ColonyView) : Set<string> =
+    Set.union (errandRooms view) (raisedHomes view)
+
+/// The rooms whose Guard is the ranger's: the resident rooms and the
 /// harassment rooms (#411, #432). Every other guarded room is the guard's.
 let internal rangerRooms (view: ColonyView) : Set<string> =
-    Set.union (errandRooms view) (harassRooms view)
+    Set.union (residentRooms view) (harassRooms view)
 
 /// What a Guard in its room may shoot: an armed hostile, a rival's claimer in
-/// an errand room, and the declared enemy's creep in a harassment room.
+/// a resident room, and the declared enemy's creep in a harassment room.
 /// `Emitter.guardTarget` and the harassment ring read this one predicate.
-let internal guardShoots (view: ColonyView) (errandRooms: Set<string>) (hostile: HostileInfo) =
-    isArmed hostile || claimsAFlag errandRooms hostile || harassTarget view hostile
+let internal guardShoots (view: ColonyView) (residentRooms: Set<string>) (hostile: HostileInfo) =
+    isArmed hostile
+    || claimsAFlag residentRooms hostile
+    || harassTarget view hostile
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there

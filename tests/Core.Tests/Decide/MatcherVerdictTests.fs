@@ -184,7 +184,14 @@ let sayTests =
                 let snapshot =
                     { bareRespawn with
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
-                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Creeps = [ worker "w1" 50 0; worker "w2" 50 0; worker "w3" 50 0 ]
                     }
 
@@ -959,7 +966,14 @@ let rankTierTests =
                 Expect.equal
                     (verdictsFor
                         { surplusColony with
-                            ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+                            ConstructionSites =
+                                [
+                                    {
+                                        Id = "site-1"
+                                        Left = siteOwes
+                                        Begun = false
+                                    }
+                                ]
                         })
                     [ Verdict.Matched("w1", taskId (Build "site-1"), MatchFactor.Rank) ]
                     "Build outranks the tower Refill: rank broke it, not pool order"
@@ -993,7 +1007,16 @@ let rankTierTests =
 
             test "a site down the lane outbids the controller beside the buffer" {
                 Expect.equal
-                    (matchOf (siteDownTheLane [ { Id = "site-1"; Left = siteOwes } ]))
+                    (matchOf (
+                        siteDownTheLane
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
+                    ))
                     (Some(taskId (Build "site-1"), MatchFactor.Rank))
                     "three steps out against the controller's one, and the site wins on rank"
 
@@ -1052,7 +1075,14 @@ let rankTierTests =
                 // deadline (`deadlineRank`) a whole tier above the shallowest
                 // work there is, so the rung does not reach it.
                 let expiring =
-                    { siteDownTheLane [ { Id = "site-1"; Left = siteOwes } ] with
+                    { siteDownTheLane
+                          [
+                              {
+                                  Id = "site-1"
+                                  Left = siteOwes
+                                  Begun = false
+                              }
+                          ] with
                         Controller =
                             Some
                                 { controllerAt 2 with

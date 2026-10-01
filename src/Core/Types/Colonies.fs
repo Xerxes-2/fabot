@@ -801,6 +801,11 @@ type Colony =
         /// `terminal-restriction.js` nulls only a `send` whose target terminal
         /// belongs to **another user**; the fee is `Engine.sendFee`.
         Consignee: string option
+        /// The home room's **perimeter** (#446): the tiles whose ramparts seal
+        /// it at its exits' chokes, read off the terrain once, offline, by a
+        /// human. Each is covered as a Keep structure is, on the same gate and
+        /// floor. Empty for a room nobody sealed.
+        Perimeter: Pos list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -885,6 +890,7 @@ module Colony =
                 // terminal stood on 2026-09-17 at (11,43). W15S28 is the one
                 // colony that declares the Reactor errand (#349).
                 Consignee = Some "W15S28"
+                Perimeter = []
             }
             // The second colony: the first colony's outpost until its own
             // spawn stood.
@@ -931,6 +937,7 @@ module Colony =
                 // 16,464 T banked and a terminal at (14,10); same far end and
                 // same reason as W12S28's (#349).
                 Consignee = Some "W15S28"
+                Perimeter = []
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
             // The entry with no spawn behind it *was* the decision to take
@@ -977,6 +984,7 @@ module Colony =
                 Mother = Some "W13S28"
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
+                Perimeter = []
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
@@ -988,6 +996,7 @@ module Colony =
                 Salvage = []
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
+                Perimeter = []
             }
             // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`),
             // in the slot the fifth, W11S27, gave up once its 22,000 T was
@@ -1001,6 +1010,20 @@ module Colony =
                 Salvage = []
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
+                // Trepidimous next door (#446): an exact vertex min cut over
+                // the terrain, exits as source and the controller, the source
+                // and the Thorium as sink, seals 460 tiles with sixteen
+                // ramparts. North needs none: W17S24 is behind a wall.
+                Perimeter =
+                    [
+                        // West, to W18S25.
+                        for y in 15..20 -> { X = 2; Y = y }
+                        for y in 23..27 -> { X = 2; Y = y }
+                        // South, to W17S26.
+                        for x in 16..18 -> { X = x; Y = 44 }
+                        // East, to W16S25.
+                        for y in 27..28 -> { X = 47; Y = y }
+                    ]
             }
         ]
 
@@ -1060,6 +1083,7 @@ module Colony =
                     Salvage = []
                     Mother = None
                     Consignee = None
+                    Perimeter = []
                 })
             |> Option.toList
         | living -> living

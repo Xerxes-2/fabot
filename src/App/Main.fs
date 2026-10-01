@@ -678,6 +678,7 @@ let private fullTick
     let executionPlan =
         (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
         @ moveIntents
+        |> firstActivationOnly
         |> Fabot.Core.IntentPlan.create
         |> function
             | Ok plan -> plan

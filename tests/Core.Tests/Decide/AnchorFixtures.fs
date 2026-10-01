@@ -305,7 +305,14 @@ let internal homeRaisingColony kind (body: CreepInfo) (at: Pos) =
         Controller = None
         Refillables = []
         Sources = [ source "src-a" ]
-        ConstructionSites = [ { Id = "can-a"; Left = siteOwes } ]
+        ConstructionSites =
+            [
+                {
+                    Id = "can-a"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
         Creeps = [ body ]
         Spatial =
             spatial

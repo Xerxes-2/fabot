@@ -175,6 +175,25 @@ let outpostTests =
                                 })
                     ))
                     "as a defended home it is not"
+
+                // #447: raised, its Guard is the ranger row's, and still no
+                // stand-down.
+                Expect.isEmpty
+                    (standDowns (
+                        RaidState.empty
+                        |> raidTick
+                            100
+                            (raidedAs
+                                { quiet with
+                                    Borrowed =
+                                        {
+                                            Rooms = [ defended ]
+                                            Defended = [ defended ]
+                                        }
+                                    Stages = Map.add defended Bootstrapping quiet.Stages
+                                })
+                    ))
+                    "nor as a home its mother raises"
             }
 
             test "an invader core opens a stand-down that runs to its collapse timer" {

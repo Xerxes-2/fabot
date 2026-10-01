@@ -19,7 +19,7 @@ We decided **an errand room keeps a guard, and takes the outpost's choice (ADR 0
 3. **The re-claimer's seat waits for the guard under a raid,** an armed non-Source-Keeper hostile or a rival's CLAIM body in the room, exactly as a raided outpost's seat does (ADR 0072); in peace it does not wait.
 4. **A raid the cap cannot beat is still a withdrawal** clocked to its own longest life, exactly as ADR 0075 had it; Source Keepers neither open nor extend it.
 
-Implemented in `Observe.raidDeadlines`, `Planner.guardedErrandsOf`, `Emitter.guardTarget`, `Threats.ErrandRing` and `Quota.reserverClaimsOf`.
+Implemented in `Observe.raidDeadlines`, `Planner.guardedErrandsOf`, `Emitter.guardTarget`, `Threats.ResidentRing` and `Quota.reserverClaimsOf`.
 
 ## Consequences
 

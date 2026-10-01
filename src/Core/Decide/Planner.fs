@@ -85,6 +85,16 @@ let internal isBootstrapRoom (view: ColonyView) room =
         | Some Nursery
         | None -> false)
 
+/// Whether the named room is a nursery whose controller still stands at level
+/// 1 (#449): the one window where its mother pools its Upgrade, on the
+/// Feeding tier, and its sites wait — 200 points bank the safe mode the
+/// level-up grants, before a spawn site a hostile's step can erase. A level
+/// the view does not carry is not level 1, and the nursery is sites only.
+let internal isNurseryFirstLevel (view: ColonyView) room =
+    isNurseryRoom view room
+    && Map.tryFind room view.NurseryControllers
+       |> Option.exists (fun controller -> controller.Level = 1)
+
 /// Whether an Upgrade in this pool is borrowed: its controller is not this
 /// colony's own, so it is a bootstrapped child's, pooled for the pioneers.
 let internal isBorrowedUpgrade (view: ColonyView) controllerId =
@@ -239,7 +249,7 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
 /// ADR-0077
 /// The errand rooms the ranger row keeps a body in: every one this colony works
 /// this tick, raid or none — the ranger stands on the Reactor's ring and meets
-/// what comes (`Threats.ErrandRing`), while there is ore to burn in it
+/// what comes (`Threats.ResidentRing`), while there is ore to burn in it
 /// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
 /// `view.Errands` before this reads it.
 let private guardedErrandsOf (fuelled: Errand list) : string list =
@@ -277,7 +287,9 @@ type OutpostFacts =
         ReservableRooms: string list
         /// The declared outposts a threat stands in, the errand rooms the
         /// guard row keeps a body in (#414), the children's homes this
-        /// colony defends (#428), and the harassment rooms it casts (#432).
+        /// colony raises (#447) or defends (#428), and the harassment rooms it
+        /// casts (#432). Each room once: a raised home that is beaten is one
+        /// Guard and one row's count, not two.
         Guarded: string list
         /// `fuelledErrands`' answer, which the guard row, the Reclaim pool and
         /// the reserver row each read: a scan of every target's kind in every
@@ -307,9 +319,12 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Guarded =
             guardedOutpostsOf view declared
             @ guardedErrandsOf fuelled
+            // Raid or none, as an errand room is kept.
+            @ (Facts.raisedHomes view |> Set.toList)
             @ defendedHomesOf view
             // Target or none, as an errand room is kept.
             @ (Facts.harassRooms view |> Set.toList)
+            |> List.distinct
         Fuelled = fuelled
     }
 
@@ -393,15 +408,17 @@ let planTasks
     // The colony's own controller, and the controller of every child it is
     // still bootstrapping: a loaded worker of the mother's may cross the Seam
     // and spend into the child's controller until it reaches
-    // `Tuning.BootstrapLevel`. Surplus tier, like the home Upgrade it stands
-    // beside, so nothing but travel cost separates the two.
+    // `Tuning.BootstrapLevel`, and a nursery's while it is at level 1 (#449).
+    // The tier is the pool's (`planPool`).
     let upgrades =
         let own = view.Controller |> Option.toList |> List.map (fun c -> c.Id)
 
         let children =
             idsOfKind Controller
             |> List.filter (fun id ->
-                SpatialInfo.roomOf view.Spatial id |> Option.exists (isBootstrapRoom view))
+                SpatialInfo.roomOf view.Spatial id
+                |> Option.exists (fun room ->
+                    isBootstrapRoom view room || isNurseryFirstLevel view room))
 
         own @ children |> List.map Upgrade
 

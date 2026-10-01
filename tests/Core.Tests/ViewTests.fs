@@ -179,7 +179,13 @@ let private withSites sites (name, facts: RoomFacts) =
     { facts with
         ConstructionSites =
             sites
-            |> List.map (fun id -> ({ Id = id; Left = siteOwes }: ConstructionSiteInfo))
+            |> List.map (fun id ->
+                ({
+                    Id = id
+                    Left = siteOwes
+                    Begun = false
+                }
+                : ConstructionSiteInfo))
     }
 
 let private withSources sources (name, facts: RoomFacts) =
@@ -226,6 +232,7 @@ let private declared: Colony list =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
         {
             Home = child
@@ -234,6 +241,7 @@ let private declared: Colony list =
             Salvage = []
             Mother = Some mother
             Consignee = None
+            Perimeter = []
         }
     ]
 
@@ -360,6 +368,7 @@ let private terminalWorld =
                                 {
                                     Id = "site-terminal"
                                     Left = 100_000 - 3_836
+                                    Begun = true
                                 }
                             ]
                         Hits = Map.add "term-home" { Hits = 3000; HitsMax = 3000 } facts.Hits
@@ -1618,6 +1627,55 @@ let defendedHomeTests =
                     raided.Spatial.TargetKinds
                     quiet.Spatial.TargetKinds
                     "with every target of its own"
+            }
+        ]
+
+let private defenderNames (view: ColonyView) room =
+    Map.tryFind room view.Defenders
+    |> Option.defaultValue []
+    |> List.map (fun creep -> creep.Name)
+
+[<Tests>]
+let safeModeFactTests =
+    testList
+        "what a safe-mode reflex reads off the world"
+        [
+            test "a child's home counts the mother's armed body standing in it as a defender" {
+                // #448: the resident is held by the mother (`Spawn1`), so the
+                // child's `Creeps` never carries it, and its home is defended
+                // by it all the same.
+                let world = pairWorld |> withGuard hers child
+                let view = viewOf world child
+
+                Expect.equal
+                    (defenderNames view child)
+                    [ hers ]
+                    "her guard, and not the unarmed pioneer"
+
+                Expect.isFalse (names view |> List.contains hers) "while the body stays hers"
+
+                Expect.isEmpty
+                    (defenderNames (viewOf world mother) child)
+                    "a bootstrapping child's home is its own reflex's, not its mother's"
+            }
+
+            test "a mother reads her nursery's controller and the defenders in it" {
+                // #449: a Nursery runs no tick of its own, so its mother fires
+                // its safe mode and pools its Upgrade off these.
+                let world = spawnlessWorld |> withGuard hers child
+                let view = viewOf world mother
+
+                Expect.equal
+                    (Map.tryFind child view.NurseryControllers
+                     |> Option.map (fun c -> c.Id, c.Level))
+                    (Some("ctrl-W13S28", 2))
+                    "the child's controller, at its level"
+
+                Expect.equal (defenderNames view child) [ hers ] "and the armed body standing in it"
+
+                Expect.isEmpty
+                    (viewOf pairWorld mother).NurseryControllers
+                    "a child with its spawn standing is no nursery"
             }
         ]
 
@@ -3550,6 +3608,27 @@ let harassViewTests =
             }
 
             test
+                "a harassment room our claim has landed in is nobody's to cast, and nobody's to report" {
+                let harass: Harassment =
+                    {
+                        Rooms = harassDeclared
+                        Floor = Bodies.harassFloor Tuning.defaults
+                    }
+
+                let casting =
+                    World.harassCasters
+                        (JoinTable())
+                        Tuning.defaults
+                        declared
+                        harass
+                        (harassWorld (control Ownership.Ours) 300)
+
+                Expect.isEmpty
+                    casting.Casters
+                    "out of the list: no colony casts a room of ours, and none reports it refused"
+            }
+
+            test
                 "the colony fewest crossings from the room casts it at any bank that buys the floor; the bank breaks equal crossings, the name last" {
                 // W13S29: one crossing from the child, two from the mother and
                 // from a third colony at W14S28.
@@ -3566,6 +3645,7 @@ let harassViewTests =
                             Salvage = []
                             Mother = None
                             Consignee = None
+                            Perimeter = []
                         }
                     ]
 
@@ -3765,6 +3845,7 @@ let harassViewTests =
                                 Salvage = []
                                 Mother = Some mother
                                 Consignee = None
+                                Perimeter = []
                             }
                         ]
 
@@ -4052,6 +4133,7 @@ let private declaringOutpost outpost : Colony =
         Salvage = []
         Mother = None
         Consignee = None
+        Perimeter = []
     }
 
 let private declaringErrand errand : Colony =
@@ -4062,6 +4144,7 @@ let private declaringErrand errand : Colony =
         Salvage = []
         Mother = None
         Consignee = None
+        Perimeter = []
     }
 
 [<Tests>]

@@ -580,6 +580,7 @@ let private seenFacts
                 ({
                     Id = site.id
                     Left = site.progressTotal - site.progress
+                    Begun = site.progress > 0
                 }
                 : ConstructionSiteInfo))
             |> Array.toList

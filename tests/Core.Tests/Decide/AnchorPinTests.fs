@@ -436,7 +436,14 @@ let anchorTests =
                 // distance: the case below takes the distance away.
                 let snapshot =
                     { unpostedColony with
-                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Creeps = [ anchor "a1" 50 0; worker "g1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 31; Y = 10 } ]
@@ -462,7 +469,14 @@ let anchorTests =
                 // is the exception, and has its own cases.
                 let snapshot =
                     { unpostedColony with
-                        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Creeps = [ anchor "a1" 50 0 ]
                         Spatial =
                             corridorEast [ "site-1", { X = 12; Y = 10 } ]

@@ -691,7 +691,14 @@ let outpostTests =
                         |> withHungryExtension { X = 10; Y = 40 }
 
                     { colony with
-                        ConstructionSites = [ { Id = "site-home"; Left = siteOwes } ]
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-home"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                     }
                     |> withTarget "site-home" { X = 10; Y = 30 } (Site BuiltKind.Container)
 
@@ -985,7 +992,14 @@ let outpostTests =
 
                     { colony with
                         ConstructionSites =
-                            colony.ConstructionSites @ [ { Id = "site-out2"; Left = siteOwes } ]
+                            colony.ConstructionSites
+                            @ [
+                                {
+                                    Id = "site-out2"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Creeps = [ for n in 1..5 -> worker $"w{n}" 50 0 ]
                         Spatial =
                             { colony.Spatial with

@@ -187,6 +187,91 @@ let rampartTests =
                 Expect.equal (at 3) keepCover "at RCL3 the whole cover is planned at once"
                 Expect.equal (at 8) keepCover "and RCL8 adds nothing to it"
             }
+
+            test "a declared perimeter is covered beside the Keep, under the same gate" {
+                // #446: W17S25's chokes, read off its terrain offline, ride the
+                // cover rule: placed from the level the colony keeps ramparts at
+                // and not one level sooner.
+                let perimeter =
+                    (Colony.declared |> List.find (fun colony -> colony.Home = "W17S25")).Perimeter
+
+                let at level perimeter =
+                    let { Intents = intents } =
+                        decideOn
+                            { atLevel level keepRoom with
+                                Perimeter = perimeter
+                            }
+
+                    sitesOfKind Rampart intents
+
+                Expect.equal (List.length (List.distinct perimeter)) 16 "sixteen distinct chokes"
+                Expect.isEmpty (at 1 perimeter) "at RCL1 nothing"
+                Expect.isEmpty (at 2 perimeter) "at RCL2 the Keep's gate holds the perimeter too"
+
+                Expect.equal
+                    (at 3 perimeter)
+                    (List.sort (perimeter @ keepCover))
+                    "at RCL3, a tower standing, all sixteen beside the Keep and the Posts"
+
+                Expect.equal (at 3 []) keepCover "a colony with no perimeter is unchanged"
+            }
+
+            test "the perimeter waits for a tower to stand; the Keep's cover does not" {
+                // At RCL3 the child's first tower comes first: a perimeter site is
+                // Feeding tier like the tower's, and every pending child site
+                // pauses the mother's borrowed Upgrade.
+                let perimeter =
+                    (Colony.declared |> List.find (fun colony -> colony.Home = "W17S25")).Perimeter
+
+                let ramparts room =
+                    let { Intents = intents } =
+                        decideOn
+                            { atLevel 3 room with
+                                Perimeter = perimeter
+                            }
+
+                    sitesOfKind Rampart intents
+
+                let towerSite =
+                    keepRoom |> withTargets [ "tower-1", { X = 24; Y = 24 }, Site BuiltKind.Tower ]
+
+                Expect.equal
+                    (ramparts towerSite)
+                    (keepCover |> List.filter (fun tile -> tile <> { X = 24; Y = 24 }))
+                    "a tower site only: the Keep and the Posts, no choke"
+
+                Expect.equal
+                    (ramparts keepRoom)
+                    (List.sort (perimeter @ keepCover))
+                    "the tower stands: all sixteen chokes"
+            }
+
+            test
+                "a perimeter tile already ramparted, owed a site, or under another site emits nothing" {
+                // The cover's census, both halves, and the tile clause: the engine
+                // takes one site per tile, so a road site on a choke waits for its
+                // road before the rampart goes down.
+                let perimeter = [ { X = 2; Y = 15 }; { X = 2; Y = 16 }; { X = 2; Y = 17 } ]
+
+                let room =
+                    keepRoom
+                    |> withTargets
+                        [
+                            "ram-p", { X = 2; Y = 15 }, Structure BuiltKind.Rampart
+                            "road-p", { X = 2; Y = 16 }, Site BuiltKind.Road
+                        ]
+
+                let { Intents = intents } =
+                    decideOn
+                        { atLevel 4 room with
+                            Perimeter = perimeter
+                        }
+
+                Expect.equal
+                    (sitesOfKind Rampart intents)
+                    (List.sort ({ X = 2; Y = 17 } :: keepCover))
+                    "only the bare, unoccupied choke is placed"
+            }
         ]
 
 /// A hostile creep of the given body, position immaterial.
@@ -217,6 +302,82 @@ let towered (snapshot: ColonyView) =
             snapshot.Spatial
             |> withTargets [ "tower-1", { X = 20; Y = 20 }, Structure BuiltKind.Tower ]
     }
+
+/// One resident ranger of seven whole blocks (#447's garrison body).
+let private resident name =
+    creepWith name 0 0 (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+/// The same colony with two resident rangers standing in the named room, as
+/// the view carries them: held by whichever colony, so in nobody's `Creeps`
+/// here.
+let private garrisonedIn room (colony: ColonyView) =
+    { colony with
+        Defenders = Map.ofList [ room, [ resident "ranger-1"; resident "ranger-2" ] ]
+    }
+
+/// A mother raising W1N2 as her [[nursery]] (#449), its controller
+/// "ctrl-child", with nothing yet built there.
+let private nurseryMother =
+    { ferryMother Nursery with
+        NurseryControllers =
+            Map.ofList
+                [
+                    "W1N2",
+                    { controllerAt 1 with
+                        Id = "ctrl-child"
+                    }
+                ]
+    }
+
+/// The same mother with a spawn site standing in her nursery, `paid` energy
+/// already built into it.
+let private withNurserySite paid (colony: ColonyView) =
+    { colony with
+        ConstructionSites =
+            [
+                {
+                    Id = "site-child"
+                    Left = 15_000 - paid
+                    Begun = paid > 0
+                }
+            ]
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add "site-child" (Site BuiltKind.Spawn) colony.Spatial.TargetKinds
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.change
+                        "W1N2"
+                        (Option.map (fun layer ->
+                            { layer with
+                                TargetPositions =
+                                    Map.add "site-child" { X = 12; Y = 46 } layer.TargetPositions
+                            }))
+            }
+    }
+
+/// The two rangers in the colony's own home.
+let private garrisoned (colony: ColonyView) =
+    garrisonedIn (SpatialInfo.homeName colony.Spatial) colony
+
+/// The same colony with its spawn at full hits and no tower: the undefended
+/// arm's room.
+let private towerless = bareRespawn |> withHits "spawn-1" BuiltKind.Spawn 5000 5000
+
+/// A 2R5M3H skirmisher.
+let private skirmisher =
+    hostileAt
+        "h-1"
+        { X = 25; Y = 27 }
+        (List.replicate 2 RangedAttack @ List.replicate 5 Move @ List.replicate 3 Heal)
+
+/// The 18M17A + 11M7H + 6M4H squad.
+let private squad =
+    [
+        hostileAt "h-1" { X = 25; Y = 27 } (List.replicate 18 Move @ List.replicate 17 Attack)
+        hostileAt "h-2" { X = 25; Y = 28 } (List.replicate 11 Move @ List.replicate 7 Heal)
+        hostileAt "h-3" { X = 26; Y = 28 } (List.replicate 6 Move @ List.replicate 4 Heal)
+    ]
 
 [<Tests>]
 let safeModeTests =
@@ -455,6 +616,217 @@ let safeModeTests =
             test "a quiet room fires nothing" {
                 let { Intents = intents } = decideOn bareRespawn
                 Expect.isEmpty (activations intents) "no hostiles, no reflex"
+            }
+
+            test "a claimer within reach fires even with a winning garrison" {
+                // #448: the claimer arm is unconditional — a tap blocks
+                // activation for 1,000 ticks, and no exchange is gambled on.
+                let snapshot =
+                    { bareRespawn with
+                        Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                        Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ BodyPart.Claim; Move ] ]
+                    }
+                    |> garrisoned
+
+                let { Intents = intents } = decideOn snapshot
+
+                Expect.equal
+                    (activations intents)
+                    [ "ctrl-1" ]
+                    "the tap is never left to the rangers"
+            }
+
+            test "a dented Keep fires whatever stands at home" {
+                // #448: a garrison buys time only while the Keep is untouched.
+                // The skirmisher loses to either ranger, and the spawn losing
+                // hits under it still means fire.
+                let { Intents = intents } =
+                    decideOn (towered dentedSpawn |> garrisoned |> facing [ skirmisher ])
+
+                Expect.equal (activations intents) [ "ctrl-1" ] "the Keep is already paying"
+            }
+
+            test "a dismantler denting the Keep fires beside an armed body of ours" {
+                // #448, the Keep arm's own case: a WORK-only body deals no damage
+                // an exchange can price, so a garrison would always "win" it.
+                let { Intents = intents } =
+                    decideOn (dentedSpawn |> garrisoned |> facing [ hostile [ Work; Work; Move ] ])
+
+                Expect.equal (activations intents) [ "ctrl-1" ] "the dismantler is doing the harm"
+            }
+
+            test "with no tower, one armed body of ours that wins the raid alone holds the stock" {
+                // #448: the skirmisher's 20 a tick is out-healed by either
+                // ranger; the squad's 510 melee beats each of them alone,
+                // and they are never summed (the raid focuses one body).
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                Expect.isEmpty
+                    (fires (towerless |> garrisoned |> facing [ skirmisher ]))
+                    "the garrison answers a poke"
+
+                Expect.equal
+                    (fires (towerless |> garrisoned |> facing squad))
+                    [ "ctrl-1" ]
+                    "the squad wins against each ranger"
+
+                Expect.equal
+                    (fires (towerless |> facing [ skirmisher ]))
+                    [ "ctrl-1" ]
+                    "and with nobody at home the undefended arm fires as before"
+            }
+
+            test "a garrison standing in another room is no defence of this one" {
+                // #448: the exchange is the home room's.
+                let { Intents = intents } =
+                    decideOn (towerless |> garrisonedIn "W9N9" |> facing [ skirmisher ])
+
+                Expect.equal (activations intents) [ "ctrl-1" ] "a ranger elsewhere is not at home"
+            }
+
+            test "a mother fires her nursery's safe mode under the same arms" {
+                // #449: a Nursery runs no tick of its own, so its mother asks
+                // the one reflex over its room and controller.
+                let mother = nurseryMother
+
+                let inNursery body =
+                    { hostileAt "h-1" { X = 10; Y = 44 } body with
+                        Pos = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                    }
+
+                let fires hostiles (colony: ColonyView) =
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
+                    activations intents
+
+                let building = mother |> withNurserySite 1
+
+                Expect.equal
+                    (fires [ inNursery [ Attack; Move ] ] building)
+                    [ "ctrl-child" ]
+                    "no tower stands in a nursery: the first armed hostile fires it"
+
+                Expect.equal
+                    (fires [ inNursery [ BodyPart.Claim; Move ] ] mother)
+                    [ "ctrl-child" ]
+                    "and a claimer within reach of its controller"
+
+                Expect.isEmpty
+                    (fires [ inNursery [ Attack; Move ] ] (building |> garrisonedIn "W1N2"))
+                    "a resident of ours that wins the raid alone holds the stock"
+
+                Expect.isEmpty
+                    (fires
+                        [ inNursery [ Attack; Move ] ]
+                        { building with
+                            NurseryControllers = Map.empty
+                        })
+                    "and a room that is no nursery of hers is not her reflex's"
+            }
+
+            test "a nursery's undefended arm fires only over a begun site" {
+                // A squad crossing an empty claimed room must not spend the
+                // shard's one activation: the undefended arm guards paid-in
+                // work, and the claimer arm guards the room itself.
+                let squadThrough =
+                    [
+                        { hostileAt "h-1" { X = 10; Y = 44 } [ Attack; Attack; Move ] with
+                            Pos = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                        }
+                    ]
+
+                let claimer =
+                    [
+                        { hostileAt "h-2" { X = 10; Y = 44 } [ BodyPart.Claim; Move ] with
+                            Pos = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                        }
+                    ]
+
+                let fires hostiles colony =
+                    let { Intents = intents } = decideOn { colony with Hostiles = hostiles }
+                    activations intents
+
+                Expect.isEmpty
+                    (fires squadThrough nurseryMother)
+                    "nothing stands in the nursery to protect"
+
+                Expect.isEmpty
+                    (fires squadThrough (nurseryMother |> withNurserySite 0))
+                    "a site nothing has been paid into is not yet worth the stock"
+
+                Expect.equal
+                    (fires squadThrough (nurseryMother |> withNurserySite 1))
+                    [ "ctrl-child" ]
+                    "a begun site is"
+
+                Expect.equal
+                    (fires claimer nurseryMother)
+                    [ "ctrl-child" ]
+                    "a claimer within reach fires with nothing built"
+            }
+
+            test "another room's running safe mode silences every arm" {
+                // One activation per shard: the engine answers a second with
+                // ERR_BUSY, so asking again each tick only logs a failure and
+                // forces the tick full.
+                let claimerHome =
+                    { bareRespawn with
+                        Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                        Hostiles = [ hostileAt "h-1" { X = 28; Y = 25 } [ BodyPart.Claim; Move ] ]
+                    }
+
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                Expect.equal
+                    (fires claimerHome)
+                    [ "ctrl-1" ]
+                    "the premise: the claimer arm fires on its own"
+
+                Expect.isEmpty
+                    (fires
+                        { claimerHome with
+                            SafeModeRunning = true
+                        })
+                    "the claimer arm included"
+
+                Expect.isEmpty
+                    (fires
+                        { (towerless |> facing [ skirmisher ]) with
+                            SafeModeRunning = true
+                        })
+                    "and the undefended arm"
+            }
+
+            test "a mother with a firing home and a firing nursery activates one" {
+                // The engine takes one per shard; the home's goes first.
+                let raided =
+                    { (nurseryMother |> withNurserySite 1) with
+                        Hostiles =
+                            [
+                                { hostileAt "h-1" { X = 10; Y = 44 } [ Attack; Attack; Move ] with
+                                    Pos = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                                }
+                                { hostileAt "h-2" { X = 10; Y = 4 } [ Attack; Attack; Move ] with
+                                    Pos = RoomPos.at "W1N1" { X = 10; Y = 4 }
+                                }
+                            ]
+                    }
+
+                let { Intents = intents } = decideOn raided
+                Expect.equal (activations intents) [ "ctrl-1" ] "the home's, and only it"
+            }
+
+            test "across colonies the first activation is the one issued" {
+                let intents =
+                    [ ActivateSafeMode "ctrl-a"; SayCreep("c-1", "hi"); ActivateSafeMode "ctrl-b" ]
+
+                Expect.equal
+                    (firstActivationOnly intents)
+                    [ ActivateSafeMode "ctrl-a"; SayCreep("c-1", "hi") ]
+                    "the second would be refused with ERR_BUSY"
             }
         ]
 

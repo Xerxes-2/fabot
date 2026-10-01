@@ -1,6 +1,8 @@
 # Safe mode fires on sight of CLAIM; the downgrade timer is a hard deadline
 
-> **Status:** amended by 0015, #201
+> **Status:** amended by 0015, #201, #449
+
+> **Amended by #449**: the reflex also runs over each [[nursery]] a colony raises, the mother firing the child's stock, since a Nursery runs no tick of its own.
 
 > **Amended by #201** on the room, and on nothing else: "any CLAIM-part hostile in a spawn room" is read as **the [[home room]]**. The sweep behind `Snapshot.Hostiles` stopped being the spawn rooms' that ticket, so "a hostile" and "a hostile here" became two questions, and this reflex asks the second — the stock is spent on a controller of ours and an [[outpost]] has none for a claimer to tap. The two sets are the same one room today; the reflex reads `Decide.hostilesAtHome`, which is the one that stays right when they part. The deadline, the gates and the downgrade half are untouched.
 

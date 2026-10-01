@@ -241,11 +241,12 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // give the walk a destination; the instant the guard arrives the room
         // is lit and this branch is not taken again.
         //
-        // In a declared errand room the ground is `Threats.ErrandRing`'s (#414),
-        // in a harassment room `Threats.HarassRing`'s (#432).
+        // In a resident room the ground is `Threats.ResidentRing`'s (#414,
+        // #447) where it has one — a raised home's only in peace — and in a
+        // harassment room `Threats.HarassRing`'s (#432).
         | Guard room ->
             let declared =
-                Threats.errandRingIn threats room
+                Threats.residentRingIn threats room
                 |> Option.orElse (Threats.harassRingIn threats room)
 
             match declared, Threats.ringIn threats room with
@@ -356,9 +357,13 @@ let private isOutpostSite (view: ColonyView) atlas siteId =
 
 /// Whether a construction site stands in a nursery — a room this colony has
 /// claimed and not yet stood a spawn in, where every site is feeding-tier
-/// outright.
+/// outright — once its controller is past level 1: until then its sites wait
+/// in the surplus for its Upgrade (#449).
 let private isNurserySite (view: ColonyView) atlas siteId =
-    siteRoomIs atlas (isNurseryRoom view) siteId
+    siteRoomIs
+        atlas
+        (fun room -> isNurseryRoom view room && not (isNurseryFirstLevel view room))
+        siteId
 
 /// Whether a room is bootstrapping as seen from this colony's tick: a child of
 /// ours running its own spawn (the mother's reading), or this colony's own
@@ -764,9 +769,11 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // A bootstrapped child's Upgrade, in the mother's pool (#213): the tier
         // the pioneers were hired for. Left in the surplus, travel cost — a
         // Seam and fifty tiles against five — kept every one of them at home.
+        // A level-1 nursery's comes ahead of its sites (#449).
         | Upgrade controllerId when
             isBorrowedUpgrade view controllerId
-            && not (sitesPendingBeside view atlas controllerId)
+            && (Atlas.targetRoom atlas controllerId |> Option.exists (isNurseryFirstLevel view)
+                || not (sitesPendingBeside view atlas controllerId))
             ->
             Feeding
         | Build _
@@ -935,14 +942,14 @@ let planPool (view: ColonyView) atlas (tasks: Task list) : PooledTask list =
         // the cascade hires against and the number the Matcher counts holders
         // against are one number.
         //
-        // One over per garrison body in an errand room (#414, #419): its
+        // One over per garrison body in a resident room (#414, #419, #447): its
         // rangers are resident, and each relief — cast at its incumbent's lead,
         // two of them together when the garrison was cast together — must take
         // the Task and walk three crossings while the incumbent still holds
         // the ring. A Guard has
         // no arrival price for a handover window to be read against, and the
         // row's count, not this cap, is what buys bodies.
-        | Guard room when Set.contains room (Facts.errandRooms view) ->
+        | Guard room when Set.contains room (Facts.residentRooms view) ->
             Capacity.fighters (rangersWanted view room + view.Tuning.RangerResidents)
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).

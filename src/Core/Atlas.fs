@@ -756,12 +756,6 @@ let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     |> List.filter (fun id -> Map.containsKey id atlas.Spatial.Hits)
     |> tilesOfIdsIn atlas room
 
-/// Tiles holding a rampart construction site — the census's pending half,
-/// exactly as a road's is: a site standing there is not yet cover, but its
-/// tile needs no second site.
-let pendingRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
-    tilesOfKindIn atlas room (Site BuiltKind.Rampart)
-
 /// Tiles holding a standing Keep structure — the spawn, the tower, the
 /// Storage and the terminal: what a rampart covers, the tick the structure
 /// stands. A site is not covered until it is a structure.

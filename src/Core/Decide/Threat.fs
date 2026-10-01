@@ -27,9 +27,11 @@ type Threats =
         /// standing in it, less the tiles the Threats stand on — the guard's
         /// Work Area.
         Ring: Map<string, Set<RoomPos>>
-        /// Per declared errand room (#414), the ranger's Work Area there: the
-        /// Reactor's own ring, which it holds and shoots from (#411).
-        ErrandRing: Map<string, Set<RoomPos>>
+        /// Per resident room (`Facts.residentRooms`), the garrison's Work Area
+        /// there, which it holds and shoots from: in a declared errand room
+        /// the Reactor's own ring (#414, #411), in a raised child's home its
+        /// controller's while no armed Threat stands there (#447).
+        ResidentRing: Map<string, Set<RoomPos>>
         /// Per [[harassment room]] (#432), the ranger's Work Area there: an
         /// ambush (#439) — the walkable tiles within ranged reach of every
         /// enemy creep on a work spot, beside every armed target, and the
@@ -44,7 +46,7 @@ let noThreats =
         Reach = Map.empty
         Safe = Map.empty
         Ring = Map.empty
-        ErrandRing = Map.empty
+        ResidentRing = Map.empty
         HarassRing = Map.empty
     }
 
@@ -66,10 +68,10 @@ module Threats =
     let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
         Map.tryFind room threats.Ring |> Option.defaultValue Set.empty
 
-    /// The ranger's Work Area in one declared errand room, or None for any
-    /// other room (#414).
-    let errandRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
-        Map.tryFind room threats.ErrandRing
+    /// The garrison's Work Area in one resident room, or None for any other
+    /// room (#414, #447).
+    let residentRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
+        Map.tryFind room threats.ResidentRing
 
     /// The ranger's Work Area in one harassment room, or None for any other
     /// room.
@@ -155,25 +157,41 @@ let threatsOf (view: ColonyView) atlas : Threats =
                     reach
                     |> Map.map (fun room tiles -> lazy (Atlas.walkableTilesExcept atlas room tiles))
                 Ring = ring
-                ErrandRing = Map.empty
+                ResidentRing = Map.empty
                 HarassRing = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
     // raid or none. The ranger holding it shoots out to three, which covers a
     // claimer at the Reactor and any body close enough to shoot back.
+    let ringAround room pos =
+        room, Atlas.adjacentWalkableIn atlas room pos |> Set.ofList |> RoomPos.setAt room
+
     let errandRing =
         view.Errands
-        |> List.map (fun errand ->
-            let room = errand.RoomName
+        |> List.map (fun errand -> ringAround errand.RoomName (RoomPos.pos (snd errand.Target)))
 
-            room,
-            Atlas.adjacentWalkableIn atlas room (RoomPos.pos (snd errand.Target))
-            |> Set.ofList
-            |> RoomPos.setAt room)
-        |> Map.ofList
+    // A raised home's (#447): its controller's ring, which a declared
+    // perimeter seals inside (#446) — the one tile the claim lives or dies by,
+    // and what a rival's tapper walks to. In peace only: with an armed Threat
+    // in the home there is no resident ground, and the garrison takes the
+    // Threats' ring as #428's guard did.
+    let raised =
+        raisedHomes view
+        |> Set.filter (fun room -> not (Map.containsKey room armed.Ring))
 
-    let errands = errandRooms view
+    let homeRing =
+        if Set.isEmpty raised then
+            []
+        else
+            Atlas.idsOfKind atlas Controller
+            |> List.choose (Atlas.positionOf atlas)
+            |> List.filter (fun tile -> Set.contains tile.Room raised)
+            |> List.map (fun tile -> ringAround tile.Room (RoomPos.pos tile))
+
+    let residentRing = errandRing @ homeRing |> Map.ofList
+
+    let resident = residentRooms view
 
     // A work spot is where the enemy's bodies must stop: within two of the
     // source, where a hauler draws from the miner's pile, and around the
@@ -195,7 +213,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 RoomPos.range spot hostile.Pos |> Option.exists (fun r -> r <= reach)
 
             let armedTargets, unarmedTargets =
-                inRoom |> List.filter (guardShoots view errands) |> List.partition isArmed
+                inRoom |> List.filter (guardShoots view resident) |> List.partition isArmed
 
             let seats = [ 1, RoomPos.pos h.Stand ]
 
@@ -230,6 +248,6 @@ let threatsOf (view: ColonyView) atlas : Threats =
         |> Map.ofList
 
     { armed with
-        ErrandRing = errandRing
+        ResidentRing = residentRing
         HarassRing = harassRing
     }

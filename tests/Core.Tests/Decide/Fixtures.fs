@@ -177,6 +177,10 @@ let bareRespawn =
         Harass = []
         HarassCast = Set.empty
         Consignee = None
+        Perimeter = []
+        Defenders = Map.empty
+        NurseryControllers = Map.empty
+        SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []
         Sightings = Map.empty
@@ -1046,6 +1050,7 @@ let owing (costs: int list) (colony: ColonyView) =
                 ({
                     Id = $"site-owing-{index}"
                     Left = cost
+                    Begun = false
                 }
                 : ConstructionSiteInfo))
     }
@@ -1367,7 +1372,14 @@ let withOutpostTrunk (sites: (string * BuiltKind * Pos) list) (colony: ColonyVie
     { colony with
         ConstructionSites =
             colony.ConstructionSites
-            @ [ for id, _, _ in sites -> { Id = id; Left = siteOwes } ]
+            @ [
+                for id, _, _ in sites ->
+                    {
+                        Id = id
+                        Left = siteOwes
+                        Begun = false
+                    }
+            ]
         Spatial =
             { colony.Spatial with
                 TargetKinds =

@@ -552,9 +552,15 @@ let private rivalDeadlines (view: ColonyView) =
 /// room is neither answer. A harassment room is read as an errand room is
 /// (#432): its ranger is weighed against the armed squad standing there, in
 /// every room the colony casts, shut or not, and it is clocked off the
-/// sighting and not the squad's life (#441).
+/// sighting and not the squad's life (#441). A raised child's home is no
+/// room to withdraw from (#447), as a defended one is not (#428), whatever
+/// the raid: one no ranger wins keeps its garrison and draws no relief
+/// (`Quota.rangersWanted`), and is the child's safe mode's.
 let private raidDeadlines (view: ColonyView) (declared: string list) =
-    let rangerRooms = Set.union (Decide.Facts.rangerRooms view) view.HarassCast
+    let rangerRooms =
+        Set.difference
+            (Set.union (Decide.Facts.rangerRooms view) view.HarassCast)
+            (Decide.Facts.raisedHomes view)
 
     let outpostRooms = Set.ofList declared
 

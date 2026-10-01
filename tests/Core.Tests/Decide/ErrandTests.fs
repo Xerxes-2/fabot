@@ -502,14 +502,14 @@ let errandStandDownTests =
                 let threats = threatsOf colony atlas
 
                 Expect.isTrue
-                    (Threats.errandRingIn threats errandRoom
+                    (Threats.residentRingIn threats errandRoom
                      |> Option.exists (Set.contains (RoomPos.at errandRoom ringTile)))
                     "the ranger's ground is the Reactor's ring, the claimer within its reach"
 
                 let quiet = bareHome |> errandColony (Some Ownership.Ours) []
 
                 Expect.equal
-                    (Threats.errandRingIn (threatsOf quiet (Atlas.ofView quiet)) errandRoom
+                    (Threats.residentRingIn (threatsOf quiet (Atlas.ofView quiet)) errandRoom
                      |> Option.map Set.count)
                     (Some(
                         Atlas.adjacentWalkableIn
@@ -634,6 +634,7 @@ let errandStandDownTests =
                         Salvage = []
                         Mother = None
                         Consignee = None
+                        Perimeter = []
                     }
 
                 let world =

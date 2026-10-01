@@ -404,17 +404,17 @@ let private guardTarget
         else
             posts |> Set.toList |> List.map (range from) |> List.min
 
-    // In an errand room a rival's CLAIM body is a target too (#414): unarmed,
-    // it is what takes the flag.
-    let errandRooms = Facts.errandRooms view
+    // In a resident room a rival's CLAIM body is a target too (#414): unarmed,
+    // it is what takes the flag, or in a raised home the controller (#447).
+    let residentRooms = Facts.residentRooms view
 
     // In a harassment room the declared enemy's unarmed creeps are targets
     // too (#432), after its armed ones.
     view.Hostiles
-    |> List.filter (fun h -> h.Pos.Room = room && Facts.guardShoots view errandRooms h && among h)
-    // The claimer first in an errand room: it is what takes the flag.
+    |> List.filter (fun h -> h.Pos.Room = room && Facts.guardShoots view residentRooms h && among h)
+    // The claimer first: it is what takes the flag or the controller.
     |> List.sortBy (fun h ->
-        not (Facts.claimsAFlag errandRooms h), not (isArmed h), distance h, h.Id)
+        not (Facts.claimsAFlag residentRooms h), not (isArmed h), distance h, h.Id)
     |> List.tryHead
 
 /// A Guard chooses one reachable target, melee for a guard and within three for

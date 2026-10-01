@@ -797,6 +797,10 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Harass = []
         HarassCast = Set.empty
         Consignee = None
+        Perimeter = []
+        Defenders = Map.empty
+        NurseryControllers = Map.empty
+        SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []
         // These captures are ticks with vision in every room they carry.

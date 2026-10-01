@@ -24,28 +24,44 @@ let private cheapest (price: 'a -> int) (tileOf: 'a -> Pos) (candidates: 'a list
         |> Some
 
 /// The hostiles standing in the colony's own room, which is the whole of what
-/// the two reflexes below may read: safe mode protects a controller of ours and
-/// an outpost has none, and a tower's shot is a range act inside its own room.
-/// The home name and not the controller's or a tower's room, because both arms
-/// need an answer on a tick the projection places neither.
+/// the tower reflexes below may read: a tower's shot is a range act inside its
+/// own room. The home name and not a tower's room, because the answer is
+/// needed on a tick the projection places none.
 let private hostilesAtHome (view: ColonyView) : HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
     view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = home)
 
-/// Colony reflex beside the pipeline (ADR-0007, ADR-0015), two arms and one
-/// pair of gates — stock remaining, safe mode not already running. The
-/// CLAIM arm holds until a claimer stands within reach of the range-1 tap; an
-/// unplaceable controller falls back to firing on sight. The Keep arm: any Keep
-/// structure below full hits while any hostile stands in the home room — any
-/// hostile and not only a Threat, a WORK-only dismantler hurting a structure
-/// without ever qualifying as one. Stateless on purpose: one tick's hits, never
-/// a comparison against the last tick's.
-let internal planSafeMode (view: ColonyView) atlas : Intent list =
-    match view.Controller with
-    | Some controller when controller.SafeModeAvailable > 0 && not controller.SafeModeActive ->
-        // The colony's own room and no other (#201): a claimer in an outpost is
-        // tapping a controller safe mode does not cover.
-        let here = hostilesAtHome view
+/// The safe-mode reflex over one room of ours and its controller, three arms
+/// and one pair of gates — stock remaining, safe mode not already running.
+/// The CLAIM arm holds until a claimer stands within reach of the range-1
+/// tap; an unplaceable controller falls back to firing on sight. The Keep
+/// arm: `keepDented` while any hostile stands in the room — any hostile and
+/// not only a Threat, a WORK-only dismantler hurting a structure without ever
+/// qualifying as one. The undefended arm (#217): no tower standing and an
+/// armed hostile in the room, unless one armed body of ours there wins the
+/// exchange alone (`Quota.homeHolds`, #448), and only while `guarded` — a
+/// Nursery's is a begun site, so a squad crossing an empty claimed room does
+/// not spend the shard's one activation. The gates are the stock, and no
+/// safe mode running here or in any other room of ours: the engine runs one
+/// per shard.
+/// Stateless on purpose: one tick's hits, never a comparison against the
+/// last tick's.
+let private safeModeIn
+    (view: ColonyView)
+    atlas
+    (room: string)
+    (keepDented: bool)
+    (guarded: bool)
+    (controller: ControllerInfo)
+    : Intent list =
+    if
+        controller.SafeModeAvailable > 0
+        && not controller.SafeModeActive
+        && not view.SafeModeRunning
+    then
+        // That room and no other (#201): a claimer in an outpost is tapping a
+        // controller safe mode does not cover.
+        let here = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
 
         let withinReach (h: HostileInfo) =
             List.contains BodyPart.Claim h.Body
@@ -60,21 +76,69 @@ let internal planSafeMode (view: ColonyView) atlas : Intent list =
 
         let claimerInReach = here |> List.exists withinReach
 
-        // The structure half is `keepDamaged`'s, off the same projected hits the
-        // Repair pool walks. The Posts and the ramparts are hungry on their own
-        // lines and are not of the Keep.
-        let dentedKeepUnderHostiles = not (List.isEmpty here) && keepDamaged view
+        let dentedKeepUnderHostiles = keepDented && not (List.isEmpty here)
 
-        // The undefended arm (#217): a colony with no tower standing fires on
-        // the first armed hostile in its room.
+        // A garrison buys time only while the Keep is untouched, so only this
+        // arm asks it (#448).
         let undefended =
-            List.isEmpty (Atlas.placedTowers atlas) && here |> List.exists isArmed
+            guarded
+            && Atlas.builtIn atlas room BuiltKind.Tower = 0
+            && here |> List.exists isArmed
+            && not (Quota.homeHolds view room)
 
         if claimerInReach || dentedKeepUnderHostiles || undefended then
             [ ActivateSafeMode controller.Id ]
         else
             []
-    | _ -> []
+    else
+        []
+
+/// Colony reflex beside the pipeline (ADR-0007, ADR-0015): `safeModeIn` over
+/// the colony's own home, and over each [[nursery]] it raises (#449), which
+/// runs no tick of its own. The home's Keep half is `keepDamaged`'s, off the
+/// same projected hits the Repair pool walks; the Posts and the ramparts are
+/// hungry on their own lines and are not of the Keep. A Nursery has no Keep
+/// standing — a spawn is what ends it — and its mother projects no hits there;
+/// what it guards is a site of ours with energy already built into it. One
+/// activation at most, the home's first: the engine takes one per shard.
+let internal planSafeMode (view: ColonyView) atlas : Intent list =
+    let home =
+        view.Controller
+        |> Option.toList
+        |> List.collect (
+            safeModeIn view atlas (SpatialInfo.homeName view.Spatial) (keepDamaged view) true
+        )
+
+    let begunIn room =
+        view.ConstructionSites
+        |> List.exists (fun site ->
+            site.Begun
+            && Atlas.positionOf atlas site.Id |> Option.exists (fun at -> at.Room = room))
+
+    let nurseries =
+        view.NurseryControllers
+        |> Map.toList
+        |> List.collect (fun (room, controller) ->
+            safeModeIn view atlas room false (begunIn room) controller)
+
+    List.truncate 1 (home @ nurseries)
+
+/// The tick's intents, every colony's together, with every `ActivateSafeMode`
+/// after the first dropped: the engine takes one per shard and refuses the
+/// rest with ERR_BUSY. Colony order decides which, so the answer is the same
+/// every time.
+let firstActivationOnly (intents: Intent list) : Intent list =
+    let rec keep fired kept rest =
+        match rest with
+        | [] -> List.rev kept
+        | ActivateSafeMode _ as intent :: rest ->
+            if fired then
+                keep fired kept rest
+            else
+                keep true (intent :: kept) rest
+        | intent :: rest -> keep fired (intent :: kept) rest
+
+    keep false [] intents
 
 /// The consignment's one intent (#349): a terminal shipping this colony's
 /// banked Thorium to the consignee's terminal — the only place the ore crosses
@@ -808,22 +872,36 @@ let internal planLayout
 
         // The ramparts: one over every standing Keep structure and every
         // standing Post container, the tick the thing it covers stands — a site
-        // is not covered until it is a structure. No allowance to size against:
-        // the gap is the covering census alone, standing ramparts and pending
-        // sites subtracted the way the roads' is. The one gate is the colony's
-        // stage (`keepsRamparts`).
+        // is not covered until it is a structure — and one on every tile of the
+        // declared perimeter (#446). No allowance to size against: the gap is
+        // the covering census alone, standing ramparts subtracted the way the
+        // roads' are, and every pending site's tile — a rampart's needs no
+        // second, and a road site on a choke holds its tile until the road
+        // stands. The one gate is the colony's stage (`keepsRamparts`), and the
+        // perimeter's second: a tower standing in the room, so sixteen
+        // decaying sites never race the first tower or pause a raised child's
+        // borrowed Upgrade (`sitesPendingBeside`).
+        let perimeter =
+            if Atlas.builtIn atlas room BuiltKind.Tower > 0 then
+                Set.ofList view.Perimeter
+            else
+                Set.empty
+
         let covered =
             if keepsRamparts view then
-                Set.union (Atlas.keepTilesIn atlas room) (Atlas.postContainerTilesIn atlas room)
+                Set.unionMany
+                    [
+                        Atlas.keepTilesIn atlas room
+                        Atlas.postContainerTilesIn atlas room
+                        perimeter
+                    ]
             else
                 Set.empty
 
         let rampartGap =
             Set.difference
                 covered
-                (Set.union
-                    (Atlas.rampartTilesIn atlas room)
-                    (Atlas.pendingRampartTilesIn atlas room))
+                (Set.union (Atlas.rampartTilesIn atlas room) (Atlas.collidingSiteTilesIn atlas room))
 
         let place kind tiles =
             tiles

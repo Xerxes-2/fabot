@@ -250,8 +250,16 @@ let plannerTests =
                     { bareRespawn with
                         ConstructionSites =
                             [
-                                { Id = "site-1"; Left = siteOwes }
-                                { Id = "site-2"; Left = siteOwes }
+                                {
+                                    Id = "site-1"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                                {
+                                    Id = "site-2"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
                             ]
                     }
 

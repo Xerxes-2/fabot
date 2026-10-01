@@ -49,7 +49,15 @@ let private withWestOutpost (crowdX: int) (colony: ColonyView) =
         }
 
     { colony with
-        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-west"; Left = siteOwes } ]
+        ConstructionSites =
+            colony.ConstructionSites
+            @ [
+                {
+                    Id = "site-west"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
         Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
         Spatial =
             { colony.Spatial with
@@ -276,7 +284,15 @@ let private withNorthSpawnSite (site: Pos) (colony: ColonyView) =
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
     { colony with
-        ConstructionSites = colony.ConstructionSites @ [ { Id = "site-spawn"; Left = siteOwes } ]
+        ConstructionSites =
+            colony.ConstructionSites
+            @ [
+                {
+                    Id = "site-spawn"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
         Spatial =
             { colony.Spatial with
                 TargetKinds = Map.add "site-spawn" (Site BuiltKind.Spawn) colony.Spatial.TargetKinds
@@ -560,8 +576,16 @@ let nurseryTests =
                         ConstructionSites =
                             colony.ConstructionSites
                             @ [
-                                { Id = "can-w-a"; Left = siteOwes }
-                                { Id = "can-w-b"; Left = siteOwes }
+                                {
+                                    Id = "can-w-a"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                                {
+                                    Id = "can-w-b"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
                             ]
                         Spatial =
                             { colony.Spatial with
@@ -685,7 +709,14 @@ let nurseryTests =
 
                     { colony with
                         ConstructionSites =
-                            colony.ConstructionSites @ [ { Id = "site-home"; Left = siteOwes } ]
+                            colony.ConstructionSites
+                            @ [
+                                {
+                                    Id = "site-home"
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Declared = [ SpatialInfo.homeName colony.Spatial ]
                         Stages = Map.ofList [ SpatialInfo.homeName colony.Spatial, Nursery ]
                         Spatial =
@@ -775,6 +806,7 @@ let private splitPair =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
         {
             Home = "W1N2"
@@ -783,6 +815,7 @@ let private splitPair =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
     ]
 
@@ -807,6 +840,7 @@ let private nurseryPair =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
         {
             Home = "W1N2"
@@ -815,6 +849,7 @@ let private nurseryPair =
             Salvage = []
             Mother = Some "W1N1"
             Consignee = None
+            Perimeter = []
         }
     ]
 
@@ -830,6 +865,7 @@ let private raisedPair =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
         {
             Home = "W1N2"
@@ -838,6 +874,7 @@ let private raisedPair =
             Salvage = []
             Mother = Some "W1N1"
             Consignee = None
+            Perimeter = []
         }
     ]
 
@@ -1033,16 +1070,55 @@ let bootstrapTests =
                     "and her own Upgrade is untouched by either reading"
 
                 // The other end of the window: with no spawn standing the room is a
-                // nursery, whose own Upgrade is nobody's business; an RCL1 controller
-                // has 20,000 ticks before it downgrades, which outlasts the nursery.
+                // nursery, whose Upgrade is pooled at RCL1 alone (#449, below); a
+                // level the view does not carry is not RCL1.
                 Expect.isFalse
                     (pool claimedChild |> List.contains (taskId (Upgrade "ctrl-child")))
-                    "a nursery's controller is not pooled: the borrowing begins the tick the child stands its own spawn"
+                    "a nursery's controller past RCL1 is not pooled: the borrowing begins the tick the child stands its own spawn"
 
                 Expect.contains
                     (pool claimedChild)
                     (taskId (Build "site-spawn"))
                     "and its Build is pooled on both sides of that tick: the mother projects the room throughout"
+            }
+
+            test "a nursery at RCL1 pools its Upgrade on the Feeding tier, and its sites wait" {
+                // #449: 200 points bank the safe mode the level-up grants,
+                // before 15,000 go into a spawn site a hostile's step erases.
+                // From RCL2 the nursery is sites only, as before.
+                let atLevel level =
+                    { claimedChild with
+                        NurseryControllers =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    { controllerAt level with
+                                        Id = "ctrl-child"
+                                    }
+                                ]
+                    }
+
+                let pool colony =
+                    planTasksOn colony noThreats |> List.map taskId
+
+                Expect.contains
+                    (pool (atLevel 1))
+                    (taskId (Upgrade "ctrl-child"))
+                    "at RCL1 the mother pools the nursery's controller"
+
+                Expect.equal
+                    (matchOf (atLevel 1 |> loaded))
+                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
+                    "and a loaded body takes it ahead of the spawn site"
+
+                Expect.isFalse
+                    (pool (atLevel 2) |> List.contains (taskId (Upgrade "ctrl-child")))
+                    "at RCL2 the controller is not pooled"
+
+                Expect.equal
+                    (matchOf (atLevel 2 |> loaded))
+                    (Some(taskId (Build "site-spawn"), MatchFactor.Rank))
+                    "and the site is the work again"
             }
 
             test "the child pools the same Upgrade in its own tick" {
@@ -1125,7 +1201,14 @@ let bootstrapTests =
 
                     { colony with
                         ConstructionSites =
-                            colony.ConstructionSites @ [ { Id = id; Left = siteOwes } ]
+                            colony.ConstructionSites
+                            @ [
+                                {
+                                    Id = id
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
                         Spatial =
                             { colony.Spatial with
                                 TargetKinds = Map.add id (Site kind) colony.Spatial.TargetKinds
@@ -1329,6 +1412,7 @@ let twoColonyTests =
                             Salvage = []
                             Mother = None
                             Consignee = None
+                            Perimeter = []
                         }
                         {
                             Home = child
@@ -1337,6 +1421,7 @@ let twoColonyTests =
                             Salvage = []
                             Mother = Some home
                             Consignee = None
+                            Perimeter = []
                         }
                     ]
 
@@ -1781,6 +1866,147 @@ let defendedHomeTests =
             }
         ]
 
+let private rangerQuotaOf colony =
+    rowOf "ranger" colony |> Option.map (fun row -> row.Quota)
+
+/// A mother raising the child W1N2 at this stage, with a W15S28-sized bank.
+let private garrisonMother stage =
+    { ferryMother stage with
+        Bank = bank 5_600 5_600
+    }
+
+[<Tests>]
+let raisedHomeGarrisonTests =
+    testList
+        "a mother keeps a resident garrison in a child's home she raises"
+        [
+            test
+                "a Nursery, Bootstrapping or Weaning child's home is a Guard of the mother's ranger row in peace" {
+                for stage in [ Nursery; Bootstrapping; Weaning ] do
+                    let mother = garrisonMother stage
+
+                    Expect.equal
+                        (guardsIn (planTasksOn mother noThreats))
+                        [ Guard "W1N2" ]
+                        $"{stage}: the child's home is one Guard in her pool, under its name"
+
+                    Expect.equal
+                        (rangerQuotaOf mother)
+                        (Some Tuning.defaults.RangerResidents)
+                        $"{stage}: and her ranger row keeps the errand room's garrison for it"
+
+                    Expect.equal
+                        (guardQuotaOf mother)
+                        (Some 0)
+                        $"{stage}: and her guard row nothing"
+            }
+
+            test "an Independent child's home draws no garrison" {
+                let mother = garrisonMother Independent
+
+                Expect.isEmpty (guardsIn (planTasksOn mother noThreats)) "no Guard in its home"
+
+                Expect.equal (rangerQuotaOf mother) (Some 0) "and no ranger for it"
+            }
+
+            test "the garrison holds the child's controller ring" {
+                let mother = garrisonMother Bootstrapping
+                let atlas = Atlas.ofView mother
+
+                Expect.equal
+                    (Threats.residentRingIn (threatsOf mother atlas) "W1N2")
+                    (Some(
+                        Atlas.adjacentWalkableIn atlas "W1N2" { X = 10; Y = 46 }
+                        |> Set.ofList
+                        |> RoomPos.setAt "W1N2"
+                    ))
+                    "the ground is the controller's walkable ring, inside any perimeter"
+            }
+
+            test
+                "under an armed raid the garrison's ground is the threats' ring, as #428's guard's was" {
+                // A Guard takes the resident ring where there is one and the
+                // threats' otherwise (`Pool.areaFor`): a raised home's resident
+                // ring is its peace-time ground only, so the garrison chases.
+                let raided =
+                    { garrisonMother Bootstrapping with
+                        Hostiles = homeRaid
+                    }
+
+                let atlas = Atlas.ofView raided
+                let threats = threatsOf raided atlas
+
+                Expect.isNone
+                    (Threats.residentRingIn threats "W1N2")
+                    "no resident ground while an armed hostile stands in the home"
+
+                Expect.isNonEmpty
+                    (Threats.ringIn threats "W1N2")
+                    "so the Guard takes the threats' ring"
+            }
+
+            test
+                "a beaten raised home is one Guard, the ranger row's, with the relief on top of the garrison" {
+                // A 10A2H raid: 300 a tick, which the seven-block resident
+                // loses alone and an eight-block ranger wins.
+                let winnable =
+                    [
+                        hostileIn
+                            "W1N2"
+                            { X = 10; Y = 44 }
+                            (List.replicate 10 Attack
+                             @ List.replicate 2 Heal
+                             @ List.replicate 12 Move)
+                    ]
+
+                let beaten raid =
+                    { garrisonMother Bootstrapping with
+                        Hostiles = raid
+                        Borrowed =
+                            {
+                                Rooms = [ "W1N2" ]
+                                Defended = [ "W1N2" ]
+                            }
+                    }
+
+                Expect.equal
+                    (guardsIn (planTasksOn (beaten winnable) noThreats))
+                    [ Guard "W1N2" ]
+                    "raised and defended, the home is still one Guard"
+
+                Expect.equal
+                    (guardQuotaOf (beaten winnable))
+                    (Some 0)
+                    "the melee row casts nothing for it"
+
+                Expect.equal
+                    (rangerQuotaOf (beaten winnable))
+                    (Some(Tuning.defaults.RangerResidents + Engine.guardCap))
+                    "and the ranger row adds #428's relief to the garrison"
+            }
+
+            test "a raid no ranger size wins draws no relief beyond the garrison" {
+                // #447: W17S29's squad heals 168 a tick against an eight-block
+                // ranger's 160, so a relief of any size only feeds it; the home
+                // is its own safe mode's (#448), and no stand-down withdraws
+                // the garrison from it.
+                let beaten =
+                    { garrisonMother Bootstrapping with
+                        Hostiles = homeRaid
+                        Borrowed =
+                            {
+                                Rooms = [ "W1N2" ]
+                                Defended = [ "W1N2" ]
+                            }
+                    }
+
+                Expect.equal
+                    (rangerQuotaOf beaten)
+                    (Some Tuning.defaults.RangerResidents)
+                    "the garrison, and nothing on top"
+            }
+        ]
+
 /// One colony's stage forced to an answer, with its controller level left
 /// where the fixture put it. The shell can never build such a ColonyView
 /// (`World.stages` derives one from the other), which is what makes it
@@ -1801,6 +2027,7 @@ let private raisingPair: Colony list =
             Salvage = []
             Mother = None
             Consignee = None
+            Perimeter = []
         }
         {
             Home = "W1N2"
@@ -1809,6 +2036,7 @@ let private raisingPair: Colony list =
             Salvage = []
             Mother = Some "W1N1"
             Consignee = None
+            Perimeter = []
         }
     ]
 
@@ -2199,7 +2427,13 @@ let colonyStageTests =
                 let lane stage =
                     bufferLaneFlow
                         [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-                        [ { Id = "site-1"; Left = siteOwes } ]
+                        [
+                            {
+                                Id = "site-1"
+                                Left = siteOwes
+                                Begun = false
+                            }
+                        ]
                         (creepWith "w" 100 0 (bodyFor workerPattern 300))
                     |> atStage stage
 

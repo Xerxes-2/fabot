@@ -462,7 +462,14 @@ let internal upgraderFleet upgraders workers =
 /// the only thing the worker row's floor reads.
 let internal withBuildSite (colony: ColonyView) =
     { colony with
-        ConstructionSites = [ { Id = "site-1"; Left = siteOwes } ]
+        ConstructionSites =
+            [
+                {
+                    Id = "site-1"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
         Spatial =
             colony.Spatial
             |> withTargets [ "site-1", { X = 16; Y = 9 }, Site BuiltKind.Extension ]

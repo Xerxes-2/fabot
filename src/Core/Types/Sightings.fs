@@ -13,6 +13,9 @@ type ConstructionSiteInfo =
         /// along a site is, only on what is left to pay (#364). It is what
         /// tells a road's 300 from a terminal's 100,000.
         Left: int
+        /// Whether any energy has been built into it yet (`progress > 0`):
+        /// a begun site in a [[nursery]] is what its safe mode guards.
+        Begun: bool
     }
 
 /// What the decision layer knows about one hostile creep in a room the colony
@@ -414,6 +417,14 @@ module World =
     let roomOf (world: World) (room: string) : RoomFacts =
         Map.tryFind room world.Rooms |> Option.defaultValue RoomFacts.empty
 
+    /// Whether safe mode is running in any room of ours this tick: one per
+    /// shard, so while it runs no other room of ours can raise its own.
+    let safeModeRunning (world: World) : bool =
+        world.Rooms
+        |> Map.exists (fun _ facts ->
+            facts.Control
+            |> Option.exists (fun control -> control.Owner = Ownership.Ours && control.SafeMode))
+
     /// ADR-0080
     /// Whether a colony's home cannot hold the raid standing in it this tick:
     /// the room is ours, an armed hostile that is not an ally is there, safe
@@ -777,7 +788,9 @@ module World =
     /// holds the most, then by home name (#437); None while no colony is
     /// both. Stateless, and decided once for every colony, so exactly one
     /// projects the room. Asked over the open gate: a caster's own stand-down
-    /// withdraws its work and hands the room to nobody else.
+    /// withdraws its work and hands the room to nobody else. A room we own is
+    /// out of the list, cast and refused by nobody (#447): the day a Claim
+    /// lands in a harassment room, its mother's garrison holds it.
     let harassCasters
         (joins: JoinTable)
         (tuning: Tuning)
@@ -792,9 +805,12 @@ module World =
             |> List.filter (fun colony ->
                 (roomOf world colony.Home).Energy.Capacity >= harass.Floor)
 
+        let owned = ownedRooms world
+
         {
             Casters =
                 harass.Rooms
+                |> List.filter (fun h -> not (Set.contains h.RoomName owned))
                 |> List.map (fun h ->
                     h,
                     affording

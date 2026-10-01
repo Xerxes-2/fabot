@@ -135,6 +135,24 @@ type ColonyView =
         /// the `send` is issued into that blindness on purpose, and a refusal
         /// costs the tick's call and nothing else.
         Consignee: string option
+        /// The home room's declared perimeter (`Colony.Perimeter`, #446): the
+        /// chokes the Layout ramparts beside the Keep.
+        Perimeter: Pos list
+        /// The armed bodies of ours (an ATTACK or a RANGED_ATTACK part)
+        /// standing in each room whose safe mode this colony fires — its home,
+        /// and each [[nursery]] it raises (#449) — under that room's name,
+        /// **whichever colony holds them** (#448): a mother's resident in her
+        /// child's home is in `Creeps` of neither the child nor the reflex
+        /// that weighs it, and is the home's defence all the same.
+        Defenders: Map<string, CreepInfo list>
+        /// The controller of each [[nursery]] this colony raises, under its
+        /// room's name (#449): the level its Upgrade waits on, and the stock
+        /// its mother fires. A Nursery runs no tick of its own to read it.
+        NurseryControllers: Map<string, ControllerInfo>
+        /// Whether safe mode is running in any room of ours this tick
+        /// (`World.safeModeRunning`), the same answer handed to every colony:
+        /// the engine runs one per shard and refuses a second with ERR_BUSY.
+        SafeModeRunning: bool
         /// The rooms in this colony's scan set that it merely **crosses**
         /// (`transiting`). Carried because decaying ore in such a room is
         /// this colony's to sweep (#360), and ore is the only thing
@@ -605,6 +623,13 @@ module ColonyView =
 
         let names = mine |> List.map (fun creep -> creep.Info.Name) |> Set.ofList
 
+        // The rooms whose safe mode this colony fires (#449): its home, and
+        // each child it raises that has no spawn standing yet.
+        let nurseries =
+            bootstrap |> List.filter (fun room -> Map.tryFind room stages = Some Nursery)
+
+        let fired = home :: nurseries
+
         let collected (select: RoomFacts -> 'a list) = worked |> List.collect (snd >> select)
 
         // The id-keyed tables merged flat, an object id being unique across
@@ -728,6 +753,26 @@ module ColonyView =
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee
+            Perimeter = colony.Perimeter
+            // Off the world's creeps and not `mine` (#448): who holds a body
+            // is not whether it defends the room it stands in.
+            Defenders =
+                world.Creeps
+                |> List.filter (fun creep ->
+                    List.contains creep.Room fired
+                    && (partCount creep.Info.Body Attack > 0
+                        || partCount creep.Info.Body RangedAttack > 0))
+                |> List.groupBy (fun creep -> creep.Room)
+                |> List.map (fun (room, creeps) ->
+                    room, creeps |> List.map (fun creep -> creep.Info))
+                |> Fresh.mapOfList
+            NurseryControllers =
+                nurseries
+                |> List.choose (fun room ->
+                    (World.roomOf world room).Controller
+                    |> Option.map (fun controller -> room, controller))
+                |> Fresh.mapOfList
+            SafeModeRunning = World.safeModeRunning world
             Crossed = transit
             // The declared Reactors' own rows (#354): the store here is what
             // meters a delivery. A room without vision contributes no row, and

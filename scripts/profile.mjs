@@ -2919,6 +2919,15 @@ function buildPairWorld() {
     ];
   }
 
+  // The garrison she keeps in a home she raises (#447): the errand room's
+  // rangers, on the child controller's ring, raid or none. Stood at the
+  // controller's tile, which `nearestFree` resolves onto the ring. Set
+  // whatever the level: past the window the row casts nothing for the room,
+  // and an unused station stands nobody.
+  motherStations.ranger = stationsIn(child.room, childCapture, [
+    childCapture.controller.pos,
+  ]);
+
   // The spare lane, on the mother's side: the `outpost` scenario's own —
   // the ground between one container and the next, which no trunk paves.
   // Hers and not the child's because the census that matters here is the
