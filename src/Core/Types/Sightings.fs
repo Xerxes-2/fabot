@@ -750,21 +750,28 @@ module World =
             | Some ground -> ground <> Wall && not (masked tile)
             | None -> false
 
+    /// `Colony.rivals` by room, built once.
+    let private declaredRivals: Set<string> =
+        Colony.rivals |> List.map fst |> Fresh.setOfSeq
+
     /// Whether the world last saw another player, not an ally, own the
     /// room's controller (`RoomSighting.Rival`). Read off the memory and not
     /// this tick's vision, which a room nothing of ours stands in does not
-    /// have. A reservation is not ownership.
+    /// have. A reservation is not ownership. A room never seen is rival when
+    /// `Colony.rivals` declares it (#459); any sighting overrides that.
     let rivalHeld (world: World) (room: string) : bool =
         match Map.tryFind room world.Sightings with
         | Some sighting ->
             match sighting.Rival with
             | Some owner -> not (Colony.isAlly owner)
             | None -> false
-        | None -> false
+        | None -> Set.contains room declaredRivals
 
     /// Every room `rivalHeld` answers yes for, in room-name order.
     let rivalRooms (world: World) : string list =
-        world.Sightings |> Map.toList |> List.map fst |> List.filter (rivalHeld world)
+        Set.union (Set.ofSeq (Map.keys world.Sightings)) declaredRivals
+        |> Set.toList
+        |> List.filter (rivalHeld world)
 
     /// Who the world last saw owning each room another player owns, allies
     /// included: what Memory keeps across a global reset (`seedRivals`).

@@ -1399,4 +1399,86 @@ let rivalRoomTests =
                     1
                     "already held: the walk that never read it stays"
             }
+
+            test "a declared rival's room no sighting reached is routed round (#459)" {
+                // ranger-887026-Spawn9 walked home from W19S26 east into
+                // W18S26, which nothing of ours had ever seen, and died to its
+                // towers at t887,428.
+                let rooms =
+                    [
+                        for x in 17..19 do
+                            for y in 26..29 -> $"W{x}S{y}"
+                    ]
+
+                let world =
+                    { World.empty with
+                        Rooms =
+                            rooms
+                            |> List.map (fun room ->
+                                let capture = load room
+
+                                room,
+                                { RoomFacts.empty with
+                                    Border = capture.Border
+                                    Layer =
+                                        { RoomLayer.empty with
+                                            Terrain = capture.Terrain
+                                        }
+                                })
+                            |> Map.ofList
+                    }
+
+                Expect.isTrue
+                    (List.contains ("W18S26", "Trepidimous") Colony.rivals)
+                    "the premise: W18S26 is declared Trepidimous's"
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W19S26"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        RivalRooms = rooms |> List.filter (World.rivalHeld world) |> Set.ofList
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                let home = route atlas "W19S26" "W17S29"
+                Expect.isSome home "the premise: W19S26 has a way home to W17S29"
+
+                Expect.isFalse
+                    (home |> Option.exists (List.contains "W18S26"))
+                    $"the way home does not enter W18S26: {home}"
+            }
+
+            test "a declared rival's room seen unowned, or held by an ally, is not rival (#459)" {
+                let seen owner =
+                    { World.empty with
+                        Sightings =
+                            Map.ofList
+                                [
+                                    "W18S26",
+                                    {
+                                        Tick = 1
+                                        Targets = lazy Set.empty
+                                        Rival = owner
+                                    }
+                                ]
+                    }
+
+                Expect.isTrue (World.rivalHeld World.empty "W18S26") "declared and unsighted: rival"
+                Expect.isFalse (World.rivalHeld (seen None) "W18S26") "seen unowned: not rival"
+
+                Expect.isFalse
+                    (World.rivalHeld (seen (Some(Set.minElement Colony.allies))) "W18S26")
+                    "seen held by an ally: not rival"
+
+                Expect.contains
+                    (World.rivalRooms World.empty)
+                    "W18S26"
+                    "rivalRooms lists it unsighted"
+
+                Expect.isFalse
+                    (List.contains "W18S26" (World.rivalRooms (seen None)))
+                    "and drops it once seen unowned"
+            }
         ]

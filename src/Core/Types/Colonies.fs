@@ -860,6 +860,22 @@ module Colony =
     /// Whether the engine's username is one of `allies`.
     let isAlly (username: string) = Set.contains username allies
 
+    /// The rooms another player, not an ally, owns the controller of, as a
+    /// human surveyed them (#459): `World.rivalHeld` treats each as rival
+    /// until a sighting says otherwise, so an unseen tower room is never
+    /// walked into. Surveyed 2026-10-02 (t887,4xx) through `map-stats`
+    /// `owner0`, over W9..W21 x S23..S31: the declared rooms' box, two rooms
+    /// wider each way. Reservations are left out.
+    let rivals: (string * string) list =
+        [
+            "W17S24", "Trepidimous" // RCL4
+            "W18S26", "Trepidimous" // RCL6, two towers: killed ranger-887026-Spawn9
+            "W19S29", "giaco" // RCL4
+            "W21S23", "Shibdib" // RCL6
+            "W9S24", "nightred" // RCL7
+            "W9S26", "Kalgen" // RCL6
+        ]
+
     /// The enemy remotes a human has declared for harassment: one list for
     /// the whole bot, each room cast by the colony `World.harassCasters`
     /// names, or refused while none can. Each Stand is the enemy's source

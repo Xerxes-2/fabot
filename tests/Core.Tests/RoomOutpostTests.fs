@@ -10,27 +10,12 @@ open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 open Fabot.Core.Tests.RoomInvariantFixtures
 
-/// The captured rooms another player owned at the capture's tick.
-let private capturedRivals =
-    Map.ofList [ "W18S26", "Trepidimous"; "W19S29", "giaco" ]
-
-/// A capture is furniture and carries no owner, so who owned each captured
-/// room at its tick is written here, as the sightings the World would hold.
-let private rivalSightings (rooms: string list) =
-    capturedRivals
-    |> Map.filter (fun room _ -> List.contains room rooms)
-    |> Map.map (fun room owner ->
-        {
-            Tick = (load room).Tick
-            Targets = lazy Set.empty
-            Rival = Some owner
-        })
-
 /// `World.linked` itself over a World built from the real captures of the
 /// given rooms, so no predicate of it is copied here to move in lockstep
 /// (#317, #438). A room no capture is loaded for carries no border and is
 /// joined to nothing, which keeps the search inside the rooms the projection
-/// would hold.
+/// would hold. It holds no sighting: who owns W18S26 and W19S29 is
+/// `Colony.rivals`' declaration, as on a cold heap (#459).
 let private shippedLinked (rooms: string list) =
     let world =
         { World.empty with
@@ -49,7 +34,6 @@ let private shippedLinked (rooms: string list) =
                             }
                     })
                 |> Map.ofList
-            Sightings = rivalSightings rooms
         }
 
     World.linked (Tuning.keeperMargin Tuning.defaults) world
@@ -311,7 +295,6 @@ let outpostDeclarationTests =
                                             Energy = { Available = bank; Capacity = bank }
                                         })
                                 |> Map.ofList
-                            Sightings = rivalSightings rooms
                         }
 
                     World.harassCasters
