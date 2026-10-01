@@ -913,6 +913,17 @@ module Colony =
                 // and W17S29's RCL5 bank buys them (#457).
                 Blocks = Some 2
             }
+            {
+                // Given up as a colony at t880,418 after Trepidimous's siege;
+                // harassed again from 2026-10-02 while they mine it. Their
+                // 18M17A squad besieged it, so it keeps the full floor.
+                RoomName = "W17S25"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W17S25"; X = 18; Y = 19 }
+                Controller = { Room = "W17S25"; X = 15; Y = 36 }
+                Via = []
+                Blocks = None
+            }
         ]
 
     /// The colonies a human has declared, moved by a human in a commit: an

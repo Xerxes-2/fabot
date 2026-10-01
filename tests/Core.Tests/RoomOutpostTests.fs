@@ -188,6 +188,10 @@ let outpostDeclarationTests =
                         // W15S28's walk dips south round the wall that
                         // W18S27's does, eight crossings, past the budget.
                         "W19S26", [ "W17S29" ]
+                        // Its north edge is wall, so W17S24 (Trepidimous) is
+                        // never the way in; W12S26, six columns and a row
+                        // away by name, has no chain to it inside the budget.
+                        "W17S25", [ "W15S28" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
@@ -218,6 +222,14 @@ let outpostDeclarationTests =
                     (Declaration.hops linked Tuning.defaults.MaxHops "W13S28" "W17S26")
                     (Some 6)
                     "and six from W13S28"
+
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S25")
+                    [
+                        [ "W15S28"; "W15S27"; "W15S26"; "W16S26"; "W17S26"; "W17S25" ]
+                        [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26"; "W17S25" ]
+                    ]
+                    "W17S25 is five crossings from W15S28, the W17S26 chains one room on"
 
                 // Neither W18S26 (Trepidimous) nor W19S29 (giaco) is entered.
                 Expect.equal
@@ -313,8 +325,13 @@ let outpostDeclarationTests =
 
                 Expect.equal
                     (casters 5_600 1_800)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
-                    "W15S28 casts the first two, which W17S29 at RCL5 (2026-10-02) cannot buy the full floor of; W17S29 casts W19S26 unseen, which W15S28 is past the budget of"
+                    [
+                        "W18S27", Some "W15S28"
+                        "W17S26", Some "W15S28"
+                        "W19S26", Some "W17S29"
+                        "W17S25", Some "W15S28"
+                    ]
+                    "W15S28 casts W18S27, W17S26 and W17S25, whose full floor W17S29 at RCL5 (2026-10-02) cannot buy; W17S29 casts W19S26 unseen, which W15S28 is past the budget of"
 
                 Expect.equal
                     (casting 5_600 1_800).Floors
@@ -323,23 +340,39 @@ let outpostDeclarationTests =
                             "W18S27", Tuning.defaults.HarassBlocks
                             "W17S26", Tuning.defaults.HarassBlocks
                             "W19S26", 2
+                            "W17S25", Tuning.defaults.HarassBlocks
                         ])
-                    "W18S27 and W17S26 keep the full floor; W19S26 is floored at its declared two blocks"
+                    "W18S27, W17S26 and W17S25 (besieged by Trepidimous's 18M17A squad) keep the full floor; W19S26 is floored at its declared two blocks"
 
                 Expect.equal
                     (casters 5_650 1_800)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
+                    [
+                        "W18S27", Some "W15S28"
+                        "W17S26", Some "W15S28"
+                        "W19S26", Some "W17S29"
+                        "W17S25", Some "W15S28"
+                    ]
                     "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
 
                 Expect.equal
                     (casters 5_600 1_300)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", None ]
+                    [
+                        "W18S27", Some "W15S28"
+                        "W17S26", Some "W15S28"
+                        "W19S26", None
+                        "W17S25", Some "W15S28"
+                    ]
                     "W17S29's RCL4 bank buys no floor, and W19S26 is refused"
 
                 Expect.equal
                     (casters 5_600 2_300)
-                    [ "W18S27", Some "W17S29"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
-                    "W17S29's RCL6 bank buys the full floor: it casts W19S26 and the nearer W18S27, and never W17S26 behind W18S26"
+                    [
+                        "W18S27", Some "W17S29"
+                        "W17S26", Some "W15S28"
+                        "W19S26", Some "W17S29"
+                        "W17S25", Some "W15S28"
+                    ]
+                    "W17S29's RCL6 bank buys the full floor: it casts W19S26 and the nearer W18S27, and never W17S26 or W17S25 behind W18S26"
 
                 for h in Colony.harass do
                     Expect.contains
