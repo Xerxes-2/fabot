@@ -79,9 +79,10 @@ type Threats =
         /// declared `Stand`'s seats while neither stands there.
         HarassRing: Map<string, Set<RoomPos>>
         /// Per ranger room (`Facts.rangerRooms`) under a raid or a rival's
-        /// claimer (#451), the ranger's ground there ahead of every other: in
-        /// a resident room whose raid no ranger wins (`Facts.outmatched`), the
-        /// room's safe set, laid only while a ranger of ours stands there or
+        /// claimer (#451), the ranger's ground there ahead of every other:
+        /// under an armed raid, our ramparts within three of the kill order's
+        /// head (#467); else in a resident room whose raid no ranger wins
+        /// (`Facts.outmatched`), the room's safe set, laid only while a ranger of ours stands there or
         /// holds its Guard (`threatsOfHeld`);
         /// else, while a melee body stands there or the kill order's head is
         /// a claimer, the kite ground — the tiles within three of that head,
@@ -438,6 +439,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let aroundHead () = kiteGroundIn atlas room inRoom head
 
+            // Under an armed raid, our standing ramparts within three of the
+            // head (#467): a creep on its own rampart takes no damage, so
+            // they are safe ground whatever the melee reaches.
+            let onRamparts () =
+                match head with
+                | Some target when Map.containsKey room armed.Ring ->
+                    Atlas.ourRampartTilesIn atlas room
+                    |> Set.filter (fun tile ->
+                        range tile (RoomPos.pos target.Pos) <= Engine.rangedRange
+                        && not (Set.contains tile standing))
+                    |> RoomPos.setAt room
+                | _ -> Set.empty
+
             // The safe set, two thousand tiles (#371), is the outmatched
             // room's answer alone, and only for a ranger of ours to hold it:
             // one standing there, or one holding its Guard on the way in.
@@ -486,6 +500,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let outmatchedHere = Set.contains room resident && outmatched view room
 
             [
+                onRamparts
+
                 if outmatchedHere then
                     if rangerHere.Value then
                         safe

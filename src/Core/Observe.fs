@@ -846,11 +846,15 @@ let foldRaids
 
     // This tick's hits across the Keep and the ramparts, the next tick's
     // baseline. The kinds are the rule's, never a list of ids: a rampart
-    // raised mid-episode joins it the tick it stands.
+    // raised mid-episode joins it the tick it stands. A child's rampart is
+    // the child's to log (`SpatialInfo.placedAway`).
     let defended =
         SpatialInfo.structureHits view.Spatial
         |> List.choose (fun (id, kind, hits) ->
-            if isDefence kind then Some(id, hits.Hits) else None)
+            if isDefence kind && not (SpatialInfo.placedAway view.Spatial id) then
+                Some(id, hits.Hits)
+            else
+                None)
         |> Map.ofList
 
     // Hits lost since the previous tick's baseline: decreases summed,

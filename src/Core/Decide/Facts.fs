@@ -161,19 +161,62 @@ let private isHungry (tuning: Tuning) (held: Set<string>) id kind (hits: HitsInf
     | Some WholeLine.Full -> hits.Hits < hits.HitsMax
     | None -> false
 
+/// The home room's tile of one of its structures, or None for one placed
+/// nowhere or in another room.
+let private homeTile (view: ColonyView) (id: string) : RoomPos option =
+    let home = SpatialInfo.homeName view.Spatial
+
+    Map.tryFind id (SpatialInfo.layerOf view.Spatial home).TargetPositions
+    |> Option.map (RoomPos.at home)
+
+/// The home's ramparts of ours under attack this tick (#467): a hostile's
+/// weapon reaches the tile, or a WORK body stands beside it to dismantle.
+/// Read off where the hostiles stand, because the projection carries no
+/// hits from the tick before to see them falling.
+let internal rampartsUnderAttack (view: ColonyView) : Set<string> =
+    match view.Hostiles with
+    | [] -> Set.empty
+    | hostiles ->
+        let strikes (tile: RoomPos) (hostile: HostileInfo) =
+            match RoomPos.range hostile.Pos tile with
+            | Some r ->
+                HostileInfo.weaponRange hostile |> Option.exists (fun reach -> r <= reach)
+                || r <= Engine.meleeRange && List.contains Work hostile.Body
+            | None -> false
+
+        SpatialInfo.structureHits view.Spatial
+        |> List.choose (fun (id, kind, _) ->
+            match kind with
+            | BuiltKind.Rampart ->
+                homeTile view id
+                |> Option.filter (fun tile -> hostiles |> List.exists (strikes tile))
+                |> Option.map (fun _ -> id)
+            | _ -> None)
+        |> Set.ofList
+
 /// Every structure the projection carries hits for that stands below its kind's
 /// line, with its kind, in id order — the Repair pool's own walk. The
 /// safe-mode reflex's Keep arm asks `keepDamaged` instead.
 let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string * BuiltKind) list =
     let ramparts = keepsRamparts view
+    let attacked = rampartsUnderAttack view
 
     SpatialInfo.structureHits view.Spatial
     |> List.choose (fun (id, kind, hits) ->
         match kind with
+        // A rampart under attack is hungry to its max, kept or not: it is
+        // what stands between the raid and the room.
+        | BuiltKind.Rampart when Set.contains id attacked ->
+            if hits.Hits < hits.HitsMax then Some(id, kind) else None
         // A rampart below the line the colony keeps them from is not
         // hungry: it is decaying away (#214, `keepsRamparts`).
         | BuiltKind.Rampart when not ramparts -> None
-        | _ when isHungry view.Tuning held id kind hits -> Some(id, kind)
+        // Nor is a child's: the mother carries it as ground, not work.
+        | _ when
+            isHungry view.Tuning held id kind hits
+            && not (kind = BuiltKind.Rampart && SpatialInfo.placedAway view.Spatial id)
+            ->
+            Some(id, kind)
         | _ -> None)
 
 /// Whether any Keep structure of this colony stands below full hits: the

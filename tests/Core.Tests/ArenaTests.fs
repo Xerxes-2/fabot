@@ -1734,17 +1734,59 @@ let arenaDefenceTests =
                     "four energy a tick"
             }
 
-            for hits in [ 10_000; 50_000; 300_000 ] do
+            test
+                "a worker of the child repairs the rampart a melee is breaking, over its floor, before the empty tower" {
+                // #467: in scenario 1 the worker poured its 200 into the
+                // tower; Repair was surplus work below a tower's Refill, and
+                // a weaning child keeps no rampart floor at all.
+                let melee =
+                    body "Eternity536" trep trepMelee (w17s25 1 24) (Some(Breach(w17s25 16 36)))
+
+                let start = sealedChild 300_000 0 0 [ worker; melee ]
+                let final, trace = start |> run 40
+                let failure = describe trace
+
+                let spent =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Ours
+                        |> List.choose (function
+                            | RepairStructure(n, id) when n = worker.Id -> Some(Choice1Of2 id)
+                            | TransferEnergyToStructure(n, id, _) when n = worker.Id ->
+                                Some(Choice2Of2 id)
+                            | _ -> None))
+
+                Expect.isNonEmpty spent $"the worker spends its load\n{failure}"
+
+                Expect.all
+                    spent
+                    (function
+                    | Choice1Of2 id -> Set.contains id lineIds
+                    | Choice2Of2 _ -> false)
+                    $"on the struck line and never the tower: {spent}\n{failure}"
+
+                Expect.isLessThan
+                    (final.Bodies |> List.find (fun b -> b.Id = worker.Id)).Energy
+                    worker.Energy
+                    "and the load goes into it"
+            }
+
+            for hits, holds in [ 10_000, false; 50_000, true; 300_000, true ] do
                 test
-                    $"scenario 1 (#446): the perimeter at {hits} hits holds the t880,341 raid hits ÷ 510 ticks — one melee a rampart at the x=1 choke — the garrison untouched inside" {
+                    $"scenario 1 (#446, #467): the perimeter at {hits} hits against the t880,341 raid, the garrison shooting from its ramparts untouched" {
                     let start = sealedChild hits 500 0 (worker :: residents @ westRaid)
+                    let raid = [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ]
 
                     let standing (a: Arena) =
                         a.Rooms["W17S25"].Structures
                         |> List.filter (fun s -> Set.contains s.Id lineIds)
 
+                    let broken (a: Arena) =
+                        raid
+                        |> List.forall (fun id -> a.Bodies |> List.forall (fun b -> b.Id <> id))
+
                     let final, trace =
-                        start |> runUntil (fun a -> List.length (standing a) < 16) 700
+                        start |> runUntil (fun a -> List.length (standing a) < 16 || broken a) 700
 
                     let failure = describe trace
                     let swing = Engine.attackPower * 17
@@ -1763,28 +1805,24 @@ let arenaDefenceTests =
                         |> List.filter (fun s -> s.Kind = "tower")
                         |> List.sumBy (fun s -> s.Energy)
 
-                    match firstFallen lineIds trace with
-                    | None -> failtest $"the line falls inside 700 ticks\n{failure}"
-                    | Some fell ->
-                        // #466, measured: 13, 52 and 296 shots, every one at
-                        // a melee its healer had stepped off, where fire on
-                        // sight spent one a tick (21, 101, 589); the tower
-                        // holds 570 (the worker's refill), 180 and 0.
-                        Expect.isLessThanOrEqual
-                            shots
-                            (fell * 3 / 4)
-                            $"a shot only where it out-damages the heal\n{failure}"
+                    // #466, measured: 13 shots over the 26 ticks to the
+                    // 10,000 line's breach and 42 over the 61 the thicker
+                    // lines' raid lives, every one at a body our damage
+                    // reaching it out-paces the heal on; the tower holds 570
+                    // (the worker's refill) and 280.
+                    Expect.isLessThanOrEqual
+                        shots
+                        (List.length trace * 3 / 4)
+                        $"a shot only where it out-damages the heal\n{failure}"
 
-                        if hits <= 50_000 then
-                            Expect.isGreaterThan
-                                towerLeft
-                                0
-                                $"the tower holds energy at the breach\n{failure}"
+                    Expect.isGreaterThan towerLeft 0 $"the tower holds energy at the end\n{failure}"
 
-                        // Measured: t25, t103, t591 (t25, t105, t593 before
-                        // #466). Both melee on one rampart would halve it;
-                        // the choke's one column, shared with the healers,
-                        // seats one.
+                    match firstFallen lineIds trace, holds with
+                    | Some fell, false ->
+                        // Measured: t25, one melee on one rampart from the
+                        // walk in, before the garrison has walked to the
+                        // line from the controller (#446 measured t105 and
+                        // t593 at the two thicker lines, unshot).
                         Expect.isGreaterThanOrEqual
                             fell
                             (hits / (2 * swing))
@@ -1794,15 +1832,30 @@ let arenaDefenceTests =
                             fell
                             (hits / swing + 30)
                             $"one melee on it from the walk in\n{failure}"
+                    | None, true ->
+                        // Measured: the raid dead by t60 at both thicker lines.
+                        for id in raid do
+                            Expect.isSome (diedOn id trace) $"{id} dies at the line\n{failure}"
 
-                        for r in residents do
-                            for tick, s in pathOf r.Id trace do
-                                Expect.equal s.Hits 4200 $"t{tick}: {r.Id} untouched\n{failure}"
+                        let onRamparts (r: Body) =
+                            pathOf r.Id trace
+                            |> List.exists (fun (_, s) ->
+                                List.contains (RoomPos.pos s.At) perimeter)
 
-                                Expect.isGreaterThan
-                                    s.At.X
-                                    2
-                                    $"t{tick}: {r.Id} inside the line, off its ramparts"
+                        Expect.all
+                            residents
+                            onRamparts
+                            $"the garrison shot from the ramparts\n{failure}"
+                    | outcome -> failtest $"the line holds: {holds}, fell: {outcome}\n{failure}"
+
+                    for r in residents do
+                        for tick, s in pathOf r.Id trace do
+                            Expect.equal s.Hits 4200 $"t{tick}: {r.Id} untouched\n{failure}"
+
+                            Expect.isGreaterThanOrEqual
+                                s.At.X
+                                2
+                                $"t{tick}: {r.Id} on the line or inside it"
                 }
 
             test

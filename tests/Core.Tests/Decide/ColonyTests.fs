@@ -1916,6 +1916,32 @@ let private openGarrison (swamps: Pos list) (rangers: (CreepInfo * Pos) list) ra
                 }
     }
 
+/// The child's home with ramparts of ours standing on these tiles: ours by
+/// their hits, as the projection carries them.
+let private withOurRamparts (tiles: Pos list) (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial "W1N2"
+    let ramparts = tiles |> List.map (fun tile -> $"ram-{tile.X}-{tile.Y}", tile)
+
+    { colony with
+        Spatial =
+            { (colony.Spatial
+               |> withNeighbour
+                   "W1N2"
+                   { layer with
+                       TargetPositions =
+                           (layer.TargetPositions, ramparts)
+                           ||> List.fold (fun acc (id, tile) -> Map.add id tile acc)
+                   }) with
+                TargetKinds =
+                    (colony.Spatial.TargetKinds, ramparts)
+                    ||> List.fold (fun acc (id, _) -> Map.add id (Structure BuiltKind.Rampart) acc)
+                Hits =
+                    (colony.Spatial.Hits, ramparts)
+                    ||> List.fold (fun acc (id, _) ->
+                        Map.add id { Hits = 50_000; HitsMax = 300_000 } acc)
+            }
+    }
+
 [<Tests>]
 let raisedHomeGarrisonTests =
     testList
@@ -2028,6 +2054,60 @@ let raisedHomeGarrisonTests =
                 Expect.isFalse
                     (Set.contains swamp ground)
                     "and no swamp a melee body stands four from"
+            }
+
+            test
+                "under a raid the garrison stands on our ramparts within three of its target, beside a melee body too" {
+                // #467: a creep on its own rampart takes no damage, so a
+                // rampart tile is safe ground whatever the melee reaches. At
+                // W17S25 the garrison held the controller ring while the
+                // raid broke the perimeter unshot.
+                let brawler = { X = 20; Y = 30 }
+                let beside = { X = 21; Y = 30 }
+                let twoOff = { X = 22; Y = 32 }
+                let farOff = { X = 30; Y = 30 }
+
+                let ground raid =
+                    let colony =
+                        openGarrison [] [] raid |> withOurRamparts [ beside; twoOff; farOff ]
+
+                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+                    |> Option.map (Set.map RoomPos.pos)
+
+                let melee body =
+                    [
+                        { hostileIn "W1N2" brawler body with
+                            Id = "atk"
+                        }
+                    ]
+
+                Expect.equal
+                    (ground (
+                        melee (
+                            List.replicate 10 Attack
+                            @ List.replicate 2 Heal
+                            @ List.replicate 12 Move
+                        )
+                    ))
+                    (Some(Set.ofList [ beside; twoOff ]))
+                    "a raid the garrison wins: the ramparts it shoots the brawler from, the one beside it too"
+
+                let outmatching =
+                    melee (List.replicate 17 Attack @ List.replicate 18 Move)
+                    @ [
+                        for i in 1..2 ->
+                            { hostileIn
+                                  "W1N2"
+                                  { X = 19; Y = 30 }
+                                  (List.replicate 7 Heal @ List.replicate 11 Move) with
+                                Id = $"med-{i}"
+                            }
+                    ]
+
+                Expect.equal
+                    (ground outmatching)
+                    (Some(Set.ofList [ beside; twoOff ]))
+                    "a raid no ranger wins: the same ramparts, not the safe set"
             }
 
             test

@@ -271,9 +271,18 @@ module ColonyView =
     let private borrowed (stage: ColonyStage option) (facts: RoomFacts) : RoomFacts =
         let sink = ferrySink stage facts
 
+        // Our ramparts there, ours by their hits as `Atlas.ourRampartTilesIn`
+        // reads them: the ground her garrison fights from (#467). Never
+        // hers to repair (`Facts.hungryStructures`).
+        let ramparts =
+            facts.Hits
+            |> Map.filter (fun id _ ->
+                Map.tryFind id facts.TargetKinds = Some(Structure BuiltKind.Rampart))
+
         let kinds =
             facts.TargetKinds
-            |> Map.filter (fun id kind -> borrowable kind || Set.contains id sink)
+            |> Map.filter (fun id kind ->
+                borrowable kind || Set.contains id sink || Map.containsKey id ramparts)
 
         { facts with
             Layer =
@@ -283,7 +292,7 @@ module ColonyView =
                         |> Map.filter (fun id _ -> Map.containsKey id kinds)
                 }
             TargetKinds = kinds
-            Hits = Map.empty
+            Hits = ramparts
             Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id sink)
             // A ferry carries energy, so no Thorium of the child's is a fact
             // the mother may act on; the extractor cooldown goes for the same

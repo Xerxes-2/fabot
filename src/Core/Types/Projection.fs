@@ -395,6 +395,14 @@ module SpatialInfo =
         |> Map.tryPick (fun room (layer: RoomLayer) ->
             Map.tryFind id layer.TargetPositions |> Option.map (RoomPos.at room))
 
+    /// Whether a target is placed in a room other than the home: a rampart
+    /// of a child's home its mother carries as ground (#467), which is the
+    /// child's to repair and the child's raid to log. The home layer is asked
+    /// first, so the home's own hundred structures walk no other room.
+    let placedAway (spatial: SpatialInfo) (id: string) : bool =
+        not (Map.containsKey id (layerOf spatial (homeName spatial)).TargetPositions)
+        && Option.isSome (placementOf spatial id)
+
     /// `placementOf` with the tile dropped: the projection-side twin of the
     /// Atlas's `targetRoom`.
     let roomOf (spatial: SpatialInfo) (id: string) : string option =

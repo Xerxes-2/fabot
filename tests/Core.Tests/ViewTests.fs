@@ -712,6 +712,53 @@ let colonyViewTests =
                     "her own container still is"
             }
 
+            test
+                "the mother carries the child's ramparts of ours, so her garrison can fight from them" {
+                // #467: her residents hold the child's home; a rampart is
+                // ours by its hits (`Atlas.ourRampartTilesIn`), and one left
+                // standing by somebody else carries none.
+                let facts = pairWorld.Rooms.[child]
+
+                let ramparts = [ "ram-ours", { X = 5; Y = 8 }; "ram-theirs", { X = 5; Y = 9 } ]
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.add
+                                child
+                                { facts with
+                                    Layer =
+                                        { facts.Layer with
+                                            TargetPositions =
+                                                (facts.Layer.TargetPositions, ramparts)
+                                                ||> List.fold (fun acc (id, tile) ->
+                                                    Map.add id tile acc)
+                                        }
+                                    TargetKinds =
+                                        (facts.TargetKinds, ramparts)
+                                        ||> List.fold (fun acc (id, _) ->
+                                            Map.add id (Structure BuiltKind.Rampart) acc)
+                                    Hits =
+                                        Map.add
+                                            "ram-ours"
+                                            { Hits = 50_000; HitsMax = 300_000 }
+                                            facts.Hits
+                                }
+                    }
+
+                let view = viewOf world mother
+
+                Expect.equal
+                    (Atlas.ourRampartTilesIn (Atlas.ofView view) child)
+                    (Set.ofList [ { X = 5; Y = 8 } ])
+                    "our rampart, and not the one somebody else left"
+
+                Expect.isFalse
+                    (Map.containsKey "can-child" view.Spatial.Hits)
+                    "and still no other hits of the child's"
+            }
+
             test "of the child's stores she carries the buffer alone, and its stock with it" {
                 // The ferry's sink is the only store of the child's she may
                 // see at all. Pairwise on the two containers standing in that

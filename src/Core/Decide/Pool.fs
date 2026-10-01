@@ -631,6 +631,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         |> List.map snd
         |> Set.ofList
 
+    let underAttack = Facts.rampartsUnderAttack view
+
     // The queue the builders' budget rations: every site the pool holds in a
     // room this colony merely mines and that no other rule already feeds. A
     // nursery's site and a bootstrapping child's are feeding-tier outright
@@ -901,6 +903,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // Over the home site as well (#284): a structure a quarter from
             // destruction is work the colony has already paid for.
             | Repair id when Set.contains id rescued -> TwoRungsUp
+            // A rampart under attack (#467) over a tower's Refill: the
+            // rampart is the room's defence while it stands, and the tower's
+            // energy is no use once the raid is through it.
+            | Repair id when Set.contains id underAttack -> TwoRungsUp
             | _ -> OnTheTier
 
         match task with

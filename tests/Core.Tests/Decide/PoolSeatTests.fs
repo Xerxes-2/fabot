@@ -743,6 +743,56 @@ let repairTests =
                     "the Keep's Repair is the uncapped, unlifted one"
             }
 
+            test
+                "a rampart under attack is a Repair over its floor, outranking a tower's Refill and not a Guard" {
+                // #467: the W17S25 worker put its 200 into the tower while a
+                // melee broke the rampart it stood beside. Under attack is a
+                // raider whose weapon reaches the rampart's tile.
+                let ramparted =
+                    { bareRespawn with
+                        Refillables =
+                            refillable "tower-1" 500 BuiltKind.Tower :: bareRespawn.Refillables
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withTargets
+                                [ "ram-1", { X = 28; Y = 25 }, Structure BuiltKind.Rampart ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 300_000 3_000_000
+
+                let priorityOf task snapshot =
+                    poolOn snapshot
+                    |> List.tryFind (fun entry -> entry.Task = task)
+                    |> Option.map (fun entry -> entry.Priority)
+
+                let struck =
+                    ramparted |> facing [ hostileAt "h-1" { X = 29; Y = 25 } [ Attack; Move ] ]
+
+                let shot =
+                    ramparted
+                    |> facing [ hostileAt "h-1" { X = 31; Y = 25 } [ RangedAttack; Move ] ]
+
+                let passing =
+                    ramparted
+                    |> facing [ hostileAt "h-1" { X = 32; Y = 25 } [ RangedAttack; Move ] ]
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn passing noThreats))
+                    "the premise: over its floor, with nothing in reach of it, the rampart asks for nothing"
+
+                for name, attacked in [ "beside a melee", struck; "in a longbow's reach", shot ] do
+                    let repair = priorityOf (Repair "ram-1") attacked
+                    let refill = priorityOf (Refill("tower-1", Energy)) attacked
+
+                    Expect.isSome repair $"{name}: the rampart is a Repair"
+                    Expect.isSome refill $"{name}: the premise: the tower is a Refill"
+                    Expect.isLessThan repair refill $"{name}: and the Repair outranks it"
+
+                    Expect.isGreaterThan
+                        (Option.get repair)
+                        (priorityOfTier Safety)
+                        $"{name}: below Flee, Guard and Fight"
+            }
+
             test "a repaired-whole road leaves the pool" {
                 let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
 
