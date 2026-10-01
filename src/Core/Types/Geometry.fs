@@ -453,6 +453,15 @@ module Seam =
     /// the projection's ground stops short of.
     let exitEdge = Engine.roomSide - 1
 
+    let private onEdge v = v = 0 || v = exitEdge
+
+    /// Whether a tile is on its room's border ring, corners included.
+    let onRing (tile: Pos) = onEdge tile.X || onEdge tile.Y
+
+    /// Whether a ring tile is an exit: on one border and not a corner, which
+    /// lies on two and lands nowhere.
+    let isExit (tile: Pos) = onEdge tile.X <> onEdge tile.Y
+
     /// The tile pairs the engine joins across the border two rooms share,
     /// before terrain has a say: this room's exit tile beside the tile a creep
     /// stepping onto it lands on. `offset` is the neighbour's world position

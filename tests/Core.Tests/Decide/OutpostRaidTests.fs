@@ -905,3 +905,336 @@ let containerSwitchTests =
                     "and decayed it adds exactly one more, its own Repair across the Seam"
             }
         ]
+
+/// The outpost's field run out to its west border (#450): the y 41..48 rows
+/// laid from x = 0, exit tiles and all, so a hold's ground can be read
+/// against tiles the terrain would let a body stand on.
+let private westField (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 0..30 do
+                                    for y in 41..48 -> { X = x; Y = y }, Plain
+                            ]
+                }
+    }
+
+/// The west side's exit tiles beside that field.
+let private westRun = [ for y in 41..48 -> { X = 0; Y = y } ]
+
+/// The view of a tick the raid has just left by the west exit: the world's
+/// hold on that run, as `ColonyView.ofWorld` hands it on.
+let private heldWest (colony: ColonyView) =
+    { colony with
+        ExitHolds =
+            Map.ofList
+                [
+                    "W1N2",
+                    {
+                        Run = westRun
+                        Until = colony.Time + 50
+                    }
+                ]
+    }
+
+/// One room's ring, W1N2's border walled but for a west exit run of
+/// y 20..24, as the world reads it off the terrain.
+let private westBorder =
+    plainRing
+    |> Map.map (fun tile terrain ->
+        if tile.X = 0 && tile.Y >= 20 && tile.Y <= 24 then
+            terrain
+        else
+            Wall)
+
+/// The corner the north and west borders meet at, walled but for a west run
+/// of y 2..6 and a north run of x 1..5: (0,1) is wall, so from (1,1) the
+/// nearest exit is (1,0) on the north side, one step, and the west run's
+/// nearest is (0,2), a diagonal.
+let private cornerBorder =
+    plainRing
+    |> Map.map (fun tile terrain ->
+        if
+            (tile.X = 0 && tile.Y >= 2 && tile.Y <= 6)
+            || (tile.Y = 0 && tile.X >= 1 && tile.X <= 5)
+        then
+            terrain
+        else
+            Wall)
+
+/// W1N2 seen at `time` with these hostiles in it, over this border.
+let private watchedOn border time hostiles : World =
+    { World.empty with
+        Time = time
+        Rooms =
+            Map.ofList
+                [
+                    "W1N2",
+                    { RoomFacts.empty with
+                        Border = border
+                        Hostiles = hostiles
+                    }
+                ]
+        Sightings =
+            Map.ofList
+                [
+                    "W1N2",
+                    {
+                        Tick = time
+                        Targets = lazy Set.empty
+                        Rival = None
+                    }
+                ]
+    }
+
+/// W1N2 seen at `time` over the west border.
+let private watched time hostiles = watchedOn westBorder time hostiles
+
+/// The same room at `time` with nothing of ours to see it by.
+let private dark time : World =
+    { watched time [] with
+        Sightings = Map.empty
+    }
+
+let private kiterAt pos ttl =
+    { hostileIn "W1N2" pos [ RangedAttack; Move ] with
+        TicksToLive = ttl
+    }
+
+let private watchOf (world: World) = Map.tryFind "W1N2" world.ExitWatches
+
+/// The watch carried through a run of ticks, from none.
+let private watchThrough (worlds: World list) : World =
+    worlds
+    |> List.fold
+        (fun (previous: World) world -> World.watchExits Tuning.defaults previous.ExitWatches world)
+        World.empty
+
+/// The hold the watch has standing, if any.
+let private holdOf (world: World) =
+    match watchOf world with
+    | Some(ExitWatch.Held hold) -> Some hold
+    | _ -> None
+
+[<Tests>]
+let exitHoldTests =
+    testList
+        "the exit a raid left by"
+        [
+            test "a threat leaving by the west exit is held at the run it left by" {
+                let seen =
+                    World.watchExits
+                        Tuning.defaults
+                        Map.empty
+                        (watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ])
+
+                Expect.equal
+                    (watchOf seen)
+                    (Some(ExitWatch.Seen [ { At = { X = 1; Y = 22 }; Dies = 1600 } ]))
+                    "while it stands there the world remembers where, and when it dies"
+
+                let gone = World.watchExits Tuning.defaults seen.ExitWatches (watched 101 [])
+
+                Expect.equal
+                    (watchOf gone)
+                    (Some(
+                        ExitWatch.Held
+                            {
+                                Run = [ for y in 20..24 -> { X = 0; Y = y } ]
+                                Until = 101 + Tuning.defaults.ExitHoldTicks
+                            }
+                    ))
+                    "the tick vision finds it gone, the whole west run beside it is held"
+            }
+
+            test "the hold ends at ExitHoldTicks, and at the threat's remembered death if sooner" {
+                let holdAfter ttl =
+                    watchThrough [ watched 100 [ kiterAt { X = 1; Y = 22 } ttl ]; watched 101 [] ]
+
+                let long = holdAfter 1500
+                let until = 101 + Tuning.defaults.ExitHoldTicks
+
+                Expect.isSome
+                    (World.watchExits Tuning.defaults long.ExitWatches (watched (until - 1) [])
+                     |> watchOf)
+                    "the hold stands to its last tick"
+
+                Expect.isNone
+                    (World.watchExits Tuning.defaults long.ExitWatches (watched until []) |> watchOf)
+                    "and ends at ExitHoldTicks"
+
+                Expect.isSome
+                    (World.watchExits Tuning.defaults long.ExitWatches (dark 150) |> watchOf)
+                    "out of sight it keeps its clock"
+
+                Expect.equal
+                    (holdAfter 30 |> holdOf |> Option.map (fun hold -> hold.Until))
+                    (Some 130)
+                    "a threat with thirty ticks to live is held thirty ticks from its last sighting"
+            }
+
+            test
+                "the deadline is the death of the threat whose exit is held, not the longest-lived's" {
+                // Two vanish together: the one beside the west run left by it with
+                // thirty ticks to live; the one in mid-room, with 1,500, died there.
+                let held =
+                    watchThrough
+                        [
+                            watched
+                                100
+                                [ kiterAt { X = 1; Y = 22 } 30; kiterAt { X = 25; Y = 25 } 1500 ]
+                            watched 101 []
+                        ]
+
+                Expect.equal
+                    (holdOf held |> Option.map (fun hold -> hold.Until))
+                    (Some 130)
+                    "held until the leaver's own death"
+            }
+
+            test "a sighting carried through darkness starts no hold when vision returns" {
+                Expect.isNone
+                    (watchThrough
+                        [ watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]; dark 101; watched 102 [] ]
+                     |> watchOf)
+                    "the room was dark on the full tick before: where the threat went is not known"
+            }
+
+            test "a threat leaving by the north exit near the west corner is held at the north run" {
+                let held =
+                    watchThrough
+                        [
+                            watchedOn cornerBorder 100 [ kiterAt { X = 1; Y = 1 } 1500 ]
+                            watchedOn cornerBorder 101 []
+                        ]
+
+                Expect.equal
+                    (holdOf held |> Option.map (fun hold -> hold.Run))
+                    (Some [ for x in 1..5 -> { X = x; Y = 0 } ])
+                    "(1,0) is a step from (1,1) and (0,2) a diagonal: the north run is the nearer"
+            }
+
+            test "a threat that vanishes away from every exit died, and nothing is held" {
+                Expect.isNone
+                    (watchThrough
+                        [ watched 100 [ kiterAt { X = 25; Y = 22 } 1500 ]; watched 101 [] ]
+                     |> watchOf)
+                    "no exit is a step from (25,22)"
+
+                Expect.isNone
+                    (watchThrough [ watched 100 [ kiterAt { X = 1; Y = 30 } 1500 ]; watched 101 [] ]
+                     |> watchOf)
+                    "nor from (1,30), whose border is wall"
+            }
+
+            test "the threat re-entering puts the ground back on its ring" {
+                let held =
+                    watchThrough [ watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]; watched 101 [] ]
+
+                Expect.equal
+                    (World.watchExits
+                        Tuning.defaults
+                        held.ExitWatches
+                        (watched 102 [ kiterAt { X = 0; Y = 22 } 1400 ])
+                     |> watchOf)
+                    (Some(ExitWatch.Seen [ { At = { X = 0; Y = 22 }; Dies = 1502 } ]))
+                    "seen again, the world remembers the threat and holds nothing"
+
+                let ringOf colony =
+                    Threats.ringIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
+                let back = declaredRaid raiders |> westField
+
+                Expect.equal
+                    (ringOf (heldWest back))
+                    (ringOf back)
+                    "and a Threat standing in the room is the Guard's ground whatever is held"
+
+                Expect.isFalse
+                    (ringOf back |> Set.exists (fun tile -> tile.X = 1))
+                    "which is its own ring, nowhere near the run"
+            }
+
+            test
+                "the raid gone by the west exit leaves the Guard on the tiles beside that run, and the guard kept" {
+                let quiet =
+                    declaredRaid [] |> westField |> withGuards [ guard "g-1", { X = 1; Y = 44 } ]
+
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+
+                let releasesOf colony =
+                    (decide colony held Set.empty None).Verdicts
+                    |> List.choose (function
+                        | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
+                        | _ -> None)
+
+                Expect.equal
+                    (releasesOf quiet)
+                    [ "g-1", taskId (Guard "W1N2"), ReleaseReason.TaskGone ]
+                    "the premise: with nothing held the Guard goes with the raid"
+
+                let holding = heldWest quiet
+
+                Expect.isEmpty (releasesOf holding) "with the exit held the guard keeps its Guard"
+
+                Expect.equal
+                    ((decide holding held Set.empty None).Assignments |> Map.tryFind "g-1")
+                    (Some(taskId (Guard "W1N2")))
+                    "and holds it"
+
+                Expect.equal
+                    (Threats.ringIn (threatsOf holding (Atlas.ofView holding)) "W1N2")
+                    ([ for y in 41..48 -> { X = 1; Y = y } ]
+                     |> List.map (RoomPos.at "W1N2")
+                     |> Set.ofList)
+                    "and its ground is the tiles a step inside the run"
+            }
+
+            test "a hold with no guard alive pools no Guard" {
+                // The hold keeps a living guard; it is no reason to send one.
+                Expect.isNone
+                    (entryFor (Guard "W1N2") (pooledOf (declaredRaid [] |> westField |> heldWest)))
+                    "nobody holds the room's Guard, so none is pooled"
+            }
+
+            test "a hold whose ground comes out empty is no hold, and the guard goes" {
+                // Without the field the terrain lays nothing walkable beside the
+                // run: the Guard is not kept on an empty ring, which would send
+                // the guard to the room's sources instead.
+                let bare =
+                    declaredRaid [] |> withGuards [ guard "g-1", { X = 1; Y = 44 } ] |> heldWest
+
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+
+                Expect.isEmpty
+                    (Threats.ringIn (threatsOf bare (Atlas.ofView bare)) "W1N2")
+                    "the premise: nothing walkable beside the run"
+
+                Expect.equal
+                    ((decide bare held Set.empty None).Verdicts
+                     |> List.choose (function
+                         | Verdict.Released(creep, task, reason) -> Some(creep, task, reason)
+                         | _ -> None))
+                    [ "g-1", taskId (Guard "W1N2"), ReleaseReason.TaskGone ]
+                    "the Guard goes as with nothing held"
+            }
+
+            test "exit tiles themselves are never in the ground" {
+                let holding = declaredRaid [] |> westField |> heldWest
+                let ground = Threats.ringIn (threatsOf holding (Atlas.ofView holding)) "W1N2"
+
+                Expect.isNonEmpty ground "the premise: the hold has ground"
+
+                Expect.isFalse
+                    (ground |> Set.exists (fun tile -> tile.X = 0))
+                    "and none of it is an exit tile the terrain lays, which would carry the guard across"
+            }
+        ]

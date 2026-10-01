@@ -121,6 +121,33 @@ let guardRowTests =
                     "and the lone smallMelee nine raids in ten arrive as hires exactly one"
             }
 
+            test "a held exit hires no guard and withholds no reserver seat" {
+                // #450: a hold keeps a living guard on the exit a raid left by. With
+                // none alive it is no raid: nothing is cast, and the seat is open.
+                let held =
+                    let colony = guardColony [] []
+
+                    { colony with
+                        ExitHolds =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    {
+                                        Run = [ for y in 38..42 -> { X = 0; Y = y } ]
+                                        Until = colony.Time + 50
+                                    }
+                                ]
+                    }
+
+                Expect.equal (guardQuotaOf held) (Some 0) "the guard row hires none"
+                Expect.isEmpty (guardCasts (decideOn held).Intents) "and casts none"
+
+                Expect.equal
+                    (rowOf "reserver" held |> Option.map (fun row -> row.Quota))
+                    (Some 1)
+                    "and the room's reserver seat stays open"
+            }
+
             test "a raid in an outpost somebody else reserves still hires its guard" {
                 // The line #333's refusal is drawn at, from the side it must not
                 // cross: a controller under somebody else's reservation stops being

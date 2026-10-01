@@ -81,13 +81,6 @@ let tag (reason: LightForce) : string =
     | LightForce.HitsLost creep -> $"hurt {creep}"
     | LightForce.ControllerChanged room -> $"controller {room}"
 
-/// Whether a tile is on its room's border ring.
-let private onRing (tile: Pos) =
-    tile.X = 0
-    || tile.Y = 0
-    || tile.X = Engine.roomSide - 1
-    || tile.Y = Engine.roomSide - 1
-
 /// The step off the border ring into the room, for a creep standing on it: a
 /// body on the ring at the start of a tick has always just crossed in (the
 /// engine carries one that ends a tick there), so the room it stands in is the
@@ -122,7 +115,7 @@ let inward (walkable: Pos -> bool) (tile: Pos) : Direction option =
     candidates
     |> List.tryFind (fun direction ->
         let next = stepTo direction
-        not (onRing next) && walkable next)
+        not (Seam.onRing next) && walkable next)
 
 /// The repeatable work intents, by the creep that acts: a light tick issues
 /// them again from the tile they were decided on. Every case named, so an
@@ -257,7 +250,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
     let onBorder () =
         now.Creeps
         |> Map.tryPick (fun name creep ->
-            if onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward then
+            if Seam.onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward then
                 Some(LightForce.OnBorder name)
             else
                 None)
@@ -301,7 +294,7 @@ let intents (last: LastFull) (now: Glance) : Intent list =
     [
         for KeyValue(name, creep) in now.Creeps do
             match creep.Inward with
-            | Some direction when onRing (RoomPos.pos creep.Tile) ->
+            | Some direction when Seam.onRing (RoomPos.pos creep.Tile) ->
                 yield MoveCreep(name, direction)
             | _ -> ()
 

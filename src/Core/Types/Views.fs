@@ -195,6 +195,11 @@ type ColonyView =
         /// is how a stand-down on a room a chain runs *through* used to hold
         /// a hauler to a Withdraw it had already withdrawn from.
         Sightings: Map<string, RoomSighting>
+        /// The exit each room this colony works is held at (#450): the run its
+        /// last armed Threat left by, while the hold stands
+        /// (`World.watchExits`). What `Threat.threatsOf` lays the Guard's
+        /// ground on while the room is empty of them.
+        ExitHolds: Map<string, ExitHold>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -819,6 +824,16 @@ module ColonyView =
                 narrowed
                 |> List.choose (fun (room, _, remembered) ->
                     remembered |> Option.map (fun sighting -> room, sighting))
+                |> Map.ofList
+            // The world's holds in the rooms this colony works, transit
+            // included: a defended child's home is projected as one.
+            ExitHolds =
+                worked
+                |> List.choose (fun (room, _) ->
+                    match Map.tryFind room world.ExitWatches with
+                    | Some(ExitWatch.Held hold) when ExitHold.stands world.Time hold ->
+                        Some(room, hold)
+                    | _ -> None)
                 |> Map.ofList
         }
 

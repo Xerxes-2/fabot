@@ -25,7 +25,8 @@ type Threats =
         Safe: Map<string, Lazy<Set<RoomPos>>>
         /// ADR-0056. Per room, the walkable tiles within range 1 of a Threat
         /// standing in it, less the tiles the Threats stand on — the guard's
-        /// Work Area.
+        /// Work Area. In a room whose last Threat has gone, the ground
+        /// beside the exit it left by while that is held (#450).
         Ring: Map<string, Set<RoomPos>>
         /// Per resident room (`Facts.residentRooms`), the garrison's Work Area
         /// there, which it holds and shoots from: in a declared errand room
@@ -37,6 +38,9 @@ type Threats =
         /// enemy creep on a work spot, beside every armed target, and the
         /// declared `Stand`'s seats while neither stands there.
         HarassRing: Map<string, Set<RoomPos>>
+        /// The rooms whose `Ring` is a held exit's ground (#450): where the
+        /// Planner keeps a living guard's Guard pooled, and hires for none.
+        Held: Set<string>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -48,6 +52,7 @@ let noThreats =
         Ring = Map.empty
         ResidentRing = Map.empty
         HarassRing = Map.empty
+        Held = Set.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -159,6 +164,7 @@ let threatsOf (view: ColonyView) atlas : Threats =
                 Ring = ring
                 ResidentRing = Map.empty
                 HarassRing = Map.empty
+                Held = Set.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -247,7 +253,38 @@ let threatsOf (view: ColonyView) atlas : Threats =
             |> RoomPos.setAt room)
         |> Map.ofList
 
+    // The held exits' ground (#450): the tiles within a melee guard's reach of
+    // the run its room's last armed Threat left by, less the ring, whose exit
+    // tiles the engine carries a body standing on across the border. Only in a
+    // room whose Guard has no declared ground: a resident room keeps the ring a
+    // CLAIM tapper is stopped at, and a harassment room its ambush. A hold
+    // with no ground is no hold.
+    let holds =
+        view.ExitHolds
+        |> Map.toList
+        |> List.filter (fun (room, _) ->
+            not (
+                Map.containsKey room armed.Ring
+                || Set.contains room resident
+                || Map.containsKey room harassRing
+            ))
+        |> List.choose (fun (room, hold) ->
+            let ground =
+                hold.Run
+                |> List.collect (Atlas.walkableWithinIn atlas room Engine.meleeRange)
+                |> List.filter (Seam.onRing >> not)
+                |> Set.ofList
+
+            if Set.isEmpty ground then
+                None
+            else
+                Some(room, RoomPos.setAt room ground))
+
     { armed with
+        Ring =
+            (armed.Ring, holds)
+            ||> List.fold (fun ring (room, ground) -> Map.add room ground ring)
         ResidentRing = residentRing
         HarassRing = harassRing
+        Held = holds |> List.map fst |> Set.ofList
     }

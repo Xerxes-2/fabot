@@ -650,6 +650,7 @@ let errandStandDownTests =
                             ]
                         Sightings = Map.empty
                         Towered = Set.empty
+                        ExitWatches = Map.empty
                     }
 
                 let view shut =
@@ -2315,5 +2316,44 @@ let deliveryRankTests =
                      |> Option.bind (Capacity.capOf CapScope.Everyone))
                     (Some 6)
                     "while the mine's draw still answers the number its own stock divides into loads"
+            }
+        ]
+
+/// The errand room's south exit, under the floor's own columns, held as the
+/// world hands a hold on (#450).
+let private heldSouth (colony: ColonyView) =
+    { colony with
+        ExitHolds =
+            Map.ofList
+                [
+                    errandRoom,
+                    {
+                        Run = [ for x in 22..28 -> { X = x; Y = 49 } ]
+                        Until = colony.Time + 50
+                    }
+                ]
+    }
+
+[<Tests>]
+let errandExitHoldTests =
+    testList
+        "the errand room's exit held"
+        [
+            test
+                "an errand room is never held: the Reactor's ring stands whatever exit a raid left by" {
+                // The ring is what stops a CLAIM tapper, and an unarmed tapper does
+                // not even end a hold.
+                let colony = bareHome |> errandColony (Some Ownership.Ours) []
+                let threatsIn colony = threatsOf colony (Atlas.ofView colony)
+                let held = threatsIn (heldSouth colony)
+
+                Expect.equal
+                    (Threats.residentRingIn held errandRoom)
+                    (Threats.residentRingIn (threatsIn colony) errandRoom)
+                    "the resident ring is the one with nothing held"
+
+                Expect.isEmpty
+                    (Threats.ringIn held errandRoom)
+                    "and nothing is laid beside the exit"
             }
         ]

@@ -805,6 +805,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Reactors = []
         // These captures are ticks with vision in every room they carry.
         Sightings = Map.empty
+        ExitHolds = Map.empty
         // A test that is about a tunable moves the one field it is about.
         Tuning = Tuning.defaults
         // Nothing in the oven: a fixture's rows count what is alive.

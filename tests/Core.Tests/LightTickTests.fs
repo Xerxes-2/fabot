@@ -486,4 +486,18 @@ let forcedTests =
                     (Some(LightForce.ArmedHostile(room, "Invader")))
                     "the armed hostile comes first"
             }
+
+            test "a guard holding the exit a raid left by, with no hostile in reach, stays light" {
+                // #450: the hold's ground is a step inside the border ring, never
+                // on it, so the guard standing there trips neither `OnBorder` nor
+                // anything a hostile would.
+                let holding =
+                    { quiet with
+                        Creeps = Map.ofList [ "guard", creepAt 1 22 1000 ]
+                    }
+
+                let held = LightTick.lastFull holding Map.empty []
+
+                Expect.isNone (LightTick.forced held holding) "nothing forces the tick full"
+            }
         ]

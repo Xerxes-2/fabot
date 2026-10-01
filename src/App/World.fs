@@ -863,6 +863,8 @@ let ofGame
             |> Fresh.mapOfList
         // The tower latch is `World.latchTowers`' to fill from last tick.
         Towered = Set.empty
+        // And the exit watch `World.watchExits`' (#450).
+        ExitWatches = Map.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

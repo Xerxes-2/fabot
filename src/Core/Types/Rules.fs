@@ -458,6 +458,10 @@ type Tuning =
         /// is itself that look. The cost is a guard hired for a room that went
         /// quiet unseen, 750 energy a block.
         ThreatMemory: int
+        /// How long a Guard holds the exit its room's last armed Threat left by
+        /// (#450), at most: 100, long enough for a kiter's step out and back,
+        /// short enough that one gone for good costs the guard little.
+        ExitHoldTicks: int
         /// How often a [[stand-down]] latched on another player's **ownership**
         /// is looked at again (#165): the room is re-admitted to the scan set
         /// for one tick, and to nothing else, so one tick of vision can clear
@@ -533,6 +537,7 @@ module Tuning =
             TrunkSwampWeight = 3
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
+            ExitHoldTicks = 100
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150

@@ -332,6 +332,38 @@ type RoomSighting =
         Rival: string option
     }
 
+/// The exit a room's last armed Threat left by, and how long its Guard holds
+/// it (#450): attacks do not cross a border, so a body re-entering lands on
+/// the edge tile beside a guard standing there.
+type ExitHold =
+    {
+        /// The walkable exit tiles of one side, contiguous, through the one
+        /// nearest where the Threat was last seen.
+        Run: Pos list
+        /// The first tick the hold no longer stands: `Tuning.ExitHoldTicks`
+        /// after it left, or the tick its remembered `ticksToLive` runs out if
+        /// sooner.
+        Until: int
+    }
+
+[<RequireQualifiedAccess>]
+module ExitHold =
+    /// Whether the hold still stands at `time`.
+    let stands (time: int) (hold: ExitHold) = hold.Until > time
+
+/// One armed Threat as the full tick saw it: where it stood, and the tick its
+/// `ticksToLive` runs out.
+type SeenThreat = { At: Pos; Dies: int }
+
+/// What the world remembers of one room's armed Threats across ticks
+/// (`World.watchExits`, #450). Heap state only: a reset costs one hold.
+[<RequireQualifiedAccess>]
+type ExitWatch =
+    /// Armed Threats stood in the room on the last full tick, which saw it.
+    | Seen of SeenThreat list
+    /// They are gone, and the room's Guard holds the exit they left by.
+    | Held of ExitHold
+
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
 /// **shell's**: one table for the life of the process, because every answer
@@ -385,6 +417,9 @@ type World =
         /// `Weaning` while its towers fire. Heap state the shell also keeps
         /// in Memory, so a global reset does not forget it.
         Towered: Set<string>
+        /// Each room's armed Threats as last seen, or the exit they left by
+        /// (`World.watchExits`, #450). Heap state in the shell, never Memory.
+        ExitWatches: Map<string, ExitWatch>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -397,6 +432,7 @@ module World =
             Creeps = []
             Sightings = Map.empty
             Towered = Set.empty
+            ExitWatches = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -516,6 +552,110 @@ module World =
                 |> Seq.filter (fun room ->
                     Set.contains room previous || towerFull tuning (roomOf world room))
                 |> Fresh.setOfSeq
+        }
+
+    /// The exit a body standing on `From` could have stepped out by, and the
+    /// run of its side's walkable exit tiles contiguous with it.
+    type private ExitRun =
+        {
+            From: Pos
+            Through: Pos
+            Run: Pos list
+        }
+
+    /// The squared straight-line distance between two tiles: a step beside one
+    /// is nearer than a diagonal, which range does not say.
+    let private squaredDistance (a: Pos) (b: Pos) =
+        let dx = b.X - a.X
+        let dy = b.Y - a.Y
+        dx * dx + dy * dy
+
+    /// How far the body stood from the exit it took.
+    let private distanceOf (run: ExitRun) = squaredDistance run.From run.Through
+
+    /// The exit run a body standing on `tile` could have stepped out by,
+    /// through the walkable exit tile nearest it within a step, on whichever
+    /// side. None for a tile no exit is a step from — a Threat that vanished
+    /// there died, it did not leave.
+    let private exitRunFrom (border: Map<Pos, Terrain>) (tile: Pos) : ExitRun option =
+        let walkable (p: Pos) =
+            Seam.isExit p && (Map.tryFind p border |> Option.exists (fun t -> t <> Wall))
+
+        tilesWithin 1 tile
+        |> List.filter walkable
+        |> List.sortBy (fun exit -> squaredDistance tile exit, exit.X, exit.Y)
+        |> List.tryHead
+        |> Option.map (fun exit ->
+            let vertical = exit.X = 0 || exit.X = Seam.exitEdge
+
+            let step d =
+                if vertical then
+                    { exit with Y = exit.Y + d }
+                else
+                    { exit with X = exit.X + d }
+
+            let along dir =
+                Seq.initInfinite (fun i -> step (dir * (i + 1)))
+                |> Seq.takeWhile walkable
+                |> List.ofSeq
+
+            {
+                From = tile
+                Through = exit
+                Run = List.rev (along -1) @ [ exit ] @ along 1
+            })
+
+    /// This tick's world with the exit watch laid under it (#450): a room
+    /// vision finds an armed Threat in is `Seen`; the next full tick vision
+    /// finds them gone, the run the nearest of them to an exit left by is
+    /// `Held` until `Tuning.ExitHoldTicks` or that one's remembered death. A
+    /// room out of sight keeps a hold until its clock runs out, and forgets a
+    /// sighting: where a Threat went in the dark is not known. Bounded by this
+    /// tick's rooms, as `recalling` is, and built by `Fresh`, the map being
+    /// carried to the next tick.
+    let watchExits (tuning: Tuning) (previous: Map<string, ExitWatch>) (world: World) : World =
+        let seen room =
+            Map.tryFind room world.Sightings
+            |> Option.exists (fun sighting -> sighting.Tick = world.Time)
+
+        let watch (room, facts: RoomFacts) =
+            let armed =
+                facts.Hostiles
+                |> List.filter (fun h -> HostileInfo.isArmed h && not (Colony.isAlly h.Owner))
+
+            match seen room, armed, Map.tryFind room previous with
+            | true, _ :: _, _ ->
+                Some(
+                    room,
+                    ExitWatch.Seen(
+                        armed
+                        |> List.map (fun h ->
+                            {
+                                At = RoomPos.pos h.Pos
+                                Dies = world.Time + h.TicksToLive
+                            })
+                    )
+                )
+            | true, [], Some(ExitWatch.Seen last) ->
+                last
+                |> List.choose (fun threat ->
+                    exitRunFrom facts.Border threat.At |> Option.map (fun run -> run, threat.Dies))
+                |> List.sortBy (fun (run, _) -> distanceOf run)
+                |> List.tryHead
+                |> Option.map (fun (run, dies) ->
+                    {
+                        Run = run.Run
+                        Until = min dies (world.Time + tuning.ExitHoldTicks)
+                    })
+                |> Option.filter (ExitHold.stands world.Time)
+                |> Option.map (fun hold -> room, ExitWatch.Held hold)
+            | false, _, Some(ExitWatch.Held hold)
+            | true, [], Some(ExitWatch.Held hold) when ExitHold.stands world.Time hold ->
+                Some(room, ExitWatch.Held hold)
+            | _ -> None
+
+        { world with
+            ExitWatches = world.Rooms |> Map.toSeq |> Seq.choose watch |> Fresh.mapOfSeq
         }
 
     /// The rooms one of our spawns stands in, in room-name order: the other

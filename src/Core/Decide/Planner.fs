@@ -358,7 +358,18 @@ let planTasks
     // One Guard per declared outpost a threat stands in, keyed on the room:
     // the same list the guard row hires against, so the body the cascade buys
     // has a Task waiting for it and no Task waits for a body nobody bought.
-    let guards = outposts.Guarded |> List.map Guard
+    //
+    // And one per held exit a living guard already holds the Guard of (#450):
+    // the hold keeps that guard on the exit, and is no room the row hires for.
+    let guards =
+        let holding =
+            threats.Held
+            |> Set.filter (fun room ->
+                Set.contains (taskId (Guard room)) held.All
+                && not (List.contains room outposts.Guarded))
+            |> Set.toList
+
+        outposts.Guarded @ holding |> List.map Guard
 
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —

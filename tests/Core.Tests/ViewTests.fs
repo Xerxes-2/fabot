@@ -318,6 +318,7 @@ let private pairWorld: World =
                     Rival = None
                 })
         Towered = Set.empty
+        ExitWatches = Map.empty
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -4466,5 +4467,45 @@ let terrainGridTests =
                     "its neighbour is not"
 
                 Expect.equal (TerrainGrid.count grid) 2 "and the grid it came from is untouched"
+            }
+        ]
+
+[<Tests>]
+let exitHoldViewTests =
+    testList
+        "the world's held exits in a colony's view"
+        [
+            test
+                "a room the colony works carries its standing hold, and a spent or unworked one none" {
+                let hold until =
+                    ExitWatch.Held
+                        {
+                            Run = [ { X = 0; Y = 20 } ]
+                            Until = until
+                        }
+
+                let withExits exits =
+                    { pairWorld with
+                        ExitWatches = Map.ofList exits
+                    }
+
+                Expect.equal
+                    ((viewOf (withExits [ mother, hold 1050; "W1N1", hold 1050 ]) mother).ExitHolds
+                     |> Map.keys
+                     |> List.ofSeq)
+                    [ mother ]
+                    "its own room's hold, and not one in a room it does not work"
+
+                Expect.isEmpty
+                    (viewOf (withExits [ mother, hold 1000 ]) mother).ExitHolds
+                    "a hold whose last tick has passed is no hold"
+
+                Expect.isEmpty
+                    (viewOf
+                        (withExits
+                            [ mother, ExitWatch.Seen [ { At = { X = 1; Y = 20 }; Dies = 1500 } ] ])
+                        mother)
+                        .ExitHolds
+                    "nor is a Threat still standing there"
             }
         ]

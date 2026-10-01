@@ -61,6 +61,10 @@ let mutable private sightings: Map<string, RoomSighting> = Map.empty
 // state for the same reason.
 let mutable private towered: Set<string> = Set.empty
 
+// Each room's armed Threats as last seen, or the exit they left by
+// (`World.ExitWatches`, #450): heap only, a reset costing one hold.
+let mutable private exitWatches: Map<string, ExitWatch> = Map.empty
+
 // The two of those a reset must not forget, as last written to the `rooms`
 // leaf: who owns each rival room (#444) and the tower latch. None on a cold
 // heap, which seeds `sightings` and `towered` off the leaf; written back
@@ -344,7 +348,7 @@ let private fullTick
             loaded
 
     // The tick's World, read out of the engine once, with the previous tick's
-    // sightings and tower latch laid under it.
+    // sightings, tower latch and exit watch laid under it.
     let world =
         World.ofGame
             Tuning.defaults.MaxHops
@@ -353,9 +357,11 @@ let private fullTick
             (ObserveMemory.loadPositions ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
+        |> World.watchExits Tuning.defaults exitWatches
 
     sightings <- world.Sightings
     towered <- world.Towered
+    exitWatches <- world.ExitWatches
 
     let latches: ObserveMemory.RoomLatches =
         {

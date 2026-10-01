@@ -221,6 +221,7 @@ let private world: World =
         Creeps = []
         Sightings = Map.empty
         Towered = Set.empty
+        ExitWatches = Map.empty
     }
 
 let private sweptView () =

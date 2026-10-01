@@ -1568,7 +1568,7 @@ let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list optio
 /// engine put it down on the tick it crossed. Read off the coordinate alone.
 let standsOnSeam (atlas: Atlas) (creep: string) : bool =
     match creepAt atlas creep with
-    | Some(_, pos) -> pos.X = 0 || pos.X = Seam.exitEdge || pos.Y = 0 || pos.Y = Seam.exitEdge
+    | Some(_, pos) -> Seam.onRing pos
     | None -> false
 
 /// The tiles of a room's own ground next to one of its exit tiles — the only
