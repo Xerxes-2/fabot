@@ -197,7 +197,6 @@ let outpostDeclarationTests =
                         // ran through W18S26, which Trepidimous owns (#444).
                         "W18S27", [ "W15S28"; "W17S29" ]
                         "W17S26", [ "W13S28"; "W15S28"; "W17S25" ]
-                        "W17S25", [ "W15S28" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
@@ -309,12 +308,12 @@ let outpostDeclarationTests =
 
                 Expect.equal
                     (casting 5_600)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W17S25", Some "W15S28" ]
-                    "W15S28 casts all three: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W17S25 is not ours yet"
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
+                    "W15S28 casts both: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W17S25 has no spawn"
 
                 Expect.equal
                     (casting 5_650)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W17S25", Some "W15S28" ]
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
                     "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
 
                 for h in Colony.harass do

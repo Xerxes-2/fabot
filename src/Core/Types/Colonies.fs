@@ -854,18 +854,6 @@ module Colony =
                 Controller = { Room = "W17S26"; X = 8; Y = 21 }
                 Via = []
             }
-            // Where their miner went once W17S26 was held (2026-09-29). Kept
-            // while it is W15S28's Claim (2026-10-01): a rival reservation in
-            // the window before the Claim lands would hold the Claim pool shut
-            // (`heldByOther`), and nothing else here clears one. **Out of this
-            // list the day the Claim lands**, with the Claim.
-            {
-                RoomName = "W17S25"
-                Enemy = "Trepidimous"
-                Stand = { Room = "W17S25"; X = 18; Y = 19 }
-                Controller = { Room = "W17S25"; X = 15; Y = 36 }
-                Via = []
-            }
         ]
 
     /// The colonies a human has declared, moved by a human in a commit: an
@@ -978,10 +966,9 @@ module Colony =
                 // 2026-09-28 until it landed at t808,328; out of this list it
                 // is this colony's nursery and not a room it mines (#404).
                 //
-                // W17S25, the seventh colony's room, is a Claim here from
-                // 2026-10-01 — **to be taken out of this list the day that
-                // Claim lands** (#404).
-                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28; Outpost.w17s25 ]
+                // W17S25, the seventh colony's room, was a Claim here (and
+                // harassed) from 2026-10-01 until it landed at t879,239.
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.
