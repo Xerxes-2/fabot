@@ -157,7 +157,7 @@ let forcedTests =
                 Expect.equal (LightTick.forced last stepped) None "the light tick runs"
             }
 
-            test "an armed hostile anywhere in sight forces a full tick" {
+            test "an armed hostile in a home room, far from everything, forces a full tick" {
                 let raided =
                     { stepped with
                         Hostiles = [ hostile 45 45 "Invader" true ]
@@ -166,7 +166,56 @@ let forcedTests =
                 Expect.equal
                     (LightTick.forced last raided)
                     (Some(LightForce.ArmedHostile(room, "Invader")))
-                    "combat is decided"
+                    "combat at home is decided"
+            }
+
+            test
+                "an armed hostile in a harassment room, out of reach of every creep of ours, forces nothing" {
+                // #461: a defender kept standing in a room we only harass took
+                // the whole shard's light ticks away.
+                let harassed = "W3N1"
+
+                let withRanger =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add
+                                "ranger"
+                                {
+                                    Tile = RoomPos.at harassed { X = 10; Y = 10 }
+                                    Hits = 500
+                                    Inward = None
+                                }
+                    }
+
+                let full = LightTick.lastFull withRanger Map.empty []
+
+                let defenderAt x =
+                    { withRanger with
+                        Hostiles =
+                            [
+                                {
+                                    Tile = RoomPos.at harassed { X = x; Y = 10 }
+                                    Owner = "Trepidimous"
+                                    Armed = true
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced full (defenderAt (10 + Engine.rangedRange + 3)))
+                    None
+                    "standing off: the tick may be light"
+
+                Expect.equal
+                    (LightTick.forced full (defenderAt (10 + Engine.rangedRange)))
+                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
+                    "trading shots with our ranger at range 3: the near rule"
+
+                Expect.equal
+                    (LightTick.forced full (defenderAt (10 + Engine.rangedRange + 2)))
+                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
+                    "at the near rule's edge: still full"
             }
 
             test "an armed Source Keeper far from us forces nothing" {

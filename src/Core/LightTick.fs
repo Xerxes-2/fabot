@@ -68,7 +68,8 @@ type LightForce =
     | HitsLost of creep: string
     | ControllerChanged of room: string
 
-/// The reason on the CPU line: the rule's word first, then where it fired —
+/// The reason on the CPU line: the rule's word first (`armed` is a home room's
+/// armed hostile, `near` one within reach anywhere), then where it fired —
 /// the room and the hostile's owner, or the creep — since a reason read back
 /// after the hostile has left has nothing else to be traced by.
 let tag (reason: LightForce) : string =
@@ -217,9 +218,14 @@ let private nearRange = Engine.rangedRange + 2
 /// The first fact that makes replaying the last full tick wrong, in the
 /// ADR's order; `None` when the light tick may run.
 let forced (last: LastFull) (now: Glance) : LightForce option =
+    // Only in a room where we own a structure: an armed body standing off in
+    // a remote or harassment room is the near rule's to answer (#461).
     let armed =
+        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
+
         now.Hostiles
-        |> List.tryFind (fun hostile -> hostile.Armed && hostile.Owner <> keeper)
+        |> List.tryFind (fun hostile ->
+            hostile.Armed && hostile.Owner <> keeper && Set.contains hostile.Tile.Room homes)
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
 
     let near () =
