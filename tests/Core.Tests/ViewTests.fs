@@ -307,7 +307,9 @@ let private pairWorld: World =
                 {
                     Tick = 1000
                     Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
+                    Rival = None
                 })
+        Towered = Set.empty
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -600,6 +602,7 @@ let worldTests =
                     {
                         Tick = tick
                         Targets = lazy (Set.ofList targets)
+                        Rival = None
                     }
 
                 let thisTick =
@@ -1933,6 +1936,7 @@ let transitTests =
                                 {
                                     Tick = twoHopWorld.Time - 1
                                     Targets = lazy (Set.ofList [ "cont-crossed"; "src-crossed" ])
+                                    Rival = None
                                 }
                     }
 
@@ -1975,6 +1979,71 @@ let transitTests =
                     ((viewWith Set.empty).Sightings |> Map.tryFind crossed)
                     (Map.tryFind crossed walked.Sightings)
                     "open, it is an outpost she works and she remembers what stood in it"
+            }
+
+            test "a declaration whose every chain crosses a rival's room is refused" {
+                // #444: the one chain to `twoHop` runs through `crossed`, and
+                // a rival owns it as last seen — the room is dark this tick,
+                // so the memory is all that says so.
+                let taken =
+                    { twoHopWorld with
+                        Sightings =
+                            twoHopWorld.Sightings
+                            |> Map.add
+                                crossed
+                                {
+                                    Tick = twoHopWorld.Time - 500
+                                    Targets = lazy Set.empty
+                                    Rival = Some "Trepidimous"
+                                }
+                    }
+
+                let view = viewUnder twoHopDeclaration taken mother
+
+                Expect.contains
+                    (view.Refused |> List.map (fun refused -> refused.RoomName))
+                    twoHop
+                    "the far outpost is refused, said on the layout record"
+
+                Expect.isFalse
+                    (Map.containsKey crossed view.Spatial.Rooms)
+                    "and the rival's room is no transit room of hers"
+            }
+
+            test "the rival owners a reset reads back off Memory are avoided as the heap's were" {
+                // `Main` seeds an empty heap off the `rooms` leaf: the room is dark
+                // after the reset, so the seed is all that says who owns it.
+                let owners = Map.ofList [ crossed, "Trepidimous" ]
+
+                let seeded = World.recalling (World.seedRivals owners Map.empty) twoHopWorld
+
+                Expect.isTrue (World.rivalHeld seeded crossed) "the seeded owner is read as held"
+
+                Expect.equal
+                    (World.rivalOwners seeded)
+                    owners
+                    "and is what the leaf is written from"
+
+                Expect.contains
+                    ((viewUnder twoHopDeclaration seeded mother).Refused
+                     |> List.map (fun refused -> refused.RoomName))
+                    twoHop
+                    "so the far outpost is refused as before the reset"
+
+                let held =
+                    Map.ofList
+                        [
+                            crossed,
+                            {
+                                Tick = twoHopWorld.Time - 1
+                                Targets = lazy Set.empty
+                                Rival = None
+                            }
+                        ]
+
+                Expect.isNone
+                    (World.seedRivals owners held |> Map.find crossed).Rival
+                    "a sighting the heap already holds is never replaced by the seed"
             }
         ]
 
@@ -3362,10 +3431,16 @@ let private harassWorldAt control motherCapacity childCapacity =
 let private harassWorld control childCapacity =
     harassWorldAt control 2400 childCapacity
 
-/// One colony's view under a global harassment list and a stand-down gate:
-/// the production path, with the holders cut over the same list, at the
-/// floor the shipped tick prices.
-let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
+/// One colony's view under a declaration, a global harassment list and a
+/// stand-down gate: the production path, with the holders cut over the same
+/// list, at the floor the shipped tick prices.
+let private harassViewOver
+    (declared: Colony list)
+    (gate: StandDown)
+    (rooms: Harass list)
+    world
+    home
+    =
     let colony = declared |> List.find (fun colony -> colony.Home = home)
     let joins = JoinTable()
 
@@ -3388,6 +3463,10 @@ let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
             world
 
     ColonyView.ofWorldRecalling joins Tuning.defaults declared casting gate holders world colony
+
+/// The same under the fixture's own declaration.
+let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
+    harassViewOver declared gate rooms world home
 
 /// The same under the open gate.
 let private harassView harass world home =
@@ -3648,6 +3727,92 @@ let harassViewTests =
                     "and still cast, so the raid log goes on reading the room as ours"
             }
 
+            test
+                "a harassment room that is also its caster's Claim outpost pools both the Guard and the Claim" {
+                // W17S25 (2026-10-01): harassed by W15S28 until the Claim lands, so
+                // no rival reservation can slip in ahead of it and block the
+                // Claim pool for good. Here the harassment room is a declared
+                // child of the mother's and a Claim outpost of hers.
+                let claiming =
+                    declared
+                    |> List.map (fun colony ->
+                        if colony.Home = mother then
+                            { colony with
+                                Outposts =
+                                    colony.Outposts
+                                    @ [
+                                        {
+                                            RoomName = harassRoom
+                                            Sources =
+                                                [
+                                                    "src-enemy",
+                                                    { Room = harassRoom; X = 5; Y = 5 }
+                                                ]
+                                            Controller =
+                                                "ctrl-enemy", { Room = harassRoom; X = 8; Y = 8 }
+                                        }
+                                    ]
+                            }
+                        else
+                            colony)
+                    |> fun colonies ->
+                        colonies
+                        @ [
+                            {
+                                Home = harassRoom
+                                Outposts = []
+                                Errands = []
+                                Salvage = []
+                                Mother = Some mother
+                                Consignee = None
+                            }
+                        ]
+
+                let world = harassWorld (control Ownership.Unowned) 300
+                let view = harassViewOver claiming StandDown.none harassDeclared world mother
+
+                Expect.equal
+                    (view.Harass |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "she casts the room"
+
+                Expect.contains view.Declared harassRoom "and it is a candidate colony of ours"
+
+                Expect.isTrue (Map.containsKey harassRoom view.Spatial.Rooms) "in her scan set"
+
+                let facts = outpostFactsOf view
+
+                Expect.equal
+                    facts.Claims
+                    [ "ctrl-enemy", harassRoom ]
+                    "its controller is in the Claim pool: the outpost's full facts, not the harassment's cut"
+
+                Expect.equal
+                    (facts.Guarded |> List.filter ((=) harassRoom))
+                    [ harassRoom ]
+                    "and it is guarded once"
+
+                let pool =
+                    planTasks
+                        view
+                        (Fabot.Core.Atlas.ofView view)
+                        noThreats
+                        HeldTaskFacts.empty
+                        facts
+
+                Expect.contains pool (Claim "ctrl-enemy") "the Claim is pooled"
+                Expect.contains pool (Guard harassRoom) "beside the harassment Guard"
+
+                Expect.equal
+                    view.Dismantles
+                    [ "can-enemy" ]
+                    "and the enemy's container still comes down"
+
+                Expect.isFalse
+                    (Map.containsKey "can-enemy" view.Spatial.TargetKinds)
+                    "the room carries the harassment's cut, so nothing of hers withdraws from or repairs it"
+            }
+
             test "a room held by anybody but the enemy yields no container" {
                 let dismantlesUnder control =
                     (harassView harassDeclared (harassWorld control 300) mother).Dismantles
@@ -3705,9 +3870,21 @@ let harassViewTests =
                     "and the child does not name it twice"
             }
 
-            test "no harassment room is a declared home, outpost, errand or salvage room" {
-                // The branch order in `ColonyView.ofWorld` reads every other kind
-                // ahead of a harassment room.
+            test
+                "no harassment room is a declared home, outpost, errand or salvage room, but a Claim" {
+                // The branch order in `ColonyView.ofWorld` reads the bootstrap,
+                // errand and salvage kinds ahead of a harassment room. The one
+                // overlap allowed is a Claim (W17S25, 2026-10-01): a declared home
+                // that is still an outpost of its mother's, harassed until the Claim
+                // lands. Its harassment cut keeps the declared controller and rock,
+                // which is all a Claim outpost works.
+                let claims =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Outposts |> List.map (fun o -> o.RoomName))
+                    |> List.filter (fun room -> List.contains room (Colony.homes Colony.declared))
+                    |> Set.ofList
+
                 let kept =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -3715,6 +3892,7 @@ let harassViewTests =
                         @ (colony.Errands |> List.map (fun e -> e.RoomName))
                         @ colony.Salvage)
                     |> Set.ofList
+                    |> fun kept -> Set.difference kept claims
 
                 Expect.isEmpty
                     (Colony.harass

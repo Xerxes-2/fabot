@@ -53,8 +53,19 @@ let mutable private planMemos: Map<string, PlanMemo> = Map.empty
 // What the world last saw standing in each room, on the heap and not in
 // Memory: the grace it feeds is worth 150 ticks of one creep's patience, not
 // a leaf every tick's `JSON.stringify` pays for. A reset empties it and the
-// colony decides as it did before the grace existed.
+// colony decides as it did before the grace existed, but for each rival
+// room's owner, which `roomLatches` below brings back.
 let mutable private sightings: Map<string, RoomSighting> = Map.empty
+
+// The homes a tower of ours has stood full in (`World.Towered`, #445): heap
+// state for the same reason.
+let mutable private towered: Set<string> = Set.empty
+
+// The two of those a reset must not forget, as last written to the `rooms`
+// leaf: who owns each rival room (#444) and the tower latch. None on a cold
+// heap, which seeds `sightings` and `towered` off the leaf; written back
+// only on the tick either moves.
+let mutable private roomLatches: ObserveMemory.RoomLatches option = None
 
 // The CPU line on the heap: read off Memory only when the heap holds none (a
 // global reset), dropped when the leaf is gone (discarded on purpose). The
@@ -321,8 +332,19 @@ let private fullTick
     (seen: LightTick.Glance option)
     (forced: LightTick.LightForce option)
     =
+    // A cold heap reads back what the last one wrote, so a rival's dark room
+    // stays unentered and a weaned child stays weaned across the reset.
+    let written =
+        match roomLatches with
+        | Some latches -> latches
+        | None ->
+            let loaded = ObserveMemory.loadRoomLatches ()
+            sightings <- World.seedRivals loaded.Rivals sightings
+            towered <- Set.union towered loaded.Towered
+            loaded
+
     // The tick's World, read out of the engine once, with the previous tick's
-    // sightings laid under it.
+    // sightings and tower latch laid under it.
     let world =
         World.ofGame
             Tuning.defaults.MaxHops
@@ -330,8 +352,21 @@ let private fullTick
             harassment
             (ObserveMemory.loadPositions ())
         |> World.recalling sightings
+        |> World.latchTowers Tuning.defaults towered
 
     sightings <- world.Sightings
+    towered <- world.Towered
+
+    let latches: ObserveMemory.RoomLatches =
+        {
+            Rivals = World.rivalOwners world
+            Towered = world.Towered
+        }
+
+    if latches <> written then
+        ObserveMemory.saveRoomLatches latches
+
+    roomLatches <- Some latches
 
     let colonies = World.living Colony.declared world
 

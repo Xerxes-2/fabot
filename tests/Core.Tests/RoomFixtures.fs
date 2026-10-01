@@ -782,7 +782,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // The stage is derived from the level, never written beside it, so
         // a rung cannot be furnished as one colony and decided as another.
         Stages =
-            match Colony.stageOf Tuning.defaults true true (Some level) with
+            match Colony.stageOf Tuning.defaults true true true (Some level) with
             | Some stage -> Map.ofList [ capture.RoomName, stage ]
             | None -> Map.empty
         // One colony over one captured room: nobody else's bodies, nothing

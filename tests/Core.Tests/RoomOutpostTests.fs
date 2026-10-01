@@ -10,6 +10,9 @@ open Fabot.Core.Tests.RoomFixtures
 open Fabot.Core.Tests.Decide
 open Fabot.Core.Tests.RoomInvariantFixtures
 
+/// The captured rooms another player owned at the capture's tick.
+let private capturedRivals = Map.ofList [ "W18S26", "Trepidimous" ]
+
 /// `World.linked` itself over a World built from the real captures of the
 /// given rooms, so no predicate of it is copied here to move in lockstep
 /// (#317, #438). A room no capture is loaded for carries no border and is
@@ -33,6 +36,17 @@ let private shippedLinked (rooms: string list) =
                             }
                     })
                 |> Map.ofList
+            // A capture is furniture and carries no owner, so who
+            // owned each captured room at its tick is written here.
+            Sightings =
+                capturedRivals
+                |> Map.filter (fun room _ -> List.contains room rooms)
+                |> Map.map (fun room owner ->
+                    {
+                        Tick = (load room).Tick
+                        Targets = lazy Set.empty
+                        Rival = Some owner
+                    })
         }
 
     World.linked (Tuning.keeperMargin Tuning.defaults) world
@@ -179,8 +193,10 @@ let outpostDeclarationTests =
                 Expect.equal
                     (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
                     [
+                        // W17S25's every chain to W18S27, and W17S29's to W17S26,
+                        // ran through W18S26, which Trepidimous owns (#444).
                         "W18S27", [ "W15S28"; "W17S29" ]
-                        "W17S26", [ "W13S28"; "W15S28" ]
+                        "W17S26", [ "W13S28"; "W15S28"; "W17S25" ]
                         "W17S25", [ "W15S28" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
@@ -294,7 +310,7 @@ let outpostDeclarationTests =
                 Expect.equal
                     (casting 5_600)
                     [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W17S25", Some "W15S28" ]
-                    "W15S28 casts all three: W17S29 cannot buy the floor, and W13S28 is further or out of the budget"
+                    "W15S28 casts all three: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W17S25 is not ours yet"
 
                 Expect.equal
                     (casting 5_650)

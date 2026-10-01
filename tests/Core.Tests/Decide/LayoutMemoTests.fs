@@ -908,6 +908,37 @@ let planMemoTests =
                     "a level-up moves every room, and the table went with them"
             }
 
+            test "a rival taking a room moves that room's signature and no other" {
+                // No chain enters a rival's room (#444), so a walk priced
+                // along one through it is stale the tick the owner changes.
+                let open' = borderedColony None
+
+                let taken =
+                    { open' with
+                        Spatial =
+                            { open'.Spatial with
+                                RivalRooms = Set.singleton "W1N2"
+                            }
+                    }
+
+                Expect.notEqual
+                    (Map.find "W1N2" (roomSignatures taken))
+                    (Map.find "W1N2" (roomSignatures open'))
+                    "the taken room's signature moves"
+
+                Expect.equal
+                    (Map.find "W1N1" (roomSignatures taken))
+                    (Map.find "W1N1" (roomSignatures open'))
+                    "and the home room's does not"
+
+                // What the next tick's eviction compares against, so that only
+                // a room newly taken drops every cross-room walk.
+                Expect.equal
+                    (decideOn taken).Memo.RivalRooms
+                    (Set.singleton "W1N2")
+                    "the memo carries the rooms held by a rival when its tables were filled"
+            }
+
             test "an outpost's census moving keeps the home room's walks and drops the outpost's" {
                 // Per room, an entry is kept while every room it reads holds
                 // — a spawn walk to a far room reads home and the chain to

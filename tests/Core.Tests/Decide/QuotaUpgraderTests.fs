@@ -652,6 +652,11 @@ let quotaInputTests =
                 Expect.equal (quotaOf (lending Bootstrapping)) 1 "one ferry body for the child"
 
                 Expect.equal
+                    (quotaOf (lending Weaning))
+                    1
+                    "and for one weaning at the line: the lend waits for its tower (#445)"
+
+                Expect.equal
                     (quotaOf (lending Independent))
                     0
                     "and none once the child feeds itself"

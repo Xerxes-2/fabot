@@ -1418,7 +1418,7 @@ let twoColonyTests =
                 // written down, so the case is the one `World.stages` would hand her:
                 // such a room is projected by nobody, and the route to one is her
                 // `Outposts` list.
-                let unowned = Colony.stageOf Tuning.defaults false false (Some 1)
+                let unowned = Colony.stageOf Tuning.defaults false false true (Some 1)
 
                 Expect.isNone
                     unowned
@@ -1791,31 +1791,106 @@ let private atStage stage (colony: ColonyView) =
         Stages = Map.add (SpatialInfo.homeName colony.Spatial) stage colony.Stages
     }
 
+/// A mother "W1N1" and the child "W1N2" she raises, both declared.
+let private raisingPair: Colony list =
+    [
+        {
+            Home = "W1N1"
+            Outposts = []
+            Errands = []
+            Salvage = []
+            Mother = None
+            Consignee = None
+        }
+        {
+            Home = "W1N2"
+            Outposts = []
+            Errands = []
+            Salvage = []
+            Mother = Some "W1N1"
+            Consignee = None
+        }
+    ]
+
+/// The pair as the shell reads it: both rooms ours with a spawn standing at
+/// `level`, the mother with no tower and the child with one tower per entry
+/// of `towers`, holding that much energy. Only the facts a stage is read off.
+let private raisingWorld level (towers: int list) : World =
+    let colonyRoom name refillables =
+        name,
+        { RoomFacts.empty with
+            Control =
+                Some
+                    {
+                        Owner = Ownership.Ours
+                        Reservation = None
+                        SafeMode = false
+                        Sign = None
+                    }
+            Controller =
+                Some
+                    {
+                        Id = $"ctrl-{name}"
+                        Level = level
+                        TicksToDowngrade = 20000
+                        SafeModeAvailable = 1
+                        SafeModeActive = false
+                    }
+            Spawns =
+                [
+                    {
+                        Name = $"Spawn-{name}"
+                        Id = $"spawn-{name}"
+                        RoomName = name
+                        IsSpawning = false
+                    }
+                ]
+            Refillables = refillables
+        }
+
+    { World.empty with
+        Rooms =
+            Map.ofList
+                [
+                    colonyRoom "W1N1" []
+                    colonyRoom
+                        "W1N2"
+                        (towers
+                         |> List.mapi (fun i energy ->
+                             {
+                                 Id = $"tower-{i}"
+                                 FreeCapacity = Engine.towerCapacity - energy
+                                 Kind = BuiltKind.Tower
+                             }))
+                ]
+    }
+
 [<Tests>]
 let colonyStageTests =
     testList
         "the colony stage"
         [
-            test "a stage is ownership, a spawn and a level, and each of the three moves it alone" {
+            test
+                "a stage is ownership, a spawn, a tower stood full and a level, and each of the four moves it alone" {
                 // `Colony.stageOf`, the one place `Tuning.BootstrapLevel` is read.
-                // Pairwise on each input in turn, the other two held.
+                // Pairwise on each input in turn, the other three held.
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults false false (Some 1))
+                    (Colony.stageOf Tuning.defaults false false true (Some 1))
                     None
                     "a room we do not own is no colony of ours: a candidate, whose one rule is the Claim pool"
 
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults false true (Some 5))
+                    (Colony.stageOf Tuning.defaults false true true (Some 5))
                     None
                     "and ownership is asked first: nothing standing in it makes an unowned room a stage"
 
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults true false (Some 1))
+                    (Colony.stageOf Tuning.defaults true false true (Some 1))
                     (Some Nursery)
                     "claimed with no spawn of ours standing in it is a nursery"
 
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults true false (Some 8))
+                    (Colony.stageOf Tuning.defaults true false true (Some 8))
                     (Some Nursery)
                     "and a nursery at any level: what ends it is a spawn, not a controller"
 
@@ -1824,19 +1899,174 @@ let colonyStageTests =
                         Tuning.defaults
                         true
                         true
+                        true
                         (Some(Tuning.defaults.BootstrapLevel - 1)))
                     (Some Bootstrapping)
                     "its own spawn standing and one level short of the line is the bootstrap window"
 
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults true true (Some Tuning.defaults.BootstrapLevel))
+                    (Colony.stageOf
+                        Tuning.defaults
+                        true
+                        true
+                        true
+                        (Some Tuning.defaults.BootstrapLevel))
                     (Some Independent)
-                    "and at the line it is independent — the one comparison this constant is read in"
+                    "and at the line, a tower stood full, it is independent — the one comparison this constant is read in"
 
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults true true None)
+                    (Colony.stageOf
+                        Tuning.defaults
+                        true
+                        true
+                        false
+                        (Some Tuning.defaults.BootstrapLevel))
+                    (Some Weaning)
+                    "at the line with no tower stood full it is weaning: its own rules run as an independent colony's, and its mother still raises it (#445)"
+
+                Expect.equal
+                    (Colony.stageOf
+                        Tuning.defaults
+                        true
+                        true
+                        false
+                        (Some(Tuning.defaults.BootstrapLevel + 1)))
+                    (Some Independent)
+                    "and past the line the tower is not asked: a mature colony is independent whatever its towers"
+
+                Expect.equal
+                    (Colony.stageOf Tuning.defaults true true false (Some 8))
+                    (Some Independent)
+                    "at RCL8 as at RCL4"
+
+                Expect.equal
+                    (Colony.stageOf Tuning.defaults true true true None)
                     None
                     "a colony whose controller nothing can place has no stage, and every reader answers it as it always did"
+            }
+
+            test "a child at the line is weaning until a tower of its own stands full" {
+                // #445's acceptance, at the seam the shell hands every view its
+                // stages through: the World.
+                let childAt level towers =
+                    World.stages Tuning.defaults raisingPair (raisingWorld level towers)
+                    |> Map.tryFind "W1N2"
+
+                Expect.equal (childAt 3 []) (Some Weaning) "RCL3 and no tower: still being raised"
+
+                Expect.equal
+                    (childAt 3 [ Engine.towerCapacity / 2 ])
+                    (Some Weaning)
+                    "RCL3 and a tower half full: still being raised"
+
+                Expect.equal
+                    (childAt 3 [ 0; Engine.towerCapacity ])
+                    (Some Independent)
+                    "RCL3 and one tower of its own full: independent"
+
+                Expect.equal
+                    (childAt 2 [ Engine.towerCapacity ])
+                    (Some Bootstrapping)
+                    "and a full tower below the line moves nothing"
+            }
+
+            test "a tower that fires and drains never takes an independent child back" {
+                // The latch: once a tower of the child's has stood full, the room is
+                // in `World.Towered` for as long as it stays ours, whatever its
+                // towers hold or whether any stands.
+                let stood =
+                    World.latchTowers
+                        Tuning.defaults
+                        Set.empty
+                        (raisingWorld 3 [ Engine.towerCapacity ])
+
+                let next level towers =
+                    World.latchTowers Tuning.defaults stood.Towered (raisingWorld level towers)
+
+                let childOf world =
+                    World.stages Tuning.defaults raisingPair world |> Map.tryFind "W1N2"
+
+                Expect.equal
+                    (childOf stood)
+                    (Some Independent)
+                    "the premise: full at RCL3, independent"
+
+                Expect.equal
+                    (childOf (next 3 [ 300 ]))
+                    (Some Independent)
+                    "the tower fired down to 300 the tick after: still independent"
+
+                Expect.equal
+                    (childOf (next 4 []))
+                    (Some Independent)
+                    "RCL4 and its tower destroyed after independence: still independent"
+
+                Expect.equal
+                    (childOf (raisingWorld 3 [ 300 ]))
+                    (Some Weaning)
+                    "and the latch is the only thing holding it: a world that never saw the tower full reads the tower now"
+            }
+
+            test "a child past the line is independent whatever its towers, with the latch empty" {
+                // A global reset empties the heap; a raid drains or destroys the
+                // towers. Neither may hand a mature colony back to its mother.
+                let childAt level towers =
+                    World.stages Tuning.defaults raisingPair (raisingWorld level towers)
+                    |> Map.tryFind "W1N2"
+
+                for level in [ Tuning.defaults.BootstrapLevel + 1; 7 ] do
+                    Expect.equal
+                        (childAt level [])
+                        (Some Independent)
+                        $"RCL{level}, no tower standing, nothing latched: independent"
+
+                    Expect.equal
+                        (childAt level [ 300 ])
+                        (Some Independent)
+                        $"RCL{level}, its tower fired down to 300, nothing latched: independent"
+            }
+
+            test "the latch forgets a room that stops being ours" {
+                let stood =
+                    World.latchTowers
+                        Tuning.defaults
+                        Set.empty
+                        (raisingWorld 3 [ Engine.towerCapacity ])
+
+                let lost =
+                    { stood with
+                        Rooms =
+                            stood.Rooms
+                            |> Map.change
+                                "W1N2"
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        Control =
+                                            facts.Control
+                                            |> Option.map (fun c ->
+                                                { c with Owner = Ownership.Unowned })
+                                    }))
+                    }
+
+                Expect.isTrue
+                    (Set.contains "W1N2" stood.Towered)
+                    "the premise: the child's tower stood full"
+
+                Expect.isFalse
+                    (Set.contains
+                        "W1N2"
+                        (World.latchTowers Tuning.defaults stood.Towered lost).Towered)
+                    "a room we lost and claim again starts its window over"
+            }
+
+            test "a colony nobody raises is independent at the line, tower or none" {
+                // The tower is the mother's reason to keep raising; a colony with
+                // no mother has nobody to wait for it.
+                Expect.equal
+                    (World.stages Tuning.defaults raisingPair (raisingWorld 3 [])
+                     |> Map.tryFind "W1N1")
+                    (Some Independent)
+                    "the mother at RCL3 with no tower is independent as she always was"
             }
 
             test "the road gate reads the stage and not the level" {
@@ -1857,6 +2087,82 @@ let colonyStageTests =
                 Expect.isEmpty
                     (roads (trunkColony 5 |> atStage Nursery))
                     "and a nursery none either: every stage under the line answers alike"
+            }
+
+            test
+                "a child weaning on the tower clause places roads and keeps ramparts as before #445" {
+                // The tower holds the mother's borrowed work and nothing of the
+                // child's own: at the line its roads and its rampart floor are an
+                // independent colony's, whatever a raid has drained its tower to.
+                Expect.equal
+                    (Colony.stageOf
+                        Tuning.defaults
+                        true
+                        true
+                        false
+                        (Some Tuning.defaults.BootstrapLevel))
+                    (Some Weaning)
+                    "the premise: RCL3 with no tower stood full is the stage under test"
+
+                let roads colony =
+                    let { Intents = intents } = decideOn colony
+                    sitesOfKind Road intents
+
+                let level = Tuning.defaults.BootstrapLevel
+
+                Expect.isNonEmpty
+                    (roads (trunkColony level |> atStage Independent))
+                    "the premise: an independent RCL3 colony places its trunk"
+
+                Expect.equal
+                    (roads (trunkColony level |> atStage Weaning))
+                    (roads (trunkColony level |> atStage Independent))
+                    "and a weaning one places the very same roads"
+
+                let hungry colony =
+                    repairTasks (planTasksOn colony noThreats)
+
+                let ramparted stage =
+                    bareRespawn
+                    |> withLevel level
+                    |> atStage stage
+                    |> withHits "ram-1" BuiltKind.Rampart 1 300_000
+
+                Expect.equal
+                    (hungry (ramparted Weaning))
+                    [ "ram-1" ]
+                    "and holds its rampart to the floor, as an independent colony does"
+            }
+
+            test
+                "a weaning child is raised as a bootstrapping one: the mother's borrowed work waits for the tower" {
+                let pool colony =
+                    planTasksOn colony noThreats |> List.map taskId
+
+                let weaning =
+                    { raisingMother with
+                        Stages = Map.add "W1N2" Weaning raisingMother.Stages
+                    }
+
+                Expect.contains
+                    (pool weaning)
+                    (taskId (Upgrade "ctrl-child"))
+                    "she still upgrades its controller"
+
+                Expect.equal
+                    (Colony.bootstrapping
+                        (Map.ofList [ "W1N2", Weaning ])
+                        raisingPair
+                        raisingPair.[0])
+                    [ "W1N2" ]
+                    "and keeps it in her scan set"
+
+                Expect.isEmpty
+                    (Colony.bootstrapping
+                        (Map.ofList [ "W1N2", Independent ])
+                        raisingPair
+                        raisingPair.[0])
+                    "until it is independent"
             }
 
             test "the rampart line reads the stage and not the level" {
@@ -1914,6 +2220,11 @@ let colonyStageTests =
                     (matched Independent)
                     (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.Rank))
                     "and an independent one leaves it surplus, under the flow like any home site"
+
+                Expect.equal
+                    (matched Weaning)
+                    (matched Independent)
+                    "and so does a weaning one: the tower holds its mother's work, not its own tiers"
             }
 
             test "the nursery and the bootstrap predicates read the stage and not the census" {

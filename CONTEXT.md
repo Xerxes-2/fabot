@@ -238,7 +238,7 @@ A [[home room]] and the [[outpost]]s worked from it — the unit the decision la
 _Avoid_: base, empire, room group
 
 ### Stage
-Where a [[colony]] stands in its life, derived every tick by `Colony.stageOf` off ownership, a spawn of ours and the controller's level: [[nursery]], bootstrapping ([[bootstrap window]]) or independent. A room that is no colony of ours has no stage. ADR-0052.
+Where a [[colony]] stands in its life, derived every tick by `Colony.stageOf` off ownership, a spawn of ours and the controller's level: [[nursery]], bootstrapping ([[bootstrap window]]), weaning (a child at exactly RCL3 whose own tower has not yet stood full: its own rules read independent, its mother still lends; #445) or independent. A room that is no colony of ours has no stage. ADR-0052.
 _Avoid_: phase, generation, tier
 
 ### Candidate colony

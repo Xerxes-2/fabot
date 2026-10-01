@@ -73,13 +73,14 @@ let internal isNurseryRoom (view: ColonyView) room =
 /// Whether the named room is a child colony this one is still bootstrapping: a
 /// declared colony of ours that stands its own spawn, and that this colony is
 /// nonetheless projecting. `isNurseryRoom`'s two facts with the stage inverted,
-/// so the two are complements over one room. Both standing stages, because
+/// so the two are complements over one room. Every standing stage, because
 /// what closes the borrowing is the scan set and never a level read here.
 let internal isBootstrapRoom (view: ColonyView) room =
     room <> SpatialInfo.homeName view.Spatial
     && colonyOwns view room
     && (match roomStage view room with
         | Some Bootstrapping
+        | Some Weaning
         | Some Independent -> true
         | Some Nursery
         | None -> false)
@@ -98,7 +99,13 @@ let internal isBorrowedUpgrade (view: ColonyView) controllerId =
 let internal ferryBuffers (view: ColonyView) : Set<string> =
     let rooms =
         view.Borrowed.Rooms
-        |> List.filter (fun room -> roomStage view room = Some Bootstrapping)
+        |> List.filter (fun room ->
+            match roomStage view room with
+            | Some Bootstrapping
+            | Some Weaning -> true
+            | Some Nursery
+            | Some Independent
+            | None -> false)
         |> Set.ofList
 
     if Set.isEmpty rooms then

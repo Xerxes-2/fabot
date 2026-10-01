@@ -296,11 +296,11 @@ type WorldCreep =
     }
 
 /// What the world last saw standing in one room, and when (#151): the one
-/// thing carried **across** ticks about a room, for one question only.
-/// Per-entry absence cannot say *why* an id left the pool, and the two
+/// thing carried **across** ticks about a room. `Targets` answers one
+/// question only, and `Rival` one other. Per-entry absence cannot say *why* an id left the pool, and the two
 /// answers are opposite work: a container destroyed is a Task gone, a room
-/// gone dark is a Task waiting. So this is read by the vision grace and by
-/// nothing else, and what the grace hands on is a **room name**: the Matcher
+/// gone dark is a Task waiting. So `Targets` is read by the vision grace and
+/// by nothing else, and what the grace hands on is a **room name**: the Matcher
 /// keeps the assignment and the mover walks its holder at that room's Seam.
 /// Nothing is placed or priced off a sighting. Which of these reach a colony
 /// is the **view**'s cut (`ColonyView.ofWorld`, #271).
@@ -321,6 +321,12 @@ type RoomSighting =
         /// room a tick for an answer nobody wants yet (#371). The closure
         /// captures the projection's own census, built this tick anyway.
         Targets: Lazy<Set<string>>
+        /// Who owned the room's controller that tick, when it was another
+        /// player and not us; None for a room nobody owns, ours, or one
+        /// with no controller. The second thing a sighting is read for
+        /// (#444): no chain enters a room a rival owns (`World.rivalHeld`),
+        /// and a room nothing of ours stands in has no vision to ask.
+        Rival: string option
     }
 
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
@@ -339,8 +345,9 @@ type RoomSighting =
 /// Beside it, the hop counts the scan set and the harassment casting ask of
 /// the same relation (`World.hopsUnder`): a chain search per declaration per
 /// colony, twice a tick, for an answer that moves only with the rooms the
-/// world holds and the rooms withheld from passage, both of which ride in
-/// its key.
+/// world holds, the rooms withheld from passage and the rooms a rival owns,
+/// all of which ride in its key. Who owns a room is never a `Joins` answer:
+/// it is asked ahead of the table, as which rooms the world holds is.
 type JoinTable() =
     member val Joins = System.Collections.Generic.Dictionary<string, bool>()
     member val Hops = System.Collections.Generic.Dictionary<string, int>()
@@ -366,10 +373,15 @@ type World =
         Creeps: WorldCreep list
         /// What each room was last seen to carry (#151): this tick's census
         /// for every room vision answered for, and the last one taken for a
-        /// room it did not. Heap state in the shell and deliberately not a
-        /// Memory leaf, so a global reset empties it. A room never seen has
-        /// no entry.
+        /// room it did not. Heap state in the shell, and only each rival
+        /// room's owner is kept in Memory (`seedRivals`): a global reset
+        /// empties the rest. A room never seen has no entry.
         Sightings: Map<string, RoomSighting>
+        /// The rooms of ours a tower of our own has stood full in
+        /// (`World.latchTowers`, #445): the latch that keeps a child out of
+        /// `Weaning` while its towers fire. Heap state the shell also keeps
+        /// in Memory, so a global reset does not forget it.
+        Towered: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -381,6 +393,7 @@ module World =
             Rooms = Map.empty
             Creeps = []
             Sightings = Map.empty
+            Towered = Set.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -470,6 +483,30 @@ module World =
         |> List.map fst
         |> Set.ofList
 
+    /// Whether a tower of ours in the room holds `Tuning.IndependenceTowerEnergy`
+    /// this tick.
+    let towerFull (tuning: Tuning) (facts: RoomFacts) : bool =
+        facts.Refillables
+        |> List.exists (fun r ->
+            r.Kind = BuiltKind.Tower
+            && Engine.towerCapacity - r.FreeCapacity >= tuning.IndependenceTowerEnergy)
+
+    /// This tick's world with the tower latch laid under it (#445): last
+    /// tick's `Towered` kept for the rooms still ours, and every room of ours
+    /// whose tower stands full now added. A room that stops being ours drops
+    /// out, so one claimed again is raised again. Built by `Fresh`, the set
+    /// being carried to the next tick.
+    let latchTowers (tuning: Tuning) (previous: Set<string>) (world: World) : World =
+        let owned = ownedRooms world
+
+        { world with
+            Towered =
+                owned
+                |> Seq.filter (fun room ->
+                    Set.contains room previous || towerFull tuning (roomOf world room))
+                |> Fresh.setOfSeq
+        }
+
     /// The rooms one of our spawns stands in, in room-name order: the other
     /// fact `Colony.living` asks for.
     let spawnRooms (world: World) : string list =
@@ -484,6 +521,10 @@ module World =
     /// **living** colony's home — not every owned room, or a room we claimed
     /// by hand and never declared would arrive in some colony's scan set as a
     /// [[nursery]] to raise.
+    ///
+    /// The tower a child waits for (#445) is asked only of a declared
+    /// child: a colony with no mother has nobody raising it to wait on. A
+    /// tower stood full is the latch (`Towered`) or one full this tick.
     let rec stages
         (tuning: Tuning)
         (colonies: Colony list)
@@ -498,10 +539,18 @@ module World =
             let owned =
                 facts.Control |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
+            let raised =
+                colonies
+                |> List.exists (fun colony -> colony.Home = name && Option.isSome colony.Mother)
+
+            let towerStood =
+                not raised || Set.contains name world.Towered || towerFull tuning facts
+
             Colony.stageOf
                 tuning
                 owned
                 (not (List.isEmpty facts.Spawns))
+                towerStood
                 (facts.Controller |> Option.map (fun c -> c.Level))
             |> Option.map (fun stage -> name, stage))
         |> Map.ofList
@@ -540,6 +589,65 @@ module World =
             | Some ground -> ground <> Wall && not (masked tile)
             | None -> false
 
+    /// Whether the world last saw another player, not an ally, own the
+    /// room's controller (`RoomSighting.Rival`). Read off the memory and not
+    /// this tick's vision, which a room nothing of ours stands in does not
+    /// have. A reservation is not ownership.
+    let rivalHeld (world: World) (room: string) : bool =
+        match Map.tryFind room world.Sightings with
+        | Some sighting ->
+            match sighting.Rival with
+            | Some owner -> not (Colony.isAlly owner)
+            | None -> false
+        | None -> false
+
+    /// Every room `rivalHeld` answers yes for, in room-name order.
+    let rivalRooms (world: World) : string list =
+        world.Sightings |> Map.toList |> List.map fst |> List.filter (rivalHeld world)
+
+    /// Who the world last saw owning each room another player owns, allies
+    /// included: what Memory keeps across a global reset (`seedRivals`).
+    /// Built by `Fresh`, being carried to the next tick.
+    let rivalOwners (world: World) : Map<string, string> =
+        world.Sightings
+        |> Map.toList
+        |> List.choose (fun (room, sighting) ->
+            sighting.Rival |> Option.map (fun owner -> room, owner))
+        |> Fresh.mapOfList
+
+    /// The heap's sightings with an owner read back off Memory laid under
+    /// them, for the first tick after a global reset: a room the heap holds
+    /// no sighting of gets one naming its owner and nothing else. It carries
+    /// no targets, so the vision grace never reads its tick.
+    let seedRivals (owners: Map<string, string>) (sightings: Map<string, RoomSighting>) =
+        (sightings, owners)
+        ||> Map.fold (fun seeded room owner ->
+            if Map.containsKey room seeded then
+                seeded
+            else
+                Map.add
+                    room
+                    {
+                        Tick = 0
+                        Targets = lazy Set.empty
+                        Rival = Some owner
+                    }
+                    seeded)
+
+    /// `linked`'s terrain half: everything it asks but who owns the room.
+    /// What `linkedRecalling` files, because it is the half that never moves.
+    let private seamed (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) =
+        let walkableIn room =
+            ringWalkable keeperMargin room (roomOf world room).Border
+
+        Keepers.enterable toRoom
+        && Seam.joinedBy
+            (walkableIn fromRoom)
+            (walkableIn toRoom)
+            (groundWalkable keeperMargin toRoom (roomOf world toRoom).Layer.Terrain)
+            fromRoom
+            toRoom
+
     /// Whether a creep could step from one room into the other: the
     /// [[world]]'s own reading of a [[seam]] band, before any [[atlas]] grid
     /// exists. The Atlas answers the same question off its ring grids
@@ -557,17 +665,11 @@ module World =
     ///
     /// A keeper room with no declared rocks is entered by nothing
     /// (`Keepers.enterable`), as `Atlas.routes` asks it.
+    ///
+    /// Nor is a room another player owns (`rivalHeld`, #444) — a room a body
+    /// already stands in is still left by it.
     let linked (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) : bool =
-        let walkableIn room =
-            ringWalkable keeperMargin room (roomOf world room).Border
-
-        Keepers.enterable toRoom
-        && Seam.joinedBy
-            (walkableIn fromRoom)
-            (walkableIn toRoom)
-            (groundWalkable keeperMargin toRoom (roomOf world toRoom).Layer.Terrain)
-            fromRoom
-            toRoom
+        not (rivalHeld world toRoom) && seamed keeperMargin world fromRoom toRoom
 
     /// `linked` over a table the caller holds **across ticks**: three readers
     /// ask it per colony per tick (`scanOf`, `ColonyView.ofWorld`,
@@ -578,8 +680,8 @@ module World =
     ///
     /// The table can outlive the tick because an answer reads only terrain —
     /// which the engine never changes — under a keeper margin that is in the
-    /// key. What *can* move between ticks is which rooms the world holds, so
-    /// that is read off `Rooms` ahead of the table on every ask.
+    /// key. What *can* move between ticks is which rooms the world holds and
+    /// who owns them, so both are read ahead of the table on every ask.
     /// Asymmetric by construction, like `linked`: the key is the ordered pair
     /// and an answer is never reused backwards.
     let linkedRecalling
@@ -588,7 +690,10 @@ module World =
         (world: World)
         : string -> string -> bool =
         fun fromRoom toRoom ->
-            if not (Map.containsKey fromRoom world.Rooms && Map.containsKey toRoom world.Rooms) then
+            if
+                not (Map.containsKey fromRoom world.Rooms && Map.containsKey toRoom world.Rooms)
+                || rivalHeld world toRoom
+            then
                 false
             else
                 let key = $"{keeperMargin}|{fromRoom}|{toRoom}"
@@ -599,7 +704,7 @@ module World =
                 if joins.Joins.ContainsKey key then
                     joins.Joins.[key]
                 else
-                    let joined = linked keeperMargin world fromRoom toRoom
+                    let joined = seamed keeperMargin world fromRoom toRoom
                     joins.Joins.[key] <- joined
                     joined
 
@@ -617,16 +722,16 @@ module World =
     /// (#382): the memoised join with the stronghold rooms taken out. One
     /// combinator and not two spellings, so the scan set and the refusal
     /// report agree. `linkedBy` below is the bare join a test asks for and
-    /// deliberately avoids nothing.
+    /// avoids no stronghold.
     let reachesUnder (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
         linkedRecalling joins (Tuning.keeperMargin tuning) world
         |> linkedAvoiding gate.Impassable
 
     /// `Declaration.hops` over `reachesUnder`, recalled from the join table:
     /// keyed by everything the chain search reads that is not terrain — the
-    /// keeper margin, the hop budget, the rooms withheld from passage and the
-    /// rooms the world holds, since `linkedRecalling` joins nothing outside
-    /// them. Past 4,096 rows the table is emptied rather than grown: a key
+    /// keeper margin, the hop budget, the rooms withheld from passage, the
+    /// rooms a rival owns (`rivalRooms`) and the rooms the world holds, since
+    /// `linkedRecalling` enters nothing outside them. Past 4,096 rows the table is emptied rather than grown: a key
     /// minted per change of the world's rooms has nothing else to evict it.
     let hopsUnder (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
         let reaches = reachesUnder gate joins tuning world
@@ -638,6 +743,7 @@ module World =
                     string (Tuning.keeperMargin tuning)
                     string tuning.MaxHops
                     String.concat "," gate.Impassable
+                    String.concat "," (rivalRooms world)
                     String.concat "," (Map.keys world.Rooms)
                 ]
 

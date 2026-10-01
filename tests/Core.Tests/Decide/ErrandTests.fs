@@ -648,6 +648,7 @@ let errandStandDownTests =
                                 }
                             ]
                         Sightings = Map.empty
+                        Towered = Set.empty
                     }
 
                 let view shut =

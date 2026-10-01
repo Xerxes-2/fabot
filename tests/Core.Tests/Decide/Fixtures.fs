@@ -116,7 +116,8 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
 /// `Colony.stageOf` and never written down: a fixture that spelled a stage
 /// out could spell a colony the shell can never build.
 let homeStages (spatial: SpatialInfo) level =
-    match Colony.stageOf Tuning.defaults true true (Some level) with
+    // No mother, so no tower to wait on: `World.stages` hands it `true`.
+    match Colony.stageOf Tuning.defaults true true true (Some level) with
     | Some stage -> Map.ofList [ SpatialInfo.homeName spatial, stage ]
     | None -> Map.empty
 

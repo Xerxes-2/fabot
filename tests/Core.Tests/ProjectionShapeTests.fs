@@ -219,6 +219,7 @@ let private world: World =
         Rooms = Map.ofList [ homeFacts; outpostFacts; errandFacts ]
         Creeps = []
         Sightings = Map.empty
+        Towered = Set.empty
     }
 
 let private sweptView () =

@@ -543,6 +543,7 @@ let verdictTests =
                                     {
                                         Tick = tick
                                         Targets = lazy (Set.singleton "spawn-1")
+                                        Rival = None
                                     }
                                 ]
                     }
@@ -1244,6 +1245,7 @@ let resourceIdVerdictTests =
                             {
                                 Tick = 999
                                 Targets = lazy (Set.singleton "can-min")
+                                Rival = None
                             }
                         ]
 

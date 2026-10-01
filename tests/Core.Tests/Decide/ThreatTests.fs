@@ -1296,6 +1296,7 @@ let fleeTests =
                                     {
                                         Tick = 999
                                         Targets = lazy (Set.singleton "spawn-1")
+                                        Rival = None
                                     }
                                 ]
                     }

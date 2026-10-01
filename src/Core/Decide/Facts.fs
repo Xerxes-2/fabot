@@ -94,8 +94,15 @@ let internal homeStage (view: ColonyView) =
     roomStage view (SpatialInfo.homeName view.Spatial)
 
 /// Whether this colony has outgrown its bootstrap window: `Independent`,
-/// at `Tuning.BootstrapLevel` or past it.
-let internal isIndependent (view: ColonyView) = homeStage view = Some Independent
+/// at `Tuning.BootstrapLevel` or past it — or `Weaning`, whose tower holds
+/// only its mother's lend and none of its own rules (#445).
+let internal isIndependent (view: ColonyView) =
+    match homeStage view with
+    | Some Independent
+    | Some Weaning -> true
+    | Some Nursery
+    | Some Bootstrapping
+    | None -> false
 
 /// ADR-0034. Whether this colony keeps ramparts this tick: the covering rule's
 /// one gate and the floor's one gate, one spelling for both, so a colony below

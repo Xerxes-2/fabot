@@ -311,6 +311,10 @@ type PlanMemo =
         /// and moved back would otherwise recall tables flooded under the
         /// intermediate one (#372).
         RoomSignatures: Map<string, string>
+        /// The rooms a rival held when those tables were filled
+        /// (`SpatialInfo.RivalRooms`, #444), stamped with them: what the next
+        /// tick's `Atlas.evictRooms` tells a room newly taken by.
+        RivalRooms: Set<string>
         SiteIntents: Intent list
         /// The footing targets this plan left unserved (#77). Empty is the
         /// healthy answer and rides here all the same: a channel that says
@@ -388,6 +392,8 @@ module PlanMemo =
         {
             Signature = ""
             RoomSignatures = roomSignatures
+            // Stamped by the caller, with the tables.
+            RivalRooms = Set.empty
             SiteIntents = []
             UnservedFootings = []
             ServedFootings = []

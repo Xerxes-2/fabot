@@ -1167,3 +1167,236 @@ let reclaimerRelayTests =
                         "the loaded leg's TTL cost: below the 1,000 cliff each elapsed tick spends three of life"
             }
         ]
+
+/// Four open rooms in a square, W15S28 the home: two chains of two crossings
+/// to W16S27, by W16S28 or by W15S27. `owner` names who the world last saw
+/// owning W16S28's controller, None for nobody; `reserved` stands a rival's
+/// reservation on it instead.
+let private squareWorld (owner: string option) (reserved: bool) =
+    let ring =
+        Map.ofList
+            [
+                for x in 0 .. Seam.exitEdge do
+                    for y in 0 .. Seam.exitEdge do
+                        if x = 0 || x = Seam.exitEdge || y = 0 || y = Seam.exitEdge then
+                            { X = x; Y = y }, Plain
+            ]
+
+    let ground =
+        TerrainGrid.ofList
+            [
+                for x in 1 .. Seam.exitEdge - 1 do
+                    for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, Plain
+            ]
+
+    let rooms = [ "W15S28"; "W16S28"; "W15S27"; "W16S27" ]
+
+    { World.empty with
+        Rooms =
+            rooms
+            |> List.map (fun room ->
+                room,
+                { RoomFacts.empty with
+                    Border = ring
+                    Layer =
+                        { RoomLayer.empty with
+                            Terrain = ground
+                        }
+                    Control =
+                        if room = "W16S28" && reserved then
+                            Some
+                                {
+                                    Owner = Ownership.Unowned
+                                    Reservation =
+                                        Some
+                                            {
+                                                Holder = ReservationHolder.Rival
+                                                TicksToEnd = 4000
+                                                Username = "Trepidimous"
+                                            }
+                                    SafeMode = false
+                                    Sign = None
+                                }
+                        else
+                            None
+                })
+            |> Map.ofList
+        Sightings =
+            Map.ofList
+                [
+                    "W16S28",
+                    {
+                        Tick = 1
+                        Targets = lazy Set.empty
+                        Rival = owner
+                    }
+                ]
+    }
+
+[<Tests>]
+let rivalRoomTests =
+    testList
+        "a room another player owns is never entered"
+        [
+            test
+                "a chain goes round a rival's room, and an ally's room or a reserved one is crossed" {
+                let margin = Tuning.keeperMargin Tuning.defaults
+                let hops = Tuning.defaults.MaxHops
+
+                let chainsOver world =
+                    RoomName.routesBy (World.linked margin world) hops "W15S28" "W16S27"
+
+                let both =
+                    [ [ "W15S28"; "W16S28"; "W16S27" ]; [ "W15S28"; "W15S27"; "W16S27" ] ]
+                    |> List.sort
+
+                Expect.equal
+                    (chainsOver (squareWorld None false) |> List.sort)
+                    both
+                    "the premise: with nobody owning W16S28, both chains of two crossings"
+
+                let rival = squareWorld (Some "Trepidimous") false
+
+                Expect.equal
+                    (chainsOver rival)
+                    [ [ "W15S28"; "W15S27"; "W16S27" ] ]
+                    "a rival owns W16S28, so the one chain left goes by W15S27"
+
+                Expect.equal
+                    (RoomName.routesBy (World.linkedBy margin rival) hops "W15S28" "W16S27")
+                    [ [ "W15S28"; "W15S27"; "W16S27" ] ]
+                    "and the recalled join answers the same"
+
+                Expect.equal
+                    (RoomName.routesBy
+                        (World.reachesUnder StandDown.none (JoinTable()) Tuning.defaults rival)
+                        hops
+                        "W15S28"
+                        "W16S27")
+                    [ [ "W15S28"; "W15S27"; "W16S27" ] ]
+                    "and so does every production reader's predicate"
+
+                Expect.isTrue
+                    (World.linked margin rival "W16S28" "W16S27")
+                    "a body already standing in the rival's room may still leave it"
+
+                Expect.equal
+                    (chainsOver (squareWorld (Some(Set.minElement Colony.allies)) false)
+                     |> List.sort)
+                    both
+                    "an ally's room is crossed"
+
+                Expect.equal
+                    (chainsOver (squareWorld None true) |> List.sort)
+                    both
+                    "a reservation is not ownership: a reserved room is crossed"
+            }
+
+            test "a rival's room is no declaration's destination" {
+                let rival = squareWorld (Some "Trepidimous") false
+                let linked = World.linkedBy (Tuning.keeperMargin Tuning.defaults) rival
+
+                Expect.isNone
+                    (Declaration.hops linked Tuning.defaults.MaxHops "W15S28" "W16S28")
+                    "no chain ends in a room a rival owns, a claim target being Unowned"
+
+                Expect.isFalse
+                    (Declaration.routable linked Tuning.defaults.MaxHops "W15S28" "W16S28")
+                    "so a declaration naming it is refused"
+            }
+
+            test "the tables that outlive the tick never answer a stale owner" {
+                // The join table and the hop memo beside it outlive the tick;
+                // who owns a room does not. Asked open, rival, open again
+                // over one table.
+                let table = JoinTable()
+                let margin = Tuning.keeperMargin Tuning.defaults
+                let opened = squareWorld None false
+                let rival = squareWorld (Some "Trepidimous") false
+
+                Expect.isTrue (World.linkedRecalling table margin opened "W15S28" "W16S28") "open"
+
+                Expect.isFalse
+                    (World.linkedRecalling table margin rival "W15S28" "W16S28")
+                    "taken: the pair's filed answer is not served"
+
+                Expect.isTrue
+                    (World.linkedRecalling table margin opened "W15S28" "W16S28")
+                    "lost again: open once more"
+
+                let hopsOf world =
+                    World.hopsUnder StandDown.none table Tuning.defaults world "W15S28" "W16S28"
+
+                Expect.equal (hopsOf opened) (Some 1) "one crossing while nobody owns it"
+                Expect.equal (hopsOf rival) None "none once a rival does"
+                Expect.equal (hopsOf opened) (Some 1) "and one again once they lose it"
+            }
+
+            test "the Atlas routes round a rival's room too" {
+                let world = squareWorld None false
+
+                let atlasOver (rivals: Set<string>) =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        RivalRooms = rivals
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (routes (atlasOver Set.empty) "W15S28" "W16S27" |> List.length)
+                    2
+                    "the premise: two chains while nobody owns W16S28"
+
+                let rival = atlasOver (Set.singleton "W16S28")
+
+                Expect.equal
+                    (routes rival "W15S28" "W16S27")
+                    [ [ "W15S28"; "W15S27"; "W16S27" ] ]
+                    "one chain, round the rival's room"
+
+                Expect.equal (routes rival "W15S28" "W16S28") [] "and none into it"
+
+                Expect.equal
+                    (routes rival "W16S28" "W16S27")
+                    [ [ "W16S28"; "W16S27" ] ]
+                    "a body standing in it walks out"
+            }
+
+            test
+                "only a room newly taken drops every cross-room walk; a census moving in a held one does not" {
+                // A walk to W16S27 priced by W15S27 never read W16S28. The tick a
+                // rival takes W16S28, `routes` stops naming the chains through it,
+                // so every cross-room walk goes; a later census change in the room
+                // they already held moves no chain at all.
+                let evictedOver (wasRival: Set<string>) =
+                    let walks = FarFieldMemo.walks ()
+
+                    walks.[({ X = 25; Y = 25 }, { FatigueParts = 1; MoveParts = 1 }, "W16S27")] <-
+                        Array.empty
+
+                    let world = squareWorld None false
+
+                    let atlas =
+                        { SpatialInfo.empty with
+                            RoomName = Some "W15S28"
+                            Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                            Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                            RivalRooms = Set.singleton "W16S28"
+                        }
+                        |> AtlasFixtures.snapshotWith []
+                        |> ofViewRecalling walks (FarFieldMemo.empty ())
+
+                    evictRooms atlas wasRival (Set.singleton "W16S28")
+                    walks.Count
+
+                Expect.equal (evictedOver Set.empty) 0 "newly taken: the cross-room walk goes"
+
+                Expect.equal
+                    (evictedOver (Set.singleton "W16S28"))
+                    1
+                    "already held: the walk that never read it stays"
+            }
+        ]

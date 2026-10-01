@@ -382,6 +382,7 @@ let outpostTests =
                                     {
                                         Tick = tick
                                         Targets = lazy (Set.singleton "site-out")
+                                        Rival = None
                                     }
                                 ]
                     }
@@ -468,6 +469,7 @@ let outpostTests =
                                     {
                                         Tick = 1000
                                         Targets = lazy (Set.singleton "site-out")
+                                        Rival = None
                                     }
                                 ]
                     }
@@ -504,6 +506,7 @@ let outpostTests =
                                     {
                                         Tick = 1000
                                         Targets = lazy (Set.empty)
+                                        Rival = None
                                     }
                                 ]
                     }
@@ -1288,8 +1291,8 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28"; "W15S28"; "W11S27"; "W17S29" ]
-                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28, its deposit mined out"
+                    [ "W12S28"; "W13S28"; "W15S28"; "W17S29"; "W17S25" ]
+                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28 and W11S27 its to W17S25 on 2026-10-01, each deposit mined out"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
@@ -1401,8 +1404,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29"; "W14S28" ]
-                    "the sixth colony's room left this list on its Claim (t808,328, #404); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
+                    [ "W15S27"; "W15S29"; "W14S28"; "W17S25" ]
+                    "the seventh colony's room is a Claim here until it lands (2026-10-01); the sixth colony's room left this list on its Claim (t808,328, #404); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
                 // The fourth colony was given up on 2026-09-28 (`sixth-colony.md`):
                 // a room with no deposit left is worth a GCL slot and nothing

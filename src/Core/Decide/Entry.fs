@@ -119,7 +119,11 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             let stage =
                 Map.tryFind room view.Stages |> Option.map string |> Option.defaultValue ""
 
-            $"{home}|{level}|{stage}|{held}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
+            // A rival's room is entered by no chain (#444), so its owner
+            // changing moves every route the walk tables were priced along.
+            let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
+
+            $"{home}|{level}|{stage}|{held}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
         |> Fresh.mapOfList
 
     // The rooms joined on a newline, which no field can carry: the room set
@@ -194,8 +198,12 @@ let decideUnarbitrated
                 Map.tryFind room m.RoomSignatures <> Map.tryFind room signedRooms)
 
         if not moved.IsEmpty then
-            Atlas.evictRooms atlas moved
+            Atlas.evictRooms atlas m.RivalRooms moved
     | _ -> ()
+
+    // The rooms a rival holds, stamped beside the per-room signatures on
+    // every memo handed on: the tables are this tick's whatever the plan is.
+    let rivals = view.Spatial.RivalRooms
 
     // Whose turn it is to re-plan (#357, `turn`). A stale memo is not a
     // wrong plan, only an old one — the reservations are level-blind and a
@@ -211,7 +219,11 @@ let decideUnarbitrated
         // a census returns after a deferred turn (#372) the stamp is the dark
         // tick's, and handed on as it was it would evict and re-flood that
         // room every tick until the next replan.
-        | Some m -> { m with RoomSignatures = signedRooms }
+        | Some m ->
+            { m with
+                RoomSignatures = signedRooms
+                RivalRooms = rivals
+            }
         // A colony whose turn has not come (#357) serves its stale plan but
         // carries the tick's own tables on it, stamped with this tick's
         // per-room signatures: a census that moves and moves back recalls the
@@ -221,18 +233,22 @@ let decideUnarbitrated
             | Some stale ->
                 { stale with
                     RoomSignatures = signedRooms
+                    RivalRooms = rivals
                     Walks = walks
                     SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
                     Narrowed = farFields.Narrowed
                 }
             | None ->
-                PlanMemo.deferred
-                    signedRooms
-                    walks
-                    farFields.SeamWalks
-                    farFields.PerCensus
-                    farFields.Narrowed
+                let deferred =
+                    PlanMemo.deferred
+                        signedRooms
+                        walks
+                        farFields.SeamWalks
+                        farFields.PerCensus
+                        farFields.Narrowed
+
+                { deferred with RivalRooms = rivals }
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -242,6 +258,7 @@ let decideUnarbitrated
             {
                 Signature = signature
                 RoomSignatures = signedRooms
+                RivalRooms = rivals
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings

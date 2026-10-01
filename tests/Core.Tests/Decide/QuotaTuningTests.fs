@@ -405,10 +405,10 @@ let tuningTests =
             }
 
             test "BootstrapLevel is the line a stage is cut at, and the one place it is read" {
-                // `Colony.stageOf`'s own pairwise: the same three facts about
+                // `Colony.stageOf`'s own pairwise: the same four facts about
                 // a room, read under two lines.
                 Expect.equal
-                    (Colony.stageOf Tuning.defaults true true (Some 3))
+                    (Colony.stageOf Tuning.defaults true true true (Some 3))
                     (Some Independent)
                     "at the shipped three, an RCL3 colony has outgrown its mother"
 
@@ -419,9 +419,41 @@ let tuningTests =
                         }
                         true
                         true
+                        true
                         (Some 3))
                     (Some Bootstrapping)
                     "move the line to five and the same room is still being raised"
+            }
+
+            test "IndependenceTowerEnergy is the fill a child's tower must stand at" {
+                let towerAt energy =
+                    { RoomFacts.empty with
+                        Refillables =
+                            [
+                                {
+                                    Id = "tower"
+                                    FreeCapacity = Engine.towerCapacity - energy
+                                    Kind = BuiltKind.Tower
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    Tuning.defaults.IndependenceTowerEnergy
+                    Engine.towerCapacity
+                    "shipped full: TOWER_CAPACITY"
+
+                Expect.isFalse
+                    (World.towerFull Tuning.defaults (towerAt 999))
+                    "one short of full is not full"
+
+                Expect.isTrue
+                    (World.towerFull
+                        { Tuning.defaults with
+                            IndependenceTowerEnergy = 500
+                        }
+                        (towerAt 500))
+                    "move the fill to 500 and a half-full tower is enough"
             }
 
             test "VisionGrace is how long a held Task outlives the vision that carried it" {
@@ -440,6 +472,7 @@ let tuningTests =
                                     {
                                         Tick = 900
                                         Targets = lazy (Set.singleton "spawn-1")
+                                        Rival = None
                                     }
                                 ]
                     }

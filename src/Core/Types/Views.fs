@@ -213,7 +213,8 @@ module ColonyView =
         let idsOfKind = SpatialInfo.idsOfKindIn facts.TargetKinds
 
         match stage, idsOfKind Controller |> List.tryPick tileOf with
-        | Some Bootstrapping, Some controller ->
+        | Some Bootstrapping, Some controller
+        | Some Weaning, Some controller ->
             let sources = idsOfKind Source |> List.choose tileOf
 
             idsOfKind (Structure BuiltKind.Container)
@@ -587,7 +588,10 @@ module ColonyView =
                     room, salvaging facts, None
                 else
                     match Map.tryFind room harassEnemies with
-                    // No memory, as a transit room keeps none.
+                    // No memory, as a transit room keeps none. Ahead of the
+                    // outposts: a Claim outpost harassed until its Claim lands
+                    // (W17S25) works its declared controller and rock, laid in
+                    // below, and nothing the cut takes out.
                     | Some enemy -> room, harassing enemy facts, None
                     | None -> room, facts, remembered)
 
@@ -695,6 +699,11 @@ module ColonyView =
                     Thorium = mergedBy (fun facts -> facts.Thorium)
                     Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
                     Owners = mergedBy (fun facts -> facts.Owners)
+                    RivalRooms =
+                        worked
+                        |> List.map fst
+                        |> List.filter (World.rivalHeld world)
+                        |> Fresh.setOfSeq
                 }
                 // The declared furniture and the errands' targets go in last,
                 // over the whole assembled projection: a declared id and tile

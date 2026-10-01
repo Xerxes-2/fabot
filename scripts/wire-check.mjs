@@ -750,6 +750,69 @@ wire("positions: what savePositions writes is what loadPositions reads", async (
   assert.equal(loadPositions().size, 1, "and it reads back as the tile it was");
 });
 
+// ---- the room latches (#444, #445) --------------------------------------
+
+// Who owns each rival room, and the homes a tower of ours has stood full in:
+// heap state the bot also keeps here so a global reset does not forget them.
+// The two halves are independent facts, so each degrades on its own, and an
+// off-shape entry costs its own entry and no other.
+
+const roomsThrough = async (value) => {
+  const { loadRoomLatches, saveRoomLatches } = await import(MODULE);
+  globalThis.Memory = rootMemoryWith("rooms", value);
+  saveRoomLatches(loadRoomLatches());
+  return globalThis.Memory.fabot.observe.rooms;
+};
+
+const emptyRooms = { rivals: {}, towered: [] };
+
+wire("rooms: a well-formed leaf round-trips key for key", async () => {
+  const leaf = {
+    rivals: { W17S24: "Trepidimous", W18S26: "Trepidimous" },
+    towered: ["W12S28", "W13S28"],
+  };
+
+  assert.equal(stable(await roomsThrough(leaf)), stable(leaf));
+});
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["a number", 7],
+  ["an array", ["W18S26"]],
+  ["an empty object", {}],
+]) {
+  wire(`rooms: a leaf that is ${name} reads empty and writes empty`, async () => {
+    assert.equal(stable(await roomsThrough(leaf)), stable(emptyRooms));
+  });
+}
+
+wire("rooms: each half degrades alone, and an off-shape entry costs only itself", async () => {
+  assert.equal(
+    stable(await roomsThrough({ rivals: ["W18S26"], towered: ["W12S28"] })),
+    stable({ rivals: {}, towered: ["W12S28"] }),
+    "rivals that are not an object read empty; the towers stand",
+  );
+
+  assert.equal(
+    stable(await roomsThrough({ rivals: { W18S26: "Trepidimous" }, towered: { W12S28: true } })),
+    stable({ rivals: { W18S26: "Trepidimous" }, towered: [] }),
+    "towers that are not an array read empty; the rivals stand",
+  );
+
+  assert.equal(
+    stable(
+      await roomsThrough({
+        rivals: { W1N1: 7, W1N2: null, W1N3: "", W1N4: {}, W18S26: "Trepidimous" },
+        towered: [3, null, "", "W12S28"],
+      }),
+    ),
+    stable({ rivals: { W18S26: "Trepidimous" }, towered: ["W12S28"] }),
+    "an owner or a room that is not a non-empty string is dropped, its neighbours kept",
+  );
+});
+
 // ---- the scoring row ----------------------------------------------------
 
 // `decodeCandidate` and `readNumbers` are reached only through a `scoring`

@@ -189,7 +189,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Stages =
             match
                 room.ControllerId
-                |> Option.bind (fun _ -> Colony.stageOf Tuning.defaults true true (Some level))
+                |> Option.bind (fun _ -> Colony.stageOf Tuning.defaults true true true (Some level))
             with
             | Some stage -> Map.ofList [ name, stage ]
             | None -> Map.empty

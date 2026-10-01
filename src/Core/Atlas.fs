@@ -1483,7 +1483,8 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
 /// budget: `RoomName.routesBy` over `seams`, out to `Tuning.MaxHops`. A room
 /// the projection does not carry has no ring and is joined to nothing, so the
 /// search stays inside the rooms `RoomName.transitBetween` (and a harassment
-/// room's `Via`) put in the world.
+/// room's `Via`) put in the world. A room another player owns is entered by
+/// no chain (`SpatialInfo.RivalRooms`), and left by one.
 /// Memoised per ordered pair, the empty answer included.
 ///
 /// **Which chain is walked is not decided here** (#288): two chains of the
@@ -1497,6 +1498,7 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
         RoomName.routesBy
             (fun here there ->
                 Keepers.enterable there
+                && not (Set.contains there atlas.Spatial.RivalRooms)
                 && Seam.joinedBy
                     (ringWalkable atlas here)
                     (ringWalkable atlas there)
@@ -1529,11 +1531,17 @@ let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep:
 /// cross-room spawn walk. A Seam walk reads its first room and is evicted on
 /// either, over-invalidating being the cheap error. A far field reads exactly
 /// its chain.
-let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
+let evictRooms (atlas: Atlas) (wasRival: Set<string>) (moved: Set<string>) : unit =
     let touches (rooms: string list) = rooms |> List.exists moved.Contains
 
+    // A room a rival has taken since `wasRival` (the tables' own stamp) has
+    // left every chain as surely, and this tick's `routes` no longer names
+    // the chains that crossed it. One they already held moves no chain.
     let departed =
-        moved |> Set.exists (fun room -> not (Map.containsKey room atlas.Spatial.Rooms))
+        moved
+        |> Set.exists (fun room ->
+            not (Map.containsKey room atlas.Spatial.Rooms)
+            || (Set.contains room atlas.Spatial.RivalRooms && not (Set.contains room wasRival)))
 
     retain atlas.Walks (fun (_, _, goalRoom) ->
         if goalRoom = atlas.Home then

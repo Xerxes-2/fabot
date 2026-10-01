@@ -630,6 +630,19 @@ let private roomSeen (roomName: string) : IRoom option =
 
     if isNull (box room) then None else Some room
 
+/// Who owns a seen room's controller when it is another player, by the
+/// engine's username (`RoomSighting.Rival`); None for nobody, us, or no
+/// controller. Asked the way `Control.Owner` is: `my` first, then `owner`.
+let private rivalOf (roomName: string) : string option =
+    roomSeen roomName
+    |> Option.bind (fun room ->
+        let c = room.controller
+
+        if isNull (box c) || isNull (box c.owner) || (not (isNull (box c.my)) && c.my) then
+            None
+        else
+            Some c.owner.username)
+
 /// One room's facts. Terrain comes off the memo whether or not we can see the
 /// room (`Game.map.getRoomTerrain` needs no vision); everything else comes off
 /// `Game.rooms`, and is absent entry by entry until vision returns.
@@ -843,9 +856,12 @@ let ofGame
                     // the ids are read the tick this room goes dark, not the
                     // tick it is seen (#371).
                     Targets = targetsOf facts.TargetKinds
+                    Rival = rivalOf roomName
                 }
                 : RoomSighting))
             |> Fresh.mapOfList
+        // The tower latch is `World.latchTowers`' to fill from last tick.
+        Towered = Set.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

@@ -1185,6 +1185,69 @@ let savePositions (creeps: (string * RoomPos) list) =
         p)
     |> writeObserveLeaf "positions"
 
+/// The two room facts the heap keeps that a global reset must not forget
+/// (`Memory.fabot.observe.rooms`): who owns each rival room as last seen
+/// (`RoomSighting.Rival`, #444), dark rooms included, and the homes a tower
+/// of ours has stood full in (`World.Towered`, #445).
+type RoomLatches =
+    {
+        Rivals: Map<string, string>
+        Towered: Set<string>
+    }
+
+let private nonEmptyString (value: obj) =
+    jsTypeof value = "string" && (unbox<string> value).Length > 0
+
+/// The room latches, each half read alone: a half that is not the shape it
+/// should be reads empty, and an entry that is not a non-empty string costs
+/// itself and no other.
+let loadRoomLatches () : RoomLatches =
+    let empty =
+        {
+            Rivals = Map.empty
+            Towered = Set.empty
+        }
+
+    leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
+        if jsTypeof rooms <> "object" || JS.Constructors.Array.isArray rooms then
+            empty
+        else
+            let rivals = rooms?rivals
+            let towered = rooms?towered
+
+            {
+                Rivals =
+                    if
+                        isNull rivals
+                        || jsTypeof rivals <> "object"
+                        || JS.Constructors.Array.isArray rivals
+                    then
+                        Map.empty
+                    else
+                        objectEntries rivals
+                        |> Array.filter (fun (room, owner) ->
+                            room.Length > 0 && nonEmptyString owner)
+                        |> Array.map (fun (room, owner) -> room, unbox<string> owner)
+                        |> Fresh.mapOfArray
+                Towered =
+                    if isNull towered || not (JS.Constructors.Array.isArray towered) then
+                        Set.empty
+                    else
+                        towered
+                        |> unbox<obj[]>
+                        |> Array.filter nonEmptyString
+                        |> Array.map unbox<string>
+                        |> Fresh.setOfSeq
+            })
+
+/// Write the room latches whole: the rivals as a room-to-owner object, the
+/// towers as a room-name array.
+let saveRoomLatches (latches: RoomLatches) =
+    let raw = createEmpty<obj>
+    raw?rivals <- latches.Rivals |> Map.toSeq |> hashOf box
+    raw?towered <- latches.Towered |> Set.toArray
+    writeObserveLeaf "rooms" raw
+
 /// The prior CPU line, or empty when the leaf is absent or unreadable. A row
 /// that will not decode costs that row alone: the window shortens.
 let loadCpu () : CpuState =

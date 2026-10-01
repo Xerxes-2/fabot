@@ -375,6 +375,17 @@ module Outpost =
             Controller = "6a8caac6dd4872bccd3195ee", { Room = "W11S27"; X = 14; Y = 29 }
         }
 
+    /// The seventh colony's room, declared 2026-10-01 off
+    /// `docs/research/seventh-colony.md`: the one claimable Ultra deposit
+    /// (45,000 T at 46,25), two rooms from the Reactor. The ids and tiles are
+    /// the engine's, read that day.
+    let w17s25: Outpost =
+        {
+            RoomName = "W17S25"
+            Sources = [ "6a8caa7cdd4872bccd318c75", { Room = "W17S25"; X = 18; Y = 19 } ]
+            Controller = "6a8caa7cdd4872bccd318c76", { Room = "W17S25"; X = 15; Y = 36 }
+        }
+
     /// The sixth colony's room, declared 2026-09-28 off
     /// `docs/research/sixth-colony.md`: the first step into the free belt
     /// west of W15S28. The ids and tiles are the engine's, read that day. Kept
@@ -750,8 +761,12 @@ type ColonyStage =
     /// `Tuning.BootstrapLevel`: running its own `decide`, and still being
     /// raised — the **bootstrap window**.
     | Bootstrapping
-    /// At `Tuning.BootstrapLevel` or past it. The stage every rule written for
-    /// the one home this bot grew up in was written at.
+    /// A child at exactly `Tuning.BootstrapLevel` whose own tower has not yet
+    /// stood full (#445): its own rules read it as `Independent`, and its
+    /// mother still lends it her borrowed work, as to a bootstrapping child.
+    | Weaning
+    /// At `Tuning.BootstrapLevel` or past it, and past `Weaning`. The stage
+    /// every rule written for the one home this bot grew up in was written at.
     | Independent
 
 /// One colony: a [[home room]] and the [[outpost]]s worked from it. The unit
@@ -839,7 +854,11 @@ module Colony =
                 Controller = { Room = "W17S26"; X = 8; Y = 21 }
                 Via = []
             }
-            // Where their miner went once W17S26 was held (2026-09-29).
+            // Where their miner went once W17S26 was held (2026-09-29). Kept
+            // while it is W15S28's Claim (2026-10-01): a rival reservation in
+            // the window before the Claim lands would hold the Claim pool shut
+            // (`heldByOther`), and nothing else here clears one. **Out of this
+            // list the day the Claim lands**, with the Claim.
             {
                 RoomName = "W17S25"
                 Enemy = "Trepidimous"
@@ -958,7 +977,11 @@ module Colony =
                 // W17S29, the sixth colony's room, was a Claim here from
                 // 2026-09-28 until it landed at t808,328; out of this list it
                 // is this colony's nursery and not a room it mines (#404).
-                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
+                //
+                // W17S25, the seventh colony's room, is a Claim here from
+                // 2026-10-01 — **to be taken out of this list the day that
+                // Claim lands** (#404).
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28; Outpost.w17s25 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.
@@ -968,24 +991,25 @@ module Colony =
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
             }
-            // The fifth colony (2026-09-24, `docs/research/fifth-colony.md`).
-            // No outposts until its spawn stands, and its ore goes by
-            // terminal: declared before the terminal it needs, on purpose, so
-            // the ore has a path the tick the Layout stands one.
-            {
-                Home = "W11S27"
-                Outposts = []
-                Errands = []
-                Salvage = []
-                Mother = Some "W13S28"
-                Consignee = Some "W15S28"
-            }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
             // Claimed t808,328, and off W15S28's outposts since (#404).
             {
                 Home = "W17S29"
                 Outposts = [ Outpost.w16s29 ]
+                Errands = []
+                Salvage = []
+                Mother = Some "W15S28"
+                Consignee = Some "W15S28"
+            }
+            // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`),
+            // in the slot the fifth, W11S27, gave up once its 22,000 T was
+            // mined out and every structure in it destroyed before the
+            // unclaim (W11S29's standing structures had cost a sweep a tick).
+            // The one claimable Ultra deposit, next door to Trepidimous.
+            {
+                Home = "W17S25"
+                Outposts = []
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"
@@ -1053,16 +1077,21 @@ module Colony =
             |> Option.toList
         | living -> living
 
-    /// One colony's [[stage]] this tick, off the three facts that decide it.
+    /// One colony's [[stage]] this tick, off the four facts that decide it.
     /// **The one place `Tuning.BootstrapLevel` is read**: no rule compares a
     /// controller level of its own. `None` for a room that is not a colony at
     /// all — a declared home nobody has claimed yet is a **candidate colony**,
     /// whose one rule is the Claim pool — and every reader's answer for `None`
-    /// is the one it already gives that colony.
+    /// is the one it already gives that colony. `towerStood` is whether a
+    /// tower of its own has stood full (`World.stages` latches it, #445), and
+    /// is asked only at the line itself: a controller past it is
+    /// `Independent` whatever its towers, so a raid or a reset never hands a
+    /// grown colony back to its mother.
     let stageOf
         (tuning: Tuning)
         (owned: bool)
         (spawnStanding: bool)
+        (towerStood: bool)
         (level: int option)
         : ColonyStage option =
         if not owned then
@@ -1072,10 +1101,12 @@ module Colony =
         else
             level
             |> Option.map (fun level ->
-                if level >= tuning.BootstrapLevel then
-                    Independent
+                if level < tuning.BootstrapLevel then
+                    Bootstrapping
+                elif level = tuning.BootstrapLevel && not towerStood then
+                    Weaning
                 else
-                    Bootstrapping)
+                    Independent)
 
     /// The declared children of this colony a further rule picks out: a child
     /// of mine, not an outpost, not me. A room in both lists is the outpost
@@ -1095,7 +1126,7 @@ module Colony =
     /// children that are not yet `Independent`, which the mother projects and
     /// works two Tasks in — the child's Upgrade and its Build. The stages are
     /// handed in off the world (`World.stages`), because this is the rule that
-    /// *decides* the scan set. **Both stages before independence**: a child
+    /// *decides* the scan set. **Every stage before independence**: a child
     /// with no spawn standing is a [[nursery]] again, and the mother is the
     /// only colony that can put the spawn site back up. A room with no stage
     /// is not bootstrapped; a child that stops being ours is `reclaiming`'s.

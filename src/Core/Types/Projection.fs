@@ -354,6 +354,9 @@ type SpatialInfo =
         /// nor any other sweep this bot makes, and the sweep that finds it
         /// finds nothing else.
         Owners: Map<string, Ownership>
+        /// The rooms of this projection another player owns
+        /// (`World.rivalHeld`): `Atlas.routes` enters none of them (#444).
+        RivalRooms: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -370,6 +373,7 @@ module SpatialInfo =
             Thorium = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
+            RivalRooms = Set.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the

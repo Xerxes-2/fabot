@@ -422,6 +422,10 @@ type Tuning =
         /// `Independent` on: **the one place this number is read**. Three,
         /// the level a colony can defend and feed itself at.
         BootstrapLevel: int
+        /// The energy one tower of a child's own must have stood holding
+        /// before `Colony.stageOf` lets it out of `Weaning` (#445): a
+        /// full one, so the mother raises it until it can shoot back.
+        IndependenceTowerEnergy: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
         /// search stops at. Six since #437, for W15S28's walk to W18S27. There
@@ -524,6 +528,7 @@ module Tuning =
             HorizonLookahead = 1
             OutpostBuilders = 2
             BootstrapLevel = 3
+            IndependenceTowerEnergy = Engine.towerCapacity
             MaxHops = 6
             TrunkSwampWeight = 3
             StandDownFallback = 2500
