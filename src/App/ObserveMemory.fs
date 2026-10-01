@@ -1148,6 +1148,28 @@ let private decodeCpuFloods (raw: obj) : (string * FloodCounts) list =
                 None)
         |> List.ofSeq
 
+/// What moved each replanning colony's signature (#463): `{ home: [part] }`.
+/// Absent or malformed is the empty list; a colony whose entry is not an
+/// array of strings is left out.
+let private decodeCpuMoved (raw: obj) : (string * string list) list =
+    let split = raw?moved
+
+    if jsTypeof split <> "object" || isNull split then
+        []
+    else
+        JS.Constructors.Object.keys split
+        |> Seq.choose (fun name ->
+            let parts = split?(name)
+
+            if
+                JS.Constructors.Array.isArray parts
+                && unbox<obj[]> parts |> Array.forall (fun part -> jsTypeof part = "string")
+            then
+                Some(name, unbox<string[]> parts |> List.ofArray)
+            else
+                None)
+        |> List.ofSeq
+
 /// The phase split off one CPU row, or `None` when the row carries none. All
 /// or none: a half-decoded group would price a phase against a boundary that
 /// was never read, while the row's `ms` still counts.
@@ -1304,6 +1326,8 @@ let loadCpu () : CpuState =
                                         Some(unbox<string> raw?forced)
                                     else
                                         None
+                                // Absent on every row but a replan's.
+                                Moved = decodeCpuMoved raw
                                 // A bare number, decoded on its own: a legacy
                                 // row reads 0.0, told apart from a headless
                                 // sweep by whether `rooms` is there at all.
@@ -1418,6 +1442,15 @@ let private encodeCpuSample (sample: CpuSample) : obj =
     match sample.Forced with
     | Some reason -> o?forced <- reason
     | None -> ()
+
+    // Written only on a replan's row, as the floods are: one array per home.
+    if not (List.isEmpty sample.Moved) then
+        let split = createEmpty<obj>
+
+        for home, parts in sample.Moved do
+            split?(home) <- Array.ofList parts
+
+        o?moved <- split
 
     o
 

@@ -126,17 +126,57 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             $"{home}|{level}|{stage}|{held}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
         |> Fresh.mapOfList
 
-    // The rooms joined on a newline, which no field can carry: the room set
-    // itself is signed by the join.
+    // The head and then the rooms, one to a line, which no field can carry:
+    // the room set itself is signed by the join, and `signatureMoves` reads
+    // the parts back.
     let flat =
         rooms
         |> Map.toList
-        |> List.map (fun (room, signature) -> $"{room}={signature}")
-        |> String.concat "\n"
+        |> List.map (fun (room, signature) -> $"\n{room}={signature}")
+        |> String.concat ""
 
-    rooms, $"{home}|{level}|{stages}|{flat}"
+    rooms, $"{home}|{level}|{stages}{flat}"
 
 let censusSignature (view: ColonyView) : string = snd (signaturesOf view)
+
+/// A flat signature's parts by name: the head's three, then each room's.
+let private signatureParts (signature: string) : Map<string, string> =
+    match signature.Split('\n') |> List.ofArray with
+    | head :: rooms ->
+        let headParts =
+            match head.Split('|') with
+            | [| home; level; stages |] -> [ "home", home; "level", level; "stages", stages ]
+            | _ -> [ "head", head ]
+
+        let roomParts =
+            rooms
+            |> List.map (fun line ->
+                let at = line.IndexOf '='
+
+                if at < 0 then
+                    line, ""
+                else
+                    line.Substring(0, at), line.Substring(at + 1))
+
+        Map.ofList (headParts @ roomParts)
+    | [] -> Map.empty
+
+/// What moved between two flat signatures (#463): the head's parts by name
+/// (`home`, `level`, `stages`), then the rooms, a room on one side only
+/// included. Read on a replan alone, so its cost is the replan's.
+let signatureMoves (before: string) (after: string) : string list =
+    let was = signatureParts before
+    let is = signatureParts after
+
+    Set.union (Map.keys was |> Set.ofSeq) (Map.keys is |> Set.ofSeq)
+    |> Set.toList
+    |> List.filter (fun part -> Map.tryFind part was <> Map.tryFind part is)
+    |> List.sortBy (fun part ->
+        match part with
+        | "home" -> 0
+        | "level" -> 1
+        | "stages" -> 2
+        | _ -> 3)
 
 /// The per-room half of the census signature (#388): what
 /// `PlanMemo.RoomSignatures` carries and `Atlas.evictRooms` is told the

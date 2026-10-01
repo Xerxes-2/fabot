@@ -1068,6 +1068,11 @@ type CpuReadings =
         /// `LightTick.tag` spells the reason; None for a light tick, and for a
         /// full tick the cadence made full (after a light tick, or a reset).
         Forced: string option
+        /// Each colony that re-planned this tick and what moved its signature
+        /// (#463, `signatureMoves`): rooms by name, the head's parts as
+        /// `home`, `level` or `stages`, and `reset` for a plan paid with no
+        /// prior memo.
+        Moved: (string * string list) list
     }
 
 /// One tick's cost, split at the loop's phase boundaries, and the count of
@@ -1124,6 +1129,8 @@ type CpuSample =
         Light: bool
         /// The reason a would-be light tick ran full (`CpuReadings.Forced`).
         Forced: string option
+        /// `CpuReadings.Moved`; empty on every row but a replan's.
+        Moved: (string * string list) list
     }
 
 /// One span of ticks, summarised: the coarse record beside the fine one,
@@ -1343,6 +1350,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     ExternalMb = external
                     Light = readings.Light
                     Forced = readings.Forced
+                    Moved = readings.Moved
                 }
             ]
             |> trim cap

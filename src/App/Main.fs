@@ -322,6 +322,7 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
             ColonyProjects = []
             Light = true
             Forced = None
+            Moved = []
         }
 
 /// The global harassment list, priced once: the declarations and the ranger
@@ -530,18 +531,29 @@ let private fullTick
         |> List.tryItem turn
         |> Option.map (fun (colony: Colony, _) -> colony.Home)
 
-    let replans =
+    // Each replanning colony with what moved its signature (#463), read only
+    // on the replan: `signatureMoves` parses both strings.
+    let moved =
         decisions
-        |> List.filter (fun (colony, _, decision, _, _) ->
+        |> List.choose (fun (colony, _, decision, _, _) ->
             match Map.tryFind colony.Home planMemos with
             // A deferred plan keeps the stale signature on purpose, so it
             // compares equal and is not a replan.
-            | Some prior -> prior.Signature <> decision.Memo.Signature
+            | Some prior when prior.Signature <> decision.Memo.Signature ->
+                // `PlanMemo.deferred`'s empty signature: the first plan since
+                // a reset, which moved everything at once.
+                if prior.Signature = "" then
+                    Some(colony.Home, [ "reset" ])
+                else
+                    Some(colony.Home, signatureMoves prior.Signature decision.Memo.Signature)
+            | Some _ -> None
             // No prior at all is a global reset, and only the colony whose
             // turn it was paid; the rest were handed `PlanMemo.deferred`.
             // Counting all four here reported the same four re-plans twice.
-            | None -> Some colony.Home = payingHome)
-        |> List.length
+            | None when Some colony.Home = payingHome -> Some(colony.Home, [ "reset" ])
+            | None -> None)
+
+    let replans = List.length moved
 
     planMemos <-
         decisions
@@ -735,6 +747,7 @@ let private fullTick
             ColonyProjects = List.rev projectedAt
             Light = false
             Forced = forced |> Option.map LightTick.tag
+            Moved = moved
         }
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.

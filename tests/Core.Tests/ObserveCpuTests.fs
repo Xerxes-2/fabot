@@ -40,6 +40,7 @@ let private costing (ms: float) =
         MemoRows = 0
         Light = false
         Forced = None
+        Moved = []
     }
 
 /// The same reading with a bucket and a replan count of its own, which is
@@ -259,6 +260,7 @@ let cpuTests =
                             MemoRows = 0
                             Light = false
                             Forced = None
+                            Moved = []
                         }
 
                 Expect.equal
@@ -451,6 +453,7 @@ let cpuTests =
                             MemoRows = 0
                             Light = false
                             Forced = None
+                            Moved = []
                             RoomSnapshots = [ "W15S28", 9.0; "W15S27", 12.5; "W15S26", 18.0 ]
                         }
 
@@ -510,6 +513,7 @@ let cpuTests =
                             MemoRows = 0
                             Light = false
                             Forced = None
+                            Moved = []
                         }
 
                 Expect.equal
@@ -564,6 +568,7 @@ let cpuTests =
                             MemoRows = 0
                             Light = false
                             Forced = None
+                            Moved = []
                         }
 
                 Expect.equal
@@ -620,6 +625,7 @@ let cpuTests =
                                     MemoRows = 0
                                     Light = false
                                     Forced = None
+                                    Moved = []
                                 }
                             ]
                     }

@@ -2232,6 +2232,25 @@ if (command === "console") {
           "a colony that threw its plan memo away re-planned its whole layout in that tick (ADR 0033)",
       );
 
+      // What moved each replan's signature (#463): per colony, the rooms by
+      // name and the head's parts (`home`, `level`, `stages`), or `reset`.
+      // One replan that moved two rooms counts once against each.
+      const moves = new Map();
+      for (const row of split) {
+        if (!row.moved || typeof row.moved !== "object") continue;
+        for (const [home, parts] of Object.entries(row.moved)) {
+          if (!Array.isArray(parts)) continue;
+          for (const part of parts) {
+            const key = `${home} ${part}`;
+            moves.set(key, (moves.get(key) ?? 0) + 1);
+          }
+        }
+      }
+      if (moves.size > 0) {
+        const ranked = [...moves].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        console.log(`  moved by: ${ranked.map(([key, n]) => `${key} ×${n}`).join(", ")}`);
+      }
+
       // Which colony the `decide` phase went into (#370). Printed per colony
       // and never summed into one line, because the whole reason the reading
       // exists is that four colonies are four shapes and a profile has to be

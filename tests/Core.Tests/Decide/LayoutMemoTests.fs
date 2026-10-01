@@ -630,6 +630,32 @@ let censusSignatureTests =
                     (stepGridOf "W1N2" colony)
                     "the premise: a room the projection carries no layer for is all impassable (ADR 0004), so neither grid compared above is an empty one passing whatever the census did"
             }
+
+            // What a replan is charged to (#463): the part of the signature
+            // that moved, read off the two flat signatures alone.
+            test "a signature change in one room names that room alone" {
+                let held = borderedColony (Some(reservedRoom true 4000))
+                let dark = borderedColony None
+
+                Expect.equal
+                    (signatureMoves (censusSignature held) (censusSignature dark))
+                    [ "W1N2" ]
+                    "the outpost's control moved, and nothing else did"
+
+                Expect.equal
+                    (signatureMoves (censusSignature held) (censusSignature held))
+                    []
+                    "an unchanged signature names nothing"
+            }
+
+            test "a level change names the level part" {
+                Expect.contains
+                    (signatureMoves
+                        (censusSignature (trunkColony 2))
+                        (censusSignature (trunkColony 3)))
+                    "level"
+                    "the head's level is named by its part, not by the rooms it reaches"
+            }
         ]
 
 [<Tests>]

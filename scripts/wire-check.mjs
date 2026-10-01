@@ -265,6 +265,43 @@ wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one
   }
 });
 
+wire("cpu: a replan's row round-trips what moved each colony's signature, and an absent or off-shape one reads as none", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
+  const replan = { ...full, t: 12, replans: 2, moved: { W15S28: ["W19S26", "level"], W17S29: ["reset"] } };
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, replan], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.ticks),
+    stable([full, replan]),
+    "the replan row keeps its moved parts per colony, the quiet row stays without the key",
+  );
+
+  for (const moved of [null, 3, "W19S26", [], {}]) {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...full, moved }], spans: [] });
+    saveCpu(loadCpu());
+    assert.equal(
+      stable(globalThis.Memory.fabot.observe.cpu.ticks),
+      stable([full]),
+      `a moved of ${JSON.stringify(moved)} reads as none, and the row survives`,
+    );
+  }
+
+  // A colony whose parts are not all strings is left out; its neighbour stays.
+  globalThis.Memory = rootMemoryWith("cpu", {
+    ticks: [{ ...full, moved: { W15S28: ["W19S26"], W17S29: [3] } }],
+    spans: [],
+  });
+  saveCpu(loadCpu());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.ticks),
+    stable([{ ...full, moved: { W15S28: ["W19S26"] } }]),
+    "the malformed colony is dropped, the well-formed one kept",
+  );
+});
+
 wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", async () => {
   const { loadCpu, saveCpu } = await import(MODULE);
 
