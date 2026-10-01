@@ -320,12 +320,12 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
             Forced = None
         }
 
-/// The global harassment list, priced once: the declarations and the bank a
-/// colony needs to cast one.
+/// The global harassment list, priced once: the declarations and the ranger
+/// block a room's floor is counted in.
 let private harassment: Harassment =
     {
         Rooms = Colony.harass
-        Floor = Bodies.harassFloor Tuning.defaults
+        BlockCost = Bodies.rangerBlockCost
     }
 
 /// The full tick: the World, every colony's view and decision, the observe
@@ -350,11 +350,7 @@ let private fullTick
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch and exit watch laid under it.
     let world =
-        World.ofGame
-            Tuning.defaults.MaxHops
-            Colony.declared
-            harassment
-            (ObserveMemory.loadPositions ())
+        World.ofGame Tuning.defaults Colony.declared harassment (ObserveMemory.loadPositions ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
         |> World.watchExits Tuning.defaults exitWatches

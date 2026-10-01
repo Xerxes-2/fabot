@@ -147,10 +147,9 @@ let bodyCost body =
         | BodyPart.Claim -> 600
         | Tough -> 10)
 
-/// The bank capacity that buys the harassment floor, `Tuning.HarassBlocks`
-/// whole ranger blocks: below it a colony casts no harassment room.
-let harassFloor (tuning: Tuning) : int =
-    tuning.HarassBlocks * bodyCost rangerPattern.Block
+/// The price of one ranger block, which a harassment room's floor is counted
+/// in (`Harassment.BlockCost`).
+let rangerBlockCost: int = bodyCost rangerPattern.Block
 
 /// Whether a counted body is a standing body: fewer than one Carry per
 /// `StandingCarryPerWork` Work. A fact about a body rather than a row — the

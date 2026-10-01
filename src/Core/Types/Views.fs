@@ -128,6 +128,10 @@ type ColonyView =
         /// the rooms the [[raid log]] reads as ours to attack, never as a
         /// raid on us.
         HarassCast: Set<string>
+        /// The ranger blocks each room of `Harass` was floored at
+        /// (`HarassCasting.Floors`), its ranger's least body (#457). A room
+        /// missing here reads the full floor, `Tuning.HarassBlocks`.
+        HarassFloors: Map<string, int>
         /// The home room of the colony this one **ships its banked Thorium to**
         /// (`Colony.Consignee`, #349), a declaration and not a sighting: the
         /// far end is outside every scan set this colony holds. A rule may
@@ -759,6 +763,12 @@ module ColonyView =
                        World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
             Harass = scan.Harass
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
+            HarassFloors =
+                scan.Harass
+                |> List.choose (fun h ->
+                    Map.tryFind h.RoomName casting.Floors
+                    |> Option.map (fun blocks -> h.RoomName, blocks))
+                |> Map.ofList
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee

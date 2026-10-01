@@ -11,7 +11,20 @@ open Fabot.Core.Tests.Decide
 open Fabot.Core.Tests.RoomInvariantFixtures
 
 /// The captured rooms another player owned at the capture's tick.
-let private capturedRivals = Map.ofList [ "W18S26", "Trepidimous" ]
+let private capturedRivals =
+    Map.ofList [ "W18S26", "Trepidimous"; "W19S29", "giaco" ]
+
+/// A capture is furniture and carries no owner, so who owned each captured
+/// room at its tick is written here, as the sightings the World would hold.
+let private rivalSightings (rooms: string list) =
+    capturedRivals
+    |> Map.filter (fun room _ -> List.contains room rooms)
+    |> Map.map (fun room owner ->
+        {
+            Tick = (load room).Tick
+            Targets = lazy Set.empty
+            Rival = Some owner
+        })
 
 /// `World.linked` itself over a World built from the real captures of the
 /// given rooms, so no predicate of it is copied here to move in lockstep
@@ -36,17 +49,7 @@ let private shippedLinked (rooms: string list) =
                             }
                     })
                 |> Map.ofList
-            // A capture is furniture and carries no owner, so who
-            // owned each captured room at its tick is written here.
-            Sightings =
-                capturedRivals
-                |> Map.filter (fun room _ -> List.contains room rooms)
-                |> Map.map (fun room owner ->
-                    {
-                        Tick = (load room).Tick
-                        Targets = lazy Set.empty
-                        Rival = Some owner
-                    })
+            Sightings = rivalSightings rooms
         }
 
     World.linked (Tuning.keeperMargin Tuning.defaults) world
@@ -198,6 +201,9 @@ let outpostDeclarationTests =
                         // columns east, has no chain to it inside the budget.
                         "W18S27", [ "W15S28"; "W17S29" ]
                         "W17S26", [ "W13S28"; "W15S28" ]
+                        // W15S28's walk dips south round the wall that
+                        // W18S27's does, eight crossings, past the budget.
+                        "W19S26", [ "W17S29" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
@@ -229,19 +235,39 @@ let outpostDeclarationTests =
                     (Some 6)
                     "and six from W13S28"
 
-                // The live banks (2026-09-29); W12S28 and W11S27 are past the
-                // budget of both rooms.
-                let banks w13s28 =
+                // Neither W18S26 (Trepidimous) nor W19S29 (giaco) is entered.
+                Expect.equal
+                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W17S29" "W19S26")
+                    [
+                        [ "W17S29"; "W17S28"; "W17S27"; "W18S27"; "W19S27"; "W19S26" ]
+                        [ "W17S29"; "W17S28"; "W18S28"; "W18S27"; "W19S27"; "W19S26" ]
+                        [ "W17S29"; "W17S28"; "W18S28"; "W19S28"; "W19S27"; "W19S26" ]
+                        [ "W17S29"; "W18S29"; "W18S28"; "W18S27"; "W19S27"; "W19S26" ]
+                        [ "W17S29"; "W18S29"; "W18S28"; "W19S28"; "W19S27"; "W19S26" ]
+                    ]
+                    "W19S26 is five crossings from W17S29, every chain into it by W19S27"
+
+                Expect.equal
+                    (Declaration.hops linked 10 "W15S28" "W19S26")
+                    (Some 8)
+                    "and eight from W15S28, two past the budget"
+
+                // The live banks (2026-09-29; W17S29's is the call's); W12S28
+                // and W11S27 are past the budget of every room. The floor is
+                // 2,100, three ranger blocks, and 1,400 for W19S26, declared
+                // at two (#457).
+                let banks w13s28 w17s29 =
                     [
                         "W12S28", 5_600
                         "W13S28", w13s28
                         "W15S28", 5_600
                         "W11S27", 1_800
-                        "W17S29", 1_300
+                        "W17S29", w17s29
                     ]
 
-                let casting w13s28 =
-                    let banks = banks w13s28
+                // No sighting of W19S26: nothing of ours has ever seen it.
+                let casting w13s28 w17s29 =
+                    let banks = banks w13s28 w17s29
 
                     let world =
                         { World.empty with
@@ -285,29 +311,52 @@ let outpostDeclarationTests =
                                             Energy = { Available = bank; Capacity = bank }
                                         })
                                 |> Map.ofList
+                            Sightings = rivalSightings rooms
                         }
 
-                    (World.harassCasters
+                    World.harassCasters
                         (JoinTable())
                         Tuning.defaults
                         Colony.declared
                         {
                             Rooms = Colony.harass
-                            Floor = Bodies.harassFloor Tuning.defaults
+                            BlockCost = Bodies.rangerBlockCost
                         }
-                        world)
-                        .Casters
+                        world
+
+                let casters w13s28 w17s29 =
+                    (casting w13s28 w17s29).Casters
                     |> List.map (fun (h, caster) -> h.RoomName, caster)
 
                 Expect.equal
-                    (casting 5_600)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
-                    "W15S28 casts both: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W12S26 has no spawn"
+                    (casters 5_600 1_800)
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
+                    "W15S28 casts the first two, which W17S29 at RCL5 (2026-10-02) cannot buy the full floor of; W17S29 casts W19S26 unseen, which W15S28 is past the budget of"
 
                 Expect.equal
-                    (casting 5_650)
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
+                    (casting 5_600 1_800).Floors
+                    (Map.ofList
+                        [
+                            "W18S27", Tuning.defaults.HarassBlocks
+                            "W17S26", Tuning.defaults.HarassBlocks
+                            "W19S26", 2
+                        ])
+                    "W18S27 and W17S26 keep the full floor; W19S26 is floored at its declared two blocks"
+
+                Expect.equal
+                    (casters 5_650 1_800)
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
                     "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
+
+                Expect.equal
+                    (casters 5_600 1_300)
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", None ]
+                    "W17S29's RCL4 bank buys no floor, and W19S26 is refused"
+
+                Expect.equal
+                    (casters 5_600 2_300)
+                    [ "W18S27", Some "W17S29"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
+                    "W17S29's RCL6 bank buys the full floor: it casts W19S26 and the nearer W18S27, and never W17S26 behind W18S26"
 
                 for h in Colony.harass do
                     Expect.contains

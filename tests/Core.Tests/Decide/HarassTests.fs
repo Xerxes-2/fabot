@@ -30,6 +30,7 @@ let private declarationOf room =
         Stand = RoomPos.at room standTile
         Controller = RoomPos.at room controllerTile
         Via = []
+        Blocks = None
     }
 
 let private declaration = declarationOf harassRoom
@@ -513,6 +514,30 @@ let harassRowTests =
                     rangedParts
                     [ 2 * Tuning.defaults.HarassBlocks ]
                     "cast at the harassment floor, three blocks, not the errand garrison's seven"
+            }
+
+            test
+                "a room declared at two blocks casts its ranger at the floor it was cast at, two blocks" {
+                // The room was cast at its declared two blocks (#457); the
+                // bank buys eight, so two is the floor's answer and not the bank's.
+                let colony =
+                    { (bareHome |> harassing) with
+                        Bank = bank 5600 5600
+                        Creeps = [ creepWith "h" 0 100 [ Carry; Carry; Move ] ]
+                        HarassFloors = Map.ofList [ harassRoom, 2 ]
+                        Tuning =
+                            { Tuning.defaults with
+                                MinWorkforce = 0
+                            }
+                    }
+
+                let rangedParts =
+                    spawnIntents (decideOn colony).Intents
+                    |> List.map (fun (_, body, _) ->
+                        body |> List.filter ((=) RangedAttack) |> List.length)
+                    |> List.filter (fun parts -> parts > 0)
+
+                Expect.equal rangedParts [ 2 * 2 ] "one ranger of two blocks"
             }
         ]
 

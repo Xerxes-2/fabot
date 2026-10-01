@@ -368,9 +368,10 @@ type Tuning =
         /// the fight, so the second body has to be there already.
         RangerResidents: int
         /// The ranger blocks a [[harassment room]] is worked with at least
-        /// (#432), and so what a caster's bank must buy (`Bodies.harassFloor`):
-        /// three outheal and outshoot the enemy's `3M1RA1H` escort and kill an
-        /// unarmed miner in about seventeen ticks.
+        /// (#432) where its declaration names none (`Harass.blocks`), and so
+        /// what a caster's bank must buy: three outheal and outshoot the
+        /// enemy's `3M1RA1H` escort and kill an unarmed miner in about
+        /// seventeen ticks.
         HarassBlocks: int
         /// How long a [[harassment room]] stays shut after a squad the ranger
         /// cannot beat was last seen there (#441).

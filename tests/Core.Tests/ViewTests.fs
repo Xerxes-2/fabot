@@ -3416,6 +3416,7 @@ let private harassDeclared: Harass list =
             Stand = RoomPos.at harassRoom { X = 5; Y = 5 }
             Controller = RoomPos.at harassRoom { X = 40; Y = 40 }
             Via = []
+            Blocks = None
         }
     ]
 
@@ -3509,7 +3510,7 @@ let private harassViewOver
     let harass: Harassment =
         {
             Rooms = rooms
-            Floor = Bodies.harassFloor Tuning.defaults
+            BlockCost = Bodies.rangerBlockCost
         }
 
     let casting = World.harassCasters joins Tuning.defaults declared harass world
@@ -3587,10 +3588,10 @@ let harassViewTests =
                 let harass: Harassment =
                     {
                         Rooms = harassDeclared
-                        Floor = Bodies.harassFloor Tuning.defaults
+                        BlockCost = Bodies.rangerBlockCost
                     }
 
-                let floorBanks = Bodies.harassFloor Tuning.defaults
+                let floorBanks = Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost
 
                 for motherBank, childBank in [ 2400, 300; 2400, 2700; floorBanks - 1, 300 ] do
                     let world = harassWorldAt (reservedFor enemy) motherBank childBank
@@ -3616,7 +3617,7 @@ let harassViewTests =
                 let harass: Harassment =
                     {
                         Rooms = harassDeclared
-                        Floor = Bodies.harassFloor Tuning.defaults
+                        BlockCost = Bodies.rangerBlockCost
                     }
 
                 let casting =
@@ -3663,9 +3664,10 @@ let harassViewTests =
                                     Stand = RoomPos.at near { X = 5; Y = 5 }
                                     Controller = RoomPos.at near { X = 40; Y = 40 }
                                     Via = []
+                                    Blocks = None
                                 }
                             ]
-                        Floor = Bodies.harassFloor Tuning.defaults
+                        BlockCost = Bodies.rangerBlockCost
                     }
 
                 let casterAt motherBank childBank thirdBank =
@@ -3706,7 +3708,7 @@ let harassViewTests =
 
             test
                 "a colony whose bank cannot buy the harassment floor is no caster, however near: the room is refused until one can" {
-                let floorBanks = Bodies.harassFloor Tuning.defaults
+                let floorBanks = Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost
                 // The mother reaches the room and holds the larger bank, one
                 // energy short of three ranger blocks.
                 let poor = harassWorldAt (reservedFor enemy) (floorBanks - 1) 300
@@ -3935,6 +3937,7 @@ let harassViewTests =
                             Stand = RoomPos.at "W9N9" { X = 5; Y = 5 }
                             Controller = RoomPos.at "W9N9" { X = 40; Y = 40 }
                             Via = []
+                            Blocks = None
                         }
                     ]
 
@@ -3988,6 +3991,80 @@ let harassViewTests =
                 Expect.isTrue
                     (Colony.harass |> List.forall (fun h -> not (Colony.isAlly h.Enemy)))
                     "and no ally is anybody's enemy"
+            }
+        ]
+
+/// The harassment room declared at these ranger blocks (None: the default
+/// floor), as no colony of ours has ever seen it (#457).
+let private declaredAt (blocks: int option) : Harass list =
+    harassDeclared |> List.map (fun h -> { h with Blocks = blocks })
+
+/// The tick's casting of the room declared at these blocks, with the mother's
+/// bank at this capacity and the child's below every floor.
+let private declaredCasting blocks motherBank =
+    let harass: Harassment =
+        {
+            Rooms = declaredAt blocks
+            BlockCost = Bodies.rangerBlockCost
+        }
+
+    let casting =
+        World.harassCasters
+            (JoinTable())
+            Tuning.defaults
+            declared
+            harass
+            (harassWorldAt (reservedFor enemy) motherBank 300)
+
+    casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster), casting.Floors
+
+[<Tests>]
+let harassDeclaredFloorTests =
+    testList
+        "a harassment room is floored at the ranger blocks it is declared at"
+        [
+            test "a room declared at two blocks is cast by a 1,800 bank with no sighting of it" {
+                let casters, floors = declaredCasting (Some 2) 1800
+
+                Expect.isFalse
+                    (Map.containsKey
+                        harassRoom
+                        (harassWorldAt (reservedFor enemy) 1800 300).Sightings)
+                    "the premise: the room was never seen"
+
+                Expect.equal
+                    casters
+                    [ harassRoom, Some mother ]
+                    "the mother's 1,800 buys two blocks"
+
+                Expect.equal floors (Map.ofList [ harassRoom, 2 ]) "and the room is floored at two"
+
+                Expect.equal
+                    (harassView
+                        (declaredAt (Some 2))
+                        (harassWorldAt (reservedFor enemy) 1800 300)
+                        mother)
+                        .HarassFloors
+                    (Map.ofList [ harassRoom, 2 ])
+                    "which the caster's view carries to its ranger row"
+            }
+
+            test "a room declared with no blocks keeps the default floor" {
+                let casters, floors = declaredCasting None 1800
+
+                Expect.equal casters [ harassRoom, None ] "refused at 1,800"
+
+                Expect.equal
+                    floors
+                    (Map.ofList [ harassRoom, Tuning.defaults.HarassBlocks ])
+                    "floored at the default blocks"
+
+                Expect.equal
+                    (fst (
+                        declaredCasting None (Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost)
+                    ))
+                    [ harassRoom, Some mother ]
+                    "and cast the tick the bank buys them"
             }
         ]
 

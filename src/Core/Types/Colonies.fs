@@ -643,10 +643,19 @@ type Harass =
         /// the chain search can find the walk. Empty where no detour is
         /// needed.
         Via: string list
+        /// The ranger blocks a human floors the room at, where what stands
+        /// there is known to be lighter than the escort `Tuning.HarassBlocks`
+        /// is sized for (#457); None for that default.
+        Blocks: int option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Harass =
+    /// The ranger blocks the room is floored at: what its caster's bank must
+    /// buy, and what its ranger is cast at no fewer than.
+    let blocks (tuning: Tuning) (harass: Harass) : int =
+        harass.Blocks |> Option.defaultValue tuning.HarassBlocks
+
     /// The declarations worked this tick: the list, less every room a
     /// [[stand-down]] is withholding (`Outpost.worked`'s twin).
     let worked (shut: Set<string>) (harass: Harass list) : Harass list =
@@ -660,16 +669,23 @@ module Harass =
         |> List.collect (fun h -> h.RoomName :: h.Via @ RoomName.transitBetween home h.RoomName)
 
 /// The global harassment list as one tick reads it: the declarations, and
-/// the bank capacity a colony needs to cast any of them at all — the
-/// harassment floor's price (`Bodies.harassFloor`), handed in because the
-/// ranger's block is `decide`'s to know.
-type Harassment = { Rooms: Harass list; Floor: int }
+/// the price of one ranger block (`Bodies.rangerBlockCost`), handed in
+/// because the ranger's block is `decide`'s to know. A room's floor is that
+/// price times its blocks (`Harass.blocks`).
+type Harassment = { Rooms: Harass list; BlockCost: int }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Harassment =
     /// No harassment room declared: the shape every caller outside the
     /// shipped tick asks in.
-    let none: Harassment = { Rooms = []; Floor = 0 }
+    let none: Harassment = { Rooms = []; BlockCost = 0 }
+
+    /// The least bank that casts any harassment room: the lowest floor
+    /// declared. With none declared, no bank does.
+    let leastFloor (tuning: Tuning) (harass: Harassment) : int =
+        match harass.Rooms with
+        | [] -> System.Int32.MaxValue
+        | rooms -> (rooms |> List.map (Harass.blocks tuning) |> List.min) * harass.BlockCost
 
 /// The global harassment list as one tick decided it (`World.harassCasters`):
 /// each room beside the colony that casts it, None while no colony can.
@@ -678,12 +694,16 @@ module Harassment =
 type HarassCasting =
     {
         Casters: (Harass * string option) list
+        /// The ranger blocks each room was floored at this tick, by room
+        /// name: what its caster's bank had to buy, and what its ranger is
+        /// cast at no fewer than (#457).
+        Floors: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module HarassCasting =
     /// No harassment room declared.
-    let none: HarassCasting = { Casters = [] }
+    let none: HarassCasting = { Casters = []; Floors = Map.empty }
 
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
@@ -853,6 +873,7 @@ module Colony =
                 Controller = { Room = "W18S27"; X = 25; Y = 32 }
                 // W15S28's walk there dips south round a wall (#437).
                 Via = [ "W15S29"; "W16S29" ]
+                Blocks = None
             }
             {
                 RoomName = "W17S26"
@@ -860,6 +881,21 @@ module Colony =
                 Stand = { Room = "W17S26"; X = 28; Y = 10 }
                 Controller = { Room = "W17S26"; X = 8; Y = 21 }
                 Via = []
+                Blocks = None
+            }
+            {
+                // Reserved by Trepidimous on 2026-10-02 (t885,888), one
+                // miner on (23,36) and haulers carrying east to W18S26; the
+                // west source (4,46) is unworked yet.
+                RoomName = "W19S26"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W19S26"; X = 23; Y = 36 }
+                Controller = { Room = "W19S26"; X = 33; Y = 17 }
+                Via = []
+                // No towers, no armed creeps, one miner and three haulers at
+                // t885,888 (2026-10-02): two blocks kill an unarmed miner,
+                // and W17S29's RCL5 bank buys them (#457).
+                Blocks = Some 2
             }
         ]
 

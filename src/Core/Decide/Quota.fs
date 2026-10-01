@@ -373,11 +373,13 @@ let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int
 /// The ranger blocks one errand room wants (#411): the smallest body that wins
 /// its raid alone, never below `Tuning.RangerResidentBlocks` — the resident a
 /// raid meets first — and the largest body where none wins. A harassment
-/// room's floor is `Tuning.HarassBlocks` (#432).
+/// room's floor is the one it was cast at (`ColonyView.HarassFloors`, #432,
+/// #457).
 let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
     let floor =
         if Set.contains room (harassRooms view) then
-            view.Tuning.HarassBlocks
+            Map.tryFind room view.HarassFloors
+            |> Option.defaultValue view.Tuning.HarassBlocks
         else
             view.Tuning.RangerResidentBlocks
 

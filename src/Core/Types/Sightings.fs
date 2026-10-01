@@ -939,15 +939,16 @@ module World =
 
     /// ADR-0081
     /// The colony that casts each [[harassment room]] this tick: among the
-    /// living colonies whose bank buys the harassment floor
-    /// (`Harassment.Floor`) and whose chain reaches the room inside the hop
-    /// budget, the one fewest crossings from it, then the one whose bank
-    /// holds the most, then by home name (#437); None while no colony is
-    /// both. Stateless, and decided once for every colony, so exactly one
-    /// projects the room. Asked over the open gate: a caster's own stand-down
-    /// withdraws its work and hands the room to nobody else. A room we own is
-    /// out of the list, cast and refused by nobody (#447): the day a Claim
-    /// lands in a harassment room, its mother's garrison holds it.
+    /// living colonies whose bank buys the room's floor (the blocks it is
+    /// declared at, `Harass.blocks`, #457) and whose chain
+    /// reaches the room inside the hop budget, the one fewest crossings from
+    /// it, then the one whose bank holds the most, then by home name (#437);
+    /// None while no colony is both. Stateless, and decided once for every
+    /// colony, so exactly one projects the room. Asked over the open gate: a
+    /// caster's own stand-down withdraws its work and hands the room to
+    /// nobody else. A room we own is out of the list, cast and refused by
+    /// nobody (#447): the day a Claim lands in a harassment room, its
+    /// mother's garrison holds it.
     let harassCasters
         (joins: JoinTable)
         (tuning: Tuning)
@@ -956,21 +957,25 @@ module World =
         (world: World)
         : HarassCasting =
         let hopsOf = hopsUnder StandDown.none joins tuning world
-
-        let affording =
-            living colonies world
-            |> List.filter (fun colony ->
-                (roomOf world colony.Home).Energy.Capacity >= harass.Floor)
-
+        let living = living colonies world
         let owned = ownedRooms world
+
+        let rooms =
+            harass.Rooms |> List.filter (fun h -> not (Set.contains h.RoomName owned))
+
+        let floors =
+            rooms |> List.map (fun h -> h.RoomName, Harass.blocks tuning h) |> Map.ofList
 
         {
             Casters =
-                harass.Rooms
-                |> List.filter (fun h -> not (Set.contains h.RoomName owned))
+                rooms
                 |> List.map (fun h ->
+                    let floor = floors.[h.RoomName] * harass.BlockCost
+
                     h,
-                    affording
+                    living
+                    |> List.filter (fun colony ->
+                        (roomOf world colony.Home).Energy.Capacity >= floor)
                     |> List.choose (fun colony ->
                         hopsOf colony.Home h.RoomName
                         |> Option.map (fun hops ->
@@ -978,6 +983,7 @@ module World =
                     |> List.sort
                     |> List.tryHead
                     |> Option.map (fun (_, _, home) -> home))
+            Floors = floors
         }
 
     /// The living colony that says a [[harassment room]] no colony casts out

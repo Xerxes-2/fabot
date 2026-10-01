@@ -722,7 +722,8 @@ let private worldRooms
                 colony.Salvage |> List.filter (Declaration.withinHopBudget maxHops colony.Home)
 
             // Every harassment room and its chain, for every home within the
-            // budget whose bank buys the harassment floor: which of them casts
+            // budget whose bank buys the lowest declared floor
+            // (`Harassment.leastFloor`): which of them casts
             // it is read off the world this is choosing rooms for
             // (`World.harassCasters`).
             let harassed =
@@ -757,7 +758,7 @@ let mutable roomCosts: (string * float) list = []
 let mutable roomsBegan: float = 0.0
 
 let ofGame
-    (maxHops: int)
+    (tuning: Tuning)
     (colonies: Colony list)
     (harass: Harassment)
     (lastPositions: Map<string, RoomPos>)
@@ -818,12 +819,13 @@ let ofGame
 
     let rooms =
         worldRooms
-            maxHops
+            tuning.MaxHops
             colonies
             harass.Rooms
             (fun home ->
                 roomSeen home
-                |> Option.exists (fun room -> room.energyCapacityAvailable >= harass.Floor))
+                |> Option.exists (fun room ->
+                    room.energyCapacityAvailable >= Harassment.leastFloor tuning harass))
             seen
         |> List.map (fun roomName ->
             let facts =
