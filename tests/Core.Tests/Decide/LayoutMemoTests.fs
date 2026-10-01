@@ -64,6 +64,19 @@ let private borderedColony (control: RoomControlInfo option) =
                 })
     }
 
+/// The north-border colony with W1N2 beside it and no rock of ours in it,
+/// `control` its entry in `RoomControl`: the room a transit or harassment
+/// narrowing leaves (`ColonyView.ofWorld`).
+let private crossedColony (control: RoomControlInfo option) =
+    let colony = northBorderColony { X = 10; Y = 38 } |> withNorthOutpost None
+
+    { colony with
+        RoomControl =
+            match control with
+            | Some seen -> Map.add "W1N2" seen colony.RoomControl
+            | None -> Map.remove "W1N2" colony.RoomControl
+    }
+
 [<Tests>]
 let censusSignatureTests =
     testList
@@ -655,6 +668,80 @@ let censusSignatureTests =
                         (censusSignature (trunkColony 3)))
                     "level"
                     "the head's level is named by its part, not by the rooms it reaches"
+            }
+
+            // A room the colony only crosses or harasses plans nothing (#463):
+            // vision coming and going there is what replanned W17S29 live.
+            test
+                "a transit room's sighting leaves the flat signature alone and still evicts its walks" {
+                let crossing control =
+                    { crossedColony control with
+                        Crossed = Set.ofList [ "W1N2" ]
+                    }
+
+                Expect.equal
+                    (censusSignature (crossing (Some neutralRoom)))
+                    (censusSignature (crossing None))
+                    "vision of a transit room is no plan input"
+
+                Expect.notEqual
+                    (roomSignatures (crossing (Some neutralRoom)))
+                    (roomSignatures (crossing None))
+                    "its walk tables are still evicted on the per-room half"
+            }
+
+            test "a harassment room's sighting leaves the flat signature alone" {
+                let harassing control =
+                    { crossedColony control with
+                        Harass =
+                            [
+                                {
+                                    RoomName = "W1N2"
+                                    Enemy = "rival"
+                                    Stand = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                                    Controller = RoomPos.at "W1N2" { X = 10; Y = 42 }
+                                    Via = []
+                                    Blocks = None
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    (censusSignature (harassing (Some(reservedRoom false 4000))))
+                    (censusSignature (harassing None))
+                    "the rival's reservation coming into view is no plan input"
+            }
+
+            test "a transit room taken by a rival still moves the flat signature" {
+                let crossing =
+                    { crossedColony None with
+                        Crossed = Set.ofList [ "W1N2" ]
+                    }
+
+                let taken =
+                    { crossing with
+                        Spatial =
+                            { crossing.Spatial with
+                                RivalRooms = Set.ofList [ "W1N2" ]
+                            }
+                    }
+
+                Expect.equal
+                    (signatureMoves (censusSignature crossing) (censusSignature taken))
+                    [ "W1N2" ]
+                    "no chain enters a rival's room, so every route priced across it moves"
+            }
+
+            test "an own outpost's new site still moves the flat signature" {
+                let colony = borderedColony (Some(reservedRoom true 4000))
+
+                let sited =
+                    colony |> withOutpostTrunk [ "road-site", BuiltKind.Road, { X = 10; Y = 45 } ]
+
+                Expect.equal
+                    (signatureMoves (censusSignature colony) (censusSignature sited))
+                    [ "W1N2" ]
+                    "an outpost's pending census is a plan input"
             }
         ]
 

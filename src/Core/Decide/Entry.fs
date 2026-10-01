@@ -126,13 +126,34 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             $"{home}|{level}|{stage}|{held}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
         |> Fresh.mapOfList
 
+    // A room the colony only crosses or harasses (#463) signs its census and
+    // its rate per room, for the walk tables, and in the flat signature only
+    // whether a rival holds it, the one thing of it the plan reads: its
+    // narrowing leaves no structure or site in the census, so its rate would
+    // move with vision alone, and a rival creep's coming and going replanned
+    // the colony. A room with a rock of ours in it is priced at its rate, so
+    // a declared outpost under harassment keeps the whole line.
+    let priced =
+        view.Sources
+        |> List.choose (fun s -> SpatialInfo.roomOf spatial s.Id)
+        |> Set.ofList
+
+    let unplanned =
+        Set.union view.Crossed (Facts.harassRooms view)
+        |> Set.filter (fun room -> not (Set.contains room priced))
+
     // The head and then the rooms, one to a line, which no field can carry:
     // the room set itself is signed by the join, and `signatureMoves` reads
     // the parts back.
     let flat =
         rooms
         |> Map.toList
-        |> List.map (fun (room, signature) -> $"\n{room}={signature}")
+        |> List.map (fun (room, signature) ->
+            if Set.contains room unplanned then
+                let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
+                $"\n{room}={taken}"
+            else
+                $"\n{room}={signature}")
         |> String.concat ""
 
     rooms, $"{home}|{level}|{stages}{flat}"
