@@ -2507,6 +2507,73 @@ let colonyStageTests =
                     "and the latch is the only thing holding it: a world that never saw the tower full reads the tower now"
             }
 
+            test
+                "a weaning child whose tower fills during a raid stays weaning until the raid has gone" {
+                // #468: Independent drops the mother's resident garrison
+                // (#447), so the stage read holds back while an armed raid
+                // stands in the home; the latch still records the tower.
+                let raided (world: World) =
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.change
+                                "W1N2"
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        Hostiles =
+                                            [
+                                                { hostileAt
+                                                      "h-1"
+                                                      { X = 10; Y = 10 }
+                                                      [ Attack; Move ] with
+                                                    Pos = RoomPos.at "W1N2" { X = 10; Y = 10 }
+                                                }
+                                            ]
+                                    }))
+                    }
+
+                let filled =
+                    World.latchTowers
+                        Tuning.defaults
+                        Set.empty
+                        (raided (raisingWorld 3 [ Engine.towerCapacity ]))
+
+                let childOf world =
+                    World.stages Tuning.defaults raisingPair world |> Map.tryFind "W1N2"
+
+                Expect.isTrue
+                    (Set.contains "W1N2" filled.Towered)
+                    "the latch records the full tower"
+
+                Expect.equal (childOf filled) (Some Weaning) "the raid in its home: still weaning"
+
+                let hold =
+                    ExitWatch.Held
+                        {
+                            Run = [ { X = 0; Y = 10 } ]
+                            Until = filled.Time + 50
+                        }
+
+                Expect.equal
+                    (childOf (
+                        World.latchTowers
+                            Tuning.defaults
+                            filled.Towered
+                            { raisingWorld 3 [ 300 ] with
+                                ExitWatches = Map.ofList [ "W1N2", hold ]
+                            }
+                    ))
+                    (Some Weaning)
+                    "and while the Guard holds the exit it left by (#450)"
+
+                Expect.equal
+                    (childOf (
+                        World.latchTowers Tuning.defaults filled.Towered (raisingWorld 3 [ 300 ])
+                    ))
+                    (Some Independent)
+                    "the raid gone: independent off the latch, the tower drained or not"
+            }
+
             test "a child past the line is independent whatever its towers, with the latch empty" {
                 // A global reset empties the heap; a raid drains or destroys the
                 // towers. Neither may hand a mature colony back to its mother.

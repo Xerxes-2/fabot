@@ -685,7 +685,11 @@ module World =
     ///
     /// The tower a child waits for (#445) is asked only of a declared
     /// child: a colony with no mother has nobody raising it to wait on. A
-    /// tower stood full is the latch (`Towered`) or one full this tick.
+    /// tower stood full is the latch (`Towered`) or one full this tick, and
+    /// is not asked while a raid stands in the child's home or its Guard
+    /// holds the exit the raid left by (#468): `Independent` drops the
+    /// mother's resident garrison (#447), so a child at the line reads
+    /// `Weaning` until the raid has gone, latch or not.
     let rec stages
         (tuning: Tuning)
         (colonies: Colony list)
@@ -704,8 +708,17 @@ module World =
                 colonies
                 |> List.exists (fun colony -> colony.Home = name && Option.isSome colony.Mother)
 
+            let raided () =
+                facts.Hostiles
+                |> List.exists (fun h -> HostileInfo.isArmed h && not (Colony.isAlly h.Owner))
+                || match Map.tryFind name world.ExitWatches with
+                   | Some(ExitWatch.Seen _) -> true
+                   | Some(ExitWatch.Held hold) -> ExitHold.stands world.Time hold
+                   | None -> false
+
             let towerStood =
-                not raised || Set.contains name world.Towered || towerFull tuning facts
+                not raised
+                || (Set.contains name world.Towered || towerFull tuning facts) && not (raided ())
 
             Colony.stageOf
                 tuning

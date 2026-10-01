@@ -199,19 +199,63 @@ let internal planConsignment (view: ColonyView) : Intent list =
         |> List.choose (fst >> ship)
     | _ -> []
 
-/// Colony reflex beside the pipeline (ADR-0014): every tower shoots the hostile
-/// nearest to itself, every tick one stands in the room. No energy gate: unlike
-/// safe mode there is no stock to protect, so a dry tower's Intent fails
-/// harmlessly. Equal ranges tie-break by hostile id. `placedTowers` has always
-/// answered home alone, and the hostiles are narrowed to match;
+/// Colony reflex beside the pipeline (ADR-0014): every tower shoots the
+/// hostile worth a shot nearest to itself. Worth one (#466): a hostile our
+/// damage reaching it this tick — every tower's at its range, as if all fired
+/// on it, and our creeps' — out-damages the heal reaching it
+/// (`healReaching`); one whose weapon reaches our Keep or creeps, or a
+/// dismantler beside the Keep, hurting something now; or a claimer, whose
+/// whole approach is the window (`claimsAFlag`, #451). Not a rampart: it is
+/// there to absorb the hits, and a shot healed back is waste. Any other
+/// target holds the energy. No energy gate: a dry tower's Intent
+/// fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
+/// has always answered home alone, and the hostiles are narrowed to match;
 /// `RoomPos.range` answers None across a border.
 let internal planFire (view: ColonyView) atlas : Intent list =
     match hostilesAtHome view with
     | [] -> []
     | hostiles ->
-        Atlas.placedTowers atlas
-        |> List.choose (fun (towerId, tile) ->
+        let home = SpatialInfo.homeName view.Spatial
+        let towers = Atlas.placedTowers atlas
+        let healOn = healReaching view home
+        let damageOn = damageReaching view
+
+        let keep = Atlas.keepTilesIn atlas home
+
+        let ours =
+            Atlas.placedCreeps atlas
+            |> List.choose (fun (_, at) -> if at.Room = home then Some(RoomPos.pos at) else None)
+            |> Set.ofList
+            |> Set.union keep
+
+        let within (tiles: Set<Pos>) reach (h: HostileInfo) =
+            tiles
+            |> Set.exists (fun at ->
+                RoomPos.range (RoomPos.at home at) h.Pos |> Option.exists (fun r -> r <= reach))
+
+        let hurting (h: HostileInfo) =
+            match HostileInfo.weaponRange h with
+            | Some reach -> within ours reach h
+            | None -> List.contains Work h.Body && within keep Engine.meleeRange h
+
+        let outDamaged (h: HostileInfo) =
+            let shots =
+                towers
+                |> List.sumBy (fun (_, tile) ->
+                    RoomPos.range tile h.Pos
+                    |> Option.map Engine.towerAttackAt
+                    |> Option.defaultValue 0)
+
+            shots + damageOn h > healOn h
+
+        let worth =
             hostiles
+            |> List.filter (fun h ->
+                claimsAFlag (Set.singleton home) h || hurting h || outDamaged h)
+
+        towers
+        |> List.choose (fun (towerId, tile) ->
+            worth
             |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
             |> function
                 | [] -> None

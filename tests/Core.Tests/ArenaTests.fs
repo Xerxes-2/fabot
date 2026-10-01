@@ -1743,16 +1743,48 @@ let arenaDefenceTests =
                         a.Rooms["W17S25"].Structures
                         |> List.filter (fun s -> Set.contains s.Id lineIds)
 
-                    let _, trace = start |> runUntil (fun a -> List.length (standing a) < 16) 700
+                    let final, trace =
+                        start |> runUntil (fun a -> List.length (standing a) < 16) 700
+
                     let failure = describe trace
                     let swing = Engine.attackPower * 17
+
+                    let shots =
+                        trace
+                        |> List.sumBy (fun t ->
+                            t.Ours
+                            |> List.filter (function
+                                | FireTower _ -> true
+                                | _ -> false)
+                            |> List.length)
+
+                    let towerLeft =
+                        final.Rooms["W17S25"].Structures
+                        |> List.filter (fun s -> s.Kind = "tower")
+                        |> List.sumBy (fun s -> s.Energy)
 
                     match firstFallen lineIds trace with
                     | None -> failtest $"the line falls inside 700 ticks\n{failure}"
                     | Some fell ->
-                        // Measured: t25, t105, t593. Both melee on one
-                        // rampart would halve it; the choke's one column,
-                        // shared with the healers, seats one.
+                        // #466, measured: 13, 52 and 296 shots, every one at
+                        // a melee its healer had stepped off, where fire on
+                        // sight spent one a tick (21, 101, 589); the tower
+                        // holds 570 (the worker's refill), 180 and 0.
+                        Expect.isLessThanOrEqual
+                            shots
+                            (fell * 3 / 4)
+                            $"a shot only where it out-damages the heal\n{failure}"
+
+                        if hits <= 50_000 then
+                            Expect.isGreaterThan
+                                towerLeft
+                                0
+                                $"the tower holds energy at the breach\n{failure}"
+
+                        // Measured: t25, t103, t591 (t25, t105, t593 before
+                        // #466). Both melee on one rampart would halve it;
+                        // the choke's one column, shared with the healers,
+                        // seats one.
                         Expect.isGreaterThanOrEqual
                             fell
                             (hits / (2 * swing))

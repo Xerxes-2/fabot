@@ -940,6 +940,23 @@ let towerColony towers hostiles =
             }
     }
 
+/// The tower colony with creeps of ours standing at home, each owing the given
+/// hits.
+let private woundedAt towers hostiles (creeps: (string * Pos * int) list) =
+    let colony = towerColony towers hostiles
+
+    { colony with
+        Creeps =
+            creeps
+            |> List.map (fun (name, _, owed) ->
+                { creepWith name 0 0 [ Move ] with
+                    Hits = { Hits = 1000 - owed; HitsMax = 1000 }
+                })
+        Spatial =
+            colony.Spatial
+            |> withCreepsAt (creeps |> List.map (fun (name, pos, _) -> name, pos))
+    }
+
 [<Tests>]
 let fireReflexTests =
     testList
@@ -998,6 +1015,78 @@ let fireReflexTests =
                     "the rule is per-tower, stated once"
             }
 
+            test
+                "a tower holds its fire on a healed raider far off, and shoots it unhealed or near (#466)" {
+                // 20 HEAL put back 240 a tick: over the 150 a range-20 shot
+                // lands, under the 600 of a range-5 one.
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+                let tower = [ "tower-1", { X = 10; Y = 40 } ]
+
+                let at x body =
+                    towerColony tower [ hostileAt "h-1" { X = x; Y = 40 } body ]
+
+                let fired snapshot = shots (decideOn snapshot).Intents
+
+                Expect.isEmpty (fired (at 30 healed)) "healed at range 20: the energy held"
+
+                Expect.equal
+                    (fired (at 30 [ Attack; Move ]))
+                    [ "tower-1", "h-1" ]
+                    "unhealed at range 20"
+
+                Expect.equal (fired (at 15 healed)) [ "tower-1", "h-1" ] "healed at range 5"
+            }
+
+            test
+                "a held tower still shoots a healed raider hurting something of ours, or a claimer (#466)" {
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+                let tower = [ "tower-1", { X = 10; Y = 40 } ]
+                let fired snapshot = shots (decideOn snapshot).Intents
+
+                let besideOurs =
+                    woundedAt
+                        tower
+                        [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
+                        [ "ours", { X = 31; Y = 40 }, 0 ]
+
+                Expect.equal (fired besideOurs) [ "tower-1", "h-1" ] "it swings at our creep now"
+
+                let claimer =
+                    towerColony
+                        tower
+                        [
+                            hostileAt
+                                "h-1"
+                                { X = 30; Y = 40 }
+                                ([ BodyPart.Claim; Move ] @ List.replicate 20 Heal)
+                        ]
+
+                Expect.equal
+                    (fired claimer)
+                    [ "tower-1", "h-1" ]
+                    "a claimer in our home, healed or not"
+            }
+
+            test
+                "a healed raider swinging at our rampart draws no shot: the rampart absorbs it (#466)" {
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 10_000 300_000
+
+                Expect.equal
+                    (Atlas.ourRampartTilesIn
+                        (Atlas.ofView snapshot)
+                        (SpatialInfo.homeName snapshot.Spatial))
+                    (Set.ofList [ { X = 31; Y = 40 } ])
+                    "the premise: our rampart beside it"
+
+                Expect.isEmpty (shots (decideOn snapshot).Intents) "healed back: the energy held"
+            }
+
             test "a quiet room fires no shot" {
                 let snapshot = towerColony [ "tower-1", { X = 10; Y = 40 } ] []
                 let { Intents = intents } = decideOn snapshot
@@ -1028,23 +1117,6 @@ let private towerHeals intents =
     |> List.choose (function
         | HealWithTower(tower, target) -> Some(tower, target)
         | _ -> None)
-
-/// The tower colony with creeps of ours standing at home, each owing the given
-/// hits.
-let private woundedAt towers hostiles (creeps: (string * Pos * int) list) =
-    let colony = towerColony towers hostiles
-
-    { colony with
-        Creeps =
-            creeps
-            |> List.map (fun (name, _, owed) ->
-                { creepWith name 0 0 [ Move ] with
-                    Hits = { Hits = 1000 - owed; HitsMax = 1000 }
-                })
-        Spatial =
-            colony.Spatial
-            |> withCreepsAt (creeps |> List.map (fun (name, pos, _) -> name, pos))
-    }
 
 [<Tests>]
 let towerHealTests =

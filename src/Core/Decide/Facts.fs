@@ -360,6 +360,41 @@ let private killTier (target: KillFacts) =
     else
         Bystander
 
+/// The heal that reaches a hostile in `room` this tick, its own included: a
+/// heal reaches one tile, a ranged heal three. A closure over the room's
+/// healers, found once.
+let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int =
+    let healers =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
+
+    fun hostile ->
+        healers
+        |> List.sumBy (fun healer ->
+            match RoomPos.range healer.Pos hostile.Pos with
+            | Some r when r <= Engine.meleeRange -> HostileInfo.healing healer
+            | Some r when r <= Engine.rangedRange ->
+                HostileInfo.healing healer * Engine.rangedHealPower / Engine.healPower
+            | _ -> 0)
+
+/// Our creeps' damage that reaches a hostile this tick: a swing one tile, a
+/// shot three. A closure over our placed creeps, found once.
+let internal damageReaching (view: ColonyView) : HostileInfo -> int =
+    let fighters =
+        view.Creeps
+        |> List.choose (fun creep ->
+            SpatialInfo.creepPlacementOf view.Spatial creep.Name
+            |> Option.map (fun at -> at, partCount creep.Body))
+
+    fun hostile ->
+        fighters
+        |> List.sumBy (fun (at, parts) ->
+            match RoomPos.range at hostile.Pos with
+            | Some r when r <= Engine.meleeRange -> damageOf parts
+            | Some r when r <= Engine.rangedRange ->
+                damageOf (fun part -> if part = Attack then 0 else parts part)
+            | _ -> 0)
+
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's
 /// melee guard) the raid first and nothing more.
@@ -372,35 +407,8 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
             }
     else
         let resident = residentRooms view
-
-        let healers =
-            view.Hostiles
-            |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
-
-        let fighters =
-            view.Creeps
-            |> List.choose (fun creep ->
-                SpatialInfo.creepPlacementOf view.Spatial creep.Name
-                |> Option.map (fun at -> at, partCount creep.Body))
-
-        // A heal and a swing each reach one tile, a ranged heal and shot three.
-        let healOn (hostile: HostileInfo) =
-            healers
-            |> List.sumBy (fun healer ->
-                match RoomPos.range healer.Pos hostile.Pos with
-                | Some r when r <= Engine.meleeRange -> HostileInfo.healing healer
-                | Some r when r <= Engine.rangedRange ->
-                    HostileInfo.healing healer * Engine.rangedHealPower / Engine.healPower
-                | _ -> 0)
-
-        let damageOn (hostile: HostileInfo) =
-            fighters
-            |> List.sumBy (fun (at, parts) ->
-                match RoomPos.range at hostile.Pos with
-                | Some r when r <= Engine.meleeRange -> damageOf parts
-                | Some r when r <= Engine.rangedRange ->
-                    damageOf (fun part -> if part = Attack then 0 else parts part)
-                | _ -> 0)
+        let healOn = healReaching view room
+        let damageOn = damageReaching view
 
         fun hostile ->
             let heal = healOn hostile
