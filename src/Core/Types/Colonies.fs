@@ -1003,12 +1003,17 @@ module Colony =
             // mined out and every structure in it destroyed before the
             // unclaim (W11S29's standing structures had cost a sweep a tick).
             // The one claimable Ultra deposit, next door to Trepidimous.
+            //
+            // Unmothered 2026-10-01 (t880,351): Trepidimous sat two 18M17A, two
+            // 11M7H and a 3-CLAIM tapper on the controller, killed the first
+            // resident and blocked the upgrade, a raid no ranger size wins. No
+            // pioneer or resident is fed into it until the mother is restored.
             {
                 Home = "W17S25"
                 Outposts = []
                 Errands = []
                 Salvage = []
-                Mother = Some "W15S28"
+                Mother = None
                 Consignee = Some "W15S28"
                 // Trepidimous next door (#446): an exact vertex min cut over
                 // the terrain, exits as source and the controller, the source
