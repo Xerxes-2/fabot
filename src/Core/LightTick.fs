@@ -17,12 +17,13 @@ type GlanceCreep =
     }
 
 /// One hostile creep in a visible room. `Armed` is any Attack, RangedAttack
-/// or Heal part in its body.
+/// or Heal part in its body; `MoveOnly`, every part with hits left a Move.
 type GlanceHostile =
     {
         Tile: RoomPos
         Owner: string
         Armed: bool
+        MoveOnly: bool
     }
 
 /// What a tick reads off `Game` directly, before any World is built: our
@@ -235,13 +236,15 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
                 now.Structures
             |> List.ofSeq
 
+        // A scout hurts, dismantles, claims and carries nothing (#462).
         now.Hostiles
         |> List.tryFind (fun hostile ->
-            ours
-            |> List.exists (fun tile ->
-                match RoomPos.range hostile.Tile tile with
-                | Some r -> r <= nearRange
-                | None -> false))
+            not hostile.MoveOnly
+            && ours
+               |> List.exists (fun tile ->
+                   match RoomPos.range hostile.Tile tile with
+                   | Some r -> r <= nearRange
+                   | None -> false))
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
     let fought () =

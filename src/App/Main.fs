@@ -206,6 +206,10 @@ let private glance () : LightTick.Glance =
                                     else
                                         hostile.owner.username
                                 Armed = hostile.body |> Array.exists armedPart
+                                MoveOnly =
+                                    hostile.body
+                                    |> Array.forall (fun part ->
+                                        part.hits <= 0 || part.``type`` = "move")
                             }
                             : LightTick.GlanceHostile)
             ]

@@ -45,6 +45,7 @@ let private hostile x y owner armed : GlanceHostile =
         Tile = tile x y
         Owner = owner
         Armed = armed
+        MoveOnly = false
     }
 
 /// The world one tick on: the hauler took its step and everything else held.
@@ -198,6 +199,7 @@ let forcedTests =
                                     Tile = RoomPos.at harassed { X = x; Y = 10 }
                                     Owner = "Trepidimous"
                                     Armed = true
+                                    MoveOnly = false
                                 }
                             ]
                     }
@@ -272,6 +274,38 @@ let forcedTests =
                     "a body at the gate"
             }
 
+            test "a MOVE-only hostile within range of our creep forces nothing" {
+                let scout =
+                    { stepped with
+                        Hostiles =
+                            [
+                                { hostile 11 10 "Mirroar" false with
+                                    MoveOnly = true
+                                }
+                            ]
+                    }
+
+                Expect.equal (LightTick.forced last scout) None "a scout changes no decision"
+            }
+
+            test
+                "a hostile with one WORK, CARRY, CLAIM or ATTACK part within range forces a full tick" {
+                // No structure of ours in the room, so an armed body is the
+                // near rule's and not the armed rule's.
+                for part, armed in
+                    [ Work, false; Carry, false; BodyPart.Claim, false; Attack, true ] do
+                    let body =
+                        { stepped with
+                            Structures = []
+                            Hostiles = [ hostile 11 10 "Mirroar" armed ]
+                        }
+
+                    Expect.equal
+                        (LightTick.forced last body)
+                        (Some(LightForce.HostileNear(room, "Mirroar")))
+                        $"one %A{part} part is a decision"
+            }
+
             test "a hostile at the same coordinates in another room is not near" {
                 let elsewhere =
                     { stepped with
@@ -281,6 +315,7 @@ let forcedTests =
                                     Tile = RoomPos.at "W2N1" { X = 10; Y = 10 }
                                     Owner = "Rival"
                                     Armed = false
+                                    MoveOnly = false
                                 }
                             ]
                     }
