@@ -56,8 +56,8 @@ type LastFull =
 /// The first reason a light tick hands over to a full one.
 [<RequireQualifiedAccess>]
 type LightForce =
-    | ArmedHostile of room: string
-    | HostileNear of room: string
+    | ArmedHostile of room: string * owner: string
+    | HostileNear of room: string * owner: string
     | Fought
     | CreepsChanged
     /// A creep of ours on its room's border ring with no ground to step onto
@@ -68,17 +68,18 @@ type LightForce =
     | HitsLost of creep: string
     | ControllerChanged of room: string
 
-/// The reason on the CPU line, one short word apiece: which of the rules
-/// keeps the most ticks full is what tuning the cadence reads.
+/// The reason on the CPU line: the rule's word first, then where it fired —
+/// the room and the hostile's owner, or the creep — since a reason read back
+/// after the hostile has left has nothing else to be traced by.
 let tag (reason: LightForce) : string =
     match reason with
-    | LightForce.ArmedHostile _ -> "armed"
-    | LightForce.HostileNear _ -> "near"
+    | LightForce.ArmedHostile(room, owner) -> $"armed {room} {owner}"
+    | LightForce.HostileNear(room, owner) -> $"near {room} {owner}"
     | LightForce.Fought -> "fought"
     | LightForce.CreepsChanged -> "creeps"
-    | LightForce.OnBorder _ -> "border"
-    | LightForce.HitsLost _ -> "hurt"
-    | LightForce.ControllerChanged _ -> "controller"
+    | LightForce.OnBorder creep -> $"border {creep}"
+    | LightForce.HitsLost creep -> $"hurt {creep}"
+    | LightForce.ControllerChanged room -> $"controller {room}"
 
 /// Whether a tile is on its room's border ring.
 let private onRing (tile: Pos) =
@@ -226,7 +227,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
     let armed =
         now.Hostiles
         |> List.tryFind (fun hostile -> hostile.Armed && hostile.Owner <> keeper)
-        |> Option.map (fun hostile -> LightForce.ArmedHostile hostile.Tile.Room)
+        |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
 
     let near () =
         let ours =
@@ -242,7 +243,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
                 match RoomPos.range hostile.Tile tile with
                 | Some r -> r <= nearRange
                 | None -> false))
-        |> Option.map (fun hostile -> LightForce.HostileNear hostile.Tile.Room)
+        |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
     let fought () =
         if last.Fought then Some LightForce.Fought else None

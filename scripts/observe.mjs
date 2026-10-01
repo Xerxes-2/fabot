@@ -276,9 +276,25 @@ const cadence = (ticks) => {
   const mean = (rows) => rows.reduce((sum, row) => sum + row.ms, 0) / rows.length;
   const lights = ticks.filter((row) => row.light === true);
   const fulls = ticks.filter((row) => row.light !== true);
+  // A reason is the rule's word, then where it fired ("armed W17S26
+  // Trepidimous", "border hauler-…"); rows written before the detail carry
+  // the word alone. Tallied per rule, with its three commonest places.
   const reasons = {};
-  for (const row of fulls) if (typeof row.forced === "string") reasons[row.forced] = (reasons[row.forced] ?? 0) + 1;
-  const ranked = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+  for (const row of fulls) {
+    if (typeof row.forced !== "string") continue;
+    const [rule, ...rest] = row.forced.split(" ");
+    const entry = (reasons[rule] ??= { n: 0, where: {} });
+    entry.n++;
+    if (rest.length > 0) entry.where[rest.join(" ")] = (entry.where[rest.join(" ")] ?? 0) + 1;
+  }
+  const ranked = Object.entries(reasons)
+    .sort((a, b) => b[1].n - a[1].n)
+    .map(([rule, { n, where }]) => {
+      const places = Object.entries(where).sort((a, b) => b[1] - a[1]);
+      const shown = places.slice(0, 3).map(([place, k]) => `${place} ${k}`);
+      if (places.length > 3) shown.push(`+${places.length - 3} more`);
+      return shown.length > 0 ? `${rule} ${n} (${shown.join(", ")})` : `${rule} ${n}`;
+    });
   return {
     mean: ticks.length > 0 ? mean(ticks) : NaN,
     max: ticks.length > 0 ? Math.max(...ticks.map((row) => row.ms)) : NaN,
@@ -286,7 +302,7 @@ const cadence = (ticks) => {
     lights: lights.length,
     fullMean: fulls.length > 0 ? `${mean(fulls).toFixed(2)} ms` : "—",
     lightMean: lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—",
-    forced: ranked.map(([reason, n]) => `${reason} ${n}`).join(", "),
+    forced: ranked.join("; "),
   };
 };
 

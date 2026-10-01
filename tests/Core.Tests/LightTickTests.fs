@@ -165,7 +165,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced last raided)
-                    (Some(LightForce.ArmedHostile room))
+                    (Some(LightForce.ArmedHostile(room, "Invader")))
                     "combat is decided"
             }
 
@@ -205,7 +205,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced last near)
-                    (Some(LightForce.HostileNear room))
+                    (Some(LightForce.HostileNear(room, "Source Keeper")))
                     "a keeper that comes near"
 
                 Expect.equal (LightTick.forced last far) None "one tile further is not near"
@@ -219,7 +219,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced last atTheSpawn)
-                    (Some(LightForce.HostileNear room))
+                    (Some(LightForce.HostileNear(room, "Rival")))
                     "a body at the gate"
             }
 
@@ -283,7 +283,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced shooting stillThere)
-                    (Some(LightForce.HostileNear room))
+                    (Some(LightForce.HostileNear(room, "Enemy")))
                     "the target still near is the near rule's"
             }
 
@@ -391,6 +391,40 @@ let forcedTests =
                     "off the ring there is no inward step"
             }
 
+            test "the CPU line's reason names the rule first, then where it fired" {
+                Expect.equal
+                    (LightTick.tag (LightForce.ArmedHostile("W17S26", "Trepidimous")))
+                    "armed W17S26 Trepidimous"
+                    "an armed hostile: the room and its owner"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.HostileNear("W1N1", "Invader")))
+                    "near W1N1 Invader"
+                    "near"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.OnBorder "hauler"))
+                    "border hauler"
+                    "the creep on the ring"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.HitsLost "hauler"))
+                    "hurt hauler"
+                    "the creep hurt"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.ControllerChanged "W1N1"))
+                    "controller W1N1"
+                    "the room"
+
+                Expect.equal (LightTick.tag LightForce.Fought) "fought" "a fight names nobody"
+
+                Expect.equal
+                    (LightTick.tag LightForce.CreepsChanged)
+                    "creeps"
+                    "nor does the creep census"
+            }
+
             test "a creep that lost hits forces a full tick, and one healed does not" {
                 let hurt =
                     { stepped with
@@ -449,7 +483,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced last everything)
-                    (Some(LightForce.ArmedHostile room))
+                    (Some(LightForce.ArmedHostile(room, "Invader")))
                     "the armed hostile comes first"
             }
         ]
