@@ -3810,7 +3810,7 @@ let harassViewTests =
 
             test
                 "a harassment room that is also its caster's Claim outpost pools both the Guard and the Claim" {
-                // W17S25 (2026-10-01): harassed by W15S28 until the Claim lands, so
+                // As W17S25 was (2026-10-01): harassed by W15S28 until the Claim landed, so
                 // no rival reservation can slip in ahead of it and block the
                 // Claim pool for good. Here the harassment room is a declared
                 // child of the mother's and a Claim outpost of hers.
@@ -3956,7 +3956,7 @@ let harassViewTests =
                 "no harassment room is a declared home, outpost, errand or salvage room, but a Claim" {
                 // The branch order in `ColonyView.ofWorld` reads the bootstrap,
                 // errand and salvage kinds ahead of a harassment room. The one
-                // overlap allowed is a Claim (W17S25, 2026-10-01): a declared home
+                // overlap allowed is a Claim (W17S25's, 2026-10-01): a declared home
                 // that is still an outpost of its mother's, harassed until the Claim
                 // lands. Its harassment cut keeps the declared controller and rock,
                 // which is all a Claim outpost works.

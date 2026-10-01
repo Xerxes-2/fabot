@@ -1305,13 +1305,17 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28"; "W15S28"; "W17S29"; "W17S25" ]
-                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28 and W11S27 its to W17S25 on 2026-10-01, each deposit mined out"
+                    [ "W12S28"; "W13S28"; "W15S28"; "W17S29"; "W12S26" ]
+                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28, W11S27 its to W17S25 on 2026-10-01, and W17S25, besieged and lost at t880,418, its to W12S26 the same day"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W12S27"; "W11S28" ]
-                    "the north outpost and, since 2026-09-16, the west one: the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
+                    [ "W12S27"; "W11S28"; "W12S26" ]
+                    "the north outpost, since 2026-09-16 the west one, and since 2026-10-01 the seventh colony's room as a Claim until it lands (#404): the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
+
+                Expect.isFalse
+                    (Colony.declared |> List.exists (fun colony -> colony.Home = "W17S25"))
+                    "W17S25 is no colony of ours: Trepidimous took it at t880,418"
 
                 Expect.equal
                     (Outpost.adr0042 |> List.map (fun outpost -> outpost.RoomName))
@@ -1441,8 +1445,8 @@ let outpostTests =
 
                 Expect.equal
                     (Outpost.roomsProjected outposts "W12S28")
-                    [ "W12S28"; "W12S27"; "W11S28" ]
-                    "so the mother's projection covers the home room and both its outposts — and W11S28 was in its scan set already, as a transit room of the chain to the nursery, which is exactly why that declaration is the cheapest tick of the three the wave-2 survey priced"
+                    [ "W12S28"; "W12S27"; "W11S28"; "W12S26" ]
+                    "so the mother's projection covers the home room and its three outposts — and W11S28 was in its scan set already, as a transit room of the chain to the nursery, which is exactly why that declaration is the cheapest tick of the three the wave-2 survey priced"
             }
 
             test "a declared outpost joins the spawn room in the set the shell scans" {

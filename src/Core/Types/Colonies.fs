@@ -376,14 +376,16 @@ module Outpost =
         }
 
     /// The seventh colony's room, declared 2026-10-01 off
-    /// `docs/research/seventh-colony.md`: the one claimable Ultra deposit
-    /// (45,000 T at 46,25), two rooms from the Reactor. The ids and tiles are
-    /// the engine's, read that day.
-    let w17s25: Outpost =
+    /// `docs/research/seventh-colony.md` (its #2) once W17S25, the #1, was
+    /// lost to Trepidimous: 22,000 T at 33,39, one source, two crossings from
+    /// W12S28 by its own outpost W12S27, no keepers and no rival within two
+    /// rooms. The ids and tiles are the engine's, read that day
+    /// (`tests/Core.Tests/rooms/W12S26.room`).
+    let w12s26: Outpost =
         {
-            RoomName = "W17S25"
-            Sources = [ "6a8caa7cdd4872bccd318c75", { Room = "W17S25"; X = 18; Y = 19 } ]
-            Controller = "6a8caa7cdd4872bccd318c76", { Room = "W17S25"; X = 15; Y = 36 }
+            RoomName = "W12S26"
+            Sources = [ "6a8caab9dd4872bccd3194a3", { Room = "W12S26"; X = 41; Y = 40 } ]
+            Controller = "6a8caab9dd4872bccd3194a2", { Room = "W12S26"; X = 8; Y = 32 }
         }
 
     /// The sixth colony's room, declared 2026-09-28 off
@@ -875,9 +877,13 @@ module Colony =
                 // W11S28 to the west (2026-09-16, `outpost-wave-2.md`): the
                 // question is never which room is best but **which colony
                 // can pay**, and this room's terrain is in the world already.
+                //
+                // W12S26, the seventh colony's room, is a Claim here from
+                // 2026-10-01 — **to be taken out of this list the day that
+                // Claim lands** (#404). Its chain crosses W12S27, already ours.
                 Outposts =
                     (Outpost.adr0042 |> List.filter (fun o -> o.RoomName = "W12S27"))
-                    @ [ Outpost.w11s28 ]
+                    @ [ Outpost.w11s28; Outpost.w12s26 ]
                 // The sector Reactor is six crossings away.
                 Errands = []
                 // W11S29, unclaimed at t807,948 with a spawn, forty extensions,
@@ -973,8 +979,9 @@ module Colony =
                 // 2026-09-28 until it landed at t808,328; out of this list it
                 // is this colony's nursery and not a room it mines (#404).
                 //
-                // W17S25, the seventh colony's room, was a Claim here (and
-                // harassed) from 2026-10-01 until it landed at t879,239.
+                // W17S25, the seventh colony's first room, was a Claim here
+                // (and harassed) from 2026-10-01 until it landed at t879,239;
+                // lost to a siege at t880,418.
                 Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
@@ -998,37 +1005,22 @@ module Colony =
                 Consignee = Some "W15S28"
                 Perimeter = []
             }
-            // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`),
-            // in the slot the fifth, W11S27, gave up once its 22,000 T was
-            // mined out and every structure in it destroyed before the
-            // unclaim (W11S29's standing structures had cost a sweep a tick).
-            // The one claimable Ultra deposit, next door to Trepidimous.
-            //
-            // Unmothered 2026-10-01 (t880,351): Trepidimous sat two 18M17A, two
-            // 11M7H and a 3-CLAIM tapper on the controller, killed the first
-            // resident and blocked the upgrade, a raid no ranger size wins. No
-            // pioneer or resident is fed into it until the mother is restored.
+            // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`).
+            // W17S25 held this slot from its Claim at t879,239 until a
+            // Trepidimous siege (two 18M17A, two 11M7H, a 3-CLAIM tapper on
+            // the controller) took it at t880,418; W12S26, the research's #2,
+            // replaced it the same day, in quiet ground no rival is near.
             {
-                Home = "W17S25"
+                Home = "W12S26"
                 Outposts = []
                 Errands = []
                 Salvage = []
-                Mother = None
+                Mother = Some "W12S28"
+                // Its Thorium goes where every colony's does: to the one
+                // colony that declares the Reactor errand (#349). The mother
+                // is not the Consignee, as W12S28's own ore is not.
                 Consignee = Some "W15S28"
-                // Trepidimous next door (#446): an exact vertex min cut over
-                // the terrain, exits as source and the controller, the source
-                // and the Thorium as sink, seals 460 tiles with sixteen
-                // ramparts. North needs none: W17S24 is behind a wall.
-                Perimeter =
-                    [
-                        // West, to W18S25.
-                        for y in 15..20 -> { X = 2; Y = y }
-                        for y in 23..27 -> { X = 2; Y = y }
-                        // South, to W17S26.
-                        for x in 16..18 -> { X = x; Y = 44 }
-                        // East, to W16S25.
-                        for y in 27..28 -> { X = 47; Y = y }
-                    ]
+                Perimeter = []
             }
         ]
 

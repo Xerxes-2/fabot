@@ -193,10 +193,11 @@ let outpostDeclarationTests =
                 Expect.equal
                     (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
                     [
-                        // W17S25's every chain to W18S27, and W17S29's to W17S26,
-                        // ran through W18S26, which Trepidimous owns (#444).
+                        // W17S29's every chain to W17S26 runs through W18S26,
+                        // which Trepidimous owns (#444), and W12S26, five
+                        // columns east, has no chain to it inside the budget.
                         "W18S27", [ "W15S28"; "W17S29" ]
-                        "W17S26", [ "W13S28"; "W15S28"; "W17S25" ]
+                        "W17S26", [ "W13S28"; "W15S28" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
@@ -222,14 +223,6 @@ let outpostDeclarationTests =
                         [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26" ]
                     ]
                     "W17S26 is four crossings from W15S28, by W15S26 or W16S27 and both into W16S26"
-
-                Expect.equal
-                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S25")
-                    [
-                        [ "W15S28"; "W15S27"; "W15S26"; "W16S26"; "W17S26"; "W17S25" ]
-                        [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26"; "W17S25" ]
-                    ]
-                    "W17S25 is one crossing past W17S26, by the same two chains"
 
                 Expect.equal
                     (Declaration.hops linked Tuning.defaults.MaxHops "W13S28" "W17S26")
@@ -309,7 +302,7 @@ let outpostDeclarationTests =
                 Expect.equal
                     (casting 5_600)
                     [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28" ]
-                    "W15S28 casts both: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W17S25 has no spawn"
+                    "W15S28 casts both: W17S29 cannot buy the floor, W13S28 is further or out of the budget, and W12S26 has no spawn"
 
                 Expect.equal
                     (casting 5_650)

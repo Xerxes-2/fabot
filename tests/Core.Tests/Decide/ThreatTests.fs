@@ -28,6 +28,31 @@ let keepRoom =
             "con-b", { X = 29; Y = 25 }, Structure BuiltKind.Container
         ]
 
+/// A colony sealed as W17S25 was (#446) while it was declared, 2026-10-01
+/// until Trepidimous took it at t880,418: an exact vertex min cut over its
+/// committed capture, exits as source and the controller, the source and
+/// the Thorium as sink, seals 460 tiles with these sixteen ramparts. North
+/// needs none: W17S24 is behind a wall.
+let private sealedW17s25: Colony =
+    {
+        Home = "W17S25"
+        Outposts = []
+        Errands = []
+        Salvage = []
+        Mother = None
+        Consignee = None
+        Perimeter =
+            [
+                // West, to W18S25.
+                for y in 15..20 -> { X = 2; Y = y }
+                for y in 23..27 -> { X = 2; Y = y }
+                // South, to W17S26.
+                for x in 16..18 -> { X = x; Y = 44 }
+                // East, to W16S25.
+                for y in 27..28 -> { X = 47; Y = y }
+            ]
+    }
+
 /// The tiles that room's rule covers, in the plan's own (x, y) order: the
 /// Keep — spawn, tower, Storage — and the two Post containers.
 let keepCover =
@@ -192,8 +217,7 @@ let rampartTests =
                 // #446: W17S25's chokes, read off its terrain offline, ride the
                 // cover rule: placed from the level the colony keeps ramparts at
                 // and not one level sooner.
-                let perimeter =
-                    (Colony.declared |> List.find (fun colony -> colony.Home = "W17S25")).Perimeter
+                let perimeter = sealedW17s25.Perimeter
 
                 let at level perimeter =
                     let { Intents = intents } =
@@ -220,8 +244,7 @@ let rampartTests =
                 // At RCL3 the child's first tower comes first: a perimeter site is
                 // Feeding tier like the tower's, and every pending child site
                 // pauses the mother's borrowed Upgrade.
-                let perimeter =
-                    (Colony.declared |> List.find (fun colony -> colony.Home = "W17S25")).Perimeter
+                let perimeter = sealedW17s25.Perimeter
 
                 let ramparts room =
                     let { Intents = intents } =
@@ -244,6 +267,76 @@ let rampartTests =
                     (ramparts keepRoom)
                     (List.sort (perimeter @ keepCover))
                     "the tower stands: all sixteen chokes"
+            }
+
+            test "the sixteen chokes seal W17S25's capture from every exit" {
+                // The fixture's tiles are the real room's, not a pattern: on the
+                // committed capture each is open ground, and a walk from every
+                // exit that may not cross them reaches neither the controller,
+                // the source nor the Thorium.
+                let room = RoomFixtures.load "W17S25"
+                let walls = Set.ofList sealedW17s25.Perimeter
+
+                let ground (tile: Pos) =
+                    match TerrainGrid.tryFind tile room.Terrain with
+                    | Some Wall
+                    | None -> false
+                    | Some _ -> true
+
+                for tile in sealedW17s25.Perimeter do
+                    Expect.isTrue
+                        (ground tile)
+                        $"choke {tile.X},{tile.Y} is open ground on the capture"
+
+                let exits =
+                    room.Border
+                    |> Map.filter (fun _ terrain -> terrain <> Wall)
+                    |> Map.keys
+                    |> Seq.map (fun pos ->
+                        {
+                            X = min 48 (max 1 pos.X)
+                            Y = min 48 (max 1 pos.Y)
+                        })
+                    |> Seq.filter (fun tile -> ground tile && not (Set.contains tile walls))
+                    |> Set.ofSeq
+
+                let rec flood (seen: Set<Pos>) (frontier: Pos list) =
+                    match frontier with
+                    | [] -> seen
+                    | tile :: rest ->
+                        let next =
+                            [
+                                for dx in -1 .. 1 do
+                                    for dy in -1 .. 1 do
+                                        { X = tile.X + dx; Y = tile.Y + dy }
+                            ]
+                            |> List.filter (fun n ->
+                                ground n && not (Set.contains n walls) && not (Set.contains n seen))
+                            |> List.distinct
+
+                        flood (Set.union seen (Set.ofList next)) (next @ rest)
+
+                let reached = flood exits (Set.toList exits)
+
+                Expect.isNonEmpty (Set.toList exits) "the capture has exits to walk in from"
+
+                let near (target: Pos) =
+                    reached
+                    |> Set.exists (fun tile ->
+                        abs (tile.X - target.X) <= 1 && abs (tile.Y - target.Y) <= 1)
+
+                let targets =
+                    [
+                        "the controller", room.Controller |> Option.map snd |> Option.toList
+                        "the source", room.Sources |> List.map snd
+                        "the Thorium", room.Minerals |> List.map snd
+                    ]
+
+                for name, tiles in targets do
+                    Expect.isNonEmpty tiles $"the capture carries {name}"
+
+                    for target in tiles do
+                        Expect.isFalse (near target) $"no walk from an exit reaches beside {name}"
             }
 
             test

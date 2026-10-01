@@ -93,7 +93,7 @@ If the user will not take on Trepidimous, the swap for W17S25 is **W13S25** (2 s
 
 - The child rates are lifetime averages of two 2-source rooms. The 1-source figures are extrapolated, not measured.
 - Trepidimous's response to a claim, and whether a fresh claim carries a safe mode, are not checked.
-- No Layout sweep was run for W17S25 or W12S26 (W17S25 and W13S26 have committed captures; W12S26 has none).
+- No Layout sweep was run for W17S25 or W12S26 (W17S25 and W13S26 have committed captures; W12S26 had none until the outcome below).
 - Odiodin's W17S23 container site may become a claim; the W17S23 row will age fastest.
 
 ## Follow-up: W17S25 as the delivery hub (user, 2026-10-01)
@@ -104,3 +104,9 @@ W17S25 is two rooms from the Reactor (by W16S25) where W15S28 is three (by W15S2
 - the Reactor errand (courier and re-claimer, `Errand.w15s25`) moves from W15S28 to W17S25, and every colony's `Consignee` moves from W15S28 to W17S25, so all banked ore arrives by terminal two rooms from the burn.
 
 Both routes cross one keeper room (W16S25 against W15S26). The move waits for the terminal (~11–13 days after the claim, the same clock as the extractor) and for the room to hold against Trepidimous next door: #445 keeps W15S28 raising it until its first tower stands full.
+
+## Outcome: W17S25 lost, W12S26 declared (2026-10-01)
+
+W17S25's Claim landed at t879,239. Trepidimous besieged it straight away (two 18M17A, two 11M7H, a 3-CLAIM tapper on the controller): the first resident died, the upgrade was blocked, and the room was unclaimed live at t880,418. The delivery-hub follow-up above is void.
+
+The user gave it up the same day and declared **W12S26** instead, as W12S28's Claim outpost and a colony of its own (mother W12S28, Consignee W15S28). Its capture is now committed (`tests/Core.Tests/rooms/W12S26.room`, t880,429): controller 8,32, source 41,40, Thorium 33,39. W17S25's sixteen-rampart perimeter (#446) stays pinned in the tests over its committed capture.
