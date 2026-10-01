@@ -6,25 +6,29 @@
 // config are `screeps-api.mjs`'s.
 //
 // Usage:
-//   capture-room.mjs <room>          capture into tests/Core.Tests/rooms/<room>.room
-//   capture-room.mjs <room> --force  overwrite a fixture that already exists
+//   capture-room.mjs <room>                capture into tests/Core.Tests/rooms/<room>.room
+//   capture-room.mjs <room> --force        overwrite a fixture that already exists
+//   capture-room.mjs <room> --structures   also write the room's structures (#465)
 //
 // There is one correct destination and no flag to override it (ADR 0036):
-// a fixture the suite cannot find is not a fixture. Structures are
-// deliberately NOT captured either. What the Layout wants is the empty
-// room; a live room's objects are somebody's half-built base, and a
-// committed fixture carrying another player's structures rots in a way
-// nobody can review.
+// a fixture the suite cannot find is not a fixture. Structures are NOT
+// captured by default: what the Layout wants is the empty room, and a live
+// room's objects are somebody's half-built base. `--structures` is the
+// arena's (#465): a siege is played against the base as it stood, so the
+// capture says which tick it stood at, and the Layout's loader ignores the
+// section. Roads and containers are left out: neither owned nor an
+// obstacle, they bar nothing a siege breaks.
 import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { connect, fail } from "./screeps-api.mjs";
 
-const usage = "usage: capture-room.mjs <room> [--force]";
+const usage = "usage: capture-room.mjs <room> [--force] [--structures]";
 
 const outDir = "tests/Core.Tests/rooms";
 const rawArgs = process.argv.slice(2);
 const force = rawArgs.includes("--force");
-const [room, ...rest] = rawArgs.filter((arg) => arg !== "--force");
+const withStructures = rawArgs.includes("--structures");
+const [room, ...rest] = rawArgs.filter((arg) => arg !== "--force" && arg !== "--structures");
 if (!room || rest.length > 0) fail(usage);
 // A room name the server would reject is worth catching here rather than
 // as an empty terrain response three requests later.
@@ -89,15 +93,57 @@ const objects = (objectsRes.objects ?? [])
 const rows = [];
 for (let y = 0; y < 50; y++) rows.push(encoded.slice(y * 50, y * 50 + 50));
 
+// The base as it stood (#465): every structure but the roads and the
+// containers, with its owner's username ("-" for a wall nobody owns), its
+// hits, the energy it holds, whether a rampart is public, and a rampart's
+// next decay tick (0 for none). The controller's holder, level and banked
+// safe modes ride in the header, since the controller is furniture above.
+const usernameOf = (userId) => objectsRes.users?.[userId]?.username ?? "-";
+const skipped = ["road", "container", "creep", "powerCreep", ...furniture];
+const structures = withStructures
+  ? (objectsRes.objects ?? [])
+      .filter((o) => o.hitsMax !== undefined && !skipped.includes(o.type))
+      .map((o) => ({
+        id: o._id,
+        type: o.type,
+        x: o.x,
+        y: o.y,
+        owner: o.user ? usernameOf(o.user) : "-",
+        hits: o.hits,
+        hitsMax: o.hitsMax,
+        energy: o.store?.energy ?? 0,
+        public: o.isPublic ? 1 : 0,
+        decay: o.nextDecayTime ?? 0,
+      }))
+      .sort((a, b) => a.type.localeCompare(b.type) || a.x - b.x || a.y - b.y)
+  : [];
+const controller = (objectsRes.objects ?? []).find((o) => o.type === "controller");
+const holder =
+  withStructures && controller?.user
+    ? [
+        `owner\t${usernameOf(controller.user)}`,
+        `level\t${controller.level}`,
+        `safeModes\t${controller.safeModeAvailable ?? 0}`,
+      ]
+    : [];
+
 const lines = [
   "# fabot room capture — ADR 0036. Terrain is the engine's own mask per",
   "# tile (bit 1 wall, bit 2 swamp), row-major, border rows included; the",
-  "# loader owns the 1..48 trim and the classification. Furniture only —",
-  "# no structures, by design.",
+  ...(withStructures
+    ? [
+        "# loader owns the 1..48 trim and the classification. The [structures]",
+        "# section is the base as it stood at this tick, for the arena (#465).",
+      ]
+    : [
+        "# loader owns the 1..48 trim and the classification. Furniture only —",
+        "# no structures, by design.",
+      ]),
   `room\t${room}`,
   `shard\t${shard}`,
   `server\t${url}`,
   `tick\t${time.time}`,
+  ...holder,
   "",
   "[terrain]",
   ...rows,
@@ -106,6 +152,16 @@ const lines = [
   "id\ttype\tx\ty\tresource",
   ...objects.map((o) => `${o.id}\t${o.type}\t${o.x}\t${o.y}\t${o.resource}`),
   "",
+  ...(withStructures
+    ? [
+        "[structures]",
+        "id\ttype\tx\ty\towner\thits\thitsMax\tenergy\tpublic\tdecay",
+        ...structures.map((s) =>
+          [s.id, s.type, s.x, s.y, s.owner, s.hits, s.hitsMax, s.energy, s.public, s.decay].join("\t"),
+        ),
+        "",
+      ]
+    : []),
 ].join("\n");
 
 mkdirSync(outDir, { recursive: true });
@@ -115,4 +171,5 @@ const counts = objects.reduce((acc, o) => ({ ...acc, [o.type]: (acc[o.type] ?? 0
 const summary = Object.entries(counts)
   .map(([type, n]) => `${n} ${type}${n === 1 ? "" : "s"}`)
   .join(", ");
-console.log(`${path}: ${room} @ ${shard} tick ${time.time} — ${summary || "no furniture"}`);
+const built = withStructures ? `; ${structures.length} structures` : "";
+console.log(`${path}: ${room} @ ${shard} tick ${time.time} — ${summary || "no furniture"}${built}`);

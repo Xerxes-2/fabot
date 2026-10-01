@@ -58,7 +58,8 @@ invariant suite (ADR 0036). The API is an authoring tool, never a test
 dependency: the suite loads the committed file and calls nothing. Terrain
 never changes, so a re-capture of unchanged terrain diffs on nothing but
 the header's `tick`, which is there to say when the furniture was last
-read. Pass `--force` to overwrite an existing fixture deliberately.
+read. Pass `--force` to overwrite an existing fixture deliberately, and
+`--structures` to add the base as it stood for the combat arena (#465).
 
 ## Layout
 

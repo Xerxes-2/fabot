@@ -150,7 +150,7 @@ module Engine =
 
     /// A tower act of this power at this range (`processor/intents/towers/`):
     /// full out to the optimal range, falling linearly to the falloff range
-    /// and flat beyond it, floored. Heal and attack share the curve.
+    /// and flat beyond it, floored. Heal, attack and repair share the curve.
     let private towerPowerAt (power: int) (range: int) =
         if range <= towerOptimalRange then
             power
@@ -169,6 +169,10 @@ module Engine =
 
     /// A tower's attack at this range: `towerHealAt`'s twin.
     let towerAttackAt (range: int) = towerPowerAt towerPowerAttack range
+
+    /// A tower's repair at this range (TOWER_POWER_REPAIR, 800, on the same
+    /// curve): the arena's (#465), for a besieged base's towers.
+    let towerRepairAt (range: int) = towerPowerAt 800 range
 
     /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`).
     let partHits = 100

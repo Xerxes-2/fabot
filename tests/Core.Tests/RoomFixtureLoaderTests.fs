@@ -208,6 +208,43 @@ let loaderTests =
                 Expect.hasLength room.Sources 3 "the count ADR 0022's rule is stated over"
                 Expect.isNone room.Controller "a sector centre has no controller to own"
             }
+
+            test
+                "a capture taken with its structures loads the base as it stood, and one without loads none" {
+                // W18S26 at t889,849 (#465): Trepidimous' RCL6, two loaded
+                // towers and 73 ramparts — the arena's siege target.
+                let held = load "W18S26"
+
+                let ofType kind =
+                    held.Structures |> List.filter (fun s -> s.Type = kind)
+
+                Expect.hasLength (ofType "rampart") 73 "the 73 ramparts"
+                Expect.hasLength (ofType "tower") 2 "the two towers"
+
+                Expect.isTrue
+                    (ofType "tower" |> List.forall (fun t -> t.Energy = 1000))
+                    "both towers full"
+
+                Expect.isTrue
+                    (held.Structures |> List.forall (fun s -> s.Owner = Some "Trepidimous"))
+                    "every structure Trepidimous'"
+
+                Expect.equal
+                    held.Holder
+                    (Some
+                        {
+                            Username = "Trepidimous"
+                            Level = 6
+                            SafeModes = 4
+                        })
+                    "the controller's holder"
+
+                Expect.hasLength held.Sources 2 "the furniture still read beside the section"
+
+                let bare = load "W12S28"
+                Expect.isEmpty bare.Structures "a furniture-only capture carries no structures"
+                Expect.isNone bare.Holder "nor a holder"
+            }
         ]
 
 // ---- the rooms the sweep runs on ----------------------------------------

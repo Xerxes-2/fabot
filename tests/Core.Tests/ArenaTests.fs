@@ -299,6 +299,326 @@ let arenaPhysicsTests =
             }
         ]
 
+/// The plain room with these structures standing in it.
+let private built (structures: ArenaStructure list) (bodies: Body list) =
+    arena 1000 [ room plainRoom |> withStructures structures; room "W17S25" ] [] bodies
+
+let private tile (x: int) (y: int) : Pos = { X = x; Y = y }
+
+/// A structure's hits at the end of the run, or None once it is gone.
+let private hitsLeft (id: string) (trace: TickTrace list) : int option =
+    trace |> List.tryLast |> Option.bind (fun t -> Map.tryFind id t.Structures)
+
+[<Tests>]
+let arenaStructureTests =
+    testList
+        "arena structures"
+        [
+            test
+                "a body on its owner's rampart takes nothing: the rampart takes the swing and the shot, and strikes nobody back" {
+                let cover = rampart red 10_000 (tile 21 12)
+
+                let standing = doing "standing" red (parts [ Move, 3; Attack, 3 ]) (at 21 12) []
+
+                let hitter =
+                    doing
+                        "hitter"
+                        blue
+                        (parts [ Move, 2; Attack, 2 ])
+                        (at 20 12)
+                        [ Act.Attack "standing" ]
+
+                let shooter =
+                    doing
+                        "shooter"
+                        blue
+                        (parts [ Move, 1; RangedAttack, 1 ])
+                        (at 18 12)
+                        [ Act.RangedAttack "standing" ]
+
+                let _, trace = built [ cover ] [ standing; hitter; shooter ] |> run 1
+                Expect.equal (snapshotOf "standing" trace).Hits 600 "the body is untouched"
+
+                Expect.equal
+                    (hitsLeft cover.Id trace)
+                    (Some(10_000 - 60 - 10))
+                    "the rampart took both"
+
+                Expect.equal
+                    (snapshotOf "hitter" trace).Hits
+                    400
+                    "a swing that lands on a rampart is struck back by nobody"
+            }
+
+            test
+                "a scripted tower shoots the nearest enemy, and the rampart under it takes the shot at the falloff" {
+                // Range 10 from 21,12: 600 less 600 × 0.75 × 5 / 15.
+                let tower = towerOf blue (tile 21 2) 1000
+                let cover = rampart red 10_000 (tile 21 12)
+                let standing = doing "standing" red (parts [ Move, 1 ]) (at 21 12) []
+                let bare = doing "bare" red (parts [ Move, 5 ]) (at 21 13) []
+
+                let _, trace =
+                    arena
+                        1000
+                        [
+                            room plainRoom
+                            |> withStructures [ tower; cover ]
+                            |> withTowerDuties [ Shoot Nearest ]
+                        ]
+                        []
+                        [ standing; bare ]
+                    |> run 1
+
+                Expect.equal (hitsLeft cover.Id trace) (Some(10_000 - 450)) "450 at range 10"
+                Expect.equal (snapshotOf "standing" trace).Hits 100 "nothing on the body"
+            }
+
+            test
+                "a tower heals its side's hurt at the falloff and mends a rampart, ten energy an act, and a dry tower does nothing" {
+                // Heal before repair before attack (`towers/intents.js`).
+                let tower = towerOf blue (tile 21 2) 1000
+                let worn = rampart blue 1_000 (tile 21 12)
+
+                let hurt =
+                    { doing "hurt" blue (parts [ Move, 10 ]) (at 21 22) [] with
+                        Hits = 500
+                    }
+
+                let duties = [ HealHurt; Mend 1_000_000; Shoot Nearest ]
+
+                let world tower bodies =
+                    arena
+                        1000
+                        [
+                            room plainRoom
+                            |> withStructures [ tower; worn ]
+                            |> withTowerDuties duties
+                        ]
+                        []
+                        bodies
+
+                // Range 20: 400 × 0.25.
+                let final, trace = world tower [ hurt ] |> run 1
+                Expect.equal (snapshotOf "hurt" trace).Hits 600 "100 healed at range 20"
+                Expect.equal (hitsLeft worn.Id trace) (Some 1_000) "the heal took the tick"
+
+                let spent =
+                    final.Rooms[plainRoom].Structures |> List.find (fun s -> s.Id = tower.Id)
+
+                Expect.equal spent.Energy 990 "ten energy spent"
+
+                // Nobody hurt: the rampart at range 10, 800 less 800 × 0.25.
+                let _, trace = world tower [] |> run 1
+                Expect.equal (hitsLeft worn.Id trace) (Some(1_000 + 600)) "600 mended at range 10"
+
+                let _, trace = world { tower with Energy = 9 } [] |> run 1
+                Expect.equal (hitsLeft worn.Id trace) (Some 1_000) "nine energy is no act"
+            }
+
+            test
+                "rangedMassAttack hits the other side's structures in three at the distance rate, never a wall nor a body under a rampart" {
+                let mass =
+                    doing
+                        "mass"
+                        blue
+                        (parts [ Move, 2; RangedAttack, 2 ])
+                        (at 20 20)
+                        [ Act.RangedMassAttack ]
+
+                let cover = rampart red 10_000 (tile 21 20)
+                let sheltered = doing "sheltered" red (parts [ Move, 1 ]) (at 21 20) []
+                let store = structureOf "extension" (Some red) 1_000 1_000 (tile 22 20)
+                let wall = structureOf "constructedWall" None 10_000 10_000 (tile 20 22)
+                let far = doing "far" red (parts [ Move, 1 ]) (at 23 21) []
+
+                let _, trace = built [ cover; store; wall ] [ mass; sheltered; far ] |> run 1
+                Expect.equal (hitsLeft cover.Id trace) (Some(10_000 - 20)) "range 1: the full 20"
+                Expect.equal (hitsLeft store.Id trace) (Some(1_000 - 8)) "range 2: 40%"
+                Expect.equal (hitsLeft wall.Id trace) (Some 10_000) "a wall has no owner to hit"
+                Expect.equal (snapshotOf "sheltered" trace).Hits 100 "the rampart covers its body"
+                Expect.equal (snapshotOf "far" trace).Hits 98 "range 3: 10%"
+            }
+
+            test "dismantle takes 50 a WORK, off the rampart over a structure first, and off a wall" {
+                let spawn = structureOf "spawn" (Some red) 5_000 5_000 (tile 21 12)
+                let cover = rampart red 10_000 (tile 21 12)
+                let wall = structureOf "constructedWall" None 10_000 10_000 (tile 19 12)
+
+                let breaker =
+                    doing
+                        "breaker"
+                        blue
+                        (parts [ Move, 2; Work, 2 ])
+                        (at 20 12)
+                        [ Act.Dismantle spawn.Id ]
+
+                let waller =
+                    doing
+                        "waller"
+                        blue
+                        (parts [ Move, 1; Work, 1 ])
+                        (at 19 13)
+                        [ Act.Dismantle wall.Id ]
+
+                let _, trace = built [ spawn; cover; wall ] [ breaker; waller ] |> run 1
+                Expect.equal (hitsLeft cover.Id trace) (Some(10_000 - 100)) "the rampart first"
+                Expect.equal (hitsLeft spawn.Id trace) (Some 5_000) "the spawn under it untouched"
+                Expect.equal (hitsLeft wall.Id trace) (Some(10_000 - 50)) "the wall"
+            }
+
+            test
+                "a body repairs 100 a WORK at range 3, an energy per 100 hits, capped by what it carries and what is missing" {
+                let worn = rampart red 1_000 (tile 23 12)
+
+                let mender energy =
+                    { doing
+                          "mender"
+                          red
+                          (parts [ Move, 2; Work, 2; Carry, 1 ])
+                          (at 20 12)
+                          [ Act.Repair worn.Id ] with
+                        Energy = energy
+                    }
+
+                let final, trace = built [ worn ] [ mender 50 ] |> run 1
+                Expect.equal (hitsLeft worn.Id trace) (Some 1_200) "two WORK, 200"
+
+                Expect.equal
+                    (final.Bodies |> List.find (fun b -> b.Id = "mender")).Energy
+                    48
+                    "two energy spent"
+
+                let _, trace = built [ worn ] [ mender 1 ] |> run 1
+                Expect.equal (hitsLeft worn.Id trace) (Some 1_100) "one energy buys 100"
+
+                let _, trace = built [ { worn with HitsMax = 1_150 } ] [ mender 50 ] |> run 1
+
+                Expect.equal (hitsLeft worn.Id trace) (Some 1_150) "no more than is missing"
+            }
+
+            test
+                "a transfer puts what the body carries into a structure beside it, no more than there is room for" {
+                let tower = towerOf red (tile 21 12) 900
+
+                let carrier =
+                    { doing
+                          "carrier"
+                          red
+                          (parts [ Move, 4; Carry, 4 ])
+                          (at 20 12)
+                          [ Act.Transfer tower.Id ] with
+                        Energy = 200
+                    }
+
+                let final, _ = built [ tower ] [ carrier ] |> run 1
+
+                let filled =
+                    final.Rooms[plainRoom].Structures |> List.find (fun s -> s.Id = tower.Id)
+
+                Expect.equal filled.Energy 1000 "filled to TOWER_CAPACITY"
+
+                Expect.equal
+                    (final.Bodies |> List.find (fun b -> b.Id = "carrier")).Energy
+                    100
+                    "the rest still carried"
+            }
+
+            test
+                "a rampart decays 300 every 100 ticks from its next decay tick, and one decayed to nothing is gone" {
+                // Placed with no decay tick, it has just decayed; then it
+                // decays at `gameTime >= nextDecayTime - 1` (`ramparts/tick.js`).
+                let worn = rampart red 700 (tile 21 12)
+                let _, trace = built [ worn ] [] |> run 300
+
+                let at tick =
+                    trace[tick].Structures |> Map.tryFind worn.Id
+
+                Expect.equal (at 98) (Some 700) "whole until its decay tick"
+                Expect.equal (at 99) (Some 400) "300 off at time 1099, nextDecayTime 1100 less one"
+                Expect.equal (at 197) (Some 400) "held until the next"
+                Expect.equal (at 198) (Some 100) "300 off again at 1198"
+                Expect.equal (at 297) None "gone"
+
+                Expect.isTrue
+                    (trace[297].Events |> List.contains (Destroyed worn.Id))
+                    "and its passing is an event"
+            }
+
+            test
+                "a wall and the other side's rampart bar a step; the owner's rampart and a public one do not" {
+                let mine = rampart red 10_000 (tile 21 12)
+
+                let shared =
+                    { rampart red 10_000 (tile 21 14) with
+                        IsPublic = true
+                    }
+
+                let wall = structureOf "constructedWall" None 10_000 10_000 (tile 21 16)
+
+                let step id side y =
+                    doing id side (parts [ Move, 1 ]) (at 20 y) [ Act.Move Right ]
+
+                let _, trace =
+                    built
+                        [ mine; shared; wall ]
+                        [ step "owner" red 12; step "walker" blue 14; step "waller" red 16 ]
+                    |> run 1
+
+                Expect.equal (snapshotOf "owner" trace).At (at 21 12) "onto its own rampart"
+                Expect.equal (snapshotOf "walker" trace).At (at 21 14) "onto a public one"
+                Expect.equal (snapshotOf "waller" trace).At (at 20 16) "never onto a wall"
+
+                let _, trace = built [ mine ] [ step "stranger" blue 12 ] |> run 1
+
+                Expect.equal
+                    (snapshotOf "stranger" trace).At
+                    (at 20 12)
+                    "never onto another's rampart"
+            }
+
+            test
+                "a breacher walks to the weakest barrier between it and its goal, breaks it, and walks in" {
+                // A goal ringed by eight ramparts, one of them a tenth of the rest.
+                let goal = at 30 12
+
+                let ring =
+                    [
+                        for x in 29..31 do
+                            for y in 11..13 do
+                                if (x, y) <> (30, 12) then
+                                    rampart
+                                        red
+                                        (if (x, y) = (29, 12) then 3_000 else 30_000)
+                                        (tile x y)
+                    ]
+
+                let breacher =
+                    body
+                        "breacher"
+                        blue
+                        (parts [ Move, 10; Attack, 10 ])
+                        (at 20 12)
+                        (Some(Breach goal))
+
+                let _, trace = built ring [ breacher ] |> run 40
+                let weak = ring |> List.find (fun s -> s.At = tile 29 12)
+
+                Expect.isTrue
+                    (trace |> List.exists (fun t -> t.Events |> List.contains (Destroyed weak.Id)))
+                    $"the weak rampart broken\n{describe trace}"
+
+                Expect.equal (snapshotOf "breacher" trace).At goal "and the goal reached"
+
+                Expect.equal
+                    (ring
+                     |> List.filter (fun s -> s.Id <> weak.Id)
+                     |> List.choose (fun s -> hitsLeft s.Id trace))
+                    (List.replicate 7 30_000)
+                    "no other rampart struck"
+            }
+        ]
+
 /// The outpost a melee guard defends: W12S28 at RCL7 with its declared
 /// W12S27, a hauler of ours standing by W12S27's source for vision.
 let private outpostRaid (invader: Body) =
@@ -1172,4 +1492,377 @@ let arenaBorderTests =
                 for id in duo do
                     Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
             }
+        ]
+
+/// W17S25's declared perimeter (#446): sixteen ramparts sealing the room at
+/// its exits' chokes — eleven west, three south, two east.
+let private perimeter =
+    [ for y in 15..20 -> tile 2 y ]
+    @ [ for y in 23..27 -> tile 2 y ]
+    @ [ tile 16 44; tile 17 44; tile 18 44; tile 47 27; tile 47 28 ]
+
+let private childSpawn = tile 22 34
+let private childTower = tile 21 32
+
+/// W17S25 raised by W17S26 and weaning at RCL3: its own spawn, one tower
+/// holding `towerEnergy` — never full, so the child stays raised (#445) —
+/// the perimeter's ramparts at `hits`, and W18S25 beyond the west exits.
+/// Nothing refills the tower.
+let private sealedChild (hits: int) (towerEnergy: int) (safeModes: int) (bodies: Body list) =
+    let mother =
+        room "W17S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 20; Y = 26 } 5600
+
+    let child =
+        room "W17S25"
+        |> withController Ownership.Ours None 3 safeModes
+        |> withSpawn "Spawn10" childSpawn 800
+        |> withStructures [ towerOf Side.Ours childTower towerEnergy ]
+        |> withRamparts Side.Ours hits perimeter
+
+    let colonies =
+        [
+            colony "W17S26"
+            { colony "W17S25" with
+                Mother = Some "W17S26"
+                Perimeter = perimeter
+            }
+        ]
+
+    arena 880_341 [ mother; child; room "W18S25" ] colonies bodies
+
+/// W17S25 raised by W17S26 and bootstrapping at RCL2: its own spawn, no
+/// tower, no perimeter yet, `safeModes` banked.
+let private bootstrappingChild (safeModes: int) (bodies: Body list) =
+    let mother =
+        room "W17S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 20; Y = 26 } 5600
+
+    let child =
+        room "W17S25"
+        |> withController Ownership.Ours None 2 safeModes
+        |> withSpawn "Spawn10" childSpawn 550
+
+    let colonies =
+        [
+            colony "W17S26"
+            { colony "W17S25" with
+                Mother = Some "W17S26"
+                Perimeter = perimeter
+            }
+        ]
+
+    arena 880_341 [ mother; child; room "W18S25" ] colonies bodies
+
+/// The t880,341 raid (§1.1) come back from W18S25, beyond the west exits:
+/// the melee breaking in for the controller's ring, each healer behind its
+/// melee, the tapper walking for the controller once a way is open.
+let private westRaid =
+    [
+        body "Eternity536" trep trepMelee (w18s25 44 22) (Some(Breach(w17s25 16 36)))
+        body "Prime803" trep trepMelee (w18s25 44 24) (Some(Breach(w17s25 16 36)))
+        body "Prism305" trep trepHealer (w18s25 43 22) (Some(Follow "Eternity536"))
+        body "Paragon722" trep trepHealer (w18s25 43 24) (Some(Follow "Prime803"))
+        body "Rune908" trep trepTapper (w18s25 45 23) (Some(Tap(w17s25 15 36)))
+    ]
+
+/// The perimeter ramparts' ids.
+let private lineIds =
+    perimeter |> List.map (fun p -> $"rampart-{p.X}-{p.Y}") |> Set.ofList
+
+/// The tick the first of these structures fell on.
+let private firstFallen (ids: Set<string>) (trace: TickTrace list) : int option =
+    trace
+    |> List.tryPick (fun t ->
+        t.Events
+        |> List.tryPick (function
+            | Destroyed id when Set.contains id ids -> Some t.Tick
+            | _ -> None))
+
+/// The tick safe mode fired on, if it did.
+let private safeModeOn (trace: TickTrace list) : int option =
+    trace
+    |> List.tryPick (fun t ->
+        t.Events
+        |> List.tryPick (function
+            | SafeModeActivated _ -> Some t.Tick
+            | _ -> None))
+
+/// The t880,341 raid already inside the line and beside the child's spawn,
+/// the melee breaking it: no tapper.
+let private insideRaid =
+    let spawn = RoomPos.at "W17S25" childSpawn
+
+    [
+        body "Eternity536" trep trepMelee (w17s25 23 35) (Some(Breach spawn))
+        body "Prime803" trep trepMelee (w17s25 22 35) (Some(Breach spawn))
+        body "Prism305" trep trepHealer (w17s25 23 36) (Some(Follow "Eternity536"))
+        body "Paragon722" trep trepHealer (w17s25 22 36) (Some(Follow "Prime803"))
+    ]
+
+/// W18S26 as captured at t889,849 (#465): Trepidimous' RCL6, its two towers
+/// full, healing their own first, then shooting the nearest, then mending
+/// their ramparts. Nothing refills them from the 86,308 in its Storage.
+let private trepBase () =
+    room "W18S26" |> withBase [ HealHurt; Shoot Nearest; Mend 2_000_000 ]
+
+/// W18S26's outer line on the side facing W17S26: the 45 ramparts at x 30.
+let private outerLine =
+    trepBase().Structures
+    |> List.filter (fun s -> s.Kind = "rampart" && s.At.X = 30)
+    |> List.map (fun s -> s.Id)
+    |> Set.ofList
+
+/// A scripted siege from W17S26, our decide off: two strikers breaking for
+/// the base's south-east corner (25,44), so the cheapest way in crosses the
+/// outer line where both towers are past their falloff range, each with a
+/// 16 HEAL healer behind it. Run until the line falls, every body is dead,
+/// or a life (1,500 ticks) is spent.
+let private offenceProbe (striker: BodyPart list) =
+    let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
+    let goal = RoomPos.at "W18S26" { X = 25; Y = 44 }
+    let us = Side.Player "fabot"
+    let healer = parts [ Move, 16; Heal, 16 ]
+
+    let start =
+        arena
+            889_849
+            [ room "W17S26"; trepBase () ]
+            []
+            [
+                body "striker-1" us striker (w17s26 4 8) (Some(Breach goal))
+                body "striker-2" us striker (w17s26 4 10) (Some(Breach goal))
+                body "healer-1" us healer (w17s26 3 8) (Some(Follow "striker-1"))
+                body "healer-2" us healer (w17s26 3 10) (Some(Follow "striker-2"))
+            ]
+
+    let over (a: Arena) =
+        let standing =
+            a.Rooms["W18S26"].Structures
+            |> List.filter (fun s -> Set.contains s.Id outerLine)
+            |> List.length
+
+        List.isEmpty a.Bodies || standing < outerLine.Count
+
+    let final, trace = start |> runUntil over Engine.creepLifetime
+    start, final, trace
+
+/// The child's one worker, carrying a full 200.
+let private worker =
+    { body
+          "worker-880300-Spawn10"
+          Side.Ours
+          (parts [ Work, 4; Carry, 4; Move, 4 ])
+          (w17s25 20 30)
+          None with
+        Energy = 200
+    }
+
+/// The #447 garrison: the mother's two resident R7s by the controller.
+let private residents =
+    [
+        body "ranger-879853-Spawn8" Side.Ours r7 (w17s25 20 38) None
+        body "ranger-879854-Spawn8" Side.Ours r7 (w17s25 19 39) None
+    ]
+
+[<Tests>]
+let arenaDefenceTests =
+    testList
+        "arena siege defence"
+        [
+            test
+                "our structures reach the views as the shell projects them: the Keep, our ramparts, the loaded tower" {
+                let start = sealedChild 50_000 500 1 residents
+                let child = viewOf start "W17S25"
+                let mother = viewOf start "W17S26"
+                let atlas = Fabot.Core.Atlas.ofView child
+
+                Expect.equal
+                    (Fabot.Core.Atlas.ourRampartTilesIn atlas "W17S25")
+                    (Set.ofList perimeter)
+                    "the sixteen ramparts are ours, by their hits"
+
+                Expect.equal
+                    (Fabot.Core.Atlas.keepTilesIn atlas "W17S25")
+                    (Set.ofList [ childSpawn; childTower ])
+                    "the spawn and the tower are the Keep"
+
+                Expect.equal
+                    (Map.tryFind "W17S25" mother.LoadedTowers)
+                    (Some 1)
+                    "the mother counts the loaded tower"
+
+                Expect.equal
+                    (Map.tryFind "W17S25" child.Stages)
+                    (Some Weaning)
+                    "the child is weaning"
+            }
+
+            test
+                "a worker of the child by its perimeter repairs a rampart under the floor through our decide, 400 hits for 4 energy a tick" {
+                // The tower full, so nothing outranks the Repair: the child
+                // stands on its own (#445) and keeps its ramparts at
+                // `RampartFloor`.
+                let start = sealedChild 10_000 1000 0 [ { worker with At = w17s25 3 18 } ]
+                let final, trace = start |> run 10
+                let failure = describe trace
+
+                let mended =
+                    trace
+                    |> List.choose (fun t ->
+                        t.Ours
+                        |> List.tryPick (function
+                            | RepairStructure(n, id) when n = worker.Id -> Some id
+                            | _ -> None))
+                    |> List.distinct
+
+                match mended with
+                | [ id ] ->
+                    Expect.isTrue (Set.contains id lineIds) $"a perimeter rampart\n{failure}"
+
+                    Expect.equal
+                        (hitsLeft id trace)
+                        (Some(10_000 + 10 * 400))
+                        "four WORK, ten ticks"
+                | ids -> failtest $"one rampart repaired every tick: {ids}\n{failure}"
+
+                Expect.equal
+                    (final.Bodies |> List.find (fun b -> b.Id = worker.Id)).Energy
+                    (200 - 10 * 4)
+                    "four energy a tick"
+            }
+
+            for hits in [ 10_000; 50_000; 300_000 ] do
+                test
+                    $"scenario 1 (#446): the perimeter at {hits} hits holds the t880,341 raid hits ÷ 510 ticks — one melee a rampart at the x=1 choke — the garrison untouched inside" {
+                    let start = sealedChild hits 500 0 (worker :: residents @ westRaid)
+
+                    let standing (a: Arena) =
+                        a.Rooms["W17S25"].Structures
+                        |> List.filter (fun s -> Set.contains s.Id lineIds)
+
+                    let _, trace = start |> runUntil (fun a -> List.length (standing a) < 16) 700
+                    let failure = describe trace
+                    let swing = Engine.attackPower * 17
+
+                    match firstFallen lineIds trace with
+                    | None -> failtest $"the line falls inside 700 ticks\n{failure}"
+                    | Some fell ->
+                        // Measured: t25, t105, t593. Both melee on one
+                        // rampart would halve it; the choke's one column,
+                        // shared with the healers, seats one.
+                        Expect.isGreaterThanOrEqual
+                            fell
+                            (hits / (2 * swing))
+                            "no faster than both melee on one rampart"
+
+                        Expect.isLessThanOrEqual
+                            fell
+                            (hits / swing + 30)
+                            $"one melee on it from the walk in\n{failure}"
+
+                        for r in residents do
+                            for tick, s in pathOf r.Id trace do
+                                Expect.equal s.Hits 4200 $"t{tick}: {r.Id} untouched\n{failure}"
+
+                                Expect.isGreaterThan
+                                    s.At.X
+                                    2
+                                    $"t{tick}: {r.Id} inside the line, off its ramparts"
+                }
+
+            test
+                "scenario 2 (#448): the raid inside a towered home dents the Keep, which fires safe mode the next tick, and nothing lands after" {
+                // The tower takes the undefended arm away, and no tapper
+                // comes: the dented Keep is the only arm that can fire.
+                let _, trace = sealedChild 50_000 500 1 (residents @ insideRaid) |> run 80
+                let failure = describe trace
+
+                let keep (t: TickTrace) =
+                    [ "spawn-Spawn10"; $"tower-{childTower.X}-{childTower.Y}" ]
+                    |> List.sumBy (fun id -> Map.tryFind id t.Structures |> Option.defaultValue 0)
+
+                let whole = 5000 + 3000
+
+                match trace |> List.tryFind (fun t -> keep t < whole), safeModeOn trace with
+                | Some dented, Some fired ->
+                    Expect.equal fired (dented.Tick + 1) $"fired the tick after the dent\n{failure}"
+
+                    let after = trace |> List.filter (fun t -> t.Tick >= fired)
+
+                    Expect.isTrue
+                        (after |> List.forall (fun t -> keep t = keep (List.head after)))
+                        $"nothing landed on the Keep after\n{failure}"
+                | outcome -> failtest $"a dent and a safe mode: {outcome}\n{failure}"
+            }
+
+            test
+                "scenario 2 (#448): a skirmisher the garrison wins fires no safe mode in a towerless home" {
+                let skirmisher =
+                    body
+                        "Skirmish1"
+                        trep
+                        (parts [ Move, 5; RangedAttack, 2; Heal, 3 ])
+                        (w17s25 8 18)
+                        (Some(Kite(Nearest, 3)))
+
+                let _, trace = bootstrappingChild 1 (skirmisher :: residents) |> run 60
+                let failure = describe trace
+                Expect.isNone (safeModeOn trace) $"no safe mode\n{failure}"
+                Expect.isSome (diedOn "Skirmish1" trace) $"the garrison kills it\n{failure}"
+            }
+
+            test
+                "scenario 2 (#448): the full raid in a towerless home fires safe mode on sight, the garrison losing it" {
+                let _, trace = bootstrappingChild 1 (residents @ insideRaid) |> run 3
+                Expect.equal (safeModeOn trace) (Some 0) $"the undefended arm\n{describe trace}"
+            }
+
+            for name, striker in
+                [
+                    "25 WORK dismantlers", parts [ Move, 25; Work, 25 ]
+                    "20 ATTACK melee", parts [ Move, 20; Attack, 20 ]
+                    "20 RANGED_ATTACK rangers", parts [ Move, 20; RangedAttack, 20 ]
+                ] do
+                test
+                    $"scenario 3, scripted on both sides — our decide does not run: two {name} and two 16 HEAL healers on W18S26's outer line, far from its towers" {
+                    let start, final, trace = offenceProbe striker
+                    let failure = describe trace
+                    let squadIds = start.Bodies |> List.map (fun b -> b.Id)
+                    let fell = firstFallen outerLine trace
+
+                    let towers =
+                        final.Rooms["W18S26"].Structures
+                        |> List.filter (fun s -> s.Kind = "tower")
+                        |> List.sumBy (fun s -> s.Energy)
+
+                    // Both towers at their falloff floor land 300 on one
+                    // body, under the 384 the two healers put back.
+                    Expect.isLessThan
+                        (2 * Engine.towerAttackAt Engine.towerFalloffRange)
+                        (2 * 16 * Engine.healPower)
+                        "at the far line the heal outpaces the towers"
+
+                    Expect.equal towers 0 $"the towers' 2,000 energy all spent\n{failure}"
+
+                    match name with
+                    | "25 WORK dismantlers" ->
+                        // Measured: the line falls at t351, nobody lost,
+                        // 17,100 energy of bodies.
+                        Expect.isSome fell $"breached\n{failure}"
+                        Expect.isLessThan fell.Value 400 "inside 400 ticks"
+
+                        for id in squadIds do
+                            Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+                    | "20 ATTACK melee" ->
+                        // Measured: t691; the towers' nearest-first fire
+                        // kills both healers on the walk in.
+                        Expect.isSome fell $"breached\n{failure}"
+                        Expect.isLessThan fell.Value 750 "inside 750 ticks"
+                    | _ ->
+                        // 400 a tick against ~780,000: not inside a life.
+                        Expect.isNone fell $"never breached inside a life\n{failure}"
+                }
         ]

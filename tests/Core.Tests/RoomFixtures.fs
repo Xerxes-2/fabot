@@ -11,6 +11,33 @@ open System.IO
 open Fabot.Core
 open Fabot.Core.Types
 
+/// One structure of a capture taken `--structures` (#465): the base as it
+/// stood, for the arena. The Layout's projections never read these.
+type CapturedStructure =
+    {
+        Id: string
+        /// The engine's `structureType`.
+        Type: string
+        At: Pos
+        /// The owner's username; None for a wall nobody owns.
+        Owner: string option
+        Hits: int
+        HitsMax: int
+        Energy: int
+        IsPublic: bool
+        /// A rampart's `nextDecayTime`; 0 for none.
+        NextDecay: int
+    }
+
+/// Who held a captured room's controller, at what level, with how many safe
+/// modes banked.
+type CapturedHolder =
+    {
+        Username: string
+        Level: int
+        SafeModes: int
+    }
+
 /// One captured room, as its committed fixture spells it.
 type RoomCapture =
     {
@@ -51,6 +78,10 @@ type RoomCapture =
         /// and this makes `Keepers.centres` checkable against the server
         /// instead of against the hand that typed them.
         Rocks: (string * Pos) list
+        /// The structures, for a capture taken with them; empty otherwise.
+        Structures: CapturedStructure list
+        /// The controller's holder, for a capture taken with structures.
+        Holder: CapturedHolder option
     }
 
 /// A captured room projected as a `SpatialInfo`, beside the ids the
@@ -142,8 +173,12 @@ let load (roomName: string) : RoomCapture =
                             { X = x; Y = y }, terrainAt x y
             ]
 
+    // The structures section is optional and follows the objects.
+    let structureSection = Array.tryFindIndex ((=) "[structures]") lines
+
     let objectRows =
-        lines.[objectSection + 1 ..] |> Array.filter (fun line -> line.Trim() <> "")
+        lines.[objectSection + 1 .. (defaultArg structureSection lines.Length) - 1]
+        |> Array.filter (fun line -> line.Trim() <> "")
 
     match Array.tryHead objectRows with
     | Some "id\ttype\tx\ty\tresource" -> ()
@@ -178,6 +213,44 @@ let load (roomName: string) : RoomCapture =
         |> Array.map snd
         |> List.ofArray
 
+    let structures =
+        match structureSection with
+        | None -> []
+        | Some section ->
+            let rows = lines.[section + 1 ..] |> Array.filter (fun line -> line.Trim() <> "")
+
+            match Array.tryHead rows with
+            | Some "id\ttype\tx\ty\towner\thits\thitsMax\tenergy\tpublic\tdecay" -> ()
+            | _ -> failwithf "%s: the structures section has no column header" path
+
+            rows
+            |> Array.skip 1
+            |> Array.map (fun line ->
+                match line.Split '\t' with
+                | [| id; kind; x; y; owner; hits; hitsMax; energy; isPublic; decay |] ->
+                    {
+                        Id = id
+                        Type = kind
+                        At = { X = int x; Y = int y }
+                        Owner = if owner = "-" then None else Some owner
+                        Hits = int hits
+                        HitsMax = int hitsMax
+                        Energy = int energy
+                        IsPublic = isPublic = "1"
+                        NextDecay = int decay
+                    }
+                | _ -> failwithf "%s: structure row %s has not ten columns" path line)
+            |> List.ofArray
+
+    let holder =
+        Map.tryFind "owner" header
+        |> Option.map (fun username ->
+            {
+                Username = username
+                Level = int (field "level")
+                SafeModes = int (field "safeModes")
+            })
+
     {
         RoomName = field "room"
         Shard = field "shard"
@@ -191,6 +264,8 @@ let load (roomName: string) : RoomCapture =
         RealController = controller
         RealMinerals = minerals
         Rocks = rocks
+        Structures = structures
+        Holder = holder
     }
 
 /// The captured room with a spawn standing on it. The spawn is always the

@@ -19,8 +19,13 @@
 ///
 /// **The physics is the engine's** (`@screeps/engine/src/processor`), cited
 /// per rule below, with `Engine`'s constants and `Engine.liveParts` shared
-/// with `Facts.squadFight` rather than re-spelt. Not modelled: spawning,
-/// economy, roads, ramparts, boosts, pulling, portals, power creeps.
+/// with `Facts.squadFight` rather than re-spelt. Structures of either side
+/// stand in a room (#465): ramparts, walls, towers, spawns and the rest,
+/// placed or loaded off a capture's `[structures]`. A body spends the
+/// energy it carries on a repair or a transfer, and nothing refills it. Not
+/// modelled: spawning, the rest of the economy (harvest, withdraw, pickup,
+/// build), roads, boosts, pulling, portals, power creeps, nukes, and safe
+/// mode for any side but ours.
 module Fabot.Core.Tests.Arena
 
 open System.Collections.Generic
@@ -57,6 +62,10 @@ type Act =
     | Heal of target: string
     | RangedHeal of target: string
     | AttackController of controllerRoom: string
+    | Dismantle of target: string
+    | Repair of target: string
+    /// Energy into a structure's store, all it holds or all there is room for.
+    | Transfer of target: string
 
 /// A scripted body's plan, re-read every tick from the start-of-tick state.
 /// Every behaviour but `Do` also fights what stands in reach of it
@@ -89,6 +98,11 @@ type Behaviour =
     /// Below `below` hits fall back to `refuge` and heal; back to `inner` at
     /// `resume` hits (#455's enemy: the hurt pair that leaves and returns).
     | Retreat of below: int * refuge: RoomPos * resume: int * inner: Behaviour
+    /// Walk to a ground tile, across rooms, breaking through what bars the
+    /// way (`firstBarrier`): the first barrier on the cheapest route is struck
+    /// with every weapon the body carries — dismantle, else attack, and a
+    /// ranged shot beside either — until it falls (#465).
+    | Breach of goal: RoomPos
 
 /// One creep in the arena: its body head first, the hits it has left (which
 /// say which parts still act, `Engine.liveParts`), where it stands, its
@@ -128,18 +142,49 @@ type ArenaController =
         UpgradeBlockedUntil: int
     }
 
-/// A tower of ours and the energy it holds.
-type ArenaTower = { Id: string; At: Pos; Energy: int }
+/// One structure in an arena room, of any owner.
+type ArenaStructure =
+    {
+        Id: string
+        /// The engine's `structureType`: "rampart", "constructedWall",
+        /// "spawn", "tower", "extension", ...
+        Kind: string
+        At: Pos
+        /// None for a wall nobody owns.
+        Owner: Side option
+        Hits: int
+        HitsMax: int
+        /// The energy it holds: a tower's shots, a store's stock.
+        Energy: int
+        /// A rampart any body may step onto (`ramparts/set-public.js`).
+        IsPublic: bool
+        /// A spawn's name, which names the colony its creeps are
+        /// (`Colony.castBy`); None for every other kind.
+        Name: string option
+        /// A rampart's `nextDecayTime`. One placed with none is taken to
+        /// have just decayed: `arena` sets it a RAMPART_DECAY_TIME off.
+        NextDecay: int
+    }
+
+/// What a tower not ours does, in the order it asks: the first duty with a
+/// target is the tick's act.
+type TowerDuty =
+    /// Heal the most hurt body of the tower's side in its room.
+    | HealHurt
+    /// Shoot the focused enemy body in its room.
+    | Shoot of Focus
+    /// Repair the weakest rampart or wall of its side below these hits.
+    | Mend of below: int
 
 /// One captured room in the arena, with what stands on it beyond terrain.
 type ArenaRoom =
     {
         Capture: RoomCapture
         Controller: ArenaController option
-        /// Our spawns here, by spawn name: a creep named after one is that
-        /// colony's (`Colony.castBy`).
-        Spawns: (string * Pos) list
-        Towers: ArenaTower list
+        /// Every structure standing here, ours and everybody else's.
+        Structures: ArenaStructure list
+        /// The script the towers not ours run; ours are our pipeline's.
+        Duties: TowerDuty list
         /// The home's bank, for a room with a spawn.
         Bank: int
     }
@@ -184,6 +229,9 @@ type ArenaEvent =
     | Exited of id: string * from: RoomPos
     | ControllerAttacked of room: string * by: string
     | SafeModeActivated of room: string
+    /// A structure's hits ran out (`structures/_destroy.js`), or a
+    /// rampart's decay did (`ramparts/tick.js`).
+    | Destroyed of id: string
 
 /// One body at the end of a tick.
 type Snapshot =
@@ -208,6 +256,8 @@ type TickTrace =
         Events: ArenaEvent list
         /// The living bodies at the end of the tick.
         Bodies: Snapshot list
+        /// Every standing structure's hits at the end of the tick, by id.
+        Structures: Map<string, int>
     }
 
 let private partHitsOf (parts: BodyPart list) = Engine.partHits * List.length parts
@@ -242,10 +292,87 @@ let room (name: string) : ArenaRoom =
     {
         Capture = load name
         Controller = None
-        Spawns = []
-        Towers = []
+        Structures = []
+        Duties = []
         Bank = 0
     }
+
+/// RAMPART_DECAY_AMOUNT and RAMPART_DECAY_TIME (`ramparts/tick.js`).
+let private rampartDecayAmount = 300
+let private rampartDecayTime = 100
+
+/// DISMANTLE_POWER (`creeps/dismantle.js`), and REPAIR_POWER at REPAIR_COST
+/// 0.01 an energy a hit (`creeps/repair.js`): 100 hits an energy.
+let private dismantlePower = 50
+let private repairPower = 100
+let private hitsPerEnergy = 100
+
+/// RAMPART_HITS_MAX by controller level; a room with no level of two or more
+/// takes RCL2's.
+let private rampartHitsMax (level: int) =
+    match level with
+    | 3 -> 1_000_000
+    | 4 -> 3_000_000
+    | 5 -> 10_000_000
+    | 6 -> 30_000_000
+    | 7 -> 100_000_000
+    | 8 -> 300_000_000
+    | _ -> 300_000
+
+/// A structure of the engine's `kind`, under the id `kind-x-y`.
+let structureOf
+    (kind: string)
+    (owner: Side option)
+    (hits: int)
+    (hitsMax: int)
+    (at: Pos)
+    : ArenaStructure =
+    {
+        Id = $"{kind}-{at.X}-{at.Y}"
+        Kind = kind
+        At = at
+        Owner = owner
+        Hits = hits
+        HitsMax = hitsMax
+        Energy = 0
+        IsPublic = false
+        Name = None
+        NextDecay = 0
+    }
+
+/// A rampart of `owner`'s, not public, at RCL2's RAMPART_HITS_MAX.
+let rampart (owner: Side) (hits: int) (at: Pos) : ArenaStructure =
+    structureOf "rampart" (Some owner) hits (rampartHitsMax 2) at
+
+/// A tower of `owner`'s at TOWER_HITS, holding `energy`.
+let towerOf (owner: Side) (at: Pos) (energy: int) : ArenaStructure =
+    { structureOf "tower" (Some owner) 3000 3000 at with
+        Energy = energy
+    }
+
+/// These structures standing in the room as well.
+let withStructures (structures: ArenaStructure list) (r: ArenaRoom) : ArenaRoom =
+    { r with
+        Structures = r.Structures @ structures
+    }
+
+/// Ramparts of the controller's holder on these tiles at these hits, at its
+/// level's RAMPART_HITS_MAX (`ramparts/tick.js`): placed after
+/// `withController`.
+let withRamparts (owner: Side) (hits: int) (tiles: Pos list) (r: ArenaRoom) : ArenaRoom =
+    let level = r.Controller |> Option.map (fun c -> c.Level) |> Option.defaultValue 0
+
+    r
+    |> withStructures (
+        tiles
+        |> List.map (fun at ->
+            { rampart owner hits at with
+                HitsMax = rampartHitsMax level
+            })
+    )
+
+/// The towers not ours run these duties.
+let withTowerDuties (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom = { r with Duties = duties }
 
 /// The room's captured controller, owned as given.
 let withController
@@ -274,16 +401,55 @@ let withController
         }
     | None -> failwithf "%s has no controller" r.Capture.RoomName
 
-/// A spawn of ours standing on a tile of the room, which must be ground.
+/// A spawn of ours standing on a tile of the room, which must be ground, at
+/// SPAWN_HITS and full.
 let withSpawn (name: string) (at: Pos) (bank: int) (r: ArenaRoom) : ArenaRoom =
     match TerrainGrid.tryFind at r.Capture.Terrain with
     | Some Wall
     | None -> failwithf "%s: the spawn tile %d,%d is not ground" r.Capture.RoomName at.X at.Y
     | Some _ ->
+        let spawn =
+            { structureOf "spawn" (Some Side.Ours) 5000 5000 at with
+                Id = $"spawn-{name}"
+                Energy = 300
+                Name = Some name
+            }
+
         { r with
-            Spawns = r.Spawns @ [ name, at ]
+            Structures = r.Structures @ [ spawn ]
             Bank = bank
         }
+
+/// The base the capture was taken with (`--structures`), its controller held
+/// as it was at the level and the safe modes it banked, its towers running
+/// `duties`. A structure's owner is a player of that username.
+let withBase (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom =
+    let held =
+        match r.Capture.Holder with
+        | Some holder ->
+            withController Ownership.Rival (Some holder.Username) holder.Level holder.SafeModes r
+        | None -> failwithf "%s was captured without its structures" r.Capture.RoomName
+
+    let structures =
+        r.Capture.Structures
+        |> List.map (fun s ->
+            {
+                Id = s.Id
+                Kind = s.Type
+                At = s.At
+                Owner = s.Owner |> Option.map Side.Player
+                Hits = s.Hits
+                HitsMax = s.HitsMax
+                Energy = s.Energy
+                IsPublic = s.IsPublic
+                Name = None
+                NextDecay = s.NextDecay
+            })
+
+    { held with
+        Structures = held.Structures @ structures
+        Duties = duties
+    }
 
 /// A colony declared over a home, with nothing else.
 let colony (home: string) : Colony =
@@ -312,10 +478,23 @@ let outpostOf (capture: RoomCapture) : Outpost =
 
 /// An arena over these rooms, colonies and bodies, starting at `time`.
 let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: Body list) : Arena =
+    let decaying (r: ArenaRoom) =
+        { r with
+            Structures =
+                r.Structures
+                |> List.map (fun s ->
+                    if s.Kind = "rampart" && s.NextDecay = 0 then
+                        { s with
+                            NextDecay = time + rampartDecayTime
+                        }
+                    else
+                        s)
+        }
+
     {
         Time = time
         Tick = 0
-        Rooms = rooms |> List.map (fun r -> r.Capture.RoomName, r) |> Map.ofList
+        Rooms = rooms |> List.map (fun r -> r.Capture.RoomName, decaying r) |> Map.ofList
         Bodies = bodies
         Colonies = colonies
         Carried =
@@ -341,16 +520,42 @@ let terrainAt (r: ArenaRoom) (tile: Pos) : Terrain =
     else
         TerrainGrid.tryFind tile r.Capture.Terrain |> Option.defaultValue Wall
 
-/// The tiles the engine's OBSTACLE_OBJECT_TYPES hold in a room: sources,
-/// minerals (every rock), the controller, spawns and towers
-/// (`movement.js` `checkObstacleAtXY`).
-let private structureTiles (r: ArenaRoom) : Set<Pos> =
+/// OBSTACLE_OBJECT_TYPES' structures (`constants.js`).
+let private obstacleKinds =
+    set
+        [
+            "spawn"
+            "constructedWall"
+            "extension"
+            "link"
+            "storage"
+            "tower"
+            "observer"
+            "powerSpawn"
+            "lab"
+            "terminal"
+            "nuker"
+            "factory"
+            "invaderCore"
+        ]
+
+/// Whether a structure bars a body of this side from its tile (`movement.js`
+/// `checkObstacleAtXY`): an obstacle kind, or a rampart neither public nor
+/// that side's own.
+let private bars (side: Side) (s: ArenaStructure) =
+    Set.contains s.Kind obstacleKinds
+    || s.Kind = "rampart" && not s.IsPublic && s.Owner <> Some side
+
+/// The tiles barred to a body of this side in a room: every rock, the
+/// controller, and the structures that bar it (`checkObstacleAtXY`).
+let private structureTiles (side: Side) (r: ArenaRoom) : Set<Pos> =
     Set.ofList
         [
             for _, pos in r.Capture.Rocks -> pos
             for _, pos in Option.toList r.Capture.RealController -> pos
-            for _, pos in r.Spawns -> pos
-            for t in r.Towers -> t.At
+            for s in r.Structures do
+                if bars side s then
+                    yield s.At
         ]
 
 let private isEdge (tile: Pos) = Seam.onRing tile
@@ -403,15 +608,18 @@ let private activeCount (b: Body) (part: BodyPart) = partCountIn (live b) part
 
 let private hitsMax (b: Body) = partHitsOf b.Parts
 
-/// Whether two bodies fight each other: different sides, and not us beside
-/// an ally of ours (`Colony.isAlly`).
-let hostileTo (a: Body) (b: Body) : bool =
+/// Whether two sides fight each other: different, and not us beside an ally
+/// of ours (`Colony.isAlly`).
+let private sidesHostile (x: Side) (y: Side) : bool =
     let allied (x: Side) (y: Side) =
         match x, y with
         | Side.Ours, Side.Player name -> Colony.isAlly name
         | _ -> false
 
-    a.Side <> b.Side && not (allied a.Side b.Side) && not (allied b.Side a.Side)
+    x <> y && not (allied x y) && not (allied y x)
+
+/// Whether two bodies fight each other (`sidesHostile`).
+let hostileTo (a: Body) (b: Body) : bool = sidesHostile a.Side b.Side
 
 let private username (side: Side) =
     match side with
@@ -432,9 +640,21 @@ let private within (reach: int) (a: RoomPos) (b: RoomPos) =
 /// structure stands in it.
 let private seen (a: Arena) (name: string) (r: ArenaRoom) =
     a.Bodies |> List.exists (fun b -> b.Side = Side.Ours && b.At.Room = name)
-    || not (List.isEmpty r.Spawns)
-    || not (List.isEmpty r.Towers)
+    || r.Structures |> List.exists (fun s -> s.Owner = Some Side.Ours)
     || r.Controller |> Option.exists (fun c -> c.Owner = Ownership.Ours)
+
+/// A structure's kind as the shell classifies its `structureType`
+/// (`World.builtKindOf`): one the table lacks is Other.
+let private builtKindOf =
+    reverseOf builtKindName allBuiltKinds >> Option.defaultValue BuiltKind.Other
+
+/// SPAWN_ENERGY_CAPACITY and EXTENSION_ENERGY_CAPACITY below RCL7, and the
+/// tower's: the free room a Refillable reports.
+let private capacityOf (kind: BuiltKind) =
+    match kind with
+    | BuiltKind.Spawn -> 300
+    | BuiltKind.Tower -> Engine.towerCapacity
+    | _ -> 50
 
 let private creepInfo (a: Arena) (b: Body) : CreepInfo =
     let active = live b
@@ -457,15 +677,21 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
 
 /// One room's facts, seen or blind, as `World.factsOf` builds them.
 let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
+    let structures = r.Structures |> List.map (fun s -> s, builtKindOf s.Kind)
+
+    let ours = structures |> List.filter (fun (s, _) -> s.Owner = Some Side.Ours)
+
     let spawns =
-        r.Spawns
-        |> List.map (fun (spawn, _) ->
-            {
-                Name = spawn
-                Id = $"spawn-{spawn}"
-                RoomName = name
-                IsSpawning = false
-            })
+        ours
+        |> List.choose (fun (s, _) ->
+            s.Name
+            |> Option.map (fun spawn ->
+                {
+                    Name = spawn
+                    Id = s.Id
+                    RoomName = name
+                    IsSpawning = false
+                }))
 
     if not (seen a name r) then
         { RoomFacts.empty with
@@ -484,8 +710,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 for id, pos in r.Capture.RealSources -> id, pos, Source
                 for id, pos in Option.toList controller -> id, pos, Controller
                 for id, pos in r.Capture.RealMinerals -> id, pos, Mineral
-                for spawn, pos in r.Spawns -> $"spawn-{spawn}", pos, Structure BuiltKind.Spawn
-                for t in r.Towers -> t.Id, t.At, Structure BuiltKind.Tower
+                for s, kind in structures -> s.Id, s.At, Structure kind
             ]
 
         let here = a.Bodies |> List.filter (fun b -> b.At.Room = name)
@@ -501,14 +726,17 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         |> List.filter (fun b -> b.Side = Side.Ours)
                         |> List.map (fun b -> b.Id, RoomPos.pos b.At)
                         |> Map.ofList
-                    // The shell's obstacle census: obstacle structures, the
-                    // controller and the minerals (`World.seenFacts`).
+                    // The shell's obstacle census: every owner's structures
+                    // a creep cannot stand on, the controller and the
+                    // minerals (`World.seenFacts`). A rampart is walkable
+                    // there whoever owns it.
                     Obstacles =
                         [
                             for _, pos in Option.toList controller -> pos
                             for _, pos in r.Capture.RealMinerals -> pos
-                            for _, pos in r.Spawns -> pos
-                            for t in r.Towers -> t.At
+                            for s, kind in structures do
+                                if not (isWalkable kind) then
+                                    yield s.At
                         ]
                         |> Set.ofList
                     Roads = Set.empty
@@ -516,6 +744,19 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 }
             Border = r.Capture.Border
             TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
+            // Hits on the repairable kinds, an ownable one only when ours
+            // (`World.seenFacts`).
+            Hits =
+                structures
+                |> List.filter (fun (s, kind) ->
+                    (wholeLine kind).IsSome && (not (needsOwner kind) || s.Owner = Some Side.Ours))
+                |> List.map (fun (s, _) -> s.Id, { Hits = s.Hits; HitsMax = s.HitsMax })
+                |> Map.ofList
+            Stores =
+                structures
+                |> List.filter (fun (_, kind) -> isStored kind)
+                |> List.map (fun (s, _) -> s.Id, s.Energy)
+                |> Map.ofList
             Thorium = r.Capture.RealMinerals |> List.map (fun (id, _) -> id, 20_000) |> Map.ofList
             Control =
                 Some
@@ -540,7 +781,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         SafeModeActive = c.SafeModeUntil > a.Time
                     })
             Energy =
-                if List.isEmpty r.Spawns then
+                if List.isEmpty spawns then
                     { Available = 0; Capacity = 0 }
                 else
                     {
@@ -549,20 +790,14 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     }
             Spawns = spawns
             Refillables =
-                [
-                    for spawn, _ in r.Spawns ->
-                        {
-                            Id = $"spawn-{spawn}"
-                            FreeCapacity = 0
-                            Kind = BuiltKind.Spawn
-                        }
-                    for t in r.Towers ->
-                        {
-                            Id = t.Id
-                            FreeCapacity = Engine.towerCapacity - t.Energy
-                            Kind = BuiltKind.Tower
-                        }
-                ]
+                ours
+                |> List.filter (fun (_, kind) -> isRefillable kind)
+                |> List.map (fun (s, kind) ->
+                    {
+                        Id = s.Id
+                        FreeCapacity = max 0 (capacityOf kind - s.Energy)
+                        Kind = kind
+                    })
             Sources =
                 r.Capture.RealSources
                 |> List.map (fun (id, _) -> { Id = id; TicksToRestock = 0 })
@@ -622,10 +857,13 @@ let worldOf (a: Arena) : World =
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
 
-/// Our side's tick: every living colony's view cut from the world and decided,
-/// every room's moves arbitrated once. The Intents, the next assignments and
-/// memos, and the world's carried memory.
-let private decideOurs (a: Arena) : Intent list * Carried =
+/// One colony's fight record as the arena carries it.
+let private foughtBy (a: Arena) (home: string) =
+    Map.tryFind home a.Carried.Fought |> Option.defaultValue Map.empty
+
+/// Every living colony's view cut from this tick's world, as
+/// `Main.fullTick` cuts them, beside the world.
+let private cut (a: Arena) : World * (Colony * ColonyView) list =
     let world = worldOf a
     let tuning = Tuning.defaults
     let living = World.living a.Colonies world
@@ -635,20 +873,33 @@ let private decideOurs (a: Arena) : Intent list * Carried =
     let holders =
         World.creepColoniesRecalling joins tuning a.Colonies casting living Map.empty world
 
-    let fought home =
-        Map.tryFind home a.Carried.Fought |> Option.defaultValue Map.empty
+    world,
+    living
+    |> List.map (fun c ->
+        let gate =
+            { StandDown.none with
+                Fought = foughtBy a c.Home
+            }
+
+        c, ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate holders world c)
+
+/// The view one living colony decides this tick off.
+let viewOf (a: Arena) (home: string) : ColonyView =
+    cut a
+    |> snd
+    |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)
+    |> Option.defaultWith (fun () -> failwithf "%s is no living colony" home)
+
+/// Our side's tick: every living colony's view cut from the world and decided,
+/// every room's moves arbitrated once. The Intents, the next assignments and
+/// memos, and the world's carried memory.
+let private decideOurs (a: Arena) : Intent list * Carried =
+    let world, views = cut a
+    let fought = foughtBy a
 
     let decided =
-        living
-        |> List.map (fun c ->
-            let gate =
-                { StandDown.none with
-                    Fought = fought c.Home
-                }
-
-            let view =
-                ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate holders world c
-
+        views
+        |> List.map (fun (c, view) ->
             (c.Home, Observe.foldFights view (fought c.Home)),
             (c.Home,
              decideUnarbitrated
@@ -662,7 +913,10 @@ let private decideOurs (a: Arena) : Intent list * Carried =
 
     let moves, _ = resolveRooms (decisions |> List.map (fun (_, d) -> d.Movement))
 
-    let intents = (decisions |> List.collect (fun (_, d) -> d.Intents)) @ moves
+    // One activation a shard, as `Main` sends them.
+    let intents =
+        (decisions |> List.collect (fun (_, d) -> d.Intents)) @ moves
+        |> Layout.firstActivationOnly
 
     // The assignments one flat table, as the shell writes them.
     let assignments =
@@ -698,7 +952,8 @@ let private stepToward (a: Arena) (mover: Body) (goals: Set<RoomPos>) : Directio
         let side = Engine.roomSide
         let total = names.Length * side * side
 
-        let blocked = names |> Array.map (fun n -> structureTiles (Map.find n a.Rooms))
+        let blocked =
+            names |> Array.map (fun n -> structureTiles mover.Side (Map.find n a.Rooms))
 
         let occupied =
             a.Bodies
@@ -799,6 +1054,189 @@ let private ringAround (reach: int) (at: RoomPos) : Set<RoomPos> =
     |> List.map (RoomPos.at at.Room)
     |> Set.ofList
 
+/// What a body takes off a structure a tick with everything it carries:
+/// dismantle, else attack — the engine admits one (`creeps/intents.js`) —
+/// beside a ranged shot.
+let private structureStrike (b: Body) =
+    let work = activeCount b Work * dismantlePower
+
+    let melee =
+        if work > 0 then
+            work
+        else
+            activeCount b Attack * Engine.attackPower
+
+    melee + activeCount b RangedAttack * Engine.rangedAttackPower
+
+/// The structures that bar a body of this side and are not its own, by tile:
+/// what it has to break to pass. A rampart over a structure stands first.
+let private barriersFor (side: Side) (r: ArenaRoom) : Map<Pos, ArenaStructure list> =
+    r.Structures
+    |> List.filter (fun s -> bars side s && s.Owner <> Some side)
+    |> List.groupBy (fun s -> s.At)
+    |> List.map (fun (at, stack) ->
+        at, stack |> List.sortBy (fun s -> (if s.Kind = "rampart" then 0 else 1), s.Id))
+    |> Map.ofList
+
+/// Each captured room's terrain walls, row by column, read once: a capture
+/// never changes, and the breach search asks every tile of every room.
+let private wallsOf =
+    let held = System.Collections.Concurrent.ConcurrentDictionary<string, bool[]>()
+
+    fun (r: ArenaRoom) ->
+        held.GetOrAdd(
+            r.Capture.RoomName,
+            fun _ ->
+                Array.init (Engine.roomSide * Engine.roomSide) (fun n ->
+                    terrainAt
+                        r
+                        {
+                            X = n / Engine.roomSide
+                            Y = n % Engine.roomSide
+                        } = Wall)
+        )
+
+/// The first barrier (`barriersFor`) on the cheapest walk for a body to a
+/// ground tile across the arena's rooms, beside the tile it stands on; None
+/// when that walk meets none, or there is no walk. A tile costs one, a
+/// barrier the ticks the body takes to break it. Its own side's structures,
+/// every rock, the controller and the terrain's walls stay impassable;
+/// bodies are not asked, the step is (`stepToward`). An exit tile leads to
+/// its landing alone, as there.
+let private firstBarrier
+    (a: Arena)
+    (mover: Body)
+    (goal: RoomPos)
+    : (RoomPos * ArenaStructure) option =
+    let strike = max 1 (structureStrike mover)
+
+    let npc =
+        match mover.Side with
+        | Side.Npc _ -> true
+        | _ -> false
+
+    let names = a.Rooms |> Map.keys |> Array.ofSeq
+    let side = Engine.roomSide
+    let area = side * side
+    let indexOf = names |> Array.mapi (fun i n -> n, i) |> Map.ofArray
+    let rooms = names |> Array.map (fun n -> Map.find n a.Rooms)
+    let barriers = rooms |> Array.map (barriersFor mover.Side)
+    let tileOf (p: Pos) = p.X * side + p.Y
+
+    // Per room, the tiles nothing passes — terrain walls, every rock, the
+    // controller, the side's own obstacles, and the ring for an NPC — and
+    // the hits a barrier stack holds per tile.
+    let impassable, barrierHits =
+        rooms
+        |> Array.map (fun r ->
+            let blocked = Array.copy (wallsOf r)
+            let hits = Array.zeroCreate area
+
+            for _, p in r.Capture.Rocks @ Option.toList r.Capture.RealController do
+                blocked[tileOf p] <- true
+
+            for s in r.Structures do
+                if bars mover.Side s then
+                    if s.Owner = Some mover.Side then
+                        blocked[tileOf s.At] <- true
+                    else
+                        hits[tileOf s.At] <- hits[tileOf s.At] + s.Hits
+
+            if npc then
+                for t in 0 .. area - 1 do
+                    if Seam.onRing { X = t / side; Y = t % side } then
+                        blocked[t] <- true
+
+            blocked, hits)
+        |> Array.unzip
+
+    let posOf (n: int) =
+        {
+            Room = names[n / area]
+            X = n % area / side
+            Y = n % side
+        }
+
+    let node (at: RoomPos) =
+        indexOf[at.Room] * area + at.X * side + at.Y
+
+    // Each tile's cost, read the first time it is asked: -1 impassable.
+    let known = Array.create (names.Length * area) -2
+
+    let cost (n: int) =
+        if known[n] = -2 then
+            let i = n / area
+            let t = n % area
+
+            known[n] <-
+                if impassable[i][t] then
+                    -1
+                elif barrierHits[i][t] > 0 then
+                    1 + barrierHits[i][t] / strike
+                else
+                    1
+
+        known[n]
+
+    let dist = Array.create (names.Length * area) System.Int32.MaxValue
+    let parent = Array.create (names.Length * area) -1
+    let carried = Array.create (names.Length * area) false
+    let queue = PriorityQueue<int, int>()
+    let start = node mover.At
+    let target = if Map.containsKey goal.Room indexOf then node goal else -1
+    dist[start] <- 0
+    carried[start] <- true
+    queue.Enqueue(start, 0)
+    let mutable found = false
+
+    while not found && queue.Count > 0 do
+        let mutable n = start
+        let mutable d = 0
+        queue.TryDequeue(&n, &d) |> ignore
+
+        if n = target then
+            found <- true
+        elif d <= dist[n] then
+            let i = n / area
+            let x = n % area / side
+            let y = n % side
+
+            let relax (m: int) =
+                let c = cost m
+
+                if c >= 0 && d + c < dist[m] then
+                    dist[m] <- d + c
+                    parent[m] <- n
+                    carried[m] <- m / area <> i
+                    queue.Enqueue(m, d + c)
+
+            if Seam.onRing { X = x; Y = y } && Seam.isExit { X = x; Y = y } && not carried[n] then
+                match landingOf (posOf n) with
+                | Some(roomName, landing) when Map.containsKey roomName indexOf ->
+                    relax (node (RoomPos.at roomName landing))
+                | _ -> ()
+            else
+                // The eight steps, clamped to the room as `stepTo` clamps.
+                for dx in -1 .. 1 do
+                    for dy in -1 .. 1 do
+                        let nx = max 0 (min Seam.exitEdge (x + dx))
+                        let ny = max 0 (min Seam.exitEdge (y + dy))
+
+                        if nx <> x || ny <> y then
+                            relax (i * area + nx * side + ny)
+
+    if not found then
+        None
+    else
+        let rec unwind (m: int) acc =
+            if m = start then acc else unwind parent[m] (m :: acc)
+
+        unwind target []
+        |> List.tryPick (fun m ->
+            Map.tryFind (RoomPos.pos (posOf m)) barriers[m / area]
+            |> Option.bind List.tryHead
+            |> Option.map (fun s -> posOf m, s))
+
 let private isHealer (b: Body) =
     let active = live b
 
@@ -806,10 +1244,11 @@ let private isHealer (b: Body) =
     && not (List.contains Attack active)
     && not (List.contains RangedAttack active)
 
-/// The focused enemy among candidates, deterministic to the id.
-let private focusOf (focus: Focus) (from: Body) (candidates: Body list) : Body option =
+/// The focused enemy among candidates, seen from a tile, deterministic to
+/// the id.
+let private focusFrom (focus: Focus) (from: RoomPos) (candidates: Body list) : Body option =
     let distance (b: Body) =
-        range from.At b.At |> Option.defaultValue System.Int32.MaxValue
+        range from b.At |> Option.defaultValue System.Int32.MaxValue
 
     match focus with
     | Nearest -> candidates |> List.sortBy (fun b -> distance b, b.Hits, b.Id)
@@ -818,6 +1257,10 @@ let private focusOf (focus: Focus) (from: Body) (candidates: Body list) : Body o
         candidates
         |> List.sortBy (fun b -> (if isHealer b then 0 else 1), b.Hits, distance b, b.Id)
     |> List.tryHead
+
+/// The focused enemy among candidates, seen from a body.
+let private focusOf (focus: Focus) (from: Body) (candidates: Body list) : Body option =
+    focusFrom focus from.At candidates
 
 let private enemiesOf (a: Arena) (b: Body) =
     a.Bodies |> List.filter (fun o -> o.At.Room = b.At.Room && hostileTo b o)
@@ -883,7 +1326,7 @@ let private kiteStep (a: Arena) (b: Body) (target: Body) (keep: int) : Direction
 
     if nearestThreat b.At <= 2 then
         let r = Map.find b.At.Room a.Rooms
-        let blocked = structureTiles r
+        let blocked = structureTiles b.Side r
 
         let occupied =
             a.Bodies
@@ -1001,6 +1444,10 @@ let private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Ac
             else
                 []
 
+        // Never onto an exit tile beside the leader, nor waiting on one: the
+        // tick's end would carry it across the border (`creeps/tick.js`).
+        let onEdge (at: RoomPos) = Seam.onRing (RoomPos.pos at)
+
         let step =
             match leader with
             | None -> None
@@ -1009,10 +1456,13 @@ let private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Ac
 
                 if next <> l.At && within 1 b.At l.At && next.Room = l.At.Room then
                     directionTo (RoomPos.pos b.At) (RoomPos.pos l.At)
-                elif within 1 b.At next then
+                elif within 1 b.At next && not (onEdge b.At) then
                     None
                 else
-                    stepToward a b (ringAround 1 next |> Set.remove next)
+                    stepToward
+                        a
+                        b
+                        (ringAround 1 next |> Set.remove next |> Set.filter (onEdge >> not))
 
         healing @ move step
     | Tap controller ->
@@ -1061,6 +1511,47 @@ let private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Ac
                 | _ -> false)
 
         fights @ (if engaged then [] else move (stepToward a b goal))
+    | Breach goal ->
+        match firstBarrier a b goal with
+        | Some(target, s) ->
+            let works = activeCount b Work > 0
+            let swings = activeCount b Attack > 0
+
+            let reach =
+                if works || swings then
+                    Engine.meleeRange
+                else
+                    Engine.rangedRange
+
+            let melee =
+                if works && within Engine.meleeRange b.At target then
+                    [ Act.Dismantle s.Id ]
+                elif swings && within Engine.meleeRange b.At target then
+                    [ Act.Attack s.Id ]
+                else
+                    []
+
+            let shot =
+                if activeCount b RangedAttack > 0 && within Engine.rangedRange b.At target then
+                    [ Act.RangedAttack s.Id ]
+                else
+                    []
+
+            // Heal suppresses a dismantle and an attack, never a shot.
+            let heal =
+                if List.isEmpty melee && activeCount b Heal > 0 && b.Hits < hitsMax b then
+                    [ Act.Heal b.Id ]
+                else
+                    []
+
+            let step =
+                if within reach b.At target then
+                    None
+                else
+                    stepToward a b (ringAround reach target |> Set.remove target)
+
+            melee @ shot @ heal @ move step
+        | None -> fightInReach a Nearest b @ move (stepToward a b (Set.singleton goal))
     | Phases _
     | Retreat _ -> []
 
@@ -1107,15 +1598,20 @@ let private actName (act: Act) =
     | Act.Heal _ -> "heal"
     | Act.RangedHeal _ -> "rangedHeal"
     | Act.AttackController _ -> "attackController"
+    | Act.Dismantle _ -> "dismantle"
+    | Act.Repair _ -> "repair"
+    | Act.Transfer _ -> "transfer"
 
 /// `creeps/intents.js` `priorities`: the acts that suppress each act.
 let private suppressedBy (name: string) : string list =
     match name with
     | "rangedHeal" -> [ "heal" ]
     | "attackController" -> [ "rangedHeal"; "heal" ]
-    | "attack" -> [ "attackController"; "rangedHeal"; "heal" ]
-    | "rangedMassAttack" -> [ "rangedHeal" ]
-    | "rangedAttack" -> [ "rangedMassAttack"; "rangedHeal" ]
+    | "dismantle" -> [ "attackController"; "rangedHeal"; "heal" ]
+    | "repair" -> [ "dismantle"; "attackController"; "rangedHeal"; "heal" ]
+    | "attack" -> [ "repair"; "dismantle"; "attackController"; "rangedHeal"; "heal" ]
+    | "rangedMassAttack" -> [ "repair"; "rangedHeal" ]
+    | "rangedAttack" -> [ "rangedMassAttack"; "repair"; "rangedHeal" ]
     | _ -> []
 
 /// The acts the engine performs of one body's intents.
@@ -1142,11 +1638,18 @@ let private safeModeStops (a: Arena) (b: Body) =
     | _ -> false
 
 /// One tick of damage and heal, accumulated as `_damageToApply` and
-/// `_healToApply` off start-of-tick positions and parts.
+/// `_healToApply` off start-of-tick positions and parts; and the structures,
+/// which take their damage and repair the moment it lands (`_damage.js`,
+/// `creeps/repair.js`).
 type private Ledger =
     {
         Damage: Dictionary<string, int>
         Healing: Dictionary<string, int>
+        /// Every structure still standing, by id, beside its room.
+        Standing: Dictionary<string, string * ArenaStructure>
+        /// The energy each body has spent on repair this tick.
+        Spent: Dictionary<string, int>
+        Events: ResizeArray<ArenaEvent>
     }
 
 let private credit (table: Dictionary<string, int>) (id: string) (amount: int) =
@@ -1154,9 +1657,49 @@ let private credit (table: Dictionary<string, int>) (id: string) (amount: int) =
     | true, held -> table[id] <- held + amount
     | _ -> table[id] <- amount
 
-/// Perform one body's combat acts (`attack.js`, `rangedAttack.js`,
-/// `rangedMassAttack.js`, `heal.js`, `rangedHeal.js`, `_damage.js`). Ranges
-/// are Chebyshev within one room and never across a border.
+/// Where a standing structure is.
+let private placeOf (room: string, s: ArenaStructure) = RoomPos.at room s.At
+
+/// The rampart standing on a tile, which takes every hit aimed at what
+/// stands under it (`attack.js`, `rangedAttack.js`, `dismantle.js`,
+/// `towers/attack.js`).
+let private rampartOn (ledger: Ledger) (tile: RoomPos) : ArenaStructure option =
+    ledger.Standing.Values
+    |> Seq.tryPick (fun (room, s) ->
+        if s.Kind = "rampart" && RoomPos.at room s.At = tile then
+            Some s
+        else
+            None)
+
+/// Damage landed on a structure: off its hits, and gone at none
+/// (`_damage.js`, `structures/_destroy.js`).
+let private strike (ledger: Ledger) (id: string) (amount: int) =
+    match ledger.Standing.TryGetValue id with
+    | true, (room, s) when amount > 0 ->
+        let hits = s.Hits - amount
+
+        if hits <= 0 then
+            ledger.Standing.Remove id |> ignore
+            ledger.Events.Add(Destroyed id)
+        else
+            ledger.Standing[id] <- (room, { s with Hits = hits })
+    | _ -> ()
+
+/// Repair landed on a structure, capped at its max.
+let private mend (ledger: Ledger) (id: string) (amount: int) =
+    match ledger.Standing.TryGetValue id with
+    | true, (room, s) ->
+        ledger.Standing[id] <-
+            (room,
+             { s with
+                 Hits = min s.HitsMax (s.Hits + amount)
+             })
+    | _ -> ()
+
+/// Perform one body's acts (`attack.js`, `rangedAttack.js`,
+/// `rangedMassAttack.js`, `heal.js`, `rangedHeal.js`, `dismantle.js`,
+/// `repair.js`, `transfer.js`, `_damage.js`). Ranges are Chebyshev within
+/// one room and never across a border.
 let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
     let byId = a.Bodies |> List.map (fun o -> o.Id, o) |> Map.ofList
     let power part each = activeCount b part * each
@@ -1167,36 +1710,115 @@ let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
         Map.tryFind id byId
         |> Option.filter (fun t -> t.Id <> b.Id && within reach b.At t.At)
 
+    // A structure in reach, and the rampart over it if one stands there.
+    let structureIn id reach =
+        match ledger.Standing.TryGetValue id with
+        | true, placed when within reach b.At (placeOf placed) ->
+            Some(rampartOn ledger (placeOf placed) |> Option.defaultValue (snd placed))
+        | _ -> None
+
+    // A hit on a body lands on the rampart it stands on, if one does.
+    let hit (t: Body) amount =
+        match rampartOn ledger t.At with
+        | Some cover -> strike ledger cover.Id amount
+        | None -> credit ledger.Damage t.Id amount
+
     match act with
     | Act.Attack id when not stopped ->
         match target id Engine.meleeRange with
         | Some t ->
-            credit ledger.Damage t.Id (power Attack Engine.attackPower)
-            // Strike-back: the target's own ATTACK lands on the attacker
-            // (`_damage.js`, no rampart under the attacker here).
+            let covered = (rampartOn ledger t.At).IsSome
+            hit t (power Attack Engine.attackPower)
+            // Strike-back: the target's own ATTACK lands on the attacker,
+            // unless the hit landed on a rampart or the attacker stands on
+            // one (`_damage.js`).
             let back = activeCount t Attack * Engine.attackPower
 
-            if back > 0 then
+            if back > 0 && not covered && (rampartOn ledger b.At).IsNone then
                 credit ledger.Damage b.Id back
-        | None -> ()
+        | None ->
+            structureIn id Engine.meleeRange
+            |> Option.iter (fun s -> strike ledger s.Id (power Attack Engine.attackPower))
     | Act.RangedAttack id when not stopped ->
         match target id Engine.rangedRange with
-        | Some t -> credit ledger.Damage t.Id (power RangedAttack Engine.rangedAttackPower)
-        | None -> ()
+        | Some t -> hit t (power RangedAttack Engine.rangedAttackPower)
+        | None ->
+            structureIn id Engine.rangedRange
+            |> Option.iter (fun s ->
+                strike ledger s.Id (power RangedAttack Engine.rangedAttackPower))
+    | Act.Dismantle id when not stopped ->
+        structureIn id Engine.meleeRange
+        |> Option.iter (fun s -> strike ledger s.Id (power Work dismantlePower))
+    | Act.Repair id ->
+        let spent =
+            match ledger.Spent.TryGetValue b.Id with
+            | true, n -> n
+            | _ -> 0
+
+        let energy = b.Energy - spent
+
+        match ledger.Standing.TryGetValue id with
+        | true, ((_, s) as placed) when
+            energy > 0
+            && s.Hits < s.HitsMax
+            && within Engine.rangedRange b.At (placeOf placed)
+            ->
+            let effect =
+                min (power Work repairPower) (min (energy * hitsPerEnergy) (s.HitsMax - s.Hits))
+
+            if effect > 0 then
+                mend ledger id effect
+                credit ledger.Spent b.Id (min energy ((effect + hitsPerEnergy - 1) / hitsPerEnergy))
+        | _ -> ()
+    | Act.Transfer id ->
+        let spent =
+            match ledger.Spent.TryGetValue b.Id with
+            | true, n -> n
+            | _ -> 0
+
+        match ledger.Standing.TryGetValue id with
+        | true, ((room, s) as placed) when within Engine.meleeRange b.At (placeOf placed) ->
+            let amount = min (b.Energy - spent) (capacityOf (builtKindOf s.Kind) - s.Energy)
+
+            if amount > 0 then
+                ledger.Standing[id] <- (room, { s with Energy = s.Energy + amount })
+                credit ledger.Spent b.Id amount
+        | _ -> ()
     | Act.RangedMassAttack when not stopped ->
         let each = power RangedAttack Engine.rangedAttackPower
 
+        let rate r =
+            match r with
+            | 0
+            | 1 -> 1.0
+            | 2 -> 0.4
+            | _ -> 0.1
+
+        let landed r =
+            int (System.Math.Round(float each * rate r))
+
+        // Bodies of another side, skipping one under a rampart, which is
+        // struck as a structure below.
         for t in a.Bodies do
             match range b.At t.At with
-            | Some r when r <= Engine.rangedRange && t.Side <> b.Side ->
-                let rate =
-                    match r with
-                    | 0
-                    | 1 -> 1.0
-                    | 2 -> 0.4
-                    | _ -> 0.1
+            | Some r when
+                r <= Engine.rangedRange && t.Side <> b.Side && (rampartOn ledger t.At).IsNone
+                ->
+                credit ledger.Damage t.Id (landed r)
+            | _ -> ()
 
-                credit ledger.Damage t.Id (int (System.Math.Round(float each * rate)))
+        // Every owned structure of another side in reach, a rampart over
+        // anything; a wall has no owner and is never struck.
+        for room, s in List.ofSeq ledger.Standing.Values do
+            let tile = RoomPos.at room s.At
+
+            match s.Owner, range b.At tile with
+            | Some owner, Some r when
+                owner <> b.Side
+                && r <= Engine.rangedRange
+                && (s.Kind = "rampart" || (rampartOn ledger tile).IsNone)
+                ->
+                strike ledger s.Id (landed r)
             | _ -> ()
     | Act.Heal id when not stopped ->
         match
@@ -1312,17 +1934,17 @@ let private resolveMoves (a: Arena) (moves: (Body * RoomPos) list) : Map<string,
 
     let canMove (b: Body) = b.Fatigue = 0 && activeCount b Move > 0
 
-    let obstacle (tile: RoomPos) =
+    let obstacle (b: Body) (tile: RoomPos) =
         let r = Map.find tile.Room a.Rooms
         let p = RoomPos.pos tile
 
         terrainAt r p = Wall
-        || Set.contains p (structureTiles r)
+        || Set.contains p (structureTiles b.Side r)
         || a.Bodies |> List.exists (fun o -> o.At = tile && not (moving.Contains o.Id))
 
     for tile in List.ofSeq order do
         match matrix.TryGetValue tile with
-        | true, b when not (canMove b) || obstacle tile -> strike tile
+        | true, b when not (canMove b) || obstacle b tile -> strike tile
         | _ -> ()
 
     matrix |> Seq.map (fun kv -> kv.Value.Id, kv.Key) |> Map.ofSeq
@@ -1343,6 +1965,98 @@ let private stepFatigue (a: Arena) (b: Body) (dest: RoomPos) =
         let carried = (b.Energy + Engine.carryPartCapacity - 1) / Engine.carryPartCapacity
         Some((heavy + carried) * rate)
 
+/// What one tower does this tick.
+type private TowerAct =
+    | Fire of body: string
+    | HealBody of body: string
+    | Fix of structure: string
+
+/// One tower act (`towers/attack.js`, `towers/heal.js`, `towers/repair.js`):
+/// nothing below TOWER_ENERGY_COST or across a border, else that energy
+/// spent and the falloff curve's power landed — a shot on the rampart over
+/// its target if one stands there.
+let private towerDoes (a: Arena) (ledger: Ledger) (towerId: string) (act: TowerAct) =
+    match ledger.Standing.TryGetValue towerId with
+    | true, ((room, tower) as placed) when
+        tower.Kind = "tower" && tower.Energy >= Engine.towerEnergyCost
+        ->
+        let from = placeOf placed
+
+        let reach (at: RoomPos) =
+            RoomPos.range from at |> Option.filter (fun _ -> at.Room = room)
+
+        let landed =
+            match act with
+            | Fire id ->
+                a.Bodies
+                |> List.tryFind (fun t -> t.Id = id)
+                |> Option.bind (fun t -> reach t.At |> Option.map (fun r -> t, r))
+                |> Option.map (fun (t, r) ->
+                    match rampartOn ledger t.At with
+                    | Some cover -> strike ledger cover.Id (Engine.towerAttackAt r)
+                    | None -> credit ledger.Damage t.Id (Engine.towerAttackAt r))
+            | HealBody id ->
+                a.Bodies
+                |> List.tryFind (fun t -> t.Id = id)
+                |> Option.bind (fun t -> reach t.At |> Option.map (fun r -> t, r))
+                |> Option.map (fun (t, r) -> credit ledger.Healing t.Id (Engine.towerHealAt r))
+            | Fix id ->
+                match ledger.Standing.TryGetValue id with
+                | true, ((_, s) as target) when s.Hits < s.HitsMax ->
+                    reach (placeOf target)
+                    |> Option.map (fun r -> mend ledger id (Engine.towerRepairAt r))
+                | _ -> None
+
+        if landed.IsSome then
+            // Re-read: a tower can stand under its own rampart's repair.
+            let room, tower = ledger.Standing[towerId]
+
+            ledger.Standing[towerId] <-
+                (room,
+                 { tower with
+                     Energy = tower.Energy - Engine.towerEnergyCost
+                 })
+    | _ -> ()
+
+/// The towers not ours, each running its room's duties off the start-of-tick
+/// bodies: the first duty with a target is its act.
+let private theirTowers (a: Arena) (ledger: Ledger) : (string * TowerAct) list =
+    a.Rooms
+    |> Map.toList
+    |> List.collect (fun (name, r) ->
+        r.Structures
+        |> List.filter (fun s -> s.Kind = "tower" && s.Owner.IsSome && s.Owner <> Some Side.Ours)
+        |> List.choose (fun tower ->
+            let side = tower.Owner.Value
+            let here = a.Bodies |> List.filter (fun b -> b.At.Room = name)
+
+            let duty d =
+                match d with
+                | HealHurt ->
+                    here
+                    |> List.filter (fun b -> b.Side = side && b.Hits < hitsMax b)
+                    |> List.sortBy (fun b -> -(hitsMax b - b.Hits), b.Id)
+                    |> List.tryHead
+                    |> Option.map (fun b -> HealBody b.Id)
+                | Shoot focus ->
+                    here
+                    |> List.filter (fun b -> sidesHostile side b.Side)
+                    |> focusFrom focus (RoomPos.at name tower.At)
+                    |> Option.map (fun b -> Fire b.Id)
+                | Mend below ->
+                    ledger.Standing.Values
+                    |> Seq.filter (fun (room, s) ->
+                        room = name
+                        && (s.Kind = "rampart" && s.Owner = Some side
+                            || s.Kind = "constructedWall")
+                        && s.Hits < below
+                        && s.Hits < s.HitsMax)
+                    |> Seq.sortBy (fun (_, s) -> s.Hits, s.Id)
+                    |> Seq.tryHead
+                    |> Option.map (fun (_, s) -> Fix s.Id)
+
+            r.Duties |> List.tryPick duty |> Option.map (fun act -> tower.Id, act)))
+
 /// One tick of the arena: our pipeline and the scripts decide off the
 /// start-of-tick state, the engine performs both, and the tick's trace.
 let step (a: Arena) : Arena * TickTrace =
@@ -1356,8 +2070,9 @@ let step (a: Arena) : Arena * TickTrace =
     let events = ResizeArray<ArenaEvent>()
     let byId = a.Bodies |> List.map (fun b -> b.Id, b) |> Map.ofList
 
-    // Our Intents as engine acts, by the body they name; the rest are
-    // structure verbs or economy the arena does not perform.
+    // Our Intents as engine acts, by the body they name; the rest are the
+    // towers' and the controller's, below, or economy the arena does not
+    // perform.
     let ourActs =
         ours
         |> List.choose (function
@@ -1366,6 +2081,9 @@ let step (a: Arena) : Arena * TickTrace =
             | HealCreep(n, t) -> Some(n, Act.Heal t)
             | RangedHealCreep(n, t) -> Some(n, Act.RangedHeal t)
             | MoveCreep(n, d) -> Some(n, Act.Move d)
+            | RepairStructure(n, s) -> Some(n, Act.Repair s)
+            | TransferEnergyToStructure(n, s, Energy) -> Some(n, Act.Transfer s)
+            | DismantleStructure(n, s) -> Some(n, Act.Dismantle s)
             | _ -> None)
 
     let actsOf =
@@ -1379,6 +2097,15 @@ let step (a: Arena) : Arena * TickTrace =
         {
             Damage = Dictionary<string, int>()
             Healing = Dictionary<string, int>()
+            Standing =
+                Dictionary<string, string * ArenaStructure>(
+                    a.Rooms
+                    |> Map.toSeq
+                    |> Seq.collect (fun (name, r) ->
+                        r.Structures |> Seq.map (fun s -> KeyValuePair(s.Id, (name, s))))
+                )
+            Spent = Dictionary<string, int>()
+            Events = events
         }
 
     let mutable rooms = a.Rooms
@@ -1396,52 +2123,33 @@ let step (a: Arena) : Arena * TickTrace =
             | Act.Move _ -> ()
             | other -> perform a ledger b other
 
-    // The towers (`towers/attack.js`, `towers/heal.js`): heal before attack,
-    // either at the falloff curve `Engine.towerAttackAt` spells.
+    // The towers: ours by our Intents, the rest by their rooms' duties; one
+    // act a tower, heal before repair before attack (`towers/intents.js`).
+    let ourTowers =
+        ours
+        |> List.choose (function
+            | FireTower(tower, hostile) -> Some(tower, Fire hostile)
+            | HealWithTower(tower, creep) -> Some(tower, HealBody creep)
+            | _ -> None)
+        |> List.filter (fun (tower, _) ->
+            match ledger.Standing.TryGetValue tower with
+            | true, (_, s) -> s.Owner = Some Side.Ours
+            | _ -> false)
+
+    let rank act =
+        match act with
+        | HealBody _ -> 0
+        | Fix _ -> 1
+        | Fire _ -> 2
+
+    for tower, act in
+        ourTowers @ theirTowers a ledger
+        |> List.groupBy fst
+        |> List.map (fun (tower, acts) -> tower, acts |> List.map snd |> List.minBy rank) do
+        towerDoes a ledger tower act
+
     for intent in ours do
         match intent with
-        | FireTower(towerId, hostileId)
-        | HealWithTower(towerId, hostileId) ->
-            let heal =
-                match intent with
-                | HealWithTower _ -> true
-                | _ -> false
-
-            let placed =
-                rooms
-                |> Map.toList
-                |> List.tryPick (fun (name, r) ->
-                    r.Towers
-                    |> List.tryFind (fun t -> t.Id = towerId)
-                    |> Option.map (fun t -> name, r, t))
-
-            match placed, Map.tryFind hostileId byId with
-            | Some(name, r, t), Some target when
-                t.Energy >= Engine.towerEnergyCost && target.At.Room = name
-                ->
-                let reach = RoomPos.range (RoomPos.at name t.At) target.At |> Option.defaultValue 0
-
-                if heal then
-                    credit ledger.Healing target.Id (Engine.towerHealAt reach)
-                else
-                    credit ledger.Damage target.Id (Engine.towerAttackAt reach)
-
-                rooms <-
-                    Map.add
-                        name
-                        { r with
-                            Towers =
-                                r.Towers
-                                |> List.map (fun x ->
-                                    if x.Id = t.Id then
-                                        { x with
-                                            Energy = x.Energy - Engine.towerEnergyCost
-                                        }
-                                    else
-                                        x)
-                        }
-                        rooms
-            | _ -> ()
         | ActivateSafeMode controllerId ->
             match
                 rooms
@@ -1471,7 +2179,35 @@ let step (a: Arena) : Arena * TickTrace =
             | None -> ()
         | _ -> ()
 
-    // Movement, resolved together.
+    // A rampart's decay (`ramparts/tick.js`): RAMPART_DECAY_AMOUNT off at
+    // `gameTime >= nextDecayTime - 1`, the next one RAMPART_DECAY_TIME on.
+    for room, s in List.ofSeq ledger.Standing.Values do
+        if s.Kind = "rampart" && a.Time >= s.NextDecay - 1 then
+            strike ledger s.Id rampartDecayAmount
+
+            match ledger.Standing.TryGetValue s.Id with
+            | true, (_, left) ->
+                ledger.Standing[s.Id] <-
+                    (room,
+                     { left with
+                         NextDecay = a.Time + rampartDecayTime
+                     })
+            | _ -> ()
+
+    // What stands at the end of the acts, in each room's own order.
+    rooms <-
+        rooms
+        |> Map.map (fun _ r ->
+            { r with
+                Structures =
+                    r.Structures
+                    |> List.choose (fun s ->
+                        match ledger.Standing.TryGetValue s.Id with
+                        | true, (_, now) -> Some now
+                        | _ -> None)
+            })
+
+    // Movement, resolved together, past whatever fell this tick.
     let moves =
         a.Bodies
         |> List.sortBy (fun b -> b.Id)
@@ -1482,7 +2218,7 @@ let step (a: Arena) : Arena * TickTrace =
                 | Act.Move d -> Some(b, stepTo b.At d)
                 | _ -> None))
 
-    let moved = resolveMoves a moves
+    let moved = resolveMoves { a with Rooms = rooms } moves
 
     // `creeps/tick.js`, per body: the step and its fatigue, the exit
     // transfer, MOVE paying fatigue off, then damage and heal applied
@@ -1534,6 +2270,11 @@ let step (a: Arena) : Arena * TickTrace =
                             events.Add(Exited(b.Id, at))
                             None
 
+                let spent =
+                    match ledger.Spent.TryGetValue b.Id with
+                    | true, n -> n
+                    | _ -> 0
+
                 landed
                 |> Option.map (fun at ->
                     let script = b.Script |> Option.defaultValue Hold
@@ -1542,6 +2283,7 @@ let step (a: Arena) : Arena * TickTrace =
                         At = at
                         Fatigue = fatigue
                         Hits = hits
+                        Energy = b.Energy - spent
                         TicksToLive = b.TicksToLive - 1
                         Retreating = retreatLatch a.Tick { b with Hits = hits } script
                     }))
@@ -1575,6 +2317,11 @@ let step (a: Arena) : Arena * TickTrace =
                     Hits = b.Hits
                     Fatigue = b.Fatigue
                 })
+        Structures =
+            rooms
+            |> Map.toSeq
+            |> Seq.collect (fun (_, r) -> r.Structures |> Seq.map (fun s -> s.Id, s.Hits))
+            |> Map.ofSeq
     }
 
 /// Run `ticks` steps, or until `stop` holds of the arena, returning the final
