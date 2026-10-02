@@ -10,22 +10,28 @@
 /// `World.latchTowers`, `World.watchExits`), cuts every living colony's view
 /// (`World.creepColoniesRecalling`, `ColonyView.ofWorldRecalling`), decides
 /// each (`decideUnarbitrated`) and arbitrates every room's moves once
-/// (`resolveRooms`) — `Main.fullTick` less Memory. What the arena leaves out,
-/// and says so: the [[stand-down]] gate (the Raid log is Memory's, so every
-/// colony decides under `StandDown.none`, its fight record alone carried, as
-/// `Observe.foldFights` folds it), harassment casting
-/// (`HarassCasting.none`), the round-robin replan (every colony is
-/// `ReplanTurn.Now`), and light ticks (`LightTick`): every tick is a full one.
+/// (`resolveRooms`) — `Main.fullTick` less Memory. Each colony's Raid log is
+/// carried in heap and not Memory: folded after the tick
+/// (`Observe.foldRaids`) and read into the next tick's [[stand-down]] gate
+/// (`Observe.standDown`), as `Main` does (#469). What the arena leaves out,
+/// and says so: harassment casting (`HarassCasting.none`), the round-robin
+/// replan (every colony is `ReplanTurn.Now`), and light ticks (`LightTick`):
+/// every tick is a full one.
 ///
 /// **The physics is the engine's** (`@screeps/engine/src/processor`), cited
 /// per rule below, with `Engine`'s constants and `Engine.liveParts` shared
 /// with `Facts.squadFight` rather than re-spelt. Structures of either side
 /// stand in a room (#465): ramparts, walls, towers, spawns and the rest,
 /// placed or loaded off a capture's `[structures]`. A body spends the
-/// energy it carries on a repair or a transfer, and nothing refills it. Not
-/// modelled: spawning, the rest of the economy (harvest, withdraw, pickup,
-/// build), roads, boosts, pulling, portals, power creeps, nukes, and safe
-/// mode for any side but ours.
+/// energy it carries on a repair or a transfer, and nothing refills it. The
+/// season's sector Reactor stands in a room (#469), with `screeps/mod-season5`
+/// `da59118`'s rules: `claimReactor`, a Thorium transfer in, and the burn
+/// that scores. A spawn of ours casts the rows an arena names (`withCasts`),
+/// and only those: the live colony's economy is staffed, and the arena holds
+/// none to cast for; the bank is never debited, as the economy the arena
+/// leaves out refills it. Not modelled: the rest of the economy (harvest,
+/// withdraw, pickup, build), roads, boosts, pulling, portals, power creeps,
+/// nukes, and safe mode for any side but ours.
 module Fabot.Core.Tests.Arena
 
 open System.Collections.Generic
@@ -66,6 +72,10 @@ type Act =
     | Repair of target: string
     /// Energy into a structure's store, all it holds or all there is room for.
     | Transfer of target: string
+    /// Thorium into the Reactor, all the body holds or all there is room for.
+    | TransferThorium of reactor: string
+    /// `claimReactor` (`mod-season5/src/creep.claimReactor.js`).
+    | ClaimReactor of reactor: string
 
 /// A scripted body's plan, re-read every tick from the start-of-tick state.
 /// Every behaviour but `Do` also fights what stands in reach of it
@@ -103,6 +113,14 @@ type Behaviour =
     /// with every weapon the body carries — dismantle, else attack, and a
     /// ranged shot beside either — until it falls (#465).
     | Breach of goal: RoomPos
+    /// SlothBot's `reactorClaimer`
+    /// (`docs/research/shibdib-reactor-steal.md` §3): walk to the Reactor on
+    /// this tile, `claimReactor` it every tick it is not its side's, and park
+    /// two off it once it is.
+    | TakeReactor of reactor: RoomPos
+    /// A squad body on its way to a tile: in a room where an enemy stands it
+    /// kites (`Kite`), and walks on (`GoTo`) where none does.
+    | Sweep of goal: RoomPos * Focus * keep: int
 
 /// One creep in the arena: its body head first, the hits it has left (which
 /// say which parts still act, `Engine.liveParts`), where it stands, its
@@ -116,6 +134,7 @@ type Body =
         At: RoomPos
         Fatigue: int
         Energy: int
+        Thorium: int
         TicksToLive: int
         /// None for a body of ours, which the decision pipeline drives.
         Script: Behaviour option
@@ -156,6 +175,8 @@ type ArenaStructure =
         HitsMax: int
         /// The energy it holds: a tower's shots, a store's stock.
         Energy: int
+        /// The Thorium it holds: a Storage's banked ore.
+        Thorium: int
         /// A rampart any body may step onto (`ramparts/set-public.js`).
         IsPublic: bool
         /// A spawn's name, which names the colony its creeps are
@@ -176,6 +197,19 @@ type TowerDuty =
     /// Repair the weakest rampart or wall of its side below these hits.
     | Mend of below: int
 
+/// A sector centre's Reactor (`mod-season5/src/reactor.roomObject.js`): no
+/// hits, walkable, a T store of `Engine.reactorCapacity`.
+type ArenaReactor =
+    {
+        Id: string
+        At: Pos
+        /// Its `user`; None for one nobody has claimed.
+        Owner: Side option
+        Thorium: int
+        /// The tick its streak began; `continuousWork` is the time since.
+        LaunchTime: int option
+    }
+
 /// One captured room in the arena, with what stands on it beyond terrain.
 type ArenaRoom =
     {
@@ -187,6 +221,17 @@ type ArenaRoom =
         Duties: TowerDuty list
         /// The home's bank, for a room with a spawn.
         Bank: int
+        Reactor: ArenaReactor option
+    }
+
+/// A body in a spawn of ours (`spawns/create-creep.js`): born at `Done`.
+type Oven =
+    {
+        Spawn: string
+        Room: string
+        Name: string
+        Parts: BodyPart list
+        Done: int
     }
 
 /// What the decision layer remembers from one tick to the next, carried
@@ -199,9 +244,8 @@ type Carried =
         Towered: Set<string>
         ExitWatches: Map<string, ExitWatch>
         LastPositions: Map<string, RoomPos>
-        /// Each colony's fight record (`Observe.foldFights`), by home: the one
-        /// part of the Raid log the arena carries.
-        Fought: Map<string, Map<string, FightLatch>>
+        /// Each colony's Raid log (`Observe.foldRaids`), by home.
+        Raids: Map<string, Observe.RaidState>
     }
 
 /// The arena's whole state between ticks.
@@ -215,6 +259,12 @@ type Arena =
         Bodies: Body list
         Colonies: Colony list
         Carried: Carried
+        /// The season score each player's Reactors have earned, by username.
+        Scores: Map<string, int>
+        /// The bodies our spawns are casting.
+        Ovens: Oven list
+        /// The rows whose casts the arena performs, by pattern name.
+        Casts: Set<string>
     }
 
 /// What happened in a tick beyond positions and hits.
@@ -232,6 +282,12 @@ type ArenaEvent =
     /// A structure's hits ran out (`structures/_destroy.js`), or a
     /// rampart's decay did (`ramparts/tick.js`).
     | Destroyed of id: string
+    /// A `claimReactor` landed: the Reactor's flag is the body's side's.
+    | ReactorClaimed of room: string * by: string
+    /// The Reactor burnt one T for its owner, who scored this much.
+    | Burned of room: string * owner: string * score: int
+    /// A spawn of ours finished a body, standing beside it.
+    | Born of id: string
 
 /// One body at the end of a tick.
 type Snapshot =
@@ -278,6 +334,7 @@ let body
         At = at
         Fatigue = 0
         Energy = 0
+        Thorium = 0
         TicksToLive = Engine.creepLifetime
         Script = script
         Retreating = false
@@ -295,6 +352,22 @@ let room (name: string) : ArenaRoom =
         Structures = []
         Duties = []
         Bank = 0
+        Reactor = None
+    }
+
+/// The sector Reactor standing on a tile of the room, holding `thorium`,
+/// flagged `owner`'s, its streak not yet begun.
+let withReactor (id: string) (at: Pos) (owner: Side option) (thorium: int) (r: ArenaRoom) =
+    { r with
+        Reactor =
+            Some
+                {
+                    Id = id
+                    At = at
+                    Owner = owner
+                    Thorium = thorium
+                    LaunchTime = None
+                }
     }
 
 /// RAMPART_DECAY_AMOUNT and RAMPART_DECAY_TIME (`ramparts/tick.js`).
@@ -335,6 +408,7 @@ let structureOf
         Hits = hits
         HitsMax = hitsMax
         Energy = 0
+        Thorium = 0
         IsPublic = false
         Name = None
         NextDecay = 0
@@ -441,6 +515,7 @@ let withBase (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom =
                 Hits = s.Hits
                 HitsMax = s.HitsMax
                 Energy = s.Energy
+                Thorium = 0
                 IsPublic = s.IsPublic
                 Name = None
                 NextDecay = s.NextDecay
@@ -505,9 +580,15 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Towered = Set.empty
                 ExitWatches = Map.empty
                 LastPositions = Map.empty
-                Fought = Map.empty
+                Raids = Map.empty
             }
+        Scores = Map.empty
+        Ovens = []
+        Casts = Set.empty
     }
+
+/// Our spawns cast these rows, by pattern name, and only these.
+let withCasts (rows: string list) (a: Arena) : Arena = { a with Casts = Set.ofList rows }
 
 // ---------------------------------------------------------------------------
 // Geometry and the engine's tile rules
@@ -666,8 +747,8 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
         Fatigue = b.Fatigue
         Hits = { Hits = b.Hits; HitsMax = hitsMax b }
         Energy = b.Energy
-        Thorium = 0
-        FreeCapacity = max 0 (carry - b.Energy)
+        Thorium = b.Thorium
+        FreeCapacity = max 0 (carry - b.Energy - b.Thorium)
         Body = active |> List.countBy id |> Map.ofList
         Moved =
             match Map.tryFind b.Id a.Carried.LastPositions with
@@ -690,7 +771,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     Name = spawn
                     Id = s.Id
                     RoomName = name
-                    IsSpawning = false
+                    IsSpawning = a.Ovens |> List.exists (fun oven -> oven.Spawn = s.Id)
                 }))
 
     if not (seen a name r) then
@@ -757,7 +838,46 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 |> List.filter (fun (_, kind) -> isStored kind)
                 |> List.map (fun (s, _) -> s.Id, s.Energy)
                 |> Map.ofList
-            Thorium = r.Capture.RealMinerals |> List.map (fun (id, _) -> id, 20_000) |> Map.ofList
+            Thorium =
+                (r.Capture.RealMinerals |> List.map (fun (id, _) -> id, 20_000))
+                @ (structures
+                   |> List.filter (fun (s, _) -> s.Thorium > 0)
+                   |> List.map (fun (s, _) -> s.Id, s.Thorium))
+                |> Map.ofList
+            // The Reactor's two rows, as `World.seenFacts` files them: its
+            // tile and kind are the declaration's, not vision's.
+            Owners =
+                r.Reactor
+                |> Option.map (fun reactor ->
+                    reactor.Id,
+                    match reactor.Owner with
+                    | Some Side.Ours -> Ownership.Ours
+                    | Some _ -> Ownership.Rival
+                    | None -> Ownership.Unowned)
+                |> Option.toList
+                |> Map.ofList
+            Reactors =
+                r.Reactor
+                |> Option.map (fun reactor ->
+                    {
+                        Id = reactor.Id
+                        Owner =
+                            match reactor.Owner with
+                            | Some Side.Ours -> ReactorOwner.Ours
+                            | Some side -> ReactorOwner.Rival(username side)
+                            | None -> ReactorOwner.Unowned
+                        Thorium = reactor.Thorium
+                        // `continuousWork`: `time - launchTime`, 0 when idle.
+                        ContinuousWork =
+                            reactor.LaunchTime
+                            |> Option.map (fun t -> a.Time - t)
+                            |> Option.defaultValue 0
+                    })
+                |> Option.toList
+            Casting =
+                a.Ovens
+                |> List.filter (fun oven -> oven.Room = name)
+                |> List.map (fun oven -> { Name = oven.Name; Body = oven.Parts })
             Control =
                 Some
                     {
@@ -857,9 +977,9 @@ let worldOf (a: Arena) : World =
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
 
-/// One colony's fight record as the arena carries it.
-let private foughtBy (a: Arena) (home: string) =
-    Map.tryFind home a.Carried.Fought |> Option.defaultValue Map.empty
+/// One colony's Raid log as the arena carries it.
+let private raidsOf (a: Arena) (home: string) =
+    Map.tryFind home a.Carried.Raids |> Option.defaultValue Observe.RaidState.empty
 
 /// Every living colony's view cut from this tick's world, as
 /// `Main.fullTick` cuts them, beside the world.
@@ -876,10 +996,7 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
     world,
     living
     |> List.map (fun c ->
-        let gate =
-            { StandDown.none with
-                Fought = foughtBy a c.Home
-            }
+        let gate = Observe.standDown tuning a.Time (raidsOf a c.Home)
 
         c, ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate holders world c)
 
@@ -895,19 +1012,32 @@ let viewOf (a: Arena) (home: string) : ColonyView =
 /// memos, and the world's carried memory.
 let private decideOurs (a: Arena) : Intent list * Carried =
     let world, views = cut a
-    let fought = foughtBy a
+
+    let alive =
+        a.Bodies
+        |> List.filter (fun b -> b.Side = Side.Ours)
+        |> List.map (fun b -> b.Id)
+        |> Set.ofList
 
     let decided =
         views
         |> List.map (fun (c, view) ->
-            (c.Home, Observe.foldFights view (fought c.Home)),
+            let decision =
+                decideUnarbitrated
+                    view
+                    a.Carried.Assignments
+                    Set.empty
+                    (Map.tryFind c.Home a.Carried.Memos)
+                    ReplanTurn.Now
+
             (c.Home,
-             decideUnarbitrated
+             Observe.foldRaids
+                 Observe.capEpisodes
+                 alive
                  view
-                 a.Carried.Assignments
-                 Set.empty
-                 (Map.tryFind c.Home a.Carried.Memos)
-                 ReplanTurn.Now))
+                 decision.OutpostRooms
+                 (raidsOf a c.Home)),
+            (c.Home, decision))
 
     let decisions = decided |> List.map snd
 
@@ -932,7 +1062,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Sightings = world.Sightings
         Towered = world.Towered
         ExitWatches = world.ExitWatches
-        Fought = decided |> List.map fst |> Map.ofList
+        Raids = decided |> List.map fst |> Map.ofList
     }
 
 // ---------------------------------------------------------------------------
@@ -1352,7 +1482,14 @@ let private kiteStep (a: Arena) (b: Body) (target: Body) (keep: int) : Direction
         |> Option.filter (fun (_, at) -> nearestThreat at > nearestThreat b.At)
         |> Option.map fst
     elif not (within keep b.At target.At) then
-        stepToward a b (ringAround keep target.At)
+        // A free tile in reach: one another body stands on is no goal.
+        let taken =
+            a.Bodies
+            |> List.filter (fun o -> o.Id <> b.Id)
+            |> List.map (fun o -> o.At)
+            |> Set.ofList
+
+        stepToward a b (Set.difference (ringAround keep target.At) taken)
     else
         None
 
@@ -1390,7 +1527,7 @@ let rec private retreatLatch (tick: int) (b: Body) (behaviour: Behaviour) : bool
 /// One scripted body's acts this tick. `planned` holds the moves of the
 /// bodies scripted before it, which a follower reads to step into the tile
 /// its leader is leaving.
-let private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Act list =
+let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Act list =
     let behaviour = b.Script |> Option.defaultValue Hold |> current a.Tick b
 
     let move (d: Direction option) =
@@ -1552,6 +1689,40 @@ let private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) : Ac
 
             melee @ shot @ heal @ move step
         | None -> fightInReach a Nearest b @ move (stepToward a b (Set.singleton goal))
+    | TakeReactor at ->
+        match Map.tryFind at.Room a.Rooms |> Option.bind (fun r -> r.Reactor) with
+        | None -> move (stepToward a b (Set.singleton at))
+        | Some reactor when reactor.Owner = Some b.Side ->
+            let parking =
+                ringAround 2 at
+                |> Set.filter (fun tile -> range tile at = Some 2)
+                |> Set.filter (fun tile ->
+                    terrainAt (Map.find tile.Room a.Rooms) (RoomPos.pos tile) <> Wall)
+
+            if Set.contains b.At parking then
+                []
+            else
+                move (stepToward a b parking)
+        | Some reactor ->
+            if within 1 b.At at then
+                [ Act.ClaimReactor reactor.Id ]
+            else
+                // A free tile of the ring, as a `moveTo` that paths around
+                // creeps would find one.
+                let taken = a.Bodies |> List.map (fun o -> o.At) |> Set.ofList
+                let ring = ringAround 1 at |> Set.remove at
+                let free = Set.difference ring taken
+                move (stepToward a b (if Set.isEmpty free then ring else free))
+    | Sweep(goal, focus, keep) ->
+        if List.isEmpty enemies then
+            fightInReach a Nearest b @ move (stepToward a b (Set.singleton goal))
+        else
+            scriptActs
+                a
+                planned
+                { b with
+                    Script = Some(Kite(focus, keep))
+                }
     | Phases _
     | Retreat _ -> []
 
@@ -1600,7 +1771,9 @@ let private actName (act: Act) =
     | Act.AttackController _ -> "attackController"
     | Act.Dismantle _ -> "dismantle"
     | Act.Repair _ -> "repair"
-    | Act.Transfer _ -> "transfer"
+    | Act.Transfer _
+    | Act.TransferThorium _ -> "transfer"
+    | Act.ClaimReactor _ -> "claimReactor"
 
 /// `creeps/intents.js` `priorities`: the acts that suppress each act.
 let private suppressedBy (name: string) : string list =
@@ -2083,6 +2256,8 @@ let step (a: Arena) : Arena * TickTrace =
             | MoveCreep(n, d) -> Some(n, Act.Move d)
             | RepairStructure(n, s) -> Some(n, Act.Repair s)
             | TransferEnergyToStructure(n, s, Energy) -> Some(n, Act.Transfer s)
+            | TransferEnergyToStructure(n, s, Thorium) -> Some(n, Act.TransferThorium s)
+            | ClaimReactor(n, r) -> Some(n, Act.ClaimReactor r)
             | DismantleStructure(n, s) -> Some(n, Act.Dismantle s)
             | _ -> None)
 
@@ -2109,6 +2284,15 @@ let step (a: Arena) : Arena * TickTrace =
         }
 
     let mutable rooms = a.Rooms
+    let poured = Dictionary<string, int>()
+
+    // The Reactor beside a body, by id, and the room it stands in.
+    let reactorBeside (b: Body) (id: string) =
+        rooms
+        |> Map.tryFind b.At.Room
+        |> Option.bind (fun r -> r.Reactor |> Option.map (fun reactor -> r, reactor))
+        |> Option.filter (fun (_, reactor) ->
+            reactor.Id = id && within 1 b.At (RoomPos.at b.At.Room reactor.At))
 
     // Every body's acts in id order, on start-of-tick positions and parts.
     for b in a.Bodies |> List.sortBy (fun b -> b.Id) do
@@ -2119,6 +2303,44 @@ let step (a: Arena) : Arena * TickTrace =
                 | Some r ->
                     rooms <- Map.add roomName r rooms
                     events.Add(ControllerAttacked(roomName, b.Id))
+                | None -> ()
+            // `creep.claimReactor.js`: adjacent and a live CLAIM part, then
+            // only `user` is written (`bulk.update` merges it into the
+            // object, so this tick's burn is already the new owner's).
+            | Act.ClaimReactor id ->
+                match reactorBeside b id with
+                | Some(r, reactor) when activeCount b BodyPart.Claim > 0 ->
+                    rooms <-
+                        Map.add
+                            b.At.Room
+                            { r with
+                                Reactor = Some { reactor with Owner = Some b.Side }
+                            }
+                            rooms
+
+                    events.Add(ReactorClaimed(b.At.Room, b.Id))
+                | _ -> ()
+            // `transfer.js`, generic: the Reactor takes T up to its
+            // `storeCapacityResource` (`reactor.roomObject.js`).
+            | Act.TransferThorium id ->
+                match reactorBeside b id with
+                | Some(r, reactor) ->
+                    let amount = min b.Thorium (Engine.reactorCapacity - reactor.Thorium)
+
+                    if amount > 0 then
+                        rooms <-
+                            Map.add
+                                b.At.Room
+                                { r with
+                                    Reactor =
+                                        Some
+                                            { reactor with
+                                                Thorium = reactor.Thorium + amount
+                                            }
+                                }
+                                rooms
+
+                        credit poured b.Id amount
                 | None -> ()
             | Act.Move _ -> ()
             | other -> perform a ledger b other
@@ -2177,6 +2399,46 @@ let step (a: Arena) : Arena * TickTrace =
                     events.Add(SafeModeActivated name)
                 | _ -> ()
             | None -> ()
+        | _ -> ()
+
+    // The Reactor's `postProcessObject` (`reactor.roomObject.js`), after
+    // every intent: a dry store clears the streak and does nothing else; an
+    // owned stocked one launches the streak if it has none, burns one T, and
+    // scores its owner `1 + floor(log10(1 + gameTime - launchTime))`. An
+    // owner change touches neither the store nor the streak.
+    let mutable scores = a.Scores
+
+    for name, r in Map.toList rooms do
+        match r.Reactor with
+        | Some reactor when reactor.Thorium = 0 && reactor.LaunchTime.IsSome ->
+            rooms <-
+                Map.add
+                    name
+                    { r with
+                        Reactor = Some { reactor with LaunchTime = None }
+                    }
+                    rooms
+        | Some({ Owner = Some owner } as reactor) when reactor.Thorium > 0 ->
+            let launch = reactor.LaunchTime |> Option.defaultValue a.Time
+            let score = 1 + int (floor (log10 (float (1 + a.Time - launch))))
+            let who = username owner
+
+            scores <- Map.add who (score + (Map.tryFind who scores |> Option.defaultValue 0)) scores
+
+            rooms <-
+                Map.add
+                    name
+                    { r with
+                        Reactor =
+                            Some
+                                { reactor with
+                                    Thorium = reactor.Thorium - 1
+                                    LaunchTime = Some launch
+                                }
+                    }
+                    rooms
+
+            events.Add(Burned(name, who, score))
         | _ -> ()
 
     // A rampart's decay (`ramparts/tick.js`): RAMPART_DECAY_AMOUNT off at
@@ -2284,16 +2546,95 @@ let step (a: Arena) : Arena * TickTrace =
                         Fatigue = fatigue
                         Hits = hits
                         Energy = b.Energy - spent
+                        Thorium =
+                            b.Thorium
+                            - (match poured.TryGetValue b.Id with
+                               | true, n -> n
+                               | _ -> 0)
                         TicksToLive = b.TicksToLive - 1
                         Retreating = retreatLatch a.Tick { b with Hits = hits } script
                     }))
+
+    // `spawns/create-creep.js`: an idle spawn of ours takes a cast of a row
+    // the arena performs, for CREEP_SPAWN_TIME a part, the bank paying.
+    let started =
+        ours
+        |> List.choose (function
+            | SpawnCreep(spawnName, bodyParts, name) ->
+                let role = name.Split('-')[0]
+
+                rooms
+                |> Map.toList
+                |> List.tryPick (fun (roomName, r) ->
+                    r.Structures
+                    |> List.tryFind (fun s -> s.Name = Some spawnName && s.Owner = Some Side.Ours)
+                    |> Option.map (fun s -> roomName, r, s))
+                |> Option.filter (fun (_, r, s) ->
+                    Set.contains role a.Casts
+                    && r.Bank >= bodyCost bodyParts
+                    && not (a.Ovens |> List.exists (fun oven -> oven.Spawn = s.Id)))
+                |> Option.map (fun (roomName, _, s) ->
+                    {
+                        Spawn = s.Id
+                        Room = roomName
+                        Name = name
+                        Parts = bodyParts
+                        Done = a.Time + Engine.spawnTicksPerPart * List.length bodyParts
+                    })
+            | _ -> None)
+
+    // `spawns/tick.js` `_born`: a finished body steps out onto the first free
+    // tile around its spawn, a CLAIM body with CREEP_CLAIM_LIFE_TIME.
+    let born, ovens =
+        (([], []), a.Ovens @ started)
+        ||> List.fold (fun (born: Body list, waiting) oven ->
+            let spawnAt =
+                rooms[oven.Room].Structures
+                |> List.tryFind (fun s -> s.Id = oven.Spawn)
+                |> Option.map (fun s -> RoomPos.at oven.Room s.At)
+
+            let taken = (settled @ born) |> List.map (fun b -> b.At) |> Set.ofList
+            let r = rooms[oven.Room]
+            let blocked = structureTiles Side.Ours r
+
+            let free =
+                spawnAt
+                |> Option.bind (fun at ->
+                    [ Top; TopRight; Right; BottomRight; Bottom; BottomLeft; Left; TopLeft ]
+                    |> List.map (stepTo at)
+                    |> List.tryFind (fun tile ->
+                        let p = RoomPos.pos tile
+
+                        not (Seam.onRing p)
+                        && terrainAt r p <> Wall
+                        && not (Set.contains p blocked)
+                        && not (Set.contains tile taken)))
+
+            match free with
+            | Some tile when oven.Done <= a.Time + 1 ->
+                events.Add(Born oven.Name)
+
+                let life =
+                    if List.contains BodyPart.Claim oven.Parts then
+                        Engine.claimLifetime
+                    else
+                        Engine.creepLifetime
+
+                ({ body oven.Name Side.Ours oven.Parts tile None with
+                    TicksToLive = life
+                 }
+                 :: born),
+                waiting
+            | _ -> born, oven :: waiting)
 
     let next =
         { a with
             Time = a.Time + 1
             Tick = a.Tick + 1
             Rooms = rooms
-            Bodies = settled
+            Bodies = settled @ List.rev born
+            Scores = scores
+            Ovens = List.rev ovens
             Carried =
                 { carried with
                     LastPositions = a.Bodies |> List.map (fun b -> b.Id, b.At) |> Map.ofList
@@ -2308,7 +2649,7 @@ let step (a: Arena) : Arena * TickTrace =
         Theirs = theirs
         Events = List.ofSeq events
         Bodies =
-            settled
+            next.Bodies
             |> List.map (fun b ->
                 {
                     Id = b.Id

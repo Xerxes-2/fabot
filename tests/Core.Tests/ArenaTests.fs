@@ -1170,18 +1170,21 @@ let arenaScenarioTests =
                     { start with
                         Carried =
                             { start.Carried with
-                                Fought =
+                                Raids =
                                     Map.ofList
                                         [
                                             "W17S26",
-                                            Map.ofList
-                                                [
-                                                    "W17S25",
-                                                    {
-                                                        Seen = start.Time - 1
-                                                        Squad = Some "duo"
-                                                    }
-                                                ]
+                                            { Fabot.Core.Observe.RaidState.empty with
+                                                Fought =
+                                                    Map.ofList
+                                                        [
+                                                            "W17S25",
+                                                            {
+                                                                Seen = start.Time - 1
+                                                                Squad = Some "duo"
+                                                            }
+                                                        ]
+                                            }
                                         ]
                             }
                     }
@@ -1481,8 +1484,8 @@ let arenaBorderTests =
                     $"no squad body is cast beside it\n{failure}"
 
                 Expect.equal
-                    (Map.tryFind "W17S26" final.Carried.Fought
-                     |> Option.bind (Map.tryFind "W17S25")
+                    (Map.tryFind "W17S26" final.Carried.Raids
+                     |> Option.bind (fun raids -> Map.tryFind "W17S25" raids.Fought)
                      |> Option.bind (fun latch -> latch.Squad))
                     (Some "duo")
                     "the duo stays the room's squad throughout"
