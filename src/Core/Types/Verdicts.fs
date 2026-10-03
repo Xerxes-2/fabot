@@ -29,7 +29,8 @@ let reverseCarrying toName sample (builders: ('p option -> 'a option) list) =
 /// What decided a fresh match: the first comparison that separated the
 /// winning Task from its closest rival — rank tier, then travel cost, then
 /// current load — or the tie-break when none did (pool order), or the fact
-/// that no rival existed at all.
+/// that no rival existed at all. A rank travel turned (`Pool.matchRank`) is
+/// travel cost's.
 [<RequireQualifiedAccess>]
 type MatchFactor =
     | OnlyCandidate
@@ -365,7 +366,8 @@ type Movement =
     }
 
 /// One row of a verbose scoring: a Task in the pool, either scored on the
-/// full matching key — rank tier, travel cost, current load — or rejected
+/// full matching key — the rank `Pool.matchRank` compared, travel cost,
+/// current load — or rejected
 /// at the first gate it failed. The answer to "why *not* that Task".
 [<RequireQualifiedAccess>]
 type Candidate =

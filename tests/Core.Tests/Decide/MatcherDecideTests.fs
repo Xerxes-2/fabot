@@ -811,6 +811,310 @@ let intakeDecayTests =
             }
         ]
 
+/// The live pioneer's body (#501): W15S28's worker, `16W 17C 17M`, light and
+/// not standing, empty.
+let private pioneer name =
+    creepWith name 0 850 (List.replicate 16 Work @ List.replicate 17 Carry @ List.replicate 17 Move)
+
+/// A mother and her [[nursery]] one room north (#501): the mother's full
+/// source container at W1N1 (10,46), at the far end of her corridor from the
+/// border, and the nursery's own source walled in at W1N2 (10,3), its one
+/// Seat (10,4) at the head of a corridor running down to the border. The
+/// pioneer stands on that Seat. Nothing else is work: no controller, no
+/// refillable, no site, so the pool is the far Withdraw and the local Harvest
+/// and the Matched Verdict names one comparison.
+let private nurseryIntake (rock: SourceInfo) =
+    { bareRespawn with
+        Spawns = []
+        Controller = None
+        Refillables = []
+        Sources = [ rock ]
+        Creeps = [ pioneer "p" ]
+        RoomControl = Map.ofList [ "W1N1", ownedRoom; "W1N2", ownedRoom ]
+        Declared = [ "W1N1"; "W1N2" ]
+        Stages = Map.ofList [ "W1N1", Independent; "W1N2", Nursery ]
+        Borrowed =
+            {
+                Rooms = [ "W1N2" ]
+                Defended = []
+                Garrisoned = []
+            }
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList [ "src-nur", Source; "can-home", Structure BuiltKind.Container ]
+                Stores = Map.ofList [ "can-home", Engine.containerCapacity ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
+                    TargetPositions = Map.ofList [ "can-home", { X = 10; Y = 46 } ]
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = TerrainGrid.ofList (corridor 10 4 48)
+                    TargetPositions = Map.ofList [ "src-nur", { X = 10; Y = 3 } ]
+                    CreepPositions = Map.ofList [ "p", { X = 10; Y = 4 } ]
+                }
+    }
+
+/// One body "b" and two source containers on one plain row (#501): the
+/// half-full one two tiles west of the body, the full one at (24,10).
+/// Pairwise: no source, no controller, no refillable, so the two Withdraws are
+/// the whole pool.
+let private twoContainers (body: CreepInfo) =
+    { bareRespawn with
+        Sources = []
+        Controller = None
+        Refillables = []
+        Creeps = [ body ]
+        Spatial =
+            { spatial [] [ for x in 5..40 -> { X = x; Y = 10 }, Plain ] with
+                Stores = Map.ofList [ "can-half", 1_000; "can-full", Engine.containerCapacity ]
+            }
+            |> withTargets
+                [
+                    "can-half", { X = 10; Y = 10 }, Structure BuiltKind.Container
+                    "can-full", { X = 24; Y = 10 }, Structure BuiltKind.Container
+                ]
+            |> withCreepsAt [ body.Name, { X = 12; Y = 10 } ]
+    }
+
+/// A home container holding 500 four tiles from body "b" at W1N1 (10,40), and
+/// a full container in the outpost one room north at W1N2 (10,10): the haul
+/// the user's ruling keeps on rank (#501).
+let private outpostHaul (body: CreepInfo) =
+    { bareRespawn with
+        Spawns = []
+        Controller = None
+        Refillables = []
+        Sources = []
+        Creeps = [ body ]
+        Spatial =
+            { SpatialInfo.empty with
+                RoomName = Some "W1N1"
+                Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+                TargetKinds =
+                    Map.ofList
+                        [
+                            "can-home", Structure BuiltKind.Container
+                            "can-out", Structure BuiltKind.Container
+                        ]
+                Stores = Map.ofList [ "can-home", 500; "can-out", Engine.containerCapacity ]
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
+                    TargetPositions = Map.ofList [ "can-home", { X = 10; Y = 44 } ]
+                    CreepPositions = Map.ofList [ body.Name, { X = 10; Y = 40 } ]
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
+                    TargetPositions = Map.ofList [ "can-out", { X = 10; Y = 10 } ]
+                }
+    }
+
+/// A full energy container and a full mineral container on one row, a worker
+/// between them at (30,10), swamp on both sides of it (#501): the energy
+/// store at (44,10) costs more than one `IntakeTravelPerRung` to reach, and the
+/// mine's container at (11,10), beside the deposit walled in at (10,10), less
+/// than one further again. Both stand two rungs up on the Feeding tier.
+let private oreBesideEnergy =
+    let terrain x =
+        if x = 10 then Wall
+        elif (x >= 13 && x <= 28) || (x >= 32 && x <= 42) then Swamp
+        else Plain
+
+    { bareRespawn with
+        Sources = []
+        Refillables = []
+        Controller = None
+        Creeps = [ lightWorker "b" 0 450 ]
+        Spatial =
+            { spatial [] [ for x in 8..48 -> { X = x; Y = 10 }, terrain x ] with
+                Thorium = Map.ofList [ "min-a", 22_000; "can-min", Engine.containerCapacity ]
+                Stores = Map.ofList [ "can-e", Engine.containerCapacity ]
+                Cooldowns = Map.ofList [ "ext-a", 0 ]
+            }
+            |> withTargets
+                [
+                    "min-a", minePos, Mineral
+                    "ext-a", minePos, Structure BuiltKind.Extractor
+                    "can-min", minePost, Structure BuiltKind.Container
+                    "can-e", { X = 44; Y = 10 }, Structure BuiltKind.Container
+                ]
+            |> withCreepsAt [ "b", { X = 30; Y = 10 } ]
+    }
+
+let private matchedFor creep colony =
+    let { Verdicts = verdicts } = decideOn colony
+
+    verdicts
+    |> List.tryPick (function
+        | Verdict.Matched(name, task, factor) when name = creep -> Some(task, factor)
+        | _ -> None)
+
+let private costOf creep task (colony: ColonyView) =
+    Atlas.travelCost (Atlas.ofView colony) creep task |> Option.defaultValue -1
+
+/// How much further body "b" walks to the first Task than to the second.
+let private extraTravel far near colony =
+    costOf "b" far colony - costOf "b" near colony
+
+[<Tests>]
+let intakeTravelTests =
+    testList
+        "an intake pays for its travel in rungs"
+        [
+            test "a pioneer beside the nursery's source digs it over a full container a room away" {
+                // Live, W17S25 at t930,881 (#501): the two pioneers walked ~220 ticks
+                // each way to W15S27's full container while the nursery's own source
+                // sat at 1,500. A full container's two rungs are spent on the walk.
+                let colony = nurseryIntake (source "src-nur")
+                let far = costOf "p" (Withdraw("can-home", Energy)) colony
+
+                Expect.isGreaterThanOrEqual
+                    far
+                    (2 * colony.Tuning.IntakeTravelPerRung)
+                    "premise: the container's two rungs are spent on the walk"
+
+                Expect.equal
+                    (matchedFor "p" colony)
+                    (Some(taskId (Harvest "src-nur"), MatchFactor.TravelCost))
+                    "the source under its feet, and travel is what turned the rank"
+            }
+
+            test "the same pioneer with the source drained past its walk still fetches" {
+                // Pairwise on the rock alone: the Harvest is rejected by the restock gate
+                // (`tooEarly`), so the far container is all there is.
+                let colony = nurseryIntake (drained "src-nur" 300)
+
+                Expect.equal
+                    (matchedFor "p" colony |> Option.map fst)
+                    (Some(taskId (Withdraw("can-home", Energy))))
+                    "nothing local to dig: the full container"
+            }
+
+            test
+                "a full container under one IntakeTravelPerRung further still outbids a nearer half-full one" {
+                // #242, #306: the full container's two rungs keep their purpose for a
+                // body near it.
+                let colony = twoContainers (lightWorker "b" 0 450)
+
+                Expect.isLessThan
+                    (extraTravel
+                        (Withdraw("can-full", Energy))
+                        (Withdraw("can-half", Energy))
+                        colony)
+                    colony.Tuning.IntakeTravelPerRung
+                    "premise: the full container is less than one IntakeTravelPerRung further"
+
+                Expect.equal
+                    (matchedFor "b" colony)
+                    (Some(taskId (Withdraw("can-full", Energy)), MatchFactor.Rank))
+                    "the full container, on rank"
+            }
+
+            test "the same pair at twice IntakeTravelPerRung further goes to the nearer" {
+                // Two rungs are given back by twice the extra travel, and no more: the
+                // full container then ties the half-full one and cost decides.
+                let colony = twoContainers (lightWorker "b" 0 450)
+
+                let extra =
+                    extraTravel (Withdraw("can-full", Energy)) (Withdraw("can-half", Energy)) colony
+
+                let tuned =
+                    { colony with
+                        Tuning =
+                            { colony.Tuning with
+                                IntakeTravelPerRung = extra / 3
+                            }
+                    }
+
+                Expect.equal
+                    (matchedFor "b" tuned)
+                    (Some(taskId (Withdraw("can-half", Energy)), MatchFactor.TravelCost))
+                    "both rungs spent on the walk: the nearer store"
+            }
+
+            test "a body with no Work keeps the full outpost container on rank" {
+                // User, 2026-10-04: a hauler has no dig to choose, and charging it left
+                // an outpost's full container to overflow. Pairwise on the body: the
+                // worker standing on the same tile goes home.
+                // Fifty aboard puts the hauler at fatigue parity, the worker's pace,
+                // and still half empty.
+                let haul = outpostHaul (hauler "b" 50 50)
+                let dig = outpostHaul (lightWorker "b" 0 450)
+
+                for colony in [ haul; dig ] do
+                    Expect.isGreaterThanOrEqual
+                        (extraTravel
+                            (Withdraw("can-out", Energy))
+                            (Withdraw("can-home", Energy))
+                            colony)
+                        (2 * colony.Tuning.IntakeTravelPerRung)
+                        "premise: the outpost lies twice IntakeTravelPerRung further"
+
+                Expect.equal
+                    (matchedFor "b" haul)
+                    (Some(taskId (Withdraw("can-out", Energy)), MatchFactor.Rank))
+                    "the hauler drains the full outpost container"
+
+                Expect.equal
+                    (matchedFor "b" dig |> Option.map fst)
+                    (Some(taskId (Withdraw("can-home", Energy))))
+                    "the worker on the same tile draws the home container"
+            }
+
+            test
+                "a Work body near a full energy container does not walk to a farther full ore container" {
+                // The whole intake family is charged against the nearest intake: an
+                // absolute charge on energy alone discounted the energy container for
+                // its own walk and sent the body past it to the ore.
+                let colony = oreBesideEnergy
+                let energy = Withdraw("can-e", Energy)
+
+                Expect.isGreaterThanOrEqual
+                    (costOf "b" energy colony)
+                    colony.Tuning.IntakeTravelPerRung
+                    "premise: the energy container is itself a walk"
+
+                Expect.isGreaterThan
+                    (extraTravel (Withdraw("can-min", Thorium)) energy colony)
+                    0
+                    "premise: the ore container is further still"
+
+                Expect.equal
+                    (matchedFor "b" colony |> Option.map fst)
+                    (Some(taskId energy))
+                    "the nearer full container"
+            }
+
+            test "the lift is the Matcher's alone: the full container's push weight is its tier's" {
+                // The Resolver's push weight reads the pooled rank, which the travel lift
+                // never touches.
+                let colony = nurseryIntake (source "src-nur")
+
+                let rank =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = Withdraw("can-home", Energy) then
+                            Some pooled.Priority
+                        else
+                            None)
+
+                Expect.equal
+                    rank
+                    (Some(priorityOfTier Feeding + rankOfRung TwoRungsUp))
+                    "the pooled rank is the full container's two rungs, travel or not"
+            }
+        ]
+
 [<Tests>]
 let selfHealTests =
     let healer =

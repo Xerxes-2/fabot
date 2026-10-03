@@ -205,7 +205,8 @@ type PooledTask =
     {
         Task: Task
         /// Where this Task ranks against every other, lower first. The
-        /// Matcher's first key component; `MatchFactor.Rank` names it.
+        /// Matcher's first key component, through `Pool.matchRank`;
+        /// `MatchFactor.Rank` names it.
         Priority: int
         Capacity: Capacity
         /// Whether this is work in a room another colony of ours runs — the

@@ -35,7 +35,7 @@ The thin imperative shell that turns Intents into Screeps API calls — the only
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn") that interchangeable creeps are matched to; a creep has no fixed role. In the pool it carries a [[priority]] and a [[capacity]] the [[planner]] sets and the [[matcher]] reads.
 
 ### Priority
-Where a pooled Task ranks against every other, lower first — the first component of the [[matcher]]'s key, set by the [[planner]] off the tier ladder (Safety, the [[downgrade deadline]]'s Upgrade, Feeding, the [[storage]]'s draw, surplus, the [[buffer]]'s Refill, the stock's). Tiers stand ten rungs apart so a Task can step up inside its tier by a `Rung` of at most half a tier, and the [[resolver]]'s push weight rounds a rank back to its nearest tier. ADR-0007, ADR-0010, ADR-0012, ADR-0023, ADR-0052, ADR-0057, ADR-0061.
+Where a pooled Task ranks against every other, lower first — the first component of the [[matcher]]'s key, set by the [[planner]] off the tier ladder (Safety, the [[downgrade deadline]]'s Upgrade, Feeding, the [[storage]]'s draw, surplus, the [[buffer]]'s Refill, the stock's). Tiers stand ten rungs apart so a Task can step up inside its tier by a `Rung` of at most half a tier, and the [[resolver]]'s push weight rounds a rank back to its nearest tier. For a body with Work the [[matcher]] alone gives back an intake's lift above its tier, a rung per `Tuning.IntakeTravelPerRung` of travel past the body's cheapest intake (#501). ADR-0002, ADR-0007, ADR-0010, ADR-0012, ADR-0023, ADR-0052, ADR-0057, ADR-0061.
 _Avoid_: rank (for the tier itself), weight, urgency
 
 ### Capacity

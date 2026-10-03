@@ -160,6 +160,53 @@ let tuningTests =
                     "a threshold of fifty and the same pile is worth the walk"
             }
 
+            test "IntakeTravelPerRung is the extra walk a Work body pays a rung of lift for" {
+                // A generalist two tiles from a half-full container and twelve from
+                // a full one: twenty-two half-ticks further, under the shipped
+                // seventy-five, so the full container's two rungs stand.
+                let colony =
+                    { bareRespawn with
+                        Sources = []
+                        Controller = None
+                        Refillables = []
+                        Creeps =
+                            [
+                                creepWith
+                                    "w"
+                                    0
+                                    450
+                                    (List.replicate 9 Work
+                                     @ List.replicate 9 Carry
+                                     @ List.replicate 9 Move)
+                            ]
+                        Spatial =
+                            { spatial [] [ for x in 5..30 -> { X = x; Y = 10 }, Plain ] with
+                                Stores =
+                                    Map.ofList
+                                        [ "can-half", 1_000; "can-full", Engine.containerCapacity ]
+                            }
+                            |> withTargets
+                                [
+                                    "can-half", { X = 10; Y = 10 }, Structure BuiltKind.Container
+                                    "can-full", { X = 24; Y = 10 }, Structure BuiltKind.Container
+                                ]
+                            |> withCreepsAt [ "w", { X = 12; Y = 10 } ]
+                    }
+
+                let matched colony =
+                    (decideOn colony).Assignments |> Map.tryFind "w"
+
+                Expect.equal
+                    (matched colony)
+                    (Some(taskId (Withdraw("can-full", Energy))))
+                    "under one rung's walk the full container keeps its lift"
+
+                Expect.equal
+                    (matched (colony |> tunedBy (fun t -> { t with IntakeTravelPerRung = 10 })))
+                    (Some(taskId (Withdraw("can-half", Energy))))
+                    "at ten the same walk spends both rungs and the nearer store wins"
+            }
+
             test "ReachMargin is the tiles a weapon's range is widened by" {
                 let melee = facingBody { X = 25; Y = 29 } [ Attack; Move ]
 

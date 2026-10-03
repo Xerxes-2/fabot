@@ -524,6 +524,38 @@ let rankOfRung =
     | OneRungUp -> -priorityStep
     | TwoRungsUp -> -2 * priorityStep
 
+/// The rungs a rank stands above its own tier: a rung only ever steps a Task
+/// up, and by less than half a tier, so the distance down to the next tier is
+/// the lift.
+let private rungsAboveTier rank =
+    let aboveLower = ((rank % tierRungs) + tierRungs) % tierRungs
+
+    if aboveLower > tierRungs / 2 then
+        (tierRungs - aboveLower) / priorityStep
+    else
+        0
+
+/// Whether a Task is an intake: a Harvest, Withdraw or Pickup of either
+/// resource. What the body may take of them is `applicable`'s.
+let internal isIntake task =
+    match task with
+    | Harvest _
+    | Withdraw _
+    | Pickup _ -> true
+    | _ -> false
+
+/// The rank the Matcher compares a candidate at (#501). For a body that digs,
+/// `nearest` is the travel cost of its cheapest intake candidate, and an
+/// intake gives back a rung of its lift per `Tuning.IntakeTravelPerRung` it
+/// lies beyond that, never more than the lift itself. `None` — a body with no
+/// Work — compares every Task at its pooled rank.
+let internal matchRank (tuning: Tuning) (nearest: int option) (pooled: PooledTask) cost =
+    match nearest with
+    | Some near when isIntake pooled.Task ->
+        let spent = (cost - near) / max 1 tuning.IntakeTravelPerRung
+        pooled.Priority + priorityStep * min (rungsAboveTier pooled.Priority) spent
+    | _ -> pooled.Priority
+
 /// ADR-0006. Which of the four shapes a body is, as far as a capacity is
 /// concerned: part arithmetic, asked in the order the gates ask it in, because
 /// Heavy and Standing overlap on the anchor's `6W/1C/1M` and every rule that

@@ -417,14 +417,39 @@ let matchCreeps
                     | Error reason -> release (ReleaseReason.Rejected reason)
                     | Ok _ -> Map.add name tid acc, hold loads tid, released)
 
-    // The fresh candidate's reading of the same cascade: scored on the full key
-    // where a holder is merely kept, and with no escape from the capacity gate.
-    let judge acc loads (creep: CreepInfo) (pooled: PooledTask) =
-        let tid = taskId pooled.Task
+    // The fresh candidate's reading of the same cascade, over the whole pool:
+    // scored on the full key where a holder is merely kept, and with no escape
+    // from the capacity gate. The key's rank is `matchRank`'s, which reads the
+    // creep's cheapest intake, so the pool is gated before any row is scored.
+    let judge acc loads (creep: CreepInfo) =
+        let gated =
+            pool |> List.map (fun pooled -> pooled, gate (lazy false) acc creep pooled)
 
-        match gate (lazy false) acc creep pooled with
-        | Error reason -> Candidate.Rejected(tid, reason)
-        | Ok cost -> Candidate.Scored(tid, pooled.Priority, cost, load loads tid)
+        let nearest =
+            if workBy creep.Name = 0 then
+                None
+            else
+                gated
+                |> List.choose (fun (pooled, result) ->
+                    match result with
+                    | Ok cost when isIntake pooled.Task -> Some cost
+                    | _ -> None)
+                |> List.fold (fun near cost -> Some(near |> Option.fold min cost)) None
+
+        gated
+        |> List.map (fun (pooled, result) ->
+            let tid = taskId pooled.Task
+
+            pooled,
+            match result with
+            | Error reason -> Candidate.Rejected(tid, reason)
+            | Ok cost ->
+                Candidate.Scored(
+                    tid,
+                    matchRank view.Tuning nearest pooled cost,
+                    cost,
+                    load loads tid
+                ))
 
     let assignOne (acc, loads, verdicts) (creep: CreepInfo) =
         let verdicts =
@@ -438,7 +463,7 @@ let matchCreeps
                     | Some tid -> Map.add tid (max 0 (load loads tid - 1)) loads
                     | None -> loads
 
-                let rows = pool |> List.map (judge (Map.remove creep.Name acc) without creep)
+                let rows = judge (Map.remove creep.Name acc) without creep |> List.map snd
                 Verdict.Scoring(creep.Name, rows) :: verdicts
             else
                 verdicts
@@ -446,12 +471,13 @@ let matchCreeps
         match Map.tryFind creep.Name acc with
         | Some tid -> acc, loads, Verdict.Kept(creep.Name, tid) :: verdicts
         | None ->
-            let judged = pool |> List.map (fun p -> p.Task, judge acc loads creep p)
+            let judged = judge acc loads creep
 
             let keyed =
                 judged
                 |> List.choose (function
-                    | t, Candidate.Scored(_, rank, cost, load) -> Some((rank, cost, load), t)
+                    | p, Candidate.Scored(_, rank, cost, load) ->
+                        Some((rank, cost, load), p.Task, p.Priority)
                     | _ -> None)
 
             match keyed with
@@ -488,22 +514,32 @@ let matchCreeps
 
                 acc, loads, Verdict.Unassigned(creep.Name, reason) :: verdicts
             | keyed ->
-                let bestKey, task = keyed |> List.minBy fst
+                let bestKey, task, bestPooled = keyed |> List.minBy (fun (key, _, _) -> key)
 
                 // The deciding factor: the first component separating the
                 // winner from its closest rival, or the pool-order tie-break
-                // when the whole key ties.
+                // when the whole key ties. A rank the pooled ranks do not
+                // order the same way was turned by travel.
                 let factor =
-                    match keyed |> List.filter (fun (_, t) -> t <> task) with
+                    match keyed |> List.filter (fun (_, t, _) -> t <> task) with
                     | [] -> MatchFactor.OnlyCandidate
                     | rivals ->
                         let bestRank, bestCost, bestLoad = bestKey
-                        let rivalRank, rivalCost, rivalLoad = rivals |> List.map fst |> List.min
 
-                        if rivalRank <> bestRank then MatchFactor.Rank
-                        elif rivalCost <> bestCost then MatchFactor.TravelCost
-                        elif rivalLoad <> bestLoad then MatchFactor.Load
-                        else MatchFactor.PoolOrder
+                        let (rivalRank, rivalCost, rivalLoad), _, rivalPooled =
+                            rivals |> List.minBy (fun (key, _, _) -> key)
+
+                        if rivalRank <> bestRank then
+                            if bestPooled < rivalPooled then
+                                MatchFactor.Rank
+                            else
+                                MatchFactor.TravelCost
+                        elif rivalCost <> bestCost then
+                            MatchFactor.TravelCost
+                        elif rivalLoad <> bestLoad then
+                            MatchFactor.Load
+                        else
+                            MatchFactor.PoolOrder
 
                 Map.add creep.Name (taskId task) acc,
                 hold loads (taskId task),

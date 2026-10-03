@@ -343,6 +343,13 @@ type Tuning =
         /// cargo; a Thorium pile under the line is gone inside `amount` ticks
         /// by its own decay.
         PickupThreshold: int
+        /// The extra travel cost, past a Work body's cheapest intake, that
+        /// spends one rung of another intake's lift in the Matcher (#501): a
+        /// full container's two rungs are gone at twice it, a pile's one at
+        /// once, and a lift is never overspent. Derived at the `Independent`
+        /// stage for W15S28's `16W 17C 17M` worker, the 3,300 body its pioneers
+        /// are; half-ticks at fatigue parity, so bank-free as written.
+        IntakeTravelPerRung: int
         /// The Reach margin: the tiles a Threat's weapon range is widened by —
         /// one for the hostile's next step, one for our own tick of lag.
         /// Tiles of lag, so the same at every stage and bank.
@@ -639,6 +646,8 @@ module Tuning =
             ObserveStaleTicks = 100
             UpgradeStockBodies = 20
             PickupThreshold = 100
+            // 37 plain tiles: a detour inside one room spends one rung at most.
+            IntakeTravelPerRung = 75
             ReachMargin = 2
             StandingCarryPerWork = 4
             PioneerCount = 3
