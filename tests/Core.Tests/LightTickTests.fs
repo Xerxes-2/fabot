@@ -80,7 +80,8 @@ let replayTests =
                 let oneShot =
                     [
                         TransferEnergyToStructure("digger", "spawn", Energy)
-                        WithdrawFromStore("digger", "store", Energy, None)
+                        // The hauler's: one beside an upgrade is replayed.
+                        WithdrawFromStore("hauler", "store", Energy, None)
                         PickupPile("digger", "pile")
                         SpawnCreep("Spawn1", [ Move ], "x")
                         PlaceConstructionSite(tile 5 5, StructureKind.Road)
@@ -100,6 +101,38 @@ let replayTests =
                     (LightTick.intents full quiet)
                     work
                     "and a light tick replays exactly those"
+            }
+
+            test "a standing upgrader's withdraw beside its upgrade is replayed with it" {
+                // The Emitter pairs the two for a standing body beside its
+                // buffer and for no one else; a lone withdraw is one-shot.
+                let paired =
+                    LightTick.lastFull
+                        quiet
+                        Map.empty
+                        [
+                            UpgradeController("digger", "ctrl")
+                            WithdrawFromStore("digger", "can-buf", Energy, None)
+                            WithdrawFromStore("hauler", "store", Energy, None)
+                        ]
+
+                Expect.equal
+                    (LightTick.intents paired quiet)
+                    [
+                        UpgradeController("digger", "ctrl")
+                        WithdrawFromStore("digger", "can-buf", Energy, None)
+                    ]
+                    "both acts for the upgrader, nothing for the hauler"
+
+                let pushed =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "digger" (creepAt 11 10 1000)
+                    }
+
+                Expect.equal
+                    (LightTick.intents paired pushed)
+                    []
+                    "moved, it may stand out of the buffer's reach: neither"
             }
 
             test "a creep off the tile it worked from re-issues nothing" {

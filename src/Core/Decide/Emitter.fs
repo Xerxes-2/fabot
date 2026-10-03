@@ -204,8 +204,9 @@ let internal applicable
             && not heavy
             && (has Work || not buffer)
             // A standing body fetches from the buffer at its feet and from
-            // nowhere else (#206).
-            && (buffer || not standing)
+            // nowhere else (#206), and only empty: carrying any, it holds its
+            // Upgrade and draws beside it (`topUp`, #498).
+            && (not standing || (buffer && creep.Energy = 0))
     // The Withdraw gate without its target-shaped clauses: a pile is nobody's
     // buffer, and it drops `worthTheTrip` because a pile decays and a store does
     // not, so there is no later body to leave it for (#311).
@@ -697,6 +698,28 @@ let private heldByFullContainer (view: ColonyView) atlas (creep: CreepInfo) task
             Engine.containerCapacity - held < dig)
     | _ -> false
 
+/// The standing upgrader's draw beside its Upgrade (#498): a standing body
+/// within reach of a buffer holding energy withdraws from it while it has
+/// room. The engine runs a creep's `withdraw` before its `upgradeController`
+/// (`creepActions` in `processor/intents/creeps/intents.js`), so the draw
+/// tops up what the upgrade spends and the Task never changes. Not a
+/// generalist's: one that never emptied would never leave for a site.
+let private topUp (view: ColonyView) atlas (creep: CreepInfo) : Intent list =
+    if creep.FreeCapacity <= 0 || not (isStandingBody view.Tuning creep) then
+        []
+    else
+        match SpatialInfo.creepPlacementOf view.Spatial creep.Name with
+        | None -> []
+        | Some tile ->
+            Atlas.controllerContainers atlas
+            |> Seq.tryFind (fun buffer ->
+                SpatialInfo.heldIn view.Spatial Energy buffer > 0
+                && SpatialInfo.placementOf view.Spatial buffer
+                   |> Option.bind (RoomPos.range tile)
+                   |> Option.exists (fun r -> r <= Engine.meleeRange))
+            |> Option.map (fun buffer -> WithdrawFromStore(creep.Name, buffer, Energy, None))
+            |> Option.toList
+
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
 /// only while the source holds energy. Anticipatory dispatch and the occupancy
@@ -748,7 +771,9 @@ let private actionIntents
             && not (heldByCooldown atlas task)
             && not (heldByFullContainer view atlas creep task)
         then
-            intentFor view atlas partyWalks creep task |> Option.toList
+            match intentFor view atlas partyWalks creep task with
+            | Some(UpgradeController _ as act) -> act :: topUp view atlas creep
+            | act -> Option.toList act
         else
             []
 

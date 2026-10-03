@@ -247,6 +247,46 @@ let standingBodyTests =
                     "the generalist, one Carry per Work, walks to whichever intake is cheaper"
             }
 
+            test "a standing body upgrading beside its buffer withdraws in the same tick" {
+                // At (12,10): two from the controller, one from the buffer.
+                // The engine runs a creep's withdraw before its upgrade, so
+                // the draw tops up what the upgrade spends and the Task never
+                // changes. Pairwise on the load and on the body.
+                let actsOf energy free body =
+                    let creep = creepWith "up" energy free body
+
+                    let colony =
+                        { bufferLaneColony [] [] creep with
+                            Spatial = bufferLane |> withCreepsAt [ "up", { X = 12; Y = 10 } ]
+                        }
+
+                    (decideOn colony).Intents
+                    |> List.filter (function
+                        | UpgradeController _
+                        | WithdrawFromStore _ -> true
+                        | _ -> false)
+
+                let upgrader = bodyFor upgraderPattern 1800
+                let upgrade = UpgradeController("up", "ctrl-1")
+                let draw = WithdrawFromStore("up", "can-buf", Energy, None)
+
+                Expect.equal (actsOf 25 25 upgrader) [ upgrade; draw ] "half a load: both acts"
+
+                Expect.equal (actsOf 50 0 upgrader) [ upgrade ] "full: the draw would be refused"
+
+                Expect.equal
+                    (actsOf 0 50 upgrader)
+                    [ draw ]
+                    "empty: it withdraws and upgrades nothing, the engine refusing an empty upgrade"
+
+                // A generalist that never emptied would never leave the
+                // controller for a site.
+                Expect.equal
+                    (actsOf 400 50 (bodyFor workerPattern 1800))
+                    [ UpgradeController("up", "ctrl-1") ]
+                    "a generalist upgrades from its own load alone"
+            }
+
             test "an Anchor with a site beside it still only Harvests" {
                 // With Harvest in the pool the rank settles it and the gate
                 // never gets a say. Pairwise on the pool: the same Anchor,

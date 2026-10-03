@@ -45,7 +45,8 @@ type LastFull =
         Standing: Map<string, RoomPos>
         /// Each walking creep's step plan, every colony's merged.
         Steps: Map<string, RoomPos * RoomPos>
-        /// The full tick's repeatable intents, in its own order.
+        /// The full tick's repeatable intents and standing draws (`workOf`),
+        /// in its own order.
         Work: Intent list
         /// Whether a structure of ours fought on the full tick (`fights`).
         Fought: bool
@@ -165,6 +166,31 @@ let private repeatableActor (intent: Intent) : string option =
     | ObserveRoom _
     | SendFromTerminal _ -> None
 
+/// The actor of a kept work intent: a repeatable one's, or a standing
+/// upgrader's draw's. `lastFull` keeps no other withdraw.
+let private workActor (intent: Intent) : string option =
+    match intent with
+    | WithdrawFromStore(creep, _, _, _) -> Some creep
+    | _ -> repeatableActor intent
+
+/// The full tick's work worth replaying: the repeatable intents, and a
+/// withdraw issued beside an upgrade by the same creep — the Emitter pairs
+/// the two for a standing body beside its buffer alone (#498), and the
+/// same-tile rule keeps it within the buffer's reach.
+let private workOf (intents: Intent list) : Intent list =
+    let upgrading =
+        intents
+        |> List.choose (function
+            | UpgradeController(creep, _) -> Some creep
+            | _ -> None)
+        |> Set.ofList
+
+    intents
+    |> List.filter (fun intent ->
+        match intent with
+        | WithdrawFromStore(creep, _, _, _) -> Set.contains creep upgrading
+        | _ -> Option.isSome (repeatableActor intent))
+
 /// Whether an intent is a structure's fight — a tower's shot, heal or repair
 /// of a struck rampart, or safe mode raised: a tick that holds one is followed by a full tick, never a
 /// light one. A creep's own shot or heal is not: a body it could still reach
@@ -221,7 +247,7 @@ let lastFull
             |> Seq.map (fun (name, creep) -> name, creep.Tile)
             |> Fresh.mapOfSeq
         Steps = steps
-        Work = intents |> List.filter (repeatableActor >> Option.isSome)
+        Work = workOf intents
         Fought = intents |> List.exists fights
         Hits =
             glance.Creeps
@@ -359,8 +385,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
 let intents (last: LastFull) (now: Glance) : Intent list =
     let work =
         last.Work
-        |> List.choose (fun intent ->
-            repeatableActor intent |> Option.map (fun creep -> creep, intent))
+        |> List.choose (fun intent -> workActor intent |> Option.map (fun creep -> creep, intent))
         |> List.groupBy fst
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
