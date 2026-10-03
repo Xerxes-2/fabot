@@ -55,6 +55,27 @@ reading decides it: a profile that prints "not triggered" has failed to
 trip the trigger, not cleared it. The trigger is a reason to re-decide,
 never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 
+## The reset tick
+
+Every deploy is a global reset, and the engine **terminates any tick over
+500 ms**, losing its intents (#486: 504.3 ms at t922,27x). Every run ends on a
+`reset tick` block: `--resets N` (default 5) fresh copies of the bundle, each
+loaded over the run's last Memory and timed through module load, Memory
+decode and its first tick, with the bundle's own phase split, flood counts and
+a fingerprint of the Memory it wrote. One fingerprint across the resets, and
+the same one across two builds, makes a cut exact. The samples land in
+`build/fabot-reset.cpuprofile` for `npm run cpuprofile`. A run's first
+profiled tick is **not** a reset: the hire loop has already warmed the bundle.
+
+The budget is the live row, read off `npm run observe -- cpu` straight after
+a deploy: **keep it under ~350 ms**, which leaves headroom for a reset during
+a raid. The harness reads a fraction of it (2026-10-03: `reactor` ~90 ms
+against live 313 ms over 36 rooms and five colonies), and most of the harness
+figure is cold JIT rather than cold caches — the same tick on a warm bundle
+over an emptied heap is ~12 ms — so code that iterates many times on the
+reset tick (a Fable list or sequence comprehension per room, say) costs far
+more there than any warm profile shows.
+
 ## Scenarios
 
 | scenario  | world                                                                                                                                                                                                      | default level |

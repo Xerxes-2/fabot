@@ -109,6 +109,18 @@ module TerrainGrid =
 
         ofTiles grid
 
+    /// A room's ground, x and y in 1..48, read tile by tile in a loop: the
+    /// list `ofList` takes is a sequence under Fable, and building one per
+    /// room on the reset tick was most of `World.terrainOf` (#486).
+    let ofGround (read: int -> int -> Terrain) : TerrainGrid =
+        let grid = Array.create tileCount None
+
+        for x in 1 .. Engine.roomSide - 2 do
+            for y in 1 .. Engine.roomSide - 2 do
+                grid.[indexOf { X = x; Y = y }] <- Some(read x y)
+
+        ofTiles grid
+
     /// Every tile the grid carries, in `indexOf` order — which is (X, Y)
     /// order, the order `Map.toList` answered in and every "ties by (X, Y)"
     /// rule in the colony rests on.

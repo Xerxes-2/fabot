@@ -115,7 +115,7 @@ const SCENARIOS = ["stub", "outpost", "young", "pair", "reactor", "siege"];
 const RAIDABLE = ["outpost", "pair", "siege"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
-  " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided]" +
+  " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided] [--resets N]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -161,11 +161,15 @@ let levelArg = null;
 // which is one melee invader, and a scenario that stood five of them would
 // be profiling the 2% case as if it were the tick.
 let raided = false;
+// How many cold resets the run ends on (#486): each loads a fresh copy of
+// the bundle over the run's last Memory and times its first tick.
+let resets = 5;
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === "--census-every")
     censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
   else if (process.argv[i] === "--raided") raided = true;
+  else if (process.argv[i] === "--resets") resets = Number(process.argv[++i]);
   else if (process.argv[i] === "--level") {
     levelArg = process.argv[++i];
     level = Number(levelArg);
@@ -175,9 +179,11 @@ for (let i = 2; i < process.argv.length; i++) {
 const TICKS = Number(positional[0] ?? 100);
 const TOP = Number(positional[1] ?? 30);
 const CENSUS_EVERY = censusEvery;
+const RESETS = resets;
 const notPositive = (n) => !Number.isInteger(n) || n < 1;
 if (
   notPositive(TICKS) ||
+  notPositive(RESETS) ||
   notPositive(TOP) ||
   (CENSUS_EVERY !== 0 && notPositive(CENSUS_EVERY))
 ) {
@@ -4736,11 +4742,14 @@ globalThis.__fabotDecideCalls = [];
     for (const [room, stage] of stages) if (room === home) return String(stage);
     return null;
   };
-  decideUnarbitrated = function decideProbe(snapshot, assignments, verbose, memo) {
+  // Every argument passed on, not a named four: a dropped fifth (the
+  // ReplanTurn) arrived as undefined and put every colony on its turn,
+  // re-planning all of them on the reset tick (#486).
+  decideUnarbitrated = function decideProbe(snapshot, ...rest) {
     const started = globalThis.__fabotClock();
     const home = (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)";
     try {
-      return inner(snapshot, assignments, verbose, memo);
+      return inner(snapshot, ...rest);
     } finally {
       globalThis.__fabotDecideCalls.push({
         home,
@@ -4942,7 +4951,16 @@ const PROBE_BINDINGS = [
 // the hotspot tables' `[main.js:NNNN]` locations still name the lines a
 // reader can open, and appended rather than spliced, so every line number
 // in them is the bundle's own.
-function loadBundle(file) {
+function loadBundle(file, dir = "probe") {
+  const probedFile = writeProbed(file, dir);
+  const { loop } = createRequire(import.meta.url)(probedFile);
+  return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
+}
+
+// The probed copy on disk, under `build/<dir>`: a cold reset loads its own
+// directory's copy, so neither Node's module cache nor V8's script cache
+// hands it the warm one.
+function writeProbed(file, dir) {
   const source = readFileSync(file, "utf8");
   const declarations = source.match(/^function decideUnarbitrated\(/gm) ?? [];
   if (declarations.length !== 1) {
@@ -4966,15 +4984,14 @@ function loadBundle(file) {
     );
   }
   globalThis.__fabotClock = () => performance.now();
-  const probed = path.join(here, "..", "build", "probe");
+  const probed = path.join(here, "..", "build", dir);
   mkdirSync(probed, { recursive: true });
   const probedFile = path.join(probed, path.basename(file));
   writeFileSync(
     probedFile,
     source + DECIDE_PROBE + WORLD_ROOMS_PROBE + DECLARATION_PROBE + REACTOR_CODEC_PROBE,
   );
-  const { loop } = createRequire(import.meta.url)(probedFile);
-  return { loop, decideCalls: () => globalThis.__fabotDecideCalls };
+  return probedFile;
 }
 
 // ---------------------------------------------------------------------------
@@ -5602,6 +5619,76 @@ if (unprojected.length) {
   console.log(
     "\nMemory leaves (Memory.fabot.*), fingerprinted: " +
       leaves.map(([name, value]) => `${name} ${fingerprint(value)}`).join("  "),
+  );
+
+  // The cold-reset tick (#486): every deploy is one, and the engine
+  // terminates a tick over 500 ms. A first tick of the run is not one — the
+  // hire loop runs first, warm — so each reset here loads a fresh copy of
+  // the bundle (cold JIT, empty heap) over the run's last Memory, decoded
+  // from its JSON as the engine does, and times the module load and its
+  // first tick together. Every reset starts from the same Memory and the
+  // same Game.time, so the Memory each writes is fingerprinted: one
+  // fingerprint across the resets, and the same one across two builds, is
+  // an exact cut.
+  const savedMemory = JSON.stringify(globalThis.Memory);
+  const resetTime = game.time;
+  const resetSession = new Session();
+  resetSession.connect();
+  await resetSession.post("Profiler.enable");
+  await resetSession.post("Profiler.setSamplingInterval", {
+    interval: SAMPLE_INTERVAL_US,
+  });
+  await resetSession.post("Profiler.start");
+  const resetRows = [];
+  for (let i = 0; i < RESETS; i++) {
+    game.time = resetTime;
+    const probedFile = writeProbed(bundle, path.join("probe-reset", String(i)));
+    tickStart = performance.now();
+    globalThis.Memory = JSON.parse(savedMemory);
+    createRequire(import.meta.url)(probedFile).loop();
+    const ms = performance.now() - tickStart;
+    const line = globalThis.Memory?.fabot?.observe?.cpu?.ticks ?? [];
+    const row = line[line.length - 1] ?? {};
+    const pops = Object.values(row.floods ?? {}).reduce((sum, f) => sum + (f?.[2] ?? 0), 0);
+    const memory = { ...globalThis.Memory };
+    memory.fabot = {
+      ...memory.fabot,
+      observe: { ...memory.fabot?.observe, cpu: line.map((r) => r.t) },
+    };
+    resetRows.push({ ms, row, pops, print: fingerprint(memory) });
+  }
+  const { profile: resetProfile } = await resetSession.post("Profiler.stop");
+  resetSession.disconnect();
+  const resetProfilePath = path.join(here, "..", "build", "fabot-reset.cpuprofile");
+  writeFileSync(resetProfilePath, JSON.stringify(resetProfile));
+  const sorted = resetRows.map((r) => r.ms).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const prints = [...new Set(resetRows.map((r) => r.print))];
+  const sumOf = (byKey) => Object.values(byKey ?? {}).reduce((sum, ms) => sum + ms, 0).toFixed(1);
+  const phase = (key) =>
+    (resetRows.reduce((sum, r) => sum + (r.row[key] ?? 0), 0) / resetRows.length).toFixed(1);
+  console.log(
+    `\nreset tick (#486): median ${median.toFixed(1)} ms  min ${sorted[0].toFixed(1)}  ` +
+      `max ${sorted[sorted.length - 1].toFixed(1)} over ${RESETS} cold reloads at t${resetTime}` +
+      ` (module load and Memory decode included); mean phases entry ${phase("entry")} ` +
+      `snapshot ${phase("snapshot")} decide ${phase("decide")} save ${phase("save")} ` +
+      `execute ${phase("execute")}; pops ${resetRows[0].pops}; replans ${resetRows[0].row.replans}\n` +
+      `  snapshot split (first reset): head ${resetRows[0].row.head}  rooms ${sumOf(resetRows[0].row.rooms)}` +
+      `  projects ${sumOf(resetRows[0].row.projects)}  decide by colony ` +
+      Object.entries(resetRows[0].row.colonies ?? {})
+        .map(([home, ms]) => `${home} ${ms}`)
+        .join("  ") +
+      "\n" +
+      `  floods (all, free, pops) by colony: ` +
+      Object.entries(resetRows[0].row.floods ?? {})
+        .map(([home, f]) => `${home} ${f.join("/")}`)
+        .join("  ") +
+      "\n" +
+      `  Memory after the reset tick, fingerprinted: ${prints.join(" ")}` +
+      (prints.length > 1 ? " — the resets disagree: something reads the clock or the heap" : "") +
+      `\n  budget: the engine terminates a tick over 500 ms; the live reset tick runs several` +
+      ` times this harness's (docs/profiling.md § The reset tick)` +
+      `\n  reset profile: ${path.relative(process.cwd(), resetProfilePath)}`,
   );
 }
 

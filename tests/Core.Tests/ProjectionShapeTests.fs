@@ -362,3 +362,28 @@ let kindCensusTests =
                         $"{kind}"
             }
         ]
+
+[<Tests>]
+let terrainGridTests =
+    testList
+        "the terrain grid"
+        [
+            test "ofGround holds exactly the ground tiles ofList is handed, and nothing of the ring" {
+                // `World.terrainOf` reads every room's terrain on the reset tick
+                // (#486); the loop it reads through must lay what the list did.
+                let read x y =
+                    match (x * 7 + y * 3) % 5 with
+                    | 0 -> Wall
+                    | 1 -> Swamp
+                    | _ -> Plain
+
+                let listed =
+                    TerrainGrid.ofList
+                        [
+                            for x in 1 .. Seam.exitEdge - 1 do
+                                for y in 1 .. Seam.exitEdge - 1 -> { X = x; Y = y }, read x y
+                        ]
+
+                Expect.equal (TerrainGrid.ofGround read) listed "the same grid, weights and all"
+            }
+        ]

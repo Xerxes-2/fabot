@@ -68,28 +68,24 @@ let private terrainOf (roomName: string) : RoomTerrain =
     | _ ->
         let terrain = Game.map.getRoomTerrain roomName
 
+        // The same read's other window: the ring the trim below drops. Filled
+        // in a loop and not a list comprehension, which Fable compiles to a
+        // sequence: every room is read on the reset tick (#486).
+        let ring = ResizeArray<Pos * Terrain>()
+
+        for x in 0..49 do
+            for y in 0..49 do
+                if x = 0 || x = 49 || y = 0 || y = 49 then
+                    ring.Add(({ X = x; Y = y }, terrainAt terrain x y))
+
         let tiles =
             {
                 // Rows and columns 0/49 are exit tiles: stepping on one
                 // teleports the creep into the next room. They stay out of
                 // the ground, so nothing ever stands on one. Do not "fix"
                 // this trim.
-                Ground =
-                    TerrainGrid.ofList
-                        [
-                            for x in 1..48 do
-                                for y in 1..48 do
-                                    { X = x; Y = y }, terrainAt terrain x y
-                        ]
-                // The same read's other window: the ring the trim drops.
-                Border =
-                    Fresh.mapOfList
-                        [
-                            for x in 0..49 do
-                                for y in 0..49 do
-                                    if x = 0 || x = 49 || y = 0 || y = 49 then
-                                        { X = x; Y = y }, terrainAt terrain x y
-                        ]
+                Ground = TerrainGrid.ofGround (terrainAt terrain)
+                Border = Fresh.mapOfArray (ring.ToArray())
             }
 
         terrainMemo.[roomName] <- tiles
