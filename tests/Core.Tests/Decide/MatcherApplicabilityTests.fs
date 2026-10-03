@@ -517,3 +517,76 @@ let fightCapacityTests =
                     "one brawler takes the brawler's slot, and the second is refused"
             }
         ]
+
+/// `nurseryFerryMother` with no controller of the mother's to upgrade, so
+/// the nursery's spawn site is the one work a loaded body is offered.
+let private siteOnly =
+    { nurseryFerryMother with
+        Controller = None
+    }
+
+/// `siteOnly` with one loaded worker "p" at home (10,8), this many ticks of
+/// life left.
+let private pioneerHomeWith ticks =
+    { siteOnly with
+        Creeps = [ worker "p" 50 0 |> withLife ticks ]
+        Spatial =
+            siteOnly.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.ofList [ "p", { X = 10; Y = 8 } ]
+                })
+    }
+
+let private walkToSpawnSite colony =
+    Atlas.walkTicks (Atlas.ofView colony) "p" (Build "site-spawn")
+    |> Option.defaultValue 0
+
+let private holdsSpawnSite colony =
+    (decideOn colony).Verdicts
+    |> List.exists (function
+        | Verdict.Matched("p", task, _) -> task = taskId (Build "site-spawn")
+        | _ -> false)
+
+[<Tests>]
+let pioneerStayTests =
+    testList
+        "a body walks into a child's room only with life to work there"
+        [
+            test
+                "a worker with its walk and PioneerStay left takes the nursery's site; one tick less stays home" {
+                // Live 2026-10-04: W15S28's pioneers reached W17S25 with five ticks left.
+                let probe = pioneerHomeWith 1500
+                let walk = walkToSpawnSite probe
+                let stay = probe.Tuning.PioneerStay
+
+                Expect.isGreaterThan walk 0 "premise: the site is a walk away, across the border"
+
+                Expect.isTrue
+                    (holdsSpawnSite (pioneerHomeWith (walk + stay)))
+                    "life for the walk and the stay"
+
+                Expect.isFalse
+                    (holdsSpawnSite (pioneerHomeWith (walk + stay - 1)))
+                    "a tick short of the stay: it stays home"
+            }
+
+            test
+                "a worker already in the nursery keeps working its site however little life is left" {
+                let child = SpatialInfo.layerOf siteOnly.Spatial "W1N2"
+
+                let inside =
+                    { siteOnly with
+                        Creeps = [ worker "p" 50 0 |> withLife 20 ]
+                        Spatial =
+                            siteOnly.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { child with
+                                    CreepPositions = Map.ofList [ "p", { X = 10; Y = 44 } ]
+                                }
+                    }
+
+                Expect.isTrue (holdsSpawnSite inside) "it is there: every tick of it is work"
+            }
+        ]

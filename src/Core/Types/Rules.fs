@@ -363,6 +363,11 @@ type Tuning =
         /// addend on the worker row's own share and the cap on the borrowed
         /// Upgrade and Build.
         PioneerCount: int
+        /// The life a body must have left past its walk to take a Task in a
+        /// child's room (a [[nursery]] or a bootstrapping child): ticks of
+        /// work there, so a body near its end stays home. Ticks, so the same
+        /// at every stage and bank.
+        PioneerStay: int
         /// The **[[ferry]]**: the hauler bodies a mother hires against a
         /// bootstrapping child's upgrade buffer, over and above the haul her
         /// own containers ask for. One, derived at her `Independent` **1,800
@@ -651,6 +656,8 @@ module Tuning =
             ReachMargin = 2
             StandingCarryPerWork = 4
             PioneerCount = 3
+            // Live 2026-10-04: W17S25's pioneers arrived with 5 ticks left.
+            PioneerStay = 300
             FerryLoads = 1
             // Two 32C16M haulers (~2.4 e/t each over five crossings) and the
             // three pioneers (~1.3 each) put ~9 e/t into a 15,000 spawn

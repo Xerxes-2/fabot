@@ -319,6 +319,8 @@ let matchCreeps
             else
                 match cost with
                 | None -> Error RejectReason.Unreachable
+                | Some _ when not (outlivesTheStay view atlas creep pooled.Task arrival) ->
+                    Error RejectReason.Inapplicable
                 | Some cost ->
                     match tooEarly view atlas creep pooled.Task arrival with
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))

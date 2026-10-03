@@ -905,6 +905,11 @@ let private actionOn =
     | Fight _
     | Assault _ -> None
 
+/// The room a Task's target stands in; None for a Task with no target or one
+/// the projection does not place.
+let taskRoom (atlas: Atlas) (task: Task) : string option =
+    actionOn task |> Option.bind (fun (id, _) -> targetRoom atlas id)
+
 /// The colony's [[refill cluster]] as this tick's Atlas holds it — the one
 /// `RefillCluster.ofRefillables` laid at construction. The Planner's Refill
 /// and the pool's bound read it here rather than laying it again.
