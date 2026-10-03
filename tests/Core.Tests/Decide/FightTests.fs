@@ -626,6 +626,7 @@ let residentTests =
                             {
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
+                                Garrisoned = []
                             }
                     }
 
@@ -676,6 +677,7 @@ let residentTests =
                             {
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
+                                Garrisoned = []
                             }
                     }
 

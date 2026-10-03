@@ -371,6 +371,10 @@ type ExitWatch =
     /// They are gone, and the room's Guard holds the exit they left by.
     | Held of ExitHold
 
+/// A raid healer as last seen in a room, and the tick it was seen
+/// (`World.recallHealers`, #480).
+type HealerSeen = { Healer: HostileInfo; Tick: int }
+
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
 /// **shell's**: one table for the life of the process, because every answer
@@ -427,6 +431,11 @@ type World =
         /// Each room's armed Threats as last seen, or the exit they left by
         /// (`World.watchExits`, #450). Heap state in the shell, never Memory.
         ExitWatches: Map<string, ExitWatch>
+        /// Each room's raid healers seen there within the last
+        /// `Tuning.HealMemoryTicks` ticks (`World.recallHealers`, #480): a
+        /// healer bouncing across the exit heals on every other tick. Heap
+        /// state in the shell, never Memory.
+        Healers: Map<string, HealerSeen list>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -440,6 +449,7 @@ module World =
             Sightings = Map.empty
             Towered = Set.empty
             ExitWatches = Map.empty
+            Healers = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -467,6 +477,12 @@ module World =
         |> Map.exists (fun _ facts ->
             facts.Control
             |> Option.exists (fun control -> control.Owner = Ownership.Ours && control.SafeMode))
+
+    /// How many towers of ours stand in the room this tick, loaded or dry.
+    let towersStanding (facts: RoomFacts) : int =
+        facts.Refillables
+        |> List.filter (fun r -> r.Kind = BuiltKind.Tower)
+        |> List.length
 
     /// How many towers of ours in the room hold a shot's energy this tick.
     let loadedTowers (facts: RoomFacts) : int =
@@ -666,6 +682,38 @@ module World =
 
         { world with
             ExitWatches = world.Rooms |> Map.toSeq |> Seq.choose watch |> Fresh.mapOfSeq
+        }
+
+    /// This tick's world with the healer memory laid under it (#480): every
+    /// raid healer standing in a room this tick, and each one remembered from
+    /// the last `Tuning.HealMemoryTicks` ticks that is not, at its last tile.
+    /// Bounded by this tick's rooms, as `watchExits` is, and built by `Fresh`,
+    /// the map being carried to the next tick.
+    let recallHealers
+        (tuning: Tuning)
+        (previous: Map<string, HealerSeen list>)
+        (world: World)
+        : World =
+        let remember (room, facts: RoomFacts) =
+            let now =
+                facts.Hostiles
+                |> List.filter (fun h -> HostileInfo.healing h > 0 && not (Colony.isAlly h.Owner))
+
+            let standing = now |> List.map (fun h -> h.Id) |> Set.ofList
+
+            let kept =
+                Map.tryFind room previous
+                |> Option.defaultValue []
+                |> List.filter (fun seen ->
+                    world.Time - seen.Tick < tuning.HealMemoryTicks
+                    && not (Set.contains seen.Healer.Id standing))
+
+            match (now |> List.map (fun h -> { Healer = h; Tick = world.Time })) @ kept with
+            | [] -> None
+            | healers -> Some(room, healers)
+
+        { world with
+            Healers = world.Rooms |> Map.toSeq |> Seq.choose remember |> Fresh.mapOfSeq
         }
 
     /// The rooms one of our spawns stands in, in room-name order: the other
@@ -1030,6 +1078,9 @@ module World =
             /// The children's homes this colony defends this tick
             /// (`Colony.defending`).
             Defended: string list
+            /// The contested children's homes this colony still garrisons
+            /// (`Colony.garrisoning`, #479).
+            Garrisoned: string list
             /// The [[harassment room]]s this colony casts (`harassCasters`),
             /// less the ones its [[stand-down]] shuts.
             Harass: Harass list
@@ -1108,7 +1159,16 @@ module World =
             Colony.bootstrapping stages colonies colony
             @ Colony.reclaiming stages unowned colonies colony
 
-        let covered = Colony.roomsProjected outposts errands salvage borrowed [] colony.Home
+        let garrisoned =
+            Colony.garrisoning
+                stages
+                (fun home -> towersStanding (roomOf world home) >= tuning.GarrisonTowers)
+                colonies
+                colony
+
+        // A garrisoned home's chain walked as a defended one's is.
+        let covered =
+            Colony.roomsProjected outposts errands salvage borrowed garrisoned colony.Home
 
         let defended =
             Colony.defending stages (defends world covered colony.Home) colonies colony
@@ -1119,11 +1179,18 @@ module World =
             Salvage = salvage
             Borrowed = borrowed
             Defended = defended
+            Garrisoned = garrisoned
             Harass = Harass.worked gate.Shut cast
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
             Scanned =
-                Colony.roomsProjected outposts errands salvage borrowed defended colony.Home
+                Colony.roomsProjected
+                    outposts
+                    errands
+                    salvage
+                    borrowed
+                    (defended @ garrisoned)
+                    colony.Home
                 @ Harass.roomsProjected cast colony.Home
                 |> List.distinct
         }

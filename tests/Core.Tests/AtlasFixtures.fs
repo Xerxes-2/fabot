@@ -32,7 +32,12 @@ let snapshotWith creeps spatial =
         Declared = []
         Stages = Map.empty
         Foreign = Set.empty
-        Borrowed = { Rooms = []; Defended = [] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = []
+                Garrisoned = []
+            }
         Refused = []
         Errands = []
         Dismantles = []
@@ -45,6 +50,7 @@ let snapshotWith creeps spatial =
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
+        RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []

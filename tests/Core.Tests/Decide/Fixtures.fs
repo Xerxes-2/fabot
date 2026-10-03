@@ -177,7 +177,12 @@ let bareRespawn =
         // child, declares no errand, and every tick has vision. "W1N2"
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
-        Borrowed = { Rooms = []; Defended = [] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = []
+                Garrisoned = []
+            }
         Refused = []
         Errands = []
         Dismantles = []
@@ -190,6 +195,7 @@ let bareRespawn =
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
+        RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []
@@ -1730,7 +1736,12 @@ let asNursery (colony: ColonyView) =
         Declared = [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
         // The shell borrows a nursery for the mother the tick it is
         // claimed; the pool's budget reads that field.
-        Borrowed = { Rooms = [ "W1N2" ]; Defended = [] }
+        Borrowed =
+            {
+                Rooms = [ "W1N2" ]
+                Defended = []
+                Garrisoned = []
+            }
         // Declared and owned with no spawn of ours standing in it is the
         // whole of `Nursery`, so the shell would derive exactly this entry.
         Stages = Map.add "W1N2" Nursery colony.Stages
@@ -2145,7 +2156,12 @@ let ferryMother stage =
         RoomControl = Map.ofList [ "W1N1", ownedRoom; "W1N2", ownedRoom ]
         Declared = [ "W1N1"; "W1N2" ]
         Stages = Map.ofList [ "W1N1", Independent; "W1N2", stage ]
-        Borrowed = { Rooms = [ "W1N2" ]; Defended = [] }
+        Borrowed =
+            {
+                Rooms = [ "W1N2" ]
+                Defended = []
+                Garrisoned = []
+            }
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some "W1N1"

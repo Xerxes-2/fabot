@@ -285,7 +285,8 @@ let internal claimsAFlag (residentRooms: Set<string>) (hostile: HostileInfo) =
 
 /// The children's homes this colony is raising (#447): its borrowed rooms at
 /// `Nursery`, `Bootstrapping` or `Weaning`, `Colony.bootstrapping`'s half of
-/// them. A lost child's home, the other half, has no stage.
+/// them. A lost child's home, the other half, has no stage. And a contested
+/// `Independent` child's short of its towers (`BorrowedWork.Garrisoned`, #479).
 let internal raisedHomes (view: ColonyView) : Set<string> =
     view.Borrowed.Rooms
     |> List.filter (fun room ->
@@ -295,6 +296,7 @@ let internal raisedHomes (view: ColonyView) : Set<string> =
         | Some Weaning -> true
         | Some Independent
         | None -> false)
+    |> List.append view.Borrowed.Garrisoned
     |> Set.ofList
 
 /// The rooms the ranger row keeps its resident garrison in, raid or none
@@ -407,8 +409,10 @@ let private killTier (target: KillFacts) =
 /// heal reaches one tile, a ranged heal three. A closure over the room's
 /// healers, found once.
 let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int =
+    // A healer remembered from the last few ticks counts where it was last
+    // seen (#480).
     let healers =
-        view.Hostiles
+        view.Hostiles @ view.RecalledHealers
         |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
 
     fun hostile ->

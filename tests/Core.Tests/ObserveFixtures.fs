@@ -51,7 +51,12 @@ let quiet: ColonyView =
         Declared = []
         Stages = Map.empty
         Foreign = Set.empty
-        Borrowed = { Rooms = []; Defended = [] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = []
+                Garrisoned = []
+            }
         Refused = []
         Errands = []
         Dismantles = []
@@ -64,6 +69,7 @@ let quiet: ColonyView =
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
+        RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []

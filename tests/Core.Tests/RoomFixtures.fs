@@ -866,7 +866,12 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // One colony over one captured room: nobody else's bodies, nothing
         // borrowed, and every hand-declared outpost borders its home.
         Foreign = Set.empty
-        Borrowed = { Rooms = []; Defended = [] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = []
+                Garrisoned = []
+            }
         Refused = []
         // No errand, so no Reclaim is pooled and no reserver seat is the
         // re-claimer's.
@@ -881,6 +886,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
+        RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []

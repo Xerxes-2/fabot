@@ -76,7 +76,7 @@ let wireVocabularyTests =
                 roundTrips
                     "ReleaseReason"
                     (Array.append
-                        [| ReleaseReason.TaskGone |]
+                        [| ReleaseReason.TaskGone; ReleaseReason.Outranked |]
                         (casesOf<RejectReason> () |> Array.map ReleaseReason.Rejected))
                     releaseReasonName
                     (releaseReasonOf sampleNumbers)

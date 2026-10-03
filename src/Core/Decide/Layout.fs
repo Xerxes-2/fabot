@@ -200,12 +200,19 @@ let internal planConsignment (view: ColonyView) : Intent list =
         |> List.choose (fst >> ship)
     | _ -> []
 
+/// A tower's energy this tick; one the projection holds no store for is read
+/// as empty.
+let private towerEnergy (view: ColonyView) (towerId: string) =
+    view.Refillables
+    |> List.tryFind (fun r -> r.Id = towerId)
+    |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
+    |> Option.defaultValue 0
+
 /// The fire reflex's held hand (#477): with no hostile worth a shot, each tower
 /// still holding `Tuning.TowerRepairReserve` after the act repairs the rampart
 /// of ours under attack (`rampartsUnderAttack`, #467) with the fewest hits,
 /// then the nearest, then by id. A repair lands 800 near the tower and 200
-/// from range 20, against the 510 one 17-ATTACK melee strikes. A tower the
-/// projection holds no store for is read as empty.
+/// from range 20, against the 510 one 17-ATTACK melee strikes.
 let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list) : Intent list =
     match rampartsUnderAttack view with
     | struck when Set.isEmpty struck -> []
@@ -221,15 +228,10 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
                     Some(id, RoomPos.at home tile, hits.Hits)
                 | _ -> None)
 
-        let energyOf (towerId: string) =
-            view.Refillables
-            |> List.tryFind (fun r -> r.Id = towerId)
-            |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
-            |> Option.defaultValue 0
-
         towers
         |> List.filter (fun (towerId, _) ->
-            energyOf towerId - Engine.towerEnergyCost >= view.Tuning.TowerRepairReserve)
+            towerEnergy view towerId - Engine.towerEnergyCost
+            >= view.Tuning.TowerRepairReserve)
         |> List.choose (fun (towerId, from) ->
             ramparts
             |> List.choose (fun (id, tile, hits) ->
@@ -242,14 +244,16 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
 
 /// Colony reflex beside the pipeline (ADR-0014): every tower shoots the
 /// hostile worth a shot nearest to itself. Worth one (#466): a hostile our
-/// damage reaching it this tick — every tower's at its range, as if all fired
-/// on it, and our creeps' — out-damages the heal reaching it
-/// (`healReaching`); one whose weapon reaches our Keep or creeps, or a
+/// damage reaching it this tick — every tower's over its reserve at its
+/// range, as if all fired on it, and our creeps' — out-damages the heal
+/// reaching it (`healReaching`, the last few ticks' healers counted, #480);
+/// or an urgent one — whose weapon reaches our Keep or creeps, or a
 /// dismantler beside the Keep, hurting something now; or a claimer, whose
 /// whole approach is the window (`claimsAFlag`, #451). Not a rampart: it is
-/// there to absorb the hits, and a shot healed back is waste. With none worth
-/// one, the towers repair (`planTowerRepair`). No energy gate on a shot: a
-/// dry tower's Intent fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
+/// there to absorb the hits, and a shot healed back is waste. A tower under
+/// `Tuning.TowerRepairReserve` shoots only the urgent (#480). With none worth
+/// one, the towers repair (`planTowerRepair`). No energy gate on an urgent
+/// shot: a dry tower's Intent fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
 /// has always answered home alone, and the hostiles are narrowed to match;
 /// `RoomPos.range` answers None across a border.
 let internal planFire (view: ColonyView) atlas : Intent list =
@@ -279,9 +283,17 @@ let internal planFire (view: ColonyView) atlas : Intent list =
             | Some reach -> within ours reach h
             | None -> List.contains Work h.Body && within keep Engine.meleeRange h
 
+        // A tower over its reserve (#480): only these take a shot that is
+        // not urgent, so only these are counted in the damage it must beat.
+        let spare =
+            towers
+            |> List.filter (fun (towerId, _) ->
+                towerEnergy view towerId - Engine.towerEnergyCost
+                >= view.Tuning.TowerRepairReserve)
+
         let outDamaged (h: HostileInfo) =
             let shots =
-                towers
+                spare
                 |> List.sumBy (fun (_, tile) ->
                     RoomPos.range tile h.Pos
                     |> Option.map Engine.towerAttackAt
@@ -289,23 +301,34 @@ let internal planFire (view: ColonyView) atlas : Intent list =
 
             shots + damageOn h > healOn h
 
-        let worth =
+        let urgent =
             hostiles
-            |> List.filter (fun h ->
-                claimsAFlag (Set.singleton home) h || hurting h || outDamaged h)
+            |> List.filter (fun h -> claimsAFlag (Set.singleton home) h || hurting h)
+
+        let worth =
+            urgent
+            @ (hostiles |> List.filter (fun h -> not (List.contains h urgent) && outDamaged h))
+
+        let nearest (tile: RoomPos) (targets: HostileInfo list) =
+            targets
+            |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
+            |> function
+                | [] -> None
+                | reachable -> Some(snd (reachable |> List.minBy (fun (r, h) -> r, h.Id)))
 
         match worth with
         | [] -> planTowerRepair view towers
         | _ ->
             towers
             |> List.choose (fun (towerId, tile) ->
-                worth
-                |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
-                |> function
-                    | [] -> None
-                    | reachable ->
-                        let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
-                        Some(FireTower(towerId, target.Id)))
+                // Under its reserve a tower keeps its energy for the urgent.
+                let targets =
+                    if List.contains (towerId, tile) spare then
+                        worth
+                    else
+                        urgent
+
+                nearest tile targets |> Option.map (fun target -> FireTower(towerId, target.Id)))
 
 /// The fire reflex's quiet twin (#410): with no hostile at home to shoot, each
 /// tower heals the creep of ours at home with the most hits still owed, the

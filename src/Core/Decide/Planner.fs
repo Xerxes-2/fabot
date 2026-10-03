@@ -89,6 +89,8 @@ let internal isNurseryRoom (view: ColonyView) room =
 let internal isBootstrapRoom (view: ColonyView) room =
     room <> SpatialInfo.homeName view.Spatial
     && colonyOwns view room
+    // A garrisoned home is projected for its ground alone (#479).
+    && not (List.contains room view.Borrowed.Garrisoned)
     && (match roomStage view room with
         | Some Bootstrapping
         | Some Weaning

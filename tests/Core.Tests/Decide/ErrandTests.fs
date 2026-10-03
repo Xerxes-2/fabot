@@ -743,6 +743,7 @@ let errandStandDownTests =
                         Sightings = Map.empty
                         Towered = Set.empty
                         ExitWatches = Map.empty
+                        Healers = Map.empty
                     }
 
                 let view shut =

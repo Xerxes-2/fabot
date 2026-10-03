@@ -1131,9 +1131,10 @@ let arenaClaimTests =
 
                 let m = milestonesOf trace
                 let failure = $"{m}\n{describe trace}"
-                // Measured: the raid dead by t60, the most struck rampart
-                // (2,24) at 28,670 of its 50,000 (25,310 before the tower
-                // repaired it, #477).
+                // Measured: the raid dead by t74, the most struck rampart
+                // (2,24) at 26,570 of its 50,000 (28,670 by t60 before the
+                // reserve held the healed shots back, #480; 25,310 before the
+                // tower repaired it, #477).
                 Expect.equal
                     (List.length (standing final))
                     lineIds.Count
@@ -1154,12 +1155,12 @@ let arenaClaimTests =
                 let report, _, trace = independentWorld [ childTower ] |> lineReport 600
                 let failure = $"{report}\n{describe trace}"
 
-                // Measured with #477: the relief cast t5, in at t371; the
-                // tower dry at t134 (it fires on the ticks a healer has
-                // bounced back across the exit, repairs on the rest); the
-                // line down at t215 (t200 before #477), one melee's 510 a
-                // tick on rampart 2,24; the tap at t552; both melee dead at
-                // t550/t554, the healers living.
+                // Measured with #477, #479–#481: the relief cast t0, in at
+                // t343; the tower never dry (#480: 9 shots, 65 repairs, 260
+                // left; it ran dry at t134 before), the line down at t231
+                // (t215 before #480, t200 before #477), one melee's 510 a tick
+                // on rampart 2,24; the tapper shot dead at t244 from the
+                // reserve, so no tap; all four dead by t530.
                 Expect.isTrue
                     (report.ReliefCast |> Option.exists (fun t -> t <= 10))
                     $"#468: the raid's entry reverts the stage and the mother casts\n{failure}"
@@ -1184,12 +1185,15 @@ let arenaClaimTests =
                     0
                     $"#477: the tower repairs the struck line\n{failure}"
 
-                Expect.isTrue
-                    (report.TowerDry |> Option.exists (fun t -> Some t < report.Fell))
-                    $"the tower is dry before the line falls\n{failure}"
+                Expect.isNone
+                    report.TowerDry
+                    $"#480: the reserve keeps the tower from running dry\n{failure}"
 
                 Expect.isEmpty report.SafeModeAsks "a banked safe mode under the cooldown: no ask"
-                Expect.isNonEmpty report.Taps $"the tapper reaches the controller\n{failure}"
+
+                Expect.isEmpty
+                    report.Taps
+                    $"#480: the reserve shoots the tapper before it taps\n{failure}"
             }
 
             test
@@ -1198,7 +1202,7 @@ let arenaClaimTests =
 
                 let failure = $"{report}\n{describe trace}"
 
-                // Measured: the raid dead by t77, the line's floor 86,620,
+                // Measured: the raid dead by t77, the line's floor 87,370,
                 // 780 of the towers' 2,000 left; the relief walking still.
                 Expect.isNone report.Fell $"the line holds\n{failure}"
                 Expect.isGreaterThan (fst report.Floor) 80_000 failure
@@ -1211,12 +1215,33 @@ let arenaClaimTests =
                 Expect.isEmpty report.Taps "no tap"
             }
 
+            test
+                "#479, one tower: a contested Independent child keeps its mother's residents, and they hold the 100k perimeter" {
+                let report, _, trace =
+                    childWorld
+                        [ childTower ]
+                        Engine.towerCapacity
+                        Tuning.defaults.RampartFloor
+                        (residents @ westRaid)
+                    |> lineReport 600
+
+                let failure = $"{report}\n{describe trace}"
+
+                // Measured: the raid's four fighters dead by t64, the line's
+                // floor 81,460, 400 of the tower's 1,000 left.
+                Expect.isNone report.Fell $"the line holds\n{failure}"
+
+                for id in [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ] do
+                    Expect.isTrue (report.Died.ContainsKey id) $"{id} dies\n{failure}"
+
+                Expect.isEmpty report.Taps "no tap"
+            }
+
             // #478's evidence: in the one-tower run the child's worker took
             // the Upgrade before the raid entered and poured all 200 into the
-            // controller (t7–t56) while rampart 2,24 lost 25,000; the Matcher
-            // keeps a still-valid holding, so the struck rampart's Repair
-            // (#467, two rungs up) never reaches a body already working.
-            ptest
+            // controller (t7–t56) while rampart 2,24 lost 25,000. The struck
+            // rampart's Repair now releases it (#481).
+            test
                 "a worker of the child holding its Upgrade when a melee starts on the perimeter repairs the struck rampart instead" {
                 let _, trace = independentWorld [ childTower ] |> run 60
                 let lineIds = perimeter |> List.map (fun p -> $"rampart-{p.X}-{p.Y}") |> Set.ofList

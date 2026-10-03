@@ -270,6 +270,10 @@ type Tuning =
         /// attack (#477), so a claimer or a dismantler walking in behind a
         /// healed raid can still be shot.
         TowerRepairReserve: int
+        /// How many ticks a raid healer last seen in a room still counts in
+        /// the heal a tower's shot must beat (#480): the t880,341 raid's
+        /// healers bounced across the exit every other tick.
+        HealMemoryTicks: int
         /// How many whole bodies of the colony's own bank the Storage keeps
         /// back before the upgrader row may spend any of it (#385). **Counted
         /// in bodies rather than in energy** so it scales with the room:
@@ -458,6 +462,11 @@ type Tuning =
         /// before `Colony.stageOf` lets it out of `Weaning` (#445): a
         /// full one, so the mother raises it until it can shoot back.
         IndependenceTowerEnergy: int
+        /// How many towers of its own an `Independent` child that declares a
+        /// perimeter must stand before its mother's resident garrison goes
+        /// home (#479): the #478 arena held the t880,341 raid with two and
+        /// lost the line with one.
+        GarrisonTowers: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
         /// search stops at. Six since #437, for W15S28's walk to W18S27. There
@@ -552,6 +561,7 @@ module Tuning =
             // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
             // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
             TowerRepairReserve = 300
+            HealMemoryTicks = 5
             UpgradeStockBodies = 20
             PickupThreshold = 100
             ReachMargin = 2
@@ -590,6 +600,7 @@ module Tuning =
             OutpostBuilders = 2
             BootstrapLevel = 3
             IndependenceTowerEnergy = Engine.towerCapacity
+            GarrisonTowers = 2
             MaxHops = 6
             TrunkSwampWeight = 3
             StandDownFallback = 2500

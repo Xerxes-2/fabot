@@ -171,7 +171,12 @@ let outpostTests =
                             100
                             (raidedAs
                                 { quiet with
-                                    Borrowed = { Rooms = []; Defended = [ defended ] }
+                                    Borrowed =
+                                        {
+                                            Rooms = []
+                                            Defended = [ defended ]
+                                            Garrisoned = []
+                                        }
                                 })
                     ))
                     "as a defended home it is not"
@@ -189,6 +194,7 @@ let outpostTests =
                                         {
                                             Rooms = [ defended ]
                                             Defended = [ defended ]
+                                            Garrisoned = []
                                         }
                                     Stages = Map.add defended Bootstrapping quiet.Stages
                                 })

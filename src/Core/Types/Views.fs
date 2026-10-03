@@ -19,6 +19,11 @@ type BorrowedWork =
         /// (`Colony.defending`): projected as transit rooms, so nothing of
         /// them is work but the Guard the planner pools there.
         Defended: string list
+        /// The `Independent` children's homes this colony still keeps its
+        /// resident garrison in (`Colony.garrisoning`, #479): projected for
+        /// the garrison's ground alone — the controller its ring is read
+        /// off and the ramparts it fights from — and no Upgrade or Build.
+        Garrisoned: string list
     }
 
 /// A [[nursery]]'s declared first spawn (`Colony.FirstSpawn`, #476) and the
@@ -168,6 +173,11 @@ type ColonyView =
         /// in each child's home this colony raises, under its room's name
         /// (#451): what its garrison fights beside. No entry for none.
         LoadedTowers: Map<string, int>
+        /// The raid healers seen in the home room within the last
+        /// `Tuning.HealMemoryTicks` ticks and not standing there now, at the
+        /// tile last seen (`World.Healers`, #480): one that stepped out across
+        /// the exit is back next tick.
+        RecalledHealers: HostileInfo list
         /// Whether safe mode is running in any room of ours this tick
         /// (`World.safeModeRunning`), the same answer handed to every colony:
         /// the engine runs one per shard and refuses a second with ERR_BUSY.
@@ -269,6 +279,14 @@ module ColonyView =
             |> Set.ofList
         | _ -> Set.empty
 
+    /// A child's ramparts, ours by their hits as `Atlas.ourRampartTilesIn`
+    /// reads them: the ground her garrison fights from (#467). Never hers to
+    /// repair (`Facts.hungryStructures`).
+    let private ourRamparts (facts: RoomFacts) =
+        facts.Hits
+        |> Map.filter (fun id _ ->
+            Map.tryFind id facts.TargetKinds = Some(Structure BuiltKind.Rampart))
+
     /// One bootstrapped room's facts, cut down to the borrowed work: what
     /// this colony may **carry**, not what to read. What is left is the
     /// per-entry absence a room with no vision arrives in, so every rule
@@ -279,14 +297,7 @@ module ColonyView =
     /// its sighting is this tick's and the grace never reads it.
     let private borrowed (stage: ColonyStage option) (facts: RoomFacts) : RoomFacts =
         let sink = ferrySink stage facts
-
-        // Our ramparts there, ours by their hits as `Atlas.ourRampartTilesIn`
-        // reads them: the ground her garrison fights from (#467). Never
-        // hers to repair (`Facts.hungryStructures`).
-        let ramparts =
-            facts.Hits
-            |> Map.filter (fun id _ ->
-                Map.tryFind id facts.TargetKinds = Some(Structure BuiltKind.Rampart))
+        let ramparts = ourRamparts facts
 
         // A [[nursery]]'s pioneers are the only bodies in it (#473): its rock
         // is theirs to dig, and the energy on its floor — the ferry's drop —
@@ -404,6 +415,29 @@ module ColonyView =
             Refillables = []
             Sources = []
             ConstructionSites = []
+        }
+
+    /// A garrisoned child's home's facts (#479): a [[transit room]]'s, and
+    /// beside them the controller the garrison's ring is read off and our
+    /// ramparts it fights from — ground, and not one Task of the child's.
+    let private garrisoning (facts: RoomFacts) : RoomFacts =
+        let crossed = transiting facts
+        let ramparts = ourRamparts facts
+
+        let kinds =
+            facts.TargetKinds
+            |> Map.filter (fun id kind -> kind = Controller || Map.containsKey id ramparts)
+
+        { crossed with
+            Layer =
+                { crossed.Layer with
+                    TargetPositions =
+                        facts.Layer.TargetPositions
+                        |> Map.filter (fun id _ -> Map.containsKey id kinds)
+                }
+            TargetKinds = kinds
+            Hits = ramparts
+            Thorium = Map.empty
         }
 
     /// An **errand** room's facts: a [[transit room]]'s ground and bodies, and
@@ -657,6 +691,7 @@ module ColonyView =
             |> List.filter (fun room ->
                 room <> home
                 && not (List.contains room bootstrap)
+                && not (List.contains room scan.Garrisoned)
                 && not (Set.contains room errandRooms)
                 && not (Set.contains room salvageRooms)
                 && not (Map.containsKey room harassEnemies)
@@ -679,6 +714,8 @@ module ColonyView =
 
                 if List.contains room bootstrap then
                     room, borrowed (Map.tryFind room stages) facts, remembered
+                elif List.contains room scan.Garrisoned then
+                    room, garrisoning facts, None
                 elif Set.contains room transit then
                     room, transiting facts, None
                 elif Set.contains room errandRooms then
@@ -882,12 +919,17 @@ module ColonyView =
                     |> List.filter (fun (room, _) -> List.contains room nurseries)
                     |> Fresh.mapOfList
             LoadedTowers =
-                bootstrap
+                bootstrap @ scan.Garrisoned
                 |> List.choose (fun room ->
                     match World.loadedTowers (World.roomOf world room) with
                     | 0 -> None
                     | towers -> Some(room, towers))
                 |> Fresh.mapOfList
+            RecalledHealers =
+                Map.tryFind home world.Healers
+                |> Option.defaultValue []
+                |> List.filter (fun seen -> seen.Tick < world.Time)
+                |> List.map (fun seen -> seen.Healer)
             SafeModeRunning = World.safeModeRunning world
             Crossed = transit
             // The declared Reactors' own rows (#354): the store here is what
@@ -908,6 +950,7 @@ module ColonyView =
                 {
                     Rooms = bootstrap
                     Defended = scan.Defended
+                    Garrisoned = scan.Garrisoned
                 }
             // Read off the whole declaration and not off `scanned`, where these
             // rooms have just been subtracted (#243); asked over the **masked**

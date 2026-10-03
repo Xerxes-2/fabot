@@ -956,10 +956,21 @@ let shots intents =
         | FireTower(tower, target) -> Some(tower, target)
         | _ -> None)
 
-/// A colony whose towers stand on the given tiles, facing the given hostiles.
+/// A colony whose towers stand on the given tiles, full, facing the given
+/// hostiles. An id not named `tower-…` is some other structure's tile.
 let towerColony towers hostiles =
     { bareRespawn with
         Hostiles = hostiles
+        Refillables =
+            (towers
+             |> List.filter (fun (id: string, _) -> id.StartsWith "tower")
+             |> List.map (fun (id, _) ->
+                 {
+                     Id = id
+                     FreeCapacity = 0
+                     Kind = BuiltKind.Tower
+                 }))
+            @ bareRespawn.Refillables
         Spatial =
             { spatial towers [] with
                 TargetKinds =
@@ -1199,6 +1210,118 @@ let fireReflexTests =
                     (towerRepairs (decideOn (at (reserve + Engine.towerEnergyCost))).Intents)
                     [ "tower-1", "rampart-1" ]
                     "one act over it repairs"
+            }
+
+            test
+                "a healer that stepped out across the exit last tick still counts in the heal a shot must beat (#480)" {
+                // The t880,341 raid's healers bounced across the exit: on the
+                // tick one stood out, the melee read unhealed and was shot,
+                // and healed back the next.
+                let raider = hostileAt "h-1" { X = 30; Y = 40 } [ Attack; Move ]
+                let healer = hostileAt "med-1" { X = 31; Y = 40 } (Move :: List.replicate 20 Heal)
+                let alone = towerColony [ "tower-1", { X = 10; Y = 40 } ] [ raider ]
+
+                Expect.equal
+                    (shots (decideOn alone).Intents)
+                    [ "tower-1", "h-1" ]
+                    "the premise: unhealed at range 20, 150 is worth a shot"
+
+                Expect.isEmpty
+                    (shots
+                        (decideOn
+                            { alone with
+                                RecalledHealers = [ healer ]
+                            })
+                            .Intents)
+                    "its healer of last tick puts back 240: the energy held"
+            }
+
+            test
+                "a shot that is not urgent keeps the reserve; a claimer or a raider at our creeps is shot from it (#480)" {
+                let tower = [ "tower-1", { X = 10; Y = 40 } ]
+
+                let at energy hostile =
+                    towerColony tower [ hostile ] |> holdingTower "tower-1" energy
+
+                let reserve = Tuning.defaults.TowerRepairReserve
+                let raider = hostileAt "h-1" { X = 30; Y = 40 } [ Attack; Move ]
+                let fired snapshot = shots (decideOn snapshot).Intents
+
+                Expect.isEmpty (fired (at reserve raider)) "at its reserve: held"
+
+                Expect.equal
+                    (fired (at (reserve + Engine.towerEnergyCost) raider))
+                    [ "tower-1", "h-1" ]
+                    "one act over it fires"
+
+                Expect.equal
+                    (fired (
+                        at reserve (hostileAt "h-1" { X = 30; Y = 40 } [ BodyPart.Claim; Move ])
+                    ))
+                    [ "tower-1", "h-1" ]
+                    "a claimer is shot from the reserve"
+
+                let besideOurs =
+                    woundedAt tower [ raider ] [ "ours", { X = 31; Y = 40 }, 0 ]
+                    |> holdingTower "tower-1" reserve
+
+                Expect.equal
+                    (fired besideOurs)
+                    [ "tower-1", "h-1" ]
+                    "and a raider swinging at our creep"
+            }
+
+            test
+                "a raid healer is remembered `HealMemoryTicks` ticks after it was last seen, and no longer (#480)" {
+                let healer = hostileAt "med-1" { X = 1; Y = 20 } (Move :: List.replicate 20 Heal)
+
+                let tick time hostiles =
+                    { World.empty with
+                        Time = time
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W1N1",
+                                    { RoomFacts.empty with
+                                        Hostiles = hostiles
+                                    }
+                                ]
+                    }
+
+                let remembered (world: World) =
+                    Map.tryFind "W1N1" world.Healers
+                    |> Option.defaultValue []
+                    |> List.map (fun seen -> seen.Healer.Id, seen.Tick)
+
+                let memory = Tuning.defaults.HealMemoryTicks
+                let seen = tick 100 [ healer ] |> World.recallHealers Tuning.defaults Map.empty
+
+                Expect.equal (remembered seen) [ "med-1", 100 ] "seen"
+
+                Expect.equal
+                    (remembered (
+                        World.recallHealers
+                            Tuning.defaults
+                            seen.Healers
+                            (tick (100 + memory - 1) [])
+                    ))
+                    [ "med-1", 100 ]
+                    "still counted inside the window"
+
+                Expect.isEmpty
+                    (remembered (
+                        World.recallHealers Tuning.defaults seen.Healers (tick (100 + memory) [])
+                    ))
+                    "and forgotten past it"
+
+                Expect.isEmpty
+                    (remembered (
+                        World.recallHealers
+                            Tuning.defaults
+                            Map.empty
+                            (tick 100 [ hostileAt "atk" { X = 2; Y = 20 } [ Attack; Move ] ])
+                    ))
+                    "a raider with no HEAL is no healer"
             }
 
             test "a quiet room fires no shot" {
@@ -2608,6 +2731,7 @@ let layeredThreatTests =
                         3
                         (openRoom 6
                          |> withTargets [ "tower-1", { X = 22; Y = 22 }, Structure BuiltKind.Tower ])
+                    |> holdingTower "tower-1" Engine.towerCapacity
                     |> withOutpost
                         "W1N2"
                         []

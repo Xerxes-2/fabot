@@ -199,7 +199,12 @@ let internal colonyOf (room: LoadedRoom) level =
         // One colony over one room: every body is its own, it raises no
         // child, declares no errand, and every tick has vision.
         Foreign = Set.empty
-        Borrowed = { Rooms = []; Defended = [] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = []
+                Garrisoned = []
+            }
         Refused = []
         Errands = []
         Dismantles = []
@@ -212,6 +217,7 @@ let internal colonyOf (room: LoadedRoom) level =
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
+        RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
         Reactors = []

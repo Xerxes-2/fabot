@@ -735,6 +735,15 @@ wire("creeps: an absent leaf reads empty, and a well-formed log round-trips", as
   assert.equal(stable(await creepsThrough({ w1: creepLog })), stable({ w1: creepLog }));
 });
 
+wire("creeps: a release outranked by a struck rampart's Repair round-trips (#481)", async () => {
+  const outranked = {
+    ...creepLog,
+    log: [{ t: 100, v: { kind: "released", task: "upgrade:ctrl-1", reason: "outranked" } }],
+  };
+
+  assert.equal(stable(await creepsThrough({ w1: outranked })), stable({ w1: outranked }));
+});
+
 wire("creeps: a creep whose log will not decode costs that creep alone", async () => {
   const written = await creepsThrough({ w1: null, w2: creepLog });
 

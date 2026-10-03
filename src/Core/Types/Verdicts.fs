@@ -112,6 +112,9 @@ let rejectReasonOf =
 type ReleaseReason =
     | TaskGone
     | Rejected of RejectReason
+    /// A non-fighter let go of lesser work in its room for a struck
+    /// rampart's Repair that outranks it (#481).
+    | Outranked
 
 /// The wire spelling of each ReleaseReason: the refusals spell what they
 /// spelt as refusals, so the release and scoring channels name one failure
@@ -119,13 +122,15 @@ type ReleaseReason =
 let releaseReasonName =
     function
     | ReleaseReason.TaskGone -> "task-gone"
+    | ReleaseReason.Outranked -> "outranked"
     | ReleaseReason.Rejected reason -> rejectReasonName reason
 
 /// The numbers a ReleaseReason carries beside its wire name, or None for a
 /// bare tag — the carried reason's own, for the same reason the name is.
 let releaseReasonNumbers =
     function
-    | ReleaseReason.TaskGone -> None
+    | ReleaseReason.TaskGone
+    | ReleaseReason.Outranked -> None
     | ReleaseReason.Rejected reason -> rejectReasonNumbers reason
 
 /// The ReleaseReason a wire name spells for the numbers the wire carried
@@ -133,6 +138,8 @@ let releaseReasonNumbers =
 let releaseReasonOf payload name =
     if name = releaseReasonName ReleaseReason.TaskGone then
         Some ReleaseReason.TaskGone
+    elif name = releaseReasonName ReleaseReason.Outranked then
+        Some ReleaseReason.Outranked
     else
         rejectReasonOf payload name |> Option.map ReleaseReason.Rejected
 

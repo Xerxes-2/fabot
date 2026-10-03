@@ -65,6 +65,10 @@ let mutable private towered: Set<string> = Set.empty
 // (`World.ExitWatches`, #450): heap only, a reset costing one hold.
 let mutable private exitWatches: Map<string, ExitWatch> = Map.empty
 
+// Each room's raid healers of the last few ticks (`World.Healers`, #480):
+// heap only, a reset forgetting a handful of ticks.
+let mutable private healers: Map<string, HealerSeen list> = Map.empty
+
 // The two of those a reset must not forget, as last written to the `rooms`
 // leaf: who owns each rival room (#444) and the tower latch. None on a cold
 // heap, which seeds `sightings` and `towered` off the leaf; written back
@@ -353,16 +357,18 @@ let private fullTick
             loaded
 
     // The tick's World, read out of the engine once, with the previous tick's
-    // sightings, tower latch and exit watch laid under it.
+    // sightings, tower latch, exit watch and healer memory laid under it.
     let world =
         World.ofGame Tuning.defaults Colony.declared harassment (ObserveMemory.loadPositions ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
         |> World.watchExits Tuning.defaults exitWatches
+        |> World.recallHealers Tuning.defaults healers
 
     sightings <- world.Sightings
     towered <- world.Towered
     exitWatches <- world.ExitWatches
+    healers <- world.Healers
 
     let latches: ObserveMemory.RoomLatches =
         {

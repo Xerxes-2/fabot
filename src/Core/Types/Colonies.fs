@@ -1306,6 +1306,28 @@ module Colony =
         |> childrenWhere stages colonies (fun home ->
             Map.tryFind home stages |> Option.exists (fun stage -> stage <> Independent))
 
+    /// The rooms one colony keeps its resident garrison in past their
+    /// independence (#479): the homes of its `Independent` children that
+    /// declare a perimeter — a **contested** child — and that do not yet
+    /// stand `towered` (two towers of their own). Disjoint from
+    /// `bootstrapping` by stage. The stage is not touched: only the
+    /// garrison reads this.
+    let garrisoning
+        (stages: Map<string, ColonyStage>)
+        (towered: string -> bool)
+        (colonies: Colony list)
+        (colony: Colony)
+        : string list =
+        let contested home =
+            colonies
+            |> List.exists (fun child -> child.Home = home && not (List.isEmpty child.Perimeter))
+
+        colony
+        |> childrenWhere stages colonies (fun home ->
+            Map.tryFind home stages = Some Independent
+            && contested home
+            && not (towered home))
+
     /// The declared children of this colony that have stopped being ours, and
     /// are nobody else's either. Without this a child whose spawn was
     /// destroyed and whose controller was then lost left every projection

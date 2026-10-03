@@ -468,6 +468,49 @@ let verdictTests =
                     "the release names the vanished Task"
             }
 
+            test
+                "an upgrading worker beside a struck rampart is released Outranked to repair it (#481)" {
+                // #478: the child's worker held the Upgrade it took before the
+                // raid and poured 200 into the controller while a melee broke
+                // the rampart; the Repair two rungs up never reached it.
+                let room =
+                    openRoom 10
+                    |> withTargets
+                        [
+                            "ctrl-1", { X = 32; Y = 25 }, Controller
+                            "ram-1", { X = 20; Y = 25 }, Structure BuiltKind.Rampart
+                        ]
+                    |> withCreepsAt [ "w1", { X = 30; Y = 26 } ]
+
+                let upgrading hostile =
+                    { atLevel 3 room with
+                        Sources = []
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 300_000 3_000_000
+                    |> facing [ hostileAt "h-1" hostile [ Attack; Move ] ]
+
+                let sticky = Map.ofList [ "w1", taskId (Upgrade "ctrl-1") ]
+                let struck = (decideFrom sticky (upgrading { X = 19; Y = 25 })).Verdicts
+
+                Expect.contains
+                    struck
+                    (Verdict.Released("w1", taskId (Upgrade "ctrl-1"), ReleaseReason.Outranked))
+                    "the Upgrade lets the worker go"
+
+                Expect.isTrue
+                    (struck
+                     |> List.exists (function
+                         | Verdict.Matched("w1", task, _) -> task = taskId (Repair "ram-1")
+                         | _ -> false))
+                    $"and it takes the struck rampart's Repair: {struck}"
+
+                Expect.equal
+                    (decideFrom sticky (upgrading { X = 16; Y = 25 })).Verdicts
+                    [ Verdict.Kept("w1", taskId (Upgrade "ctrl-1")) ]
+                    "with no rampart struck it keeps its Upgrade"
+            }
+
             test "a repair runs to the whole line and then releases TaskGone, once per job" {
                 // A holder is released nowhere inside the band between the
                 // two lines and `task-gone` past it: one release per repair

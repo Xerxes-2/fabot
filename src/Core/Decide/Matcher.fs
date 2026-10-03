@@ -255,6 +255,21 @@ let matchCreeps
     // no Work Area, so `threatened` answers false for it whatever stands
     // where; the question has to be asked of the creep. A holder inside a
     // Reach is denied the grace and rematches in the cascade below.
+    // The struck ramparts' Repairs (#467), by room: what a non-fighter holding
+    // lesser work in that room is let go for (#481). Empty on a quiet tick.
+    let struckRepairs =
+        match view.Hostiles with
+        | [] -> []
+        | _ ->
+            let struck = Facts.rampartsUnderAttack view
+
+            pool
+            |> List.choose (fun pooled ->
+                match pooled.Task with
+                | Repair id when Set.contains id struck ->
+                    Atlas.targetRoom atlas id |> Option.map (fun room -> room, pooled)
+                | _ -> None)
+
     let graced (creep: CreepInfo) tid =
         if standsInReach threats atlas creep.Name then
             None
@@ -297,6 +312,22 @@ let matchCreeps
                     match tooEarly view atlas creep pooled.Task arrival with
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
                     | None -> Ok cost
+
+    // Whether a holder is let go for a struck rampart's Repair (#481): a
+    // non-fighter in the rampart's room whose Task that Repair outranks, and
+    // which the cascade would give it. Scoped to struck ramparts, so an
+    // ordinary change of rank churns nobody.
+    let outranked acc (creep: CreepInfo) (pooled: PooledTask) =
+        not (List.isEmpty struckRepairs)
+        && classOf creep.Name <> Some Fighter
+        && (match Atlas.creepRoom atlas creep.Name with
+            | Some room ->
+                struckRepairs
+                |> List.exists (fun (struckIn, repair) ->
+                    struckIn = room
+                    && repair.Priority < pooled.Priority
+                    && Result.isOk (gate (lazy false) acc creep repair))
+            | None -> false)
 
     // Which holder a cap that has shrunk gives up (#230): the fold below
     // judges each remembered assignment against the ones already kept, so the
@@ -367,6 +398,7 @@ let matchCreeps
                        |> Option.exists (fun flee -> applicable view threats atlas creep flee)
                     ->
                     release (ReleaseReason.Rejected RejectReason.Threatened)
+                | Some pooled when outranked acc creep pooled -> release ReleaseReason.Outranked
                 | Some pooled ->
                     let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 

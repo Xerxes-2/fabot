@@ -2179,7 +2179,12 @@ let private defendingMother raid =
         Spawns = [ spawn ]
         Bank = bank 5_600 5_600
         Hostiles = raid
-        Borrowed = { Rooms = []; Defended = [ "W1N2" ] }
+        Borrowed =
+            {
+                Rooms = []
+                Defended = [ "W1N2" ]
+                Garrisoned = []
+            }
     }
 
 /// The child in the same tick: its own home under the same raid, and a bank
@@ -2344,6 +2349,30 @@ let raisedHomeGarrisonTests =
                 Expect.isEmpty (guardsIn (planTasksOn mother noThreats)) "no Guard in its home"
 
                 Expect.equal (rangerQuotaOf mother) (Some 0) "and no ranger for it"
+            }
+
+            test
+                "an Independent contested child's home short of its towers keeps the garrison (#479)" {
+                let independent = garrisonMother Independent
+
+                let mother =
+                    { independent with
+                        Borrowed =
+                            { independent.Borrowed with
+                                Rooms = []
+                                Garrisoned = [ "W1N2" ]
+                            }
+                    }
+
+                Expect.equal
+                    (guardsIn (planTasksOn mother noThreats))
+                    [ Guard "W1N2" ]
+                    "one Guard in its home"
+
+                Expect.equal
+                    (rangerQuotaOf mother)
+                    (Some Tuning.defaults.RangerResidents)
+                    "and her ranger row keeps the garrison for it"
             }
 
             test "the garrison holds the child's controller ring" {
@@ -2617,6 +2646,7 @@ let raisedHomeGarrisonTests =
                             {
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
+                                Garrisoned = []
                             }
                     }
 
@@ -2656,6 +2686,7 @@ let raisedHomeGarrisonTests =
                             {
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
+                                Garrisoned = []
                             }
                     }
 
@@ -2703,6 +2734,7 @@ let raisedHomeGarrisonTests =
                             {
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
+                                Garrisoned = []
                             }
                     }
 

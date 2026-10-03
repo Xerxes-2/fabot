@@ -323,6 +323,7 @@ let private pairWorld: World =
                 })
         Towered = Set.empty
         ExitWatches = Map.empty
+        Healers = Map.empty
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -1733,6 +1734,94 @@ let defendedHomeTests =
                     raided.Spatial.TargetKinds
                     quiet.Spatial.TargetKinds
                     "with every target of its own"
+            }
+        ]
+
+/// The declaration with the child contested: a perimeter declared (#446).
+let private contestedDeclared: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home = child then
+            { colony with
+                Perimeter = [ { X = 2; Y = 8 } ]
+            }
+        else
+            colony)
+
+/// A rampart of ours standing in the child's home.
+let private withChildRampart =
+    inChild (fun facts ->
+        { facts with
+            TargetKinds = Map.add "ram-child" (Structure BuiltKind.Rampart) facts.TargetKinds
+            Hits = Map.add "ram-child" { Hits = 50_000; HitsMax = 300_000 } facts.Hits
+            Layer =
+                { facts.Layer with
+                    TargetPositions =
+                        Map.add "ram-child" { X = 2; Y = 8 } facts.Layer.TargetPositions
+                }
+        })
+
+[<Tests>]
+let garrisonedHomeTests =
+    testList
+        "a mother garrisons a contested child's home until it stands two towers"
+        [
+            test
+                "an Independent child with a perimeter and one tower is garrisoned, as ground alone" {
+                let view =
+                    viewUnder
+                        contestedDeclared
+                        (independentChild [ 1000 ] |> withChildRampart)
+                        mother
+
+                Expect.equal view.Borrowed.Garrisoned [ child ] "the home is hers to garrison"
+                Expect.isEmpty view.Borrowed.Rooms "and no room she raises: its stage is its own"
+
+                Expect.equal
+                    (guardsPooled view)
+                    [ Guard child ]
+                    "her ranger row's Guard, under its name"
+
+                Expect.equal
+                    (view.Spatial.TargetKinds
+                     |> Map.filter (fun id _ -> SpatialInfo.roomOf view.Spatial id = Some child)
+                     |> Map.keys
+                     |> Set.ofSeq)
+                    (set [ "ctrl-W13S28"; "ram-child" ])
+                    "the controller its ring is read off and the rampart it fights from, and nothing else"
+
+                let atlas = Atlas.ofView view
+
+                Expect.isFalse
+                    (Planner.planTasks
+                        view
+                        atlas
+                        (threatsOf view atlas)
+                        HeldTaskFacts.empty
+                        (Planner.outpostFactsOf view)
+                     |> List.contains (Upgrade "ctrl-W13S28"))
+                    "and the child's Upgrade is not hers"
+            }
+
+            test "two towers send the garrison home" {
+                let view = viewUnder contestedDeclared (independentChild [ 1000; 0 ]) mother
+
+                Expect.isEmpty view.Borrowed.Garrisoned "a dry tower still stands"
+                Expect.isEmpty (guardsPooled view) "and no Guard is pooled there"
+            }
+
+            test
+                "a child that declares no perimeter turns the garrison off at Independent, as before" {
+                Expect.isEmpty
+                    (viewOf (independentChild [ 1000 ]) mother).Borrowed.Garrisoned
+                    "an uncontested child is none of hers"
+            }
+
+            test "the child's own view carries no garrison" {
+                Expect.isEmpty
+                    (viewUnder contestedDeclared (independentChild [ 1000 ]) child)
+                        .Borrowed.Garrisoned
+                    "a colony garrisons no home of its own"
             }
         ]
 
