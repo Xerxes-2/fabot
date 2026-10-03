@@ -151,6 +151,9 @@ let private repeatableActor (intent: Intent) : string option =
     | HealWithTower _
     | RepairWithTower _
     | SetRampartPublic _
+    // One-shot (#484): a light tick looks nowhere, and the next full tick
+    // aims again.
+    | ObserveRoom _
     | SendFromTerminal _ -> None
 
 /// Whether an intent is a structure's fight — a tower's shot, heal or repair
@@ -189,6 +192,7 @@ let private fights (intent: Intent) : bool =
     | MoveCreep _
     | SayCreep _
     | SetRampartPublic _
+    | ObserveRoom _
     | SendFromTerminal _ -> false
 
 /// The full tick's record, off the glance taken at its start, its step plans

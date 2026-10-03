@@ -33,6 +33,7 @@ let builtKindTests =
                         "rampart"
                         "extractor"
                         "terminal"
+                        "observer"
                     ]
                     "each BuiltKind maps to its Screeps string"
             }
@@ -71,6 +72,8 @@ let builtKindTests =
                         BuiltKind.Extractor, None
                         // The terminal is of the Keep (#422).
                         BuiltKind.Terminal, Some WholeLine.Full
+                        // The observer is of no Keep: losing it costs vision.
+                        BuiltKind.Observer, None
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 
@@ -170,6 +173,7 @@ let builtKindTests =
                         Storage
                         Rampart
                         StructureKind.Extractor
+                        StructureKind.Observer
                      ]
                      |> List.map builtKindOfPlaceable)
                     [
@@ -180,6 +184,7 @@ let builtKindTests =
                         BuiltKind.Storage
                         BuiltKind.Rampart
                         BuiltKind.Extractor
+                        BuiltKind.Observer
                     ]
                     "each placeable kind widens to its own built kind"
             }
@@ -441,6 +446,28 @@ let placementTests =
                 let { Intents = below } = decideOn (atLevel 5 (openRoom 6))
 
                 Expect.hasLength (sitesOfKind Extension below) 30 "RCL5 places its own thirty"
+            }
+
+            test
+                "the observer is placed at RCL8 and not before, on a cluster tile of its own (#484)" {
+                // `CONTROLLER_STRUCTURES.observer`: 0 through RCL7, 1 at RCL8.
+                for level in 2..7 do
+                    let { Intents = intents } = decideOn (atLevel level (openRoom 8))
+
+                    Expect.isEmpty
+                        (sitesOfKind StructureKind.Observer intents)
+                        $"RCL{level} places no observer"
+
+                let { Intents = intents } = decideOn (atLevel 8 (openRoom 8))
+                let observer = sitesOfKind StructureKind.Observer intents
+
+                Expect.hasLength observer 1 "RCL8 places its one observer"
+
+                Expect.isEmpty
+                    (placementIntents intents
+                     |> List.filter (fun (_, tile, kind) ->
+                         kind <> StructureKind.Observer && List.contains tile observer))
+                    "on a tile nothing else is planned for, a road included"
             }
 
             // The plan a room *built out* under one level's horizon only ever

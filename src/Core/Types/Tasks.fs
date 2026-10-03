@@ -225,6 +225,8 @@ type StructureKind =
     /// A spawn beyond the first (#408). The first is a human's, and the whole
     /// plan is oriented on it.
     | Spawn
+    /// The observer (#484), at RCL8, placed after the extensions.
+    | Observer
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -300,6 +302,7 @@ let allBuiltKinds =
         BuiltKind.Rampart
         BuiltKind.Extractor
         BuiltKind.Terminal
+        BuiltKind.Observer
     ]
 
 /// Screeps STRUCTURE_* strings as the engine spells them, in `structureType`
@@ -319,6 +322,7 @@ let builtKindName =
     | BuiltKind.Rampart -> "rampart"
     | BuiltKind.Extractor -> "extractor"
     | BuiltKind.Terminal -> "terminal"
+    | BuiltKind.Observer -> "observer"
     | BuiltKind.Other -> ""
 
 /// The built kind a placement Intent's kind names: the one crossing between
@@ -337,6 +341,7 @@ let builtKindOfPlaceable =
     | Extractor -> BuiltKind.Extractor
     | Terminal -> BuiltKind.Terminal
     | Spawn -> BuiltKind.Spawn
+    | Observer -> BuiltKind.Observer
 
 /// The kinds Refill keeps fed: the spawn-energy feeders and the towers, the
 /// structures a view projects as Refillables. The controller container and the
@@ -356,6 +361,7 @@ let isRefillable =
     // The terminal is fed by no Refill (#349): its energy and its ore are the
     // send rule's business, pooled off its store the way the Storage's are.
     | BuiltKind.Terminal
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// ADR-0034. The Keep: the structures worth defending. One list, three rules
@@ -373,6 +379,7 @@ let isKeep =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// The kinds a raid's damage is charged on: the Keep and the ramparts that
@@ -389,6 +396,7 @@ let isDefence =
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// The kinds whose projection has to ask the engine who owns them: every
@@ -407,6 +415,7 @@ let needsOwner =
     | BuiltKind.Container
     | BuiltKind.Link
     | BuiltKind.Extractor
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// Where a kind is whole — which of the three rules judges its hits, never the
@@ -437,6 +446,7 @@ let wholeLine =
     | BuiltKind.Extension
     | BuiltKind.Link
     | BuiltKind.Extractor
+    | BuiltKind.Observer
     | BuiltKind.Other -> None
 
 /// The kinds whose stored energy enters the projection: the containers, the
@@ -457,6 +467,7 @@ let isStored =
     | BuiltKind.Link
     | BuiltKind.Rampart
     | BuiltKind.Extractor
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// The kinds a creep can stand on; every other kind blocks its tile
@@ -480,6 +491,7 @@ let isWalkable =
     // In OBSTACLE_OBJECT_TYPES, like the Storage it stands beside
     // (`docs/research/creep-positioning-traffic.md`).
     | BuiltKind.Terminal
+    | BuiltKind.Observer
     | BuiltKind.Other -> false
 
 /// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.

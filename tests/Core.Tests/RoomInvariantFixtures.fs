@@ -223,6 +223,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Crossed = Set.empty
         Reactors = []
         Sightings = Map.empty
+        Seen = Map.empty
         ExitHolds = Map.empty
         // The tests that are *about* a tunable move the one field they are
         // about.

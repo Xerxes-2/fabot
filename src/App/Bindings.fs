@@ -396,3 +396,8 @@ let createSpawnSite (_room: IRoom) (_x: int) (_y: int) (_name: string) : int = j
 /// `rampart.setPublic` (`game/structures.js`): ERR_NOT_OWNER on one not ours.
 [<Emit("$0.setPublic($1)")>]
 let setPublic (_rampart: obj) (_isPublic: bool) : int = jsNative
+
+/// `observer.observeRoom` (`game/structures.js`): ERR_NOT_IN_RANGE past
+/// OBSERVER_RANGE, ERR_RCL_NOT_ENOUGH below RCL8.
+[<Emit("$0.observeRoom($1)")>]
+let observeRoom (_observer: obj) (_room: string) : int = jsNative

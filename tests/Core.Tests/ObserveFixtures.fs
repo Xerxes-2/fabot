@@ -75,6 +75,7 @@ let quiet: ColonyView =
         Crossed = Set.empty
         Reactors = []
         Sightings = Map.empty
+        Seen = Map.empty
         ExitHolds = Map.empty
         // A test that is about a tunable moves the one field it is about.
         Tuning = Tuning.defaults

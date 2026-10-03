@@ -3091,3 +3091,132 @@ let rangerGroundTests =
                     "and none of it within two of a brawler"
             }
         ]
+
+/// One room of each tier around W13S28, none of them seen.
+let private tiers: ObserverTiers =
+    {
+        Claims = [ "W17S25" ]
+        Watched = [ "W18S26" ]
+        Harassed = [ "W17S26" ]
+        Box = [ "W14S28"; "W13S27" ]
+    }
+
+/// The aim at tick 1,000 off W13S28, given when each room was last seen.
+let private aimAt (seen: (string * int) list) (tiers: ObserverTiers) =
+    let seen = Map.ofList seen
+
+    aimObserver
+        1_000
+        Tuning.defaults.ObserveStaleTicks
+        "W13S28"
+        (fun room -> Map.tryFind room seen)
+        tiers
+
+[<Tests>]
+let observerAimTests =
+    testList
+        "the observer's aim"
+        [
+            test
+                "a claim under no vision comes first, then a stale watched room, a harassment room, the box (#484)" {
+                Expect.equal (aimAt [] tiers) (Some "W17S25") "the claim first"
+
+                Expect.equal
+                    (aimAt [ "W17S25", 1_000 ] tiers)
+                    (Some "W18S26")
+                    "the claim seen this tick: the watched room"
+
+                Expect.equal
+                    (aimAt [ "W17S25", 1_000; "W18S26", 1_000 ] tiers)
+                    (Some "W17S26")
+                    "both seen: the harassment room"
+
+                Expect.equal
+                    (aimAt [ "W17S25", 1_000; "W18S26", 1_000; "W17S26", 1_000 ] tiers)
+                    (Some "W13S27")
+                    "all three seen: the box, never-seen rooms by name"
+            }
+
+            test "a watched room is aimed at only once its sighting is N ticks old (#484)" {
+                let n = Tuning.defaults.ObserveStaleTicks
+
+                let only =
+                    { tiers with
+                        Claims = []
+                        Harassed = []
+                        Box = []
+                    }
+
+                Expect.isNone (aimAt [ "W18S26", 1_000 - n + 1 ] only) "younger than N: left alone"
+                Expect.equal (aimAt [ "W18S26", 1_000 - n ] only) (Some "W18S26") "N old: aimed at"
+
+                Expect.equal
+                    (aimAt
+                        [ "W18S26", 1_000 - n; "W17S24", 1_000 - 2 * n ]
+                        { only with
+                            Watched = [ "W18S26"; "W17S24" ]
+                        })
+                    (Some "W17S24")
+                    "the stalest of the tier first"
+            }
+
+            test "the box is a round robin: the room longest unseen first (#484)" {
+                let box =
+                    {
+                        Claims = []
+                        Watched = []
+                        Harassed = []
+                        Box = [ "W14S28"; "W13S27"; "W12S28" ]
+                    }
+
+                let seen = [ "W14S28", 990; "W13S27", 995; "W12S28", 1_000 ]
+
+                Expect.equal (aimAt seen box) (Some "W14S28") "the oldest sighting"
+
+                // The next tick it was seen at 1,000, and the turn moves on.
+                Expect.equal
+                    (aimAt [ "W14S28", 1_000; "W13S27", 995; "W12S28", 1_000 ] box)
+                    (Some "W13S27")
+                    "the next oldest"
+
+                Expect.isNone
+                    (aimAt [ "W14S28", 1_000; "W13S27", 1_000; "W12S28", 1_000 ] box)
+                    "every room seen this tick: nothing to look at"
+            }
+
+            test "no room past OBSERVER_RANGE, nor the observer's own, is aimed at (#484)" {
+                // W13S28 is (-14, 28): W24S28 is eleven columns west, W23S38
+                // ten rows south.
+                let far =
+                    {
+                        Claims = [ "W24S28"; "W13S28" ]
+                        Watched = []
+                        Harassed = []
+                        Box = [ "W23S38" ]
+                    }
+
+                Expect.equal
+                    (aimAt [] far)
+                    (Some "W23S38")
+                    "range is Chebyshev over the room grid, 10 inclusive"
+
+                Expect.isNone (aimAt [] { far with Box = [] }) "eleven away and the home: nothing"
+            }
+
+            test
+                "an observer standing at home spends its tick on the declared room nobody of ours sees (#484)" {
+                let colony =
+                    { atLevel 8 (openRoom 6) with
+                        Declared = [ "W1N1"; "W1N3" ]
+                    }
+                    |> withTarget "observer-1" { X = 30; Y = 30 } (Structure BuiltKind.Observer)
+
+                let observed =
+                    (decideOn colony).Intents
+                    |> List.choose (function
+                        | ObserveRoom(observer, room) -> Some(observer, room)
+                        | _ -> None)
+
+                Expect.equal observed [ "observer-1", "W1N3" ] "one ObserveRoom, on the claim"
+            }
+        ]

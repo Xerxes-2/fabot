@@ -56,6 +56,7 @@ let snapshotWith creeps spatial =
         Crossed = Set.empty
         Reactors = []
         Sightings = Map.empty
+        Seen = Map.empty
         ExitHolds = Map.empty
         Tuning = Tuning.defaults
         Casting = []

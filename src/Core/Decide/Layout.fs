@@ -367,6 +367,90 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
                 None
         | _ -> None)
 
+/// The rooms an observer may look at, by tier, highest first (#484).
+type ObserverTiers =
+    {
+        /// Declared colony rooms not yet ours, and our nurseries: looked at
+        /// while nothing of ours sees them.
+        Claims: string list
+        /// The rivals' rooms and the rooms on our chains: looked at once
+        /// their last sighting is `Tuning.ObserveStaleTicks` old.
+        Watched: string list
+        /// The harassment rooms: looked at while no creep of ours is there.
+        Harassed: string list
+        /// The colony's scan set, its transit rectangles included: the rest
+        /// of the observer's ticks.
+        Box: string list
+    }
+
+/// Where an observer in `from` looks this tick (#484): the first tier with a
+/// room in `Engine.observerRange` that wants a look, and in it the room
+/// longest unseen (`lastSeen` None first), then by name. Longest unseen is the
+/// round robin: the look itself is the next tick's sighting. A room seen this
+/// tick wants none, and the observer's own room is never one.
+let aimObserver
+    (time: int)
+    (staleAfter: int)
+    (from: string)
+    (lastSeen: string -> int option)
+    (tiers: ObserverTiers)
+    : string option =
+    let inReach room =
+        room <> from
+        && RoomName.offsetOf from room
+           |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange)
+
+    let unseen room = lastSeen room <> Some time
+
+    let stale room =
+        lastSeen room |> Option.forall (fun tick -> time - tick >= staleAfter)
+
+    [
+        tiers.Claims, unseen
+        tiers.Watched, stale
+        tiers.Harassed, unseen
+        tiers.Box, unseen
+    ]
+    |> List.tryPick (fun (rooms, wants) ->
+        rooms
+        |> List.filter (fun room -> inReach room && wants room)
+        |> List.sortBy (fun room -> lastSeen room, room)
+        |> List.tryHead)
+
+/// The observer at home spends its tick (#484): `aimObserver` over the
+/// declared rooms not yet colonies of ours or still nurseries, `Colony.rivals`
+/// and the rooms this colony crosses, `Colony.harass`, and the scan set.
+let internal planObserver (view: ColonyView) : Intent list =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let observers =
+        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Observer)
+        |> List.filter (fun id -> SpatialInfo.roomOf view.Spatial id = Some home)
+
+    match observers with
+    | [] -> []
+    | observer :: _ ->
+        let tiers =
+            {
+                Claims =
+                    view.Declared
+                    |> List.filter (fun room ->
+                        match Map.tryFind room view.Stages with
+                        | None
+                        | Some Nursery -> true
+                        | Some _ -> false)
+                Watched = (Colony.rivals |> List.map fst) @ Set.toList view.Crossed |> List.distinct
+                Harassed = Colony.harass |> List.map (fun h -> h.RoomName)
+                Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
+            }
+
+        let lastSeen room =
+            Map.tryFind room view.Seen |> Option.map (fun sighting -> sighting.Tick)
+
+        aimObserver view.Time view.Tuning.ObserveStaleTicks home lastSeen tiers
+        |> Option.map (fun room -> ObserveRoom(observer, room))
+        |> Option.toList
+
 /// The fire reflex's quiet twin (#410): with no hostile at home to shoot, each
 /// tower heals the creep of ours at home with the most hits still owed, the
 /// heal it will land (`Engine.towerHealAt` its range) counted off as it is
@@ -438,13 +522,21 @@ let private allowanceOf kind level =
     | BuiltKind.Spawn, (1 | 2 | 3 | 4 | 5 | 6) -> 1
     | BuiltKind.Spawn, 7 -> 2
     | BuiltKind.Spawn, _ -> 3
+    | BuiltKind.Observer, (0 | 1 | 2 | 3 | 4 | 5 | 6 | 7) -> 0
+    | BuiltKind.Observer, _ -> 1
     | _ -> 0
 
 /// The kinds the clustered horizon sizes, and the ones the ceiling below is
 /// read over. The Storage is not one of them: it reads no horizon at all and
 /// holds its whole allowance from level 0.
 let private clusteredKinds =
-    [ BuiltKind.Extension; BuiltKind.Tower; BuiltKind.Terminal; BuiltKind.Spawn ]
+    [
+        BuiltKind.Extension
+        BuiltKind.Tower
+        BuiltKind.Terminal
+        BuiltKind.Spawn
+        BuiltKind.Observer
+    ]
 
 /// The level past which `allowanceOf` stops growing (ADR-0064): the smallest
 /// level at which every clustered kind already answers its catch-all row,
@@ -580,6 +672,7 @@ let internal planLayout
         let spawnSlots = gapAt BuiltKind.Spawn horizon
         let towerSlots = gapAt BuiltKind.Tower horizon
         let extensionSlots = gapAt BuiltKind.Extension horizon
+        let observerSlots = gapAt BuiltKind.Observer horizon
 
         // The same two kinds sized at the ceiling instead, which is what the
         // trunk router dodges. Sized there the reservation is a function of
@@ -590,6 +683,7 @@ let internal planLayout
         let reservedSpawnSlots = gapAt BuiltKind.Spawn allowanceCeiling
         let reservedTowerSlots = gapAt BuiltKind.Tower allowanceCeiling
         let reservedExtensionSlots = gapAt BuiltKind.Extension allowanceCeiling
+        let reservedObserverSlots = gapAt BuiltKind.Observer allowanceCeiling
 
         // The Link footings cannot be named here — their targets are the
         // container picks, which are derived from the trunks the reservation is
@@ -605,6 +699,7 @@ let internal planLayout
                 + reservedSpawnSlots
                 + reservedTowerSlots
                 + reservedExtensionSlots
+                + reservedObserverSlots
                 + footingSlots
             )
 
@@ -925,19 +1020,23 @@ let internal planLayout
         // spawns first (#408): the nearest free tile to the first spawn is
         // where a second one shares its refill round. The `…Slots` and not the
         // `reserved…` counts: this is the placement, sized at the horizon,
-        // inside the reservation the trunks already dodged.
+        // inside the reservation the trunks already dodged. The observer last
+        // (#484): it is never refilled, so the furthest tile is its.
         let clusterPicks =
             ordering
             |> List.filter (fun tile ->
                 not (List.contains tile storagePick)
                 && not (List.contains tile terminalPick)
                 && not (Set.contains tile footingTiles))
-            |> List.truncate (spawnSlots + towerSlots + extensionSlots)
+            |> List.truncate (spawnSlots + towerSlots + extensionSlots + observerSlots)
 
         let spawnTiles, rest =
             clusterPicks |> List.splitAt (min spawnSlots clusterPicks.Length)
 
-        let towerTiles, extensionTiles = rest |> List.splitAt (min towerSlots rest.Length)
+        let towerTiles, rest = rest |> List.splitAt (min towerSlots rest.Length)
+
+        let extensionTiles, observerTiles =
+            rest |> List.splitAt (min extensionSlots rest.Length)
 
         // The container census the target clause is judged against: a
         // container standing, or a site already going up.
@@ -1062,6 +1161,9 @@ let internal planLayout
         @ place
             Extension
             (extensionTiles |> List.truncate (gapAt BuiltKind.Extension controller.Level))
+        @ place
+            Observer
+            (observerTiles |> List.truncate (gapAt BuiltKind.Observer controller.Level))
         @ place Road (Set.toList placedRoads)
         @ place Container containerGap
         @ place Extractor extractorGap

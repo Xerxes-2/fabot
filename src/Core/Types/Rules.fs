@@ -75,6 +75,14 @@ module Engine =
     /// bank are shipped in one lot or not at all.
     let terminalMinSend = 100
 
+    /// OBSERVER_RANGE: how far `observeRoom` reaches, Chebyshev over the room
+    /// grid (`structures.js` compares each axis of `roomNameToXY`); further is
+    /// ERR_NOT_IN_RANGE. The room it names is in `Game.rooms` the next tick
+    /// alone: the processor writes `observeRoom` on the observer, the driver
+    /// adds that room to the next tick's vision, and the next processing
+    /// tick nulls it.
+    let observerRange = 10
+
     /// The energy a `send` costs the sending terminal:
     /// `ceil(amount · (1 − e^(−range/30)))` over the **linear** room distance
     /// (`calcTerminalEnergyCost`; `Game.map.getRoomLinearDistance` is
@@ -292,6 +300,9 @@ type Tuning =
         /// ours before it shuts, ally or no ally (#482): a public rampart lets
         /// everybody in.
         AllyPassGuard: int
+        /// How old a watched room's sighting grows before the observer looks
+        /// again (#484): a rival's room and a room on our chains.
+        ObserveStaleTicks: int
         /// How many whole bodies of the colony's own bank the Storage keeps
         /// back before the upgrader row may spend any of it (#385). **Counted
         /// in bodies rather than in energy** so it scales with the room:
@@ -584,6 +595,9 @@ module Tuning =
             // Past the light tick's near rule (5): a hostile closing on an
             // open rampart forces the full tick that shuts it.
             AllyPassGuard = 7
+            // Owners and towers change over thousands of ticks; a hundred
+            // leaves the rest of the observer's ticks to the lower tiers.
+            ObserveStaleTicks = 100
             UpgradeStockBodies = 20
             PickupThreshold = 100
             ReachMargin = 2

@@ -356,7 +356,7 @@ let decideUnarbitrated
 
     // The consignment's send (#349), beside the defence reflexes because it is
     // the same kind of thing: a structure's own verb, read off the view.
-    let consignmentIntents = planConsignment view
+    let consignmentIntents = planConsignment view @ planObserver view
 
     // The pool is derived before the spawns, and the dependency runs one way:
     // the worker row's floor asks the pool, and nothing in the pool reads a

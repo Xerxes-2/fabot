@@ -136,6 +136,8 @@ let private execute (intent: Intent) : Outcome =
             withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.repair target))
     | SetRampartPublic(rampartId, isPublic) ->
         withActor (Game.getObjectById rampartId) (fun rampart -> setPublic rampart isPublic)
+    | ObserveRoom(observerId, room) ->
+        withActor (Game.getObjectById observerId) (fun observer -> observeRoom observer room)
     | SendFromTerminal(terminalId, resource, amount, destination) ->
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))

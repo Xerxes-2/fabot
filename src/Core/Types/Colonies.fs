@@ -602,6 +602,7 @@ module Salvage =
         | Structure BuiltKind.Tower
         | Structure BuiltKind.Storage
         | Structure BuiltKind.Terminal
+        | Structure BuiltKind.Observer
         | Structure BuiltKind.Extractor
         | Structure BuiltKind.Link
         | Structure BuiltKind.Rampart -> true

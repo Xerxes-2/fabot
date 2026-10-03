@@ -460,12 +460,17 @@ module World =
     /// every room vision answered for keeps this tick's sighting, and a room
     /// it did not answer for keeps the last one taken. One pure function a
     /// test can drive. Bounded by the rooms this tick's world holds, so a room
-    /// that leaves the world leaves the memory with it.
+    /// that leaves the world leaves the memory with it — but for the declared
+    /// rivals' (#484): an observer's look at one is what its next look waits
+    /// on, and six sightings are no growth.
     let recalling (previous: Map<string, RoomSighting>) (world: World) : World =
+        let kept room =
+            Map.containsKey room world.Rooms
+            || Colony.rivals |> List.exists (fun (rival, _) -> rival = room)
+
         { world with
             Sightings =
-                (previous |> Map.filter (fun room _ -> Map.containsKey room world.Rooms),
-                 world.Sightings)
+                (previous |> Map.filter (fun room _ -> kept room), world.Sightings)
                 ||> Map.fold (fun carried room sighting -> Map.add room sighting carried)
         }
 

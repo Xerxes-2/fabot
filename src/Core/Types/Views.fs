@@ -227,6 +227,10 @@ type ColonyView =
         /// is how a stand-down on a room a chain runs *through* used to hold
         /// a hauler to a Withdraw it had already withdrawn from.
         Sightings: Map<string, RoomSighting>
+        /// Every sighting the world holds, `Sightings` before the narrowing:
+        /// which rooms nobody of ours sees, the observer's aim (#484). A room
+        /// seen this tick carries `Time`.
+        Seen: Map<string, RoomSighting>
         /// The exit each room this colony works is held at (#450): the run its
         /// last armed Threat left by, while the hold stands
         /// (`World.watchExits`). What `Threat.threatsOf` lays the Guard's
@@ -989,6 +993,7 @@ module ColonyView =
                 |> List.choose (fun (room, _, remembered) ->
                     remembered |> Option.map (fun sighting -> room, sighting))
                 |> Map.ofList
+            Seen = world.Sightings
             // The world's holds in the rooms this colony works, transit
             // included: a defended child's home is projected as one.
             ExitHolds =

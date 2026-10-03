@@ -632,6 +632,7 @@ let worldTests =
                                 mother, sighting 900 [ "gone-since" ]
                                 outpost, sighting 950 [ "src-out" ]
                                 "W9N9", sighting 950 [ "src-elsewhere" ]
+                                "W18S26", sighting 940 [ "spawn-trep" ]
                             ])
                         thisTick
 
@@ -658,6 +659,13 @@ let worldTests =
                 Expect.isFalse
                     (Map.containsKey "W9N9" recalled.Sightings)
                     "and a room the world no longer holds at all is forgotten rather than carried for the life of the global"
+
+                // An observer's look at a declared rival (#484) is what its
+                // next look waits on, so it outlives the one tick of vision.
+                Expect.equal
+                    (Map.tryFind "W18S26" recalled.Sightings |> Option.map (fun seen -> seen.Tick))
+                    (Some 940)
+                    "but a room `Colony.rivals` declares keeps its last look, held or not"
             }
         ]
 

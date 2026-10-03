@@ -2009,3 +2009,53 @@ let arenaDefenceTests =
                         Expect.isNone fell $"never breached inside a life\n{failure}"
                 }
         ]
+
+/// W13S28 at RCL8 with its observer, and W14S27 declared a colony of ours
+/// nobody has claimed: diagonal to the home, so in no scan set and blind.
+let private observing () =
+    let home =
+        room "W13S28"
+        |> withController Ownership.Ours None 8 0
+        |> withSpawn "Spawn3" { X = 36; Y = 42 } 12_900
+        |> withStructures [ structureOf "observer" (Some Side.Ours) 500 500 { X = 30; Y = 30 } ]
+
+    arena 922_600 [ home; room "W14S27" ] [ colony "W13S28"; colony "W14S27" ] []
+
+[<Tests>]
+let arenaVisionTests =
+    testList
+        "arena vision"
+        [
+            test
+                "an observed room's sighting reaches the next tick's World, and is kept after (#484)" {
+                let observer = "observer-30-30"
+
+                let sightingOf (a: Arena) =
+                    Map.tryFind "W14S27" (worldOf a).Sightings
+
+                let start = observing ()
+
+                Expect.isNone (sightingOf start) "blind before the look"
+
+                let looked, trace = step start
+
+                Expect.contains
+                    trace.Ours
+                    (ObserveRoom(observer, "W14S27"))
+                    "the observer looks at the declared room nobody of ours sees"
+
+                Expect.equal
+                    (sightingOf looked |> Option.map (fun s -> s.Tick))
+                    (Some looked.Time)
+                    "seen the next tick, through the World's own path"
+
+                let after, _ = step looked
+
+                Expect.isFalse (Set.contains "W14S27" after.Observed) "seen, so not looked at again"
+
+                Expect.equal
+                    (sightingOf after |> Option.map (fun s -> s.Tick))
+                    (Some looked.Time)
+                    "and the sighting is remembered once the vision lapses"
+            }
+        ]

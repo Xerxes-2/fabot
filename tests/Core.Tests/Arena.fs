@@ -305,6 +305,10 @@ type Arena =
         Ovens: Oven list
         /// The rows whose casts the arena performs, by pattern name.
         Casts: Set<string>
+        /// The rooms an observer of ours looked at last tick: vision this
+        /// tick alone (`processor.js` writes `observeRoom` on the observer,
+        /// `driver/lib/runtime/data.js` adds the room to the next tick's).
+        Observed: Set<string>
     }
 
 /// What happened in a tick beyond positions and hits.
@@ -711,6 +715,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
         Scores = Map.empty
         Ovens = []
         Casts = Set.empty
+        Observed = Set.empty
     }
 
 /// Our spawns cast these rows, by pattern name, and only these.
@@ -848,9 +853,10 @@ let private within (reach: int) (a: RoomPos) (b: RoomPos) =
 // ---------------------------------------------------------------------------
 
 /// Whether vision answers for a room this tick: a body of ours or an owned
-/// structure stands in it.
+/// structure stands in it, or an observer of ours looked at it last tick.
 let private seen (a: Arena) (name: string) (r: ArenaRoom) =
-    a.Bodies |> List.exists (fun b -> b.Side = Side.Ours && b.At.Room = name)
+    Set.contains name a.Observed
+    || a.Bodies |> List.exists (fun b -> b.Side = Side.Ours && b.At.Room = name)
     || r.Structures |> List.exists (fun s -> s.Owner = Some Side.Ours)
     || r.Controller |> Option.exists (fun c -> c.Owner = Ownership.Ours)
 
@@ -3174,6 +3180,29 @@ let step (a: Arena) : Arena * TickTrace =
                 { carried with
                     LastPositions = a.Bodies |> List.map (fun b -> b.Id, b.At) |> Map.ofList
                 }
+            // `StructureObserver.observeRoom` (`game/structures.js`) refuses
+            // an observer not ours and a room past OBSERVER_RANGE.
+            Observed =
+                ours
+                |> List.choose (function
+                    | ObserveRoom(observer, target) ->
+                        a.Rooms
+                        |> Map.tryPick (fun name r ->
+                            if
+                                r.Structures
+                                |> List.exists (fun s ->
+                                    s.Id = observer
+                                    && s.Kind = "observer"
+                                    && s.Owner = Some Side.Ours)
+                            then
+                                RoomName.offsetOf name target
+                                |> Option.filter (fun (dx, dy) ->
+                                    max (abs dx) (abs dy) <= Engine.observerRange)
+                                |> Option.map (fun _ -> target)
+                            else
+                                None)
+                    | _ -> None)
+                |> Set.ofList
         }
 
     next,

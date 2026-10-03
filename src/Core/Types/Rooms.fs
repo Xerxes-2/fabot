@@ -63,6 +63,9 @@ type BuiltKind =
     /// store yet; a kind the Refill rules do not name is a kind no hauler
     /// fills, which is what keeps this slice inert until #349's send rule lands.
     | Terminal
+    /// The observer (#484): one per room at RCL8, whose `observeRoom` lends
+    /// vision of one room within `Engine.observerRange` for the next tick.
+    | Observer
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 
