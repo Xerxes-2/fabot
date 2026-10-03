@@ -555,6 +555,60 @@ let mineHaulTests =
                     "a priced trip is a demand, and the trip is the one the Atlas answers"
             }
 
+            test "W17S29's mine prices 46 Thorium in flight over a 14-tick road round trip" {
+                // #497: the live line read "output 20/t → storage 14t: demand
+                // 46". `Output` is the 20W miner's dig per six-tick cycle,
+                // not per tick, so the flow is 20/6 a tick and the T in flight
+                // over the 14-tick trip is 46 — a thirtieth of one 30C/15M load.
+                // Rounded apart (#403), that is one whole body for the mine:
+                // the full container was a ranking failure, not a quota one.
+                // W17S29's geometry: the container (15,43), the Storage
+                // (23,39), a seven-step road leg to the tile beside it; here a
+                // road corridor with the Storage at (19,10), seven steps from
+                // the container's (11,10).
+                let storageAt = { X = 19; Y = 10 }
+
+                let colony =
+                    { mineColony with
+                        Bank = bank 2300 2300
+                        Spatial =
+                            { spatial
+                                  []
+                                  [
+                                      for x in 8..22 ->
+                                          { X = x; Y = 10 }, (if x = 10 then Wall else Plain)
+                                  ] with
+                                Thorium = Map.ofList [ "min-a", 22_000; "can-min", 2000 ]
+                                Cooldowns = Map.ofList [ "ext-a", 0 ]
+                            }
+                            |> withObstacles [ storageAt ]
+                            |> withRoads [ for x in 11..18 -> { X = x; Y = 10 } ]
+                            |> withTargets
+                                [
+                                    "min-a", minePos, Mineral
+                                    "ext-a", minePos, Structure BuiltKind.Extractor
+                                    "can-min", minePost, Structure BuiltKind.Container
+                                    "sto-1", storageAt, Structure BuiltKind.Storage
+                                ]
+                    }
+
+                let row = (decideOn colony).Quotas.HaulerDemand |> List.exactlyOne
+
+                Expect.equal row.Output 20 "the 20W miner digs 20 a cycle"
+
+                Expect.equal
+                    (row.Sinks |> List.map (fun sink -> sink.Trip))
+                    [ Some 14 ]
+                    "seven steps each way on road"
+
+                Expect.equal row.Demand (20 * 14 / Engine.mineralHarvestCycle) "46 T in flight"
+
+                Expect.equal
+                    (quotaOfRow "hauler" colony)
+                    (Some 1)
+                    "and the mine alone is still one whole body"
+            }
+
             test "a mine the colony cannot bank to asks for no haul at all" {
                 // The Storage is the one sink, so a colony with none standing prices
                 // nothing here, the same tick the Thorium pair is not pooled either,

@@ -1011,6 +1011,72 @@ let thoriumLegTests =
                     "the lifted draw is still deeper than the shallowest energy flow"
             }
 
+            test "a Thorium container at nine tenths full is drawn on the Feeding tier" {
+                // Live W17S29 (t930,064): the container at 2,000 and 885 T on
+                // the floor beside it, while all three haulers topped up
+                // extensions that were not empty. Pairwise on the stock
+                // either side of the line; the cluster's spawn holds energy.
+                let colony units =
+                    { mineHaulColony with
+                        Refillables =
+                            [
+                                refillable "spawn-1" 100 BuiltKind.Spawn
+                                refillable "ext-1" 50 BuiltKind.Extension
+                            ]
+                    }
+                    |> withMineStock units
+
+                let rankIn colony task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankIn (colony 1799) (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier StockDraw + rankOfRung TwoRungsUp))
+                    "the premise: under the line the draw stays on the Storage's tier"
+
+                Expect.equal
+                    (rankIn (colony 1800) (Withdraw("can-min", Thorium)))
+                    (Some(priorityOfTier Feeding + rankOfRung TwoRungsUp))
+                    "at nine tenths it is Feeding-tier, with the cliff's two rungs"
+
+                Expect.isLessThan
+                    (rankIn (colony 2000) (Withdraw("can-min", Thorium)) |> Option.get)
+                    (rankIn (colony 2000) (Refill("spawn-1", Energy)) |> Option.get)
+                    "a full container outranks topping up a cluster whose spawn holds energy"
+            }
+
+            test "an empty spawn's refill outranks a full Thorium container and a big pile" {
+                // The colony stays alive first: with the spawn dry the ore
+                // keeps the Storage's tier, under every Feeding refill.
+                let colony =
+                    { mineHaulColony with
+                        Refillables =
+                            [ refillable "spawn-1" Engine.spawnEnergyCapacity BuiltKind.Spawn ]
+                    }
+                    |> withMineStock 2000
+                    |> withMinePile 885
+
+                let rankOf task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+                    |> Option.get
+
+                let refill = rankOf (Refill("spawn-1", Energy))
+
+                Expect.isLessThan
+                    refill
+                    (rankOf (Withdraw("can-min", Thorium)))
+                    "the empty spawn's refill goes before the full container"
+
+                Expect.isLessThan
+                    refill
+                    (rankOf (Pickup("pile-min", Thorium)))
+                    "and before the pile"
+            }
+
             test "the Thorium draw is capped by its own column and not by the energy one" {
                 // The row's cast at this bank is `[4 Carry; 2 Move]` — 200 —
                 // so 600 Thorium is three seats, and the energy the
@@ -1105,11 +1171,10 @@ let thoriumPileTests =
                     "and an energy pile's id has not moved a byte"
             }
 
-            test
-                "a Thorium pile is drawn on the Storage's tier, one rung up; the energy pile is flow" {
+            test "a Thorium pile is drawn one rung up on its tier; the energy pile is flow" {
                 // Pairwise on the resource alone. A pile is the container's
-                // next dig lying on the floor: one intake of one resource,
-                // ranked on the same tier. The rung inside it is neither of
+                // next dig lying on the floor, Feeding-tier unless a spawn is
+                // empty (#497). The rung inside it is neither of
                 // the energy pile's clauses (`drawableTiles` holds
                 // Feeding-tier Withdraws alone, and a hundred units fails
                 // the worth-a-trip line): ore on the floor bleeds
@@ -1128,8 +1193,21 @@ let thoriumPileTests =
 
                 Expect.equal
                     (rankIn (mineHaulColony |> withMinePile 630) (Pickup("pile-min", Thorium)))
+                    (Some(priorityOfTier Feeding + rankOfRung OneRungUp))
+                    "and the season's ore is Feeding-tier, one rung up"
+
+                let dry (colony: ColonyView) =
+                    { colony with
+                        Refillables =
+                            [ refillable "spawn-1" Engine.spawnEnergyCapacity BuiltKind.Spawn ]
+                    }
+
+                Expect.equal
+                    (rankIn
+                        (mineHaulColony |> dry |> withMinePile 630)
+                        (Pickup("pile-min", Thorium)))
                     (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
-                    "and the season's ore is drawn on the Storage's tier, one rung over the bank"
+                    "under an empty spawn it is the Storage's tier, one rung over the bank"
 
                 // The rung is unconditional: no mineral container, so
                 // nothing drawable lies under the pile and the ore is ours
@@ -1142,7 +1220,7 @@ let thoriumPileTests =
                     (rankIn
                         (mineHaulColony |> atMineBank |> withoutMineContainer |> withMinePile 100)
                         (Pickup("pile-min", Thorium)))
-                    (Some(priorityOfTier StockDraw + rankOfRung OneRungUp))
+                    (Some(priorityOfTier Feeding + rankOfRung OneRungUp))
                     "ore on the floor takes the rung with no store under it and no trip's worth in it"
             }
 
@@ -1150,8 +1228,8 @@ let thoriumPileTests =
                 // With the pile above the full container the haulers chased
                 // the small copy all day and never drew the store: draining
                 // the container is what stops the floor filling. Pairwise
-                // on the container's stock, either side of the contact
-                // cliff.
+                // on the container's stock: under the cliff, and at the
+                // nine tenths that lifts it onto the pile's Feeding tier.
                 let matchIn colony =
                     let colony =
                         { colony with
@@ -1170,13 +1248,9 @@ let thoriumPileTests =
                     "a container under the cliff is not bleeding, so the decaying copy goes first"
 
                 Expect.equal
-                    (matchIn (
-                        mineHaulColony
-                        |> withMineStock Tuning.defaults.MineContactCliff
-                        |> withMinePile 600
-                    ))
+                    (matchIn (mineHaulColony |> withMineStock 1800 |> withMinePile 600))
                     (Some(taskId (Withdraw("can-min", Thorium)), MatchFactor.Rank))
-                    "past it the store that is feeding the floor is drained first"
+                    "at nine tenths the store that is feeding the floor is drained first"
             }
 
             test "a pile past the threshold is pooled; one under it is left to decay" {
@@ -1205,6 +1279,37 @@ let thoriumPileTests =
 
                 Expect.equal (seatsAt 600) (Some 3) "six hundred of Thorium is three loads"
                 Expect.equal (seatsAt 200) (Some 1) "one load is one seat"
+            }
+
+            test
+                "a big Thorium pile is picked up on the Feeding tier, over a cluster with energy in it" {
+                // Every pooled pile is past `Tuning.PickupThreshold`'s hundred,
+                // and ore on the floor bleeds: it goes ahead of topping up
+                // extensions that are not empty.
+                let colony =
+                    { mineHaulColony with
+                        Refillables =
+                            [
+                                refillable "spawn-1" 100 BuiltKind.Spawn
+                                refillable "ext-1" 50 BuiltKind.Extension
+                            ]
+                    }
+                    |> withMinePile 885
+
+                let rankOf task =
+                    poolOn colony
+                    |> List.tryPick (fun pooled ->
+                        if pooled.Task = task then Some pooled.Priority else None)
+
+                Expect.equal
+                    (rankOf (Pickup("pile-min", Thorium)))
+                    (Some(priorityOfTier Feeding + rankOfRung OneRungUp))
+                    "the pile is Feeding-tier, one rung up"
+
+                Expect.isLessThan
+                    (rankOf (Pickup("pile-min", Thorium)) |> Option.get)
+                    (rankOf (Refill("spawn-1", Energy)) |> Option.get)
+                    "and outranks the cluster's refill"
             }
 
             test "a pile in a room somebody else owns is nobody's" {

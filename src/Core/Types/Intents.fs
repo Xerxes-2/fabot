@@ -308,7 +308,9 @@ type HaulSink = { Kind: string; Trip: int option }
 
 /// One source container's line in the hauler quota: the output it is
 /// priced at, its sinks, and the demand that line adds to the sum
-/// (output × the mean reachable round trip). Observability only.
+/// (output × the dearest reachable round trip). A mineral container's output
+/// is the miner's dig per six-tick extractor cycle, not per tick, and its
+/// demand is divided by the cycle. Observability only.
 type HaulDemandRow =
     {
         Container: RoomPos

@@ -55,6 +55,10 @@ module Engine =
     /// which a buffer needs no Refill.
     let containerCapacity = 2000
 
+    /// SPAWN_ENERGY_CAPACITY: what a spawn's store holds, so a spawn with
+    /// this much room is empty.
+    let spawnEnergyCapacity = 300
+
     /// STORAGE_CAPACITY: what the Storage's store holds. Read against
     /// stored *energy*, because energy is the only resource this colony
     /// ever holds.

@@ -581,6 +581,19 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         clusterRoom > 0
         && view.Bank.Available < bodyCost (bodyFor haulerPattern view.Bank.Capacity)
 
+    // A spawn holding no energy at all: the one refill the ore never jumps.
+    let spawnEmpty =
+        view.Refillables
+        |> List.exists (fun r ->
+            r.Kind = BuiltKind.Spawn && r.FreeCapacity >= Engine.spawnEnergyCapacity)
+
+    // A mineral container nine tenths full: the miner's next few digs land on
+    // the floor, where the ore bleeds.
+    let overflowing storeId =
+        Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
+        && SpatialInfo.heldIn view.Spatial Thorium storeId * 10
+           >= Engine.containerCapacity * 9
+
     // The ferry's sinks (`ferryBuffers`): what a mother lends a bootstrapping
     // child is written down and bounded.
     let ferrySinks = ferryBuffers view
@@ -757,6 +770,13 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // Ore in a merely crossed room keeps `StockDraw` and its walk home.
         | Withdraw(storeId, Thorium) when besideTheReactor storeId -> Feeding
         | Pickup(pileId, Thorium) when besideTheReactor pileId -> Feeding
+        // Ore about to land on the floor, or already there, is Feeding (#497):
+        // live W17S29 stood at 2,000 T with 885 on the floor while every
+        // hauler topped up extensions that were not empty. Every pooled pile
+        // is past `Tuning.PickupThreshold`. Not while a spawn is empty: the
+        // colony staying alive comes first.
+        | Withdraw(storeId, Thorium) when overflowing storeId && not spawnEmpty -> Feeding
+        | Pickup(_, Thorium) when not spawnEmpty -> Feeding
         // The mine haul ranks at the Storage's tier: an empty hauler beside
         // the mine must not take the season's ore ahead of the energy the
         // spawn is waiting on. Asked before the kind, because the store it
@@ -772,9 +792,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
                 if clusterStarved then Feeding else StockDraw
             else
                 Feeding
-        // A Thorium pile ranks where the Thorium container does: it is that
-        // container's next dig, landed on the floor because the store was
-        // full. Both arms spelled: a third resource is a build error here.
+        // Under an empty spawn a Thorium pile ranks where the Thorium container
+        // does: it is that container's next dig, landed on the floor because
+        // the store was full. Both arms spelled: a third resource is a build
+        // error here.
         | Pickup(_, Thorium) -> StockDraw
         // A pile is flow and not stock: the haul cycle's energy lying where it
         // fell.
@@ -823,7 +844,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         tasks
         |> List.choose (fun task ->
             match task with
-            | Withdraw(storeId, _) when tierOf task = Feeding ->
+            | Withdraw(storeId, Energy) when tierOf task = Feeding ->
                 SpatialInfo.placementOf view.Spatial storeId
             | _ -> None)
         |> Set.ofList
