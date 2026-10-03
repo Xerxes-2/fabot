@@ -1173,21 +1173,40 @@ let private withAssaults
                 |> List.tryFind (snd >> (<>) Medic)
                 |> Option.bind (fun (name, _) -> tileOf name |> Option.map (fun tile -> name, tile))
 
+            let held = members |> List.choose (fun (name, _) -> tileOf name) |> Set.ofList
+
+            // Whether a cast this far from the leader has a step nearer it:
+            // onto a free tile off the border and off the front, which is
+            // the sappers'. In a one-tile corridor the file's tail has none,
+            // and holding for it holds for good (live t930,290). Across a
+            // border it is still walking in.
+            let closes (at: RoomPos) (tile: RoomPos) =
+                tile.Room <> at.Room
+                || besideIn tile
+                   |> Set.exists (fun step ->
+                       edgeGap (RoomPos.pos step) > 0
+                       && not (Set.contains step held)
+                       && not (Set.contains step front)
+                       && RoomPos.range step at < RoomPos.range tile at)
+
             // Strung out under fire, the squad's medics cannot reach the body
             // the towers pick: every cast within two of the leader, or the
             // leader holds its tile and the rest close on it: at home, in the
-            // room or at its crossing. In the rooms between it holds only for
-            // a broken file: a one-tile corridor fits no four within two of
-            // one.
+            // room or at its crossing — never on the front, where it works,
+            // and only for a cast with a step nearer it. In the rooms between
+            // it holds only for a broken file: a one-tile corridor fits no
+            // four within two of one.
             let strung =
                 match leader with
+                | Some(_, at) when Set.contains at front -> false
                 | Some(name, at) when at.Room = home || at.Room = room || atCrossingInto room at ->
                     members
                     |> List.exists (fun (other, _) ->
                         other <> name
                         && tileOf other
-                           |> Option.bind (rangeAcross at)
-                           |> Option.forall (fun r -> r > squadSpread))
+                           |> Option.forall (fun tile ->
+                               rangeAcross at tile
+                               |> Option.forall (fun r -> r > squadSpread && closes at tile)))
                 | Some _ -> not (linked view members)
                 | None -> false
 
@@ -1196,11 +1215,25 @@ let private withAssaults
                 | Some(_, at) when strung -> Set.add at (besideIn at)
                 | _ -> front
 
-            // Beside the leading sapper, off the front it works from.
+            // Beside the leading sapper, off the front it works from; and
+            // while the leader is short of the front, beside the front and
+            // the leader's own tile too: a medic the file put between the two
+            // trades places with the leader for nothing and steps through to
+            // the far side of the target, rather than standing in its way.
             let behind =
                 match leader with
                 | Some(_, tile) ->
-                    match Set.difference (besideIn tile) front with
+                    let besideFront =
+                        if strung || Set.contains tile front then
+                            Set.empty
+                        else
+                            front
+                            |> Seq.collect besideIn
+                            |> Seq.filter (fun step -> edgeGap (RoomPos.pos step) > 0)
+                            |> Set.ofSeq
+                            |> Set.add tile
+
+                    match Set.difference (Set.union (besideIn tile) besideFront) front with
                     | clear when Set.isEmpty clear -> besideIn tile
                     | clear -> clear
                 | None -> rally

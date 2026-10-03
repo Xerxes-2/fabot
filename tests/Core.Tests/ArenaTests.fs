@@ -2015,13 +2015,12 @@ let private linkWalk () =
     |> List.map room
 
 /// The shipped link assault (#496, from the south #494), from its caster:
-/// W15S28 as it stands live, its four casts standing south-east of its
-/// spawns, every room of the walk loaded; Trepidimous raising safe mode
+/// W15S28 as it stands live, its four casts — sapper, sapper, medic, medic —
+/// standing on `tiles` — `holding` the Assault already, as a squad on its
+/// walk does — every room of the walk loaded; Trepidimous raising safe mode
 /// wherever struck or not. Run until the link is down and no body of ours is
 /// in W18S26, every body of ours is dead, or `ticks` are spent.
-let private linkProbe (panics: bool) (ticks: int) =
-    let w15s28 x y = RoomPos.at "W15S28" { X = x; Y = y }
-
+let private linkProbeFrom (tiles: RoomPos list) (holding: bool) (panics: bool) (ticks: int) =
     let colonies =
         [
             { colony "W15S28" with
@@ -2031,13 +2030,14 @@ let private linkProbe (panics: bool) (ticks: int) =
 
     let squad =
         [
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (30, 38)
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (31, 38)
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (30, 39)
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (31, 39)
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block
         ]
-        |> List.mapi (fun i (row, block, (x, y)) ->
-            body $"{row}-889000{i + 1}-Spawn3" Side.Ours block (w15s28 x y) None)
+        |> List.zip tiles
+        |> List.mapi (fun i (at, (row, block)) ->
+            body $"{row}-889000{i + 1}-Spawn3" Side.Ours block at None)
 
     // Its towers mend nothing: nothing refills them here, and mending
     // through the walk from home would empty them before the squad came.
@@ -2046,7 +2046,22 @@ let private linkProbe (panics: bool) (ticks: int) =
         |> withTowerDuties [ HealHurt; Shoot Nearest ]
         |> fun r -> if panics then panicking r else r
 
-    let start = arena 889_849 ([ w15s28Home (); target ] @ linkWalk ()) colonies squad
+    let start =
+        arena 889_849 ([ w15s28Home (); target ] @ linkWalk ()) colonies squad
+        |> fun a ->
+            if holding then
+                { a with
+                    Carried =
+                        { a.Carried with
+                            Assignments =
+                                squad
+                                |> List.map (fun b ->
+                                    b.Id, Fabot.Core.Decide.Facts.taskId (Assault "W18S26"))
+                                |> Map.ofList
+                        }
+                }
+            else
+                a
 
     let over (a: Arena) =
         let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
@@ -2061,6 +2076,20 @@ let private linkProbe (panics: bool) (ticks: int) =
 
     let final, trace = start |> runUntil over ticks
     start, final, trace
+
+/// The link raid from its four casts' tiles south-east of W15S28's spawns.
+let private linkProbe (panics: bool) (ticks: int) =
+    let tiles =
+        [ 30, 38; 31, 38; 30, 39; 31, 39 ]
+        |> List.map (fun (x, y) -> RoomPos.at "W15S28" { X = x; Y = y })
+
+    linkProbeFrom tiles false panics ticks
+
+/// The link raid's casts on W18S26's south corridor, the one row between its
+/// south line and the exit, sappers first, at these x, holding the Assault.
+let private inCorridor (xs: int list) (panics: bool) (ticks: int) =
+    let tiles = xs |> List.map (fun x -> RoomPos.at "W18S26" { X = x; Y = 48 })
+    linkProbeFrom tiles true panics ticks
 
 /// Odiodin's garrison outside W17S25's west line, walking in for the room's
 /// west end (#482).
@@ -2827,6 +2856,29 @@ let arenaDefenceTests =
                              tick <= raised.Value + 3 || s.At.Room <> "W18S26"))
                         $"{b.Id} out within three ticks of it\n{failure}"
             }
+
+            // Live t930,260: the leader beside the breach, a medic four back
+            // down the one-tile corridor; the file shoved the leader east off
+            // the breach to the corridor's end at x29 and held there for good.
+            for name, xs in
+                [
+                    "the leader at the breach, a medic four back (live t930,260)",
+                    [ 24; 23; 22; 20 ]
+                    "the file shoved east to the corridor's end (live t930,290)", [ 29; 28; 27; 26 ]
+                ] do
+                test $"scenario 8c: in W18S26's south corridor, {name}: the line falls" {
+                    let start, _, trace = inCorridor xs false 600
+                    let failure = describe trace
+                    let fell = firstFallen (Set.singleton southBreach.Id) trace
+
+                    // Measured: down at t311 and t314, both sappers on it —
+                    // the line's hits over two sappers' dismantle.
+                    Expect.isSome fell $"breached\n{failure}"
+                    Expect.isLessThan fell.Value 330 $"both sappers at it\n{failure}"
+
+                    for b in start.Bodies do
+                        Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                }
         ]
 
 /// W13S28 at RCL8 with its observer, and W14S27 declared a colony of ours
