@@ -211,6 +211,9 @@ type IController =
     abstract sign: ISign
     /// Ticks of safe mode remaining; undefined when safe mode is off.
     abstract safeMode: int
+    /// Ticks before `activateSafeMode` is no longer refused; undefined when
+    /// no cooldown runs. Defined on a controller nobody owns too.
+    abstract safeModeCooldown: int
     abstract pos: IRoomPosition
     abstract activateSafeMode: unit -> int
 

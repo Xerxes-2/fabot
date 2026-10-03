@@ -7,6 +7,12 @@ module Fabot.Core.Decide.Emitter
 open Fabot.Core
 open Fabot.Core.Types
 
+/// The bodies that run from a Threat: Flee's body gate, and the mover's, which
+/// walks them round a Reach (#472). A Work-heavy body cannot run (the answer
+/// for its Post is a rampart), and a Fighter will not.
+let internal runsFromThreats atlas (creep: CreepInfo) =
+    not (isFighterBody creep) && not (Atlas.workHeavy atlas creep.Name)
+
 /// Whether a creep can usefully work this Task right now: the body must be able
 /// to do it, and its energy state must call for it. Gates read part arithmetic,
 /// never names or roles. The body gates enforced here: ADR-0016 (a Work-heavy
@@ -282,12 +288,10 @@ let internal applicable
     // parts fit a slot (`FightGround.Roles`); how many of each role is the
     // capacity's.
     | Fight room -> Option.isSome (Threats.fightRoleOf threats room creep.Name)
-    // Two bodies are exempt, for opposite reasons: a Work-heavy body cannot run
-    // (the answer for its Post is a rampart), and a Fighter will not. Without
-    // the second a guard on the ring is offered both Safety-tier Tasks and kept
-    // in the fight by travel cost alone, so the tick a raid steps toward it the
-    // body bought to stand still walks away.
-    | Flee -> not (isFighterBody creep) && not heavy && standsInReach threats atlas creep.Name
+    // Without the Fighter exemption a guard on the ring is offered both
+    // Safety-tier Tasks and kept in the fight by travel cost alone, so the tick
+    // a raid steps toward it the body bought to stand still walks away.
+    | Flee -> runsFromThreats atlas creep && standsInReach threats atlas creep.Name
 
 /// The action Intent a Task asks of a creep, and `None` where this tick asks
 /// for none: Flee is movement and nothing else, and Reclaim withholds its act

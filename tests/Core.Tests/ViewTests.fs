@@ -53,6 +53,7 @@ let private control owner : RoomControlInfo =
         Owner = owner
         Reservation = None
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 
@@ -102,6 +103,7 @@ let private ourColony spawnName level energy (name, facts: RoomFacts) =
                     TicksToDowngrade = 20000
                     SafeModeAvailable = 1
                     SafeModeActive = false
+                    SafeModeCooldownUntil = 0
                 }
         Spawns =
             [

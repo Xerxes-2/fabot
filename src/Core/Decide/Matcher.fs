@@ -21,6 +21,7 @@ let matchCreeps
     (verbose: Set<string>)
     : Assignments * Verdict list =
     let byId = pool |> List.map (fun p -> taskId p.Task, p) |> Map.ofList
+    let fleeing = Map.tryFind (taskId Flee) byId
 
     // Each living creep's remaining life and its body class, hoisted for the
     // tick: the capacity gate asks them once per holder per judged pair.
@@ -357,6 +358,15 @@ let matchCreeps
                 | None -> release ReleaseReason.TaskGone
                 // An expiring holder, or one of a relief pair, is kept over
                 // capacity where a fresh candidate would be refused.
+                // A holder Flee applies to runs, whatever its Task's ground
+                // (#472): `threatened` reads the Task's tiles, and a body
+                // walking past a raid toward safe ground is struck all the way.
+                | Some pooled when
+                    pooled.Task <> Flee
+                    && fleeing
+                       |> Option.exists (fun flee -> applicable view threats atlas creep flee)
+                    ->
+                    release (ReleaseReason.Rejected RejectReason.Threatened)
                 | Some pooled ->
                     let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 

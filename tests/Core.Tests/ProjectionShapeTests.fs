@@ -86,6 +86,7 @@ let private roomOf name owner (targets: (string * Pos * TargetKind) list) stores
                     Owner = owner
                     Reservation = None
                     SafeMode = false
+                    SafeModeCooldownUntil = 0
                     Sign = None
                 }
     }
@@ -134,6 +135,7 @@ let private homeFacts =
                         TicksToDowngrade = 20_000
                         SafeModeAvailable = 1
                         SafeModeActive = false
+                        SafeModeCooldownUntil = 0
                     }
             Spawns =
                 [

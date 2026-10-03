@@ -116,6 +116,37 @@ let claimTests =
                     "and the one Claim is the candidate's: a home we already own is no candidate"
             }
 
+            test
+                "a candidate under a safe-mode cooldown pools no Claim, and no Reserve, until it ends" {
+                // #474: a claim lands through the cooldown an unclaim started,
+                // and the room then cannot bank its safe mode until it ends, so
+                // the Claim waits. The room stays a candidate meanwhile.
+                let pooledAt (until: int) =
+                    let colony = candidateColony []
+
+                    { colony with
+                        RoomControl =
+                            colony.RoomControl
+                            |> Map.add
+                                "W1N2"
+                                { neutralRoom with
+                                    SafeModeCooldownUntil = until
+                                }
+                    }
+                    |> fun colony -> planTasksOn colony noThreats
+
+                let time = (candidateColony []).Time
+                let cooling = pooledAt (time + 1)
+                let ended = pooledAt time
+
+                Expect.equal
+                    (claimTasks cooling, reserveTasks cooling)
+                    ([], [])
+                    "one tick of cooldown left: nothing to claim, and no Reserve either"
+
+                Expect.equal (claimTasks ended) [ "ctrl-out" ] "the tick it ends, the Claim"
+            }
+
             test "the room this colony has already claimed is neither claimed nor reserved" {
                 // The tick the claim lands (#181): `reserveController` and
                 // `claimController` are both refused on a room with an owner, so the
@@ -2405,6 +2436,7 @@ let private raisingWorld level (towers: int list) : World =
                         Owner = Ownership.Ours
                         Reservation = None
                         SafeMode = false
+                        SafeModeCooldownUntil = 0
                         Sign = None
                     }
             Controller =
@@ -2415,6 +2447,7 @@ let private raisingWorld level (towers: int list) : World =
                         TicksToDowngrade = 20000
                         SafeModeAvailable = 1
                         SafeModeActive = false
+                        SafeModeCooldownUntil = 0
                     }
             Spawns =
                 [

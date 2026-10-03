@@ -609,6 +609,53 @@ let safeModeTests =
                 Expect.isEmpty (activations intents) "the room is already protected"
             }
 
+            test "a controller's safe-mode cooldown silences the reflex until it ends" {
+                // #474: the engine refuses `activateSafeMode` while
+                // `safeModeCooldown` runs, so asking each tick of it is a
+                // refusal logged and a tick forced full. Home and nursery alike.
+                let cooling (until: int) (colony: ColonyView) =
+                    { colony with
+                        Controller =
+                            colony.Controller
+                            |> Option.map (fun c -> { c with SafeModeCooldownUntil = until })
+                        NurseryControllers =
+                            colony.NurseryControllers
+                            |> Map.map (fun _ c -> { c with SafeModeCooldownUntil = until })
+                    }
+
+                let fires (colony: ColonyView) =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                let home =
+                    { bareRespawn with
+                        Hostiles = [ hostile [ BodyPart.Claim; Move ] ]
+                    }
+
+                Expect.isEmpty
+                    (fires (cooling (home.Time + 1) home))
+                    "home: one tick of cooldown left"
+
+                Expect.equal (fires (cooling home.Time home)) [ "ctrl-1" ] "home: the tick it ends"
+
+                let nursery =
+                    { nurseryMother with
+                        Hostiles =
+                            [
+                                { hostileAt "h-1" { X = 10; Y = 44 } [ BodyPart.Claim; Move ] with
+                                    Pos = RoomPos.at "W1N2" { X = 10; Y = 44 }
+                                }
+                            ]
+                    }
+
+                Expect.isEmpty (fires (cooling (nursery.Time + 1) nursery)) "nursery: cooling"
+
+                Expect.equal
+                    (fires (cooling nursery.Time nursery))
+                    [ "ctrl-child" ]
+                    "nursery: ended"
+            }
+
             test "a dented Keep with a hostile in the room fires" {
                 // The second arm stands on its own: this hostile carries no CLAIM, so
                 // only the damage speaks. Each in turn; the tower is the
@@ -1808,6 +1855,96 @@ let fleeTests =
                     verdicts
                     (Verdict.Matched("w1", taskId Flee, MatchFactor.Rank))
                     "and rank is what decided it against the deadline Upgrade"
+            }
+
+            test "a holder whose Task's ground is safe still flees when it stands in a Reach itself" {
+                // #472: the pioneer walking for a site beyond a parked raid kept
+                // its Build, the site's ground being clear, and was struck five
+                // ticks before anything asked whether it stood in the Reach.
+                let held = taskId (Refill("spawn-1", Energy))
+
+                let colony =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+
+                Expect.contains
+                    (decideFrom (Map.ofList [ "w1", held ]) colony).Verdicts
+                    (Verdict.Kept("w1", held))
+                    "the premise, with nothing in the room: it keeps its Refill"
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decideFrom
+                        (Map.ofList [ "w1", held ])
+                        (colony |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ])
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("w1", held, ReleaseReason.Rejected RejectReason.Threatened))
+                    "standing in the Reach releases the holder"
+
+                Expect.equal (Map.tryFind "w1" assignments) (Some(taskId Flee)) "and it runs"
+            }
+
+            test "a body Flee applies to walks round a Reach to its work, never into it" {
+                // #472: an open floor, the source walled in at (25,14), its
+                // Seats along y = 15; a melee body at (25,20) whose Reach
+                // (x 22–28, y 17–23) stands between the worker and every
+                // Seat. The straight walk steps into it; the way round does not.
+                let floor =
+                    [
+                        for x in 15..35 do
+                            for y in 15..35 -> { X = x; Y = y }, Plain
+                    ]
+
+                let colony =
+                    { bareRespawn with
+                        Sources = [ source "src-a" ]
+                        Refillables = []
+                        Controller = None
+                        Creeps = [ worker "w1" 0 100 ]
+                        Spatial =
+                            spatial
+                                [ "src-a", { X = 25; Y = 14 } ]
+                                (({ X = 25; Y = 14 }, Wall) :: floor)
+                            |> withCreepsAt [ "w1", { X = 25; Y = 24 } ]
+                    }
+
+                let offset =
+                    function
+                    | Top -> 0, -1
+                    | TopRight -> 1, -1
+                    | Right -> 1, 0
+                    | BottomRight -> 1, 1
+                    | Bottom -> 0, 1
+                    | BottomLeft -> -1, 1
+                    | Left -> -1, 0
+                    | TopLeft -> -1, -1
+
+                let stepOf (view: ColonyView) =
+                    match moveIntents (decideOn view).Intents with
+                    | [ "w1", direction ] ->
+                        let dx, dy = offset direction
+                        { X = 25 + dx; Y = 24 + dy }
+                    | moves -> failtest $"one move for w1: {moves}"
+
+                Expect.equal
+                    (stepOf colony).Y
+                    23
+                    "the premise, with nothing in the room: straight up the floor"
+
+                let step =
+                    stepOf (
+                        colony |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+                    )
+
+                Expect.isGreaterThan
+                    (max (abs (step.X - 25)) (abs (step.Y - 20)))
+                    3
+                    $"the step stays out of the Reach: {step}"
             }
 
             test "a holder the vision grace would keep still flees out of a Reach" {

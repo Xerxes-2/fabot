@@ -1215,6 +1215,7 @@ let private squareWorld (owner: string option) (reserved: bool) =
                                                 Username = "Trepidimous"
                                             }
                                     SafeMode = false
+                                    SafeModeCooldownUntil = 0
                                     Sign = None
                                 }
                         else

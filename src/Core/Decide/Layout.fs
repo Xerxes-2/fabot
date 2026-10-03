@@ -41,9 +41,9 @@ let private hostilesAtHome (view: ColonyView) : HostileInfo list =
 /// armed hostile in the room, unless one armed body of ours there wins the
 /// exchange alone (`Quota.homeHolds`, #448), and only while `guarded` — a
 /// Nursery's is a begun site, so a squad crossing an empty claimed room does
-/// not spend the shard's one activation. The gates are the stock, and no
-/// safe mode running here or in any other room of ours: the engine runs one
-/// per shard.
+/// not spend the shard's one activation. The gates are the stock, no cooldown
+/// running on the controller (#474), and no safe mode running here or in any
+/// other room of ours: the engine runs one per shard.
 /// Stateless on purpose: one tick's hits, never a comparison against the
 /// last tick's.
 let private safeModeIn
@@ -57,6 +57,7 @@ let private safeModeIn
     if
         controller.SafeModeAvailable > 0
         && not controller.SafeModeActive
+        && controller.SafeModeCooldownUntil <= view.Time
         && not view.SafeModeRunning
     then
         // That room and no other (#201): a claimer in an outpost is tapping a

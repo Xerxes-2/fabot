@@ -30,6 +30,7 @@ let private moveIntentFor
     (threats: Threats)
     atlas
     (creep: string)
+    (runs: bool)
     (at: RoomPos)
     (task: Task option)
     (crossing: string option)
@@ -158,7 +159,25 @@ let private moveIntentFor
             // the candidates were partitioned on.
             intent (rankOf task) (pos :: (inside @ outside)) area
         else
-            match stepToward atlas creep task area |> Option.map RoomPos.pos with
+            // A body that runs from a Threat, standing outside its room's
+            // Reach, walks round it (#472), or waits at its edge where no way
+            // round reaches the work. Flee's own walk is the way out of one.
+            let reach = Threats.reachIn threats room
+
+            let hot (tile: RoomPos) =
+                tile.Room = room && Set.contains (RoomPos.pos tile) reach
+
+            let step =
+                if
+                    runs && task <> Flee && not (Set.isEmpty reach) && not (Set.contains pos reach)
+                then
+                    match Atlas.firstStepAvoiding atlas creep reach area with
+                    | Some step -> Some step
+                    | None -> stepToward atlas creep task area |> Option.filter (hot >> not)
+                else
+                    stepToward atlas creep task area
+
+            match step |> Option.map RoomPos.pos with
             | Some step -> travelling (rankOf task) step
             | None -> parked (rankOf task)
 
@@ -403,6 +422,16 @@ let movementOf
 
     let placed = Atlas.placedCreeps atlas
 
+    // Asked only on a tick with a Reach: the mover's one reader of it.
+    let runners =
+        if Map.isEmpty threats.Reach then
+            Set.empty
+        else
+            view.Creeps
+            |> List.filter (runsFromThreats atlas)
+            |> List.map (fun c -> c.Name)
+            |> Set.ofList
+
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of
     // ours idles in, and none at all for a tick where every body has a Task,
@@ -465,6 +494,7 @@ let movementOf
                     threats
                     atlas
                     name
+                    (Set.contains name runners)
                     at
                     (Map.tryFind name assigned)
                     (Map.tryFind name crossings))

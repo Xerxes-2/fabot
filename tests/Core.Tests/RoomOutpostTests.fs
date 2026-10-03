@@ -293,6 +293,7 @@ let outpostDeclarationTests =
                                                         Owner = Ownership.Ours
                                                         Reservation = None
                                                         SafeMode = false
+                                                        SafeModeCooldownUntil = 0
                                                         Sign = None
                                                     }
                                             Spawns =

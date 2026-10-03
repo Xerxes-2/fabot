@@ -2609,6 +2609,42 @@ let firstStep (atlas: Atlas) (creep: string) (task: Task) (goals: Set<RoomPos>) 
 let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomPos option =
     firstStepVia atlas TravelCost creep goals
 
+/// `firstStepWithin` over a path that never enters `avoid`, tiles of the
+/// creep's own room (#472): a Reach a body Flee applies to walks round.
+/// Flooded fresh and never memoised or recorded for the light tick, being
+/// asked only of a room a Threat stands in. None where every goal in the
+/// creep's room lies in `avoid` or behind it.
+let firstStepAvoiding
+    (atlas: Atlas)
+    (creep: string)
+    (avoid: Set<Pos>)
+    (goalTiles: Set<RoomPos>)
+    : RoomPos option =
+    match creepAt atlas creep with
+    | None -> None
+    | Some(room, pos) ->
+        let goals =
+            RoomPos.tilesIn room goalTiles
+            |> List.filter (fun tile -> not (Set.contains tile avoid))
+
+        if List.isEmpty goals || Set.contains (RoomPos.at room pos) goalTiles then
+            None
+        else
+            let weights = Array.copy (weightsOf atlas room)
+            // A Reach is unclamped: a Threat by the border reaches past it.
+            avoid
+            |> Set.iter (fun tile ->
+                if inGrid tile then
+                    weights.[indexOf tile] <- -1)
+
+            let near =
+                floodPriced weights (occupiedOf atlas room) (factorOf atlas creep) TravelCost pos
+
+            cheapestReached (reachedBy near) goals
+            |> Option.map (fun (_, goal) ->
+                let struct (first, _) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
+                RoomPos.at room (posAt first))
+
 /// The step a creep takes toward a **room**, with nothing placed in it to aim
 /// at: `stepAcross` without its far leg, the exit being the one this room's
 /// own flood reaches cheapest. It reads the border layer and the memoised

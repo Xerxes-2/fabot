@@ -158,6 +158,7 @@ let internal colonyOf (room: LoadedRoom) level =
                     TicksToDowngrade = 20000
                     SafeModeAvailable = 1
                     SafeModeActive = false
+                    SafeModeCooldownUntil = 0
                 })
         // The captured room is this colony's own, so it is owned and its
         // sources are priced at the full rate.
@@ -172,6 +173,7 @@ let internal colonyOf (room: LoadedRoom) level =
                         Owner = Ownership.Ours
                         Reservation = None
                         SafeMode = false
+                        SafeModeCooldownUntil = 0
                         Sign = None
                     }
                 ]
@@ -853,6 +855,7 @@ let internal declaredColony level =
                         Owner = Ownership.Unowned
                         Reservation = None
                         SafeMode = false
+                        SafeModeCooldownUntil = 0
                         Sign = None
                     }
                     control)

@@ -157,6 +157,10 @@ type ControllerInfo =
         SafeModeAvailable: int
         /// True while safe mode is running in the room.
         SafeModeActive: bool
+        /// The first tick `activateSafeMode` is no longer refused on the
+        /// controller's `safeModeCooldown` (#474); at or before now while
+        /// none runs.
+        SafeModeCooldownUntil: int
     }
 
 /// Whose CLAIM parts hold one room's reservation, as the colony reads it:
@@ -249,6 +253,11 @@ type RoomControlInfo =
         /// safe mode shields the room it is in, whoever is looking, and only
         /// a room *we* own shields us. False where no controller stands.
         SafeMode: bool
+        /// `ControllerInfo.SafeModeCooldownUntil`, read off any controller and
+        /// not ours alone: an unclaim leaves the cooldown standing on a room
+        /// nobody owns, and a claim landing through it banks no safe mode
+        /// before it ends (#474). 0 where no controller stands.
+        SafeModeCooldownUntil: int
         /// The text standing on this controller, and **None for a controller
         /// nobody has signed**. A sign is written by any creep adjacent to the
         /// controller and lasts until somebody overwrites it, so it is the one

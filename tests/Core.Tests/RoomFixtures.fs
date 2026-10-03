@@ -792,6 +792,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                     TicksToDowngrade = 20000
                     SafeModeAvailable = 1
                     SafeModeActive = false
+                    SafeModeCooldownUntil = 0
                 }
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
@@ -804,6 +805,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                         Owner = Ownership.Ours
                         Reservation = None
                         SafeMode = false
+                        SafeModeCooldownUntil = 0
                         Sign = None
                     }
                 ]

@@ -357,22 +357,26 @@ let reactorHoldTests =
                 Expect.equal held.Scores (Map.ofList [ "fabot", streakScore 300 ]) "792, all ours"
 
                 // The counterfactual: no garrison standing. The re-claimer the
-                // row casts dies to the longbows on t188 on its way in, and the
-                // two R7s it casts are born on t125 and t131, still walking.
+                // row casts walks round the longbows' Reach (#472) and retakes
+                // the flag on t212, trading it with Claimer1 three times until
+                // it dies on t239; the two R7s it casts are born on t125 and
+                // t131, still walking.
                 let lost, lostTrace = reactorWorld (Some Side.Ours) 500 (stealSquad 2 1) |> run 300
 
                 match claimsIn lostTrace with
-                | (tick, "Claimer1") :: _ ->
+                | (tick, "Claimer1") :: (retaken, by) :: _ ->
                     Expect.equal tick 11 "the claimer walks straight in"
 
                     Expect.equal
+                        (retaken, by)
+                        (212, "reserver-900000-Spawn8")
+                        "and ours walks back in"
+
+                    // Ticks 0–10 at 13, and six more of ours at 3 a tick.
+                    Expect.equal
                         lost.Scores
-                        (Map.ofList
-                            [
-                                "fabot", streakScore tick
-                                "Shibdib", streakScore 300 - streakScore tick
-                            ])
-                        "13 ours, 779 theirs: the streak is one, its owner changed"
+                        (Map.ofList [ "fabot", 31; "Shibdib", streakScore 300 - 31 ])
+                        "31 ours, 761 theirs: the streak is one, its owner changed"
                 | claims -> failtest $"the claimer claims: {claims}\n{describe lostTrace}"
 
                 Expect.equal (reactorOf lost).Owner (Some shibdib) "theirs at the end"

@@ -37,6 +37,7 @@ let controllerAt level =
         TicksToDowngrade = 20000
         SafeModeAvailable = 1
         SafeModeActive = false
+        SafeModeCooldownUntil = 0
     }
 
 /// A room this colony owns: the spawn room's control entry, and the rate
@@ -46,6 +47,7 @@ let ownedRoom: RoomControlInfo =
         Owner = Ownership.Ours
         Reservation = None
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 
@@ -57,6 +59,7 @@ let rivalRoom: RoomControlInfo =
         Owner = Ownership.Rival
         Reservation = None
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 
@@ -67,6 +70,7 @@ let neutralRoom: RoomControlInfo =
         Owner = Ownership.Unowned
         Reservation = None
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 
@@ -88,6 +92,7 @@ let reservedRoom ours ticksToEnd : RoomControlInfo =
                     Username = if ours then "fabot" else "rival"
                 }
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 
@@ -106,6 +111,7 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
                     Username = "Invader"
                 }
         SafeMode = false
+        SafeModeCooldownUntil = 0
         Sign = None
     }
 

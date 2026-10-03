@@ -118,6 +118,15 @@ let private collapseTickOf (structure: IStructure) : int option =
         |> Array.tryFind (fun effect -> effect.effect = effectCollapseTimer)
         |> Option.map (fun effect -> Game.time + effect.ticksRemaining)
 
+/// The absolute tick a controller's safe-mode cooldown ends at, 0 while none
+/// runs. `safeModeCooldown` is relative and undefined once it has run out,
+/// on any controller and not ours alone.
+let private cooldownUntilOf (controller: IController) : int =
+    if isNull (box controller.safeModeCooldown) then
+        0
+    else
+        Game.time + controller.safeModeCooldown
+
 /// The census's stable half, memoised per room name (#384). Building
 /// `TargetKinds` is 6.5% of a profiled tick (`--scenario reactor --level 7`,
 /// four interleaved pairs), and the cost is the `Map.ofArray` build, not the
@@ -470,6 +479,7 @@ let private seenFacts
                         Owner = Ownership.Unowned
                         Reservation = None
                         SafeMode = false
+                        SafeModeCooldownUntil = 0
                         // A room with no controller has nothing to sign.
                         Sign = None
                     }
@@ -478,6 +488,7 @@ let private seenFacts
                         // `safeMode` is the tick count remaining and
                         // undefined otherwise.
                         SafeMode = not (isNull (box c.safeMode))
+                        SafeModeCooldownUntil = cooldownUntilOf c
                         // `sign` is undefined until somebody writes one; the
                         // text is what the rule compares, not who wrote it.
                         Sign =
@@ -529,6 +540,7 @@ let private seenFacts
                     // `safeMode` is the tick count remaining, undefined
                     // when safe mode is off.
                     SafeModeActive = not (isNull (box c.safeMode))
+                    SafeModeCooldownUntil = cooldownUntilOf c
                 }
                 : ControllerInfo)
         Energy =

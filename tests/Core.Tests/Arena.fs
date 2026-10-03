@@ -1021,6 +1021,10 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                             |> Option.defaultValue Ownership.Unowned
                         Reservation = None
                         SafeMode = r.Controller |> Option.exists (fun c -> c.SafeModeUntil > a.Time)
+                        SafeModeCooldownUntil =
+                            r.Controller
+                            |> Option.map (fun c -> c.SafeModeCooldown)
+                            |> Option.defaultValue 0
                         Sign = None
                     }
             Controller =
@@ -1033,6 +1037,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         TicksToDowngrade = c.TicksToDowngrade
                         SafeModeAvailable = c.SafeModeAvailable
                         SafeModeActive = c.SafeModeUntil > a.Time
+                        SafeModeCooldownUntil = c.SafeModeCooldown
                     })
             Energy =
                 if List.isEmpty spawns then

@@ -32,15 +32,13 @@ let private roomHasOwner (view: ColonyView) room =
     |> Map.tryFind room
     |> Option.exists (fun control -> control.Owner <> Ownership.Unowned)
 
-/// The controllers a Claim is pooled for this tick, each with the room it
-/// stands in — one spelling for the two rules that read it: the Task pool
-/// offers exactly these and the reserver row hires one body for each. A
+/// The candidate colonies' controllers, each with the room it stands in. A
 /// candidate colony is a declared home this colony does not own yet, and both
 /// halves are needed: the declaration, because no projected fact distinguishes
 /// a room we mean to own from a neighbour we merely mine; and the ownership,
 /// because the tick the claim lands this pool empties itself, with no state
 /// kept.
-let internal claimTargets (view: ColonyView) : (string * string) list =
+let private candidateControllers (view: ColonyView) : (string * string) list =
     let takeable room =
         match Map.tryFind room view.RoomControl with
         | Some control ->
@@ -56,6 +54,19 @@ let internal claimTargets (view: ColonyView) : (string * string) list =
         match SpatialInfo.placementOf view.Spatial id with
         | Some tile when candidate tile.Room -> Some(id, tile.Room)
         | _ -> None)
+
+/// The controllers a Claim is pooled for this tick — one spelling for the two
+/// rules that read it: the Task pool offers exactly these and the reserver
+/// row hires one body for each. Every candidate's but one whose safe-mode
+/// cooldown, as vision reads it this tick, runs past now (#474): a claim
+/// landing through it banks no safe mode the room can spend before it ends.
+/// Vision is the whole memory: a candidate nothing sees is no Claim anyway.
+let internal claimTargets (view: ColonyView) : (string * string) list =
+    let cooling room =
+        Map.tryFind room view.RoomControl
+        |> Option.exists (fun control -> control.SafeModeCooldownUntil > view.Time)
+
+    candidateControllers view |> List.filter (fun (_, room) -> not (cooling room))
 
 /// Whether the named room is this colony's nursery: a declared colony of ours
 /// that has been claimed and has no spawn of its own yet. Three rules read that
@@ -146,7 +157,7 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
 /// disagree about which rooms are ours to work.
 let private outpostControllers (view: ColonyView) : string list =
     let home = view.Controller |> Option.map (fun c -> c.Id)
-    let claimed = claimTargets view |> List.map fst |> Set.ofList
+    let claimed = candidateControllers view |> List.map fst |> Set.ofList
 
     SpatialInfo.idsOfKind view.Spatial Controller
     |> List.filter (fun id ->

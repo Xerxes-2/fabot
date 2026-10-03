@@ -753,6 +753,7 @@ let clocklessTests =
                                             Owner = Ownership.Ours
                                             Reservation = None
                                             SafeMode = false
+                                            SafeModeCooldownUntil = 0
                                             Sign = None
                                         }
                                     ]
