@@ -373,7 +373,7 @@ The tiles a [[threat]] can hurt — its weapon range plus a margin of two, less 
 _Avoid_: danger zone, threat radius
 
 ### Keeper margin
-The tiles masked out of a Source Keeper room's walkable ground within `Tuning.keeperMargin` (six, derived) of every rock a keeper is pinned to, declared by room name and applied to the raw ground and the border ring before any query reads them; a keeper room with none declared is linked to nothing. The hostile list is untouched; the ground is. ADR-0004, ADR-0060, ADR-0062.
+The tiles masked out of a Source Keeper room's walkable ground within `Tuning.keeperMargin` (six, derived) of every rock a keeper is pinned to, and one tile less of every lair it is cast on, declared by room name and applied to the raw ground and the border ring before any query reads them; a keeper room with none declared is linked to nothing. The hostile list is untouched; the ground is. ADR-0004, ADR-0060, ADR-0062.
 _Avoid_: keeper radius, SK exclusion
 
 ### Downgrade deadline

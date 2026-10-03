@@ -324,6 +324,7 @@ let private pairWorld: World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        ArmedSeen = Map.empty
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -4399,10 +4400,11 @@ let private reactorRoom = "W15S25"
 /// six the mask reaches exactly one of W15S26's four rings. The north ring's
 /// nearest declared centre is the mineral at (38,7) and the east ring's the
 /// lair at (42,39), both seven away; the south ring's nearest is ten away;
-/// the west ring loses y ∈ 11..23 and 27..42 to the lairs at (6,17) and
-/// (5,36) and the source at (4,33). So the shipped margin closes no crossing
-/// of the live chain (the `List.pairwise` loop below asserts that), and the
-/// one border six can close is W15S26's west one, facing W16S26.
+/// the west ring loses y ∈ 27..41 to the source at (4,33) and the lair at
+/// (5,36), and the lair at (6,17), masked at five, takes the x = 1 ground
+/// behind y ∈ 12..22. So the shipped margin closes no crossing of the live
+/// chain (the `List.pairwise` loop below asserts that), and the one border it
+/// can close is W15S26's west one, facing W16S26.
 ///
 /// W16S26 has no capture, so its ring is written here. The margin is
 /// declared by room name and is terrain-blind by construction, which is what
@@ -4412,18 +4414,19 @@ let private reactorRoom = "W15S25"
 let private keeperHome = "W16S26"
 
 /// That invented ring: W16S26's east column — the one `Seam.pairsAcross` pairs
-/// with W15S26's x = 0 column — open across y ∈ 19..23 and walled everywhere
-/// else. Those five tiles are the disagreement and the whole of it: W15S26's
-/// own west ring carries them over raw terrain, the lair at (6,17) masks every
-/// one of them at the shipped six, and the eight raw crossings that survive the
-/// mask there (y ∈ 3..10) are walled on this side, so no pair is left.
+/// with W15S26's x = 0 column — open across y ∈ 19..21 and walled everywhere
+/// else. Those three tiles are the disagreement and the whole of it: W15S26's
+/// own west ring carries them over raw terrain, and at the shipped margin the
+/// lair at (6,17) masks every x = 1 tile beside them, so each lands a body
+/// where it can never step again; the raw crossings that keep ground behind
+/// them (y ∈ 3..12, 22..23) are walled on this side, so no pair is left.
 let private homeRing: Map<Pos, Terrain> =
     Map.ofList
         [
             for x in 0..49 do
                 for y in 0..49 do
                     if x = 0 || x = 49 || y = 0 || y = 49 then
-                        { X = x; Y = y }, (if x = 49 && y >= 19 && y <= 23 then Plain else Wall)
+                        { X = x; Y = y }, (if x = 49 && y >= 19 && y <= 21 then Plain else Wall)
         ]
 
 /// The world those five rooms make: a border ring and the ground behind it
@@ -4469,9 +4472,10 @@ let private keeperWorld () : World =
 
 /// The one tuning below that is not the server's, and it is the **control**:
 /// what the refusals are read under is `Tuning.defaults`. Five is the last
-/// margin at which the crossing survives — the lair at (6,17) is six from the
-/// x = 0 column and masks nothing on it below that — so this is the same
-/// fixture with the mask pulled off that one ring and nothing else moved. The
+/// margin at which the crossing survives — the lair at (6,17), masked at four
+/// there, is five from the x = 1 column and masks nothing on it — so this is
+/// the same fixture with the mask pulled off that ground and nothing else
+/// moved. The
 /// margin is a `Tuning` knob and is swept as one here, exactly as
 /// `RoomSeamTests` sweeps it: 1 + 3 + `ReachMargin`, so one is five.
 let private reachingTuning = { Tuning.defaults with ReachMargin = 1 }
@@ -4559,7 +4563,7 @@ let scanSetMaskTests =
 
                 Expect.isTrue
                     (World.linked 0 world keeperHome keeperRoom)
-                    "over raw rings the home's five exits face open ground in the Source Keeper room"
+                    "over raw rings the home's three exits face open ground in the Source Keeper room"
 
                 Expect.isFalse
                     (World.linked (Tuning.keeperMargin Tuning.defaults) world keeperHome keeperRoom)
@@ -4682,10 +4686,12 @@ let scanSetMaskTests =
             test "a join whose every landing is orphaned is no join, and `linked` now says so" {
                 // At `World.linked`'s own altitude, over the border where the
                 // mask takes the whole band: W15S26's x = 49 column, which
-                // faces W14S26 (`RoomName.offsetOf`, #336). The lair at (42,39)
+                // faces W14S26 (`RoomName.offsetOf`, #336). One margin above
+                // the shipped (a lair masked at six), the lair at (42,39)
                 // masks x = 48 for y = 33..45 and stops one tile short of
                 // x = 49, so seven exits survive on the ring with nothing at
-                // all behind them. Read off the rings alone this answered
+                // all behind them; at the shipped margin the lair's five
+                // leaves x = 48 standing. Read off the rings alone this answered
                 // true, and the flood then priced `None`: the #243/#259 silent
                 // failure through a join the scan set had asserted.
                 //
@@ -4738,7 +4744,11 @@ let scanSetMaskTests =
                                 ]
                     }
 
-                let margin = Tuning.keeperMargin Tuning.defaults
+                let margin =
+                    Tuning.keeperMargin
+                        { Tuning.defaults with
+                            ReachMargin = Tuning.defaults.ReachMargin + 1
+                        }
 
                 Expect.equal
                     (Seam.bandBy
@@ -4749,7 +4759,7 @@ let scanSetMaskTests =
                         keeperRoom
                      |> List.length)
                     7
-                    "the premise: the two rings leave seven crossings open at the shipped margin"
+                    "the premise: the two rings leave seven crossings open at that margin"
 
                 Expect.isFalse
                     (World.linked margin world "W14S26" keeperRoom)

@@ -2939,8 +2939,17 @@ let keeperTests =
 
                 Expect.isNonEmpty walkable "the room is ground a body can cross at all"
 
-                for rock in Keepers.centresIn "W15S26" do
-                    for pin in tilesWithin Engine.keeperPin rock do
+                // A rock pins it within one; a lair, where it is cast, holds it on
+                // the lair's own tile until it walks off.
+                let declared = Keepers.centres["W15S26"]
+
+                let pins =
+                    (declared.Rocks
+                     |> List.map (fun rock -> rock, tilesWithin Engine.keeperPin rock))
+                    @ (declared.Lairs |> List.map (fun lair -> lair, [ lair ]))
+
+                for rock, tiles in pins do
+                    for pin in tiles do
                         let reach = Threats.reachIn (threatsIn [ keeper pin ]) "W15S26"
 
                         Expect.isEmpty

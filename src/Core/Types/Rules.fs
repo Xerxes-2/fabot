@@ -532,6 +532,11 @@ type Tuning =
         /// (#450), at most: 100, long enough for a kiter's step out and back,
         /// short enough that one gone for good costs the guard little.
         ExitHoldTicks: int
+        /// How long a room an armed rival was seen in is walked round
+        /// (`World.ArmedSeen`, #485), counted from the last tick vision showed
+        /// one: 1,500, the longest the body seen can still be standing there,
+        /// as `ThreatMemory` argues. The detour it buys is one crossing at most.
+        HostileRoomMemory: int
         /// How long a [[fight]] stays pooled after its raid was last seen, and
         /// how long after that no squad is cast for the room again: 300, the
         /// duo's two casts (150 and 108 ticks in one oven) and its walk to the
@@ -642,6 +647,7 @@ module Tuning =
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
             ExitHoldTicks = 100
+            HostileRoomMemory = Engine.creepLifetime
             FightHoldTicks = 300
             FightConfirmTicks = 20
             RivalRecheck = 5000
@@ -652,7 +658,8 @@ module Tuning =
 
     /// The **[[keeper margin]]**: the tiles masked out of a Source Keeper
     /// room's walkable ground around every rock a keeper is pinned to
-    /// (`Keepers`). Six today, and **derived rather than chosen** — a function
+    /// (`Keepers`), a lair one tile less (`Keepers.lairMargin`: the keeper
+    /// stands on it, unpinned). Six today, and **derived rather than chosen** — a function
     /// beside the record and not a field in it, so a human who moves
     /// `ReachMargin` moves this too:
     ///
@@ -663,7 +670,7 @@ module Tuning =
     /// body, so at five a crossing courier is inside a Reach and [[flee]]
     /// applies. At six Flee is inapplicable by geometry — for the steady
     /// state, not the ticks after a respawn (`Engine.keeperPin`, #327); past
-    /// seven W15S26 cannot be crossed at all.
+    /// eight W15S26 cannot be crossed at all.
     let keeperMargin (tuning: Tuning) : int =
         Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin
 

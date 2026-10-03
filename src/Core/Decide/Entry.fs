@@ -262,9 +262,13 @@ let decideUnarbitrated
             Atlas.evictRooms atlas m.RivalRooms moved
     | _ -> ()
 
-    // The rooms a rival holds, stamped beside the per-room signatures on
-    // every memo handed on: the tables are this tick's whatever the plan is.
+    memo |> Option.iter (fun m -> Atlas.evictAvoided atlas m.AvoidRooms)
+
+    // The rooms a rival holds, and the rooms a non-fighter goes round, stamped
+    // beside the per-room signatures on every memo handed on: the tables are
+    // this tick's whatever the plan is.
     let rivals = view.Spatial.RivalRooms
+    let avoided = view.Spatial.AvoidRooms
 
     // Whose turn it is to re-plan (#357, `turn`). A stale memo is not a
     // wrong plan, only an old one — the reservations are level-blind and a
@@ -284,6 +288,7 @@ let decideUnarbitrated
             { m with
                 RoomSignatures = signedRooms
                 RivalRooms = rivals
+                AvoidRooms = avoided
             }
         // A colony whose turn has not come (#357) serves its stale plan but
         // carries the tick's own tables on it, stamped with this tick's
@@ -295,6 +300,7 @@ let decideUnarbitrated
                 { stale with
                     RoomSignatures = signedRooms
                     RivalRooms = rivals
+                    AvoidRooms = avoided
                     Walks = walks
                     SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
@@ -309,7 +315,10 @@ let decideUnarbitrated
                         farFields.PerCensus
                         farFields.Narrowed
 
-                { deferred with RivalRooms = rivals }
+                { deferred with
+                    RivalRooms = rivals
+                    AvoidRooms = avoided
+                }
         | None ->
             let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
                 planLayout view atlas
@@ -320,6 +329,7 @@ let decideUnarbitrated
                 Signature = signature
                 RoomSignatures = signedRooms
                 RivalRooms = rivals
+                AvoidRooms = avoided
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings

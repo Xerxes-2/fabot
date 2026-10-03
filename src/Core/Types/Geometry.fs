@@ -393,6 +393,37 @@ module RoomName =
 
             search [ fromRoom, [ fromRoom ] ] (Set.singleton fromRoom)
 
+    /// `routesBy`, going round the rooms `avoided` names where it can (#485):
+    /// while any shortest chain crosses one, the chains that cross none, out
+    /// to one crossing longer, take their place. Where none does inside that
+    /// and the budget, the shortest chains stand, avoided rooms and all. The
+    /// two ends are never avoided: a body walks out of the room it stands in
+    /// and into the room it is going to.
+    let routesAvoiding
+        (linked: string -> string -> bool)
+        (avoided: string -> bool)
+        (maxHops: int)
+        (fromRoom: string)
+        (toRoom: string)
+        : string list list =
+        let chains = routesBy linked maxHops fromRoom toRoom
+
+        let crosses (chain: string list) =
+            chain
+            |> List.exists (fun room -> room <> fromRoom && room <> toRoom && avoided room)
+
+        match chains with
+        | shortest :: _ when List.exists crosses chains ->
+            let clear =
+                routesBy
+                    (fun here there -> (there = toRoom || not (avoided there)) && linked here there)
+                    (min maxHops (List.length shortest))
+                    fromRoom
+                    toRoom
+
+            if List.isEmpty clear then chains else clear
+        | _ -> chains
+
     /// The crossings of `routesBy`'s chains, None where it answers none, off
     /// one visit per room: a hop count needs no chain, and listing every
     /// shortest chain at `Tuning.MaxHops` six is what the counters paid for.

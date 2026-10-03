@@ -283,6 +283,7 @@ type Carried =
         Towered: Set<string>
         ExitWatches: Map<string, ExitWatch>
         Healers: Map<string, HealerSeen list>
+        ArmedSeen: Map<string, int>
         LastPositions: Map<string, RoomPos>
         /// Each colony's Raid log (`Observe.foldRaids`), by home.
         Raids: Map<string, Observe.RaidState>
@@ -709,6 +710,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Towered = Set.empty
                 ExitWatches = Map.empty
                 Healers = Map.empty
+                ArmedSeen = Map.empty
                 LastPositions = Map.empty
                 Raids = Map.empty
             }
@@ -1136,11 +1138,13 @@ let worldOf (a: Arena) : World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        ArmedSeen = Map.empty
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
+    |> World.recallArmed tuning a.Carried.ArmedSeen
 
 /// One colony's Raid log as the arena carries it.
 let private raidsOf (a: Arena) (home: string) =
@@ -1228,6 +1232,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Towered = world.Towered
         ExitWatches = world.ExitWatches
         Healers = world.Healers
+        ArmedSeen = world.ArmedSeen
         Raids = decided |> List.map fst |> Map.ofList
     }
 

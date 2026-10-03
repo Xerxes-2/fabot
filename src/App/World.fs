@@ -887,6 +887,8 @@ let ofGame
         ExitWatches = Map.empty
         // And the healer memory `World.recallHealers`' (#480).
         Healers = Map.empty
+        // And the armed-room memory `World.recallArmed`' (#485).
+        ArmedSeen = Map.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

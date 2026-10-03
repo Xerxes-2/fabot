@@ -1103,18 +1103,19 @@ let keeperSeamTests =
             }
 
             test "a rock near a border does take exit tiles out of that band" {
-                // The west lair at (6,17), the west source at (4,33) and the
-                // south-west lair at (5,36) each reach the x = 0 ring. The
-                // mask's reach over a plain ring; what the server's terrain
-                // does with it is `RoomSeamTests`'.
+                // The west source at (4,33) and the south-west lair at (5,36)
+                // each reach the x = 0 ring; the west lair at (6,17), six off
+                // it and masked at five, does not. The mask's reach over a
+                // plain ring; what the server's terrain does with it is
+                // `RoomSeamTests`'.
                 let alongY (tile: Pos) = tile.Y
 
                 let lost = Set.difference (Set.ofList [ 1..48 ]) (band "W16S26" alongY)
 
                 Expect.equal
                     lost
-                    (Set.union (Set.ofList [ 11..23 ]) (Set.ofList [ 27..42 ]))
-                    "the tiles within six of the west lair at (6,17), the west source at (4,33) and the south-west lair at (5,36)"
+                    (Set.ofList [ 27..41 ])
+                    "the tiles within six of the west source at (4,33) and five of the south-west lair at (5,36)"
 
                 Expect.isNonEmpty
                     (seams (masked ()) "W15S26" "W16S26")

@@ -1279,11 +1279,14 @@ let savePositions (creeps: (string * RoomPos) list) =
 /// The two room facts the heap keeps that a global reset must not forget
 /// (`Memory.fabot.observe.rooms`): who owns each rival room as last seen
 /// (`RoomSighting.Rival`, #444), dark rooms included, and the homes a tower
-/// of ours has stood full in (`World.Towered`, #445).
+/// of ours has stood full in (`World.Towered`, #445), and the last tick an
+/// armed rival was seen in each room a non-fighter walks round
+/// (`World.ArmedSeen`, #485).
 type RoomLatches =
     {
         Rivals: Map<string, string>
         Towered: Set<string>
+        Armed: Map<string, int>
     }
 
 let private nonEmptyString (value: obj) =
@@ -1297,6 +1300,7 @@ let loadRoomLatches () : RoomLatches =
         {
             Rivals = Map.empty
             Towered = Set.empty
+            Armed = Map.empty
         }
 
     leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
@@ -1305,6 +1309,7 @@ let loadRoomLatches () : RoomLatches =
         else
             let rivals = rooms?rivals
             let towered = rooms?towered
+            let armed = rooms?armed
 
             {
                 Rivals =
@@ -1329,14 +1334,28 @@ let loadRoomLatches () : RoomLatches =
                         |> Array.filter nonEmptyString
                         |> Array.map unbox<string>
                         |> Fresh.setOfSeq
+                // Absent on a leaf an older bundle wrote: nothing remembered.
+                Armed =
+                    if
+                        isNull armed
+                        || jsTypeof armed <> "object"
+                        || JS.Constructors.Array.isArray armed
+                    then
+                        Map.empty
+                    else
+                        intMapOf armed
+                        |> Map.toArray
+                        |> Array.filter (fun (room, _) -> room.Length > 0)
+                        |> Fresh.mapOfArray
             })
 
 /// Write the room latches whole: the rivals as a room-to-owner object, the
-/// towers as a room-name array.
+/// towers as a room-name array, the armed rooms as a room-to-tick object.
 let saveRoomLatches (latches: RoomLatches) =
     let raw = createEmpty<obj>
     raw?rivals <- latches.Rivals |> Map.toSeq |> hashOf box
     raw?towered <- latches.Towered |> Set.toArray
+    raw?armed <- latches.Armed |> Map.toSeq |> hashOf box
     writeObserveLeaf "rooms" raw
 
 /// The prior CPU line, or empty when the leaf is absent or unreadable. A row

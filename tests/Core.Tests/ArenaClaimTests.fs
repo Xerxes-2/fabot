@@ -415,8 +415,13 @@ let private claimRows = [ "worker"; "ranger"; "brawler"; "medic" ]
 /// chain to W17S25 by keeper room W16S26 (no keeper standing: our route is
 /// laid round the lairs either way), and W18S25 west of W17S25, where the
 /// raid waits. W17S25 is nobody's, under the live `safeModeCooldown`
-/// unless `cooldown` says otherwise.
-let private claimWorld (cooldown: int) (colonies: Colony list) (bodies: Body list) =
+/// unless `cooldown` says otherwise. `extra` rooms join the chain's.
+let private claimWorldWith
+    (extra: ArenaRoom list)
+    (cooldown: int)
+    (colonies: Colony list)
+    (bodies: Body list)
+    =
     let mother =
         room "W15S28"
         |> withController Ownership.Ours None 7 0
@@ -436,7 +441,7 @@ let private claimWorld (cooldown: int) (colonies: Colony list) (bodies: Body lis
 
     arena
         921_000
-        [
+        ([
             mother
             room "W15S27"
             room "W16S28"
@@ -445,10 +450,14 @@ let private claimWorld (cooldown: int) (colonies: Colony list) (bodies: Body lis
             room "W17S26"
             child
             room "W18S25"
-        ]
+         ]
+         @ extra)
         colonies
         bodies
     |> withCasts claimRows
+
+let private claimWorld (cooldown: int) (colonies: Colony list) (bodies: Body list) =
+    claimWorldWith [] cooldown colonies bodies
 
 /// W15S28's standing economy, as live at t921,063 so far as the arena runs
 /// it: an anchor on each home rock and a hauler standing for the haul (no
@@ -855,6 +864,49 @@ let private independentWorld (towers: Pos list) =
     childWorld towers Engine.towerCapacity Tuning.defaults.RampartFloor westRaid
 
 
+/// The rooms the #485 detour crosses beyond the claim's chain: W15S26 and
+/// W16S25, keeper rooms, and the sector centre between them.
+let private detourRooms = [ room "W15S26"; room "W15S25"; room "W16S25" ]
+
+/// A Source Keeper as `keeper-lairs/tick.js` casts it, holding its tile and
+/// hitting what comes in reach (`keepers/pretick.js`).
+let private keeper (id: string) (at: RoomPos) =
+    body
+        id
+        (Side.Npc "Source Keeper")
+        (parts [ Tough, 17; Move, 13; Attack, 10; RangedAttack, 10 ])
+        at
+        (Some Hold)
+
+/// The ground beside a rock a keeper stands on: the first tile within one of
+/// it that is not wall.
+let private besideRock (r: ArenaRoom) (rock: Pos) =
+    tilesWithin 1 rock
+    |> List.find (fun tile -> tile <> rock && terrainAt r tile <> Wall)
+    |> RoomPos.at r.Capture.RoomName
+
+/// Every keeper of the two keeper rooms beside the rock it adopted, one more
+/// on W16S25's east lair as if just respawned, and Traverse710 by W17S26's
+/// north exit as at t923,853.
+let private detourBodies =
+    [
+        for r in [ room "W15S26"; room "W16S25" ] do
+            for rock in Keepers.centres[r.Capture.RoomName].Rocks do
+                keeper $"Keeper-{r.Capture.RoomName}-{rock.X}-{rock.Y}" (besideRock r rock)
+        keeper "Keeper-W16S25-lair" (RoomPos.at "W16S25" { X = 42; Y = 16 })
+        body "Traverse710" trep trepMelee (RoomPos.at "W17S26" { X = 7; Y = 1 }) (Some Hold)
+    ]
+
+/// An armed rival seen in `room` `ago` ticks before the arena's start: the
+/// World's memory of it, as a sighting would have left it.
+let private remembering (room: string) (ago: int) (a: Arena) =
+    { a with
+        Carried =
+            { a.Carried with
+                ArmedSeen = Map.add room (a.Time - ago) a.Carried.ArmedSeen
+            }
+    }
+
 [<Tests>]
 let arenaClaimTests =
     testList
@@ -1256,5 +1308,39 @@ let arenaClaimTests =
                             | _ -> false))
 
                 Expect.isTrue repaired $"the line repaired\n{describe trace}"
+            }
+
+            test
+                "#485: with Trepidimous' melee seen in W17S26, the claim party walks by the sector centre and W16S25 and no keeper touches it" {
+                let _, _, trace =
+                    claimWorldWith detourRooms 0 beforeClaim (claimer :: motherStaff @ detourBodies)
+                    |> remembering "W17S26" 100
+                    |> claimThen cooled 1
+
+                let m = milestonesOf trace
+
+                // The premise: unseen, the melee is walked past by the cheaper
+                // chain. Measured: the claim at t476 that way, t596 round.
+                let _, _, control =
+                    claimWorldWith detourRooms 0 beforeClaim (claimer :: motherStaff @ detourBodies)
+                    |> claimThen cooled 1
+
+                Expect.isTrue
+                    (pathOf "worker-920100-Spawn3" control
+                     |> List.exists (fun (_, s) -> s.At.Room = "W17S26"))
+                    "the premise: with nothing seen the party walks by W17S26"
+
+                for id in [ "worker-920100-Spawn3"; "worker-920101-Spawn8" ] do
+                    let path = pathOf id trace
+                    let rooms = path |> List.map (fun (_, s) -> s.At.Room) |> List.distinct
+                    let failure = $"{id}: {rooms}\n{m}"
+
+                    Expect.isTrue (m.Entered.ContainsKey id) $"it reaches the controller\n{failure}"
+                    Expect.isFalse (List.contains "W17S26" rooms) $"never by W17S26\n{failure}"
+                    Expect.isTrue (List.contains "W16S25" rooms) $"by W16S25\n{failure}"
+
+                    Expect.isTrue
+                        (path |> List.forall (fun (_, s) -> s.Hits = 100 * List.length pioneerParts))
+                        $"and not one hit lost to a keeper\n{failure}"
             }
         ]

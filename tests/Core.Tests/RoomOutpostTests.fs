@@ -181,20 +181,21 @@ let outpostDeclarationTests =
                     (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
                     [
                         // W17S29's every chain to W17S26 runs through W18S26,
-                        // which Trepidimous owns (#444), and W12S26, five
-                        // columns east, has no chain to it inside the budget.
-                        // W17S25, declared again 2026-10-03, reaches the
-                        // first three by ground once it stands a spawn
+                        // which Trepidimous owns (#444). W12S26, five columns
+                        // east, reaches it by W14S26 into W15S26's east band,
+                        // which a lair masked a tile short of a rock leaves
+                        // open. W17S25, declared again 2026-10-03, reaches
+                        // the first three by ground once it stands a spawn
                         // that can buy a floor.
                         "W18S27", [ "W15S28"; "W17S29"; "W17S25" ]
-                        "W17S26", [ "W13S28"; "W15S28"; "W17S25" ]
+                        "W17S26", [ "W13S28"; "W15S28"; "W12S26"; "W17S25" ]
                         // W15S28's walk dips south round the wall that
                         // W18S27's does, eight crossings, past the budget.
                         "W19S26", [ "W17S29"; "W17S25" ]
                         // Its north edge is wall, so W17S24 (Trepidimous) is
-                        // never the way in; W12S26, six columns and a row
-                        // away by name, has no chain to it inside the budget.
-                        "W17S25", [ "W15S28" ]
+                        // never the way in; W12S26 reaches it in six, by
+                        // W14S26 and the sector centre into W16S25.
+                        "W17S25", [ "W15S28"; "W12S26" ]
                     ]
                     "each harassment room is reached, both ways, by exactly the colonies the ground allows"
 
@@ -226,13 +227,21 @@ let outpostDeclarationTests =
                     (Some 6)
                     "and six from W13S28"
 
+                // A lair masked a tile short of a rock opens W16S25's east
+                // band (y 14..20) off the sector centre; its south band
+                // (x 41..47) stays shut under the source at (46,45).
                 Expect.equal
                     (RoomName.routesBy linked Tuning.defaults.MaxHops "W15S28" "W17S25")
                     [
+                        [ "W15S28"; "W15S27"; "W15S26"; "W15S25"; "W16S25"; "W17S25" ]
                         [ "W15S28"; "W15S27"; "W15S26"; "W16S26"; "W17S26"; "W17S25" ]
                         [ "W15S28"; "W15S27"; "W16S27"; "W16S26"; "W17S26"; "W17S25" ]
                     ]
-                    "W17S25 is five crossings from W15S28, the W17S26 chains one room on"
+                    "W17S25 is five crossings from W15S28, by the sector centre and W16S25 or by W17S26"
+
+                Expect.isFalse
+                    (linked "W16S26" "W16S25" || linked "W16S25" "W16S26")
+                    "W16S26 and W16S25 are joined by no crossing outside a keeper's reach"
 
                 // Neither W18S26 (Trepidimous) nor W19S29 (giaco) is entered.
                 Expect.equal

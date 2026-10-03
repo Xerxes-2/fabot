@@ -360,6 +360,11 @@ type SpatialInfo =
         /// The rooms of this projection another player owns
         /// (`World.rivalHeld`): `Atlas.routes` enters none of them (#444).
         RivalRooms: Set<string>
+        /// The rooms of this projection an armed rival was seen in lately
+        /// (`World.avoidedRooms`, #485): a non-fighter's chain goes round one
+        /// where a chain a crossing longer does (`Atlas.routes`). Soft where
+        /// `RivalRooms` is hard.
+        AvoidRooms: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -378,6 +383,7 @@ module SpatialInfo =
             PublicRamparts = Set.empty
             Owners = Map.empty
             RivalRooms = Set.empty
+            AvoidRooms = Set.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the

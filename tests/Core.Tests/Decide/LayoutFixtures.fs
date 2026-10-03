@@ -295,6 +295,7 @@ let sentinelMemo snapshot =
         Signature = censusSignature snapshot
         RoomSignatures = roomSignatures snapshot
         RivalRooms = snapshot.Spatial.RivalRooms
+        AvoidRooms = snapshot.Spatial.AvoidRooms
         SiteIntents = [ PlaceConstructionSite(RoomPos.at "W1N1" { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
         ServedFootings = []

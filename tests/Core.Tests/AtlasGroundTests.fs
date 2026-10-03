@@ -906,10 +906,18 @@ let keeperMaskTests =
 
                 Expect.isNonEmpty centres "W15S26's rocks are declared"
 
+                // A lair a tile short of a rock: the keeper stands on it,
+                // where at a rock it stands within one.
+                let declared = Keepers.centres["W15S26"]
+
+                let balls =
+                    (declared.Rocks |> List.map (fun rock -> rock, margin))
+                    @ (declared.Lairs |> List.map (fun lair -> lair, Keepers.lairMargin margin))
+
                 let inside =
                     walkable
                     |> Set.filter (fun tile ->
-                        centres |> List.exists (fun centre -> range centre tile <= margin))
+                        balls |> List.exists (fun (centre, reach) -> range centre tile <= reach))
 
                 Expect.isEmpty
                     inside
@@ -918,15 +926,23 @@ let keeperMaskTests =
                 Expect.isTrue
                     (walkable
                      |> Set.exists (fun tile ->
-                         centres |> List.exists (fun centre -> range centre tile = margin + 1)))
+                         declared.Rocks |> List.exists (fun rock -> range rock tile = margin + 1)))
                     "and the tile one step past the margin is ground, so the mask is a margin and not the room"
+
+                Expect.isTrue
+                    (walkable
+                     |> Set.exists (fun tile ->
+                         declared.Lairs
+                         |> List.exists (fun lair ->
+                             range lair tile = Keepers.lairMargin margin + 1)))
+                    "and so is the tile one step past a lair's"
             }
 
             test "a masked tile is impassable to the grid, the ring and the ground alike" {
                 // The mask goes on the raw ground before the walking grid
                 // is copied from it, so every query answers alike.
                 let lair = { X = 35; Y = 11 }
-                let ringTile = { X = 0; Y = 20 }
+                let ringTile = { X = 0; Y = 30 }
 
                 Expect.isTrue
                     (List.contains lair centres)
@@ -948,7 +964,7 @@ let keeperMaskTests =
 
                 Expect.isTrue
                     (Keepers.masked margin "W15S26" ringTile)
-                    "(0,20) is within six of the west lair at (6,17)"
+                    "(0,30) is within six of the west source at (4,33)"
 
                 Expect.isEmpty
                     (seams (masked ()) "W15S26" "W16S26"

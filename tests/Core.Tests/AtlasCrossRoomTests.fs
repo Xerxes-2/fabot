@@ -1912,16 +1912,16 @@ let cornerTests =
                     "and north up its column when the swamp corner is the only one left"
             }
 
-            test "the vision-grace mover still walks the compass's chain" {
+            test "the vision-grace mover walks the cheapest chain too" {
                 let bothCorners = cornersBothOpen ()
 
-                // #297, pinned rather than fixed: the vision-grace mover has
-                // no price to choose a chain with, so it takes the compass's.
-                // Red the day #297 lands.
+                // #297, closed by #485: the room being dark prices no target,
+                // but the walk into it is terrain, so the grace's mover takes
+                // the corner the price takes.
                 Expect.equal
                     (stepTowardRoom bothCorners "w" "W2N2")
-                    (Some(at "W1N1" { X = 25; Y = 24 }))
-                    "north, the compass's corner, while `firstStepFor` above steps west"
+                    (Some(at "W1N1" { X = 24; Y = 25 }))
+                    "west, the cheaper corner, as `firstStepFor` above steps"
             }
 
             test "the round trip is priced on the cheapest chain, both legs of it" {

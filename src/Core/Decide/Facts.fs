@@ -234,7 +234,7 @@ let internal weaponRange (hostile: HostileInfo) : int option = HostileInfo.weapo
 let internal isArmed (hostile: HostileInfo) : bool = HostileInfo.isArmed hostile
 
 /// Whether a hostile is a Source Keeper: the room's own NPC, never a raid.
-let internal isKeeper (hostile: HostileInfo) : bool = hostile.Owner = "Source Keeper"
+let internal isKeeper (hostile: HostileInfo) : bool = HostileInfo.isKeeper hostile
 
 /// Whether a hostile raids a resident room: armed, and not a Source Keeper.
 let internal isRaider (hostile: HostileInfo) : bool =

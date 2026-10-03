@@ -333,6 +333,11 @@ type PlanMemo =
         /// (`SpatialInfo.RivalRooms`, #444), stamped with them: what the next
         /// tick's `Atlas.evictRooms` tells a room newly taken by.
         RivalRooms: Set<string>
+        /// The rooms a non-fighter went round when those tables were filled
+        /// (`SpatialInfo.AvoidRooms`, #485), stamped with them: what the next
+        /// tick's `Atlas.evictAvoided` reads a moved set off. Never in the
+        /// plan's signature, so a raid seen in a transit room replans nothing.
+        AvoidRooms: Set<string>
         SiteIntents: Intent list
         /// The footing targets this plan left unserved (#77). Empty is the
         /// healthy answer and rides here all the same: a channel that says
@@ -412,6 +417,7 @@ module PlanMemo =
             RoomSignatures = roomSignatures
             // Stamped by the caller, with the tables.
             RivalRooms = Set.empty
+            AvoidRooms = Set.empty
             SiteIntents = []
             UnservedFootings = []
             ServedFootings = []

@@ -3,6 +3,16 @@ module Fabot.Core.Atlas
 open Fabot.Core.Types
 open Fabot.Core.Grid
 
+/// Whose walk a chain of rooms is asked for (#485).
+[<RequireQualifiedAccess>]
+type Walker =
+    /// A body that does not fight: its chain goes round a room an armed rival
+    /// was seen in, where one a crossing longer does (`SpatialInfo.AvoidRooms`).
+    | Wary
+    /// A fighter on its way to the fight: the shortest chains, rooms with
+    /// rivals in them and all.
+    | Bold
+
 /// The per-tick, task-aware query interface over the spatial projection.
 /// Total: geometry the projection cannot place gets one documented answer per
 /// query — it never counts against a Task and never blocks an action.
@@ -99,7 +109,8 @@ type Atlas =
             /// is load-bearing: a band asks the *far* room's ground, so the two
             /// entries of a swapped pair are two questions and may answer differently.
             /// The empty list is an answer and is memoised as one.
-            Routes: System.Collections.Generic.Dictionary<string * string, string list list>
+            Routes:
+                System.Collections.Generic.Dictionary<string * string * Walker, string list list>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per (spawner
             /// tile, fatigue factor, goal's room), for bodies the view does not carry:
             /// a lead prices a replacement not yet cast, whose factor is in no creep's
@@ -1488,21 +1499,46 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
 /// the readers that *have* a price (`joinedAlong`, `castWalkTicks`) keep the
 /// cheapest. The search's order survives as the order of this list, so a tie
 /// on the price falls where it always fell.
+///
+/// A `Wary` walker's chains go round a room an armed rival was seen in
+/// (`RoomName.routesAvoiding`, #485); a `Bold` one's do not.
+let routesFor
+    (atlas: Atlas)
+    (walker: Walker)
+    (fromRoom: string)
+    (toRoom: string)
+    : string list list =
+    memoised atlas.Routes (fromRoom, toRoom, walker) (fun () ->
+        let linked here there =
+            Keepers.enterable there
+            && not (Set.contains there atlas.Spatial.RivalRooms)
+            && Seam.joinedBy
+                (ringWalkable atlas here)
+                (ringWalkable atlas there)
+                (groundWalkable atlas there)
+                here
+                there
+
+        match walker with
+        | Walker.Bold -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
+        | Walker.Wary ->
+            RoomName.routesAvoiding
+                linked
+                atlas.Spatial.AvoidRooms.Contains
+                atlas.Tuning.MaxHops
+                fromRoom
+                toRoom)
+
+/// A non-fighter's chains: `routesFor` a `Wary` walker.
 let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list =
-    memoised atlas.Routes (fromRoom, toRoom) (fun () ->
-        RoomName.routesBy
-            (fun here there ->
-                Keepers.enterable there
-                && not (Set.contains there atlas.Spatial.RivalRooms)
-                && Seam.joinedBy
-                    (ringWalkable atlas here)
-                    (ringWalkable atlas there)
-                    (groundWalkable atlas there)
-                    here
-                    there)
-            atlas.Tuning.MaxHops
-            fromRoom
-            toRoom)
+    routesFor atlas Walker.Wary fromRoom toRoom
+
+/// Whose walk a Task asks for: a Guard's or a Fight's is a fighter's.
+let walkerOf (task: Task) : Walker =
+    match task with
+    | Guard _
+    | Fight _ -> Walker.Bold
+    | _ -> Walker.Wary
 
 /// The table with only the entries `keep` answers for, in place. Keys are
 /// collected before anything is removed: a `Dictionary` may not be mutated
@@ -1558,12 +1594,21 @@ let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
     retain atlas.FarFields.PerCensus (fun (_, task, _, _, _, _) -> Set.contains task live)
     retain atlas.FarFields.Narrowed (fun (_, task, _, _, _) -> Set.contains task live)
 
-/// The first of those chains, or `None` where there is none — what a reader
-/// with no price to choose one with takes (`stepTowardRoom`, whose room is
-/// dark and prices nothing, and which is therefore the one mover that can
-/// contradict a price: #297), and the answer `route` gave before #288.
+/// Drop every cross-room spawn walk when the rooms a non-fighter goes round
+/// have moved since `wasAvoided` (the tables' own stamp, #485): a walk is
+/// cast along `routes`, and a room going in or out of the set can move a
+/// chain onto rooms no chain of the old set named. Rare — a room enters on a
+/// raid's first sighting and leaves `Tuning.HostileRoomMemory` later — so
+/// the whole of them and not a reckoning of which.
+let evictAvoided (atlas: Atlas) (wasAvoided: Set<string>) : unit =
+    if wasAvoided <> atlas.Spatial.AvoidRooms then
+        retain atlas.Walks (fun (_, _, goalRoom) -> goalRoom = atlas.Home)
+
+/// The first of a fighter's chains, or `None` where there is none — what a
+/// reader with no price to choose one with takes: a squad's rally, aimed at
+/// the crossing its walk to the fight will take.
 let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
-    routes atlas fromRoom toRoom |> List.tryHead
+    routesFor atlas Walker.Bold fromRoom toRoom |> List.tryHead
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
 /// engine put it down on the tick it crossed. Read off the coordinate alone.
@@ -2107,6 +2152,7 @@ let private joinedOn
 /// chains — the surcharge's doing, and it lasts as long as the crowd does.
 let private joinedAlong
     (atlas: Atlas)
+    (walker: Walker)
     (pricing: Pricing)
     (factor: FatigueFactor)
     (fromRoom: string)
@@ -2121,7 +2167,7 @@ let private joinedAlong
     // all five scenarios.
     let leg = lazy (near ())
 
-    routes atlas fromRoom toRoom
+    routesFor atlas walker fromRoom toRoom
     |> List.fold
         (fun best chain ->
             match best, joinedOn atlas pricing factor fromRoom from leg.Force far chain with
@@ -2150,6 +2196,7 @@ let private pricedAcrossInto
     : (int * Pos) option =
     joinedAlong
         atlas
+        (walkerOf task)
         pricing
         (factorOf atlas creep)
         creepRoom
@@ -2313,7 +2360,7 @@ let private pricedOffField
     | Some standing ->
         let origins = narrowedArea atlas creep task |> RoomPos.tilesIn targetRoom
 
-        routes atlas creepRoom targetRoom
+        routesFor atlas (walkerOf task) creepRoom targetRoom
         |> List.fold
             (fun best chain ->
                 match
@@ -2655,11 +2702,10 @@ let firstStepAvoiding
 /// to price is the one reader that can otherwise walk a body into a tile it
 /// can never leave.
 ///
-/// **It walks the compass's chain while the price walks the cheapest** (#288,
-/// #297): `route` is the first chain of `routes`, so for a target reachable
-/// two ways this mover can aim at the other border than the one the price
-/// won, and which a creep obeys flips with its target room's vision.
-/// `AtlasCrossRoomTests` pins the divergence so closing it turns a test red.
+/// It walks the **cheapest** of a non-fighter's chains (#485): the walk from
+/// where the creep stands carried along each chain into the room, the room
+/// itself unseen being terrain all the same. Chains that agree on the next
+/// room ask no price.
 let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
     match creepAt atlas creep with
     | Some(creepRoom, from) when creepRoom <> room ->
@@ -2667,7 +2713,28 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
         // toward a room two hops out can aim at is the border it reaches first,
         // and the hop after that is the same question asked again from the room
         // it lands in.
-        match route atlas creepRoom room |> Option.bind (List.tryItem 1) with
+        let chains = routes atlas creepRoom room
+
+        let nextRoom =
+            match chains |> List.choose (List.tryItem 1) |> List.distinct with
+            | []
+            | [ _ ] -> chains |> List.tryHead |> Option.bind (List.tryItem 1)
+            | _ ->
+                let factor = factorOf atlas creep
+                let near = fst (walkFloodFrom (weightsOf atlas creepRoom) factor from)
+
+                // The least of each chain's arrival over the room's tiles; a
+                // tie keeps the search's order.
+                chains
+                |> List.map (fun chain ->
+                    Array.min (foldChain atlas factor Walk (creepRoom, near) (hopsAlong chain)),
+                    chain)
+                |> List.filter (fun (arrival, _) -> arrival < unreached)
+                |> List.sortBy fst
+                |> List.tryHead
+                |> Option.bind (snd >> List.tryItem 1)
+
+        match nextRoom with
         | None -> None
         | Some next ->
 

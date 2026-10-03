@@ -876,6 +876,10 @@ module ColonyView =
                         |> List.map fst
                         |> List.filter (World.rivalHeld world)
                         |> Fresh.setOfSeq
+                    AvoidRooms =
+                        let avoided = World.avoidedRooms tuning world
+
+                        worked |> List.map fst |> List.filter avoided.Contains |> Fresh.setOfSeq
                 }
                 // The declared furniture and the errands' targets go in last,
                 // over the whole assembled projection: a declared id and tile

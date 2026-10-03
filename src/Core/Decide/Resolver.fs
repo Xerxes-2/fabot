@@ -91,10 +91,8 @@ let private moveIntentFor
 
     // The graced holder's crossing (#151), asked before the Task branches
     // because it is the one body with neither. No Seam to that room — it is
-    // not next door — and it falls through to the idle rule below. Which chain
-    // it crosses on is the compass's and not the price's, so where the room is
-    // reachable round either of two corners the grace can turn a creep at the
-    // border and the returning vision turn it back (#288, #297).
+    // not next door — and it falls through to the idle rule below. It crosses
+    // on the cheapest chain, as the price does (#297, #485).
     let crossingStep =
         match task, crossing with
         | None, Some room -> Atlas.stepTowardRoom atlas creep room |> Option.map RoomPos.pos

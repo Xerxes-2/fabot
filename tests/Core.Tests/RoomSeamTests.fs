@@ -536,8 +536,10 @@ let keeperMaskTests =
                 // centres. The four lairs are not here because
                 // `capture-room.mjs` keeps sources, controllers and minerals
                 // alone (widening it is #316's), so the lairs stay a hand-read fact.
-                for KeyValue(room, _) in Keepers.centres do
-                    let declared = Keepers.centresIn room |> Set.ofList
+                for KeyValue(room, declaredRocks) in Keepers.centres do
+                    // Among the rocks and not the lairs: the two are masked a
+                    // tile apart.
+                    let declared = Set.ofList declaredRocks.Rocks
                     let rocks = (load room).Rocks
 
                     for _, tile in rocks do
@@ -570,6 +572,25 @@ let keeperMaskTests =
                     "W15S26's mineral at (38,7) above all, which is the tile every orphaned north crossing traces to"
             }
 
+            test
+                "a lair is masked one tile short of a rock, the keeper standing on it only to respawn" {
+                // W16S25's east lair (42,16) feeds the source at (40,17): the
+                // ground a body lands on off W15S25 is six from the lair.
+                let margin = Tuning.keeperMargin Tuning.defaults
+
+                Expect.isFalse
+                    (Keepers.masked margin "W16S25" { X = 48; Y = 20 })
+                    "six from the lair and eight from its source is ground"
+
+                Expect.isTrue
+                    (Keepers.masked margin "W16S25" { X = 47; Y = 20 })
+                    "five from the lair is masked"
+
+                Expect.isTrue
+                    (Keepers.masked margin "W16S25" { X = 40; Y = 23 })
+                    "and six from the source is masked, as it always was"
+            }
+
             test "the mask takes a third of W15S26's ground and the chain still crosses it" {
                 // Three crossings, and only the shortest chains are searched:
                 // no detour round a room the mask closed.
@@ -583,8 +604,8 @@ let keeperMaskTests =
 
                 Expect.equal
                     (walkableTilesIn (atlasAt 2) "W15S26" |> Set.count)
-                    1005
-                    "and 563 of those tiles are inside six of a rock"
+                    1079
+                    "and 489 of those tiles are inside six of a rock or five of a lair"
 
                 Expect.equal
                     (routes (atlasAt 2) "W15S28" "W15S25")
@@ -636,14 +657,14 @@ let keeperMaskTests =
 
             test
                 "a margin that severs the room's middle leaves the chain standing and the price gone" {
-                // Eight is no knob this bot ships, so this asserts a shape
-                // and no count: every crossing the north border keeps has
+                // Nine (a lair at eight) is no knob this bot ships, so this
+                // asserts a shape and no count: every crossing the north border keeps has
                 // ground beside it, `Atlas.routes` answers the full chain,
                 // and the walk over it prices `None`. Nothing yet asks
                 // whether the two bands of a transit room are joined to
                 // each other (#243/#259's silent failure, one layer in).
-                let atlas = atlasAt 4
-                let margin = marginOf 4
+                let atlas = atlasAt 5
+                let margin = marginOf 5
 
                 let north = survivingExits margin (fun tile -> tile.Y = 0)
 
@@ -680,8 +701,8 @@ let keeperMaskTests =
             test "a rock behind a border leaves the crossing and takes the ground it lands on" {
                 // #317's stranding on the terrain it was found over. The
                 // mineral at (38,7) is seven from the y = 0 ring and six
-                // from the y = 1 ground; the lair at (42,39) orphans every
-                // east exit it leaves. This case reads the ring and the
+                // from the y = 1 ground; the lair at (42,39), six from the
+                // x = 48 ground, orphans nothing. This case reads the ring and the
                 // ground beside it, the facts the band is built from, so a
                 // fixture that stopped exhibiting the orphan would red here.
                 let atlas = atlasAt 2
@@ -705,12 +726,14 @@ let keeperMaskTests =
 
                 Expect.equal east.Length 7 "east: seven exits survive the mask"
 
-                Expect.equal
-                    (orphans (fun tile -> tile.X = Seam.exitEdge) |> List.length)
-                    7
-                    "and all seven are orphans: the whole of that border lands a body where it can never step again"
+                Expect.isEmpty
+                    (orphans (fun tile -> tile.X = Seam.exitEdge))
+                    "and none is an orphan: the lair at (42,39), masked a tile short of a rock, leaves the x = 48 ground behind them"
 
-                Expect.isEmpty (orphans (fun tile -> tile.X = 0)) "west: none"
+                Expect.equal
+                    (orphans (fun tile -> tile.X = 0) |> List.map (fun tile -> tile.Y))
+                    [ 19; 20; 21 ]
+                    "west: three, the lair at (6,17) masking the x = 1 ground behind them at five"
             }
 
             test
@@ -752,11 +775,11 @@ let keeperMaskTests =
             }
 
             test "the east band is orphaned end to end, so the model answers no band at all" {
-                // The lair at (42,39) masks x = 48 for y = 33..45 and stops
-                // one tile short of x = 49. The neighbour across that column
-                // is W14S26 (#336), uncaptured, so its side is given as open
-                // as a ring can be.
-                let margin = marginOf 2
+                // One margin above the shipped, where a lair is masked at
+                // six: the lair at (42,39) masks x = 48 for y = 33..45 and
+                // stops one tile short of x = 49. The neighbour across that
+                // column is W14S26 (#336), given as open as a ring can be.
+                let margin = marginOf 3
                 let capture = load "W15S26"
 
                 let ringOf tile =
@@ -793,8 +816,8 @@ let keeperMaskTests =
                 // the grids and `World.linked` off the border maps, side by
                 // side in both directions. Without it the third predicate
                 // can be struck out of `Atlas.routes` and every other case
-                // stays green. Same geometry as above.
-                let margin = marginOf 2
+                // stays green. Same geometry and margin as above.
+                let margin = marginOf 3
                 let capture = load "W15S26"
 
                 let openRing =
@@ -835,6 +858,10 @@ let keeperMaskTests =
                             rooms |> List.map (fun (room, (ring, _)) -> room, ring) |> Map.ofList
                     }
                     |> AtlasFixtures.snapshotWith []
+                    |> fun view ->
+                        { view with
+                            Tuning = { Tuning.defaults with ReachMargin = 3 }
+                        }
                     |> ofView
 
                 let world =
@@ -939,7 +966,7 @@ let keeperMaskTests =
                 // chain search answers, reads the row it filed the second time,
                 // and files another row under other rooms withheld.
                 let hopTable = JoinTable()
-                let tuning = Tuning.defaults
+                let tuning = { Tuning.defaults with ReachMargin = 3 }
                 let hopsOf = World.hopsUnder StandDown.none hopTable tuning world
 
                 for home, room in [ "W15S27", "W14S26"; "W15S27", "W15S26"; "W15S26", "W14S26" ] do
@@ -1481,5 +1508,206 @@ let rivalRoomTests =
                 Expect.isFalse
                     (List.contains "W18S26" (World.rivalRooms (seen None)))
                     "and drops it once seen unowned"
+            }
+        ]
+
+/// W15S28 to W17S25 over the captures, every room a walk of six crossings
+/// could need: the column up to the sector centre, W16S25 and W17S26 beside
+/// it, and the rooms between.
+let private claimRooms =
+    [
+        for x in 15..17 do
+            for y in 25..28 -> $"W{x}S{y}"
+    ]
+
+let private claimWorld () : World =
+    { World.empty with
+        Rooms =
+            claimRooms
+            |> List.map (fun room ->
+                let capture = load room
+
+                room,
+                { RoomFacts.empty with
+                    Border = capture.Border
+                    Layer =
+                        { RoomLayer.empty with
+                            Terrain = capture.Terrain
+                        }
+                })
+            |> Map.ofList
+    }
+
+/// That world's projection from W15S28, these rooms avoided, a worker `w`
+/// standing on `tile` of `room`.
+let private claimAtlas (avoided: Set<string>) (room: string) (tile: Pos) =
+    let world = claimWorld ()
+
+    { SpatialInfo.empty with
+        RoomName = Some "W15S28"
+        Rooms =
+            world.Rooms
+            |> Map.map (fun name facts ->
+                if name = room then
+                    { facts.Layer with
+                        CreepPositions = Map.ofList [ "w", tile ]
+                    }
+                else
+                    facts.Layer)
+        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+        AvoidRooms = avoided
+    }
+    |> AtlasFixtures.snapshotWith [ AtlasFixtures.worker "w" ]
+    |> ofView
+
+/// An armed Trepidimous melee standing in a room at a tick.
+let private trepMelee (room: string) : HostileInfo =
+    {
+        Id = "Traverse710"
+        Owner = "Trepidimous"
+        Pos = RoomPos.at room { X = 7; Y = 1 }
+        Body = [ Move; Attack ]
+        Hits = 200
+        TicksToLive = 1000
+    }
+
+[<Tests>]
+let armedRoomTests =
+    testList
+        "a room an armed rival was seen in (#485)"
+        [
+            test
+                "an armed rival's sighting is remembered for HostileRoomMemory ticks; a keeper's and an ally's are not" {
+                let tuning = Tuning.defaults
+
+                let seenAt time (hostiles: HostileInfo list) previous =
+                    { World.empty with
+                        Time = time
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W17S26",
+                                    { RoomFacts.empty with
+                                        Hostiles = hostiles
+                                    }
+                                    "W16S25", RoomFacts.empty
+                                ]
+                    }
+                    |> World.recallArmed tuning previous
+
+                let seen = seenAt 923_853 [ trepMelee "W17S26" ] Map.empty
+
+                Expect.equal
+                    (World.avoidedRooms tuning seen)
+                    (Set.singleton "W17S26")
+                    "seen this tick"
+
+                let later = seenAt (923_853 + tuning.HostileRoomMemory - 1) [] seen.ArmedSeen
+
+                Expect.equal
+                    (World.avoidedRooms tuning later)
+                    (Set.singleton "W17S26")
+                    "remembered while the room is quiet or dark"
+
+                let gone = seenAt (923_853 + tuning.HostileRoomMemory) [] later.ArmedSeen
+
+                Expect.isEmpty
+                    (World.avoidedRooms tuning gone)
+                    "and forgotten once the memory runs out"
+
+                let keeper =
+                    { trepMelee "W16S25" with
+                        Owner = "Source Keeper"
+                    }
+
+                let ally =
+                    { trepMelee "W17S26" with
+                        Owner = Set.minElement Colony.allies
+                    }
+
+                let unarmed =
+                    { trepMelee "W17S26" with
+                        Body = [ Move; BodyPart.Claim ]
+                    }
+
+                Expect.isEmpty
+                    (World.avoidedRooms tuning (seenAt 1 [ keeper; ally; unarmed ] Map.empty))
+                    "a keeper, an ally and an unarmed body are nothing to walk round"
+            }
+
+            test
+                "an armed sighting in W17S26 sends W15S28's walk to W17S25 by the sector centre and W16S25" {
+                let avoided = claimAtlas (Set.singleton "W17S26") "W15S28" { X = 25; Y = 25 }
+
+                Expect.equal
+                    (routes avoided "W15S28" "W17S25")
+                    [ [ "W15S28"; "W15S27"; "W15S26"; "W15S25"; "W16S25"; "W17S25" ] ]
+                    "the one chain that does not enter W17S26"
+
+                Expect.equal
+                    (routesFor avoided Walker.Bold "W15S28" "W17S25" |> List.length)
+                    3
+                    "a fighter's walk is every shortest chain, as before"
+
+                Expect.equal (walkerOf (Guard "W17S25")) Walker.Bold "a Guard is a fighter's walk"
+                Expect.equal (walkerOf (Fight "W17S25")) Walker.Bold "and so is a Fight"
+
+                Expect.equal
+                    (walkerOf (Claim "ctrl"))
+                    Walker.Wary
+                    "and a claimer's, a pioneer's or a ferry's is not"
+
+                Expect.equal
+                    (routes (claimAtlas Set.empty "W15S28" { X = 25; Y = 25 }) "W15S28" "W17S25"
+                     |> List.length)
+                    3
+                    "the premise: three chains of five crossings with nothing seen"
+            }
+
+            test "the destination is entered, and a room no chain one hop longer avoids is crossed" {
+                let avoided = claimAtlas (Set.singleton "W17S26") "W15S28" { X = 25; Y = 25 }
+
+                Expect.equal
+                    (routes avoided "W15S28" "W17S26")
+                    (routes (claimAtlas Set.empty "W15S28" { X = 25; Y = 25 }) "W15S28" "W17S26")
+                    "a room with a hostile in it is still walked into when it is where the creep is going"
+
+                // Every chain to W17S26 crosses W16S26, and the shortest that
+                // does not is two crossings longer.
+                let throughKeeperRoom =
+                    claimAtlas (Set.singleton "W16S26") "W15S28" { X = 25; Y = 25 }
+
+                Expect.equal
+                    (routes throughKeeperRoom "W15S28" "W17S26")
+                    (routes (claimAtlas Set.empty "W15S28" { X = 25; Y = 25 }) "W15S28" "W17S26")
+                    "a room only a longer detour avoids is crossed as before"
+
+                Expect.equal
+                    (routes avoided "W17S26" "W17S25")
+                    [ [ "W17S26"; "W17S25" ] ]
+                    "and a body standing in it walks out"
+            }
+
+            test
+                "a dark room's walk takes the cheapest chain, and round a room an armed rival was seen in" {
+                // From W15S27 to W17S25 the chains leave north for W15S26 or
+                // west for W16S27; the walk over W16S27 is the cheaper.
+                // Walked step by step to the ring, which says the room it
+                // crosses into: x = 0 faces W16S27, y = 0 W15S26.
+                let rec walk avoided (at: Pos) steps =
+                    if Seam.onRing at || steps = 0 then
+                        at
+                    else
+                        match stepTowardRoom (claimAtlas avoided "W15S27" at) "w" "W17S25" with
+                        | Some step -> walk avoided (RoomPos.pos step) (steps - 1)
+                        | None -> at
+
+                let start = { X = 25; Y = 25 }
+
+                let open' = walk Set.empty start 100
+                Expect.equal open'.X 0 $"with nothing seen it crosses west, into W16S27: {open'}"
+
+                let round = walk (Set.singleton "W17S26") start 100
+                Expect.equal round.Y 0 $"with W17S26 avoided it crosses north, into W15S26: {round}"
             }
         ]

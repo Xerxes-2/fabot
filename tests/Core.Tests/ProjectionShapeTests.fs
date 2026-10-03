@@ -226,6 +226,7 @@ let private world: World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        ArmedSeen = Map.empty
     }
 
 let private sweptView () =

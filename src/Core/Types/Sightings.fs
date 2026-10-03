@@ -60,6 +60,9 @@ module HostileInfo =
     /// yes/no, written once because many rules turn on it.
     let isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
 
+    /// Whether a hostile is a Source Keeper: the room's own NPC, never a raid.
+    let isKeeper (hostile: HostileInfo) : bool = hostile.Owner = "Source Keeper"
+
     /// What a hostile heals a tick, its HEAL parts priced unboosted: the
     /// projection carries no boosts.
     let healing (hostile: HostileInfo) : int =
@@ -440,6 +443,12 @@ type World =
         /// healer bouncing across the exit heals on every other tick. Heap
         /// state in the shell, never Memory.
         Healers: Map<string, HealerSeen list>
+        /// The last tick an armed rival — not an ally, not a Source Keeper —
+        /// stood in each room, kept for `Tuning.HostileRoomMemory` ticks
+        /// (`World.recallArmed`, #485): the rooms a non-fighter's walk goes
+        /// round. Heap state the shell also keeps in Memory, so the deploy
+        /// before a claim does not forget the room it must walk round.
+        ArmedSeen: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -454,6 +463,7 @@ module World =
             Towered = Set.empty
             ExitWatches = Map.empty
             Healers = Map.empty
+            ArmedSeen = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -724,6 +734,43 @@ module World =
         { world with
             Healers = world.Rooms |> Map.toSeq |> Seq.choose remember |> Fresh.mapOfSeq
         }
+
+    /// This tick's world with the armed-room memory laid under it (#485):
+    /// every room an armed rival stands in this tick at this tick, and each
+    /// one remembered from the last `Tuning.HostileRoomMemory` ticks that is
+    /// not. Not bounded by this tick's rooms — a room drops out of the world
+    /// with the declaration that projected it, and the memory is a clock —
+    /// and built by `Fresh`, the map being carried to the next tick.
+    let recallArmed (tuning: Tuning) (previous: Map<string, int>) (world: World) : World =
+        let now =
+            world.Rooms
+            |> Map.toSeq
+            |> Seq.filter (fun (_, facts) ->
+                facts.Hostiles
+                |> List.exists (fun h ->
+                    HostileInfo.isArmed h
+                    && not (HostileInfo.isKeeper h)
+                    && not (Colony.isAlly h.Owner)))
+            |> Seq.map (fun (room, _) -> room, world.Time)
+
+        let kept =
+            previous
+            |> Map.toSeq
+            |> Seq.filter (fun (_, tick) -> world.Time - tick < tuning.HostileRoomMemory)
+
+        { world with
+            ArmedSeen = Seq.append kept now |> Fresh.mapOfSeq
+        }
+
+    /// The rooms an armed rival was seen in within `Tuning.HostileRoomMemory`
+    /// ticks: what a non-fighter's chain goes round where it can
+    /// (`RoomName.routesAvoiding`).
+    let avoidedRooms (tuning: Tuning) (world: World) : Set<string> =
+        world.ArmedSeen
+        |> Map.toSeq
+        |> Seq.filter (fun (_, tick) -> world.Time - tick < tuning.HostileRoomMemory)
+        |> Seq.map fst
+        |> Fresh.setOfSeq
 
     /// The rooms one of our spawns stands in, in room-name order: the other
     /// fact `Colony.living` asks for.
