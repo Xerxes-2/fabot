@@ -779,6 +779,8 @@ let private worldRooms
             @ Errand.roomsProjected errands colony.Home
             @ Salvage.roomsProjected salvage colony.Home
             @ Harass.roomsProjected harassed colony.Home
+            // Its assaults' walks, on each one's own budget (#494).
+            @ Assault.roomsProjected (Assault.worked colony.Assaults) colony.Home
             @ children)
 
     seen @ declared |> List.distinct

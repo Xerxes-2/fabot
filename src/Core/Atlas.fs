@@ -118,6 +118,10 @@ type Atlas =
             /// from (`Assault.Entry`, #493), against that room: a `Siege`
             /// walker's chain crosses into it from there alone.
             Entries: Map<string, string>
+            /// Each [[assault]] room whose assault declares its own hop budget
+            /// (`Assault.MaxHops`, #494), against that budget: a `Siege`
+            /// walker's chain into or out of it is searched to it.
+            SiegeHops: Map<string, int>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per (spawner
             /// tile, fatigue factor, goal's room), for bodies the view does not carry:
             /// a lead prices a replacement not yet cast, whose factor is in no creep's
@@ -386,6 +390,11 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
             view.Assaults
             |> List.choose (fun facts ->
                 facts.Assault.Entry |> Option.map (fun entry -> facts.Assault.RoomName, entry))
+            |> Map.ofList
+        SiegeHops =
+            view.Assaults
+            |> List.choose (fun facts ->
+                facts.Assault.MaxHops |> Option.map (fun hops -> facts.Assault.RoomName, hops))
             |> Map.ofList
         FarFields = farFields
         Walks = walks
@@ -1534,7 +1543,8 @@ let pricedWalksFrom
 /// ADR-0058
 /// Every chain of rooms a walk from one room to another could cross at the
 /// fewest crossings, ends included, and empty where none lies inside the hop
-/// budget: `RoomName.routesBy` over `seams`, out to `Tuning.MaxHops`. A room
+/// budget: `RoomName.routesBy` over `seams`, out to `Tuning.MaxHops` (a
+/// siege's to its assault's own, where it declares one). A room
 /// the projection does not carry has no ring and is joined to nothing, so the
 /// search stays inside the rooms `RoomName.transitBetween` (and a harassment
 /// room's `Via`) put in the world. A room another player owns is entered by
@@ -1577,9 +1587,15 @@ let routesFor
                 here
                 there
 
+        // An assault's own budget, for its siege walk alone (#494).
+        let siegeHops =
+            Map.tryFind toRoom atlas.SiegeHops
+            |> Option.orElse (Map.tryFind fromRoom atlas.SiegeHops)
+            |> Option.defaultValue atlas.Tuning.MaxHops
+
         match walker with
-        | Walker.Bold
-        | Walker.Siege -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
+        | Walker.Bold -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
+        | Walker.Siege -> RoomName.routesBy linked siegeHops fromRoom toRoom
         | Walker.Wary ->
             RoomName.routesAvoiding
                 linked

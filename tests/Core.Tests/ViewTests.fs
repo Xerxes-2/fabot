@@ -5239,6 +5239,7 @@ let private assaultNaming (targets: Pos list) (mode: AssaultMode) (active: bool)
                             Mode = mode
                             Targets = targets
                             Entry = None
+                            MaxHops = None
                             Active = active
                         }
                     ]
@@ -5277,15 +5278,16 @@ let assaultViewTests =
         "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
         [
             test
-                "no declared assault is switched on: the link raid waits for the south approach (#494), the probe stays off (#493)" {
+                "exactly one declared assault is switched on: the link raid from the south (#494); the probe stays off (#493)" {
                 let worked =
                     Colony.declared
                     |> List.collect (fun colony ->
                         Assault.worked colony.Assaults
                         |> List.map (fun assault -> colony.Home, assault))
 
-                Expect.isEmpty
+                Expect.equal
                     worked
+                    [ "W15S28", Assault.w18s26Link ]
                     "the user wants the link raid from the south (2026-10-03); the probe answered and stays off"
 
                 Expect.equal
@@ -5295,25 +5297,46 @@ let assaultViewTests =
             }
 
             test
-                "W18S26's link is declared from W15S28 off its far line, paused for the south approach (#496)" {
+                "W18S26's link is declared from W15S28 off its south line, in by W18S27 on a budget of seven crossings (#494)" {
                 let declaring =
                     Colony.declared
                     |> List.filter (fun colony -> List.contains Assault.w18s26Link colony.Assaults)
                     |> List.map (fun colony -> colony.Home)
 
-                Expect.equal declaring [ "W15S28" ] "declared once, by the colony #490 cast from"
+                Expect.equal declaring [ "W15S28" ] "declared once, by W15S28"
 
                 let link = Assault.w18s26Link
 
                 Expect.equal
-                    (link.RoomName, link.Breach, link.Targets, link.Entry)
-                    ("W18S26", [ { X = 30; Y = 44 } ], [ { X = 25; Y = 41 } ], Some "W17S26")
-                    "the far line at (30,44), then the link at (25,41), in from W17S26"
+                    (link.RoomName, link.Breach, link.Targets, link.Entry, link.MaxHops)
+                    ("W18S26", [ { X = 25; Y = 47 } ], [ { X = 25; Y = 41 } ], Some "W18S27", Some 7)
+                    "the south line at (25,47), then the link at (25,41), in from W18S27, seven crossings"
 
                 Expect.equal
                     (link.Squad, link.Mode, link.Active)
-                    (Assault.breachers, Provoke, false)
-                    "the default squad, paused"
+                    (Assault.breachers, Provoke, true)
+                    "the default squad, on"
+            }
+
+            test
+                "an assault's own hop budget widens its projection to every room a walk inside it could cross; the default's is the rectangle (#494)" {
+                let link = Assault.w18s26Link
+                let projected = Assault.roomsProjected [ link ] "W15S28"
+
+                for room in [ "W15S29"; "W16S29"; "W17S29"; "W18S29"; "W18S28"; "W18S27"; "W18S26" ] do
+                    Expect.contains projected room $"{room}, on the walk by the south"
+
+                let defaulted = Assault.roomsProjected [ { link with MaxHops = None } ] "W15S28"
+
+                Expect.equal
+                    (Set.ofList defaulted)
+                    (Set.ofList (
+                        "W18S26" :: RoomName.transitBetween "W15S28" "W18S26"
+                        @ RoomName.adjacent "W18S26"
+                        @ RoomName.transitBetween "W15S28" "W18S27"
+                     )
+                     |> Set.remove "W15S28")
+                    "no budget of its own: the rectangle to it and to its entry, and the rooms beside it"
             }
 
             test

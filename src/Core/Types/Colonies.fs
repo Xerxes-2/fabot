@@ -751,6 +751,10 @@ type Assault =
         /// faces an exit no shortest chain from home crosses; None for
         /// whichever the chain search finds.
         Entry: string option
+        /// The crossings its siege walk may take, where a breach lies past
+        /// `Tuning.MaxHops` of the colony that casts it (#494); None for the
+        /// tuning's. Its walk alone reads it, and its projection: no other.
+        MaxHops: int option
         /// Whether it runs. Off, nothing is projected, pooled or cast for it:
         /// a human switches it on in a commit.
         Active: bool
@@ -773,16 +777,19 @@ module Assault =
     /// The rooms the assaults add to the scan set: each room and every room a
     /// shortest walk to it could cross (`Errand.roomsProjected`), every room
     /// beside it — the ways a squad falling back may leave it by (#492) —
-    /// and the walk to its entry (#493).
+    /// and the walk to its entry (#493); with a hop budget of its own, every
+    /// room a walk inside that budget could cross (#494).
     let roomsProjected (assaults: Assault list) (home: string) : string list =
         assaults
         |> List.collect (fun assault ->
-            let entry =
-                assault.Entry
-                |> Option.map (fun entry -> RoomName.transitBetween home entry)
-                |> Option.defaultValue []
+            let transit hops toRoom =
+                match assault.MaxHops with
+                | Some budget -> RoomName.transitWithin (budget - hops) home toRoom
+                | None -> RoomName.transitBetween home toRoom
 
-            assault.RoomName :: RoomName.transitBetween home assault.RoomName
+            let entry = assault.Entry |> Option.map (transit 1) |> Option.defaultValue []
+
+            assault.RoomName :: transit 0 assault.RoomName
             @ RoomName.adjacent assault.RoomName
             @ entry)
         |> List.filter ((<>) home)
@@ -804,25 +811,27 @@ module Assault =
             Mode = Provoke
             Targets = []
             Entry = Some "W19S26"
+            MaxHops = None
             Active = false
         }
 
-    /// W18S26's far line again (#496), to hurt its economy: the source at
-    /// (23,43) hauls by the link at (25,41), five tiles inside the breach
-    /// #490's arena took from W17S26 with no loss, and far from the towers.
-    /// Paused (2026-10-03): the user wants it from the south, through W18S27,
-    /// where the line runs farthest from the towers; W15S28 reaches that side
-    /// only past MaxHops (7), so it waits on #494.
+    /// W18S26's link at (25,41), to hurt its economy (#496): the source at
+    /// (23,43) hauls by it, far from the towers. From the south (user,
+    /// 2026-10-03), where the line runs farthest from them: the rampart at
+    /// (25,47) straight below it, two steps from W18S27's exits where the far
+    /// line's were 18. W15S28 reaches it in seven crossings, by W15S29,
+    /// W16S29, W17S29, W18S29, W18S28 and W18S27 (#494).
     let w18s26Link: Assault =
         {
             RoomName = "W18S26"
             Enemy = "Trepidimous"
-            Breach = [ { X = 30; Y = 44 } ]
+            Breach = [ { X = 25; Y = 47 } ]
             Squad = breachers
             Mode = Provoke
             Targets = [ { X = 25; Y = 41 } ]
-            Entry = Some "W17S26"
-            Active = false
+            Entry = Some "W18S27"
+            MaxHops = Some 7
+            Active = true
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
@@ -840,6 +849,7 @@ module Assault =
             Mode = Strike
             Targets = []
             Entry = Some "W18S24"
+            MaxHops = None
             Active = false
         }
 
@@ -1231,9 +1241,8 @@ module Colony =
                 Consignee = None
                 Perimeter = []
                 FirstSpawn = None
-                // W18S26's far line was cast from here (#490), five crossings
-                // in by W17S26; its west line is seven out by W19S26, past
-                // `Tuning.MaxHops`.
+                // W18S26's south line, seven crossings out by W18S27 on the
+                // assault's own budget (#494).
                 Assaults = [ Assault.w18s26Link ]
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),

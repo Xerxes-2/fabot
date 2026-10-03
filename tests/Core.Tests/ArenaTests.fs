@@ -1927,6 +1927,11 @@ let private farLink =
     trepBase().Structures
     |> List.find (fun s -> s.Kind = "link" && s.At = List.head Assault.w18s26Link.Targets)
 
+/// The rampart on W18S26's south line the link raid breaks (#494).
+let private southBreach =
+    trepBase().Structures
+    |> List.find (fun s -> s.Kind = "rampart" && s.At = List.head Assault.w18s26Link.Breach)
+
 /// W15S28 as it stands live at t929,344: RCL7, Spawn3 and Spawn8, the
 /// storage, terminal, three towers and fifty extensions on their tiles.
 let private w15s28Home () =
@@ -1999,34 +2004,28 @@ let private w15s28Home () =
     )
 
 /// Every room the link raid's walk from W15S28 may cross, and the rooms
-/// beside W18S26 a fall-back may leave by: W15–W18 by S25–S28, W19S26.
+/// beside W18S26 a fall-back may leave by: W15–W18 by S25–S29, W19S26.
 let private linkWalk () =
     [
         for x in 15..18 do
-            for y in 25..28 -> $"W{x}S{y}"
+            for y in 25..29 -> $"W{x}S{y}"
         yield "W19S26"
     ]
     |> List.filter (fun name -> name <> "W15S28" && name <> "W18S26")
     |> List.map room
 
-/// The shipped link assault, switched on (#496), from its caster: W15S28 as
-/// it stands live, its four casts standing south-east of its spawns, every
-/// room of the walk loaded; Trepidimous raising safe mode wherever struck or
-/// not. Run until
-/// the link is down and no body of ours is in W18S26, every body of ours is
-/// dead, or `ticks` are spent.
+/// The shipped link assault (#496, from the south #494), from its caster:
+/// W15S28 as it stands live, its four casts standing south-east of its
+/// spawns, every room of the walk loaded; Trepidimous raising safe mode
+/// wherever struck or not. Run until the link is down and no body of ours is
+/// in W18S26, every body of ours is dead, or `ticks` are spent.
 let private linkProbe (panics: bool) (ticks: int) =
     let w15s28 x y = RoomPos.at "W15S28" { X = x; Y = y }
 
     let colonies =
         [
             { colony "W15S28" with
-                Assaults =
-                    [
-                        { Assault.w18s26Link with
-                            Active = true
-                        }
-                    ]
+                Assaults = [ Assault.w18s26Link ]
             }
         ]
 
@@ -2639,18 +2638,43 @@ let arenaDefenceTests =
             }
 
             test
-                "the link raid's squad musters at W15S28 by the exit its walk leaves by, off the spawns and extensions, its walk entering W18S26 from W17S26 and crossing no rival's room" {
+                "the link raid's squad musters at W15S28 by the exit its walk leaves by, off the spawns and extensions, its walk entering W18S26 from W18S27 in seven crossings and crossing no rival's room" {
                 let start, _, _ = linkProbe false 0
                 let view = viewOf start "W15S28"
                 let atlas = Fabot.Core.Atlas.ofView view
                 let chain = Fabot.Core.Atlas.siegeRoute atlas "W15S28" "W18S26"
 
-                Expect.isSome chain "a siege chain inside the hops"
+                Expect.isSome chain "a siege chain inside its own budget"
 
                 Expect.equal
-                    (chain.Value |> List.rev |> List.truncate 2)
-                    [ "W18S26"; "W17S26" ]
-                    $"in from W17S26: {chain}"
+                    (List.length chain.Value - 1,
+                     chain.Value |> List.truncate 2,
+                     chain.Value |> List.rev |> List.truncate 2)
+                    (7, [ "W15S28"; "W15S29" ], [ "W18S26"; "W18S27" ])
+                    $"seven crossings, out by W15S29 and in from W18S27: {chain}"
+
+                // The tuning's six find none (#494).
+                let defaulted =
+                    { start with
+                        Colonies =
+                            [
+                                { colony "W15S28" with
+                                    Assaults =
+                                        [
+                                            { Assault.w18s26Link with
+                                                MaxHops = None
+                                            }
+                                        ]
+                                }
+                            ]
+                    }
+
+                Expect.isNone
+                    (Fabot.Core.Atlas.siegeRoute
+                        (Fabot.Core.Atlas.ofView (viewOf defaulted "W15S28"))
+                        "W15S28"
+                        "W18S26")
+                    "no chain inside the tuning's budget"
 
                 Expect.isTrue
                     (chain.Value
@@ -2691,10 +2715,10 @@ let arenaDefenceTests =
             }
 
             test
-                "scenario 8 (#496): the shipped link assault musters at W15S28, walks out whole, breaks W18S26's far line from W17S26, dismantles the link behind it and walks out, the raid log saying it is taken" {
+                "scenario 8 (#496, #494): the shipped link assault musters at W15S28, walks out whole by the south, breaks W18S26's south line from W18S27, dismantles the link behind it and walks out, the raid log saying it is taken" {
                 let start, final, trace = linkProbe false 1_500
                 let failure = describe trace
-                let fell = firstFallen (Set.singleton farBreach.Id) trace
+                let fell = firstFallen (Set.singleton southBreach.Id) trace
                 let linkDown = firstFallen (Set.singleton farLink.Id) trace
 
                 let out =
@@ -2708,28 +2732,32 @@ let arenaDefenceTests =
                                |> Option.forall (fun (_, s) -> s.At.Room <> "W18S26")))
                     |> Option.map (fun t -> t.Tick)
 
-                // Measured: mustered by W15S28's north exit, out of home at
-                // t68–78, the line down at t694 (the walk from home some 330
-                // ticks on #490's t366), the link at t700 five tiles in, every
-                // cast out of the room by W17S26 at t724, nobody lost.
+                // Measured: mustered by W15S28's south exit, out of home at
+                // t63–66 by W15S29, W16S29, W16S28, W17S28, W17S27 and
+                // W18S27, the line down at t563, the link at t583 round the
+                // walls west of it, every cast out of the room by W18S27 at
+                // t590, nobody lost.
                 Expect.isSome fell $"breached\n{failure}"
                 Expect.isSome linkDown $"the link down\n{failure}"
-                Expect.isLessThan linkDown.Value (fell.Value + 20) "a few steps past the breach"
+                Expect.isLessThan linkDown.Value (fell.Value + 30) "a few steps past the breach"
                 Expect.isSome out $"every cast out of the room\n{failure}"
                 Expect.isLessThan out.Value (linkDown.Value + 40) "straight out once it is down"
 
                 for b in start.Bodies do
                     Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
 
-                // Launched from home whole: every cast leaves W15S28 within a
-                // dozen ticks of the rest — the tail shuffles at the crossing
-                // while the leader holds for it — and goes in by W17S26.
+                // Launched from home whole: every cast leaves W15S28 for good
+                // within a dozen ticks of the rest — the tail shuffles at the
+                // crossing while the leader holds for it; a step onto the exit
+                // at rally, carried over and straight back, is no launch — and
+                // goes in by W18S27.
                 let leftHome =
                     start.Bodies
                     |> List.map (fun b ->
                         pathOf b.Id trace
-                        |> List.tryFind (fun (_, s) -> s.At.Room <> "W15S28")
-                        |> Option.map fst)
+                        |> List.windowed 5
+                        |> List.tryFind (List.forall (fun (_, s) -> s.At.Room <> "W15S28"))
+                        |> Option.map (List.head >> fst))
 
                 Expect.isTrue
                     (leftHome |> List.forall Option.isSome)
@@ -2752,8 +2780,8 @@ let arenaDefenceTests =
 
                     Expect.equal
                         (rooms |> List.takeWhile ((<>) "W18S26") |> List.last)
-                        "W17S26"
-                        $"{b.Id} in from W17S26: {rooms}"
+                        "W18S27"
+                        $"{b.Id} in from W18S27: {rooms}"
 
                 Expect.isTrue
                     (Map.tryFind "W15S28" final.Carried.Raids
@@ -2772,29 +2800,32 @@ let arenaDefenceTests =
             }
 
             test
-                "scenario 8b (#496): Trepidimous safe-modes the link assault's first dismantle on the far line; the link stands" {
+                "scenario 8b (#496, #494): Trepidimous safe-modes the link assault's first dismantle on the south line; the link stands, and the squad steps out losing nobody" {
                 let start, final, trace = linkProbe true 1_000
                 let failure = describe trace
                 let raised = safeModeOn trace
                 let linkDown = firstFallen (Set.singleton farLink.Id) trace
-                let lost = start.Bodies |> List.choose (fun b -> diedOn b.Id trace)
 
                 let stranded =
                     final.Bodies
                     |> List.filter (fun b -> b.Side = Side.Ours && b.At.Room = "W18S26")
 
-                // Measured: safe mode at t391 off the first dismantle; on the
-                // 18 steps out to W17S26 at (0,39), past the falloff with our
-                // heal refused (#492), a sapper stripped of its MOVE dies at
-                // t413 and a medic at t422; the other two out by t418, as the
-                // raid mustered beside W17S26 lost them.
+                // Measured: safe mode at t249 off the first dismantle, from
+                // (24,48) outside the line, the rest of the file still in
+                // W18S27; one step to W18S27's exit, out at t249, where the
+                // far line's 18 cost a sapper and a medic.
                 Expect.isSome raised $"safe mode raised\n{failure}"
                 Expect.isNone linkDown "the link stands"
+                Expect.isEmpty stranded $"nobody left in the room\n{failure}"
 
-                Expect.isLessThanOrEqual
-                    (lost.Length + stranded.Length)
-                    2
-                    $"half the squad at most lost or left in the room\n{failure}"
+                for b in start.Bodies do
+                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+
+                    Expect.isTrue
+                        (pathOf b.Id trace
+                         |> List.forall (fun (tick, s) ->
+                             tick <= raised.Value + 3 || s.At.Room <> "W18S26"))
+                        $"{b.Id} out within three ticks of it\n{failure}"
             }
         ]
 

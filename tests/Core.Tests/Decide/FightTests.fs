@@ -865,6 +865,7 @@ let private assaultingBy squad mode (targets: (string * Pos) list option) bodies
                             Mode = mode
                             Targets = []
                             Entry = None
+                            MaxHops = None
                             Active = true
                         }
                     Targets = targets
@@ -1394,6 +1395,43 @@ let assaultTests =
                 Expect.isNone
                     (entering (Some "W2N2"))
                     "in from a room the projection holds no walk through: no chain"
+            }
+
+            test "an assault's own hop budget bounds its siege walk and no other walk (#494)" {
+                let budgeted hops =
+                    let colony = assaulting []
+
+                    Atlas.ofView
+                        { colony with
+                            Assaults =
+                                colony.Assaults
+                                |> List.map (fun facts ->
+                                    { facts with
+                                        Assault = { facts.Assault with MaxHops = hops }
+                                    })
+                        }
+
+                let none = budgeted (Some 0)
+                let one = budgeted (Some 1)
+                let defaulted = budgeted None
+
+                Expect.equal
+                    (Atlas.siegeRoute one "W1N1" "W1N2")
+                    (Some [ "W1N1"; "W1N2" ])
+                    "a crossing inside it"
+
+                Expect.isNone (Atlas.siegeRoute none "W1N1" "W1N2") "none past it, in"
+                Expect.isNone (Atlas.siegeRoute none "W1N2" "W1N1") "none past it, out"
+
+                for walker in [ Atlas.Walker.Bold; Atlas.Walker.Wary ] do
+                    Expect.equal
+                        (Atlas.routesFor none walker "W1N2" "W1N1")
+                        (Atlas.routesFor defaulted walker "W1N2" "W1N1")
+                        $"a {walker} walk out keeps the tuning's budget"
+
+                    Expect.isNonEmpty
+                        (Atlas.routesFor none walker "W1N2" "W1N1")
+                        $"and finds its chain"
             }
 
             test "a probe Provoke (#493) is capped and cast at one cheap probe and nothing else" {

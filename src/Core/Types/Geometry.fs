@@ -314,6 +314,25 @@ module RoomName =
             ]
         | _ -> []
 
+    /// Every room a walk of at most `hops` crossings could pass through, the
+    /// two ends excluded: `transitBetween`'s rectangle widened on every side
+    /// by half the crossings to spare, since a step out of it is a step back
+    /// in (#494). `transitBetween`'s set where none are to spare.
+    let transitWithin (hops: int) (fromRoom: string) (toRoom: string) : string list =
+        match worldCoordsOf fromRoom, worldCoordsOf toRoom with
+        | Some(fromX, fromY), Some(toX, toY) ->
+            let spare = max 0 ((hops - abs (toX - fromX) - abs (toY - fromY)) / 2)
+
+            [
+                for x in min fromX toX - spare .. max fromX toX + spare do
+                    for y in min fromY toY - spare .. max fromY toY + spare do
+                        let name = nameOfCoords x y
+
+                        if name <> fromRoom && name <> toRoom then
+                            yield name
+            ]
+        | _ -> []
+
     /// **Every** chain of rooms a walk of the fewest possible crossings could
     /// take, ends included, and an empty list where the hop budget or the terrain
     /// leaves none (ADR-0059): a breadth-first search over the name grid,
