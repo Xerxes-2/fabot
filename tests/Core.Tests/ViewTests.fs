@@ -1414,11 +1414,18 @@ let colonyViewTests =
 
                 Expect.isFalse
                     (List.contains "src-child" (idsOf bootstrapping))
-                    "a child with its own spawn digs its own rock"
+                    "a child with its own spawn: its rock is out of her Sources and quotas (#192)"
 
-                Expect.isFalse
-                    (Map.containsKey pile bootstrapping.Spatial.Stores)
-                    "and its floor is its own"
+                // User, 2026-10-04: the child's first bodies are too small to dig.
+                Expect.contains
+                    (bootstrapping.BorrowedSources |> List.map (fun s -> s.Id))
+                    "src-child"
+                    "and borrowed, for her pioneers standing there"
+
+                Expect.equal
+                    (Map.tryFind pile bootstrapping.Spatial.Stores)
+                    (Some 400)
+                    "and the ferry's drop on its floor is theirs to pick up"
             }
         ]
 

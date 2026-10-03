@@ -349,8 +349,8 @@ module ColonyView =
 
         let nurseryWork kind =
             match kind with
-            | Source -> digs
-            | Dropped Energy -> nursery
+            | Source
+            | Dropped Energy -> digs
             | _ -> false
 
         let kinds =
@@ -362,7 +362,7 @@ module ColonyView =
                 || Map.containsKey id ramparts)
 
         let piles =
-            if nursery then
+            if digs then
                 kinds |> Map.filter (fun _ kind -> kind = Dropped Energy)
             else
                 Map.empty

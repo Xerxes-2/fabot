@@ -3643,3 +3643,62 @@ let raisedChildRockTests =
                     "the child's Post is out of the mother's count (#192)"
             }
         ]
+
+/// `ferryMother` raising W1N2 past its nursery before its buffer stands: no
+/// container of the child's, and these bodies of hers in the child.
+let private unbufferedChild (bodies: (CreepInfo * Pos) list) =
+    let mother = ferryMother Bootstrapping
+    let child = SpatialInfo.layerOf mother.Spatial "W1N2"
+
+    { mother with
+        Creeps = bodies |> List.map fst
+        Spatial =
+            { mother.Spatial with
+                TargetKinds = mother.Spatial.TargetKinds |> Map.remove "can-child"
+                Stores = Map.empty
+            }
+            |> withNeighbour
+                "W1N2"
+                { child with
+                    TargetPositions = child.TargetPositions |> Map.remove "can-child"
+                    CreepPositions = bodies |> List.map (fun (c, at) -> c.Name, at) |> Map.ofList
+                }
+    }
+
+[<Tests>]
+let unbufferedChildTests =
+    testList
+        "a raised child with no buffer yet takes the ferry's load beside its controller"
+        [
+            test "the child's controller is the ferry's sink while a Work body of ours stands there" {
+                // User, 2026-10-04: W17S25 stood its spawn, its buffer was a site,
+                // and no ferry crossed at all.
+                let drop = Refill("ctrl-child", Energy)
+
+                Expect.contains
+                    (planTasksOn
+                        (unbufferedChild [ worker "p1" 0 50, { X = 10; Y = 44 } ])
+                        noThreats)
+                    drop
+                    "a pioneer there to pick it up: dropped beside the controller"
+
+                Expect.isFalse
+                    (List.contains drop (planTasksOn (unbufferedChild []) noThreats))
+                    "nobody there: nothing is dropped to decay"
+
+                let dropped =
+                    (decideFrom
+                        (Map.ofList [ "h1", taskId drop ])
+                        (unbufferedChild
+                            [
+                                hauler "h1" 100 0, { X = 10; Y = 45 }
+                                worker "p1" 0 50, { X = 10; Y = 44 }
+                            ]))
+                        .Intents
+
+                Expect.contains
+                    dropped
+                    (DropEnergy "h1")
+                    "beside the controller the hauler drops its load"
+            }
+        ]

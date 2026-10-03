@@ -163,7 +163,7 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
         SpatialInfo.roomOf view.Spatial id
         |> Option.exists (fun room -> Set.contains room rooms)
 
-    let buffers =
+    let containers =
         if Set.isEmpty rooms then
             Set.empty
         else
@@ -179,8 +179,22 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
                 && inRoom rooms id)
             |> Set.ofList
 
+    // A raised child whose buffer is not built yet has its controller for a
+    // sink, delivered by a drop beside it (user, 2026-10-04: W17S25 stood its
+    // spawn and no ferry crossed while the buffer was a site).
+    let controllers =
+        rooms
+        |> Set.filter (fun room -> not (containers |> Set.exists (inRoom (Set.singleton room))))
+        |> Set.toList
+        |> List.collect (fun room ->
+            SpatialInfo.idsOfKindIn view.Spatial.TargetKinds Controller
+            |> List.filter (inRoom (Set.singleton room)))
+        |> Set.ofList
+
+    let buffers = Set.union containers controllers
+
     // A nursery has no store to fill (#473): its spawn site is the sink, and
-    // the delivery a drop beside it (`isNurseryDrop`).
+    // the delivery a drop beside it (`isFerryDrop`).
     let nurseries =
         view.Borrowed.Rooms |> List.filter (isNurseryRoom view) |> Set.ofList
 
@@ -195,10 +209,14 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
         |> Set.ofList
         |> Set.union buffers
 
-/// Whether a ferry sink is a nursery's spawn site, delivered to by a drop
-/// beside it and never by a transfer (#473).
-let internal isNurseryDrop (view: ColonyView) id =
-    Map.tryFind id view.Spatial.TargetKinds = Some(Site BuiltKind.Spawn)
+/// Whether a ferry sink is delivered to by a drop beside it and never by a
+/// transfer: a nursery's spawn site (#473), or a raised child's controller
+/// while its buffer is unbuilt — the only controllers `ferryBuffers` names.
+let internal isFerryDrop (view: ColonyView) id =
+    match Map.tryFind id view.Spatial.TargetKinds with
+    | Some(Site BuiltKind.Spawn)
+    | Some Controller -> true
+    | _ -> false
 
 /// The ferry bodies a mother lends one child room: `Tuning.NurseryFerries` for
 /// a nursery, `Tuning.FerryLoads` for a child already casting. One reading for
@@ -846,12 +864,19 @@ let planTasks
                 partCount creep.Body Work > 0
                 && Atlas.creepTile atlas creep.Name |> Option.exists (fun at -> at.Room = room))
 
+        // A child's controller is dropped beside while its floor holds less
+        // than the buffer would: a container's worth, and no more to decay.
+        let wanted id =
+            match Map.tryFind id view.Spatial.TargetKinds with
+            | Some Controller -> Engine.containerCapacity
+            | _ -> owes id
+
         ferrySinks
         |> Set.toList
         |> List.filter (fun id ->
-            if isNurseryDrop view id then
+            if isFerryDrop view id then
                 SpatialInfo.roomOf view.Spatial id
-                |> Option.exists (fun room -> builderIn room && owes id > lyingIn room)
+                |> Option.exists (fun room -> builderIn room && wanted id > lyingIn room)
             else
                 stored id < Engine.containerCapacity)
         |> List.map (fun id -> Refill(id, Energy))

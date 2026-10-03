@@ -760,12 +760,13 @@ let quotaInputTests =
                     0
                     "nor for a nursery with no spawn site, which has no buffer to fill and no mouth to drink it"
 
-                // The shipped default is the derived one: the Refill that spends a
-                // ferried load stands beside this term, so the body hired has a Task.
+                // The shipped default (user, 2026-10-04: two, a 1,600 load beating a
+                // pioneer's 850): the Refill that spends a ferried load stands beside
+                // this term, so the body hired has a Task.
                 Expect.equal
                     (quotaOf (ferryMother Bootstrapping))
-                    1
-                    "and the shipped default lends the one body the rule was derived at"
+                    2
+                    "and the shipped default lends two bodies"
 
                 // What a mother lends is written down, never derived from how much the
                 // child could absorb.

@@ -658,7 +658,8 @@ module Tuning =
             PioneerCount = 3
             // Live 2026-10-04: W17S25's pioneers arrived with 5 ticks left.
             PioneerStay = 300
-            FerryLoads = 1
+            // User, 2026-10-04: a 1,600 load per trip beats a pioneer's 850.
+            FerryLoads = 2
             // Two 32C16M haulers (~2.4 e/t each over five crossings) and the
             // three pioneers (~1.3 each) put ~9 e/t into a 15,000 spawn
             // site: up within ~2,200 ticks of the claim (#470's G3 estimate).

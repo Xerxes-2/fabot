@@ -218,8 +218,8 @@ let internal applicable
     // buffer, and it drops `worthTheTrip` because a pile decays and a store does
     // not, so there is no later body to leave it for (#311).
     | Pickup(_, Thorium) -> has Carry && emptyHanded && not heavy && not standing
-    // A nursery's floor is the ferry's drop (#473): a Work body's to build
-    // with, and never a hauler's to carry back out.
+    // A child's floor is the ferry's drop (#473): a Work body's to build and
+    // upgrade with, and never a hauler's to carry back out.
     | Pickup(pileId, Energy) ->
         has Carry
         && halfEmpty
@@ -227,14 +227,17 @@ let internal applicable
         && not heavy
         && not standing
         && (has Work
-            || not (Atlas.targetRoom atlas pileId |> Option.exists (isNurseryRoom view)))
+            || not (
+                Atlas.targetRoom atlas pileId
+                |> Option.exists (fun room -> isNurseryRoom view room || isBootstrapRoom view room)
+            ))
     // The two body clauses are read a second time by `canRefill`, beside
     // Withdraw's; the Energy clause is a state, not a fact about the body. The
     // delivery half reads down the same two columns: what a body took is what
     // it has to put down.
     // The nursery drop is a hauler's (#473): a pioneer carrying energy to
     // the site builds with it.
-    | Refill(targetId, Energy) when isNurseryDrop view targetId ->
+    | Refill(targetId, Energy) when isFerryDrop view targetId ->
         has Carry && creep.Energy > 0 && not standing && not (has Work)
     | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing
     | Refill(targetId, Thorium) ->
@@ -410,7 +413,7 @@ let private intentFor
     // A refill cluster's Refill names a place; which member the energy lands in
     // is settled here, at arrival, off the tile the body stands on. Every other
     // Refill resolves through the same call.
-    | Refill(siteId, Energy) when isNurseryDrop view siteId -> Some(DropEnergy creep.Name)
+    | Refill(siteId, Energy) when isFerryDrop view siteId -> Some(DropEnergy creep.Name)
     | Refill(structureId, resource) ->
         Atlas.refillTarget atlas creep.Name structureId resource
         |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
