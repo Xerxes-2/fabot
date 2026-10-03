@@ -1845,6 +1845,7 @@ let private westProbe (panics: bool) (ticks: int) =
                     [
                         { Assault.w18s26 with
                             Squad = Assault.breachers
+                            Active = true
                         }
                     ]
             }
@@ -1887,7 +1888,7 @@ let private probeProbe (ticks: int) =
     let colonies =
         [
             { colony "W17S29" with
-                Assaults = [ Assault.w18s26 ]
+                Assaults = [ { Assault.w18s26 with Active = true } ]
             }
         ]
 

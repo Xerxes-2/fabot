@@ -5267,15 +5267,16 @@ let assaultViewTests =
     testList
         "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
         [
-            test
-                "the one declared assault switched on is W18S26's probe (#493): the user switched it on" {
+            test "no declared assault is switched on: W18S26's probe answered and is off (#493)" {
                 let worked =
                     Colony.declared
                     |> List.collect (fun colony ->
                         Assault.worked colony.Assaults
                         |> List.map (fun assault -> colony.Home, assault))
 
-                Expect.equal worked [ "W17S29", Assault.w18s26 ] "exactly one, cast from W17S29"
+                Expect.isEmpty
+                    worked
+                    "two dismantles at t928,121-122 raised no safe mode and the towers killed the probe; it stays off"
 
                 Expect.equal
                     (Assault.w18s26.RoomName, Assault.w18s26.Squad, Assault.w18s26.Mode)

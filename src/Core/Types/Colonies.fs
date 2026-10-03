@@ -784,7 +784,9 @@ module Assault =
     /// opens only on the exits to W19S26, every tile of it under 390 a tick
     /// of the towers' fire and one step from an exit. The far line at x30
     /// y44 (#490) is 18 tiles from the nearest exit it can reach (#492).
-    /// The probe goes first: the user switched it on (2026-10-03).
+    /// The probe went first (user, 2026-10-03) and answered: two dismantles
+    /// on (2,7) at t928,121-122 raised no safe mode, and the towers killed
+    /// it in four ticks at (1,8). Off until the bait is rethought.
     let w18s26: Assault =
         {
             RoomName = "W18S26"
@@ -793,7 +795,7 @@ module Assault =
             Squad = probe
             Mode = Provoke
             Entry = Some "W19S26"
-            Active = true
+            Active = false
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
