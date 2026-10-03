@@ -587,3 +587,117 @@ let forcedTests =
                 Expect.isNone (LightTick.forced held holding) "nothing forces the tick full"
             }
         ]
+
+/// Four colonies, each projecting its home and one outpost.
+let private fourColonies =
+    [
+        "W1N1", Set.ofList [ "W1N1"; "W2N1" ]
+        "W3N1", Set.ofList [ "W3N1"; "W4N1" ]
+        "W5N1", Set.ofList [ "W5N1"; "W6N1" ]
+        "W7N1", Set.ofList [ "W7N1"; "W8N1" ]
+    ]
+
+let private hostileIn roomName x y owner armed : GlanceHostile =
+    {
+        Tile = RoomPos.at roomName { X = x; Y = y }
+        Owner = owner
+        Armed = armed
+        MoveOnly = false
+    }
+
+[<Tests>]
+let resetSplitTests =
+    testList
+        "reset split"
+        [
+            test
+                "a reset with one threatened colony decides it first, then the rest in order up to half" {
+                let seen =
+                    { quiet with
+                        Hostiles = [ hostileIn "W8N1" 25 25 "Trepidimous" true ]
+                    }
+
+                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+
+                Expect.equal
+                    first
+                    [ "W7N1"; "W1N1" ]
+                    "the threatened colony, then the first in order"
+
+                Expect.equal
+                    rest
+                    [ "W3N1"; "W5N1" ]
+                    "the remaining colonies decide on the next tick"
+            }
+
+            test "an ally's or a keeper's armed body threatens nobody, and the split stays in order" {
+                let seen =
+                    { quiet with
+                        Hostiles =
+                            [
+                                hostileIn "W8N1" 25 25 "Odiodin" true
+                                hostileIn "W6N1" 25 25 "Source Keeper" true
+                            ]
+                    }
+
+                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+
+                Expect.equal first [ "W1N1"; "W3N1" ] "the first half in order"
+                Expect.equal rest [ "W5N1"; "W7N1" ] "the second half"
+            }
+
+            test "an unarmed hostile within reach of ours threatens the colony projecting its room" {
+                let seen =
+                    { quiet with
+                        Creeps =
+                            Map.ofList
+                                [
+                                    "miner",
+                                    { creepAt 10 10 1000 with
+                                        Tile = RoomPos.at "W6N1" { X = 10; Y = 10 }
+                                    }
+                                ]
+                        Hostiles = [ hostileIn "W6N1" 12 10 "Trepidimous" false ]
+                    }
+
+                let first, _ = LightTick.resetSplit 0.5 seen fourColonies
+
+                Expect.equal first [ "W5N1"; "W1N1" ] "the near rule picks the colony"
+            }
+
+            test "more threatened colonies than half all decide first" {
+                let seen =
+                    { quiet with
+                        Hostiles =
+                            [
+                                hostileIn "W2N1" 25 25 "Invader" true
+                                hostileIn "W4N1" 25 25 "Invader" true
+                                hostileIn "W8N1" 25 25 "Invader" true
+                            ]
+                    }
+
+                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+
+                Expect.equal first [ "W1N1"; "W3N1"; "W7N1" ] "every threatened colony"
+                Expect.equal rest [ "W5N1" ] "only the quiet one waits"
+            }
+
+            test "a lone colony decides on the reset tick" {
+                let first, rest = LightTick.resetSplit 0.5 quiet [ List.head fourColonies ]
+
+                Expect.equal first [ "W1N1" ] "one colony is its own half"
+                Expect.isEmpty rest "nothing waits"
+            }
+
+            test "the tick after a reset that deferred colonies is full" {
+                let deferring =
+                    { LightTick.lastFull quiet Map.empty [] with
+                        Deferred = Set.ofList [ "W5N1" ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced deferring quiet)
+                    (Some LightForce.Deferred)
+                    "a quiet world still decides the deferred colonies"
+            }
+        ]

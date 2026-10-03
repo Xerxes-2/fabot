@@ -576,6 +576,11 @@ type Tuning =
         /// decision instead of deciding (`LightTick`). `false` makes every tick
         /// full: the one switch that reverses the cadence.
         LightTicks: bool
+        /// The share of the colonies a cold reset decides on its own tick
+        /// (`LightTick.resetSplit`), the threatened ones first; the rest
+        /// stand that tick and decide on the next. Half: a reset's decide ran
+        /// 313-504 ms live of the engine's 500 (#488).
+        ResetFirstShare: float
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -654,6 +659,7 @@ module Tuning =
             QuietGap = 50
             VisionGrace = 150
             LightTicks = true
+            ResetFirstShare = 0.5
         }
 
     /// The **[[keeper margin]]**: the tiles masked out of a Source Keeper

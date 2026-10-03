@@ -497,6 +497,23 @@ let private fullTick
         else
             counted % List.length views
 
+    // Nor does the reset tick decide every colony (#488): the threatened ones
+    // and the rest up to `ResetFirstShare` decide, and the others issue
+    // nothing, keep every Memory leaf they own as written, and decide on the
+    // next tick, which `LastFull.Deferred` makes full.
+    let waiting =
+        if resetTick then
+            views
+            |> List.map (fun (colony, view) ->
+                colony.Home, view.Spatial.Rooms |> Map.keys |> Set.ofSeq |> Set.add colony.Home)
+            |> LightTick.resetSplit
+                Tuning.defaults.ResetFirstShare
+                (seen |> Option.defaultWith glance)
+            |> snd
+            |> Set.ofList
+        else
+            Set.empty
+
     // The decision is bound and then tupled, and the turn is a DU
     // (`ReplanTurn`), because the first shape shipped broken: as an expression
     // inside the tuple with a `bool` last argument, the turn arrived as
@@ -506,7 +523,9 @@ let private fullTick
     // line can say which colony a spike came out of; `foldCpu` differences.
     let decisions =
         views
-        |> List.mapi (fun index (colony, view) ->
+        |> List.indexed
+        |> List.filter (fun (_, (colony, _)) -> not (Set.contains colony.Home waiting))
+        |> List.map (fun (index, (colony, view)) ->
             let memo = Map.tryFind colony.Home planMemos
 
             let whose = if index = turn then ReplanTurn.Now else ReplanTurn.Waiting
@@ -622,9 +641,19 @@ let private fullTick
 
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state. The colonies' answers are
-    // disjoint, so the union is the whole map.
+    // disjoint, so the union is the whole map; a waiting colony's creeps keep
+    // the Tasks they were read with.
+    let kept =
+        views
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home waiting)
+        |> List.collect (fun (_, view) ->
+            view.Creeps
+            |> List.choose (fun creep ->
+                Map.tryFind creep.Name assignments |> Option.map (fun task -> creep.Name, task)))
+        |> Map.ofList
+
     saveAssignments (
-        (Map.empty, decisions)
+        (kept, decisions)
         ||> List.fold (fun acc (_, _, decision, _, _) ->
             (acc, decision.Assignments)
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
@@ -725,13 +754,18 @@ let private fullTick
     lastFull <-
         seen
         |> Option.map (fun seen ->
+            let record =
+                LightTick.lastFull
+                    seen
+                    (decisions
+                     |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Steps)
+                     |> Fresh.mapOfSeq)
+                    (executionPlan |> Fabot.Core.IntentPlan.intents)
+
             Game.time,
-            LightTick.lastFull
-                seen
-                (decisions
-                 |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Steps)
-                 |> Fresh.mapOfSeq)
-                (executionPlan |> Fabot.Core.IntentPlan.intents))
+            { record with
+                Deferred = Fresh.setOfSeq waiting
+            })
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it
     // back. The tick's total is the last reading, after the Executor, because

@@ -52,6 +52,9 @@ type LastFull =
         Hits: Map<string, int>
         Controllers: Map<string, int * bool>
         Creeps: Set<string>
+        /// The colonies a cold reset left undecided (`resetSplit`): the tick
+        /// after it is full and decides them.
+        Deferred: Set<string>
     }
 
 /// The first reason a light tick hands over to a full one.
@@ -68,6 +71,8 @@ type LightForce =
     | OnBorder of creep: string
     | HitsLost of creep: string
     | ControllerChanged of room: string
+    /// The reset tick before left colonies undecided (`resetSplit`).
+    | Deferred
 
 /// The reason on the CPU line: the rule's word first (`armed` is a home room's
 /// armed hostile, `near` one within reach anywhere), then where it fired —
@@ -82,6 +87,7 @@ let tag (reason: LightForce) : string =
     | LightForce.OnBorder creep -> $"border {creep}"
     | LightForce.HitsLost creep -> $"hurt {creep}"
     | LightForce.ControllerChanged room -> $"controller {room}"
+    | LightForce.Deferred -> "deferred"
 
 /// The step off the border ring into the room, for a creep standing on it: a
 /// body on the ring at the start of a tick has always just crossed in (the
@@ -224,6 +230,7 @@ let lastFull
             |> Fresh.mapOfSeq
         Controllers = glance.Controllers
         Creeps = glance.Creeps |> Map.keys |> Fresh.setOfSeq
+        Deferred = Fresh.setOfSeq Seq.empty
     }
 
 /// A Source Keeper's owner, as the engine spells it.
@@ -232,6 +239,51 @@ let private keeper = "Source Keeper"
 /// How close a hostile of any kind may come to a creep or structure of ours
 /// before a tick is decided.
 let private nearRange = Engine.rangedRange + 2
+
+/// Every tile of ours the near rule measures from: our creeps and structures.
+let private oursOf (now: Glance) : RoomPos list =
+    Seq.append (now.Creeps |> Map.values |> Seq.map (fun creep -> creep.Tile)) now.Structures
+    |> List.ofSeq
+
+/// The near rule: a hostile within `nearRange` of a tile of ours. A scout
+/// hurts, dismantles, claims and carries nothing (#462).
+let private within (ours: RoomPos list) (hostile: GlanceHostile) : bool =
+    not hostile.MoveOnly
+    && ours
+       |> List.exists (fun tile ->
+           match RoomPos.range hostile.Tile tile with
+           | Some r -> r <= nearRange
+           | None -> false)
+
+/// The colonies a cold reset decides on its own tick and the ones it leaves
+/// to the next (#488), each in the order given: every colony with a threat in
+/// a room it projects — an armed body of neither a keeper nor an ally, or one
+/// the near rule reads within reach of ours — then the rest in order until
+/// `share` of them is decided. Never none: a lone colony decides.
+let resetSplit
+    (share: float)
+    (now: Glance)
+    (colonies: (string * Set<string>) list)
+    : string list * string list =
+    let ours = oursOf now
+
+    let threats =
+        now.Hostiles
+        |> List.filter (fun hostile ->
+            hostile.Owner <> keeper
+            && not (Colony.isAlly hostile.Owner)
+            && (hostile.Armed || within ours hostile))
+        |> List.map (fun hostile -> hostile.Tile.Room)
+        |> Set.ofList
+
+    let threatened, quiet =
+        colonies
+        |> List.partition (fun (_, rooms) -> not (Set.isEmpty (Set.intersect rooms threats)))
+
+    let half = max 1 (int (ceil (float (List.length colonies) * share)))
+    let spare = min (List.length quiet) (max 0 (half - List.length threatened))
+
+    threatened @ List.take spare quiet |> List.map fst, List.skip spare quiet |> List.map fst
 
 /// The first fact that makes replaying the last full tick wrong, in the
 /// ADR's order; `None` when the light tick may run.
@@ -247,21 +299,10 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
 
     let near () =
-        let ours =
-            Seq.append
-                (now.Creeps |> Map.values |> Seq.map (fun creep -> creep.Tile))
-                now.Structures
-            |> List.ofSeq
+        let ours = oursOf now
 
-        // A scout hurts, dismantles, claims and carries nothing (#462).
         now.Hostiles
-        |> List.tryFind (fun hostile ->
-            not hostile.MoveOnly
-            && ours
-               |> List.exists (fun tile ->
-                   match RoomPos.range hostile.Tile tile with
-                   | Some r -> r <= nearRange
-                   | None -> false))
+        |> List.tryFind (within ours)
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
     let fought () =
@@ -296,7 +337,14 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
             Map.tryFind room last.Controllers <> Map.tryFind room now.Controllers)
         |> Option.map LightForce.ControllerChanged
 
-    armed
+    let deferred =
+        if Set.isEmpty last.Deferred then
+            None
+        else
+            Some LightForce.Deferred
+
+    deferred
+    |> Option.orElse armed
     |> Option.orElseWith near
     |> Option.orElseWith fought
     |> Option.orElseWith creepsChanged

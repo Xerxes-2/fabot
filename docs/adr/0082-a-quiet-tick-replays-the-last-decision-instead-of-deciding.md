@@ -27,7 +27,8 @@ We propose that **ticks alternate between a full tick and a light tick, for the 
    - any creep of ours that is new since the last full tick, or gone;
    - any creep of ours that lost hits since the last full tick (the heal reflexes). Not a structure: ramparts, roads and containers lose hits to decay on schedule, and a structure under attack has its attacker within reach, which the rule above already reads;
    - any controller of ours whose safe mode or level changed;
-   - a global reset (the reset tick is full, as #442 left it).
+   - a global reset (the reset tick is full, as #442 left it). Amended 2026-10-03 (#488): full, but not every colony decides on it. A cold decide ran 313-504 ms live of the engine's 500, so the reset tick decides the colonies with a threat in a room they project (an armed non-ally body other than a keeper, or one the near rule reads) and the rest in order up to `Tuning.ResetFirstShare` of them (`LightTick.resetSplit`); the others issue nothing that tick, their creeps stand and their Memory leaves keep last tick's values;
+   - colonies the reset tick left undecided (`LastFull.Deferred`): the tick after it is full and decides them.
 
    Combat is never light: every intent that shoots or heals is decided.
 
