@@ -68,6 +68,7 @@ refuses(["health", "--json"], "usage:");
 refuses(["history", "W1N1"], "history needs a tick");
 refuses(["history", "W1N1", "12.5"], "history needs a tick");
 refuses(["probe", "--all"], "usage:");
+refuses(["rivals", "--all"], "usage:");
 
 for (const args of [
   ["tasks"],
@@ -90,6 +91,7 @@ for (const args of [
   ["health", "--colony", "W1N1", "--samples", "3"],
   ["history", "W15S28", "877000", "--json"],
   ["probe"],
+  ["rivals", "--json"],
 ]) {
   parses(args);
 }

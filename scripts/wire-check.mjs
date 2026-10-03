@@ -836,13 +836,18 @@ const roomsThrough = async (value) => {
   return globalThis.Memory.fabot.observe.rooms;
 };
 
-const emptyRooms = { rivals: {}, towered: [], armed: {} };
+const emptyRooms = { rivals: {}, towered: [], armed: {}, controllers: {} };
+
+// W18S26 as the #489 projection writes it: safe mode until, cooldown until,
+// stock, upgrade block until, ticks to downgrade, the tick seen.
+const w18s26 = { o: "Trepidimous", l: 6, s: 943747, c: 973747, a: 3, b: 0, d: 119000, t: 923747 };
 
 wire("rooms: a well-formed leaf round-trips key for key", async () => {
   const leaf = {
     rivals: { W17S24: "Trepidimous", W18S26: "Trepidimous" },
     towered: ["W12S28", "W13S28"],
     armed: { W17S26: 923853 },
+    controllers: { W18S26: w18s26 },
   };
 
   assert.equal(stable(await roomsThrough(leaf)), stable(leaf));
@@ -864,13 +869,13 @@ for (const [name, leaf] of [
 wire("rooms: each half degrades alone, and an off-shape entry costs only itself", async () => {
   assert.equal(
     stable(await roomsThrough({ rivals: ["W18S26"], towered: ["W12S28"] })),
-    stable({ rivals: {}, towered: ["W12S28"], armed: {} }),
+    stable({ rivals: {}, towered: ["W12S28"], armed: {}, controllers: {} }),
     "rivals that are not an object read empty; the towers stand",
   );
 
   assert.equal(
     stable(await roomsThrough({ rivals: { W18S26: "Trepidimous" }, towered: { W12S28: true } })),
-    stable({ rivals: { W18S26: "Trepidimous" }, towered: [], armed: {} }),
+    stable({ rivals: { W18S26: "Trepidimous" }, towered: [], armed: {}, controllers: {} }),
     "towers that are not an array read empty; the rivals stand",
   );
 
@@ -881,7 +886,7 @@ wire("rooms: each half degrades alone, and an off-shape entry costs only itself"
         towered: [3, null, "", "W12S28"],
       }),
     ),
-    stable({ rivals: { W18S26: "Trepidimous" }, towered: ["W12S28"], armed: {} }),
+    stable({ rivals: { W18S26: "Trepidimous" }, towered: ["W12S28"], armed: {}, controllers: {} }),
     "an owner or a room that is not a non-empty string is dropped, its neighbours kept",
   );
 });
@@ -907,8 +912,41 @@ wire("rooms: the armed rooms (#485) are a room-to-tick object; an older leaf wit
         armed: { W17S26: 923853, W16S25: "923853", W15S25: null },
       }),
     ),
-    stable({ rivals: {}, towered: [], armed: { W17S26: 923853 } }),
+    stable({ rivals: {}, towered: [], armed: { W17S26: 923853 }, controllers: {} }),
     "a tick that is not a number costs its own room",
+  );
+});
+
+wire("rooms: the rival controllers (#489) are a room-to-facts object; an off-shape one costs only itself", async () => {
+  assert.equal(
+    stable(await roomsThrough({ rivals: {}, towered: [], armed: {} })),
+    stable(emptyRooms),
+    "absent on an older leaf: nothing remembered, and the key written back",
+  );
+
+  assert.equal(
+    stable(await roomsThrough({ rivals: {}, towered: [], armed: {}, controllers: [w18s26] })),
+    stable(emptyRooms),
+    "an array reads empty",
+  );
+
+  assert.equal(
+    stable(
+      await roomsThrough({
+        rivals: {},
+        towered: [],
+        armed: {},
+        controllers: {
+          W18S26: w18s26,
+          W17S24: { ...w18s26, o: "" },
+          W22S28: { ...w18s26, s: "943747" },
+          W19S29: { ...w18s26, t: undefined },
+          W21S23: null,
+        },
+      }),
+    ),
+    stable({ rivals: {}, towered: [], armed: {}, controllers: { W18S26: w18s26 } }),
+    "an empty owner or a key that is not a number costs its own room",
   );
 });
 

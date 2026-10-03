@@ -325,6 +325,7 @@ let private pairWorld: World =
         ExitWatches = Map.empty
         Healers = Map.empty
         ArmedSeen = Map.empty
+        RivalControllers = Map.empty
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -4983,5 +4984,158 @@ let exitHoldViewTests =
                         mother)
                         .ExitHolds
                     "nor is a Threat still standing there"
+            }
+        ]
+
+/// One of Trepidimous' rooms as vision showed it at tick 1,000, able to
+/// activate: stock banked, no clock running, its downgrade timer full.
+let private trepController level : RivalController =
+    {
+        Owner = "Trepidimous"
+        Level = level
+        SafeModeUntil = 0
+        SafeModeCooldownUntil = 0
+        SafeModeAvailable = 3
+        UpgradeBlockedUntil = 0
+        TicksToDowngrade = Engine.controllerDowngrade level
+        Seen = 1_000
+    }
+
+let private trepRooms =
+    Map.ofList [ "W17S24", trepController 4; "W18S26", trepController 6 ]
+
+/// `RivalSafeMode.canActivate` for W17S24 over Trepidimous' rooms with one of
+/// them changed, at `now`.
+let private gateAt now room (change: RivalController -> RivalController) =
+    let known = trepRooms |> Map.change room (Option.map change)
+    RivalSafeMode.canActivate Tuning.defaults.RivalIntelTicks known "Trepidimous" "W17S24" now
+
+[<Tests>]
+let rivalSafeModeTests =
+    testList
+        "a rival controller's safe mode"
+        [
+            test "W18S26 in safe mode: W17S24 cannot activate until it ends (#489)" {
+                let provoked (c: RivalController) = { c with SafeModeUntil = 1_200 }
+
+                Expect.equal
+                    (gateAt 1_100 "W18S26" provoked)
+                    (SafeModeActivation.Cannot(SafeModeRefusal.Busy "W18S26"))
+                    "one safe mode per player: ERR_BUSY"
+
+                Expect.equal
+                    (gateAt 1_200 "W18S26" provoked)
+                    SafeModeActivation.Can
+                    "open the tick it ends"
+
+                Expect.equal
+                    (gateAt 1_100 "W18S26" id)
+                    SafeModeActivation.Can
+                    "and open while none runs"
+            }
+
+            test
+                "a cooldown, an empty stock, an upgrade block, the downgrade line each refuse it (#489)" {
+                let refusal change = gateAt 1_100 "W17S24" change
+
+                Expect.equal
+                    (refusal (fun c -> { c with SafeModeCooldownUntil = 1_101 }))
+                    (SafeModeActivation.Cannot SafeModeRefusal.Cooldown)
+                    "cooldown"
+
+                Expect.equal
+                    (refusal (fun c -> { c with SafeModeAvailable = 0 }))
+                    (SafeModeActivation.Cannot SafeModeRefusal.NoStock)
+                    "zero stock"
+
+                Expect.equal
+                    (refusal (fun c -> { c with UpgradeBlockedUntil = 1_101 }))
+                    (SafeModeActivation.Cannot SafeModeRefusal.UpgradeBlocked)
+                    "a tap's upgrade block"
+
+                // RCL4: 40,000 / 2 - 5,000.
+                Expect.equal
+                    (refusal (fun c -> { c with TicksToDowngrade = 14_999 }))
+                    (SafeModeActivation.Cannot SafeModeRefusal.Downgrading)
+                    "below the downgrade line"
+
+                Expect.equal
+                    (refusal (fun c -> { c with TicksToDowngrade = 15_000 }))
+                    SafeModeActivation.Can
+                    "on it"
+            }
+
+            test "a stale sighting reads Unknown, but a clock it saw still refuses (#489)" {
+                let stale = 1_000 + Tuning.defaults.RivalIntelTicks
+
+                Expect.equal
+                    (gateAt stale "W17S24" id)
+                    SafeModeActivation.Unknown
+                    "stock may have come back"
+
+                Expect.equal
+                    (gateAt stale "W17S24" (fun c ->
+                        { c with
+                            SafeModeCooldownUntil = stale + 1
+                        }))
+                    (SafeModeActivation.Cannot SafeModeRefusal.Cooldown)
+                    "a cooldown never ends early"
+
+                Expect.equal
+                    (RivalSafeMode.canActivate
+                        Tuning.defaults.RivalIntelTicks
+                        trepRooms
+                        "Trepidimous"
+                        "W22S28"
+                        1_100)
+                    SafeModeActivation.Unknown
+                    "a room never seen"
+            }
+
+            test
+                "a rival controller is remembered while dark and forgotten once seen unowned (#489)" {
+                let facts controller =
+                    { RoomFacts.empty with
+                        Control =
+                            Some
+                                {
+                                    Owner =
+                                        if Option.isSome controller then
+                                            Ownership.Rival
+                                        else
+                                            Ownership.Unowned
+                                    Reservation = None
+                                    SafeMode = false
+                                    SafeModeCooldownUntil = 0
+                                    Sign = None
+                                }
+                        RivalController = controller
+                    }
+
+                let worldAt time rooms =
+                    { World.empty with
+                        Time = time
+                        Rooms = Map.ofList rooms
+                    }
+
+                let fresh = { trepController 6 with Seen = 1_100 }
+
+                let seen =
+                    World.recallRivalControllers
+                        trepRooms
+                        (worldAt 1_100 [ "W18S26", facts (Some fresh); "W17S24", RoomFacts.empty ])
+
+                Expect.equal
+                    seen.RivalControllers
+                    (Map.ofList [ "W17S24", trepController 4; "W18S26", fresh ])
+                    "the seen room restamped, the dark one kept"
+
+                Expect.equal
+                    (World.recallRivalControllers
+                        seen.RivalControllers
+                        (worldAt 1_200 [ "W18S26", facts None ]))
+                        .RivalControllers
+                    (Map.ofList [ "W17S24", trepController 4 ])
+                    "a room seen with nobody's controller is dropped"
             }
         ]

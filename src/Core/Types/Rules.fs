@@ -83,6 +83,25 @@ module Engine =
     /// tick nulls it.
     let observerRange = 10
 
+    /// CONTROLLER_DOWNGRADE: a controller's full downgrade timer at each
+    /// level, what upgrading restores it towards. 0 for a level with none.
+    let controllerDowngrade (level: int) =
+        match level with
+        | 1 -> 20_000
+        | 2 -> 10_000
+        | 3 -> 20_000
+        | 4 -> 40_000
+        | 5 -> 80_000
+        | 6 -> 120_000
+        | 7 -> 150_000
+        | 8 -> 200_000
+        | _ -> 0
+
+    /// The downgrade timer below which `activateSafeMode` is ERR_TIRED:
+    /// half the level's full timer less CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD
+    /// (`game/structures.js`).
+    let safeModeDowngradeLine (level: int) = controllerDowngrade level / 2 - 5_000
+
     /// The energy a `send` costs the sending terminal:
     /// `ceil(amount · (1 − e^(−range/30)))` over the **linear** room distance
     /// (`calcTerminalEnergyCost`; `Game.map.getRoomLinearDistance` is
@@ -537,6 +556,12 @@ type Tuning =
         /// one: 1,500, the longest the body seen can still be standing there,
         /// as `ThreatMemory` argues. The detour it buys is one crossing at most.
         HostileRoomMemory: int
+        /// How old a rival controller's sighting grows before
+        /// `RivalSafeMode.canActivate` stops trusting the facts that can move
+        /// back in the dark — the stock (a level-up banks one) and the
+        /// downgrade timer (an upgrade restores it) — and answers Unknown
+        /// (#489). The clocks it saw still refuse: none of them ends early.
+        RivalIntelTicks: int
         /// How long a [[fight]] stays pooled after its raid was last seen, and
         /// how long after that no squad is cast for the room again: 300, the
         /// duo's two casts (150 and 108 ticks in one oven) and its walk to the
@@ -653,6 +678,9 @@ module Tuning =
             ThreatMemory = Engine.creepLifetime
             ExitHoldTicks = 100
             HostileRoomMemory = Engine.creepLifetime
+            // A creep's lifetime: a strike is staged inside one, and a
+            // level-up in the dark is rarer still.
+            RivalIntelTicks = Engine.creepLifetime
             FightHoldTicks = 300
             FightConfirmTicks = 20
             RivalRecheck = 5000

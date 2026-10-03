@@ -527,8 +527,34 @@ let private seenFacts
                                     }
                     }
             )
-        // The controller while it is ours: the downgrade clock and the banked
-        // safe modes are undefined on one we do not own.
+        // A rival's controller, every safe-mode fact on it (#489). The
+        // relative clocks are undefined once run out, and each is read as the
+        // absolute tick it runs to.
+        RivalController =
+            controller
+            |> Option.filter (fun c -> isNull (box c.my) || not c.my)
+            |> Option.filter (fun c -> not (isNull (box c.owner)))
+            |> Option.map (fun c ->
+                let until (relative: int) =
+                    if isNull (box relative) then 0 else Game.time + relative
+
+                {
+                    Owner = c.owner.username
+                    Level = c.level
+                    SafeModeUntil = until c.safeMode
+                    SafeModeCooldownUntil = cooldownUntilOf c
+                    SafeModeAvailable = c.safeModeAvailable
+                    UpgradeBlockedUntil = until c.upgradeBlocked
+                    // Undefined only with no downgrade time at all: never due.
+                    TicksToDowngrade =
+                        if isNull (box c.ticksToDowngrade) then
+                            Engine.controllerDowngrade c.level
+                        else
+                            c.ticksToDowngrade
+                    Seen = Game.time
+                }
+                : RivalController)
+        // The controller while it is ours.
         Controller =
             controller
             |> Option.filter (fun c -> not (isNull (box c.my)) && c.my)
@@ -887,6 +913,8 @@ let ofGame
         Healers = Map.empty
         // And the armed-room memory `World.recallArmed`' (#485).
         ArmedSeen = Map.empty
+        // And the rival controllers `World.recallRivalControllers`' (#489).
+        RivalControllers = Map.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

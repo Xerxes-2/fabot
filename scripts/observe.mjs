@@ -65,6 +65,11 @@
 //   observe.mjs probe [--json]          read Memory.__probe written by a bundle
 //                                       `scripts/probe.mjs` wrapped: ms/tick and
 //                                       calls/tick per colony:function
+//   observe.mjs rivals [--json]         every rival controller the bot remembers
+//                                       (#489): owner, level, safe mode, cooldown,
+//                                       stock, upgrade block, downgrade timer,
+//                                       how old the sighting is, and whether its
+//                                       owner can raise safe mode there now
 // Every read takes --json to emit the raw stored structure for jq.
 //
 // `raids`, `outposts`, `layout`, `quotas` and `breaches` are one colony's
@@ -86,7 +91,7 @@ const usage =
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
-  "history <room> <tick> [--json] | probe [--json]";
+  "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
 
 const rawArgs = process.argv.slice(2);
 const json = rawArgs.includes("--json");
@@ -133,6 +138,7 @@ const ACCEPTS = {
   health: ["--colony", "--samples"],
   history: ["--json"],
   probe: ["--json"],
+  rivals: ["--json"],
 };
 
 if (!Object.hasOwn(ACCEPTS, command ?? "")) fail(usage);
@@ -738,6 +744,63 @@ if (command === "console") {
     for (const [key, [ms, calls]] of rows) {
       console.log(
         `${key.padEnd(width)}  ${(ms / stored.ticks).toFixed(2).padStart(8)}  ${(calls / stored.ticks).toFixed(1).padStart(10)}`,
+      );
+    }
+  }
+} else if (command === "rivals") {
+  // ---- rivals: every rival controller's safe-mode state (#489) ----------
+
+  // The wire shape `ObserveMemory.saveRoomLatches` writes under
+  // `rooms.controllers`: room -> { o owner, l level, s safe mode until,
+  // c cooldown until, a stock, b upgrade blocked until, d ticks to
+  // downgrade as seen, t tick seen }. Every `until` is an absolute tick.
+  const stored = (await memoryGet("fabot.observe.rooms"))?.controllers;
+  if (stored == null || typeof stored !== "object" || Array.isArray(stored)) {
+    fail(
+      "no rival controllers at Memory.fabot.observe.rooms.controllers — " +
+        "the deployed bundle predates #489, or it has seen no rival controller yet",
+    );
+  }
+  if (json) {
+    console.log(JSON.stringify(stored, null, 2));
+  } else {
+    const now = await gameTime();
+    // A mirror of `RivalSafeMode.canActivate` (src/Core/Types/Rooms.fs), the
+    // bot's own answer, with `Tuning.RivalIntelTicks` and CONTROLLER_DOWNGRADE.
+    const STALE = 1500;
+    const DOWNGRADE = { 1: 20000, 2: 10000, 3: 20000, 4: 40000, 5: 80000, 6: 120000, 7: 150000, 8: 200000 };
+    const rooms = Object.entries(stored);
+    const gate = (room, c) => {
+      const running = c.s > now ? room : rooms.find(([, o]) => o.o === c.o && o.s > now)?.[0];
+      if (running) return `no: busy (safe mode in ${running})`;
+      if (c.c > now) return "no: cooldown";
+      if (c.b > now) return "no: upgrade blocked";
+      if (now - c.t >= STALE) return "unknown: stale";
+      if (c.a <= 0) return "no: no stock";
+      if (c.d < (DOWNGRADE[c.l] ?? 0) / 2 - 5000) return "no: below the downgrade line";
+      return "YES";
+    };
+    const left = (until) => (until > now ? `${until - now}` : "—");
+    console.log(`rival controllers at t${now}`);
+    console.log(
+      ["room", "owner", "rcl", "safe mode", "cooldown", "stock", "blocked", "ttd", "seen ago", "can activate"]
+        .map((h, i) => (i < 2 ? h.padEnd(12) : h.padStart(9)))
+        .join(" "),
+    );
+    for (const [room, c] of rooms.sort((a, b) => a[1].o.localeCompare(b[1].o) || a[0].localeCompare(b[0]))) {
+      console.log(
+        [
+          room.padEnd(12),
+          c.o.padEnd(12),
+          `${c.l}`.padStart(9),
+          left(c.s).padStart(9),
+          left(c.c).padStart(9),
+          `${c.a}`.padStart(9),
+          left(c.b).padStart(9),
+          `${c.d}`.padStart(9),
+          `${now - c.t}`.padStart(9),
+          ` ${gate(room, c)}`,
+        ].join(" "),
       );
     }
   }

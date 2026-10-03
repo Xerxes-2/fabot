@@ -3228,4 +3228,27 @@ let observerAimTests =
 
                 Expect.equal observed [ "observer-1", "W1N3" ] "one ObserveRoom, on the claim"
             }
+
+            test
+                "every rival room a sighting names is watched, declared or not, and no ally's (#489)" {
+                let sighting rival =
+                    {
+                        Tick = 900
+                        Targets = lazy Set.empty
+                        Rival = Some rival
+                    }
+
+                let watched =
+                    watchedRooms
+                        (Map.ofList
+                            [ "W22S28", sighting "Trepidimous"; "W17S22", sighting "Odiodin" ])
+                        (Set.ofList [ "W14S28" ])
+
+                Expect.containsAll
+                    watched
+                    [ "W18S26"; "W17S24"; "W22S28"; "W14S28" ]
+                    "rivals and crossings"
+
+                Expect.isFalse (List.contains "W17S22" watched) "an ally's room is not watched"
+            }
         ]

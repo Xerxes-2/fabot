@@ -301,3 +301,87 @@ module RoomControlInfo =
     /// off it. One predicate for the vision read (`reservableControllers`) and
     /// the blind one (`StandDown.HeldOutposts`), or the two could disagree.
     let refusesReserver (holder: ReservationHolder) : bool = holder = ReservationHolder.Rival
+
+/// Another player's controller as vision last showed it (#489): what decides
+/// whether its owner can raise safe mode there. Every clock is the absolute
+/// tick it runs to, so a sighting stays true in the dark; the stock and the
+/// downgrade timer are as seen at `Seen`, which is why they go stale.
+type RivalController =
+    {
+        /// The engine's username for the controller's owner.
+        Owner: string
+        Level: int
+        /// The first tick its safe mode no longer runs; at or before `Seen`
+        /// while none does.
+        SafeModeUntil: int
+        /// The first tick `safeModeCooldown` no longer refuses an activation.
+        SafeModeCooldownUntil: int
+        /// Activations banked.
+        SafeModeAvailable: int
+        /// The first tick `upgradeBlocked` no longer refuses one: a CLAIM
+        /// tap's 1,000 ticks.
+        UpgradeBlockedUntil: int
+        /// The downgrade timer as seen.
+        TicksToDowngrade: int
+        /// The tick vision showed it.
+        Seen: int
+    }
+
+/// Why `activateSafeMode` would be refused, as far as a sighting can say.
+[<RequireQualifiedAccess>]
+type SafeModeRefusal =
+    /// Safe mode runs in this room or another of the owner's: one per
+    /// player at a time (ERR_BUSY).
+    | Busy of room: string
+    | Cooldown
+    | NoStock
+    | UpgradeBlocked
+    /// The downgrade timer is below `Engine.safeModeDowngradeLine`.
+    | Downgrading
+
+/// Whether a rival can raise safe mode in one room now.
+[<RequireQualifiedAccess>]
+type SafeModeActivation =
+    | Can
+    | Cannot of SafeModeRefusal
+    /// The room unseen, or seen too long ago to rule it out.
+    | Unknown
+
+[<RequireQualifiedAccess>]
+module RivalSafeMode =
+    /// Whether `player` can activate safe mode in `room` at `now`, over every
+    /// controller of theirs remembered (`World.RivalControllers`). A refusal
+    /// off a clock holds however old the sighting, since none ends early; the
+    /// stock and the downgrade line are trusted for `staleAfter` ticks, and
+    /// past that a room no clock refuses is Unknown. A room not `player`'s as
+    /// last seen is Unknown too.
+    let canActivate
+        (staleAfter: int)
+        (known: Map<string, RivalController>)
+        (player: string)
+        (room: string)
+        (now: int)
+        : SafeModeActivation =
+        match Map.tryFind room known |> Option.filter (fun c -> c.Owner = player) with
+        | None -> SafeModeActivation.Unknown
+        | Some c ->
+            let busy =
+                if c.SafeModeUntil > now then
+                    Some room
+                else
+                    known
+                    |> Map.tryFindKey (fun _ other ->
+                        other.Owner = player && other.SafeModeUntil > now)
+
+            match busy with
+            | Some running -> SafeModeActivation.Cannot(SafeModeRefusal.Busy running)
+            | None when c.SafeModeCooldownUntil > now ->
+                SafeModeActivation.Cannot SafeModeRefusal.Cooldown
+            | None when c.UpgradeBlockedUntil > now ->
+                SafeModeActivation.Cannot SafeModeRefusal.UpgradeBlocked
+            | None when now - c.Seen >= staleAfter -> SafeModeActivation.Unknown
+            | None when c.SafeModeAvailable <= 0 ->
+                SafeModeActivation.Cannot SafeModeRefusal.NoStock
+            | None when c.TicksToDowngrade < Engine.safeModeDowngradeLine c.Level ->
+                SafeModeActivation.Cannot SafeModeRefusal.Downgrading
+            | None -> SafeModeActivation.Can

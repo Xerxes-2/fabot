@@ -417,9 +417,22 @@ let aimObserver
         |> List.sortBy (fun room -> lastSeen room, room)
         |> List.tryHead)
 
+/// The observer's watched tier: `Colony.rivals`, every other room a sighting
+/// names a rival's, not an ally's (#489: their controllers' safe-mode clocks),
+/// and the rooms this colony crosses.
+let watchedRooms (seen: Map<string, RoomSighting>) (crossed: Set<string>) : string list =
+    let sighted =
+        seen
+        |> Map.toList
+        |> List.filter (fun (_, sighting) ->
+            sighting.Rival |> Option.exists (fun owner -> not (Colony.isAlly owner)))
+        |> List.map fst
+
+    (Colony.rivals |> List.map fst) @ sighted @ Set.toList crossed |> List.distinct
+
 /// The observer at home spends its tick (#484): `aimObserver` over the
-/// declared rooms not yet colonies of ours or still nurseries, `Colony.rivals`
-/// and the rooms this colony crosses, `Colony.harass`, and the scan set.
+/// declared rooms not yet colonies of ours or still nurseries, the watched
+/// rooms, `Colony.harass`, and the scan set.
 let internal planObserver (view: ColonyView) : Intent list =
     let home = SpatialInfo.homeName view.Spatial
 
@@ -439,7 +452,7 @@ let internal planObserver (view: ColonyView) : Intent list =
                         | None
                         | Some Nursery -> true
                         | Some _ -> false)
-                Watched = (Colony.rivals |> List.map fst) @ Set.toList view.Crossed |> List.distinct
+                Watched = watchedRooms view.Seen view.Crossed
                 Harassed = Colony.harass |> List.map (fun h -> h.RoomName)
                 Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
             }

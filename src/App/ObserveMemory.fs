@@ -1281,16 +1281,51 @@ let savePositions (creeps: (string * RoomPos) list) =
 /// (`RoomSighting.Rival`, #444), dark rooms included, and the homes a tower
 /// of ours has stood full in (`World.Towered`, #445), and the last tick an
 /// armed rival was seen in each room a non-fighter walks round
-/// (`World.ArmedSeen`, #485).
+/// (`World.ArmedSeen`, #485), and every rival controller's safe-mode facts as
+/// last seen (`World.RivalControllers`, #489).
 type RoomLatches =
     {
         Rivals: Map<string, string>
         Towered: Set<string>
         Armed: Map<string, int>
+        Controllers: Map<string, RivalController>
     }
 
 let private nonEmptyString (value: obj) =
     jsTypeof value = "string" && (unbox<string> value).Length > 0
+
+/// One rival controller off the wire, or None for an entry that is not the
+/// shape: the owner a non-empty string, every other key a number.
+let private decodeRivalController (raw: obj) : RivalController option =
+    if isNull raw || jsTypeof raw <> "object" || not (nonEmptyString raw?o) then
+        None
+    else
+        try
+            Some
+                {
+                    Owner = unbox<string> raw?o
+                    Level = numberOf raw "l"
+                    SafeModeUntil = numberOf raw "s"
+                    SafeModeCooldownUntil = numberOf raw "c"
+                    SafeModeAvailable = numberOf raw "a"
+                    UpgradeBlockedUntil = numberOf raw "b"
+                    TicksToDowngrade = numberOf raw "d"
+                    Seen = numberOf raw "t"
+                }
+        with _ ->
+            None
+
+let private encodeRivalController (c: RivalController) : obj =
+    let raw = createEmpty<obj>
+    raw?o <- c.Owner
+    raw?l <- c.Level
+    raw?s <- c.SafeModeUntil
+    raw?c <- c.SafeModeCooldownUntil
+    raw?a <- c.SafeModeAvailable
+    raw?b <- c.UpgradeBlockedUntil
+    raw?d <- c.TicksToDowngrade
+    raw?t <- c.Seen
+    raw
 
 /// The room latches, each half read alone: a half that is not the shape it
 /// should be reads empty, and an entry that is not a non-empty string costs
@@ -1301,6 +1336,7 @@ let loadRoomLatches () : RoomLatches =
             Rivals = Map.empty
             Towered = Set.empty
             Armed = Map.empty
+            Controllers = Map.empty
         }
 
     leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
@@ -1310,6 +1346,7 @@ let loadRoomLatches () : RoomLatches =
             let rivals = rooms?rivals
             let towered = rooms?towered
             let armed = rooms?armed
+            let controllers = rooms?controllers
 
             {
                 Rivals =
@@ -1347,15 +1384,31 @@ let loadRoomLatches () : RoomLatches =
                         |> Map.toArray
                         |> Array.filter (fun (room, _) -> room.Length > 0)
                         |> Fresh.mapOfArray
+                // Absent on a leaf an older bundle wrote: nothing remembered.
+                Controllers =
+                    if
+                        isNull controllers
+                        || jsTypeof controllers <> "object"
+                        || JS.Constructors.Array.isArray controllers
+                    then
+                        Map.empty
+                    else
+                        objectEntries controllers
+                        |> Array.filter (fun (room, _) -> room.Length > 0)
+                        |> Array.choose (fun (room, raw) ->
+                            decodeRivalController raw |> Option.map (fun c -> room, c))
+                        |> Fresh.mapOfArray
             })
 
 /// Write the room latches whole: the rivals as a room-to-owner object, the
-/// towers as a room-name array, the armed rooms as a room-to-tick object.
+/// towers as a room-name array, the armed rooms as a room-to-tick object, the
+/// rival controllers as a room-to-facts object.
 let saveRoomLatches (latches: RoomLatches) =
     let raw = createEmpty<obj>
     raw?rivals <- latches.Rivals |> Map.toSeq |> hashOf box
     raw?towered <- latches.Towered |> Set.toArray
     raw?armed <- latches.Armed |> Map.toSeq |> hashOf box
+    raw?controllers <- latches.Controllers |> Map.toSeq |> hashOf encodeRivalController
     writeObserveLeaf "rooms" raw
 
 /// The prior CPU line, or empty when the leaf is absent or unreadable. A row

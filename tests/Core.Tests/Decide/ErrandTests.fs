@@ -745,6 +745,7 @@ let errandStandDownTests =
                         ExitWatches = Map.empty
                         Healers = Map.empty
                         ArmedSeen = Map.empty
+                        RivalControllers = Map.empty
                     }
 
                 let view shut =

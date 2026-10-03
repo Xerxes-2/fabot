@@ -256,6 +256,10 @@ type RoomFacts =
         /// room we do not own, whose ownership and reservation are
         /// `Control`'s.
         Controller: ControllerInfo option
+        /// The controller of this room **while another player owns it**, as
+        /// this tick shows it (#489); `World.recallRivalControllers` keeps it
+        /// past the tick.
+        RivalController: RivalController option
         /// The room's shared spawn-energy account. Zero for a room with no
         /// spawn or extension in it, which a colony reads as an empty bank.
         Energy: RoomEnergy
@@ -301,6 +305,7 @@ module RoomFacts =
             Reactors = []
             Control = None
             Controller = None
+            RivalController = None
             Energy = { Available = 0; Capacity = 0 }
             Spawns = []
             Casting = []
@@ -459,6 +464,10 @@ type World =
         /// round. Heap state the shell also keeps in Memory, so the deploy
         /// before a claim does not forget the room it must walk round.
         ArmedSeen: Map<string, int>
+        /// Every rival controller as last seen (`World.recallRivalControllers`,
+        /// #489): what `RivalSafeMode.canActivate` reads. Heap state the shell
+        /// also keeps in Memory, so a reset does not forget a safe mode it saw.
+        RivalControllers: Map<string, RivalController>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -474,6 +483,7 @@ module World =
             ExitWatches = Map.empty
             Healers = Map.empty
             ArmedSeen = Map.empty
+            RivalControllers = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -770,6 +780,30 @@ module World =
 
         { world with
             ArmedSeen = Seq.append kept now |> Fresh.mapOfSeq
+        }
+
+    /// This tick's world with the rival controllers laid under it (#489): a
+    /// room vision answers for this tick takes its own controller, or drops
+    /// out where no rival owns it now; a dark room keeps the last one seen.
+    /// Not bounded by this tick's rooms, as `recallArmed` is not: a rival's
+    /// other room is what refuses this one. Built by `Fresh`, the map being
+    /// carried to the next tick.
+    let recallRivalControllers (previous: Map<string, RivalController>) (world: World) : World =
+        let seen = world.Rooms |> Map.filter (fun _ facts -> Option.isSome facts.Control)
+
+        let kept =
+            previous
+            |> Map.toSeq
+            |> Seq.filter (fun (room, _) -> not (Map.containsKey room seen))
+
+        let now =
+            seen
+            |> Map.toSeq
+            |> Seq.choose (fun (room, facts) ->
+                facts.RivalController |> Option.map (fun c -> room, c))
+
+        { world with
+            RivalControllers = Seq.append kept now |> Fresh.mapOfSeq
         }
 
     /// The rooms an armed rival was seen in within `Tuning.HostileRoomMemory`

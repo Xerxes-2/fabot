@@ -74,6 +74,11 @@ let mutable private healers: Map<string, HealerSeen list> = Map.empty
 // a walk does not forget the room the walk goes round.
 let mutable private armedSeen: Map<string, int> = Map.empty
 
+// Every rival controller as last seen (`World.RivalControllers`, #489): heap
+// state seeded off the `rooms` leaf on a cold heap, so a safe mode seen
+// before a deploy still refuses its owner's other rooms after it.
+let mutable private rivalControllers: Map<string, RivalController> = Map.empty
+
 // The two of those a reset must not forget, as last written to the `rooms`
 // leaf: who owns each rival room (#444) and the tower latch. None on a cold
 // heap, which seeds `sightings` and `towered` off the leaf; written back
@@ -360,6 +365,7 @@ let private fullTick
             sightings <- World.seedRivals loaded.Rivals sightings
             towered <- Set.union towered loaded.Towered
             armedSeen <- loaded.Armed
+            rivalControllers <- loaded.Controllers
             loaded
 
     // The tick's World, read out of the engine once, with the previous tick's
@@ -371,18 +377,21 @@ let private fullTick
         |> World.watchExits Tuning.defaults exitWatches
         |> World.recallHealers Tuning.defaults healers
         |> World.recallArmed Tuning.defaults armedSeen
+        |> World.recallRivalControllers rivalControllers
 
     sightings <- world.Sightings
     towered <- world.Towered
     exitWatches <- world.ExitWatches
     healers <- world.Healers
     armedSeen <- world.ArmedSeen
+    rivalControllers <- world.RivalControllers
 
     let latches: ObserveMemory.RoomLatches =
         {
             Rivals = World.rivalOwners world
             Towered = world.Towered
             Armed = world.ArmedSeen
+            Controllers = world.RivalControllers
         }
 
     if latches <> written then

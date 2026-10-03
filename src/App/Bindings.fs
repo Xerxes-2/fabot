@@ -217,6 +217,9 @@ type IController =
     /// Ticks before `activateSafeMode` is no longer refused; undefined when
     /// no cooldown runs. Defined on a controller nobody owns too.
     abstract safeModeCooldown: int
+    /// Ticks before `activateSafeMode` and upgrading are no longer refused
+    /// after an `attackController`; undefined when none runs.
+    abstract upgradeBlocked: int
     abstract pos: IRoomPosition
     abstract activateSafeMode: unit -> int
 
