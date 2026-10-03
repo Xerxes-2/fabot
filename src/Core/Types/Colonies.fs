@@ -388,6 +388,19 @@ module Outpost =
             Controller = "6a8caab9dd4872bccd3194a2", { Room = "W12S26"; X = 8; Y = 32 }
         }
 
+    /// The seventh colony's first room, declared again 2026-10-03 to retake
+    /// it from Trepidimous, whose siege took it at t880,418
+    /// (`docs/research/seventh-colony.md`, its #1):
+    /// the one claimable Ultra deposit, 45,000 T at 46,25, two rooms from the
+    /// Reactor. The ids and tiles are the engine's
+    /// (`tests/Core.Tests/rooms/W17S25.room`).
+    let w17s25: Outpost =
+        {
+            RoomName = "W17S25"
+            Sources = [ "6a8caa7cdd4872bccd318c75", { Room = "W17S25"; X = 18; Y = 19 } ]
+            Controller = "6a8caa7cdd4872bccd318c76", { Room = "W17S25"; X = 15; Y = 36 }
+        }
+
     /// The sixth colony's room, declared 2026-09-28 off
     /// `docs/research/sixth-colony.md`: the first step into the free belt
     /// west of W15S28. The ids and tiles are the engine's, read that day. Kept
@@ -933,7 +946,9 @@ module Colony =
             {
                 // Given up as a colony at t880,418 after Trepidimous's siege;
                 // harassed again from 2026-10-02 while they mine it. Their
-                // 18M17A squad besieged it, so it keeps the full floor.
+                // 18M17A squad besieged it, so it keeps the full floor. Also
+                // W15S28's Claim again from 2026-10-03: the caster pools both
+                // until the Claim lands, then `harassCasters` drops it as ours.
                 RoomName = "W17S25"
                 Enemy = "Trepidimous"
                 Stand = { Room = "W17S25"; X = 18; Y = 19 }
@@ -1060,8 +1075,11 @@ module Colony =
                 //
                 // W17S25, the seventh colony's first room, was a Claim here
                 // (and harassed) from 2026-10-01 until it landed at t879,239;
-                // lost to a siege at t880,418.
-                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28 ]
+                // lost to a siege at t880,418. **A Claim here again from
+                // 2026-10-03, to leave this list the day it lands**: #471's
+                // `outpostsWorked` stops working it as an outpost on the claim
+                // tick already, so the #404 hand edit is only tidiness.
+                Outposts = [ Outpost.w15s27; Outpost.w15s29; Outpost.w14s28; Outpost.w17s25 ]
                 // The one errand there is: the sector Reactor in W15S25, three
                 // crossings out. This colony is the only one that can reach
                 // it, which is the room's whole reason for being where it is.
@@ -1100,6 +1118,37 @@ module Colony =
                 // is not the Consignee, as W12S28's own ore is not.
                 Consignee = Some "W15S28"
                 Perimeter = []
+            }
+            // W17S25 again (2026-10-03): the user retakes the room
+            // Trepidimous's siege took at t880,418. The plan:
+            // - the Claim waits out the controller's safe-mode cooldown, to
+            //   t930,418 (#474);
+            // - a claim party carries it to RCL2 in about seven ticks (#471);
+            // - safe mode covers the rush;
+            // - the mother ferries the nursery (#473);
+            // - the perimeter and residents on its ramparts hold it
+            //   afterwards (#446, #467).
+            {
+                Home = "W17S25"
+                Outposts = []
+                Errands = []
+                Salvage = []
+                Mother = Some "W15S28"
+                Consignee = Some "W15S28"
+                // Trepidimous next door (#446): an exact vertex min cut over
+                // the terrain, exits as source and the controller, the source
+                // and the Thorium as sink, seals 460 tiles with sixteen
+                // ramparts. North needs none: W17S24 is behind a wall.
+                Perimeter =
+                    [
+                        // West, to W18S25.
+                        for y in 15..20 -> { X = 2; Y = y }
+                        for y in 23..27 -> { X = 2; Y = y }
+                        // South, to W17S26.
+                        for x in 16..18 -> { X = x; Y = 44 }
+                        // East, to W16S25.
+                        for y in 27..28 -> { X = 47; Y = y }
+                    ]
             }
         ]
 

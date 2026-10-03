@@ -28,30 +28,10 @@ let keepRoom =
             "con-b", { X = 29; Y = 25 }, Structure BuiltKind.Container
         ]
 
-/// A colony sealed as W17S25 was (#446) while it was declared, 2026-10-01
-/// until Trepidimous took it at t880,418: an exact vertex min cut over its
-/// committed capture, exits as source and the controller, the source and
-/// the Thorium as sink, seals 460 tiles with these sixteen ramparts. North
-/// needs none: W17S24 is behind a wall.
-let private sealedW17s25: Colony =
-    {
-        Home = "W17S25"
-        Outposts = []
-        Errands = []
-        Salvage = []
-        Mother = None
-        Consignee = None
-        Perimeter =
-            [
-                // West, to W18S25.
-                for y in 15..20 -> { X = 2; Y = y }
-                for y in 23..27 -> { X = 2; Y = y }
-                // South, to W17S26.
-                for x in 16..18 -> { X = x; Y = 44 }
-                // East, to W16S25.
-                for y in 27..28 -> { X = 47; Y = y }
-            ]
-    }
+/// W17S25's declared perimeter (#446), declared again with the colony on
+/// 2026-10-03: sixteen chokes, pinned against the committed capture below.
+let private w17s25Perimeter =
+    (Colony.declared |> List.find (fun colony -> colony.Home = "W17S25")).Perimeter
 
 /// The tiles that room's rule covers, in the plan's own (x, y) order: the
 /// Keep — spawn, tower, Storage — and the two Post containers.
@@ -217,7 +197,7 @@ let rampartTests =
                 // #446: W17S25's chokes, read off its terrain offline, ride the
                 // cover rule: placed from the level the colony keeps ramparts at
                 // and not one level sooner.
-                let perimeter = sealedW17s25.Perimeter
+                let perimeter = w17s25Perimeter
 
                 let at level perimeter =
                     let { Intents = intents } =
@@ -244,7 +224,7 @@ let rampartTests =
                 // At RCL3 the child's first tower comes first: a perimeter site is
                 // Feeding tier like the tower's, and every pending child site
                 // pauses the mother's borrowed Upgrade.
-                let perimeter = sealedW17s25.Perimeter
+                let perimeter = w17s25Perimeter
 
                 let ramparts room =
                     let { Intents = intents } =
@@ -270,12 +250,12 @@ let rampartTests =
             }
 
             test "the sixteen chokes seal W17S25's capture from every exit" {
-                // The fixture's tiles are the real room's, not a pattern: on the
+                // The declared tiles are the real room's, not a pattern: on the
                 // committed capture each is open ground, and a walk from every
                 // exit that may not cross them reaches neither the controller,
                 // the source nor the Thorium.
                 let room = RoomFixtures.load "W17S25"
-                let walls = Set.ofList sealedW17s25.Perimeter
+                let walls = Set.ofList w17s25Perimeter
 
                 let ground (tile: Pos) =
                     match TerrainGrid.tryFind tile room.Terrain with
@@ -283,7 +263,7 @@ let rampartTests =
                     | None -> false
                     | Some _ -> true
 
-                for tile in sealedW17s25.Perimeter do
+                for tile in w17s25Perimeter do
                     Expect.isTrue
                         (ground tile)
                         $"choke {tile.X},{tile.Y} is open ground on the capture"

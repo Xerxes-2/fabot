@@ -1305,17 +1305,26 @@ let outpostTests =
 
                 Expect.equal
                     (Colony.homes Colony.declared)
-                    [ "W12S28"; "W13S28"; "W15S28"; "W17S29"; "W12S26" ]
-                    "five colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28, W11S27 its to W17S25 on 2026-10-01, and W17S25, besieged and lost at t880,418, its to W12S26 the same day"
+                    [ "W12S28"; "W13S28"; "W15S28"; "W17S29"; "W12S26"; "W17S25" ]
+                    "six colonies are declared, in the order a human wrote them (ADR 0047): W11S29 gave its slot to W17S29 on 2026-09-28, W11S27 its to W17S25 on 2026-10-01, W17S25, besieged and lost at t880,418, its to W12S26 the same day, and W17S25 was declared again on 2026-10-03 to retake it"
 
                 Expect.equal
                     (outposts |> List.map (fun outpost -> outpost.RoomName))
                     [ "W12S27"; "W11S28" ]
                     "the north outpost and, since 2026-09-16, the west one; the seventh colony's room W12S26 left this list on its Claim (t881,062, #404): the room ADR 0042's pair called west is a colony of its own now (ADR 0047), and W11S28 is a room further west again (`docs/research/outpost-wave-2.md`)"
 
-                Expect.isFalse
-                    (Colony.declared |> List.exists (fun colony -> colony.Home = "W17S25"))
-                    "W17S25 is no colony of ours: Trepidimous took it at t880,418"
+                match Colony.declared |> List.tryFind (fun colony -> colony.Home = "W17S25") with
+                | Some w17s25 ->
+                    Expect.equal
+                        (w17s25.Mother, w17s25.Consignee)
+                        (Some "W15S28", Some "W15S28")
+                        "W17S25, retaken from 2026-10-03, is raised by W15S28 and banks its Thorium there"
+
+                    Expect.hasLength
+                        w17s25.Perimeter
+                        16
+                        "and is sealed against Trepidimous next door by its sixteen chokes (#446)"
+                | None -> failtest "W17S25 is declared a colony again from 2026-10-03"
 
                 Expect.equal
                     (Outpost.adr0042 |> List.map (fun outpost -> outpost.RoomName))
@@ -1422,8 +1431,8 @@ let outpostTests =
                 Expect.equal
                     (Colony.outpostsOf Colony.declared "W15S28"
                      |> List.map (fun outpost -> outpost.RoomName))
-                    [ "W15S27"; "W15S29"; "W14S28" ]
-                    "the sixth and seventh colonies' rooms left this list on their Claims (t808,328 and t879,239, #404); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
+                    [ "W15S27"; "W15S29"; "W14S28"; "W17S25" ]
+                    "W17S25 is a Claim here again from 2026-10-03, to leave on landing as the sixth and seventh colonies' rooms did on theirs (t808,328 and t879,239, #404); the third colony works the room its errand crosses, the one declared for its own sake, and since 2026-09-20 the room next door that was always nearer to it than to W13S28: W15S29 was withdrawn on 2026-09-17 after one invader killed four bodies in it and re-declared on 2026-09-18 (#369), and W14S28 came across because its rock stands six tiles from this colony's border and forty-three from the other's"
 
                 // The fourth colony was given up on 2026-09-28 (`sixth-colony.md`):
                 // a room with no deposit left is worth a GCL slot and nothing

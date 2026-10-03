@@ -183,11 +183,14 @@ let outpostDeclarationTests =
                         // W17S29's every chain to W17S26 runs through W18S26,
                         // which Trepidimous owns (#444), and W12S26, five
                         // columns east, has no chain to it inside the budget.
-                        "W18S27", [ "W15S28"; "W17S29" ]
-                        "W17S26", [ "W13S28"; "W15S28" ]
+                        // W17S25, declared again 2026-10-03, reaches the
+                        // first three by ground once it stands a spawn
+                        // that can buy a floor.
+                        "W18S27", [ "W15S28"; "W17S29"; "W17S25" ]
+                        "W17S26", [ "W13S28"; "W15S28"; "W17S25" ]
                         // W15S28's walk dips south round the wall that
                         // W18S27's does, eight crossings, past the budget.
-                        "W19S26", [ "W17S29" ]
+                        "W19S26", [ "W17S29"; "W17S25" ]
                         // Its north edge is wall, so W17S24 (Trepidimous) is
                         // never the way in; W12S26, six columns and a row
                         // away by name, has no chain to it inside the budget.
@@ -262,7 +265,9 @@ let outpostDeclarationTests =
                     ]
 
                 // No sighting of W19S26: nothing of ours has ever seen it.
-                let casting w13s28 w17s29 =
+                // `w17s25`: W17S25's Claim has landed, its controller ours
+                // and no spawn in it yet (a nursery).
+                let castingAfter w17s25 w13s28 w17s29 =
                     let banks = banks w13s28 w17s29
 
                     let world =
@@ -284,6 +289,18 @@ let outpostDeclarationTests =
 
                                     name,
                                     match List.tryFind (fst >> (=) name) banks with
+                                    | None when w17s25 && name = "W17S25" ->
+                                        { facts with
+                                            Control =
+                                                Some
+                                                    {
+                                                        Owner = Ownership.Ours
+                                                        Reservation = None
+                                                        SafeMode = true
+                                                        SafeModeCooldownUntil = 0
+                                                        Sign = None
+                                                    }
+                                        }
                                     | None -> facts
                                     | Some(_, bank) ->
                                         { facts with
@@ -319,6 +336,8 @@ let outpostDeclarationTests =
                             BlockCost = Bodies.rangerBlockCost
                         }
                         world
+
+                let casting = castingAfter false
 
                 let casters w13s28 w17s29 =
                     (casting w13s28 w17s29).Casters
@@ -374,6 +393,15 @@ let outpostDeclarationTests =
                         "W17S25", Some "W15S28"
                     ]
                     "W17S29's RCL6 bank buys the full floor: it casts W19S26 and the nearer W18S27, and never W17S26 or W17S25 behind W18S26"
+
+                // W17S25 is W15S28's Claim and a harassment room at once
+                // (2026-10-03): harassed until the Claim lands, then ours,
+                // and out of the list (#447). The nursery casts nothing.
+                Expect.equal
+                    ((castingAfter true 5_600 1_800).Casters
+                     |> List.map (fun (h, caster) -> h.RoomName, caster))
+                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
+                    "the tick W17S25's Claim lands it is ours, and no colony casts it: the rest are cast as before"
 
                 for h in Colony.harass do
                     Expect.contains

@@ -3638,6 +3638,39 @@ let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =
 let private harassView harass world home =
     harassViewUnder StandDown.none harass world home
 
+/// The fixture's declaration with the harassment room also a declared child
+/// of the mother's and a Claim outpost of hers: W17S25's shape.
+let private claimingDeclared: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home = mother then
+            { colony with
+                Outposts =
+                    colony.Outposts
+                    @ [
+                        {
+                            RoomName = harassRoom
+                            Sources = [ "src-enemy", { Room = harassRoom; X = 5; Y = 5 } ]
+                            Controller = "ctrl-enemy", { Room = harassRoom; X = 8; Y = 8 }
+                        }
+                    ]
+            }
+        else
+            colony)
+    |> fun colonies ->
+        colonies
+        @ [
+            {
+                Home = harassRoom
+                Outposts = []
+                Errands = []
+                Salvage = []
+                Mother = Some mother
+                Consignee = None
+                Perimeter = []
+            }
+        ]
+
 [<Tests>]
 let harassViewTests =
     testList
@@ -3918,48 +3951,13 @@ let harassViewTests =
 
             test
                 "a harassment room that is also its caster's Claim outpost pools both the Guard and the Claim" {
-                // As W17S25 was (2026-10-01): harassed by W15S28 until the Claim landed, so
-                // no rival reservation can slip in ahead of it and block the
-                // Claim pool for good. Here the harassment room is a declared
-                // child of the mother's and a Claim outpost of hers.
-                let claiming =
-                    declared
-                    |> List.map (fun colony ->
-                        if colony.Home = mother then
-                            { colony with
-                                Outposts =
-                                    colony.Outposts
-                                    @ [
-                                        {
-                                            RoomName = harassRoom
-                                            Sources =
-                                                [
-                                                    "src-enemy",
-                                                    { Room = harassRoom; X = 5; Y = 5 }
-                                                ]
-                                            Controller =
-                                                "ctrl-enemy", { Room = harassRoom; X = 8; Y = 8 }
-                                        }
-                                    ]
-                            }
-                        else
-                            colony)
-                    |> fun colonies ->
-                        colonies
-                        @ [
-                            {
-                                Home = harassRoom
-                                Outposts = []
-                                Errands = []
-                                Salvage = []
-                                Mother = Some mother
-                                Consignee = None
-                                Perimeter = []
-                            }
-                        ]
-
+                // As W17S25 is (2026-10-01, and again from 2026-10-03): harassed by
+                // W15S28 until the Claim lands, so no rival reservation can slip in
+                // ahead of it and block the Claim pool for good.
                 let world = harassWorld (control Ownership.Unowned) 300
-                let view = harassViewOver claiming StandDown.none harassDeclared world mother
+
+                let view =
+                    harassViewOver claimingDeclared StandDown.none harassDeclared world mother
 
                 Expect.equal
                     (view.Harass |> List.map (fun h -> h.RoomName))
@@ -4001,6 +3999,58 @@ let harassViewTests =
                 Expect.isFalse
                     (Map.containsKey "can-enemy" view.Spatial.TargetKinds)
                     "the room carries the harassment's cut, so nothing of hers withdraws from or repairs it"
+            }
+
+            test
+                "a harassed Claim under a safe-mode cooldown pools no Claim and no party Upgrade until the cooldown ends, the Guard throughout" {
+                // W17S25 (2026-10-03): unclaimed at t880,418, its controller
+                // cools to t930,418. The Claim waits it out (#474), and the
+                // claim party's Upgrade is pooled off the Claim alone (#471), so
+                // no party walks out early. The harassment goes on meanwhile.
+                let poolAt (until: int) =
+                    let world =
+                        { harassWorld
+                              { control Ownership.Unowned with
+                                  SafeModeCooldownUntil = until
+                              }
+                              300 with
+                            Time = 1_000
+                        }
+
+                    let view =
+                        harassViewOver claimingDeclared StandDown.none harassDeclared world mother
+
+                    let facts = outpostFactsOf view
+
+                    facts.Claims,
+                    planTasks
+                        view
+                        (Fabot.Core.Atlas.ofView view)
+                        noThreats
+                        HeldTaskFacts.empty
+                        facts
+
+                let coolingClaims, cooling = poolAt 1_001
+                let endedClaims, ended = poolAt 1_000
+
+                Expect.isEmpty coolingClaims "one tick of cooldown left: no controller to claim"
+
+                Expect.isFalse (List.contains (Claim "ctrl-enemy") cooling) "so no Claim is pooled"
+
+                Expect.isFalse
+                    (List.contains (Upgrade "ctrl-enemy") cooling)
+                    "and no party Upgrade: the party waits with the Claim"
+
+                Expect.contains cooling (Guard harassRoom) "while the harassment Guard stays pooled"
+
+                Expect.equal
+                    endedClaims
+                    [ "ctrl-enemy", harassRoom ]
+                    "the tick the cooldown ends, the controller is a Claim"
+
+                Expect.contains ended (Claim "ctrl-enemy") "the Claim is pooled"
+                Expect.contains ended (Upgrade "ctrl-enemy") "and the party's Upgrade with it"
+                Expect.contains ended (Guard harassRoom) "beside the Guard"
             }
 
             test "a room held by anybody but the enemy yields no container" {
@@ -4065,7 +4115,8 @@ let harassViewTests =
                 "no harassment room is a declared home, outpost, errand or salvage room, but a Claim" {
                 // The branch order in `ColonyView.ofWorld` reads the bootstrap,
                 // errand and salvage kinds ahead of a harassment room. The one
-                // overlap allowed is a Claim (W17S25's, 2026-10-01): a declared home
+                // overlap allowed is a Claim (W17S25's, 2026-10-01 and again from
+                // 2026-10-03): a declared home
                 // that is still an outpost of its mother's, harassed until the Claim
                 // lands. Its harassment cut keeps the declared controller and rock,
                 // which is all a Claim outpost works.
@@ -4090,6 +4141,13 @@ let harassViewTests =
                      |> List.filter (fun h -> Set.contains h.RoomName kept)
                      |> List.map (fun h -> h.RoomName))
                     "no room is harassed by one list and kept by another"
+
+                Expect.equal
+                    (Colony.harass
+                     |> List.filter (fun h -> Set.contains h.RoomName claims)
+                     |> List.map (fun h -> h.RoomName))
+                    [ "W17S25" ]
+                    "W17S25 is the one room both harassed and a Claim (2026-10-03): W15S28 pools both until it lands"
 
                 Expect.isTrue
                     (Colony.harass |> List.forall (fun h -> not (Colony.isAlly h.Enemy)))
