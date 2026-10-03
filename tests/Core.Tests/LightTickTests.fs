@@ -45,7 +45,8 @@ let private hostile x y owner armed : GlanceHostile =
         Tile = tile x y
         Owner = owner
         Armed = armed
-        MoveOnly = false
+        Hurts = armed
+        Breaks = false
     }
 
 /// The world one tick on: the hauler took its step and everything else held.
@@ -278,7 +279,8 @@ let forcedTests =
                                     Tile = RoomPos.at harassed { X = x; Y = 10 }
                                     Owner = "Trepidimous"
                                     Armed = true
-                                    MoveOnly = false
+                                    Hurts = true
+                                    Breaks = false
                                 }
                             ]
                     }
@@ -341,48 +343,69 @@ let forcedTests =
                 Expect.equal (LightTick.forced last far) None "one tile further is not near"
             }
 
-            test "any hostile near a structure of ours forces a full tick" {
-                let atTheSpawn =
+            test
+                "a hostile that can dismantle or claim, near a structure of ours, forces a full tick" {
+                let atTheSpawn breaks =
                     { stepped with
-                        Hostiles = [ hostile 33 33 "Rival" false ]
+                        Hostiles =
+                            [
+                                { hostile 33 33 "Rival" false with
+                                    Breaks = breaks
+                                }
+                            ]
                     }
 
                 Expect.equal
-                    (LightTick.forced last atTheSpawn)
+                    (LightTick.forced last (atTheSpawn true))
                     (Some(LightForce.HostileNear(room, "Rival")))
-                    "a body at the gate"
+                    "a WORK or CLAIM body at the gate"
+
+                Expect.equal
+                    (LightTick.forced last (atTheSpawn false))
+                    None
+                    "a hauler at the gate takes nothing down"
             }
 
             test "a MOVE-only hostile within range of our creep forces nothing" {
                 let scout =
                     { stepped with
-                        Hostiles =
-                            [
-                                { hostile 11 10 "Mirroar" false with
-                                    MoveOnly = true
-                                }
-                            ]
+                        Hostiles = [ hostile 11 10 "Mirroar" false ]
                     }
 
                 Expect.equal (LightTick.forced last scout) None "a scout changes no decision"
             }
 
-            test
-                "a hostile with one WORK, CARRY, CLAIM or ATTACK part within range forces a full tick" {
-                // No structure of ours in the room, so an armed body is the
-                // near rule's and not the armed rule's.
-                for part, armed in
-                    [ Work, false; Carry, false; BodyPart.Claim, false; Attack, true ] do
+            test "near a creep of ours, only a body that can hurt it forces a full tick" {
+                // User, 2026-10-04: a Trepidimous worker beside a harassing ranger
+                // held every tick full. No structure of ours in the room, so an
+                // armed body is the near rule's and not the armed rule's.
+                for part, hurts, breaks in
+                    [
+                        Attack, true, false
+                        RangedAttack, true, false
+                        Work, false, true
+                        Carry, false, false
+                        BodyPart.Claim, false, true
+                        Heal, false, false
+                    ] do
                     let body =
                         { stepped with
                             Structures = []
-                            Hostiles = [ hostile 11 10 "Mirroar" armed ]
+                            Hostiles =
+                                [
+                                    { hostile 11 10 "Mirroar" hurts with
+                                        Breaks = breaks
+                                    }
+                                ]
                         }
 
                     Expect.equal
                         (LightTick.forced last body)
-                        (Some(LightForce.HostileNear(room, "Mirroar")))
-                        $"one %A{part} part is a decision"
+                        (if hurts then
+                             Some(LightForce.HostileNear(room, "Mirroar"))
+                         else
+                             None)
+                        $"one %A{part} part beside a creep of ours"
             }
 
             test "a hostile at the same coordinates in another room is not near" {
@@ -393,8 +416,9 @@ let forcedTests =
                                 {
                                     Tile = RoomPos.at "W2N1" { X = 10; Y = 10 }
                                     Owner = "Rival"
-                                    Armed = false
-                                    MoveOnly = false
+                                    Armed = true
+                                    Hurts = true
+                                    Breaks = false
                                 }
                             ]
                     }
@@ -681,7 +705,8 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
         Tile = RoomPos.at roomName { X = x; Y = y }
         Owner = owner
         Armed = armed
-        MoveOnly = false
+        Hurts = armed
+        Breaks = false
     }
 
 [<Tests>]
@@ -725,7 +750,9 @@ let resetSplitTests =
                 Expect.equal rest [ "W5N1"; "W7N1" ] "the second half"
             }
 
-            test "an unarmed hostile within reach of ours threatens the colony projecting its room" {
+            test "an unarmed hostile that takes nothing down, beside our creep, threatens no colony" {
+                // User, 2026-10-04: a body that cannot hurt a creep is no reason
+                // to decide.
                 let seen =
                     { quiet with
                         Creeps =
@@ -741,7 +768,7 @@ let resetSplitTests =
 
                 let first, _ = LightTick.resetSplit 0.5 seen fourColonies
 
-                Expect.equal first [ "W5N1"; "W1N1" ] "the near rule picks the colony"
+                Expect.equal first [ "W1N1"; "W3N1" ] "the colonies in their order, none picked out"
             }
 
             test "more threatened colonies than half all decide first" {
