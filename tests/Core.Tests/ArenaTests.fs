@@ -2024,7 +2024,12 @@ let private linkProbeFrom (tiles: RoomPos list) (holding: bool) (panics: bool) (
     let colonies =
         [
             { colony "W15S28" with
-                Assaults = [ Assault.w18s26Link ]
+                Assaults =
+                    [
+                        { Assault.w18s26Link with
+                            Active = true
+                        }
+                    ]
             }
         ]
 
@@ -2692,6 +2697,7 @@ let arenaDefenceTests =
                                         [
                                             { Assault.w18s26Link with
                                                 MaxHops = None
+                                                Active = true
                                             }
                                         ]
                                 }

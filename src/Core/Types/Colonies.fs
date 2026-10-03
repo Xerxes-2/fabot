@@ -820,7 +820,9 @@ module Assault =
     /// 2026-10-03), where the line runs farthest from them: the rampart at
     /// (25,47) straight below it, two steps from W18S27's exits where the far
     /// line's were 18. W15S28 reaches it in seven crossings, by W15S29,
-    /// W16S29, W17S29, W18S29, W18S28 and W18S27 (#494).
+    /// W16S29, W17S29, W18S29, W18S28 and W18S27 (#494). Paused (user,
+    /// 2026-10-04): the first wave was driven off the line by Dread358, an
+    /// 17 ATTACK defender that lives to about t931,955; the next waits for it.
     let w18s26Link: Assault =
         {
             RoomName = "W18S26"
@@ -831,7 +833,7 @@ module Assault =
             Targets = [ { X = 25; Y = 41 } ]
             Entry = Some "W18S27"
             MaxHops = Some 7
-            Active = true
+            Active = false
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
