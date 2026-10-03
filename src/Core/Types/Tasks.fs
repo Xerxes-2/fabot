@@ -101,6 +101,9 @@ type Capacity =
         /// where every cap above counts holders. The refill cluster's free
         /// energy; None for every other Task.
         Budget: int option
+        /// The same over the holders' live Work parts (#483): an RCL8
+        /// controller's `Engine.maxUpgradePerTick`. None for every other Task.
+        WorkBudget: int option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -115,6 +118,7 @@ module Capacity =
             Handover = 0
             Relieved = false
             Budget = None
+            WorkBudget = None
         }
 
     /// One crowd's cap written onto a Task.
@@ -150,6 +154,11 @@ module Capacity =
     /// what they carry together falls short of `energy`.
     let budgeting energy (capacity: Capacity) = { capacity with Budget = Some energy }
 
+    /// A budget the holders' Work parts are counted against (#483): admitted
+    /// while the Work they hold together falls short of `work`.
+    let budgetingWork work (capacity: Capacity) =
+        { capacity with WorkBudget = Some work }
+
     /// One number over every class: a Seat count, a store's stock divided
     /// by one load, one holder per controller.
     let total n =
@@ -176,7 +185,9 @@ module Capacity =
     /// Whether any cap at all is set — the question that decides whether
     /// the Matcher pays for a walk over the holders.
     let isBounded (capacity: Capacity) =
-        not (Map.isEmpty capacity.Caps) || Option.isSome capacity.Budget
+        not (Map.isEmpty capacity.Caps)
+        || Option.isSome capacity.Budget
+        || Option.isSome capacity.WorkBudget
 
 /// One entry of this tick's Task pool: the Task, where it ranks and how many
 /// bodies it admits.

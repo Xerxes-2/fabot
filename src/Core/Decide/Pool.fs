@@ -1064,6 +1064,14 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // `Tuning.PioneerCount`, the same constant the worker row is raised by.
         | Upgrade controllerId when isBorrowedUpgrade view controllerId ->
             Capacity.total view.Tuning.PioneerCount
+        // An RCL8 controller takes `Engine.maxUpgradePerTick` a tick from
+        // everyone together (#483): Work past it holds a seat and upgrades
+        // nothing.
+        | Upgrade controllerId when
+            view.Controller
+            |> Option.exists (fun c -> c.Id = controllerId && c.Level >= Engine.controllerMaxLevel)
+            ->
+            Capacity.unbounded |> Capacity.budgetingWork Engine.maxUpgradePerTick
         | Build siteId ->
             // The body standing on the site is outside the builders' budget:
             // that number prices a commute, and this body made none.

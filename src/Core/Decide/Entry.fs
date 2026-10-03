@@ -365,7 +365,7 @@ let decideUnarbitrated
     // `outpostControllers` 9.1, each walking the kind census.
     let outposts = outpostFactsOf view
 
-    let sizing = rowSizingOf view atlas threats outposts
+    let sizing = rowSizingOf view atlas threats outposts held
 
     let tasks = planTasks view atlas threats held outposts
 

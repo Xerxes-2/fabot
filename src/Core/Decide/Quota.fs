@@ -673,15 +673,47 @@ type RowSizing =
         MinerQuota: int
         /// One while the Reactor delivery's current ground facts stand (#319).
         CourierQuota: int
+        /// `upgraderWorkOf`'s answer this tick: the Work the upgrader row may
+        /// put on the controller in total, and so in any one body. None while
+        /// the controller takes whatever it is given.
+        UpgraderWork: int option
     }
+
+/// The ceiling on one upgrader body's Work that a `RowSizing` hands to
+/// `BodySizing`.
+let internal upgraderWorkCeiling (sizing: RowSizing) =
+    sizing.UpgraderWork |> Option.defaultValue upgraderWorkMost
+
+/// The Work the upgrader row may stand on the home controller (#483): no
+/// bound below `Engine.controllerMaxLevel`; at it, the engine's
+/// `maxUpgradePerTick` less the live Work of every other body holding the
+/// controller's Upgrade, since Work past the cap upgrades nothing.
+let internal upgraderWorkOf (view: ColonyView) atlas (held: HeldTaskFacts) : int option =
+    match view.Controller with
+    | Some controller when controller.Level >= Engine.controllerMaxLevel ->
+        let holders =
+            HeldTaskFacts.holdersOf held (taskId (Upgrade controller.Id)) |> Set.ofList
+
+        let others =
+            view.Creeps
+            |> List.filter (fun creep ->
+                Set.contains creep.Name holders
+                && patternOfParts view.Tuning (Atlas.workHeavy atlas creep.Name) creep.Body
+                   <> upgraderPattern)
+            |> List.sumBy (fun creep -> partCount creep.Body Work)
+
+        Some(Engine.maxUpgradePerTick - others |> max 0)
+    | _ -> None
 
 let internal rowSizingOf
     (view: ColonyView)
     atlas
     (threats: Threats)
     (outposts: OutpostFacts)
+    (held: HeldTaskFacts)
     : RowSizing =
     {
+        UpgraderWork = upgraderWorkOf view atlas held
         AnchorPostCaps = postWorkCapsOf view atlas
         ReserverClaims = reserverClaimsOf view threats outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
@@ -755,27 +787,34 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
 /// it is the Work-heavy one and not the standing one.
 let internal isStandingBody (tuning: Tuning) (creep: CreepInfo) = standingParts tuning creep.Body
 
-/// What one body of the upgrader row eats per tick, at the row's cast at the
-/// richest bank. Never below one — the sizing rule floors at a pair — so the
-/// quota always has a divisor.
-let private upgraderDrain capacity =
-    upgradeDrainOf (bodyFor upgraderPattern capacity)
+/// The upgrader row's cast this tick: the bank's, under the Work the
+/// controller still takes.
+let private upgraderCastOf (sizing: RowSizing) capacity =
+    sizedBodyFor
+        { largestSizing with
+            UpgraderWork = upgraderWorkCeiling sizing
+        }
+        upgraderPattern
+        capacity
 
 /// What one body of the row costs the colony over a life: the energy its Work
 /// drinks plus the body itself. One expression, because the quota *sells*
 /// bodies at this price and `workforceTarget` *charges* the surplus at it.
-let private upgraderLifetimeCost capacity =
-    upgraderDrain capacity * Engine.creepLifetime
-    + bodyCost (bodyFor upgraderPattern capacity)
+/// Never below one pair's drink — the sizing rule floors at a pair — so the
+/// quota always has a divisor.
+let private upgraderLifetimeCost sizing capacity =
+    let body = upgraderCastOf sizing capacity
+    upgradeDrainOf body * Engine.creepLifetime + bodyCost body
 
 /// Whether this colony may hire the standing row at all: a **built**
 /// controller container to stand at, and a bank whose own cast is a standing
 /// body. Named once because both halves of the row must answer to it, and a
 /// body hired where the row is illegal reads `NoneApplicable` for its whole
-/// life.
-let private rowStands (view: ColonyView) atlas =
+/// life. The cast is the capped one: a body cut to the last few Work an RCL8
+/// controller takes is no standing body, and is read back to the generalist.
+let private rowStands (view: ColonyView) atlas sizing =
     not (Set.isEmpty (Atlas.controllerContainers atlas))
-    && standingParts view.Tuning (partsOf (bodyFor upgraderPattern view.Bank.Capacity))
+    && standingParts view.Tuning (partsOf (upgraderCastOf sizing view.Bank.Capacity))
 
 /// ADR-0046
 /// The upgrader row's two halves: what the income buys — the surplus divided
@@ -785,22 +824,31 @@ let private rowStands (view: ColonyView) atlas =
 /// mouth at a time, because `haulerQuota` is fixed before this term so the
 /// extra mouth brings no carrier with it. Derived together because they share
 /// every expensive term; split apart they measured +2.4% of a tick on the idle
-/// box.
-let internal upgraderRow (view: ColonyView) atlas surplus : int * int =
+/// box. Under an RCL8 controller both halves together stop at the bodies the
+/// row's Work fits (#483).
+let internal upgraderRow (view: ColonyView) atlas (sizing: RowSizing) surplus : int * int =
     let capacity = view.Bank.Capacity
 
-    if not (rowStands view atlas) then
+    if not (rowStands view atlas sizing) then
         0, 0
     else
-        let cost = upgraderLifetimeCost capacity
+        let cost = upgraderLifetimeCost sizing capacity
         let onIncome = surplus / cost |> max 0
         let floor = view.Tuning.UpgradeStockBodies * capacity
         let owed = view.ConstructionSites |> List.sumBy (fun site -> site.Left)
 
-        onIncome, (Facts.stockedEnergy view - owed - floor |> max 0) / cost |> min 1
+        let onStock = (Facts.stockedEnergy view - owed - floor |> max 0) / cost |> min 1
+
+        match sizing.UpgraderWork with
+        | None -> onIncome, onStock
+        | Some work ->
+            let most = work / partCountIn (upgraderCastOf sizing capacity) Work
+            let onIncome = min onIncome most
+            onIncome, min onStock (most - onIncome)
 
 /// The income's half alone.
-let internal upgraderQuota (view: ColonyView) atlas surplus = fst (upgraderRow view atlas surplus)
+let internal upgraderQuota (view: ColonyView) atlas sizing surplus =
+    fst (upgraderRow view atlas sizing surplus)
 
 
 /// The worker row's floor: two while anything stands in the Build or Repair
@@ -844,6 +892,9 @@ type QuotaRows =
         /// must charge the surplus for these mouths not at all, since they ate
         /// no income.
         UpgraderOnStock: int
+        /// One `Upgrader` body's lifetime cost at this tick's cast, the price
+        /// the row sold it at and the surplus is charged at.
+        UpgraderCost: int
         Surplus: int
     }
 
@@ -873,7 +924,7 @@ let internal quotaRowsOf
     : QuotaRows =
     let surplus = surplusOverLifetime view atlas sizing haulerQuota
 
-    let onIncome, onStock = upgraderRow view atlas surplus
+    let onIncome, onStock = upgraderRow view atlas sizing surplus
 
     {
         Reserver = sizing.ReserverClaims
@@ -891,6 +942,7 @@ let internal quotaRowsOf
         Dismantler = dismantlerQuota view
         Upgrader = onIncome + onStock
         UpgraderOnStock = onStock
+        UpgraderCost = upgraderLifetimeCost sizing view.Bank.Capacity
         Surplus = surplus
     }
 
@@ -920,8 +972,7 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     // is hired against the rest: the income-bought mouths only (#385), since a
     // stock-bought mouth ate no income and charging it here would take the
     // surplus away twice.
-    let upgraderCost =
-        (rows.Upgrader - rows.UpgraderOnStock) * upgraderLifetimeCost capacity
+    let upgraderCost = (rows.Upgrader - rows.UpgraderOnStock) * rows.UpgraderCost
 
     // ADR-0037
     let incomeWorkers =

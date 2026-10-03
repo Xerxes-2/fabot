@@ -532,6 +532,100 @@ let upgraderQuotaTests =
         ]
 
 [<Tests>]
+let upgraderCapTests =
+    testList
+        "the upgrader row under an RCL8 controller's cap"
+        [
+            // One bank for both levels, rich enough that the row's uncapped
+            // cast is the 24-Work ceiling, and a stock deep enough to buy a
+            // body beside the income's: the level is the only knob.
+            let colonyAt level =
+                let colony =
+                    upgraderColony (withBuffer (Structure BuiltKind.Container))
+                    |> thirdSource
+                    |> stocking 1_000_000
+                    |> withLevel level
+
+                { colony with Bank = bank 5600 5600 }
+
+            let fleet upgraders = upgraderFleetAt 5600 3 upgraders 1
+
+            let upgraderQuotaOf (decision: Decision) =
+                decision.Quotas.Rows
+                |> List.find (fun row -> row.Row = "upgrader")
+                |> fun row -> row.Quota
+
+            let castBody (decision: Decision) =
+                match spawnIntents decision.Intents with
+                | [ (_, body, name: string) ] when name.StartsWith "upgrader-" -> body
+                | other -> failtest $"expected one upgrader cast, got %A{other}"
+
+            let standing name =
+                creepWith name 50 0 (List.replicate 15 Work @ [ Carry ] @ List.replicate 15 Move)
+
+            test "an RCL8 controller's row casts fifteen Work in all" {
+                let decision = decideOn { colonyAt 8 with Creeps = fleet 0 }
+
+                Expect.equal
+                    (partCountIn (castBody decision) Work)
+                    Engine.maxUpgradePerTick
+                    "the cast carries the fifteen the controller takes a tick, not the bank's 24"
+
+                Expect.equal (upgraderQuotaOf decision) 1 "and one such body is the whole row"
+            }
+
+            test "an RCL7 controller's row is unchanged" {
+                let decision = decideOn { colonyAt 7 with Creeps = fleet 0 }
+
+                Expect.equal
+                    (castBody decision)
+                    (bodyFor upgraderPattern 5600)
+                    "below RCL8 the row casts the bank's own ceiling"
+
+                Expect.isGreaterThan
+                    (upgraderQuotaOf decision)
+                    1
+                    "and the income and the stock buy a body each"
+            }
+
+            test "a worker already upgrading counts toward the fifteen" {
+                let holder =
+                    creepWith
+                        "w-holder"
+                        50
+                        0
+                        (List.replicate 5 Work @ List.replicate 5 Carry @ List.replicate 5 Move)
+
+                let decision =
+                    decideFrom
+                        (Map.ofList [ holder.Name, taskId (Upgrade "ctrl-1") ])
+                        { colonyAt 8 with
+                            Creeps = fleet 0 @ [ holder ]
+                        }
+
+                Expect.equal
+                    (partCountIn (castBody decision) Work)
+                    (Engine.maxUpgradePerTick - 5)
+                    "the row's cast is the Work the controller still takes beside the worker's five"
+            }
+
+            test "an RCL8 controller's Upgrade admits Work up to the cap" {
+                let holdersOf level =
+                    (decideOn
+                        { colonyAt level with
+                            Creeps = fleet 0 @ [ standing "u1"; standing "u2" ]
+                        })
+                        .Assignments
+                    |> Map.filter (fun name tid ->
+                        name.StartsWith "u" && tid = taskId (Upgrade "ctrl-1"))
+                    |> Map.count
+
+                Expect.equal (holdersOf 7) 2 "the premise: below RCL8 both bodies upgrade"
+                Expect.equal (holdersOf 8) 1 "at RCL8 the first fifteen fill the cap"
+            }
+        ]
+
+[<Tests>]
 let quotaInputTests =
     testList
         "the quota inputs read this colony's own cast"

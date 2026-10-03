@@ -212,6 +212,17 @@ module Engine =
     /// per upgrade tick — the rate an upgrade mouth eats income at.
     let upgradeDrainPerWork = 1
 
+    /// CONTROLLER_MAX_UPGRADE_PER_TICK: what a controller at
+    /// `controllerMaxLevel` takes a tick, summed over every creep upgrading
+    /// it. The engine's processor keeps a per-controller tally for the tick:
+    /// a creep reaching it upgrades only the remainder and spends only that
+    /// much energy, and every creep after it spends none.
+    let maxUpgradePerTick = 15
+
+    /// The level past which a controller does not rise, and at which
+    /// `maxUpgradePerTick` applies.
+    let controllerMaxLevel = 8
+
     /// What a swamp tile costs a walking creep against plain's two: the
     /// dearest weight a grid can hold, which the flood's step table is
     /// sized by.

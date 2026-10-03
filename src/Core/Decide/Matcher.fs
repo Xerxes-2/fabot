@@ -34,6 +34,13 @@ let matchCreeps
     let carriedBy name =
         Map.tryFind name carried |> Option.defaultValue 0
 
+    // What each body's live Work comes to, for the Work budget.
+    let works =
+        view.Creeps |> List.map (fun c -> c.Name, partCount c.Body Work) |> Map.ofList
+
+    let workBy name =
+        Map.tryFind name works |> Option.defaultValue 0
+
     let classes =
         view.Creeps
         |> List.map (fun c -> c.Name, bodyClassOf view.Tuning atlas c)
@@ -244,7 +251,11 @@ let matchCreeps
                 capacity.Budget
                 |> Option.forall (fun budget -> (holders |> List.sumBy carriedBy) < budget)
 
-            capsHold && budgetHolds
+            let workBudgetHolds =
+                capacity.WorkBudget
+                |> Option.forall (fun budget -> (holders |> List.sumBy workBy) < budget)
+
+            capsHold && budgetHolds && workBudgetHolds
 
     // The vision grace (#151): an assignment whose Task left the pool because
     // its room went dark inside `Tuning.VisionGrace` is kept (`lastSeenIn`);

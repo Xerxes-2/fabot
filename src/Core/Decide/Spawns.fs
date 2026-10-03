@@ -87,6 +87,7 @@ let private castBodyOf
             MinerWorkPerMove = sizing.MinerWorkPerMove
             GuardBlocks = sizing.GuardBlocks
             RangerBlocks = sizing.RangerBlocks
+            UpgraderWork = upgraderWorkCeiling sizing
         }
         pattern
         view.Bank.Capacity
@@ -304,6 +305,7 @@ let internal planSpawns
                 MinerWorkPerMove = sizing.MinerWorkPerMove
                 GuardBlocks = sizing.GuardBlocks
                 RangerBlocks = sizing.RangerBlocks
+                UpgraderWork = upgraderWorkCeiling sizing
             }
 
         let squadRows: SpecialistRow list =

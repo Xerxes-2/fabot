@@ -478,16 +478,22 @@ let internal rangerBodyWithin blocks capacity =
     wholeBlockBodyFor rangerPattern.Block (min capacity (blocks * bodyCost rangerPattern.Block))
 
 /// ADR-0046
+/// The most Work/Move pairs one upgrader body holds beside its Carry under the
+/// engine's part cap.
+let upgraderWorkMost = (Engine.maxBodyParts - 1) / 2
+
 /// The upgrader row's sizing rule: one Carry, and the rest on Work/Move pairs
 /// — `W = M = floor((capacity - 50) / 150)`, never below one pair. Why Move
 /// parts at all for a body that stands: the Withdraw gate is `Work > Move`, and
 /// the buffer is what this row drinks from, so pairing keeps it at `Work = Move`
-/// inside the gate.
-let private upgraderBodyFor capacity =
+/// inside the gate. `workCap` is the Work the controller still takes (#483);
+/// the part cap alone below RCL8.
+let private upgraderBodyFor workCap capacity =
     let pairs =
         (capacity - bodyCost [ Carry ]) / bodyCost [ Work; Move ]
+        |> min upgraderWorkMost
+        |> min workCap
         |> max 1
-        |> min ((Engine.maxBodyParts - 1) / 2)
 
     List.replicate pairs Work @ [ Carry ] @ List.replicate pairs Move
 
@@ -515,6 +521,8 @@ type BodySizing =
         GuardBlocks: int
         /// `Quota.rangerBlocksWanted`'s answer this tick (#411).
         RangerBlocks: int
+        /// `Quota.upgraderWorkOf`'s answer this tick (#483).
+        UpgraderWork: int
     }
 
 /// The sizing a caller holding nothing but a capacity can ask for: every row at
@@ -528,6 +536,7 @@ let largestSizing =
         MinerWorkPerMove = Tuning.defaults.MinerWorkPerMove
         GuardBlocks = guardBlocksMost
         RangerBlocks = rangerBlocksMost
+        UpgraderWork = upgraderWorkMost
     }
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule.
@@ -552,7 +561,7 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
     elif pattern.Name = rangerPattern.Name then
         rangerBodyWithin sizing.RangerBlocks capacity
     elif pattern.Name = upgraderPattern.Name then
-        upgraderBodyFor capacity
+        upgraderBodyFor sizing.UpgraderWork capacity
     elif pattern.Name = minerPattern.Name then
         minerBodyFor sizing.MinerWorkPerMove capacity
     elif pattern.Name = dismantlerPattern.Name then
