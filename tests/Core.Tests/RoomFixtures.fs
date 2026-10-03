@@ -812,6 +812,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         ConstructionSites = []
         Creeps = fleet |> List.map fst
         Hostiles = []
+        Allies = []
         InvaderCores = []
         Spatial =
             { SpatialInfo.empty with

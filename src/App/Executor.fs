@@ -134,6 +134,8 @@ let private execute (intent: Intent) : Outcome =
     | RepairWithTower(towerId, structureId) ->
         withTarget structureId (fun target ->
             withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.repair target))
+    | SetRampartPublic(rampartId, isPublic) ->
+        withActor (Game.getObjectById rampartId) (fun rampart -> setPublic rampart isPublic)
     | SendFromTerminal(terminalId, resource, amount, destination) ->
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))

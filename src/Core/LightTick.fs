@@ -150,6 +150,7 @@ let private repeatableActor (intent: Intent) : string option =
     | FireTower _
     | HealWithTower _
     | RepairWithTower _
+    | SetRampartPublic _
     | SendFromTerminal _ -> None
 
 /// Whether an intent is a structure's fight — a tower's shot, heal or repair
@@ -187,6 +188,7 @@ let private fights (intent: Intent) : bool =
     | SignController _
     | MoveCreep _
     | SayCreep _
+    | SetRampartPublic _
     | SendFromTerminal _ -> false
 
 /// The full tick's record, off the glance taken at its start, its step plans

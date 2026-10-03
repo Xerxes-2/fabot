@@ -1652,6 +1652,23 @@ let private offenceProbe (striker: BodyPart list) =
     let final, trace = start |> runUntil over Engine.creepLifetime
     start, final, trace
 
+/// Odiodin's garrison outside W17S25's west line, walking in for the room's
+/// west end (#482).
+let private passingGarrison =
+    [
+        body "Odio1" odiodin garrison (w17s25 1 17) (Some(GoTo(w17s25 10 17)))
+        body "Odio2" odiodin garrison (w17s25 1 18) (Some(GoTo(w17s25 10 18)))
+    ]
+
+/// Every `setPublic` that landed, by tick, rampart and the state it set.
+let private flips (trace: TickTrace list) =
+    trace
+    |> List.collect (fun t ->
+        t.Events
+        |> List.choose (function
+            | MadePublic(id, isPublic) -> Some(t.Tick, id, isPublic)
+            | _ -> None))
+
 /// The child's one worker, carrying a full 200.
 let private worker =
     { body
@@ -1907,6 +1924,43 @@ let arenaDefenceTests =
                 "scenario 2 (#448): the full raid in a towerless home fires safe mode on sight, the garrison losing it" {
                 let _, trace = bootstrappingChild 1 (residents @ insideRaid) |> run 3
                 Expect.equal (safeModeOn trace) (Some 0) $"the undefended arm\n{describe trace}"
+            }
+
+            test
+                "an Odiodin garrison walks through W17S25's perimeter in peace, the line shut again behind it (#482)" {
+                let final, trace = sealedChild 300_000 500 0 passingGarrison |> run 30
+                let failure = describe trace
+
+                for b in passingGarrison do
+                    let now = final.Bodies |> List.find (fun o -> o.Id = b.Id)
+                    Expect.isGreaterThan now.At.X 2 $"{b.Id} through the line\n{failure}"
+                    Expect.equal now.Hits b.Hits $"{b.Id} untouched\n{failure}"
+
+                let landed = flips trace
+
+                Expect.isTrue
+                    (landed
+                     |> List.exists (fun (_, id, isPublic) -> isPublic && Set.contains id lineIds))
+                    $"the line opened: {landed}\n{failure}"
+
+                Expect.isEmpty
+                    (final.Rooms["W17S25"].Structures
+                     |> List.filter (fun s -> s.Kind = "rampart" && s.IsPublic))
+                    $"and shut once the garrison was through: {landed}\n{failure}"
+            }
+
+            test
+                "with a Trepidimous melee 6 tiles off, W17S25's line stays shut to the Odiodin garrison beside it (#482)" {
+                // The tower dry, so the melee stands where it was put.
+                let melee = body "Eternity536" trep trepMelee (w17s25 8 17) (Some Hold)
+                let final, trace = sealedChild 300_000 0 0 (melee :: passingGarrison) |> run 20
+                let failure = describe trace
+
+                Expect.isEmpty (flips trace) $"never opened\n{failure}"
+
+                for b in passingGarrison do
+                    let now = final.Bodies |> List.find (fun o -> o.Id = b.Id)
+                    Expect.isLessThan now.At.X 2 $"{b.Id} held outside\n{failure}"
             }
 
             for name, striker in

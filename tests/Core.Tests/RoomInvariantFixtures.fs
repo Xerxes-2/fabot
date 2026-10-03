@@ -180,6 +180,7 @@ let internal colonyOf (room: LoadedRoom) level =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        Allies = []
         // A captured room holds no invader core: the captures were taken
         // off a sector whose cores stand four rooms away.
         InvaderCores = []

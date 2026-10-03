@@ -349,7 +349,10 @@ let decideUnarbitrated
         planOutpostContainers view atlas @ planFirstSpawns view atlas
 
     let defenseIntents =
-        planSafeMode view atlas @ planFire view atlas @ planTowerHeal view atlas
+        planSafeMode view atlas
+        @ planFire view atlas
+        @ planTowerHeal view atlas
+        @ planRampartDoors view
 
     // The consignment's send (#349), beside the defence reflexes because it is
     // the same kind of thing: a structure's own verb, read off the view.

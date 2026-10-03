@@ -341,6 +341,9 @@ type SpatialInfo =
         /// no clock on it has no entry here, and 0 means "now", which is a
         /// different answer.
         Cooldowns: Map<string, int>
+        /// Our public ramparts' ids (`RoomFacts.PublicRamparts`, #482); a
+        /// rampart of ours not here is private.
+        PublicRamparts: Set<string>
         /// Target id -> whose that **object** is (#318): the per-object twin of
         /// `RoomControlInfo.Owner`, which answers nothing for a sector centre,
         /// there being no controller there to read. Absent is "we cannot see
@@ -372,6 +375,7 @@ module SpatialInfo =
             Stores = Map.empty
             Thorium = Map.empty
             Cooldowns = Map.empty
+            PublicRamparts = Set.empty
             Owners = Map.empty
             RivalRooms = Set.empty
         }

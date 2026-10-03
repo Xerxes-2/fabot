@@ -38,6 +38,7 @@ let quiet: ColonyView =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        Allies = []
         // An invader core opens the log's other family; empty here, so the
         // spawn room's raid measurements regress against that family
         // arriving.

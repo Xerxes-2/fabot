@@ -1427,6 +1427,131 @@ let towerHealTests =
             }
         ]
 
+let private doorFlips intents =
+    intents
+    |> List.choose (function
+        | SetRampartPublic(rampart, isPublic) -> Some(rampart, isPublic)
+        | _ -> None)
+
+/// An Odiodin creep (`Colony.allies`) standing at home.
+let private allyAt id pos : HostileInfo =
+    { hostileAt id pos [ Attack; Move ] with
+        Owner = "Odiodin"
+    }
+
+/// A home with one rampart of ours at (10,10), public or not, and these
+/// allies and hostiles standing in it.
+let private doorway isPublic allies hostiles =
+    let colony =
+        towerColony [ "rampart-1", { X = 10; Y = 10 } ] hostiles
+        |> withHits "rampart-1" BuiltKind.Rampart 100_000 1_000_000
+
+    { colony with
+        Allies = allies
+        Spatial =
+            { colony.Spatial with
+                PublicRamparts = if isPublic then Set.singleton "rampart-1" else Set.empty
+            }
+    }
+
+[<Tests>]
+let rampartDoorTests =
+    testList
+        "rampart doors"
+        [
+            test "a rampart opens to an ally beside it with no hostile near (#482)" {
+                let snapshot = doorway false [ allyAt "a-1" { X = 11; Y = 10 } ] []
+
+                Expect.equal
+                    (doorFlips (decideOn snapshot).Intents)
+                    [ "rampart-1", true ]
+                    "an ally within AllyPassRange, nobody else within AllyPassGuard"
+
+                let farAlly = doorway false [ allyAt "a-1" { X = 14; Y = 10 } ] []
+
+                Expect.isEmpty
+                    (doorFlips (decideOn farAlly).Intents)
+                    "an ally 4 off is not passing yet"
+            }
+
+            test
+                "a hostile within the guard keeps the rampart shut, even with the ally beside it (#482)" {
+                let ally = [ allyAt "a-1" { X = 11; Y = 10 } ]
+
+                let raider x =
+                    [ hostileAt "h-1" { X = x; Y = 10 } [ Attack; Move ] ]
+
+                Expect.isEmpty
+                    (doorFlips (decideOn (doorway false ally (raider 17))).Intents)
+                    "a raider 7 off: shut"
+
+                Expect.equal
+                    (doorFlips (decideOn (doorway true ally (raider 17))).Intents)
+                    [ "rampart-1", false ]
+                    "and an open one closes the tick it comes"
+
+                Expect.equal
+                    (doorFlips (decideOn (doorway false ally (raider 18))).Intents)
+                    [ "rampart-1", true ]
+                    "8 off is outside the guard"
+
+                let keeper =
+                    [
+                        { hostileAt "k-1" { X = 15; Y = 10 } [ Attack; Move ] with
+                            Owner = "Source Keeper"
+                        }
+                    ]
+
+                Expect.equal
+                    (doorFlips (decideOn (doorway false ally keeper)).Intents)
+                    [ "rampart-1", true ]
+                    "a keeper never leaves its lair: it guards nothing"
+            }
+
+            test
+                "a rampart already as it should be draws no intent; an open one shuts once the ally leaves (#482)" {
+                let ally = [ allyAt "a-1" { X = 11; Y = 10 } ]
+
+                Expect.isEmpty
+                    (doorFlips (decideOn (doorway true ally [])).Intents)
+                    "already open for the ally"
+
+                Expect.isEmpty (doorFlips (decideOn (doorway false [] [])).Intents) "already shut"
+
+                Expect.equal
+                    (doorFlips (decideOn (doorway true [] [])).Intents)
+                    [ "rampart-1", false ]
+                    "nobody passing: shut"
+            }
+
+            test "a rampart stays shut while the home's raid record holds (#482)" {
+                let open' = doorway false [ allyAt "a-1" { X = 11; Y = 10 } ] []
+                let hold = open'.Tuning.FightHoldTicks
+
+                let seen ago =
+                    { open' with
+                        Fought =
+                            Map.ofList
+                                [
+                                    "",
+                                    {
+                                        Seen = open'.Time - ago
+                                        Squad = None
+                                    }
+                                ]
+                    }
+
+                Expect.isEmpty
+                    (doorFlips (decideOn (seen hold)).Intents)
+                    "the raid seen FightHoldTicks ago: shut"
+
+                Expect.equal
+                    (doorFlips (decideOn (seen (hold + 1))).Intents)
+                    [ "rampart-1", true ]
+                    "the record run out: open"
+            }
+        ]
+
 [<Tests>]
 let downgradeDeadlineTests =
     testList

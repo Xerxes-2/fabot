@@ -330,6 +330,43 @@ let internal planFire (view: ColonyView) atlas : Intent list =
 
                 nearest tile targets |> Option.map (fun target -> FireTower(towerId, target.Id)))
 
+/// The rampart door (#482): each rampart of ours at home is public while an
+/// ally stands within `Tuning.AllyPassRange` of it, no other hostile but a
+/// keeper within `Tuning.AllyPassGuard`, and no raid is on the home's record
+/// within `Tuning.FightHoldTicks`; private otherwise. Ranges reach across a
+/// border (`rangeAcross`): the perimeter stands at the exits. An intent only
+/// where the rampart's `isPublic` differs.
+let internal planRampartDoors (view: ColonyView) : Intent list =
+    let home = SpatialInfo.homeName view.Spatial
+    let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+
+    let raided =
+        Map.tryFind home view.Fought
+        |> Option.exists (fun latch -> view.Time - latch.Seen <= view.Tuning.FightHoldTicks)
+
+    let guards = view.Hostiles |> List.filter (isKeeper >> not)
+
+    let within reach (tile: RoomPos) (creeps: HostileInfo list) =
+        creeps
+        |> List.exists (fun h -> rangeAcross tile h.Pos |> Option.exists (fun r -> r <= reach))
+
+    SpatialInfo.structureHits view.Spatial
+    |> List.choose (fun (id, kind, _) ->
+        match kind, Map.tryFind id tiles with
+        | BuiltKind.Rampart, Some tile ->
+            let at = RoomPos.at home tile
+
+            let wanted =
+                not raided
+                && within view.Tuning.AllyPassRange at view.Allies
+                && not (within view.Tuning.AllyPassGuard at guards)
+
+            if wanted <> Set.contains id view.Spatial.PublicRamparts then
+                Some(SetRampartPublic(id, wanted))
+            else
+                None
+        | _ -> None)
+
 /// The fire reflex's quiet twin (#410): with no hostile at home to shoot, each
 /// tower heals the creep of ours at home with the most hits still owed, the
 /// heal it will land (`Engine.towerHealAt` its range) counted off as it is

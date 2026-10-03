@@ -339,6 +339,8 @@ type ArenaEvent =
     /// A build finished a site: the structure stands under the site's id's
     /// kind and tile.
     | Built of site: string
+    /// A `setPublic` landed on a rampart of ours (`ramparts/set-public.js`).
+    | MadePublic of rampart: string * isPublic: bool
 
 /// One body at the end of a tick.
 type Snapshot =
@@ -970,6 +972,11 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     (wholeLine kind).IsSome && (not (needsOwner kind) || s.Owner = Some Side.Ours))
                 |> List.map (fun (s, _) -> s.Id, { Hits = s.Hits; HitsMax = s.HitsMax })
                 |> Map.ofList
+            PublicRamparts =
+                ours
+                |> List.filter (fun (s, kind) -> kind = BuiltKind.Rampart && s.IsPublic)
+                |> List.map (fun (s, _) -> s.Id)
+                |> Set.ofList
             Stores =
                 structures
                 |> List.filter (fun (_, kind) -> isStored kind)
@@ -2828,6 +2835,15 @@ let step (a: Arena) : Arena * TickTrace =
                     events.Add(SafeModeActivated name)
                 | _ -> ()
             | None -> ()
+        // `StructureRampart.setPublic` refuses a rampart not ours
+        // (`game/structures.js`); the processor writes `isPublic` among the
+        // intents (`processor.js`), so this tick's movement already reads it.
+        | SetRampartPublic(id, isPublic) ->
+            match ledger.Standing.TryGetValue id with
+            | true, (room, s) when s.Kind = "rampart" && s.Owner = Some Side.Ours ->
+                ledger.Standing[id] <- (room, { s with IsPublic = isPublic })
+                events.Add(MadePublic(id, isPublic))
+            | _ -> ()
         | _ -> ()
 
     // `controllers/tick.js`, per owned controller: a claim starts the

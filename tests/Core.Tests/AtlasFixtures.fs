@@ -27,6 +27,7 @@ let snapshotWith creeps spatial =
         ConstructionSites = []
         Creeps = creeps
         Hostiles = []
+        Allies = []
         InvaderCores = []
         Spatial = spatial
         Declared = []

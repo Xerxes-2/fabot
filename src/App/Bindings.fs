@@ -145,6 +145,9 @@ type IStructure =
     /// Ticks before this structure may act again. Among the kinds we build,
     /// defined on the extractor alone (`EXTRACTOR_COOLDOWN` is 5).
     abstract cooldown: int
+    /// Whether any creep may step onto this rampart; undefined on every
+    /// other kind.
+    abstract isPublic: bool
 
 /// A dropped resource pile lying on the ground.
 type IResource =
@@ -389,3 +392,7 @@ let withdrawAmount (_creep: ICreep) (_target: obj) (_resource: string) (_amount:
 /// a spawn site's name: the stub `withdrawAmount` is, for the same reason.
 [<Emit("$0.createConstructionSite($1, $2, 'spawn', $3)")>]
 let createSpawnSite (_room: IRoom) (_x: int) (_y: int) (_name: string) : int = jsNative
+
+/// `rampart.setPublic` (`game/structures.js`): ERR_NOT_OWNER on one not ours.
+[<Emit("$0.setPublic($1)")>]
+let setPublic (_rampart: obj) (_isPublic: bool) : int = jsNative

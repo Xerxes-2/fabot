@@ -94,6 +94,9 @@ type Intent =
     /// engine runs repair after heal and before attack, so it is planned only
     /// on a tick the tower neither fires nor heals.
     | RepairWithTower of towerId: string * structureId: string
+    /// A rampart of ours opened to every creep or shut to all but ours (#482):
+    /// the engine's `setPublic` has no per-player list.
+    | SetRampartPublic of rampartId: string * isPublic: bool
     /// A terminal shipping a resource to another room's terminal (#349). The
     /// amount and the destination are named here for `HealCreep`'s reason, and
     /// this is the one intent whose refusal is expected in normal running: a

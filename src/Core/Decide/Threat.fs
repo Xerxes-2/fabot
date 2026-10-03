@@ -577,7 +577,7 @@ let private edgeGap (tile: Pos) =
 /// its leader over a crossing is beside it. The exit tiles either side of a
 /// border are one tile, the engine carrying a body from one to the other, so
 /// the rooms overlap by a row. None between rooms that share no border.
-let private rangeAcross (a: RoomPos) (b: RoomPos) : int option =
+let internal rangeAcross (a: RoomPos) (b: RoomPos) : int option =
     if a.Room = b.Room then
         RoomPos.range a b
     else

@@ -443,6 +443,11 @@ let private seenFacts
             |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
             |> Array.map (fun (st, _) -> st.id, st.cooldown)
             |> Map.ofArray
+        PublicRamparts =
+            mine
+            |> Array.filter (fun (st, kind) -> kind = BuiltKind.Rampart && st.isPublic)
+            |> Array.map (fun (st, _) -> st.id)
+            |> Set.ofArray
         // The reactors' owners, read off `my` and `owner` as the controller's
         // are (the mod's `my` is undefined, not false, on one nobody owns).
         // Neither the reactor's tile nor a kind is filed, and both omissions

@@ -274,6 +274,13 @@ type Tuning =
         /// the heal a tower's shot must beat (#480): the t880,341 raid's
         /// healers bounced across the exit every other tick.
         HealMemoryTicks: int
+        /// How close an ally's creep stands to a rampart of ours for the
+        /// rampart to open to it (#482).
+        AllyPassRange: int
+        /// How close any other hostile but a keeper may stand to a rampart of
+        /// ours before it shuts, ally or no ally (#482): a public rampart lets
+        /// everybody in.
+        AllyPassGuard: int
         /// How many whole bodies of the colony's own bank the Storage keeps
         /// back before the upgrader row may spend any of it (#385). **Counted
         /// in bodies rather than in energy** so it scales with the room:
@@ -562,6 +569,10 @@ module Tuning =
             // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
             TowerRepairReserve = 300
             HealMemoryTicks = 5
+            AllyPassRange = 3
+            // Past the light tick's near rule (5): a hostile closing on an
+            // open rampart forces the full tick that shuts it.
+            AllyPassGuard = 7
             UpgradeStockBodies = 20
             PickupThreshold = 100
             ReachMargin = 2

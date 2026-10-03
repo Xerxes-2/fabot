@@ -105,6 +105,9 @@ type ColonyView =
         /// Hostile creeps standing in any room this colony works and has
         /// vision in, each under its own room's name.
         Hostiles: HostileInfo list
+        /// Our allies' creeps (`Colony.allies`) standing where `Hostiles` would
+        /// have filed them: what a rampart of ours opens to (#482).
+        Allies: HostileInfo list
         /// The invader cores standing in the rooms this colony works and can
         /// see. Its own list and not a widening of `Hostiles`: a raider is
         /// something a creep runs from this tick, a core is something a whole
@@ -835,6 +838,9 @@ module ColonyView =
             Hostiles =
                 collected (fun facts -> facts.Hostiles)
                 |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
+            Allies =
+                collected (fun facts -> facts.Hostiles)
+                |> List.filter (fun hostile -> Colony.isAlly hostile.Owner)
             InvaderCores = collected (fun facts -> facts.InvaderCores)
             Spatial =
                 {
@@ -856,6 +862,10 @@ module ColonyView =
                     Stores = mergedBy (fun facts -> facts.Stores)
                     Thorium = mergedBy (fun facts -> facts.Thorium)
                     Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
+                    PublicRamparts =
+                        worked
+                        |> Seq.collect (fun (_, facts) -> facts.PublicRamparts)
+                        |> Fresh.setOfSeq
                     Owners = mergedBy (fun facts -> facts.Owners)
                     RivalRooms =
                         worked

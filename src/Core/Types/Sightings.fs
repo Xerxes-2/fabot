@@ -224,6 +224,9 @@ type RoomFacts =
         /// extractor's cooldown, the one clock a decision reads off a
         /// structure.
         Cooldowns: Map<string, int>
+        /// Our ramparts standing here that are public (`isPublic`, #482): any
+        /// creep may step onto one. Absent is private.
+        PublicRamparts: Set<string>
         /// Whose each **object** standing here is (#318) — the per-object twin
         /// of `Control`'s room ownership, and the fact the sector Reactor's
         /// room has no controller to answer with. Filled for the reactors
@@ -280,6 +283,7 @@ module RoomFacts =
             Stores = Map.empty
             Thorium = Map.empty
             Cooldowns = Map.empty
+            PublicRamparts = Set.empty
             Owners = Map.empty
             Reactors = []
             Control = None

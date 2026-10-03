@@ -162,6 +162,7 @@ let bareRespawn =
         ConstructionSites = []
         Creeps = []
         Hostiles = []
+        Allies = []
         InvaderCores = []
         Spatial = SpatialInfo.empty
         // No colony declared but this one, which claims nothing.
