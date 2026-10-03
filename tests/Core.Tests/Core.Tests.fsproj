@@ -82,6 +82,7 @@
     <Compile Include="Arena.fs" />
     <Compile Include="ArenaTests.fs" />
     <Compile Include="ArenaReactorTests.fs" />
+    <Compile Include="ArenaClaimTests.fs" />
     <Compile Include="ParallelSafetyTests.fs" />
   </ItemGroup>
   <ItemGroup>

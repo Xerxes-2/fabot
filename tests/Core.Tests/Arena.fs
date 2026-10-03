@@ -29,9 +29,15 @@
 /// that scores. A spawn of ours casts the rows an arena names (`withCasts`),
 /// and only those: the live colony's economy is staffed, and the arena holds
 /// none to cast for; the bank is never debited, as the economy the arena
-/// leaves out refills it. Not modelled: the rest of the economy (harvest,
-/// withdraw, pickup, build), roads, boosts, pulling, portals, power creeps,
-/// nukes, and safe mode for any side but ours.
+/// leaves out refills it. A controller is claimed, upgraded to its next
+/// level and tapped (#470), and safe mode is refused as the engine refuses
+/// it: on cooldown, under an upgrade block, or past the downgrade line.
+/// Construction sites stand, are built with carried energy, and are removed
+/// by a body of another side stepping on them; placing one is a test's, not
+/// the pipeline's. A body withdraws energy from a store. Not modelled: the
+/// rest of the economy (harvest, pickup, a store's refill), a downgrade,
+/// roads, boosts, pulling, portals, power creeps, nukes, and safe mode for
+/// any side but ours.
 module Fabot.Core.Tests.Arena
 
 open System.Collections.Generic
@@ -76,6 +82,15 @@ type Act =
     | TransferThorium of reactor: string
     /// `claimReactor` (`mod-season5/src/creep.claimReactor.js`).
     | ClaimReactor of reactor: string
+    /// `claimController` on the room's controller (`creeps/claimController.js`).
+    | ClaimController of controllerRoom: string
+    /// `upgradeController` on the room's controller (`creeps/upgradeController.js`).
+    | UpgradeController of controllerRoom: string
+    /// `build` on a construction site (`creeps/build.js`).
+    | Build of site: string
+    /// Energy out of a structure's store, as much as the body has room for
+    /// or `amount` (`creeps/withdraw.js`).
+    | Withdraw of store: string * amount: int option
 
 /// A scripted body's plan, re-read every tick from the start-of-tick state.
 /// Every behaviour but `Do` also fights what stands in reach of it
@@ -159,6 +174,28 @@ type ArenaController =
         /// (`CONTROLLER_ATTACK_BLOCKED_UPGRADE` after a landed
         /// `attackController`); 0 for never blocked.
         UpgradeBlockedUntil: int
+        /// Points toward the next level (`progress`).
+        Progress: int
+        /// The engine's `safeModeCooldown`: no activation while the game
+        /// tick is at or below it. An unclaim or a downgrade to 0 sets it
+        /// SAFE_MODE_COOLDOWN on, and a claim leaves it standing
+        /// (`controllers/unclaim.js`, `creeps/claimController.js`).
+        SafeModeCooldown: int
+    }
+
+/// A construction site in an arena room, of any owner.
+type ArenaSite =
+    {
+        Id: string
+        /// The engine's `structureType` it becomes.
+        Kind: string
+        At: Pos
+        Owner: Side
+        Progress: int
+        /// `progressTotal`: CONSTRUCTION_COST of the kind.
+        Total: int
+        /// A spawn site's name, which the spawn takes.
+        Name: string option
     }
 
 /// One structure in an arena room, of any owner.
@@ -217,6 +254,8 @@ type ArenaRoom =
         Controller: ArenaController option
         /// Every structure standing here, ours and everybody else's.
         Structures: ArenaStructure list
+        /// Every construction site here, ours and everybody else's.
+        Sites: ArenaSite list
         /// The script the towers not ours run; ours are our pipeline's.
         Duties: TowerDuty list
         /// The home's bank, for a room with a spawn.
@@ -288,6 +327,17 @@ type ArenaEvent =
     | Burned of room: string * owner: string * score: int
     /// A spawn of ours finished a body, standing beside it.
     | Born of id: string
+    /// A `claimController` landed: the room is the body's side's at level 1.
+    | ControllerClaimed of room: string * by: string
+    /// An upgrade took the room's controller to this level, banking a safe
+    /// mode.
+    | LeveledUp of room: string * level: int
+    /// A body of another side stepped onto a site and removed it
+    /// (`movement.js` `execute`).
+    | SiteStomped of site: string * by: string
+    /// A build finished a site: the structure stands under the site's id's
+    /// kind and tile.
+    | Built of site: string
 
 /// One body at the end of a tick.
 type Snapshot =
@@ -350,6 +400,7 @@ let room (name: string) : ArenaRoom =
         Capture = load name
         Controller = None
         Structures = []
+        Sites = []
         Duties = []
         Bank = 0
         Reactor = None
@@ -391,6 +442,29 @@ let private rampartHitsMax (level: int) =
     | 7 -> 100_000_000
     | 8 -> 300_000_000
     | _ -> 300_000
+
+/// CONTROLLER_DOWNGRADE (`constants.js`): the full downgrade timer a level.
+let private fullDowngrade (level: int) =
+    match level with
+    | 1 -> 20_000
+    | 2 -> 10_000
+    | 3 -> 20_000
+    | 4 -> 40_000
+    | 5 -> 80_000
+    | 6 -> 120_000
+    | 7 -> 150_000
+    | _ -> 200_000
+
+/// CONTROLLER_LEVELS (`constants.js`): the points from a level to the next.
+let private levelPoints (level: int) =
+    match level with
+    | 1 -> 200
+    | 2 -> 45_000
+    | 3 -> 135_000
+    | 4 -> 405_000
+    | 5 -> 1_215_000
+    | 6 -> 3_645_000
+    | _ -> 10_935_000
 
 /// A structure of the engine's `kind`, under the id `kind-x-y`.
 let structureOf
@@ -448,7 +522,7 @@ let withRamparts (owner: Side) (hits: int) (tiles: Pos list) (r: ArenaRoom) : Ar
 /// The towers not ours run these duties.
 let withTowerDuties (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom = { r with Duties = duties }
 
-/// The room's captured controller, owned as given.
+/// The room's captured controller, owned as given, its downgrade timer full.
 let withController
     (owner: Ownership)
     (username: string option)
@@ -467,13 +541,60 @@ let withController
                         Owner = owner
                         Username = username
                         Level = level
-                        TicksToDowngrade = 20_000
+                        TicksToDowngrade = fullDowngrade level
                         SafeModeAvailable = safeModes
                         SafeModeUntil = 0
                         UpgradeBlockedUntil = 0
+                        Progress = 0
+                        SafeModeCooldown = 0
                     }
         }
     | None -> failwithf "%s has no controller" r.Capture.RoomName
+
+/// The room's controller with its `safeModeCooldown` standing to this tick:
+/// placed after `withController`.
+let withSafeModeCooldown (until: int) (r: ArenaRoom) : ArenaRoom =
+    { r with
+        Controller = r.Controller |> Option.map (fun c -> { c with SafeModeCooldown = until })
+    }
+
+/// CONSTRUCTION_COST (`constants.js`) of the kinds a site is placed for here.
+let private constructionCost (kind: string) =
+    match kind with
+    | "spawn" -> 15_000
+    | "tower" -> 5_000
+    | "extension" -> 3_000
+    | "rampart" -> 1
+    | "road" -> 300
+    | "container" -> 5_000
+    | "storage" -> 30_000
+    | other -> failwithf "no CONSTRUCTION_COST for %s here" other
+
+/// A site of `owner`'s on a tile of the room, `progress` already built into
+/// it, under the id `site-kind-x-y`; a spawn's carries its name.
+let withSite
+    (owner: Side)
+    (kind: string)
+    (name: string option)
+    (progress: int)
+    (at: Pos)
+    (r: ArenaRoom)
+    : ArenaRoom =
+    { r with
+        Sites =
+            r.Sites
+            @ [
+                {
+                    Id = $"site-{kind}-{at.X}-{at.Y}"
+                    Kind = kind
+                    At = at
+                    Owner = owner
+                    Progress = progress
+                    Total = constructionCost kind
+                    Name = name
+                }
+            ]
+    }
 
 /// A spawn of ours standing on a tile of the room, which must be ground, at
 /// SPAWN_HITS and full.
@@ -628,7 +749,8 @@ let private bars (side: Side) (s: ArenaStructure) =
     || s.Kind = "rampart" && not s.IsPublic && s.Owner <> Some side
 
 /// The tiles barred to a body of this side in a room: every rock, the
-/// controller, and the structures that bar it (`checkObstacleAtXY`).
+/// controller, the structures that bar it, and its own side's sites of an
+/// obstacle kind (`checkObstacleAtXY`).
 let private structureTiles (side: Side) (r: ArenaRoom) : Set<Pos> =
     Set.ofList
         [
@@ -637,6 +759,9 @@ let private structureTiles (side: Side) (r: ArenaRoom) : Set<Pos> =
             for s in r.Structures do
                 if bars side s then
                     yield s.At
+            for site in r.Sites do
+                if site.Owner = side && Set.contains site.Kind obstacleKinds then
+                    yield site.At
         ]
 
 let private isEdge (tile: Pos) = Seam.onRing tile
@@ -786,12 +911,18 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
     else
         let controller = r.Capture.RealController
 
+        // `FIND_MY_CONSTRUCTION_SITES`: every reader presumes a site is ours,
+        // and the others are tiles alone (`World.seenFacts`).
+        let sites, rivalSites =
+            r.Sites |> List.partition (fun site -> site.Owner = Side.Ours)
+
         let targets =
             [
                 for id, pos in r.Capture.RealSources -> id, pos, Source
+                for s, kind in structures -> s.Id, s.At, Structure kind
+                for site in sites -> site.Id, site.At, Site(builtKindOf site.Kind)
                 for id, pos in Option.toList controller -> id, pos, Controller
                 for id, pos in r.Capture.RealMinerals -> id, pos, Mineral
-                for s, kind in structures -> s.Id, s.At, Structure kind
             ]
 
         let here = a.Bodies |> List.filter (fun b -> b.At.Room = name)
@@ -818,10 +949,13 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                             for s, kind in structures do
                                 if not (isWalkable kind) then
                                     yield s.At
+                            for site in sites do
+                                if not (isWalkable (builtKindOf site.Kind)) then
+                                    yield site.At
                         ]
                         |> Set.ofList
                     Roads = Set.empty
-                    RivalSites = Set.empty
+                    RivalSites = rivalSites |> List.map (fun site -> site.At) |> Set.ofList
                 }
             Border = r.Capture.Border
             TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
@@ -921,6 +1055,14 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
             Sources =
                 r.Capture.RealSources
                 |> List.map (fun (id, _) -> { Id = id; TicksToRestock = 0 })
+            ConstructionSites =
+                sites
+                |> List.map (fun site ->
+                    {
+                        Id = site.Id
+                        Left = site.Total - site.Progress
+                        Begun = site.Progress > 0
+                    })
             Hostiles =
                 here
                 |> List.filter (fun b -> b.Side <> Side.Ours)
@@ -1774,6 +1916,10 @@ let private actName (act: Act) =
     | Act.Transfer _
     | Act.TransferThorium _ -> "transfer"
     | Act.ClaimReactor _ -> "claimReactor"
+    | Act.ClaimController _ -> "claimController"
+    | Act.UpgradeController _ -> "upgradeController"
+    | Act.Build _ -> "build"
+    | Act.Withdraw _ -> "withdraw"
 
 /// `creeps/intents.js` `priorities`: the acts that suppress each act.
 let private suppressedBy (name: string) : string list =
@@ -1782,9 +1928,10 @@ let private suppressedBy (name: string) : string list =
     | "attackController" -> [ "rangedHeal"; "heal" ]
     | "dismantle" -> [ "attackController"; "rangedHeal"; "heal" ]
     | "repair" -> [ "dismantle"; "attackController"; "rangedHeal"; "heal" ]
-    | "attack" -> [ "repair"; "dismantle"; "attackController"; "rangedHeal"; "heal" ]
-    | "rangedMassAttack" -> [ "repair"; "rangedHeal" ]
-    | "rangedAttack" -> [ "rangedMassAttack"; "repair"; "rangedHeal" ]
+    | "build" -> [ "repair"; "dismantle"; "attackController"; "rangedHeal"; "heal" ]
+    | "attack" -> [ "build"; "repair"; "dismantle"; "attackController"; "rangedHeal"; "heal" ]
+    | "rangedMassAttack" -> [ "build"; "repair"; "rangedHeal" ]
+    | "rangedAttack" -> [ "rangedMassAttack"; "build"; "repair"; "rangedHeal" ]
     | _ -> []
 
 /// The acts the engine performs of one body's intents.
@@ -1957,6 +2104,28 @@ let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
                 ledger.Standing[id] <- (room, { s with Energy = s.Energy + amount })
                 credit ledger.Spent b.Id amount
         | _ -> ()
+    // `withdraw.js`, energy only: beside the store, as much as the body has
+    // room for, the store holds and was asked. Booked as negative spending,
+    // so a later act this tick spends it.
+    | Act.Withdraw(id, asked) when not stopped ->
+        let spent =
+            match ledger.Spent.TryGetValue b.Id with
+            | true, n -> n
+            | _ -> 0
+
+        let room =
+            activeCount b Carry * Engine.carryPartCapacity - (b.Energy - spent) - b.Thorium
+
+        match ledger.Standing.TryGetValue id with
+        | true, ((r, s) as placed) when within Engine.meleeRange b.At (placeOf placed) ->
+            let amount =
+                min room s.Energy
+                |> fun n -> asked |> Option.map (min n) |> Option.defaultValue n
+
+            if amount > 0 then
+                ledger.Standing[id] <- (r, { s with Energy = s.Energy - amount })
+                credit ledger.Spent b.Id -amount
+        | _ -> ()
     | Act.RangedMassAttack when not stopped ->
         let each = power RangedAttack Engine.rangedAttackPower
 
@@ -2011,8 +2180,15 @@ let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
 
 /// `attackController.js` on an owned controller: CONTROLLER_CLAIM_DOWNGRADE
 /// (300) a CLAIM part off the downgrade timer and upgrades blocked for
-/// CONTROLLER_ATTACK_BLOCKED_UPGRADE (1,000); refused while that block runs.
-let private tapController (a: Arena) (b: Body) (roomName: string) : ArenaRoom option =
+/// CONTROLLER_ATTACK_BLOCKED_UPGRADE (1,000); refused while a block stands
+/// from an earlier tick. `blocked` is that start-of-tick block: the new one
+/// is written in `controllers/tick.js`, so a second tap the same tick lands.
+let private tapController
+    (a: Arena)
+    (blocked: bool)
+    (b: Body)
+    (roomName: string)
+    : ArenaRoom option =
     match Map.tryFind roomName a.Rooms with
     | Some r ->
         match r.Controller with
@@ -2020,7 +2196,7 @@ let private tapController (a: Arena) (b: Body) (roomName: string) : ArenaRoom op
             b.At.Room = roomName
             && within 1 b.At (RoomPos.at roomName c.At)
             && c.Owner <> Ownership.Unowned
-            && c.UpgradeBlockedUntil <= a.Time
+            && not blocked
             && not (safeModeStops a b)
             ->
             let claims = activeCount b BodyPart.Claim
@@ -2039,6 +2215,148 @@ let private tapController (a: Arena) (b: Body) (roomName: string) : ArenaRoom op
                     }
         | _ -> None
     | None -> None
+
+/// `claimController.js`: beside a controller nobody holds, with a live CLAIM
+/// part, the room is the body's at level 1, `progress` 0; the downgrade
+/// timer starts full (`controllers/tick.js`). The safe-mode stock and its
+/// cooldown are left as they stand. The GCL is taken to allow it.
+let private claimBy (a: Arena) (b: Body) (roomName: string) : ArenaRoom option =
+    match Map.tryFind roomName a.Rooms with
+    | Some({ Controller = Some c } as r) when
+        b.At.Room = roomName
+        && within 1 b.At (RoomPos.at roomName c.At)
+        && c.Owner = Ownership.Unowned
+        && activeCount b BodyPart.Claim > 0
+        ->
+        Some
+            { r with
+                Controller =
+                    Some
+                        { c with
+                            Owner =
+                                (if b.Side = Side.Ours then
+                                     Ownership.Ours
+                                 else
+                                     Ownership.Rival)
+                            Username = (if b.Side = Side.Ours then None else Some(username b.Side))
+                            Level = 1
+                            Progress = 0
+                            TicksToDowngrade = fullDowngrade 1
+                        }
+            }
+    | _ -> None
+
+/// `upgradeController.js`: in range 3 of a controller of the body's own,
+/// carrying energy, upgrades not `blocked` at the start of the tick (a tap
+/// this tick blocks the next): UPGRADE_CONTROLLER_POWER (1) a live WORK,
+/// capped by the energy. At CONTROLLER_LEVELS the level rises — only while
+/// the downgrade timer stands within CONTROLLER_DOWNGRADE_RESTORE (100) of
+/// full — with `downgradeTime` reset to half the new level's and one safe
+/// mode banked. The energy spent and whether it leveled.
+let private upgradeBy (a: Arena) (blocked: bool) (b: Body) (energy: int) (roomName: string) =
+    match Map.tryFind roomName a.Rooms with
+    | Some({ Controller = Some c } as r) when
+        b.At.Room = roomName
+        && energy > 0
+        && within 3 b.At (RoomPos.at roomName c.At)
+        && c.Level > 0
+        && c.Owner = Ownership.Ours
+        && b.Side = Side.Ours
+        && not blocked
+        && activeCount b Work > 0
+        ->
+        let effect = min (activeCount b Work) energy
+        let next = levelPoints c.Level
+
+        let leveled =
+            c.Level < 8
+            && c.Progress + effect >= next
+            && c.TicksToDowngrade + 100 >= fullDowngrade c.Level
+
+        let controller =
+            if leveled then
+                { c with
+                    Level = c.Level + 1
+                    Progress = c.Progress + effect - next
+                    TicksToDowngrade = fullDowngrade (c.Level + 1) / 2
+                    SafeModeAvailable = c.SafeModeAvailable + 1
+                }
+            else
+                { c with
+                    Progress = c.Progress + effect
+                }
+
+        Some({ r with Controller = Some controller }, effect, leveled)
+    | _ -> None
+
+/// `build.js`: in range 3 of a site, carrying energy: BUILD_POWER (5) a live
+/// WORK, capped by the energy and what is left. A site of an obstacle kind
+/// takes nothing while a body stands on it — under its owner's safe mode,
+/// only a body of the owner's. Finished, the structure stands: a spawn
+/// named, empty, at SPAWN_HITS; a rampart at RAMPART_HITS (1) under the
+/// level's max; a tower at TOWER_HITS, empty. The site, its room, the energy
+/// spent, and the structure if it finished.
+let private buildBy (a: Arena) (b: Body) (energy: int) (siteId: string) =
+    let found =
+        a.Rooms
+        |> Map.toSeq
+        |> Seq.tryPick (fun (name, r) ->
+            r.Sites
+            |> List.tryFind (fun site -> site.Id = siteId)
+            |> Option.map (fun site -> name, r, site))
+
+    match found with
+    | Some(name, r, site) when
+        b.At.Room = name && energy > 0 && within 3 b.At (RoomPos.at name site.At)
+        ->
+        let tile = RoomPos.at name site.At
+
+        // `mySafeMode`: the builder's own safe mode runs here.
+        let mySafeMode =
+            b.Side = Side.Ours
+            && r.Controller
+               |> Option.exists (fun c -> c.SafeModeUntil > a.Time && c.Owner = Ownership.Ours)
+
+        let standing =
+            a.Bodies
+            |> List.exists (fun o -> o.At = tile && (not mySafeMode || o.Side = b.Side))
+
+        if Set.contains site.Kind obstacleKinds && standing then
+            None
+        else
+            let effect = min (activeCount b Work * 5) (min energy (site.Total - site.Progress))
+
+            if effect <= 0 then
+                None
+            else
+                let progress = site.Progress + effect
+
+                let structure =
+                    if progress < site.Total then
+                        None
+                    else
+                        let level =
+                            r.Controller |> Option.map (fun c -> c.Level) |> Option.defaultValue 0
+
+                        let owner = Some site.Owner
+
+                        Some(
+                            match site.Kind with
+                            | "spawn" ->
+                                { structureOf "spawn" owner 5000 5000 site.At with
+                                    Id = $"spawn-{site.Name |> Option.defaultValue site.Id}"
+                                    Name = site.Name
+                                }
+                            | "rampart" ->
+                                { structureOf "rampart" owner 1 (rampartHitsMax level) site.At with
+                                    NextDecay = a.Time + rampartDecayTime
+                                }
+                            | "tower" -> towerOf site.Owner site.At 0
+                            | kind -> structureOf kind owner 1000 1000 site.At
+                        )
+
+                Some(name, { site with Progress = progress }, effect, structure)
+    | _ -> None
 
 /// `movement.js` `check`: every mover's target tile, the contested ones won
 /// by the mover whose own tile is most wanted (a swap counting 100), then by
@@ -2243,12 +2561,23 @@ let step (a: Arena) : Arena * TickTrace =
     let events = ResizeArray<ArenaEvent>()
     let byId = a.Bodies |> List.map (fun b -> b.Id, b) |> Map.ofList
 
+    // The room a controller stands in, by its id.
+    let controllerRoom (id: string) =
+        a.Rooms
+        |> Map.tryFindKey (fun _ r -> r.Controller |> Option.exists (fun c -> c.Id = id))
+
     // Our Intents as engine acts, by the body they name; the rest are the
     // towers' and the controller's, below, or economy the arena does not
     // perform.
     let ourActs =
         ours
         |> List.choose (function
+            | ClaimController(n, c) ->
+                controllerRoom c |> Option.map (fun r -> n, Act.ClaimController r)
+            | UpgradeController(n, c) ->
+                controllerRoom c |> Option.map (fun r -> n, Act.UpgradeController r)
+            | BuildSite(n, s) -> Some(n, Act.Build s)
+            | WithdrawFromStore(n, s, Energy, amount) -> Some(n, Act.Withdraw(s, amount))
             | AttackCreep(n, h) -> Some(n, Act.Attack h)
             | RangedAttackCreep(n, h) -> Some(n, Act.RangedAttack h)
             | HealCreep(n, t) -> Some(n, Act.Heal t)
@@ -2294,12 +2623,87 @@ let step (a: Arena) : Arena * TickTrace =
         |> Option.filter (fun (_, reactor) ->
             reactor.Id = id && within 1 b.At (RoomPos.at b.At.Room reactor.At))
 
+    // The rooms whose controller was upgraded, and the ones claimed, this
+    // tick: what `controllers/tick.js` reads for the downgrade timer.
+    let upgraded = HashSet<string>()
+    let claimed = HashSet<string>()
+
+    let energyLeft (b: Body) =
+        b.Energy
+        - (match ledger.Spent.TryGetValue b.Id with
+           | true, n -> n
+           | _ -> 0)
+
+    // The upgrade block standing at the start of the tick: what the intents
+    // read, `upgradeBlocked` being written only in `controllers/tick.js`.
+    let blockedAtStart (roomName: string) =
+        Map.tryFind roomName a.Rooms
+        |> Option.bind (fun r -> r.Controller)
+        |> Option.exists (fun c -> c.UpgradeBlockedUntil > a.Time)
+
     // Every body's acts in id order, on start-of-tick positions and parts.
     for b in a.Bodies |> List.sortBy (fun b -> b.Id) do
         for act in Map.tryFind b.Id actsOf |> Option.defaultValue [] do
             match act with
+            | Act.ClaimController roomName ->
+                match claimBy { a with Rooms = rooms } b roomName with
+                | Some r ->
+                    rooms <- Map.add roomName r rooms
+                    claimed.Add roomName |> ignore
+                    events.Add(ControllerClaimed(roomName, b.Id))
+                | None -> ()
+            | Act.UpgradeController roomName ->
+                match
+                    upgradeBy
+                        { a with Rooms = rooms }
+                        (blockedAtStart roomName)
+                        b
+                        (energyLeft b)
+                        roomName
+                with
+                | Some(r, spent, leveled) ->
+                    rooms <- Map.add roomName r rooms
+                    upgraded.Add roomName |> ignore
+                    credit ledger.Spent b.Id spent
+
+                    if leveled then
+                        events.Add(LeveledUp(roomName, r.Controller.Value.Level))
+                | None -> ()
+            | Act.Build siteId ->
+                match buildBy { a with Rooms = rooms } b (energyLeft b) siteId with
+                | Some(roomName, site, spent, built) ->
+                    let r = Map.find roomName rooms
+                    credit ledger.Spent b.Id spent
+
+                    match built with
+                    | Some structure ->
+                        ledger.Standing[structure.Id] <- (roomName, structure)
+
+                        rooms <-
+                            Map.add
+                                roomName
+                                { r with
+                                    Sites = r.Sites |> List.filter (fun s -> s.Id <> site.Id)
+                                    Structures = r.Structures @ [ structure ]
+                                }
+                                rooms
+
+                        events.Add(Built site.Id)
+                    | None ->
+                        rooms <-
+                            Map.add
+                                roomName
+                                { r with
+                                    Sites =
+                                        r.Sites
+                                        |> List.map (fun s -> if s.Id = site.Id then site else s)
+                                }
+                                rooms
+                | None -> ()
             | Act.AttackController roomName ->
-                match tapController { a with Rooms = rooms } b roomName with
+                match
+                    tapController { a with Rooms = rooms } (blockedAtStart roomName) b roomName
+                with
                 | Some r ->
                     rooms <- Map.add roomName r rooms
                     events.Add(ControllerAttacked(roomName, b.Id))
@@ -2381,8 +2785,20 @@ let step (a: Arena) : Arena * TickTrace =
             | Some name ->
                 let r = Map.find name rooms
 
+                // `controllers/activateSafeMode.js`: stock, no cooldown, no
+                // upgrade block, the downgrade timer above half the level's
+                // less CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD (5,000); and
+                // `controllers/tick.js` refuses it under a block a tap landed
+                // this very tick, which `rooms` already holds. The cooldown
+                // runs SAFE_MODE_COOLDOWN (50,000) from it.
                 match r.Controller with
-                | Some c when c.SafeModeAvailable > 0 && c.SafeModeUntil <= a.Time ->
+                | Some c when
+                    c.SafeModeAvailable > 0
+                    && c.SafeModeUntil <= a.Time
+                    && c.SafeModeCooldown < a.Time
+                    && c.UpgradeBlockedUntil <= a.Time
+                    && c.TicksToDowngrade >= fullDowngrade c.Level / 2 - 5_000
+                    ->
                     rooms <-
                         Map.add
                             name
@@ -2392,6 +2808,7 @@ let step (a: Arena) : Arena * TickTrace =
                                         { c with
                                             SafeModeAvailable = c.SafeModeAvailable - 1
                                             SafeModeUntil = a.Time + 20_000
+                                            SafeModeCooldown = a.Time + 50_000
                                         }
                             }
                             rooms
@@ -2399,6 +2816,28 @@ let step (a: Arena) : Arena * TickTrace =
                     events.Add(SafeModeActivated name)
                 | _ -> ()
             | None -> ()
+        | _ -> ()
+
+    // `controllers/tick.js`, per owned controller: a claim starts the
+    // downgrade timer full; an upgrade not under a block restores
+    // CONTROLLER_DOWNGRADE_RESTORE (100), capped at full; else it runs down
+    // one. A downgrade at zero is not modelled.
+    for name, r in Map.toList rooms do
+        match r.Controller with
+        | Some c when c.Owner <> Ownership.Unowned && not (claimed.Contains name) ->
+            let ticks =
+                if upgraded.Contains name && c.UpgradeBlockedUntil <= a.Time then
+                    min (c.TicksToDowngrade + 100) (fullDowngrade c.Level)
+                else
+                    c.TicksToDowngrade - 1
+
+            rooms <-
+                Map.add
+                    name
+                    { r with
+                        Controller = Some { c with TicksToDowngrade = ticks }
+                    }
+                    rooms
         | _ -> ()
 
     // The Reactor's `postProcessObject` (`reactor.roomObject.js`), after
@@ -2481,6 +2920,43 @@ let step (a: Arena) : Arena * TickTrace =
                 | _ -> None))
 
     let moved = resolveMoves { a with Rooms = rooms } moves
+
+    // `movement.js` `execute`: a body stepping onto another side's site
+    // removes it, unless safe mode runs here for somebody else than the
+    // mover. The refund a begun site drops is economy, and not modelled.
+    for b in a.Bodies |> List.sortBy (fun b -> b.Id) do
+        match Map.tryFind b.Id moved with
+        | Some dest ->
+            let r = Map.find dest.Room rooms
+
+            let shielded =
+                r.Controller
+                |> Option.exists (fun c ->
+                    let mine =
+                        match c.Owner, b.Side with
+                        | Ownership.Ours, Side.Ours -> true
+                        | Ownership.Rival, side ->
+                            c.Username = Some(username side) && side <> Side.Ours
+                        | _ -> false
+
+                    c.SafeModeUntil > a.Time && not mine)
+
+            match
+                r.Sites
+                |> List.tryFind (fun site -> site.At = RoomPos.pos dest && site.Owner <> b.Side)
+            with
+            | Some site when not shielded ->
+                rooms <-
+                    Map.add
+                        dest.Room
+                        { r with
+                            Sites = r.Sites |> List.filter (fun s -> s.Id <> site.Id)
+                        }
+                        rooms
+
+                events.Add(SiteStomped(site.Id, b.Id))
+            | _ -> ()
+        | None -> ()
 
     // `creeps/tick.js`, per body: the step and its fatigue, the exit
     // transfer, MOVE paying fatigue off, then damage and heal applied
