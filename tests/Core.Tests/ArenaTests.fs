@@ -1710,8 +1710,9 @@ let private w17s24Spawn = { X = 23; Y = 33 }
 /// the engine lets them. #490's Provoke squad from W17S26 strikes W18S26's
 /// far line; W18S25, an RCL7 colony of ours with the same squad standing at
 /// home, declares a Strike on W17S24's west line, its controller remembered
-/// as seen at the start. Run until W17S24's tower and spawn are down, every
-/// body of ours is dead, or `ticks` are spent.
+/// as seen at the start; W18S27 stands south of W18S26, a way out the
+/// Provoke's fall-back may weigh (#492). Run until W17S24's tower and spawn
+/// are down, every body of ours is dead, or `ticks` are spent.
 let private baitProbe (ticks: int) =
     let time = 889_849
     let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
@@ -1795,6 +1796,7 @@ let private baitProbe (ticks: int) =
                 striker
                 room "W18S24"
                 target
+                room "W18S27"
             ]
             colonies
             squad
@@ -2292,12 +2294,26 @@ let arenaDefenceTests =
                 // Measured: safe mode at t62 off the Provoke's first
                 // dismantle; the Strike's first step t63, out of W18S25 at
                 // t95, the west line down at t395, the tower at t434, the
-                // spawn at t453. The Strike lost nobody; the Provoke both its
-                // medics, under W18S26's towers on the way back out.
+                // spawn at t453. The Strike lost nobody.
                 Expect.isLessThan spawnDown.Value 600 $"inside 600 ticks, ended t{final.Tick}"
 
                 for id in strikers do
                     Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+
+                // The Provoke's way out (#492): every exit it can reach is
+                // W17S26's, 18 tiles east of the far line — W18S27's lie
+                // behind the line, W18S25's 35 tiles north — and all of it
+                // past the towers' falloff, 300 a tick with our heal refused.
+                // A body takes MOVE damage first, so the first 100 hits halve
+                // its pace and the one hit straggles. Measured: a medic dead
+                // at t84 and a sapper at t93, the other two out of the room;
+                // before #492, both medics.
+                let lost =
+                    start.Bodies
+                    |> List.filter (fun b -> b.Id.EndsWith "Spawn8")
+                    |> List.filter (fun b -> Option.isSome (diedOn b.Id trace))
+
+                Expect.isLessThanOrEqual lost.Length 2 $"half the Provoke at most\n{failure}"
             }
         ]
 

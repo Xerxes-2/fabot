@@ -865,6 +865,7 @@ let private assaultingWith mode (targets: (string * Pos) list option) bodies =
                             Active = true
                         }
                     Targets = targets
+                    Towers = []
                     SafeMode = false
                     // A provoked safe mode's whole 20,000 ticks ahead.
                     BarredUntil = Some(colony.Time + 20_000)
@@ -913,6 +914,27 @@ let private holdingAssault (colony: ColonyView) =
     colony.Creeps
     |> List.map (fun creep -> creep.Name, taskId (Assault "W1N2"))
     |> Map.ofList
+
+/// The squad on these tiles, safe mode raised in the rival's room and its
+/// towers standing on these tiles.
+let private provokedWith (towers: Pos list) tiles =
+    let colony = assaulting (squadAt tiles)
+
+    { colony with
+        Assaults =
+            colony.Assaults
+            |> List.map (fun facts ->
+                { facts with
+                    SafeMode = true
+                    Towers = towers
+                })
+    }
+
+/// Whether every tile is the home's ground beside its border with the
+/// rival's room: one step out of it.
+let private outOfTheRoom (tiles: Set<RoomPos>) =
+    not (Set.isEmpty tiles)
+    && tiles |> Set.forall (fun tile -> tile.Room = "W1N1" && tile.Y = 1)
 
 [<Tests>]
 let assaultTests =
@@ -1080,7 +1102,10 @@ let assaultTests =
                 let back = assaultGroundOf (assaultThreats (hurt 49))
 
                 Expect.isFalse back.Launched "under half, it turns back"
-                Expect.equal back.Front back.Rally "every member to rally"
+
+                Expect.isTrue
+                    (outOfTheRoom back.Front && back.Behind = back.Front)
+                    $"every member out of the room first: {back.Front}"
 
                 let atRally share =
                     let colony = hurt share
@@ -1128,7 +1153,51 @@ let assaultTests =
 
                 let ground = assaultGroundOf (assaultThreats moded)
                 Expect.isFalse ground.Launched "safe mode: not launched"
-                Expect.equal ground.Front ground.Rally "and back to rally"
+                Expect.isTrue (outOfTheRoom ground.Front) "and out of the room"
+            }
+
+            test
+                "a squad falling back from inside the rival's room leaves it by the nearest exit, then walks to rally (#492)" {
+                let ground = assaultGroundOf (assaultThreats (provokedWith [] atBreach))
+
+                Expect.isTrue
+                    (outOfTheRoom ground.Front && ground.Behind = ground.Front)
+                    $"sappers and medics one step out of the room: {ground.Front}"
+
+                Expect.isTrue
+                    (ground.Front |> Set.forall (fun tile -> abs (tile.X - 20) <= 2))
+                    $"straight out, the towerless room priced by the step: {ground.Front}"
+
+                let out =
+                    assaultGroundOf (
+                        assaultThreats (
+                            provokedWith [] [ home 20 1; home 21 1; home 19 2; home 20 2 ]
+                        )
+                    )
+
+                Expect.equal out.Front out.Rally "every member out: to rally"
+                Expect.equal out.Behind out.Rally "medics too"
+            }
+
+            test
+                "its way out is priced by the towers' fire on every step of the walk: it leaves on the side away from them (#492)" {
+                let ground =
+                    assaultGroundOf (assaultThreats (provokedWith [ { X = 10; Y = 44 } ] atBreach))
+
+                Expect.isTrue (outOfTheRoom ground.Front) $"out of the room: {ground.Front}"
+
+                Expect.isTrue
+                    (ground.Front |> Set.forall (fun tile -> tile.X > 25))
+                    $"east, away from the tower in the south-west: {ground.Front}"
+            }
+
+            test "an assault projects every room beside its target: the ways out (#492)" {
+                let projected = Assault.roomsProjected [ Assault.w18s26 ] "W17S26"
+
+                Expect.equal
+                    (Set.ofList projected)
+                    (Set.ofList [ "W18S26"; "W18S25"; "W19S26"; "W18S27" ])
+                    "the room and the three beside it that are not home"
             }
 
             test

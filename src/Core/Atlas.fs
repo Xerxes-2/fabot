@@ -1487,6 +1487,41 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
             fromRoom
             toRoom)
 
+/// The cheapest walk from a tile to every tile of its room, each step priced
+/// at the tile's walking weight times `price` of the tile (one at least) —
+/// a walk under fire, priced by what lands on it rather than by its ticks
+/// alone (#492). Every creep ignored; `None` where no walk reaches. One
+/// flood settled whole a call: its one reader asks it of a squad falling
+/// back, a few times a tick at most.
+let pricedWalksFrom
+    (atlas: Atlas)
+    (room: string)
+    (price: Pos -> int)
+    (from: Pos)
+    : Pos -> int option =
+    let weights = weightsOf atlas room
+    // The flood prices a step by the table entry its grid names: here each
+    // walkable tile names its own entry.
+    let tiles =
+        Array.init tileCount (fun index -> if at index weights >= 0 then index else -1)
+
+    let prices =
+        Array.init tileCount (fun index ->
+            let weight = at index weights
+
+            if weight >= 0 then
+                weight * max 1 (price (posAt index))
+            else
+                -1)
+
+    let dist, _ = floodFromAllSeeded tiles noTraffic prices [ from, 0 ] |> drained
+
+    fun tile ->
+        if inGrid tile && reachedIn dist tile <> unreached then
+            Some(reachedIn dist tile)
+        else
+            None
+
 /// ADR-0058
 /// Every chain of rooms a walk from one room to another could cross at the
 /// fewest crossings, ends included, and empty where none lies inside the hop

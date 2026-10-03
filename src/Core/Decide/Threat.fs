@@ -63,12 +63,14 @@ type AssaultGround =
         /// What the sappers take down this tick (`AssaultFacts.Targets`'
         /// head), None while the room is dark or nothing is left.
         Target: (string * RoomPos) option
-        /// A sapper's ground: the rally ground, or, launched, the tiles beside
-        /// the target — beside the first declared breach tile while the room is
-        /// dark, and beside the last once a `Provoke`'s breach has fallen.
+        /// A sapper's ground: the rally ground — the way out (`wayOut`) first
+        /// while a cast of a squad not launched stands in the room — or,
+        /// launched, the tiles beside the target: beside the first declared
+        /// breach tile while the room is dark, and beside the last once a
+        /// `Provoke`'s breach has fallen.
         Front: Set<RoomPos>
-        /// A medic's: the rally ground, or, launched, the tiles beside the
-        /// leading sapper that are not the front.
+        /// A medic's: the sappers' ground not launched, or, launched, the
+        /// tiles beside the leading sapper that are not the front.
         Behind: Set<RoomPos>
         /// Its casts holding it, by role.
         Roles: Map<string, SquadRole>
@@ -698,6 +700,72 @@ let private rallyOn (view: ColonyView) atlas (threats: Threats) (chain: string l
     |> Option.map (fun (from, into) -> besideCrossing atlas threats from into)
     |> Option.defaultValue Set.empty
 
+/// A step onto a tile under these towers' fire, priced one plus a unit per
+/// 50 hits of it: fine enough that a tile a range further off is cheaper,
+/// and small enough that a walk across a room fits the flood's integers.
+let private underFire (towers: Pos list) (tile: Pos) =
+    1
+    + (towers |> List.sumBy (fun tower -> Engine.towerAttackAt (range tile tower)))
+      / 50
+
+/// The way out of an assault's room for a squad falling back with casts
+/// still in it (#492): the ground beside the landing of the one exit whose
+/// walks from them cost least under the room's towers (`underFire`), into
+/// any room beside it that is no rival's. Under the rival's safe mode our
+/// heal is refused and its towers fire on,
+/// so the walk out is what the squad takes, and the way to rally may lead
+/// toward them; a squad out by a room with no chain home waits there alive.
+/// Empty where no room beside it will do.
+let private wayOut (view: ColonyView) atlas (facts: AssaultFacts) (inside: Pos list) =
+    let room = facts.Assault.RoomName
+
+    let walks =
+        inside |> List.map (Atlas.pricedWalksFrom atlas room (underFire facts.Towers))
+
+    // Every cast's cheapest walk onto the ground beside the exit, summed;
+    // None where one of them has none.
+    let priced (exit: Pos) =
+        let beside = Atlas.adjacentWalkableIn atlas room exit
+
+        let costs =
+            walks
+            |> List.map (fun walk ->
+                match List.choose walk beside with
+                | [] -> None
+                | reached -> Some(List.min reached))
+
+        // Past the falloff range every tile costs the same: on a tie, the exit
+        // farther from the towers, then the straighter walk.
+        let clear =
+            match facts.Towers with
+            | [] -> 0
+            | towers -> towers |> List.map (range exit) |> List.min
+
+        if List.forall Option.isSome costs then
+            Some(
+                List.sumBy Option.get costs,
+                -clear,
+                inside |> List.sumBy (fun tile -> abs (tile.X - exit.X) + abs (tile.Y - exit.Y))
+            )
+        else
+            None
+
+    RoomName.adjacent room
+    |> List.filter (fun next ->
+        not (Set.contains next view.Spatial.RivalRooms) && Keepers.enterable next)
+    |> List.collect (fun next ->
+        Atlas.seams atlas room next
+        |> List.choose (fun (exit, landing) ->
+            priced exit |> Option.map (fun price -> price, (next, landing))))
+    |> function
+        | [] -> Set.empty
+        | exits ->
+            let _, (next, landing) = List.minBy fst exits
+
+            Atlas.adjacentWalkableIn atlas next landing
+            |> List.map (RoomPos.at next)
+            |> Set.ofList
+
 /// A squad's casts, the front leading: a brawler, else a sapper, else a
 /// kiter, else whoever holds.
 let private frontFirst (members: (string * SquadRole) list) =
@@ -1107,7 +1175,24 @@ let private withAssaults
                     | clear -> clear
                 | None -> rally
 
-            let launchedOr ground = if launched then ground else rally
+            // Falling back with casts still in the room: out of it first,
+            // then to rally.
+            let back =
+                if launched then
+                    rally
+                else
+                    match
+                        members
+                        |> List.choose (fun (name, _) -> tileOf name)
+                        |> List.filter (fun tile -> tile.Room = room)
+                    with
+                    | [] -> rally
+                    | inside ->
+                        match wayOut view atlas facts (List.map RoomPos.pos inside) with
+                        | out when Set.isEmpty out -> rally
+                        | out -> out
+
+            let launchedOr ground = if launched then ground else back
 
             {
                 Slots = slots

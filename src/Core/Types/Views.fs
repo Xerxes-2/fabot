@@ -39,6 +39,9 @@ type AssaultFacts =
         /// the room's towers and then its spawns. None while the room is
         /// dark.
         Targets: (string * Pos) list option
+        /// The room's towers' tiles, off this tick's vision: what prices a
+        /// fall-back's walk out (#492). Empty while the room is dark.
+        Towers: Pos list
         /// Whether safe mode runs in the room: vision this tick, or the
         /// controller remembered (`World.RivalControllers`, #491).
         SafeMode: bool
@@ -677,6 +680,7 @@ module ColonyView =
         {
             Assault = assault
             Targets = targets
+            Towers = placed BuiltKind.Tower |> List.map snd
             SafeMode =
                 remembered || facts.Control |> Option.exists (fun control -> control.SafeMode)
             BarredUntil =

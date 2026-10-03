@@ -755,11 +755,14 @@ module Assault =
         assaults |> List.filter (fun assault -> assault.Active)
 
     /// The rooms the assaults add to the scan set: each room and every room a
-    /// shortest walk to it could cross (`Errand.roomsProjected`).
+    /// shortest walk to it could cross (`Errand.roomsProjected`), and every
+    /// room beside it: the ways a squad falling back may leave it by (#492).
     let roomsProjected (assaults: Assault list) (home: string) : string list =
         assaults
         |> List.collect (fun assault ->
-            assault.RoomName :: RoomName.transitBetween home assault.RoomName)
+            assault.RoomName :: RoomName.transitBetween home assault.RoomName
+            @ RoomName.adjacent assault.RoomName)
+        |> List.filter ((<>) home)
 
     /// W18S26's far line (boosts.md §4.2: breached in ~322 ticks with no
     /// loss; its near line at x30 y8 wipes any squad): the bait.
