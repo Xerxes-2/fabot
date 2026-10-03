@@ -974,6 +974,15 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // dies mid-route leaves one on a road tile, and it takes this rung
             // too.
             | Pickup(_, Thorium) -> OneRungUp
+            // A room's first tower over every other site on its tier (user,
+            // 2026-10-04: W17S25 at RCL3 raises its tower before its
+            // extensions): the room's defence once its safe mode ends.
+            | Build siteId when
+                Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Tower)
+                && Atlas.targetRoom atlas siteId
+                   |> Option.exists (fun room -> Atlas.builtIn atlas room BuiltKind.Tower = 0)
+                ->
+                TwoRungsUp
             // A site outranks the controller inside the surplus tier (#234):
             // a worker that fills at the buffer is already standing in the
             // controller's Work Area, so Upgrade costs it nothing and never

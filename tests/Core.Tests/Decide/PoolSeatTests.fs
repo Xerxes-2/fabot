@@ -1102,3 +1102,56 @@ let repairTests =
                     "nothing else fits an empty creep here"
             }
         ]
+
+/// A loaded worker "w" at (12,10) on a plain row with no controller, an
+/// extension site two tiles off and a tower site twelve off, and `towers`
+/// standing in the room.
+let private towerAndExtension (towers: (string * Pos) list) =
+    { bareRespawn with
+        Controller = None
+        Sources = []
+        Refillables = []
+        Creeps = [ worker "w" 50 0 ]
+        ConstructionSites =
+            [
+                {
+                    Id = "site-ext"
+                    Left = siteOwes
+                    Begun = false
+                }
+                {
+                    Id = "site-tower"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
+        Spatial =
+            spatial [] [ for x in 5..30 -> { X = x; Y = 10 }, Plain ]
+            |> withTargets (
+                [
+                    "site-ext", { X = 14; Y = 10 }, Site BuiltKind.Extension
+                    "site-tower", { X = 24; Y = 10 }, Site BuiltKind.Tower
+                ]
+                @ (towers |> List.map (fun (id, pos) -> id, pos, Structure BuiltKind.Tower))
+            )
+            |> withCreepsAt [ "w", { X = 12; Y = 10 } ]
+    }
+
+[<Tests>]
+let firstTowerTests =
+    testList
+        "a room's first tower"
+        [
+            test "a room with no tower builds its tower site over a nearer extension" {
+                // User, 2026-10-04: W17S25 at RCL3 raises its tower first.
+                Expect.equal
+                    (matchOf (towerAndExtension []) |> Option.map fst)
+                    (Some(taskId (Build "site-tower")))
+                    "the tower, twelve tiles off, over the extension two off"
+
+                Expect.equal
+                    (matchOf (towerAndExtension [ "tower-1", { X = 6; Y = 10 } ]) |> Option.map fst)
+                    (Some(taskId (Build "site-ext")))
+                    "with a tower standing, the nearer site again"
+            }
+        ]
