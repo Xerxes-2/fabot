@@ -30,6 +30,7 @@ let quiet: ColonyView =
         Bank = { Available = 0; Capacity = 0 }
         Refillables = []
         Sources = []
+        BorrowedSources = []
         Controller = None
         RoomControl = Map.empty
         HeldOutposts = Set.empty

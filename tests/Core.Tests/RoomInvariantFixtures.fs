@@ -149,6 +149,7 @@ let internal colonyOf (room: LoadedRoom) level =
                 }
             ]
         Sources = room.SourceIds |> List.map (fun id -> { Id = id; TicksToRestock = 0 })
+        BorrowedSources = []
         Controller =
             room.ControllerId
             |> Option.map (fun id ->

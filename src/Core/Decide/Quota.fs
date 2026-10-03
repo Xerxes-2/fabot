@@ -969,8 +969,14 @@ let internal quotaRowsOf
             SquadRole.all
             |> List.map (fun role -> role, squadQuota view threats role)
             |> Map.ofList
-        // One Anchor per Post of every projected room.
-        Anchor = Atlas.postCount atlas
+        // One Anchor per Post of every projected room but a raised child's,
+        // whose rock its pioneers dig and its own row garrisons (#192).
+        Anchor =
+            Atlas.postCount atlas
+            - (view.BorrowedSources
+               |> List.choose (fun s -> Atlas.targetRoom atlas s.Id)
+               |> List.distinct
+               |> List.sumBy (fun room -> Set.count (Atlas.postsIn atlas room)))
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
         Courier = sizing.CourierQuota

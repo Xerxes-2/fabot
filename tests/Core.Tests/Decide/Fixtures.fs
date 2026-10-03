@@ -154,6 +154,7 @@ let bareRespawn =
         Bank = bank 300 300
         Refillables = [ refillable "spawn-1" 0 BuiltKind.Spawn ]
         Sources = [ source "src-a"; source "src-b" ]
+        BorrowedSources = []
         Controller = Some(controllerAt 1)
         RoomControl = homeControl
         HeldOutposts = Set.empty

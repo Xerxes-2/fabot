@@ -76,6 +76,13 @@ let internal applicable
     // `FreeCapacity = 0`, is Work-heavy and has not arrived, so it would
     // otherwise be offered the walk and dribble its Work into a source
     // container for a whole life while the deposit is never dug.
+    // A raised child's rock (`ColonyView.BorrowedSources`) is for the pioneer
+    // already standing in the child, never a walk out from the mother's home.
+    | Harvest sourceId when
+        view.BorrowedSources |> List.exists (fun s -> s.Id = sourceId)
+        && Atlas.creepRoom atlas creep.Name <> Atlas.targetRoom atlas sourceId
+        ->
+        false
     | Harvest sourceId ->
         has Work
         && has Carry

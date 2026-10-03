@@ -472,7 +472,8 @@ let planTasks
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —
     // the Matcher's knowledge, and none of this half's.
-    let harvests = view.Sources |> List.map (fun s -> Harvest s.Id)
+    let harvests =
+        view.Sources @ view.BorrowedSources |> List.map (fun s -> Harvest s.Id)
 
     // One Harvest per Thorium deposit beside them: the same Task kind, so
     // every exhaustive match over `Task` grows no arm. The Task exists exactly

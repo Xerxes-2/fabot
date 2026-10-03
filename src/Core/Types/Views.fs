@@ -83,6 +83,10 @@ type ColonyView =
         /// it merely [[bootstrap]]s, with every declared outpost rock beside
         /// them whether or not there is vision (`Outpost.pooledSources`).
         Sources: SourceInfo list
+        /// The sources of the children this colony bootstraps past their
+        /// nursery: dug by its pioneers standing there, and out of every
+        /// quota, which `Sources` feeds and the child's own rows count (#192).
+        BorrowedSources: SourceInfo list
         /// This colony's own controller. Never a child's, which reaches the
         /// pool as a target in a layer she projects.
         Controller: ControllerInfo option
@@ -339,12 +343,15 @@ module ColonyView =
         // theirs to pick up.
         let nursery = stage = Some Nursery
 
+        // Past the nursery the pioneers still dig the child's rock: its own
+        // first bodies are too small to (user, 2026-10-04, W17S25).
+        let digs = nursery || stage = Some Bootstrapping || stage = Some Weaning
+
         let nurseryWork kind =
-            nursery
-            && (match kind with
-                | Source
-                | Dropped Energy -> true
-                | _ -> false)
+            match kind with
+            | Source -> digs
+            | Dropped Energy -> nursery
+            | _ -> false
 
         let kinds =
             facts.TargetKinds
@@ -379,7 +386,7 @@ module ColonyView =
             Thorium = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
-            Sources = if nursery then facts.Sources else []
+            Sources = if digs then facts.Sources else []
         }
 
     /// A **transit** room's facts: the ground a chain of [[seam]]s crosses and
@@ -909,6 +916,15 @@ module ColonyView =
 
         let collected (select: RoomFacts -> 'a list) = worked |> List.collect (snd >> select)
 
+        // A child past its nursery: its rock is borrowed, never the mother's.
+        let raised room =
+            List.contains room bootstrap && Map.tryFind room stages <> Some Nursery
+
+        let sourcesWhere keep =
+            worked
+            |> List.filter (fst >> keep)
+            |> List.collect (fun (_, facts) -> facts.Sources)
+
         // The id-keyed tables merged flat, an object id being unique across
         // the world. Seeded with the **biggest** room's table rather than
         // `Map.empty` (#384): no key is ever written twice, so the result does
@@ -961,8 +977,8 @@ module ColonyView =
             Refillables = homeFacts.Refillables
             // Every worked room's sources but a bootstrapped child's (#192),
             // with the declared outpost rocks laid in beside them.
-            Sources =
-                collected (fun facts -> facts.Sources) |> Outpost.pooledSources scanned outposts
+            Sources = sourcesWhere (raised >> not) |> Outpost.pooledSources scanned outposts
+            BorrowedSources = sourcesWhere raised
             Controller = homeFacts.Controller
             RoomControl = control
             // The gate's third and fourth sets, verbatim (#333, #366). Not

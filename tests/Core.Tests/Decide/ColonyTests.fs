@@ -3565,3 +3565,81 @@ let borrowedRoomBudgetTests =
                     "so the pool admits exactly what the row hires"
             }
         ]
+
+/// `ferryMother` raising W1N2 past its nursery, with no controller of her own
+/// to upgrade, the child's source at (11,48) and a container on its Seat at
+/// (10,47), and one empty generalist "w" of hers standing at `at`.
+let private raisedChildRock (at: RoomPos) =
+    let mother = ferryMother Bootstrapping
+    let child = SpatialInfo.layerOf mother.Spatial "W1N2"
+
+    { mother with
+        Controller = None
+        BorrowedSources = [ source "src-child" ]
+        Creeps = [ worker "w" 0 50 ]
+        Spatial =
+            { mother.Spatial with
+                TargetKinds =
+                    mother.Spatial.TargetKinds
+                    |> Map.add "src-child" Source
+                    |> Map.add "can-src" (Structure BuiltKind.Container)
+            }
+            |> withNeighbour
+                "W1N2"
+                { child with
+                    TargetPositions =
+                        child.TargetPositions
+                        |> Map.add "src-child" { X = 11; Y = 48 }
+                        |> Map.add "can-src" { X = 10; Y = 47 }
+                    CreepPositions =
+                        if at.Room = "W1N2" then
+                            Map.ofList [ "w", RoomPos.pos at ]
+                        else
+                            Map.empty
+                }
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions =
+                        if at.Room = "W1N1" then
+                            Map.ofList [ "w", RoomPos.pos at ]
+                        else
+                            Map.empty
+                })
+    }
+
+[<Tests>]
+let raisedChildRockTests =
+    testList
+        "a mother's pioneer digs a raised child's rock"
+        [
+            test "a pioneer standing in the child digs its source" {
+                // Live 2026-10-04: W17S25's spawn stood, the child's rock left the
+                // mother's pool with the nursery, and her pioneer walked two rooms
+                // for energy while the child's own first bodies were too small to dig.
+                Expect.equal
+                    (matchOf (raisedChildRock (RoomPos.at "W1N2" { X = 9; Y = 44 }))
+                     |> Option.map fst)
+                    (Some(taskId (Harvest "src-child")))
+                    "the rock under its feet"
+            }
+
+            test "a body at the mother's home is never sent to the child's rock" {
+                Expect.isNone
+                    (matchOf (raisedChildRock (RoomPos.at "W1N1" { X = 10; Y = 5 })))
+                    "the child's rock is for the pioneer already there"
+            }
+
+            test "the child's Post hires no Anchor of the mother's" {
+                let rock = raisedChildRock (RoomPos.at "W1N2" { X = 9; Y = 44 })
+
+                let anchors colony =
+                    rowOf "anchor" colony
+                    |> Option.map (fun row -> row.Quota)
+                    |> Option.defaultValue 0
+
+                Expect.equal
+                    (anchors { rock with BorrowedSources = [] } - anchors rock)
+                    1
+                    "the child's Post is out of the mother's count (#192)"
+            }
+        ]

@@ -11,7 +11,7 @@ open Fabot.Core.Types
 /// source the view does not carry at all, so a source nothing projects never
 /// holds a decision up.
 let internal ticksToRestock (view: ColonyView) sourceId =
-    view.Sources
+    view.Sources @ view.BorrowedSources
     |> List.tryFind (fun s -> s.Id = sourceId)
     |> Option.map (fun s -> s.TicksToRestock)
     |> Option.defaultValue 0
