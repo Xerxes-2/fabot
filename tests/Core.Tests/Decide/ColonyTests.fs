@@ -3702,3 +3702,33 @@ let unbufferedChildTests =
                     "beside the controller the hauler drops its load"
             }
         ]
+
+[<Tests>]
+let unbufferedChildMatchTests =
+    testList
+        "a loaded hauler at home is matched to the unbuffered child's controller"
+        [
+            test "the ferry crosses for the controller's drop" {
+                let colony =
+                    let child = unbufferedChild [ worker "p1" 0 50, { X = 10; Y = 44 } ]
+
+                    { child with
+                        Creeps = child.Creeps @ [ hauler "w" 1600 0 ]
+                        Spatial =
+                            child.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions = Map.ofList [ "w", { X = 10; Y = 5 } ]
+                                })
+                    }
+
+                let mine =
+                    (decideOn colony).Verdicts
+                    |> List.filter (fun v -> (sprintf "%A" v).Contains "\"w\"")
+
+                Expect.equal
+                    (matchOf colony |> Option.map fst)
+                    (Some(taskId (Refill("ctrl-child", Energy))))
+                    $"%A{mine}"
+            }
+        ]
