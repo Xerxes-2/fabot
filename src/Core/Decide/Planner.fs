@@ -108,6 +108,34 @@ let internal isNurseryFirstLevel (view: ColonyView) room =
     && Map.tryFind room view.NurseryControllers
        |> Option.exists (fun controller -> controller.Level = 1)
 
+/// The full downgrade timer per controller level (Screeps
+/// CONTROLLER_DOWNGRADE).
+let private fullDowngradeTimer level =
+    match level with
+    | 1 -> 20000
+    | 2 -> 10000
+    | 3 -> 20000
+    | 4 -> 40000
+    | 5 -> 80000
+    | 6 -> 120000
+    | 7 -> 150000
+    | _ -> 200000
+
+/// ADR-0007. The hard deadline on the controller's downgrade timer: half the
+/// level's full timer. The engine refuses activateSafeMode once the timer
+/// sinks below half minus 5,000 (its grace), so escalating at half keeps the
+/// safe-mode reflex fireable with the whole grace still banked.
+let internal insideDeadline (controller: ControllerInfo) =
+    controller.TicksToDowngrade <= fullDowngradeTimer controller.Level / 2
+
+/// Whether the named room is a nursery whose controller stands inside its
+/// downgrade deadline: its mother pools its Upgrade at the deadline rank,
+/// sites or not, for a downgrade costs the level and the safe-mode stock
+/// (user, 2026-10-04: W17S25 sat at 4,035 of 10,000 with no Upgrade pooled).
+let internal isNurseryNearDowngrade (view: ColonyView) room =
+    isNurseryRoom view room
+    && Map.tryFind room view.NurseryControllers |> Option.exists insideDeadline
+
 /// Whether an Upgrade in this pool is borrowed: its controller is not this
 /// colony's own, so it is a bootstrapped child's, pooled for the pioneers.
 let internal isBorrowedUpgrade (view: ColonyView) controllerId =
@@ -499,7 +527,9 @@ let planTasks
             |> List.filter (fun id ->
                 SpatialInfo.roomOf view.Spatial id
                 |> Option.exists (fun room ->
-                    isBootstrapRoom view room || isNurseryFirstLevel view room))
+                    isBootstrapRoom view room
+                    || isNurseryFirstLevel view room
+                    || isNurseryNearDowngrade view room))
 
         // And the claim party's (#471): a candidate's controller under the
         // same Task id, so the loaded pioneers wait at it before the claim

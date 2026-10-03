@@ -1467,6 +1467,41 @@ let bootstrapTests =
                     "and the site is the work again"
             }
 
+            test
+                "a nursery inside its downgrade deadline pools its Upgrade at the deadline rank, ahead of its sites" {
+                // Live 2026-10-04: W17S25 at RCL2 sat at 4,035 of 10,000 with no
+                // Upgrade pooled; a downgrade costs the level and the safe-mode stock.
+                let withTimer ticks =
+                    { claimedChild with
+                        NurseryControllers =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    { controllerAt 2 with
+                                        Id = "ctrl-child"
+                                        TicksToDowngrade = ticks
+                                    }
+                                ]
+                    }
+
+                let pool colony =
+                    planTasksOn colony noThreats |> List.map taskId
+
+                Expect.isFalse
+                    (pool (withTimer 5_001) |> List.contains (taskId (Upgrade "ctrl-child")))
+                    "above half the RCL2 timer: sites only"
+
+                Expect.contains
+                    (pool (withTimer 5_000))
+                    (taskId (Upgrade "ctrl-child"))
+                    "at half: the mother pools the controller"
+
+                Expect.equal
+                    (matchOf (withTimer 5_000 |> loaded))
+                    (Some(taskId (Upgrade "ctrl-child"), MatchFactor.Rank))
+                    "and a loaded body takes it ahead of the spawn site"
+            }
+
             test "the child pools the same Upgrade in its own tick" {
                 // Both colonies hold it: the mother reads the controller off a layer
                 // she projects, the child off its own `ColonyView.Controller`, and each

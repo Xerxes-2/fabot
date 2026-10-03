@@ -454,29 +454,9 @@ let private isHomeSite (view: ColonyView) atlas siteId =
     Atlas.targetRoom atlas siteId
     |> Option.forall (fun room -> room = SpatialInfo.homeName view.Spatial)
 
-/// The full downgrade timer per controller level (Screeps
-/// CONTROLLER_DOWNGRADE).
-let private fullDowngradeTimer level =
-    match level with
-    | 1 -> 20000
-    | 2 -> 10000
-    | 3 -> 20000
-    | 4 -> 40000
-    | 5 -> 80000
-    | 6 -> 120000
-    | 7 -> 150000
-    | _ -> 200000
-
-/// ADR-0007. The hard deadline on the controller's downgrade timer: half the
-/// level's full timer. The engine refuses activateSafeMode once the timer
-/// sinks below half minus 5,000 (its grace), so escalating at half keeps the
-/// safe-mode reflex fireable with the whole grace still banked.
-let private downgradeDeadline level = fullDowngradeTimer level / 2
-
 /// Whether the controller stands inside its downgrade deadline.
 let private insideDowngradeDeadline (view: ColonyView) =
-    view.Controller
-    |> Option.exists (fun c -> c.TicksToDowngrade <= downgradeDeadline c.Level)
+    view.Controller |> Option.exists insideDeadline
 
 /// ADR-0010. The tier of work a Task belongs to, once its target is taken into
 /// account — the ladder `planPool` sets each entry's priority off. Exported
@@ -1017,6 +997,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             insideDowngradeDeadline view
             && view.Controller |> Option.exists (fun c -> c.Id = id)
             ->
+            deadlineRank
+        | Upgrade id when Atlas.targetRoom atlas id |> Option.exists (isNurseryNearDowngrade view) ->
             deadlineRank
         | _ -> priorityOfTier tier + rankOfRung step
 
