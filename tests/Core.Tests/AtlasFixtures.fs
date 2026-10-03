@@ -43,6 +43,7 @@ let snapshotWith creeps spatial =
         Perimeter = []
         Defenders = Map.empty
         NurseryControllers = Map.empty
+        FirstSpawns = Map.empty
         LoadedTowers = Map.empty
         SafeModeRunning = false
         Crossed = Set.empty

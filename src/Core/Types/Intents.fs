@@ -8,6 +8,9 @@ module Fabot.Core.Types.Intents
 type Intent =
     | SpawnCreep of spawnName: string * body: BodyPart list * creepName: string
     | PlaceConstructionSite of tile: RoomPos * kind: StructureKind
+    /// A spawn site under the name the spawn will stand under (#476): a
+    /// [[nursery]]'s first, placed by its mother.
+    | PlaceSpawnSite of tile: RoomPos * spawnName: string
     /// The dig act, over either rock the `Harvest` Task can name: a source, or
     /// a Thorium deposit under an extractor of ours. The Intent's name is the
     /// frozen one (a raid log and every `observe` channel reads it) and the

@@ -1068,6 +1068,51 @@ let nurseryTests =
                     (PickupPile("w1", "pile-1"))
                     "and a pioneer beside it picks it up"
             }
+
+            test
+                "the mother places her nursery's declared first spawn, and stops once a site or a spawn stands" {
+                // #476: a nursery runs no decide, so the site a human used to
+                // place by hand is its mother's to place.
+                let declaring (colony: ColonyView) =
+                    { colony with
+                        FirstSpawns =
+                            Map.ofList
+                                [
+                                    "W1N2",
+                                    {
+                                        Tile = { X = 10; Y = 43 }
+                                        Name = "Spawn3"
+                                    }
+                                ]
+                    }
+
+                let room =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withHomeController { X = 10; Y = 5 }
+                    |> declaring
+
+                let placed colony =
+                    (decideOn colony).Intents
+                    |> List.filter (function
+                        | PlaceSpawnSite _ -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (placed (asNursery room))
+                    [ PlaceSpawnSite(RoomPos.at "W1N2" { X = 10; Y = 43 }, "Spawn3") ]
+                    "claimed and spawnless: the declared tile, under the name handed in"
+
+                Expect.isEmpty
+                    (placed (asNursery room |> withNorthSpawnSite { X = 10; Y = 43 }))
+                    "a spawn site of ours pending there: placed already"
+
+                Expect.isEmpty
+                    (placed (asNursery room |> withNorthSpawn))
+                    "a spawn standing: no nursery"
+
+                Expect.isEmpty (placed (asCandidate room)) "an unowned room: nothing"
+            }
         ]
 
 /// The two spawns of the pair below, each in its own colony's home, what
@@ -1096,6 +1141,7 @@ let private splitPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
         {
             Home = "W1N2"
@@ -1105,6 +1151,7 @@ let private splitPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 
@@ -1130,6 +1177,7 @@ let private nurseryPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
         {
             Home = "W1N2"
@@ -1139,6 +1187,7 @@ let private nurseryPair =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 
@@ -1155,6 +1204,7 @@ let private raisedPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
         {
             Home = "W1N2"
@@ -1164,6 +1214,7 @@ let private raisedPair =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 
@@ -1702,6 +1753,7 @@ let twoColonyTests =
                             Mother = None
                             Consignee = None
                             Perimeter = []
+                            FirstSpawn = None
                         }
                         {
                             Home = child
@@ -1711,6 +1763,7 @@ let twoColonyTests =
                             Mother = Some home
                             Consignee = None
                             Perimeter = []
+                            FirstSpawn = None
                         }
                     ]
 
@@ -2697,6 +2750,7 @@ let private raisingPair: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
         {
             Home = "W1N2"
@@ -2706,6 +2760,7 @@ let private raisingPair: Colony list =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 

@@ -132,6 +132,7 @@ let private repeatableActor (intent: Intent) : string option =
     | DismantleStructure(creep, _) -> Some creep
     | SpawnCreep _
     | PlaceConstructionSite _
+    | PlaceSpawnSite _
     | TransferEnergyToStructure _
     | WithdrawFromStore _
     | ClaimController _
@@ -168,6 +169,7 @@ let private fights (intent: Intent) : bool =
     | RangedHealCreep _
     | SpawnCreep _
     | PlaceConstructionSite _
+    | PlaceSpawnSite _
     | HarvestSource _
     | TransferEnergyToStructure _
     | WithdrawFromStore _

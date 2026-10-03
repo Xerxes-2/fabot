@@ -858,6 +858,10 @@ type Colony =
         /// human. Each is covered as a Keep structure is, on the same gate and
         /// floor. Empty for a room nobody sealed.
         Perimeter: Pos list
+        /// The home room's first spawn tile (#476), swept offline by a human:
+        /// the mother places the site there while the home is her nursery.
+        /// `None` for a room nobody swept.
+        FirstSpawn: Pos option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -991,6 +995,7 @@ module Colony =
                 // colony that declares the Reactor errand (#349).
                 Consignee = Some "W15S28"
                 Perimeter = []
+                FirstSpawn = None
             }
             // The second colony: the first colony's outpost until its own
             // spawn stood.
@@ -1038,6 +1043,7 @@ module Colony =
                 // same reason as W12S28's (#349).
                 Consignee = Some "W15S28"
                 Perimeter = []
+                FirstSpawn = None
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
             // The entry with no spawn behind it *was* the decision to take
@@ -1089,6 +1095,7 @@ module Colony =
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
                 Perimeter = []
+                FirstSpawn = None
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
@@ -1101,6 +1108,8 @@ module Colony =
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
                 Perimeter = []
+                // Placed by hand at t808,3xx; for the record.
+                FirstSpawn = Some { X = 24; Y = 40 }
             }
             // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`).
             // W17S25 held this slot from its Claim at t879,239 until a
@@ -1118,6 +1127,8 @@ module Colony =
                 // is not the Consignee, as W12S28's own ore is not.
                 Consignee = Some "W15S28"
                 Perimeter = []
+                // Placed by hand; for the record.
+                FirstSpawn = Some { X = 37; Y = 34 }
             }
             // W17S25 again (2026-10-03): the user retakes the room
             // Trepidimous's siege took at t880,418. The plan:
@@ -1149,6 +1160,10 @@ module Colony =
                         // East, to W16S25.
                         for y in 27..28 -> { X = 47; Y = y }
                     ]
+                // The 2026-10-01 stride-1 sweep: 17 roads, trips src 8 /
+                // ctrl 5 / T 31, every cluster tile inside the perimeter and
+                // at range 4 or more from it.
+                FirstSpawn = Some { X = 14; Y = 28 }
             }
         ]
 
@@ -1209,6 +1224,7 @@ module Colony =
                     Mother = None
                     Consignee = None
                     Perimeter = []
+                    FirstSpawn = None
                 })
             |> Option.toList
         | living -> living

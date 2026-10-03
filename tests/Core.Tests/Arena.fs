@@ -657,6 +657,7 @@ let colony (home: string) : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        FirstSpawn = None
     }
 
 /// An outpost declared off a capture's own engine ids.
@@ -2962,6 +2963,37 @@ let step (a: Arena) : Arena * TickTrace =
                 events.Add(SiteStomped(site.Id, b.Id))
             | _ -> ()
         | None -> ()
+
+    // Our spawn sites (`rooms.js` `createConstructionSite`): into a room
+    // whose controller is ours, onto a tile no site and no structure but a
+    // road or a rampart holds, under a name no spawn or spawn site bears. The
+    // spawn allowance is the engine's too, and not modelled: one at RCL1.
+    for intent in ours do
+        match intent with
+        | PlaceSpawnSite(tile, name) ->
+            match Map.tryFind tile.Room rooms with
+            | Some r when
+                r.Controller |> Option.exists (fun c -> c.Owner = Ownership.Ours)
+                && not (r.Sites |> List.exists (fun s -> s.At = RoomPos.pos tile))
+                && not (
+                    r.Structures
+                    |> List.exists (fun s ->
+                        s.At = RoomPos.pos tile && s.Kind <> "road" && s.Kind <> "rampart")
+                )
+                && not (
+                    rooms
+                    |> Map.exists (fun _ room ->
+                        room.Sites |> List.exists (fun s -> s.Name = Some name)
+                        || room.Structures |> List.exists (fun s -> s.Name = Some name))
+                )
+                ->
+                rooms <-
+                    Map.add
+                        tile.Room
+                        (r |> withSite Side.Ours "spawn" (Some name) 0 (RoomPos.pos tile))
+                        rooms
+            | _ -> ()
+        | _ -> ()
 
     // `creeps/tick.js`, per body: the step and its fatigue, the exit
     // transfer, MOVE paying fatigue off, then damage and heal applied

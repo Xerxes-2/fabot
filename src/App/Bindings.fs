@@ -382,3 +382,8 @@ let objectItem<'T> (_o: obj) (_key: string) : 'T = jsNative
 [<Emit("$0.withdraw($1, $2, $3)")>]
 let withdrawAmount (_creep: ICreep) (_target: obj) (_resource: string) (_amount: int) : int =
     jsNative
+
+/// `room.createConstructionSite` with the engine's optional fourth argument,
+/// a spawn site's name: the stub `withdrawAmount` is, for the same reason.
+[<Emit("$0.createConstructionSite($1, $2, 'spawn', $3)")>]
+let createSpawnSite (_room: IRoom) (_x: int) (_y: int) (_name: string) : int = jsNative

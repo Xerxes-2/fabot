@@ -213,6 +213,7 @@ let private declared: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 

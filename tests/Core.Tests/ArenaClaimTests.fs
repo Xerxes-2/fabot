@@ -926,6 +926,47 @@ let arenaClaimTests =
             }
 
             test
+                "the declared first spawn's site is placed at 14,28 the tick after the claim lands, and once (#476)" {
+                let swept =
+                    beforeClaim
+                    |> List.map (fun colony ->
+                        if colony.Home = "W17S25" then
+                            { colony with
+                                FirstSpawn = Some { X = 14; Y = 28 }
+                            }
+                        else
+                            colony)
+
+                let claim, final, trace =
+                    claimWorld 0 swept (claimer :: motherStaff) |> claimThen cooled 20
+
+                let placed =
+                    trace
+                    |> List.filter (fun t ->
+                        t.Ours
+                        |> List.exists (function
+                            | PlaceSpawnSite _ -> true
+                            | _ -> false))
+                    |> List.map (fun t ->
+                        t.Tick,
+                        t.Ours
+                        |> List.filter (function
+                            | PlaceSpawnSite _ -> true
+                            | _ -> false))
+
+                // Spawn3 and Spawn8 stand in the mother: the next is Spawn9.
+                Expect.equal
+                    placed
+                    [ claim + 1, [ PlaceSpawnSite(w17s25 14 28, "Spawn9") ] ]
+                    $"one placement, the tick after the claim at t{claim}"
+
+                Expect.equal
+                    (final.Rooms["W17S25"].Sites |> List.map (fun s -> s.Kind, s.At, s.Name))
+                    [ "spawn", tile 14 28, Some "Spawn9" ]
+                    "the site stands"
+            }
+
+            test
                 "under the live cooldown the Claim waits: the claimer on the ring claims the tick the cooldown ends (#474)" {
                 // The claimer alone: with a loaded worker at home the claim
                 // would wait out its party's walk as well (#471).

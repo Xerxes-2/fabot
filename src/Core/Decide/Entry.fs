@@ -345,7 +345,8 @@ let decideUnarbitrated
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
-    let outpostSiteIntents = planOutpostContainers view atlas
+    let outpostSiteIntents =
+        planOutpostContainers view atlas @ planFirstSpawns view atlas
 
     let defenseIntents =
         planSafeMode view atlas @ planFire view atlas @ planTowerHeal view atlas

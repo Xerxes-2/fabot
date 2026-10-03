@@ -65,6 +65,9 @@ let private execute (intent: Intent) : Outcome =
     | PlaceConstructionSite(tile, kind) ->
         withActor (Game.rooms?(tile.Room): IRoom) (fun room ->
             room.createConstructionSite (tile.X, tile.Y, structureName kind))
+    | PlaceSpawnSite(tile, name) ->
+        withActor (Game.rooms?(tile.Room): IRoom) (fun room ->
+            createSpawnSite room tile.X tile.Y name)
     | HarvestSource(creepName, sourceId) ->
         withCreepTarget creepName sourceId (fun c t -> c.harvest t)
     | TransferEnergyToStructure(creepName, structureId, resource) ->

@@ -1036,6 +1036,26 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
             |> cheapest fst snd
             |> Option.map (fun (_, seat) -> PlaceConstructionSite(RoomPos.at room seat, Container)))
 
+/// Each [[nursery]]'s declared first spawn (#476), placed by its mother: a
+/// nursery runs no decide, and before this a human placed it. Only while the
+/// room is a nursery this colony projects and can see, and no spawn site of
+/// ours stands in it — the pending site is the stop, so it goes down once.
+/// The spawn ends the nursery, and the child's own Layout plans around it.
+let internal planFirstSpawns (view: ColonyView) atlas : Intent list =
+    let spawnSiteIn room =
+        view.ConstructionSites
+        |> List.exists (fun site ->
+            Map.tryFind site.Id view.Spatial.TargetKinds = Some(Site BuiltKind.Spawn)
+            && Atlas.positionOf atlas site.Id |> Option.exists (fun at -> at.Room = room))
+
+    view.FirstSpawns
+    |> Map.toList
+    |> List.filter (fun (room, _) ->
+        isNurseryRoom view room
+        && Map.containsKey room view.RoomControl
+        && not (spawnSiteIn room))
+    |> List.map (fun (room, first) -> PlaceSpawnSite(RoomPos.at room first.Tile, first.Name))
+
 /// The colony's signature, written by whoever is standing there (#381). A
 /// reflex and not a Task: it sends nobody anywhere, and the engine keeps a sign
 /// until it is overwritten. It reaches what somebody already has business

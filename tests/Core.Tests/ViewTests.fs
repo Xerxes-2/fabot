@@ -235,6 +235,7 @@ let private declared: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
         {
             Home = child
@@ -244,6 +245,7 @@ let private declared: Colony list =
             Mother = Some mother
             Consignee = None
             Perimeter = []
+            FirstSpawn = None
         }
     ]
 
@@ -1780,6 +1782,55 @@ let safeModeFactTests =
                 Expect.isEmpty
                     (viewOf pairWorld mother).NurseryControllers
                     "a child with its spawn standing is no nursery"
+            }
+
+            test
+                "a mother reads her nursery's declared first spawn, named past every spawn the world holds" {
+                // #476: the next free `SpawnN` is past the highest number
+                // standing, so a name a lost room once held is never reused.
+                let firstSpawning =
+                    declared
+                    |> List.map (fun colony ->
+                        if colony.Home = child then
+                            { colony with
+                                FirstSpawn = Some { X = 10; Y = 10 }
+                            }
+                        else
+                            colony)
+
+                let withSpawn7 =
+                    { spawnlessWorld with
+                        Rooms =
+                            spawnlessWorld.Rooms
+                            |> Map.add
+                                mother
+                                (snd (
+                                    ourColony
+                                        "Spawn7"
+                                        5
+                                        1800
+                                        (mother, World.roomOf spawnlessWorld mother)
+                                ))
+                    }
+
+                Expect.equal
+                    ((viewUnder firstSpawning withSpawn7 mother).FirstSpawns |> Map.toList)
+                    [
+                        child,
+                        {
+                            Tile = { X = 10; Y = 10 }
+                            Name = "Spawn8"
+                        }
+                    ]
+                    "the declared tile, named after Spawn7"
+
+                Expect.isEmpty
+                    (viewUnder firstSpawning pairWorld mother).FirstSpawns
+                    "a child with its spawn standing has nothing to place"
+
+                Expect.isEmpty
+                    (viewOf spawnlessWorld mother).FirstSpawns
+                    "a nursery nobody declared a tile for has nothing to place"
             }
         ]
 
@@ -3668,6 +3719,7 @@ let private claimingDeclared: Colony list =
                 Mother = Some mother
                 Consignee = None
                 Perimeter = []
+                FirstSpawn = None
             }
         ]
 
@@ -3787,6 +3839,7 @@ let harassViewTests =
                             Mother = None
                             Consignee = None
                             Perimeter = []
+                            FirstSpawn = None
                         }
                     ]
 
@@ -4376,6 +4429,7 @@ let private declaringOutpost outpost : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        FirstSpawn = None
     }
 
 let private declaringErrand errand : Colony =
@@ -4387,6 +4441,7 @@ let private declaringErrand errand : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        FirstSpawn = None
     }
 
 [<Tests>]

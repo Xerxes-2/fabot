@@ -84,6 +84,7 @@ let private channels =
     | SayCreep(name, _) -> [ name, Say ]
     | SpawnCreep _
     | PlaceConstructionSite _
+    | PlaceSpawnSite _
     | ActivateSafeMode _
     | FireTower _
     | HealWithTower _

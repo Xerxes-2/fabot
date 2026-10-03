@@ -21,6 +21,10 @@ type BorrowedWork =
         Defended: string list
     }
 
+/// A [[nursery]]'s declared first spawn (`Colony.FirstSpawn`, #476) and the
+/// name the site goes down under.
+type FirstSpawnSite = { Tile: Pos; Name: string }
+
 /// One colony's whole reading of this tick: its home room's projection, the
 /// rooms it works beside it, the bodies it holds, the bank it casts from and
 /// the explicit little it may take of its neighbours'. ADR-0052
@@ -155,6 +159,11 @@ type ColonyView =
         /// room's name (#449): the level its Upgrade waits on, and the stock
         /// its mother fires. A Nursery runs no tick of its own to read it.
         NurseryControllers: Map<string, ControllerInfo>
+        /// The declared first spawn of each [[nursery]] this colony raises,
+        /// under its room's name (#476), named past every spawn the world
+        /// holds (`ColonyView.firstSpawns`). No entry for a nursery nobody
+        /// swept a tile for.
+        FirstSpawns: Map<string, FirstSpawnSite>
         /// The towers of ours holding a shot's energy (`World.loadedTowers`)
         /// in each child's home this colony raises, under its room's name
         /// (#451): what its garrison fights beside. No entry for none.
@@ -542,6 +551,45 @@ module ColonyView =
                 }
         }
 
+    /// Every declared first spawn still to place (#476), world-wide: each
+    /// [[nursery]] with a swept tile, in room order, named `SpawnN` from one
+    /// past the highest N standing, so a name a lost room once held is never
+    /// handed out again. One numbering over every colony, so two nurseries
+    /// placed on one tick never share a name.
+    let firstSpawns
+        (stages: Map<string, ColonyStage>)
+        (colonies: Colony list)
+        (world: World)
+        : (string * FirstSpawnSite) list =
+        let numberOf (name: string) =
+            if name.StartsWith "Spawn" then
+                match System.Int32.TryParse(name.Substring 5) with
+                | true, n -> Some n
+                | _ -> None
+            else
+                None
+
+        let highest =
+            world.Rooms
+            |> Map.toList
+            |> List.collect (fun (_, facts) -> facts.Spawns)
+            |> List.choose (fun spawn -> numberOf spawn.Name)
+            |> List.fold max 0
+
+        colonies
+        |> List.choose (fun colony ->
+            match colony.FirstSpawn with
+            | Some tile when Map.tryFind colony.Home stages = Some Nursery ->
+                Some(colony.Home, tile)
+            | _ -> None)
+        |> List.sortBy fst
+        |> List.mapi (fun i (room, tile) ->
+            room,
+            {
+                Tile = tile
+                Name = $"Spawn{highest + 1 + i}"
+            })
+
     /// One colony's view of this tick: the rooms it works cut out of the
     /// `World`, the bodies it holds, its own bank and controller, and the
     /// explicit little it may take of a child's. **Pure, and that is the point
@@ -826,6 +874,13 @@ module ColonyView =
                     (World.roomOf world room).Controller
                     |> Option.map (fun controller -> room, controller))
                 |> Fresh.mapOfList
+            FirstSpawns =
+                match nurseries with
+                | [] -> Map.empty
+                | _ ->
+                    firstSpawns stages colonies world
+                    |> List.filter (fun (room, _) -> List.contains room nurseries)
+                    |> Fresh.mapOfList
             LoadedTowers =
                 bootstrap
                 |> List.choose (fun room ->
