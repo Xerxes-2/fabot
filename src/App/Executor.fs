@@ -131,6 +131,9 @@ let private execute (intent: Intent) : Outcome =
         withOurCreep targetName (fun target ->
             withActor (Game.getObjectById towerId :?> ITower) (fun tower ->
                 tower.heal (box target)))
+    | RepairWithTower(towerId, structureId) ->
+        withTarget structureId (fun target ->
+            withActor (Game.getObjectById towerId :?> ITower) (fun tower -> tower.repair target))
     | SendFromTerminal(terminalId, resource, amount, destination) ->
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))

@@ -170,9 +170,12 @@ module Engine =
     /// A tower's attack at this range: `towerHealAt`'s twin.
     let towerAttackAt (range: int) = towerPowerAt towerPowerAttack range
 
-    /// A tower's repair at this range (TOWER_POWER_REPAIR, 800, on the same
-    /// curve): the arena's (#465), for a besieged base's towers.
-    let towerRepairAt (range: int) = towerPowerAt 800 range
+    /// TOWER_POWER_REPAIR: what a tower puts back on a structure within its
+    /// optimal range, for TOWER_ENERGY_COST (`towers/repair.js`).
+    let towerPowerRepair = 800
+
+    /// A tower's repair at this range: 800 to range 5, 200 from range 20.
+    let towerRepairAt (range: int) = towerPowerAt towerPowerRepair range
 
     /// Hits a body part carries, unboosted (Screeps `BODYPART_HITS`).
     let partHits = 100
@@ -263,6 +266,10 @@ type Tuning =
         /// whole at it — the ticks the room must hold times the damage per
         /// tick. No hysteresis, one Repair visit clearing the line. ADR-0034
         RampartFloor: int
+        /// The energy a tower keeps back from repairing a rampart under
+        /// attack (#477), so a claimer or a dismantler walking in behind a
+        /// healed raid can still be shot.
+        TowerRepairReserve: int
         /// How many whole bodies of the colony's own bank the Storage keeps
         /// back before the upgrader row may spend any of it (#385). **Counted
         /// in bodies rather than in energy** so it scales with the room:
@@ -542,6 +549,9 @@ module Tuning =
             RepairRescueLine = 0.25
             RepairRescues = 2
             RampartFloor = 100_000
+            // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
+            // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
+            TowerRepairReserve = 300
             UpgradeStockBodies = 20
             PickupThreshold = 100
             ReachMargin = 2

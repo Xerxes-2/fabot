@@ -967,6 +967,24 @@ let towerColony towers hostiles =
             }
     }
 
+let private towerRepairs intents =
+    intents
+    |> List.choose (function
+        | RepairWithTower(tower, target) -> Some(tower, target)
+        | _ -> None)
+
+/// The colony with this tower of its holding `energy`.
+let private holdingTower (id: string) (energy: int) (colony: ColonyView) =
+    { colony with
+        Refillables =
+            {
+                Id = id
+                FreeCapacity = Engine.towerCapacity - energy
+                Kind = BuiltKind.Tower
+            }
+            :: colony.Refillables
+    }
+
 /// The tower colony with creeps of ours standing at home, each owing the given
 /// hits.
 let private woundedAt towers hostiles (creeps: (string * Pos * int) list) =
@@ -1112,6 +1130,75 @@ let fireReflexTests =
                     "the premise: our rampart beside it"
 
                 Expect.isEmpty (shots (decideOn snapshot).Intents) "healed back: the energy held"
+            }
+
+            test
+                "a tower repairs our rampart a healed raider strikes, and fires instead at a raider worth a shot (#477)" {
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+
+                let besieged body =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 30; Y = 40 } body ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    |> holdingTower "tower-1" 500
+
+                let healedOn = (decideOn (besieged healed)).Intents
+                Expect.isEmpty (shots healedOn) "the premise: healed back, no shot"
+
+                Expect.equal
+                    (towerRepairs healedOn)
+                    [ "tower-1", "rampart-1" ]
+                    "800 at range ≤5, 200 at 20: over a 17 ATTACK swing's 510 near it"
+
+                let unhealedOn = (decideOn (besieged [ Attack; Move ])).Intents
+                Expect.equal (shots unhealedOn) [ "tower-1", "h-1" ] "worth a shot: fire"
+                Expect.isEmpty (towerRepairs unhealedOn) "and no repair beside it"
+            }
+
+            test
+                "a tower repairs the weakest rampart under attack, and none a hostile cannot reach (#477)" {
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+
+                let snapshot =
+                    towerColony
+                        [
+                            "tower-1", { X = 10; Y = 40 }
+                            "rampart-a", { X = 31; Y = 40 }
+                            "rampart-b", { X = 29; Y = 40 }
+                            "rampart-far", { X = 40; Y = 10 }
+                        ]
+                        [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
+                    |> withHits "rampart-a" BuiltKind.Rampart 90_000 1_000_000
+                    |> withHits "rampart-b" BuiltKind.Rampart 60_000 1_000_000
+                    |> withHits "rampart-far" BuiltKind.Rampart 1_000 1_000_000
+                    |> holdingTower "tower-1" 500
+
+                Expect.equal
+                    (towerRepairs (decideOn snapshot).Intents)
+                    [ "tower-1", "rampart-b" ]
+                    "the struck one with the fewest hits; the far one is decay's"
+            }
+
+            test "a tower at its reserve neither repairs nor fires on a healed raider (#477)" {
+                let healed = [ Attack; Move ] @ List.replicate 20 Heal
+
+                let at energy =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    |> holdingTower "tower-1" energy
+
+                let reserve = (at 0).Tuning.TowerRepairReserve
+                let intents = (decideOn (at reserve)).Intents
+                Expect.isEmpty (towerRepairs intents) "kept for a claimer or a dismantler"
+                Expect.isEmpty (shots intents) "and no shot"
+
+                Expect.equal
+                    (towerRepairs (decideOn (at (reserve + Engine.towerEnergyCost))).Intents)
+                    [ "tower-1", "rampart-1" ]
+                    "one act over it repairs"
             }
 
             test "a quiet room fires no shot" {

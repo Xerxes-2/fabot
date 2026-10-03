@@ -2762,6 +2762,7 @@ let step (a: Arena) : Arena * TickTrace =
         |> List.choose (function
             | FireTower(tower, hostile) -> Some(tower, Fire hostile)
             | HealWithTower(tower, creep) -> Some(tower, HealBody creep)
+            | RepairWithTower(tower, structure) -> Some(tower, Fix structure)
             | _ -> None)
         |> List.filter (fun (tower, _) ->
             match ledger.Standing.TryGetValue tower with

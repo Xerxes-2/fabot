@@ -1808,11 +1808,12 @@ let arenaDefenceTests =
                         |> List.filter (fun s -> s.Kind = "tower")
                         |> List.sumBy (fun s -> s.Energy)
 
-                    // #466, measured: 13 shots over the 26 ticks to the
+                    // #466, measured: 15 shots over the 30 ticks to the
                     // 10,000 line's breach and 42 over the 61 the thicker
                     // lines' raid lives, every one at a body our damage
-                    // reaching it out-paces the heal on; the tower holds 570
-                    // (the worker's refill) and 280.
+                    // reaching it out-paces the heal on; on the ticks between
+                    // the tower repairs the struck rampart (#477: 10 and 14
+                    // repairs), and holds 460 (the worker's refill) and 140.
                     Expect.isLessThanOrEqual
                         shots
                         (List.length trace * 3 / 4)
@@ -1822,7 +1823,7 @@ let arenaDefenceTests =
 
                     match firstFallen lineIds trace, holds with
                     | Some fell, false ->
-                        // Measured: t25, one melee on one rampart from the
+                        // Measured: t29 (t25 unrepaired), one melee on one rampart from the
                         // walk in, before the garrison has walked to the
                         // line from the controller (#446 measured t105 and
                         // t593 at the two thicker lines, unshot).

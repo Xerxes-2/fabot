@@ -664,12 +664,12 @@ let private withSpawnSite (a: Arena) =
                 (a.Rooms["W17S25"] |> withSite Side.Ours "spawn" (Some "Spawn10") 0 (tile 14 28))
     }
 
-/// The window after safe mode (the #465 scenario, mothered by W15S28): W17S25
-/// at RCL3 with its own spawn and one tower holding 500, never full so the
-/// child stays raised (#445); the sixteen perimeter ramparts at 50,000; the
-/// safe mode RCL3 banked standing, under the 30,000 ticks of cooldown the
-/// spent one left; and the child's one worker, carrying 200.
-let private heldWorld (bodies: Body list) =
+/// W17S25 at RCL3 after safe mode, mothered by W15S28: its own spawn, these
+/// towers holding `towerEnergy`, the sixteen perimeter ramparts at `hits`,
+/// the safe mode RCL3 banked standing under the 30,000 ticks of cooldown the
+/// spent one left, and the child's one worker, carrying 200; the mother and
+/// the chain between as `claimWorld` has them.
+let private childWorld (towers: Pos list) (towerEnergy: int) (hits: int) (bodies: Body list) =
     let mother =
         room "W15S28"
         |> withController Ownership.Ours None 7 0
@@ -681,8 +681,8 @@ let private heldWorld (bodies: Body list) =
         |> withController Ownership.Ours None 3 1
         |> withSafeModeCooldown (921_000 + 30_000)
         |> withSpawn "Spawn10" (tile 22 34) 800
-        |> withStructures [ towerOf Side.Ours (tile 21 32) 500 ]
-        |> withRamparts Side.Ours 50_000 perimeter
+        |> withStructures [ for at in towers -> towerOf Side.Ours at towerEnergy ]
+        |> withRamparts Side.Ours hits perimeter
 
     let worker =
         { body
@@ -710,6 +710,14 @@ let private heldWorld (bodies: Body list) =
         (worker :: motherStaff @ bodies)
     |> withCasts claimRows
 
+let private childTower = tile 21 32
+
+/// The window after safe mode (the #465 scenario, mothered by W15S28): one
+/// tower holding 500, never full so the child stays raised (#445), and the
+/// perimeter at 50,000.
+let private heldWorld (bodies: Body list) =
+    childWorld [ childTower ] 500 50_000 bodies
+
 /// The t880,341 raid come back from W18S25 beyond the west exits, as #465
 /// plays it: each melee breaking in for the controller's ring, each healer
 /// behind its melee, the tapper walking for the controller once a way is
@@ -724,6 +732,127 @@ let private westRaid =
             TicksToLive = Engine.claimLifetime
         }
     ]
+
+/// The relief's rows: the residents and the duo the mother casts for them.
+let private reliefRows = [ "ranger-"; "brawler-"; "medic-" ]
+
+let private isRelief (id: string) =
+    reliefRows |> List.exists (fun row -> id.StartsWith row)
+
+/// What one run of the line against the raid came to (#478).
+type private LineReport =
+    {
+        /// The tick the first perimeter rampart fell on.
+        Fell: int option
+        /// The lowest any perimeter rampart stood at, and the tick.
+        Floor: int * int
+        /// The towers' energy at the end, and the tick they first ran dry.
+        TowerLeft: int
+        TowerDry: int option
+        /// The towers' acts our side asked for.
+        Shots: int
+        Repairs: int
+        /// The tick the mother first cast a relief body, and the tick the
+        /// first one stood in W17S25.
+        ReliefCast: int option
+        ReliefIn: int option
+        SafeModeAsks: int list
+        SafeMode: int option
+        Taps: int list
+        Died: Map<string, int>
+        Ticks: int
+    }
+
+/// Run until the raid's four fighters are dead, the spawn has fallen, or
+/// `ticks` pass, reading the towers' energy each tick.
+let private lineReport (ticks: int) (start: Arena) =
+    let lineIds = perimeter |> List.map (fun p -> $"rampart-{p.X}-{p.Y}") |> Set.ofList
+    let fighters = [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ]
+
+    let towerEnergy (a: Arena) =
+        a.Rooms["W17S25"].Structures
+        |> List.filter (fun s -> s.Kind = "tower")
+        |> List.sumBy (fun s -> s.Energy)
+
+    let over (a: Arena) =
+        fighters
+        |> List.forall (fun id -> a.Bodies |> List.forall (fun b -> b.Id <> id))
+        || not (a.Rooms["W17S25"].Structures |> List.exists (fun s -> s.Kind = "spawn"))
+
+    let rec go n (a: Arena) trace energies =
+        if n = 0 || over a then
+            a, List.rev trace, List.rev energies
+        else
+            let next, t = step a
+            go (n - 1) next (t :: trace) ((t.Tick, towerEnergy next) :: energies)
+
+    let final, trace, energies = go ticks start [] []
+    let m = milestonesOf trace
+
+    let asked (act: Intent -> bool) =
+        trace |> List.sumBy (fun t -> t.Ours |> List.filter act |> List.length)
+
+    let floor =
+        trace
+        |> List.collect (fun t ->
+            t.Structures
+            |> Map.toList
+            |> List.filter (fun (id, _) -> Set.contains id lineIds)
+            |> List.map (fun (_, hits) -> hits, t.Tick))
+        |> List.minBy fst
+
+    let report =
+        {
+            Fell =
+                trace
+                |> List.tryPick (fun t ->
+                    t.Events
+                    |> List.tryPick (function
+                        | Destroyed id when Set.contains id lineIds -> Some t.Tick
+                        | _ -> None))
+            Floor = floor
+            TowerLeft = towerEnergy final
+            TowerDry =
+                energies
+                |> List.tryFind (fun (_, e) -> e < Engine.towerEnergyCost)
+                |> Option.map fst
+            Shots =
+                asked (function
+                    | FireTower _ -> true
+                    | _ -> false)
+            Repairs =
+                asked (function
+                    | RepairWithTower _ -> true
+                    | _ -> false)
+            ReliefCast =
+                trace
+                |> List.tryFind (fun t ->
+                    t.Ours
+                    |> List.exists (function
+                        | SpawnCreep(_, _, n) -> isRelief n
+                        | _ -> false))
+                |> Option.map (fun t -> t.Tick)
+            ReliefIn =
+                m.Entered
+                |> Map.toList
+                |> List.filter (fun (id, _) -> isRelief id)
+                |> List.map snd
+                |> List.sort
+                |> List.tryHead
+            SafeModeAsks = safeModeAsksOf trace
+            SafeMode = m.SafeMode
+            Taps = m.Taps
+            Died = m.Died
+            Ticks = List.length trace
+        }
+
+    report, final, trace
+
+/// #478: W17S25 Independent — its towers full, so the latch stands (#445) and
+/// the mother's residents have gone home (#447) — the perimeter at
+/// `RampartFloor`.
+let private independentWorld (towers: Pos list) =
+    childWorld towers Engine.towerCapacity Tuning.defaults.RampartFloor westRaid
 
 
 [<Tests>]
@@ -1003,7 +1132,8 @@ let arenaClaimTests =
                 let m = milestonesOf trace
                 let failure = $"{m}\n{describe trace}"
                 // Measured: the raid dead by t60, the most struck rampart
-                // (2,24) at 25,010 of its 50,000.
+                // (2,24) at 28,670 of its 50,000 (25,310 before the tower
+                // repaired it, #477).
                 Expect.equal
                     (List.length (standing final))
                     lineIds.Count
@@ -1017,5 +1147,89 @@ let arenaClaimTests =
 
                 for r in residents do
                     Expect.isFalse (m.Died.ContainsKey r.Id) $"{r.Id} lives\n{failure}"
+            }
+
+            test
+                "#478, one tower: an Independent child with no residents loses its 100k perimeter before the mother's relief arrives, which then kills the melee" {
+                let report, _, trace = independentWorld [ childTower ] |> lineReport 600
+                let failure = $"{report}\n{describe trace}"
+
+                // Measured with #477: the relief cast t5, in at t371; the
+                // tower dry at t134 (it fires on the ticks a healer has
+                // bounced back across the exit, repairs on the rest); the
+                // line down at t215 (t200 before #477), one melee's 510 a
+                // tick on rampart 2,24; the tap at t552; both melee dead at
+                // t550/t554, the healers living.
+                Expect.isTrue
+                    (report.ReliefCast |> Option.exists (fun t -> t <= 10))
+                    $"#468: the raid's entry reverts the stage and the mother casts\n{failure}"
+
+                match report.Fell, report.ReliefIn with
+                | Some fell, Some relief ->
+                    Expect.isGreaterThanOrEqual
+                        fell
+                        (Tuning.defaults.RampartFloor / (Engine.attackPower * 17))
+                        "no faster than one melee on one rampart"
+
+                    Expect.isLessThan fell relief $"the line falls first\n{failure}"
+
+                    for id in [ "Eternity536"; "Prime803" ] do
+                        Expect.isTrue
+                            (Map.tryFind id report.Died |> Option.exists (fun t -> t > relief))
+                            $"{id} dies to the relief\n{failure}"
+                | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
+
+                Expect.isGreaterThan
+                    report.Repairs
+                    0
+                    $"#477: the tower repairs the struck line\n{failure}"
+
+                Expect.isTrue
+                    (report.TowerDry |> Option.exists (fun t -> Some t < report.Fell))
+                    $"the tower is dry before the line falls\n{failure}"
+
+                Expect.isEmpty report.SafeModeAsks "a banked safe mode under the cooldown: no ask"
+                Expect.isNonEmpty report.Taps $"the tapper reaches the controller\n{failure}"
+            }
+
+            test
+                "#478, two towers: an Independent child with no residents holds its 100k perimeter and kills the raid before the relief arrives" {
+                let report, _, trace = independentWorld [ childTower; tile 23 31 ] |> lineReport 600
+
+                let failure = $"{report}\n{describe trace}"
+
+                // Measured: the raid dead by t77, the line's floor 86,620,
+                // 780 of the towers' 2,000 left; the relief walking still.
+                Expect.isNone report.Fell $"the line holds\n{failure}"
+                Expect.isGreaterThan (fst report.Floor) 80_000 failure
+
+                for id in [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ] do
+                    Expect.isTrue (report.Died.ContainsKey id) $"{id} dies\n{failure}"
+
+                Expect.isNone report.ReliefIn "over before the relief lands"
+                Expect.isEmpty report.SafeModeAsks "no ask"
+                Expect.isEmpty report.Taps "no tap"
+            }
+
+            // #478's evidence: in the one-tower run the child's worker took
+            // the Upgrade before the raid entered and poured all 200 into the
+            // controller (t7–t56) while rampart 2,24 lost 25,000; the Matcher
+            // keeps a still-valid holding, so the struck rampart's Repair
+            // (#467, two rungs up) never reaches a body already working.
+            ptest
+                "a worker of the child holding its Upgrade when a melee starts on the perimeter repairs the struck rampart instead" {
+                let _, trace = independentWorld [ childTower ] |> run 60
+                let lineIds = perimeter |> List.map (fun p -> $"rampart-{p.X}-{p.Y}") |> Set.ofList
+
+                let repaired =
+                    trace
+                    |> List.exists (fun t ->
+                        t.Ours
+                        |> List.exists (function
+                            | RepairStructure("worker-920300-Spawn10", id) ->
+                                Set.contains id lineIds
+                            | _ -> false))
+
+                Expect.isTrue repaired $"the line repaired\n{describe trace}"
             }
         ]

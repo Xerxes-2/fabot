@@ -236,6 +236,8 @@ type ITower =
     abstract attack: target: obj -> int
     /// Put hits back on a creep, falling off with range; 10 energy an act.
     abstract heal: target: obj -> int
+    /// Put hits back on a structure, falling off with range; 10 energy an act.
+    abstract repair: target: obj -> int
 
 /// `send` moves a resource to another room's terminal, paying a fee out of
 /// this terminal's energy; `mod-season5/src/terminal-restriction.js` nulls it

@@ -200,6 +200,46 @@ let internal planConsignment (view: ColonyView) : Intent list =
         |> List.choose (fst >> ship)
     | _ -> []
 
+/// The fire reflex's held hand (#477): with no hostile worth a shot, each tower
+/// still holding `Tuning.TowerRepairReserve` after the act repairs the rampart
+/// of ours under attack (`rampartsUnderAttack`, #467) with the fewest hits,
+/// then the nearest, then by id. A repair lands 800 near the tower and 200
+/// from range 20, against the 510 one 17-ATTACK melee strikes. A tower the
+/// projection holds no store for is read as empty.
+let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list) : Intent list =
+    match rampartsUnderAttack view with
+    | struck when Set.isEmpty struck -> []
+    | struck ->
+        let home = SpatialInfo.homeName view.Spatial
+        let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+
+        let ramparts =
+            SpatialInfo.structureHits view.Spatial
+            |> List.choose (fun (id, _, hits) ->
+                match Map.tryFind id tiles with
+                | Some tile when Set.contains id struck && hits.Hits < hits.HitsMax ->
+                    Some(id, RoomPos.at home tile, hits.Hits)
+                | _ -> None)
+
+        let energyOf (towerId: string) =
+            view.Refillables
+            |> List.tryFind (fun r -> r.Id = towerId)
+            |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
+            |> Option.defaultValue 0
+
+        towers
+        |> List.filter (fun (towerId, _) ->
+            energyOf towerId - Engine.towerEnergyCost >= view.Tuning.TowerRepairReserve)
+        |> List.choose (fun (towerId, from) ->
+            ramparts
+            |> List.choose (fun (id, tile, hits) ->
+                RoomPos.range from tile |> Option.map (fun r -> hits, r, id))
+            |> function
+                | [] -> None
+                | reachable ->
+                    let _, _, target = List.min reachable
+                    Some(RepairWithTower(towerId, target)))
+
 /// Colony reflex beside the pipeline (ADR-0014): every tower shoots the
 /// hostile worth a shot nearest to itself. Worth one (#466): a hostile our
 /// damage reaching it this tick — every tower's at its range, as if all fired
@@ -207,9 +247,9 @@ let internal planConsignment (view: ColonyView) : Intent list =
 /// (`healReaching`); one whose weapon reaches our Keep or creeps, or a
 /// dismantler beside the Keep, hurting something now; or a claimer, whose
 /// whole approach is the window (`claimsAFlag`, #451). Not a rampart: it is
-/// there to absorb the hits, and a shot healed back is waste. Any other
-/// target holds the energy. No energy gate: a dry tower's Intent
-/// fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
+/// there to absorb the hits, and a shot healed back is waste. With none worth
+/// one, the towers repair (`planTowerRepair`). No energy gate on a shot: a
+/// dry tower's Intent fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
 /// has always answered home alone, and the hostiles are narrowed to match;
 /// `RoomPos.range` answers None across a border.
 let internal planFire (view: ColonyView) atlas : Intent list =
@@ -254,15 +294,18 @@ let internal planFire (view: ColonyView) atlas : Intent list =
             |> List.filter (fun h ->
                 claimsAFlag (Set.singleton home) h || hurting h || outDamaged h)
 
-        towers
-        |> List.choose (fun (towerId, tile) ->
-            worth
-            |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
-            |> function
-                | [] -> None
-                | reachable ->
-                    let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
-                    Some(FireTower(towerId, target.Id)))
+        match worth with
+        | [] -> planTowerRepair view towers
+        | _ ->
+            towers
+            |> List.choose (fun (towerId, tile) ->
+                worth
+                |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
+                |> function
+                    | [] -> None
+                    | reachable ->
+                        let _, target = reachable |> List.minBy (fun (r, h) -> r, h.Id)
+                        Some(FireTower(towerId, target.Id)))
 
 /// The fire reflex's quiet twin (#410): with no hostile at home to shoot, each
 /// tower heals the creep of ours at home with the most hits still owed, the

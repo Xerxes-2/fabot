@@ -119,6 +119,7 @@ let tests =
                         SpawnCreep("worker", [ Work; Carry; Move ], "new")
                         FireTower("worker", "hostile")
                         HealWithTower("worker", "patient")
+                        RepairWithTower("worker", "rampart")
                         ActivateSafeMode "worker"
                         PlaceConstructionSite({ Room = "W1N1"; X = 10; Y = 10 }, Road)
                         HarvestSource("worker", "source")

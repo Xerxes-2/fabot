@@ -328,11 +328,13 @@ let forcedTests =
                     [
                         FireTower("tower", "h")
                         HealWithTower("tower", "hauler")
+                        RepairWithTower("tower", "rampart")
                         ActivateSafeMode "ctrl"
                     ] do
                     let fought = LightTick.lastFull quiet Map.empty [ fight ]
 
                     Expect.isTrue fought.Fought $"%A{fight} is a fight"
+                    Expect.isEmpty (LightTick.intents fought quiet) $"%A{fight} is never replayed"
 
                     Expect.equal
                         (LightTick.forced fought quiet)

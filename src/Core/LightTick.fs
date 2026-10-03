@@ -149,10 +149,11 @@ let private repeatableActor (intent: Intent) : string option =
     | ActivateSafeMode _
     | FireTower _
     | HealWithTower _
+    | RepairWithTower _
     | SendFromTerminal _ -> None
 
-/// Whether an intent is a structure's fight — a tower's shot or heal, or safe
-/// mode raised: a tick that holds one is followed by a full tick, never a
+/// Whether an intent is a structure's fight — a tower's shot, heal or repair
+/// of a struck rampart, or safe mode raised: a tick that holds one is followed by a full tick, never a
 /// light one. A creep's own shot or heal is not: a body it could still reach
 /// is within `nearRange` and forces the tick full on that rule, and one that
 /// died or ran leaves nothing to decide (live 2026-09-30, 40 of 83 full ticks
@@ -162,6 +163,7 @@ let private fights (intent: Intent) : bool =
     match intent with
     | FireTower _
     | HealWithTower _
+    | RepairWithTower _
     | ActivateSafeMode _ -> true
     | AttackCreep _
     | RangedAttackCreep _
