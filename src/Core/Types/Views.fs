@@ -39,8 +39,13 @@ type AssaultFacts =
         /// the room's towers and then its spawns. None while the room is
         /// dark.
         Targets: (string * Pos) list option
-        /// Whether vision shows safe mode running in the room this tick.
+        /// Whether safe mode runs in the room: vision this tick, or the
+        /// controller remembered (`World.RivalControllers`, #491).
         SafeMode: bool
+        /// The window (`RivalSafeMode.barredUntil`): the first tick its owner
+        /// may raise safe mode in the room again, as remembered; None while
+        /// they can or nobody knows.
+        BarredUntil: int option
     }
 
 /// One colony's whole reading of this tick: its home room's projection, the
@@ -638,8 +643,15 @@ module ColonyView =
                 }
         }
 
-    /// One assault as this tick's vision of its room reads it.
-    let private assaultFacts (facts: RoomFacts) (assault: Assault) : AssaultFacts =
+    /// One assault as this tick's vision of its room reads it, and its safe
+    /// mode as the rival controllers remembered read it.
+    let private assaultFacts (tuning: Tuning) (world: World) (assault: Assault) : AssaultFacts =
+        let facts = World.roomOf world assault.RoomName
+
+        let remembered =
+            Map.tryFind assault.RoomName world.RivalControllers
+            |> Option.exists (fun c -> c.SafeModeUntil > world.Time)
+
         let placed kind =
             facts.TargetKinds
             |> Map.filter (fun _ seen -> seen = Structure kind)
@@ -665,7 +677,15 @@ module ColonyView =
         {
             Assault = assault
             Targets = targets
-            SafeMode = facts.Control |> Option.exists (fun control -> control.SafeMode)
+            SafeMode =
+                remembered || facts.Control |> Option.exists (fun control -> control.SafeMode)
+            BarredUntil =
+                RivalSafeMode.barredUntil
+                    tuning.RivalIntelTicks
+                    world.RivalControllers
+                    assault.Enemy
+                    assault.RoomName
+                    world.Time
         }
 
     /// Every declared first spawn still to place (#476), world-wide: each
@@ -983,10 +1003,7 @@ module ColonyView =
                    |> List.collect (fun h ->
                        World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
             Harass = scan.Harass
-            Assaults =
-                scan.Assaults
-                |> List.map (fun assault ->
-                    assaultFacts (World.roomOf world assault.RoomName) assault)
+            Assaults = scan.Assaults |> List.map (assaultFacts tuning world)
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
             HarassFloors =
                 scan.Harass

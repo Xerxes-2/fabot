@@ -541,11 +541,19 @@ let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) 
             - (ground.Residents |> Map.filter (fun _ held -> held = role) |> Map.count)
             |> max 0)
 
-    // Each assault's slots, on the same rally rule; it has no residents.
+    // Each assault's slots, on the same rally rule; it has no residents. None
+    // while safe mode runs in its room: a squad bought then waits it out.
+    let moded =
+        view.Assaults
+        |> List.filter (fun facts -> facts.SafeMode)
+        |> List.map (fun facts -> facts.Assault.RoomName)
+        |> Set.ofList
+
     let assaults =
         threats.Assault
         |> Map.toList
-        |> List.filter (fun (_, ground) -> not (Set.isEmpty ground.Rally))
+        |> List.filter (fun (room, ground) ->
+            not (Set.isEmpty ground.Rally) && not (Set.contains room moded))
         |> List.sumBy (fun (_, ground) -> SquadRole.slots role ground.Slots)
 
     fights + assaults

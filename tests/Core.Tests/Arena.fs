@@ -261,6 +261,9 @@ type ArenaRoom =
         /// The home's bank, for a room with a spawn.
         Bank: int
         Reactor: ArenaReactor option
+        /// Whether its rival owner raises safe mode the tick a structure of
+        /// theirs here is struck, whenever the engine lets them (#491).
+        Panics: bool
     }
 
 /// A body in a spawn of ours (`spawns/create-creep.js`): born at `Done`.
@@ -287,6 +290,8 @@ type Carried =
         LastPositions: Map<string, RoomPos>
         /// Each colony's Raid log (`Observe.foldRaids`), by home.
         Raids: Map<string, Observe.RaidState>
+        /// Every rival controller as last seen (`World.recallRivalControllers`).
+        RivalControllers: Map<string, RivalController>
     }
 
 /// The arena's whole state between ticks.
@@ -412,7 +417,12 @@ let room (name: string) : ArenaRoom =
         Duties = []
         Bank = 0
         Reactor = None
+        Panics = false
     }
+
+/// Its rival owner raises safe mode here once struck, when the engine lets
+/// them (#491).
+let panicking (r: ArenaRoom) : ArenaRoom = { r with Panics = true }
 
 /// The sector Reactor standing on a tile of the room, holding `thorium`,
 /// flagged `owner`'s, its streak not yet begun.
@@ -714,6 +724,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 ArmedSeen = Map.empty
                 LastPositions = Map.empty
                 Raids = Map.empty
+                RivalControllers = Map.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -1058,6 +1069,23 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         SafeModeActive = c.SafeModeUntil > a.Time
                         SafeModeCooldownUntil = c.SafeModeCooldown
                     })
+            // Every clock as the absolute tick it runs to (`World.seenFacts`).
+            RivalController =
+                r.Controller
+                |> Option.filter (fun c -> c.Owner = Ownership.Rival)
+                |> Option.bind (fun c ->
+                    c.Username
+                    |> Option.map (fun owner ->
+                        {
+                            Owner = owner
+                            Level = c.Level
+                            SafeModeUntil = c.SafeModeUntil
+                            SafeModeCooldownUntil = c.SafeModeCooldown
+                            SafeModeAvailable = c.SafeModeAvailable
+                            UpgradeBlockedUntil = c.UpgradeBlockedUntil
+                            TicksToDowngrade = c.TicksToDowngrade
+                            Seen = a.Time
+                        }))
             Energy =
                 if List.isEmpty spawns then
                     { Available = 0; Capacity = 0 }
@@ -1147,6 +1175,7 @@ let worldOf (a: Arena) : World =
     |> World.watchExits tuning a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
     |> World.recallArmed tuning a.Carried.ArmedSeen
+    |> World.recallRivalControllers a.Carried.RivalControllers
 
 /// One colony's Raid log as the arena carries it.
 let private raidsOf (a: Arena) (home: string) =
@@ -1236,6 +1265,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Healers = world.Healers
         ArmedSeen = world.ArmedSeen
         Raids = decided |> List.map fst |> Map.ofList
+        RivalControllers = world.RivalControllers
     }
 
 // ---------------------------------------------------------------------------
@@ -2579,6 +2609,40 @@ let private theirTowers (a: Arena) (ledger: Ledger) : (string * TowerAct) list =
 
             r.Duties |> List.tryPick duty |> Option.map (fun act -> tower.Id, act)))
 
+/// The controller after an `activateSafeMode` that lands, or None where the
+/// engine refuses it: `controllers/activateSafeMode.js` wants stock, no
+/// cooldown, no upgrade block (`controllers/tick.js` refuses it under a block
+/// a tap landed this very tick, which `rooms` already holds) and the
+/// downgrade timer above half the level's less
+/// CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD (5,000); `game/structures.js`
+/// wants no safe mode running in any room of the owner's, one per player
+/// (ERR_BUSY). The cooldown runs SAFE_MODE_COOLDOWN (50,000) from it.
+let private activated (time: int) (rooms: Map<string, ArenaRoom>) (c: ArenaController) =
+    let busy =
+        rooms
+        |> Map.exists (fun _ r ->
+            r.Controller
+            |> Option.exists (fun other ->
+                other.Owner = c.Owner
+                && other.Username = c.Username
+                && other.SafeModeUntil > time))
+
+    if
+        c.SafeModeAvailable > 0
+        && not busy
+        && c.SafeModeCooldown < time
+        && c.UpgradeBlockedUntil <= time
+        && c.TicksToDowngrade >= fullDowngrade c.Level / 2 - 5_000
+    then
+        Some
+            { c with
+                SafeModeAvailable = c.SafeModeAvailable - 1
+                SafeModeUntil = time + 20_000
+                SafeModeCooldown = time + 50_000
+            }
+    else
+        None
+
 /// One tick of the arena: our pipeline and the scripts decide off the
 /// start-of-tick state, the engine performs both, and the tick's trace.
 let step (a: Arena) : Arena * TickTrace =
@@ -2817,36 +2881,11 @@ let step (a: Arena) : Arena * TickTrace =
             | Some name ->
                 let r = Map.find name rooms
 
-                // `controllers/activateSafeMode.js`: stock, no cooldown, no
-                // upgrade block, the downgrade timer above half the level's
-                // less CONTROLLER_DOWNGRADE_SAFEMODE_THRESHOLD (5,000); and
-                // `controllers/tick.js` refuses it under a block a tap landed
-                // this very tick, which `rooms` already holds. The cooldown
-                // runs SAFE_MODE_COOLDOWN (50,000) from it.
-                match r.Controller with
-                | Some c when
-                    c.SafeModeAvailable > 0
-                    && c.SafeModeUntil <= a.Time
-                    && c.SafeModeCooldown < a.Time
-                    && c.UpgradeBlockedUntil <= a.Time
-                    && c.TicksToDowngrade >= fullDowngrade c.Level / 2 - 5_000
-                    ->
-                    rooms <-
-                        Map.add
-                            name
-                            { r with
-                                Controller =
-                                    Some
-                                        { c with
-                                            SafeModeAvailable = c.SafeModeAvailable - 1
-                                            SafeModeUntil = a.Time + 20_000
-                                            SafeModeCooldown = a.Time + 50_000
-                                        }
-                            }
-                            rooms
-
+                match r.Controller |> Option.bind (activated a.Time rooms) with
+                | Some c ->
+                    rooms <- Map.add name { r with Controller = Some c } rooms
                     events.Add(SafeModeActivated name)
-                | _ -> ()
+                | None -> ()
             | None -> ()
         // `StructureRampart.setPublic` refuses a rampart not ours
         // (`game/structures.js`); the processor writes `isPublic` among the
@@ -2857,6 +2896,29 @@ let step (a: Arena) : Arena * TickTrace =
                 ledger.Standing[id] <- (room, { s with IsPublic = isPublic })
                 events.Add(MadePublic(id, isPublic))
             | _ -> ()
+        | _ -> ()
+
+    // A panicking rival (#491): a structure of theirs struck this tick, they
+    // raise safe mode in the room under the same rules as ours.
+    for name, r in Map.toList rooms do
+        match r.Controller with
+        | Some c when r.Panics && c.Owner = Ownership.Rival ->
+            let theirs = c.Username |> Option.map Side.Player
+
+            let struck =
+                a.Rooms[name].Structures
+                |> List.exists (fun s ->
+                    s.Owner = theirs
+                    && match ledger.Standing.TryGetValue s.Id with
+                       | true, (_, now) -> now.Hits < s.Hits
+                       | _ -> true)
+
+            if struck then
+                match activated a.Time rooms c with
+                | Some raised ->
+                    rooms <- Map.add name { r with Controller = Some raised } rooms
+                    events.Add(SafeModeActivated name)
+                | None -> ()
         | _ -> ()
 
     // `controllers/tick.js`, per owned controller: a claim starts the

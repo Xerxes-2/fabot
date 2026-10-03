@@ -52,9 +52,10 @@ type AssaultGround =
     {
         /// The roles the declared squad casts (`Assault.Squad`).
         Slots: SquadRole list
-        /// A `Fight`'s launch, over its casts alone, and never while one of
-        /// them is hurt — under half its hits once in, under four fifths
-        /// before — or while safe mode runs in the room.
+        /// A `Fight`'s launch, over its casts alone, or while they stand as
+        /// one file; never while one of them is hurt — under half its hits
+        /// once in, under four fifths before — or while safe mode runs in the
+        /// room.
         Launched: bool
         /// The rally ground, as a `Fight`'s, on the chain that ends in the
         /// rival's room.
@@ -732,6 +733,27 @@ let private together (view: ColonyView) (rally: Set<RoomPos>) (members: (string 
                       |> Option.bind (rangeAcross tile)
                       |> Option.exists (fun r -> r <= squadSpread))))
 
+/// Whether the casts stand as one file (#491): each within two of another,
+/// every one joined to the rest. A squad that walks single file off its
+/// rally ground strings out further than two from its leader without
+/// leaving one of its own behind.
+let private linked (view: ColonyView) (members: (string * SquadRole) list) =
+    let tiles =
+        members
+        |> List.choose (fun (name, _) -> SpatialInfo.creepPlacementOf view.Spatial name)
+
+    let near (a: RoomPos) (b: RoomPos) =
+        rangeAcross a b |> Option.exists (fun r -> r <= squadSpread)
+
+    let rec grow (joined: RoomPos list) (rest: RoomPos list) =
+        match rest |> List.partition (fun tile -> joined |> List.exists (near tile)) with
+        | [], left -> List.isEmpty left
+        | added, left -> grow (added @ joined) left
+
+    match tiles with
+    | first :: rest when List.length tiles = List.length members -> grow [ first ] rest
+    | _ -> false
+
 /// Whether every cast stands in the room or at its crossing: a front chasing
 /// its target, or carried over the border off an exit tile, is not called
 /// back to the rally ground.
@@ -934,16 +956,42 @@ let private assaultRetreatShare = 0.5
 
 let private assaultLaunchShare = 0.8
 
-/// The tick's Threats with each Assault's ground on it (`ColonyView.Assaults`):
-/// a Fight's rally and launch over the casts holding it, kept whole on the
-/// walk in.
+/// Whether an assault is pooled this tick (#491): a `Provoke` whenever it
+/// runs; a launched `Strike` until its window closes; one not launched only
+/// inside a window that outlasts its squad's casts, in one oven, and its
+/// walk from home, a room's side a crossing.
+let internal assaultPooled (view: ColonyView) atlas (launched: bool) (facts: AssaultFacts) : bool =
+    match facts.Assault.Mode with
+    | Provoke -> true
+    | Strike when launched -> facts.BarredUntil |> Option.exists (fun until -> until > view.Time)
+    | Strike ->
+        let cast =
+            facts.Assault.Squad
+            |> List.choose squadRoleOfRow
+            |> List.sumBy (fun role -> List.length (squadPatternOf role).Block)
+
+        match
+            facts.BarredUntil,
+            Atlas.siegeRoute atlas (SpatialInfo.homeName view.Spatial) facts.Assault.RoomName
+        with
+        | Some until, Some chain ->
+            until > view.Time
+                    + Engine.spawnTicksPerPart * cast
+                    + Engine.roomSide * (List.length chain - 1)
+        | _ -> false
+
+/// The tick's Threats with each pooled Assault's ground on it
+/// (`ColonyView.Assaults`, `assaultPooled`): a Fight's rally and launch over
+/// the casts holding it, kept whole on the walk in.
 let private withAssaults
     (view: ColonyView)
     atlas
     (held: HeldTaskFacts)
     (threats: Threats)
     : Threats =
-    match view.Assaults with
+    // Grounded while a window may be open at all; `assaultPooled` keeps those
+    // its launch and its margin allow.
+    match view.Assaults |> List.filter (assaultPooled view atlas true) with
     | [] -> threats
     | assaults ->
         let home = SpatialInfo.homeName view.Spatial
@@ -999,7 +1047,7 @@ let private withAssaults
                 && filled
                 && fit
                 && not facts.SafeMode
-                && (together view rally members || inside)
+                && (together view rally members || inside || linked view members)
 
             let breach = facts.Assault.Breach |> List.map (RoomPos.at room)
 
@@ -1074,7 +1122,10 @@ let private withAssaults
         { threats with
             Assault =
                 assaults
-                |> List.map (fun facts -> facts.Assault.RoomName, groundOf facts)
+                |> List.map (fun facts -> facts, groundOf facts)
+                |> List.filter (fun (facts, ground) ->
+                    assaultPooled view atlas ground.Launched facts)
+                |> List.map (fun (facts, ground) -> facts.Assault.RoomName, ground)
                 |> Map.ofList
         }
 

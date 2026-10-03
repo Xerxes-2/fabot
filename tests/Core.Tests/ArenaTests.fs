@@ -1698,6 +1698,126 @@ let private assaultProbe (ticks: int) =
     let final, trace = start |> runUntil over ticks
     start, final, trace
 
+/// W17S24 as captured at t926,538 (RCL4, 3 safe modes): its west line at x2
+/// y18–21, one tower at 17,33, one spawn at 23,33.
+let private w17s24Base () =
+    room "W17S24" |> withBase [ HealHurt; Shoot Nearest; Mend 2_000_000 ]
+
+let private w17s24Tower = { X = 17; Y = 33 }
+let private w17s24Spawn = { X = 23; Y = 33 }
+
+/// The bait (#491): Trepidimous raises safe mode in a struck room whenever
+/// the engine lets them. #490's Provoke squad from W17S26 strikes W18S26's
+/// far line; W18S25, an RCL7 colony of ours with the same squad standing at
+/// home, declares a Strike on W17S24's west line, its controller remembered
+/// as seen at the start. Run until W17S24's tower and spawn are down, every
+/// body of ours is dead, or `ticks` are spent.
+let private baitProbe (ticks: int) =
+    let time = 889_849
+    let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
+
+    let provoker =
+        room "W17S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 20; Y = 26 } 5600
+
+    let striker =
+        room "W18S25"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn9" { X = 16; Y = 20 } 5600
+
+    let colonies =
+        [
+            { colony "W17S26" with
+                Assaults = [ { Assault.w18s26 with Active = true } ]
+            }
+            { colony "W18S25" with
+                Assaults =
+                    [
+                        {
+                            RoomName = "W17S24"
+                            Enemy = "Trepidimous"
+                            Breach = [ { X = 2; Y = 20 } ]
+                            Squad = Assault.breachers
+                            Mode = Strike
+                            Active = true
+                        }
+                    ]
+            }
+        ]
+
+    let w18s25 x y = RoomPos.at "W18S25" { X = x; Y = y }
+
+    let cast spawn row (block: BodyPart list) n at =
+        body $"{row}-889000{n}-{spawn}" Side.Ours block at None
+
+    // Each colony's squad standing at home: the arena's spawns cast no
+    // economy, and a colony's cascade buys that first.
+    let squadOf spawn (at: int -> int -> RoomPos) (tiles: (int * int) list) =
+        List.zip3
+            [ "sapper"; "sapper"; "medic"; "medic" ]
+            [
+                Fabot.Core.Decide.Bodies.sapperPattern.Block
+                Fabot.Core.Decide.Bodies.sapperPattern.Block
+                Fabot.Core.Decide.Bodies.medicPattern.Block
+                Fabot.Core.Decide.Bodies.medicPattern.Block
+            ]
+            tiles
+        |> List.mapi (fun i (row, block, (x, y)) -> cast spawn row block (i + 1) (at x y))
+
+    let squad =
+        squadOf "Spawn8" w17s26 [ 4, 8; 4, 10; 3, 8; 3, 10 ]
+        @ squadOf "Spawn9" w18s25 [ 12, 27; 12, 28; 11, 27; 11, 28 ]
+
+    let target = w17s24Base () |> panicking
+
+    let seen =
+        let c = target.Controller.Value
+
+        {
+            Owner = "Trepidimous"
+            Level = c.Level
+            SafeModeUntil = 0
+            SafeModeCooldownUntil = 0
+            SafeModeAvailable = c.SafeModeAvailable
+            UpgradeBlockedUntil = 0
+            TicksToDowngrade = c.TicksToDowngrade
+            Seen = time
+        }
+
+    let start =
+        arena
+            time
+            [
+                provoker
+                trepBase () |> panicking
+                room "W17S25"
+                striker
+                room "W18S24"
+                target
+            ]
+            colonies
+            squad
+        |> fun a ->
+            { a with
+                Carried =
+                    { a.Carried with
+                        RivalControllers = Map.ofList [ "W17S24", seen ]
+                    }
+            }
+
+    let standing (a: Arena) at =
+        a.Rooms["W17S24"].Structures
+        |> List.exists (fun s -> s.At = at && (s.Kind = "tower" || s.Kind = "spawn"))
+
+    let over (a: Arena) =
+        let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
+
+        List.isEmpty ours || not (standing a w17s24Tower || standing a w17s24Spawn)
+
+    let final, trace = start |> runUntil over ticks
+    start, final, trace
+
 /// Odiodin's garrison outside W17S25's west line, walking in for the room's
 /// west end (#482).
 let private passingGarrison =
@@ -2102,6 +2222,82 @@ let arenaDefenceTests =
                                  id = farBreach.Id && List.contains name sappers
                              | _ -> false)))
                     "the sappers took it down"
+            }
+
+            test
+                "scenario 5, the bait (#491): the Provoke raises W18S26's safe mode, and only then the Strike breaks W17S24's west line and kills its tower and spawn" {
+                let start, final, trace = baitProbe 2_000
+                let failure = describe trace
+
+                let raisedIn room =
+                    trace
+                    |> List.tryPick (fun t ->
+                        t.Events
+                        |> List.tryPick (function
+                            | SafeModeActivated r when r = room -> Some t.Tick
+                            | _ -> None))
+
+                let provoked = raisedIn "W18S26"
+
+                Expect.isSome provoked $"W18S26 raised safe mode\n{failure}"
+                Expect.isNone (raisedIn "W17S24") "W17S24 never could"
+
+                // The Strike's casts are W18S25's: Spawn9's.
+                let strikers =
+                    start.Bodies
+                    |> List.filter (fun b -> b.Id.EndsWith "Spawn9")
+                    |> List.map (fun b -> b.Id)
+
+                let stepped (t: TickTrace) =
+                    t.Ours
+                    |> List.exists (function
+                        | MoveCreep(name, _) -> List.contains name strikers
+                        | _ -> false)
+
+                let firstStep = trace |> List.tryFind stepped |> Option.map (fun t -> t.Tick)
+
+                Expect.isSome firstStep $"the Strike went\n{failure}"
+
+                Expect.isGreaterThan
+                    firstStep.Value
+                    provoked.Value
+                    "not one step before the window opened"
+
+                let left =
+                    strikers
+                    |> List.choose (fun id ->
+                        pathOf id trace
+                        |> List.tryFind (fun (_, s) -> s.At.Room <> "W18S25")
+                        |> Option.map fst)
+
+                Expect.hasLength left 4 "every cast went"
+
+                let w17s24 = start.Rooms["W17S24"].Structures
+
+                let idsWhere pick =
+                    w17s24 |> List.filter pick |> List.map (fun s -> s.Id) |> Set.ofList
+
+                let line = idsWhere (fun s -> s.Kind = "rampart" && s.At.X = 2)
+                let tower = idsWhere (fun s -> s.At = w17s24Tower)
+                let spawn = idsWhere (fun s -> s.At = w17s24Spawn)
+
+                let breached = firstFallen line trace
+                let towerDown = firstFallen tower trace
+                let spawnDown = firstFallen spawn trace
+
+                Expect.isSome breached $"the west line breached\n{failure}"
+                Expect.isSome towerDown $"the tower killed\n{failure}"
+                Expect.isSome spawnDown $"the spawn killed\n{failure}"
+
+                // Measured: safe mode at t62 off the Provoke's first
+                // dismantle; the Strike's first step t63, out of W18S25 at
+                // t95, the west line down at t395, the tower at t434, the
+                // spawn at t453. The Strike lost nobody; the Provoke both its
+                // medics, under W18S26's towers on the way back out.
+                Expect.isLessThan spawnDown.Value 600 $"inside 600 ticks, ended t{final.Tick}"
+
+                for id in strikers do
+                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
             }
         ]
 

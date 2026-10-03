@@ -438,8 +438,8 @@ let planTasks
 
         (outposts.Guarded @ holding |> List.map Guard)
         @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
-        // And one Assault per assault this colony runs (#490).
-        @ (view.Assaults |> List.map (fun facts -> Assault facts.Assault.RoomName))
+        // And one Assault per assault this colony pools (#490, #491).
+        @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)
 
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —

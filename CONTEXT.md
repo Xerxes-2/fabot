@@ -206,7 +206,7 @@ The Safety-tier `Fight of roomName` Task a [[squad]] holds (#453), pooled beside
 _Avoid_: attack, assault, engagement
 
 ### Assault
-A rival's room a [[colony]] declares to send a [[squad]] against (#490): breach tiles, a squad of rows (by default two sappers — `25M 25W` — and two medics), a mode (`Provoke` holds at the breach, `Strike` goes on to the towers and the spawns), and whether a human has switched it on. Its Safety-tier `Assault of roomName` Task musters and launches as a [[fight]] does, over its own casts alone; the squad falls back to rally when a cast drops under half its hits or safe mode shows in the room. ADR-0084.
+A rival's room a [[colony]] declares to send a [[squad]] against (#490): breach tiles, a squad of rows (by default two sappers — `25M 25W` — and two medics), a mode (`Provoke` holds at the breach, `Strike` goes on to the towers and the spawns), and whether a human has switched it on. Its Safety-tier `Assault of roomName` Task musters and launches as a [[fight]] does, over its own casts alone, or once its casts stand as one file, each within two of another; the squad falls back to rally when a cast drops under half its hits or safe mode runs in the room, seen or remembered. A `Provoke` is pooled whenever it is on, and casts nothing while safe mode runs in its room; a `Strike` only inside its **window** — the rival's controllers as remembered (`RivalSafeMode.barredUntil`) say they cannot raise safe mode in the room until past the squad's casts and walk. ADR-0084.
 _Avoid_: siege, raid, strike (a mode, not the whole)
 
 ### Miner

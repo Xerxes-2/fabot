@@ -844,7 +844,7 @@ let private sapper name = creepWith name 0 0 sapperPattern.Block
 let private breachTile = { X = 20; Y = 30 }
 
 /// `fightingMother` with no raid, sending the default squad against the
-/// child's room as a rival's (#490): the room a rival's, its rampart on the
+/// child's room as a rival's (#490), a window open in it (#491): the room a rival's, its rampart on the
 /// breach tile a wall to our walk (`ColonyView.assaulting`), these targets
 /// standing, and these bodies of hers each on its tile.
 let private assaultingWith mode (targets: (string * Pos) list option) bodies =
@@ -866,6 +866,8 @@ let private assaultingWith mode (targets: (string * Pos) list option) bodies =
                         }
                     Targets = targets
                     SafeMode = false
+                    // A provoked safe mode's whole 20,000 ticks ahead.
+                    BarredUntil = Some(colony.Time + 20_000)
                 }
             ]
         Spatial =
@@ -987,6 +989,21 @@ let assaultTests =
                      && whole.Front
                         |> Set.forall (fun tile -> RoomPos.range tile (child 20 30) = Some 1))
                     $"the sappers' ground beside it: {whole.Front}"
+            }
+
+            test
+                "a squad walking in single file off the rally ground stays launched; one cast left behind halts it (#491)" {
+                let file = [ home 25 20; home 26 20; home 27 20; home 28 20 ]
+
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats (assaulting (squadAt file)))).Launched
+                    "each within two of the next: one squad on its way"
+
+                let behind = [ home 25 20; home 26 20; home 27 20; home 33 20 ]
+
+                Expect.isFalse
+                    (assaultGroundOf (assaultThreats (assaulting (squadAt behind)))).Launched
+                    "a medic five tiles back: not launched"
             }
 
             test
@@ -1112,5 +1129,84 @@ let assaultTests =
                 let ground = assaultGroundOf (assaultThreats moded)
                 Expect.isFalse ground.Launched "safe mode: not launched"
                 Expect.equal ground.Front ground.Rally "and back to rally"
+            }
+
+            test
+                "a Provoke whose room is in safe mode stays pooled and out of it, and casts no squad for it (#491)" {
+                let colony = assaulting []
+
+                let moded =
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts -> { facts with SafeMode = true })
+                    }
+
+                Expect.contains (planHolding moded []) (Assault "W1N2") "pooled whenever active"
+
+                Expect.equal
+                    ([ "sapper"; "medic" ] |> List.map (quotaHolding moded []))
+                    [ Some 0; Some 0 ]
+                    "no body bought to wait out the safe mode"
+            }
+
+            test
+                "a Strike is pooled only while its room cannot raise safe mode for longer than the squad's casts and walk (#491)" {
+                let barred until =
+                    let colony = assaultingWith Strike breachStanding []
+
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts -> { facts with BarredUntil = until })
+                    }
+
+                let pooled colony =
+                    planHolding colony [] |> List.contains (Assault "W1N2")
+
+                // Two sappers and two medics in one oven, then the one crossing.
+                let lead =
+                    Engine.spawnTicksPerPart
+                    * (2 * List.length sapperPattern.Block + 2 * List.length medicPattern.Block)
+                    + Engine.roomSide
+
+                let now = (barred None).Time
+
+                Expect.isFalse (pooled (barred None)) "it may raise one, or nobody knows: no Strike"
+
+                Expect.isFalse
+                    (pooled (barred (Some(now + lead))))
+                    "a window that closes before the squad is cast and there: no Strike"
+
+                Expect.equal
+                    ([ "sapper"; "medic" ] |> List.map (quotaHolding (barred (Some(now + lead))) []))
+                    [ Some 0; Some 0 ]
+                    "and nothing cast for it"
+
+                let inside =
+                    let colony = assaultingWith Strike breachStanding (squadAt atBreach)
+
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts ->
+                                { facts with
+                                    BarredUntil = Some(colony.Time + 100)
+                                })
+                    }
+
+                let launched = assaultThreats inside |> fun threats -> threats.Assault
+
+                Expect.isTrue
+                    (launched |> Map.tryFind "W1N2" |> Option.exists (fun ground -> ground.Launched))
+                    "launched, with 100 ticks of window left: pooled until it closes"
+
+                let open' = barred (Some(now + lead + 1))
+                Expect.isTrue (pooled open') "a window that outlasts them: pooled"
+
+                Expect.equal
+                    ([ "sapper"; "medic" ] |> List.map (quotaHolding open' []))
+                    [ Some 2; Some 2 ]
+                    "and its squad cast"
             }
         ]

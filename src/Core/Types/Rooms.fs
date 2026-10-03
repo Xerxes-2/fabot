@@ -385,3 +385,41 @@ module RivalSafeMode =
             | None when c.TicksToDowngrade < Engine.safeModeDowngradeLine c.Level ->
                 SafeModeActivation.Cannot SafeModeRefusal.Downgrading
             | None -> SafeModeActivation.Can
+
+    /// The window (#491): the first tick past `now` at which every refusal
+    /// `canActivate` reads off the sightings has lifted — a safe mode in any
+    /// of `player`'s rooms, the cooldown, the upgrade block, and the stock and
+    /// the downgrade line for as long as they are trusted. None exactly
+    /// while `canActivate` answers anything but Cannot.
+    let barredUntil
+        (staleAfter: int)
+        (known: Map<string, RivalController>)
+        (player: string)
+        (room: string)
+        (now: int)
+        : int option =
+        match Map.tryFind room known |> Option.filter (fun c -> c.Owner = player) with
+        | None -> None
+        | Some c ->
+            let running =
+                known
+                |> Map.toList
+                |> List.choose (fun (_, other) ->
+                    if other.Owner = player then
+                        Some other.SafeModeUntil
+                    else
+                        None)
+
+            let untrusted =
+                if
+                    c.SafeModeAvailable <= 0
+                    || c.TicksToDowngrade < Engine.safeModeDowngradeLine c.Level
+                then
+                    [ c.Seen + staleAfter ]
+                else
+                    []
+
+            running @ [ c.SafeModeCooldownUntil; c.UpgradeBlockedUntil ] @ untrusted
+            |> List.filter (fun until -> until > now)
+            |> List.sortDescending
+            |> List.tryHead

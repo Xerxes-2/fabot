@@ -5100,6 +5100,73 @@ let rivalSafeModeTests =
             }
 
             test
+                "the window: the tick every refusal it saw has lifted, None while it may activate (#491)" {
+                let barred now room change =
+                    let known = trepRooms |> Map.change room (Option.map change)
+
+                    RivalSafeMode.barredUntil
+                        Tuning.defaults.RivalIntelTicks
+                        known
+                        "Trepidimous"
+                        "W17S24"
+                        now
+
+                Expect.equal
+                    (barred 1_100 "W18S26" (fun c -> { c with SafeModeUntil = 21_000 }))
+                    (Some 21_000)
+                    "another room's safe mode: until it ends"
+
+                Expect.equal
+                    (barred 1_100 "W17S24" (fun c ->
+                        { c with
+                            SafeModeCooldownUntil = 5_000
+                            UpgradeBlockedUntil = 2_000
+                        }))
+                    (Some 5_000)
+                    "the last of the clocks running"
+
+                Expect.equal
+                    (barred 1_100 "W17S24" (fun c -> { c with SafeModeAvailable = 0 }))
+                    (Some(1_000 + Tuning.defaults.RivalIntelTicks))
+                    "no stock: while the sighting is trusted"
+
+                Expect.equal (barred 1_100 "W17S24" id) None "it can activate"
+
+                Expect.equal
+                    (barred (1_000 + Tuning.defaults.RivalIntelTicks) "W17S24" id)
+                    None
+                    "stale: Unknown is no window"
+
+                for now, room, change in
+                    [
+                        1_100,
+                        "W18S26",
+                        (fun (c: RivalController) -> { c with SafeModeUntil = 1_200 })
+                        1_200, "W18S26", (fun c -> { c with SafeModeUntil = 1_200 })
+                        1_100, "W17S24", (fun c -> { c with SafeModeAvailable = 0 })
+                        2_600, "W17S24", (fun c -> { c with SafeModeAvailable = 0 })
+                    ] do
+                    let known = trepRooms |> Map.change room (Option.map change)
+
+                    let cannot =
+                        match
+                            RivalSafeMode.canActivate
+                                Tuning.defaults.RivalIntelTicks
+                                known
+                                "Trepidimous"
+                                "W17S24"
+                                now
+                        with
+                        | SafeModeActivation.Cannot _ -> true
+                        | _ -> false
+
+                    Expect.equal
+                        (Option.isSome (barred now room change))
+                        cannot
+                        $"a window exactly while canActivate says Cannot, at {now}"
+            }
+
+            test
                 "a rival controller is remembered while dark and forgotten once seen unowned (#489)" {
                 let facts controller =
                     { RoomFacts.empty with
@@ -5267,5 +5334,48 @@ let assaultViewTests =
                      |> List.map (fun facts -> facts.Targets))
                     [ None ]
                     "dark: nothing known"
+            }
+
+            test
+                "its room's safe mode and the window it cannot raise one in are read off memory, dark or seen (#491)" {
+                let now = assaultWorld.Time
+
+                let remembering controllers =
+                    { assaultWorld with
+                        Rooms = assaultWorld.Rooms |> unseen assaultRoom
+                        RivalControllers = Map.ofList controllers
+                    }
+
+                let factsUnder world =
+                    match (viewUnder (assaultDeclared Strike true) world mother).Assaults with
+                    | [ facts ] -> facts
+                    | other -> failtest $"one assault, not {other}"
+
+                let trep = { trepController 4 with Seen = now }
+
+                let provoked =
+                    factsUnder (
+                        remembering
+                            [
+                                assaultRoom, trep
+                                "W18S26",
+                                { trepController 6 with
+                                    SafeModeUntil = now + 20_000
+                                }
+                            ]
+                    )
+
+                Expect.equal provoked.BarredUntil (Some(now + 20_000)) "barred while W18S26's runs"
+                Expect.isFalse provoked.SafeMode "and none runs in its own room"
+
+                let moded =
+                    factsUnder (
+                        remembering [ assaultRoom, { trep with SafeModeUntil = now + 500 } ]
+                    )
+
+                Expect.isTrue moded.SafeMode "safe mode remembered in the dark"
+
+                let open' = factsUnder (remembering [ assaultRoom, trep ])
+                Expect.isNone open'.BarredUntil "it can raise one: no window"
             }
         ]
