@@ -334,6 +334,100 @@ let extractorCooldownTests =
         ]
 
 [<Tests>]
+let fullMineContainerTests =
+    testList
+        "the full mineral container"
+        [
+            // The miner on its mine Post over "can-min", the container holding
+            // `thorium` of its 2,000. The fixture's miner has two Work, so one
+            // dig yields two.
+            let standingBeside thorium =
+                { mineColony with
+                    Creeps = [ miner "m1" ]
+                    Spatial =
+                        { mineColony.Spatial with
+                            Thorium = Map.add "can-min" thorium mineColony.Spatial.Thorium
+                        }
+                        |> withCreepsAt [ "m1", minePost ]
+                }
+
+            let held = taskId (Harvest "min-a")
+
+            let digsAt thorium =
+                standingBeside thorium
+                |> decideOn
+                |> fun decision -> digIntentsFor "m1" decision.Intents
+
+            test
+                "a miner beside a full container digs nothing, and one beside a container with room digs" {
+                // #497: a miner has no Carry, so a dig into a full container
+                // lands on the floor, where Thorium decays; the deposit does
+                // not regenerate, so the wait loses nothing.
+                Expect.isEmpty (digsAt Engine.containerCapacity) "a full container holds the dig"
+
+                Expect.isEmpty
+                    (digsAt (Engine.containerCapacity - 1))
+                    "and so does one with less room than a dig yields"
+
+                Expect.equal
+                    (digsAt (Engine.containerCapacity - 2))
+                    [ HarvestSource("m1", "min-a") ]
+                    "room for one whole dig is a dig"
+
+                Expect.equal
+                    (digsAt 600)
+                    [ HarvestSource("m1", "min-a") ]
+                    "and so is a container with room"
+            }
+
+            test "a miner held by a full container keeps its Task" {
+                Expect.contains
+                    (decideFrom
+                        (Map.ofList [ "m1", held ])
+                        (standingBeside Engine.containerCapacity))
+                        .Verdicts
+                    (Verdict.Kept("m1", held))
+                    "the body stands on its seat and waits"
+            }
+
+            test "a light tick after a held full tick replays no dig" {
+                // A light tick replays a full tick's HarvestSource: a held dig
+                // must leave nothing behind for it to replay.
+                let replayedAt thorium =
+                    let intents = (decideOn (standingBeside thorium)).Intents
+
+                    let glance: LightTick.Glance =
+                        {
+                            Creeps =
+                                Map.ofList
+                                    [
+                                        "m1",
+                                        {
+                                            Tile = RoomPos.at "" minePost
+                                            Hits = 300
+                                            Inward = None
+                                        }
+                                    ]
+                            Hostiles = []
+                            Structures = []
+                            Controllers = Map.empty
+                        }
+
+                    LightTick.intents (LightTick.lastFull glance Map.empty intents) glance
+                    |> digIntentsFor "m1"
+
+                Expect.equal
+                    (replayedAt 600)
+                    [ HarvestSource("m1", "min-a") ]
+                    "the premise: a dig replays"
+
+                Expect.isEmpty
+                    (replayedAt Engine.containerCapacity)
+                    "and a held one leaves nothing to replay"
+            }
+        ]
+
+[<Tests>]
 let verdictTests =
     testList
         "matcher verdicts"

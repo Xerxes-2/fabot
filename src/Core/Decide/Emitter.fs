@@ -676,6 +676,27 @@ let private heldByCooldown atlas task =
         | None -> true
     | _ -> false
 
+/// Whether a Thorium harvest is held this tick by its mine's container (#497):
+/// less room in it than one dig yields. The miner has no Carry, so the dig
+/// lands on the floor, where Thorium decays; the deposit does not regenerate,
+/// so the wait loses nothing. Withheld here and not in applicability, for the
+/// cooldown's reason: the miner keeps its Task and its seat. A full tick that
+/// withholds the act leaves no `HarvestSource` for the light ticks to replay.
+let private heldByFullContainer (view: ColonyView) atlas (creep: CreepInfo) task =
+    match task with
+    | Harvest rockId when Atlas.isMineral atlas rockId ->
+        let dig = partCount creep.Body Work * Engine.mineralHarvestPerWork
+
+        Facts.ourMineralContainerPairs view
+        |> List.tryFind (fun (markId, _) -> markId = rockId)
+        |> Option.exists (fun (_, containerId) ->
+            let held =
+                SpatialInfo.heldIn view.Spatial Thorium containerId
+                + SpatialInfo.storedIn view.Spatial containerId
+
+            Engine.containerCapacity - held < dig)
+    | _ -> false
+
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
 /// only while the source holds energy. Anticipatory dispatch and the occupancy
@@ -725,6 +746,7 @@ let private actionIntents
             mayActNow threats atlas creep.Name task
             && not drained
             && not (heldByCooldown atlas task)
+            && not (heldByFullContainer view atlas creep task)
         then
             intentFor view atlas partyWalks creep task |> Option.toList
         else
