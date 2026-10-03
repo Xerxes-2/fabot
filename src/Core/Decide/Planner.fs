@@ -129,20 +129,55 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
             | None -> false)
         |> Set.ofList
 
-    if Set.isEmpty rooms then
-        Set.empty
+    let inRoom (rooms: Set<string>) id =
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.exists (fun room -> Set.contains room rooms)
+
+    let buffers =
+        if Set.isEmpty rooms then
+            Set.empty
+        else
+            view.Spatial.Stores
+            |> Map.toList
+            |> List.map fst
+            // A container and not merely a store: the kind is the one half of
+            // the join that survives the narrowing, and it keeps a tombstone or
+            // a pile lying in that room out of a Refill it could never be
+            // filled through.
+            |> List.filter (fun id ->
+                Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
+                && inRoom rooms id)
+            |> Set.ofList
+
+    // A nursery has no store to fill (#473): its spawn site is the sink, and
+    // the delivery a drop beside it (`isNurseryDrop`).
+    let nurseries =
+        view.Borrowed.Rooms |> List.filter (isNurseryRoom view) |> Set.ofList
+
+    if Set.isEmpty nurseries then
+        buffers
     else
-        view.Spatial.Stores
-        |> Map.toList
-        |> List.map fst
-        // A container and not merely a store: the kind is the one half of the
-        // join that survives the narrowing, and it keeps a tombstone or a pile
-        // lying in that room out of a Refill it could never be filled through.
-        |> List.filter (fun id ->
-            Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
-            && (SpatialInfo.roomOf view.Spatial id
-                |> Option.exists (fun room -> Set.contains room rooms)))
+        view.ConstructionSites
+        |> List.filter (fun site ->
+            Map.tryFind site.Id view.Spatial.TargetKinds = Some(Site BuiltKind.Spawn)
+            && inRoom nurseries site.Id)
+        |> List.map (fun site -> site.Id)
         |> Set.ofList
+        |> Set.union buffers
+
+/// Whether a ferry sink is a nursery's spawn site, delivered to by a drop
+/// beside it and never by a transfer (#473).
+let internal isNurseryDrop (view: ColonyView) id =
+    Map.tryFind id view.Spatial.TargetKinds = Some(Site BuiltKind.Spawn)
+
+/// The ferry bodies a mother lends one child room: `Tuning.NurseryFerries` for
+/// a nursery, `Tuning.FerryLoads` for a child already casting. One reading for
+/// the hauler quota's term and the pool's bound.
+let internal ferryLoadsFor (view: ColonyView) room =
+    if isNurseryRoom view room then
+        view.Tuning.NurseryFerries
+    else
+        view.Tuning.FerryLoads
 
 /// The controllers of the rooms this colony works as outposts: every controller
 /// the projection carries that is not this colony's home, stands in no room
@@ -447,7 +482,12 @@ let planTasks
                 |> Option.exists (fun room ->
                     isBootstrapRoom view room || isNurseryFirstLevel view room))
 
-        own @ children |> List.map Upgrade
+        // And the claim party's (#471): a candidate's controller under the
+        // same Task id, so the loaded pioneers wait at it before the claim
+        // and hold the nursery's Upgrade the tick it lands.
+        let party = outposts.Claims |> List.map fst
+
+        own @ children @ party |> List.map Upgrade
 
     // One Claim per candidate colony's controller (`claimTargets`).
     let claims = outposts.Claims |> List.map (fst >> Claim)
@@ -732,10 +772,38 @@ let planTasks
     // The ferry's other half: a bootstrapping child's upgrade buffer is a
     // Refill target of the mother's, on the same tier her own buffer sits on,
     // so the load crosses the Seam only when there is nowhere nearer to put it.
+    //
+    // A nursery's spawn site is dropped beside (#473) while the site still
+    // owes more than the energy already lying on that room's floor.
     let ferryRefills =
+        let owes id =
+            view.ConstructionSites
+            |> List.tryFind (fun site -> site.Id = id)
+            |> Option.map (fun site -> site.Left)
+            |> Option.defaultValue 0
+
+        let lyingIn room =
+            idsOfKind (Dropped Energy)
+            |> List.filter (fun pile -> SpatialInfo.roomOf view.Spatial pile = Some room)
+            |> List.sumBy stored
+
+        // And only while a Work body of ours stands in the room to take it
+        // up: a pile nobody is there for decays, or a raider takes it, while
+        // the pioneers flee (#472) or upgrade.
+        let builderIn room =
+            view.Creeps
+            |> List.exists (fun creep ->
+                partCount creep.Body Work > 0
+                && Atlas.creepTile atlas creep.Name |> Option.exists (fun at -> at.Room = room))
+
         ferrySinks
         |> Set.toList
-        |> List.filter (fun id -> stored id < Engine.containerCapacity)
+        |> List.filter (fun id ->
+            if isNurseryDrop view id then
+                SpatialInfo.roomOf view.Spatial id
+                |> Option.exists (fun room -> builderIn room && owes id > lyingIn room)
+            else
+                stored id < Engine.containerCapacity)
         |> List.map (fun id -> Refill(id, Energy))
 
     // The stock's other half (ADR-0023): a stocked Storage is a Withdraw source

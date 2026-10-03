@@ -2188,6 +2188,33 @@ let ferryMother stage =
                 }
     }
 
+/// `ferryMother` raising a [[nursery]] (#473): no spawn of the child's, a
+/// spawn site of ours at (10,47) owing `siteOwes`, the sink the ferry drops
+/// its load beside.
+let nurseryFerryMother =
+    let mother = ferryMother Nursery
+    let child = SpatialInfo.layerOf mother.Spatial "W1N2"
+
+    { mother with
+        ConstructionSites =
+            [
+                {
+                    Id = "site-spawn"
+                    Left = siteOwes
+                    Begun = true
+                }
+            ]
+        Spatial =
+            { mother.Spatial with
+                TargetKinds = Map.add "site-spawn" (Site BuiltKind.Spawn) mother.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                "W1N2"
+                { child with
+                    TargetPositions = Map.add "site-spawn" { X = 10; Y = 47 } child.TargetPositions
+                }
+    }
+
 /// The raid parked on W17S25's controller at t880,341 (`docs/research/squads.md`
 /// §1.2), part for part as the replays show Trepidimous build them: MOVE
 /// first, the weapon, one MOVE last; the healers MOVE then HEAL; and the

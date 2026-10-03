@@ -279,10 +279,31 @@ module ColonyView =
             |> Map.filter (fun id _ ->
                 Map.tryFind id facts.TargetKinds = Some(Structure BuiltKind.Rampart))
 
+        // A [[nursery]]'s pioneers are the only bodies in it (#473): its rock
+        // is theirs to dig, and the energy on its floor — the ferry's drop —
+        // theirs to pick up.
+        let nursery = stage = Some Nursery
+
+        let nurseryWork kind =
+            nursery
+            && (match kind with
+                | Source
+                | Dropped Energy -> true
+                | _ -> false)
+
         let kinds =
             facts.TargetKinds
             |> Map.filter (fun id kind ->
-                borrowable kind || Set.contains id sink || Map.containsKey id ramparts)
+                borrowable kind
+                || nurseryWork kind
+                || Set.contains id sink
+                || Map.containsKey id ramparts)
+
+        let piles =
+            if nursery then
+                kinds |> Map.filter (fun _ kind -> kind = Dropped Energy)
+            else
+                Map.empty
 
         { facts with
             Layer =
@@ -293,7 +314,9 @@ module ColonyView =
                 }
             TargetKinds = kinds
             Hits = ramparts
-            Stores = facts.Stores |> Map.filter (fun id _ -> Set.contains id sink)
+            Stores =
+                facts.Stores
+                |> Map.filter (fun id _ -> Set.contains id sink || Map.containsKey id piles)
             // A ferry carries energy, so no Thorium of the child's is a fact
             // the mother may act on; the extractor cooldown goes for the same
             // reason, and so do the owners (#318): what a mother may act on
@@ -301,7 +324,7 @@ module ColonyView =
             Thorium = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
-            Sources = []
+            Sources = if nursery then facts.Sources else []
         }
 
     /// A **transit** room's facts: the ground a chain of [[seam]]s crosses and

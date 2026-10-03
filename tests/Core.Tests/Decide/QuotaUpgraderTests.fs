@@ -664,7 +664,7 @@ let quotaInputTests =
                 Expect.equal
                     (quotaOf (lending Nursery))
                     0
-                    "nor for a nursery, which has no buffer to fill and no mouth to drink it"
+                    "nor for a nursery with no spawn site, which has no buffer to fill and no mouth to drink it"
 
                 // The shipped default is the derived one: the Refill that spends a
                 // ferried load stands beside this term, so the body hired has a Task.
@@ -770,6 +770,22 @@ let quotaInputTests =
                         (Withdraw("storage-1", Energy))
                         (planTasksOn (stocked Independent) noThreats))
                     "and with nothing to feed, the stock stays shut"
+            }
+
+            test "a nursery's spawn site hires `Tuning.NurseryFerries` ferry bodies" {
+                // #473: a contested nursery's spawn is a rush the pioneers'
+                // own walk cannot feed (the W17S25 arena's G3 estimate).
+                Expect.equal
+                    (quotaOf nurseryFerryMother)
+                    Tuning.defaults.NurseryFerries
+                    "the nursery's lend, written down"
+
+                Expect.equal
+                    (quotaOf (
+                        nurseryFerryMother |> tunedBy (fun t -> { t with NurseryFerries = 3 })
+                    ))
+                    3
+                    "and the tuning is the whole of it"
             }
 
             test "a mother with no stock ferries nothing" {

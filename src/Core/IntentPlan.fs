@@ -41,6 +41,8 @@ type private Channel =
     /// it neither overwrites nor is overwritten by `claimController` beside it.
     | Reclaim
     | Pickup
+    /// `drop`, its own key in the creep's intents beside `transfer`.
+    | Drop
     | Move
     | Say
     /// Writing the colony's line onto a controller (#381). A channel of its
@@ -76,6 +78,7 @@ let private channels =
     | ClaimController(name, _) -> [ name, Claim ]
     | ClaimReactor(name, _) -> [ name, Reclaim ]
     | PickupPile(name, _) -> [ name, Pickup ]
+    | DropEnergy name -> [ name, Drop ]
     | SignController(name, _, _) -> [ name, Sign ]
     | MoveCreep(name, _) -> [ name, Move ]
     | SayCreep(name, _) -> [ name, Say ]

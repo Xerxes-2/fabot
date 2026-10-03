@@ -299,6 +299,21 @@ type Tuning =
         /// bank** and read at no other stage: a lend is bounded by what is
         /// written down and never by what the child could absorb.
         FerryLoads: int
+        /// The ferry bodies a mother hires against a [[nursery]]'s spawn site
+        /// (#473), dropping their loads beside it for her pioneers: the rush
+        /// to a spawn before a raid's safe mode ends, where `FerryLoads` is a
+        /// lend to a child already casting.
+        NurseryFerries: int
+        /// The **claim party**'s energy (#471): what the loaded pioneers
+        /// standing at a candidate colony's controller carry between them
+        /// when the claim lands, the budget its Upgrade admits holders
+        /// against. RCL2's 200 points and the margin a tap's block leaves
+        /// no time to fetch.
+        ClaimPartyEnergy: int
+        /// The claimer's life it keeps in hand while it waits for its party
+        /// (#471): it waits only on a member who arrives inside its remaining
+        /// life less this, and claims anyway once its life is down to this.
+        ClaimPartyMargin: int
         /// The claimer range at which safe mode fires: the precise deadline is
         /// 2 — `attackController` is a range-1 act judged from tick-start
         /// position and a creep steps one tile a tick — plus one tile of
@@ -533,6 +548,17 @@ module Tuning =
             StandingCarryPerWork = 4
             PioneerCount = 3
             FerryLoads = 1
+            // Two 32C16M haulers (~2.4 e/t each over five crossings) and the
+            // three pioneers (~1.3 each) put ~9 e/t into a 15,000 spawn
+            // site: up within ~2,200 ticks of the claim (#470's G3 estimate).
+            NurseryFerries = 2
+            // Two of W15S28's 16W 17C pioneers (850 apiece): RCL2 seven
+            // ticks after the claim, where one takes thirteen
+            // (`ArenaClaimTests`, #470).
+            ClaimPartyEnergy = 1_000
+            // A crossing's walk for a claimer: a skipped tick or a blocked
+            // ring tile costs it the claim otherwise.
+            ClaimPartyMargin = 50
             SafeModeDeadline = 3
             StorageLevel = 4
             ExtractorLevel = 6

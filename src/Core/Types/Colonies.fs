@@ -1195,11 +1195,26 @@ module Colony =
                 else
                     Independent)
 
+    /// The outposts one colony works this tick: its declaration's, less any
+    /// room that is already a colony of ours (`stages` holds owned homes
+    /// alone). The entry that carried a Claim stops making the room an
+    /// outpost the tick the claim lands, so it is the mother's nursery on
+    /// that tick and not after a human's edit (#471).
+    let outpostsWorked (stages: Map<string, ColonyStage>) (colony: Colony) : Outpost list =
+        colony.Outposts
+        |> List.filter (fun outpost -> not (Map.containsKey outpost.RoomName stages))
+
     /// The declared children of this colony a further rule picks out: a child
     /// of mine, not an outpost, not me. A room in both lists is the outpost
-    /// list's — worked and not raised.
-    let private childrenWhere (colonies: Colony list) (rule: string -> bool) (colony: Colony) =
-        let worked = colony.Outposts |> List.map (fun outpost -> outpost.RoomName)
+    /// list's — worked and not raised — until it is ours (`outpostsWorked`).
+    let private childrenWhere
+        (stages: Map<string, ColonyStage>)
+        (colonies: Colony list)
+        (rule: string -> bool)
+        (colony: Colony)
+        =
+        let worked =
+            outpostsWorked stages colony |> List.map (fun outpost -> outpost.RoomName)
 
         colonies
         |> List.filter (fun child ->
@@ -1223,7 +1238,7 @@ module Colony =
         (colony: Colony)
         : string list =
         colony
-        |> childrenWhere colonies (fun home ->
+        |> childrenWhere stages colonies (fun home ->
             Map.tryFind home stages |> Option.exists (fun stage -> stage <> Independent))
 
     /// The declared children of this colony that have stopped being ours, and
@@ -1232,14 +1247,24 @@ module Colony =
     /// there was, and only a human's edit could take the room back.
     /// **Unowned and never a rival's**: a room somebody else holds is the
     /// [[stand-down]]'s business.
-    let reclaiming (unowned: Set<string>) (colonies: Colony list) (colony: Colony) : string list =
-        colony |> childrenWhere colonies (fun home -> Set.contains home unowned)
+    let reclaiming
+        (stages: Map<string, ColonyStage>)
+        (unowned: Set<string>)
+        (colonies: Colony list)
+        (colony: Colony)
+        : string list =
+        colony |> childrenWhere stages colonies (fun home -> Set.contains home unowned)
 
     /// The declared children of this colony whose home it **defends** this
     /// tick (`World.defends`, handed in off the world as the stages are to
     /// `bootstrapping`): the homes its guard row guards.
-    let defending (defends: string -> bool) (colonies: Colony list) (colony: Colony) : string list =
-        colony |> childrenWhere colonies defends
+    let defending
+        (stages: Map<string, ColonyStage>)
+        (defends: string -> bool)
+        (colonies: Colony list)
+        (colony: Colony)
+        : string list =
+        colony |> childrenWhere stages colonies defends
 
     /// The rooms one colony projects this tick: its home and its worked
     /// [[outpost]]s, its [[errand]]s, its [[salvage]] rooms, the rooms it

@@ -579,7 +579,17 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
     // child is written down and bounded.
     let ferrySinks = ferryBuffers view
 
-    // One `Tuning.FerryLoads` budget per child room, spread over that room's
+    // The claim party's controllers (#471): a candidate colony's, pooled as
+    // an Upgrade before the claim lands.
+    // Read off the pool's own Claims, which are `outposts.Claims` (#383).
+    let partyControllers =
+        tasks
+        |> List.choose (function
+            | Claim id -> Some id
+            | _ -> None)
+        |> Set.ofList
+
+    // One `ferryLoadsFor` budget per child room, spread over that room's
     // buffers in id order (user decision 2026-09-07): the hauler row hires per
     // child, so the pool admits per child.
     let ferryShare: Map<string, int> =
@@ -587,10 +597,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         |> Set.toList
         |> List.choose (fun id -> Atlas.targetRoom atlas id |> Option.map (fun room -> room, id))
         |> List.groupBy fst
-        |> List.collect (fun (_, buffers) ->
+        |> List.collect (fun (room, buffers) ->
             let ids = buffers |> List.map snd |> List.sort
             let n = List.length ids
-            let budget = view.Tuning.FerryLoads
+            let budget = ferryLoadsFor view room
 
             ids
             |> List.mapi (fun i id -> id, budget / n + (if i < budget % n then 1 else 0)))
@@ -780,6 +790,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
                 // through the same door.
                 Feeding
         | Build siteId when isFeedingSite view atlas fedSiteIds siteId -> Feeding
+        // The claim party's: RCL2 before the tap is what the claim is worth.
+        | Upgrade controllerId when Set.contains controllerId partyControllers -> Feeding
         // A bootstrapped child's Upgrade, in the mother's pool (#213): the tier
         // the pioneers were hired for. Left in the surplus, travel cost — a
         // Seam and fifty tiles against five — kept every one of them at home.
@@ -907,6 +919,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // rampart is the room's defence while it stands, and the tower's
             // energy is no use once the raid is through it.
             | Repair id when Set.contains id underAttack -> TwoRungsUp
+            // The claim party over the home's Feeding work (#471): on the
+            // tier alone travel cost keeps every loaded pioneer at home, the
+            // claim lands with no party, and the tap comes first.
+            | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
             | _ -> OnTheTier
 
         match task with
@@ -1039,6 +1055,11 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // leave every generalist free to cross for the same store.
         | Refill(structureId, _) when Set.contains structureId ferrySinks ->
             Capacity.total (Map.tryFind structureId ferryShare |> Option.defaultValue 0)
+        // The party: loaded pioneers until they carry `Tuning.ClaimPartyEnergy`
+        // between them.
+        | Upgrade controllerId when Set.contains controllerId partyControllers ->
+            Capacity.total view.Tuning.PioneerCount
+            |> Capacity.budgeting view.Tuning.ClaimPartyEnergy
         // A borrowed Upgrade takes the bodies hired for it and no more (#213):
         // `Tuning.PioneerCount`, the same constant the worker row is raised by.
         | Upgrade controllerId when isBorrowedUpgrade view controllerId ->

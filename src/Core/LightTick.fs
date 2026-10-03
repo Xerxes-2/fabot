@@ -137,6 +137,7 @@ let private repeatableActor (intent: Intent) : string option =
     | ClaimController _
     | ClaimReactor _
     | PickupPile _
+    | DropEnergy _
     | SignController _
     | AttackCreep _
     | HealCreep _
@@ -178,6 +179,7 @@ let private fights (intent: Intent) : bool =
     | ClaimController _
     | ClaimReactor _
     | PickupPile _
+    | DropEnergy _
     | SignController _
     | MoveCreep _
     | SayCreep _

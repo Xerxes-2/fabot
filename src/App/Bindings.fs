@@ -317,6 +317,8 @@ type ICreep =
     /// `launchTime` alone.
     abstract claimReactor: target: obj -> int
     abstract pickup: target: obj -> int
+    /// Put the whole of one resource down on the body's own tile.
+    abstract drop: resource: string -> int
     /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part.
     abstract attack: target: obj -> int
     /// Restore `HEAL_POWER` per HEAL part to a creep of ours at range 1,

@@ -247,8 +247,7 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
             // declaration.
             |> List.map (fun tile -> tile.Room)
             |> List.distinct
-            |> List.length
-            |> (*) view.Tuning.FerryLoads
+            |> List.sumBy (ferryLoadsFor view)
 
     // A haul that crosses a Seam is never one body (#279): a full container
     // at home waits, a full container in an outpost drops the anchor's next
@@ -938,7 +937,15 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
         let raising room =
             isNurseryRoom view room || isBootstrapRoom view room
 
-        if view.Stages |> Map.exists (fun room _ -> raising room) then
+        // And while a Claim is pooled (#471): the claim party is cast beside
+        // the claimer, not after the claim lands.
+        if
+            view.Stages |> Map.exists (fun room _ -> raising room)
+            || tasks
+               |> List.exists (function
+                   | Claim _ -> true
+                   | _ -> false)
+        then
             view.Tuning.PioneerCount
         else
             0

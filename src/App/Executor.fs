@@ -104,6 +104,7 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName reactorId (fun c t -> c.claimReactor t)
     | PickupPile(creepName, resourceId) ->
         withCreepTarget creepName resourceId (fun c t -> c.pickup t)
+    | DropEnergy creepName -> withCreep creepName (fun c -> c.drop (resourceName Energy))
     // The hostile arrives by id; one that died between decision and replay is
     // ActorMissing. The heal names one of ours twice, through `Game.creeps`.
     | AttackCreep(creepName, hostileId) ->

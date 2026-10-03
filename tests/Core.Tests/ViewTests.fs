@@ -1354,6 +1354,57 @@ let colonyViewTests =
                     (Some 400)
                     "and the one stage the lend exists at still carries it"
             }
+
+            test
+                "a nursery's rock and the energy on its floor are the mother's pioneers' to dig and to pick up" {
+                // #473: in a nursery her pioneers are the only bodies there
+                // are, so the room's own rock and the ferry's drop are hers.
+                let pile = "pile-child"
+
+                let withPile (world: World) =
+                    let facts = World.roomOf world child
+
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.add
+                                child
+                                { facts with
+                                    TargetKinds = Map.add pile (Dropped Energy) facts.TargetKinds
+                                    Stores = Map.add pile 400 facts.Stores
+                                    Layer =
+                                        { facts.Layer with
+                                            TargetPositions =
+                                                Map.add
+                                                    pile
+                                                    { X = 20; Y = 20 }
+                                                    facts.Layer.TargetPositions
+                                        }
+                                }
+                    }
+
+                let raising = viewOf (withPile spawnlessWorld) mother
+
+                Expect.contains
+                    (idsOf raising)
+                    "src-child"
+                    "the nursery's rock is a Harvest of hers"
+
+                Expect.equal
+                    (Map.tryFind pile raising.Spatial.Stores)
+                    (Some 400)
+                    "and the pile on its floor a store she sees"
+
+                let bootstrapping = viewOf (withPile pairWorld) mother
+
+                Expect.isFalse
+                    (List.contains "src-child" (idsOf bootstrapping))
+                    "a child with its own spawn digs its own rock"
+
+                Expect.isFalse
+                    (Map.containsKey pile bootstrapping.Spatial.Stores)
+                    "and its floor is its own"
+            }
         ]
 
 /// The pair world a few levels on: the child independent at RCL4, so its

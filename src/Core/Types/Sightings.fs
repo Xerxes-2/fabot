@@ -1092,7 +1092,7 @@ module World =
             |> List.map fst
 
         let outposts =
-            Outpost.worked gate.Shut colony.Outposts
+            Outpost.worked gate.Shut (Colony.outpostsWorked stages colony)
             |> List.filter (fun outpost -> routable outpost.RoomName)
 
         let errands =
@@ -1106,11 +1106,12 @@ module World =
         // a room she may take back is one we do not (#221).
         let borrowed =
             Colony.bootstrapping stages colonies colony
-            @ Colony.reclaiming unowned colonies colony
+            @ Colony.reclaiming stages unowned colonies colony
 
         let covered = Colony.roomsProjected outposts errands salvage borrowed [] colony.Home
 
-        let defended = Colony.defending (defends world covered colony.Home) colonies colony
+        let defended =
+            Colony.defending stages (defends world covered colony.Home) colonies colony
 
         {
             Outposts = outposts

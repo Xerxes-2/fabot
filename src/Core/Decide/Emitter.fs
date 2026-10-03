@@ -210,12 +210,24 @@ let internal applicable
     // buffer, and it drops `worthTheTrip` because a pile decays and a store does
     // not, so there is no later body to leave it for (#311).
     | Pickup(_, Thorium) -> has Carry && emptyHanded && not heavy && not standing
-    | Pickup(_, Energy) ->
-        has Carry && halfEmpty && not carryingThorium && not heavy && not standing
+    // A nursery's floor is the ferry's drop (#473): a Work body's to build
+    // with, and never a hauler's to carry back out.
+    | Pickup(pileId, Energy) ->
+        has Carry
+        && halfEmpty
+        && not carryingThorium
+        && not heavy
+        && not standing
+        && (has Work
+            || not (Atlas.targetRoom atlas pileId |> Option.exists (isNurseryRoom view)))
     // The two body clauses are read a second time by `canRefill`, beside
     // Withdraw's; the Energy clause is a state, not a fact about the body. The
     // delivery half reads down the same two columns: what a body took is what
     // it has to put down.
+    // The nursery drop is a hauler's (#473): a pioneer carrying energy to
+    // the site builds with it.
+    | Refill(targetId, Energy) when isNurseryDrop view targetId ->
+        has Carry && creep.Energy > 0 && not standing && not (has Work)
     | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing
     | Refill(targetId, Thorium) ->
         let reactor =
@@ -293,12 +305,63 @@ let internal applicable
     // a raid steps toward it the body bought to stand still walks away.
     | Flee -> runsFromThreats atlas creep && standsInReach threats atlas creep.Name
 
+/// Whether a controller stands in a room nobody owns: the claim party's
+/// (#471), the one Upgrade pooled on such a controller. Read off the room's
+/// control entry, never a second `claimTargets` scan (#383).
+let private unownedController (view: ColonyView) id =
+    SpatialInfo.roomOf view.Spatial id
+    |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
+    |> Option.exists (fun control -> control.Owner = Ownership.Unowned)
+
+/// The claim party's walk (#471): for each candidate's controller, the
+/// ticks each loaded holder of its Upgrade still has to walk to reach it.
+let private partyWalksOf (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) =
+    view.Creeps
+    |> List.choose (fun creep ->
+        match Map.tryFind creep.Name assigned with
+        | Some(Upgrade id as task) when
+            creep.Energy > 0
+            && unownedController view id
+            && not (mayActNow threats atlas creep.Name task)
+            ->
+            Atlas.walkTicks atlas creep.Name task |> Option.map (fun walk -> id, walk)
+        | _ -> None)
+    |> List.groupBy fst
+    |> List.map (fun (id, walks) -> id, walks |> List.map snd)
+    |> Map.ofList
+
+/// Whether a claimer holds its claim for its party: a member still walking
+/// arrives inside the claimer's life less `Tuning.ClaimPartyMargin`. A member
+/// who cannot, or one that died, holds nothing, so the wait is capped by
+/// the claimer's own life and never restarts past it.
+let private waitsForParty
+    (view: ColonyView)
+    (walks: Map<string, int list>)
+    (claimer: CreepInfo)
+    id
+    =
+    let inHand = claimer.TicksToLive - view.Tuning.ClaimPartyMargin
+
+    Map.tryFind id walks |> Option.exists (List.exists (fun walk -> walk < inHand))
+
 /// The action Intent a Task asks of a creep, and `None` where this tick asks
 /// for none: Flee is movement and nothing else, and Reclaim withholds its act
 /// on the ticks the reactor is already ours — the one act gated on a fact about
 /// its target rather than the body, which is why the view is a parameter.
-let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
+let private intentFor
+    (view: ColonyView)
+    atlas
+    (partyWalks: Map<string, int list>)
+    (creep: CreepInfo)
+    task
+    =
     match task with
+    // The claim party's Upgrade before the claim lands: a wait at the
+    // controller, the engine refusing the act on a controller nobody owns.
+    | Upgrade controllerId when unownedController view controllerId -> None
+    // The claim waits for its party (#471): a tap lands before a party cast
+    // after the claim can walk in.
+    | Claim controllerId when waitsForParty view partyWalks creep controllerId -> None
     | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
     // The same Intent for a tombstone or a ruin as for a container: the engine's
     // `withdraw` is one method over every store. `None` for the amount means
@@ -329,6 +392,7 @@ let private intentFor (view: ColonyView) atlas (creep: CreepInfo) task =
     // A refill cluster's Refill names a place; which member the energy lands in
     // is settled here, at arrival, off the tile the body stands on. Every other
     // Refill resolves through the same call.
+    | Refill(siteId, Energy) when isNurseryDrop view siteId -> Some(DropEnergy creep.Name)
     | Refill(structureId, resource) ->
         Atlas.refillTarget atlas creep.Name structureId resource
         |> Option.map (fun target -> TransferEnergyToStructure(creep.Name, target, resource))
@@ -595,6 +659,7 @@ let private actionIntents
     (view: ColonyView)
     atlas
     (threats: Threats)
+    (partyWalks: Map<string, int list>)
     (creep: CreepInfo)
     (task: Task)
     : Intent list =
@@ -614,7 +679,7 @@ let private actionIntents
             && not drained
             && not (heldByCooldown atlas task)
         then
-            intentFor view atlas creep task |> Option.toList
+            intentFor view atlas partyWalks creep task |> Option.toList
         else
             []
 
@@ -623,11 +688,13 @@ let private actionIntents
 /// tick-start geometry — it must run against the same Atlas the Matcher
 /// used, never against resolved positions.
 let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
+    let partyWalks = partyWalksOf view atlas threats assigned
+
     let actions =
         view.Creeps
         |> List.collect (fun creep ->
             match Map.tryFind creep.Name assigned with
-            | Some task -> actionIntents view atlas threats creep task
+            | Some task -> actionIntents view atlas threats partyWalks creep task
             | None -> [])
 
     // Every assigned creep says its Task's glyph every tick; unassigned creeps

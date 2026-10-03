@@ -304,6 +304,158 @@ let claimTests =
                     1
                     "one of the two holds the Claim, and the other is not a second holder"
             }
+
+            test
+                "the claim party: a candidate's controller is pooled as its Upgrade too, Feeding-tier, budgeted at ClaimPartyEnergy" {
+                // #471: the party carries RCL2's energy to the controller
+                // before the claim lands, under the Upgrade's own id, so the
+                // hold runs on into the nursery's Upgrade with no rematch.
+                let pooled colony =
+                    poolOn colony |> List.tryFind (fun p -> p.Task = Upgrade "ctrl-out")
+
+                let outpost =
+                    let colony = reserveColony []
+
+                    { colony with
+                        RoomControl = colony.RoomControl |> Map.add "W1N2" neutralRoom
+                    }
+
+                Expect.isNone (pooled outpost) "an outpost's controller is no party's"
+
+                match pooled (candidateColony []) with
+                | Some p ->
+                    Expect.equal
+                        p.Priority
+                        (priorityOfTier Feeding + rankOfRung TwoRungsUp)
+                        "two rungs up the Feeding tier, over the home's own"
+
+                    Expect.equal
+                        p.Capacity.Budget
+                        (Some Tuning.defaults.ClaimPartyEnergy)
+                        "admitted against the party's energy"
+
+                    Expect.equal
+                        (Capacity.capOf CapScope.Everyone p.Capacity)
+                        (Some Tuning.defaults.PioneerCount)
+                        "and no more bodies than the pioneers"
+
+                    Expect.isTrue p.Borrowed "a commute: no standing body takes it"
+                | None -> failtest "the candidate's controller is the party's Upgrade"
+            }
+
+            test
+                "a loaded party member at the candidate's controller holds its Upgrade and acts nothing until the claim lands" {
+                let party = worker "w1" 50 0
+
+                let {
+                        Assignments = assignments
+                        Intents = intents
+                    } =
+                    decideOn (candidateColony [ party, { X = 10; Y = 43 } ])
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Upgrade "ctrl-out")))
+                    "the party holds the controller's Upgrade"
+
+                Expect.isEmpty
+                    (intents
+                     |> List.filter (function
+                         | UpgradeController _ -> true
+                         | _ -> false))
+                    "and upgrades nothing it does not own"
+            }
+
+            test
+                "the claimer waits beside the controller while a loaded party member is still walking to it" {
+                let claimer = reserver "r1", { X = 10; Y = 44 }
+
+                let claims colony assigned =
+                    (decideFrom assigned colony).Intents
+                    |> List.filter (function
+                        | ClaimController _ -> true
+                        | _ -> false)
+
+                let party = Map.ofList [ "w1", taskId (Upgrade "ctrl-out") ]
+
+                Expect.isEmpty
+                    (claims
+                        (candidateColony [ claimer; worker "w1" 50 0, { X = 10; Y = 48 } ])
+                        party)
+                    "the party is four tiles off, out of reach: the claim waits for it"
+
+                Expect.isNonEmpty
+                    (claims
+                        (candidateColony [ claimer; worker "w1" 50 0, { X = 10; Y = 42 } ])
+                        party)
+                    "the party in reach of the controller: the claim lands"
+
+                Expect.isNonEmpty
+                    (claims (candidateColony [ claimer ]) Map.empty)
+                    "and with no party at all the claimer claims as it always did"
+
+                // The wait is capped by the claimer's own life: a member who
+                // cannot arrive inside it, less `Tuning.ClaimPartyMargin`,
+                // holds nothing.
+                let living ticks =
+                    { fst claimer with
+                        TicksToLive = Tuning.defaults.ClaimPartyMargin + ticks
+                    },
+                    snd claimer
+
+                let walker = worker "w1" 50 0, { X = 10; Y = 48 }
+
+                let walk =
+                    let colony = candidateColony [ walker ]
+
+                    match Atlas.walkTicks (Atlas.ofView colony) "w1" (Upgrade "ctrl-out") with
+                    | Some ticks -> ticks
+                    | None -> failtest "the fixture prices the member's walk"
+
+                Expect.isEmpty
+                    (claims (candidateColony [ living (walk + 1); walker ]) party)
+                    "the member arrives inside the claimer's life past its margin: it waits"
+
+                Expect.isNonEmpty
+                    (claims (candidateColony [ living walk; walker ]) party)
+                    "a tick less of life and the member cannot arrive in time: the claim lands"
+            }
+
+            test
+                "the mother hires her pioneers while a Claim is pooled, so the party is cast beside the claimer" {
+                let casts colony fleet =
+                    spawnIntents (decideOn { colony with Creeps = fleet }).Intents
+                    |> List.filter (fun (_, _, name: string) -> name.StartsWith "worker-")
+
+                let candidate =
+                    { switchHome with
+                        RoomControl = Map.add "W1N2" neutralRoom switchHome.RoomControl
+                        Declared = [ "W1N1"; "W1N2" ]
+                        Spatial =
+                            switchHome.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { RoomLayer.empty with
+                                    Terrain = TerrainGrid.ofList (corridor 25 41 48)
+                                }
+                            |> Outpost.place [ reserveDeclaration ]
+                    }
+
+                // A 300 bank hires no claimer (`reserverPattern`), so the
+                // worker row is the only one moved.
+                let fleet = switchHomeFleet @ [ for i in 1..2 -> worker $"p{i}" 0 50 ]
+
+                Expect.isEmpty (casts switchHome fleet) "the premise: no claim, no worker short"
+
+                Expect.hasLength
+                    (casts candidate fleet)
+                    1
+                    "a Claim pooled: the third pioneer is short and cast"
+
+                Expect.isEmpty
+                    (casts candidate (fleet @ [ worker "p3" 0 50 ]))
+                    "and with three the party's row is whole"
+            }
         ]
 
 /// The north room with a **spawn** construction site of ours standing in
@@ -810,6 +962,112 @@ let nurseryTests =
                     [ taskId (Build "site-out"), 2; taskId (Build "site-west"), 2 ]
                     "claimed, the north site is uncapped and the west one takes the whole budget"
             }
+
+            test
+                "the mother ferries to her nursery's spawn site: the hauler drops its load beside it, and only a Work body takes the drop up" {
+                // #473: a nursery has no store, so the ferry's sink is the
+                // spawn site and its delivery a drop beside it, which only
+                // the pioneers building it may pick up.
+                let inChild (creeps: (CreepInfo * Pos) list) (colony: ColonyView) =
+                    let child = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    { colony with
+                        Creeps = creeps |> List.map fst
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { child with
+                                    CreepPositions =
+                                        creeps |> List.map (fun (c, at) -> c.Name, at) |> Map.ofList
+                                }
+                    }
+
+                let withPile amount (colony: ColonyView) =
+                    let child = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add "pile-1" (Dropped Energy) colony.Spatial.TargetKinds
+                                Stores = Map.add "pile-1" amount colony.Spatial.Stores
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { child with
+                                    TargetPositions =
+                                        Map.add "pile-1" { X = 10; Y = 46 } child.TargetPositions
+                                }
+                    }
+
+                let ferry = Refill("site-spawn", Energy)
+
+                Expect.isFalse
+                    (List.contains ferry (planTasksOn nurseryFerryMother noThreats))
+                    "no Work body of ours in the nursery: nothing is dropped to decay or be taken"
+
+                Expect.contains
+                    (planTasksOn
+                        (inChild [ worker "p1" 0 50, { X = 10; Y = 44 } ] nurseryFerryMother)
+                        noThreats)
+                    ferry
+                    "a pioneer there to pick it up: the spawn site is the ferry's sink"
+
+                Expect.isFalse
+                    (List.contains
+                        ferry
+                        (planTasksOn
+                            (inChild
+                                [ worker "p1" 0 50, { X = 10; Y = 44 } ]
+                                (withPile siteOwes nurseryFerryMother))
+                            noThreats))
+                    "and no more is dropped than the site still owes"
+
+                let dropped =
+                    (decideFrom
+                        (Map.ofList [ "h1", taskId ferry ])
+                        (inChild
+                            [
+                                hauler "h1" 100 0, { X = 10; Y = 46 }
+                                worker "p1" 0 50, { X = 10; Y = 44 }
+                            ]
+                            nurseryFerryMother))
+                        .Intents
+
+                Expect.contains
+                    dropped
+                    (DropEnergy "h1")
+                    "beside the site the hauler drops its load"
+
+                let { Assignments = building } =
+                    decideOn (inChild [ worker "w1" 50 0, { X = 10; Y = 46 } ] nurseryFerryMother)
+
+                Expect.notEqual
+                    (Map.tryFind "w1" building)
+                    (Some(taskId ferry))
+                    "a loaded pioneer never drops: it builds with what it carries"
+
+                let piled = withPile 400 nurseryFerryMother
+
+                let haulerTick = decideOn (inChild [ hauler "h1" 0 100, { X = 10; Y = 45 } ] piled)
+
+                Expect.notEqual
+                    (Map.tryFind "h1" haulerTick.Assignments)
+                    (Some(taskId (Pickup("pile-1", Energy))))
+                    "the hauler never takes its own drop back"
+
+                Expect.isFalse
+                    (haulerTick.Intents |> List.exists (fun i -> i = PickupPile("h1", "pile-1")))
+                    "not even by the reflex"
+
+                let pioneerTick = decideOn (inChild [ worker "w1" 0 50, { X = 10; Y = 45 } ] piled)
+
+                Expect.contains
+                    pioneerTick.Intents
+                    (PickupPile("w1", "pile-1"))
+                    "and a pioneer beside it picks it up"
+            }
         ]
 
 /// The two spawns of the pair below, each in its own colony's home, what
@@ -853,8 +1111,8 @@ let private splitPair =
 /// And the tick before it: the north room is the child's home and the
 /// mother's outpost at once, one room, two projections. The child names
 /// its mother here as well, which costs nothing while the outpost entry
-/// stands: a room the mother already works is worked as an outpost and
-/// never as a bootstrap layer (`Colony.bootstrapping`).
+/// stands: a room nobody owns is worked as an outpost, and the tick it is
+/// ours it is a bootstrap layer (`Colony.outpostsWorked`, #471).
 let private nurseryPair =
     [
         {
@@ -1547,9 +1805,37 @@ let twoColonyTests =
                         mother)
                     "so the child she raised is not one she can take back on her own once it stops being ours"
 
+                // The claim tick (#471): the outpost entry that carried the
+                // Claim stops making the room an outpost the tick it is ours,
+                // so the party standing at its controller takes the nursery's
+                // Upgrade and not its mother's.
+                Expect.equal
+                    (raising [ "W1N2", Nursery ] nurseryPair (List.head nurseryPair))
+                    [ "W1N2" ]
+                    "a room she still declares as her outpost is her nursery once it is ours"
+
                 Expect.isEmpty
-                    (raising [ "W1N2", Bootstrapping ] nurseryPair (List.head nurseryPair))
-                    "and a room she still declares as her outpost is worked as one: the outpost reading names it first"
+                    (Colony.outpostsWorked (Map.ofList [ "W1N2", Nursery ]) (List.head nurseryPair))
+                    "and out of the outposts she works"
+
+                Expect.equal
+                    (Colony.defending
+                        (Map.ofList [ "W1N2", Nursery ])
+                        (fun _ -> true)
+                        nurseryPair
+                        (List.head nurseryPair))
+                    [ "W1N2" ]
+                    "and a home of hers to defend the tick it is ours"
+
+                Expect.isEmpty
+                    (Colony.defending Map.empty (fun _ -> true) nurseryPair (List.head nurseryPair))
+                    "while nobody's it is the outpost, defended as one"
+
+                Expect.equal
+                    (Colony.outpostsWorked Map.empty (List.head nurseryPair)
+                     |> List.map (fun o -> o.RoomName))
+                    [ "W1N2" ]
+                    "while it is nobody's it is the outpost the Claim walks to"
 
                 // What the stage then decides: the scan set, and with it
                 // every rule that reads the room off the projection.

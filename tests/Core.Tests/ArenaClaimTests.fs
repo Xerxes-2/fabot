@@ -1,7 +1,7 @@
 /// Taking W17S25 and holding it against Trepidimous (#470): the controller's
 /// and the construction site's rules against the engine, and the claim played
-/// through our live decide — the claim as shipped, a claim party (G1),
-/// residents before the claim (G2), and the perimeter once safe mode ends.
+/// through our live decide — the claim party (G1, #471), residents before
+/// the claim (G2), and the perimeter once safe mode ends.
 module Fabot.Core.Tests.ArenaClaimTests
 
 open Expecto
@@ -487,21 +487,6 @@ let private claimer =
         (w17s25 16 35)
         None
 
-/// Run until the claim lands, swap in the declarations the #404 edit writes
-/// the same tick — the live edit is a commit and a deploy, so this is its
-/// best case — apply `atLanding`, and run on: `ticks` in all.
-let private claimThenRaise (atLanding: Arena -> Arena) (ticks: int) (start: Arena) =
-    let claimedYet (a: Arena) =
-        a.Rooms["W17S25"].Controller
-        |> Option.exists (fun c -> c.Owner = Ownership.Ours)
-
-    let landed, first = start |> runUntil claimedYet ticks
-
-    let rest, second =
-        { landed with Colonies = afterClaim } |> atLanding |> run (ticks - first.Length)
-
-    rest, first @ second
-
 /// The live cooldown laid on at the claim's tick. Our side withholds the Claim
 /// while one runs (#474), so a scenario of a room claimed under one starts it
 /// once the claim has landed: its physics, and not how the claim got there.
@@ -608,6 +593,35 @@ let private milestonesOf (trace: TickTrace list) =
             |> Map.ofList
     }
 
+/// Run on live code until the claim lands — no declaration edited, the
+/// Claim's outpost entry standing (#471) — apply `atLanding` on the landing
+/// tick, and run `after` ticks more. The claim's tick beside the run.
+let private claimThen (atLanding: Arena -> Arena) (after: int) (start: Arena) =
+    let claimedYet (a: Arena) =
+        a.Rooms["W17S25"].Controller
+        |> Option.exists (fun c -> c.Owner = Ownership.Ours)
+
+    let landed, first = start |> runUntil claimedYet 900
+
+    match
+        firstTick
+            (function
+            | ControllerClaimed("W17S25", _) -> true
+            | _ -> false)
+            first
+    with
+    | Some claim ->
+        let rest, second = landed |> atLanding |> run after
+        claim, rest, first @ second
+    | None -> failtest $"the claim lands: {milestonesOf first}"
+
+/// Trepidimous' answer to a claim (§1.1): the raid sets out from W18S25
+/// `arrival` ticks after the landing.
+let private raidAfter (arrival: int) (a: Arena) =
+    { a with
+        Bodies = a.Bodies @ raidFrom (a.Tick + arrival)
+    }
+
 /// G1, the claim party: two of W15S28's workers, loaded, on the
 /// controller's ring when the claim lands.
 let private party =
@@ -622,8 +636,8 @@ let private party =
 
 let private partyIds = party |> List.map (fun b -> b.Id)
 
-/// What G1 would do, scripted: the party holds the nursery's Upgrade from
-/// the claim's own tick.
+/// The party as its walk leaves it (#471): holding the controller's Upgrade,
+/// one Task id before the claim and after it.
 let private partyHolds (a: Arena) =
     holding (partyIds |> List.map (fun id -> id, nurseryUpgrade)) a
 
@@ -718,68 +732,31 @@ let arenaClaimTests =
         "arena W17S25 claim"
         [
             test
-                "scenario 1, as shipped: the tap lands at every arrival before a pioneer is in the room, and RCL2 never comes" {
-                // Best case for today's code: W15S28's two loaded workers
-                // match the nursery's Upgrade the tick the claim lands.
-                let workersHold =
-                    holding
-                        [
-                            "worker-920100-Spawn3", nurseryUpgrade
-                            "worker-920101-Spawn8", nurseryUpgrade
-                        ]
-
-                let unopposed =
-                    claimWorld 0 beforeClaim (claimer :: motherStaff)
-                    |> claimThenRaise (cooled >> workersHold) 600
-                    |> snd
-                    |> milestonesOf
-
-                // Measured: the first loaded worker in the room at t436 (a
-                // 16W 17C body walks loaded at half speed), RCL2 at t486.
-                match unopposed.Rcl2, Map.tryFind "worker-920100-Spawn3" unopposed.Entered with
-                | Some rcl2, Some entered ->
-                    Expect.isGreaterThan entered 400 "five crossings loaded: over 400 ticks"
-                    Expect.isLessThan (rcl2 - entered) 60 "and RCL2 soon after"
-                | outcome -> failtest $"unopposed, RCL2 comes: {outcome}"
-
+                "scenario 2, live: the mother's loaded workers are the party, the claim waits for them at the controller, and RCL2 comes 7 ticks after it; under a cooldown our side never asks and the tap lands" {
+                // #471 on live code: no party placed, no hold scripted, no
+                // declaration edited. W15S28's two loaded workers take the
+                // party's Upgrade at the Storage, the claimer on the ring
+                // waits for them, and Trepidimous answers the claim.
                 for arrival in [ 20; 100; 300 ] do
-                    let final, trace =
-                        claimWorld 0 beforeClaim (claimer :: motherStaff @ raidFrom arrival)
-                        |> claimThenRaise (cooled >> workersHold) 700
+                    let claim, final, trace =
+                        claimWorld 0 beforeClaim (claimer :: motherStaff)
+                        |> claimThen (cooled >> withSpawnSite >> raidAfter arrival) 400
 
                     let m = milestonesOf trace
-                    let failure = $"arrival {arrival}: {m}"
-
-                    // Measured: the tap 49 ticks after the raid sets out; the
-                    // workers turn back once it stands in the room.
-                    match m.Taps with
-                    | tap :: _ -> Expect.isLessThanOrEqual tap (arrival + 60) failure
-                    | [] -> failtest $"the tapper lands\n{failure}"
-
-                    Expect.isNone m.Rcl2 failure
-                    Expect.isNone m.SafeMode failure
-
-                    Expect.isFalse
-                        (m.Entered.ContainsKey "worker-920100-Spawn3")
-                        $"no pioneer reaches it\n{failure}"
-
+                    let failure = $"arrival {arrival}, claim t{claim}: {m}"
+                    // Measured: the claim at t492, the tick both workers
+                    // stand in reach (a 16W 17C body walks loaded at half
+                    // speed), RCL2 at t499, the tap at claim + arrival + 50.
                     Expect.isGreaterThan
-                        (controllerOf final).UpgradeBlockedUntil
-                        final.Time
-                        "blocked at the end"
-            }
+                        claim
+                        400
+                        $"the claimer waits out five loaded crossings\n{failure}"
 
-            test
-                "scenario 2, G1 scripted: the party banks RCL2's safe mode 7 ticks after the claim; under a cooldown our side never asks and the tap lands" {
-                for arrival in [ 20; 100; 300 ] do
-                    let final, trace =
-                        claimWorld 0 beforeClaim (claimer :: motherStaff @ party @ raidFrom arrival)
-                        |> withSpawnSite
-                        |> claimThenRaise (cooled >> partyHolds) 400
+                    Expect.equal
+                        (m.Rcl2 |> Option.map (fun t -> t - claim))
+                        (Some 7)
+                        $"two 16-WORK pioneers: 32 a tick\n{failure}"
 
-                    let m = milestonesOf trace
-                    let failure = $"arrival {arrival}: {m}"
-                    Expect.equal m.Rcl2 (Some 7) $"two 16-WORK pioneers: 32 a tick\n{failure}"
                     Expect.equal (controllerOf final).SafeModeAvailable 1 "banked, and never spent"
 
                     // The begun site arms the undefended arm (#449), and the
@@ -791,20 +768,19 @@ let arenaClaimTests =
             }
 
             test
-                "scenario 2, G1 scripted, the cooldown run out: safe mode fires as the raid enters and nothing taps; with no begun site the claimer arm fires at its deadline" {
+                "scenario 2, live, the cooldown run out: safe mode fires as the raid enters and nothing taps; with no begun site the claimer arm fires at its deadline" {
                 for arrival in [ 20; 100; 300 ] do
-                    let final, trace =
-                        claimWorld 0 beforeClaim (claimer :: motherStaff @ party @ raidFrom arrival)
-                        |> withSpawnSite
-                        |> claimThenRaise partyHolds 400
+                    let claim, final, trace =
+                        claimWorld 0 beforeClaim (claimer :: motherStaff)
+                        |> claimThen (withSpawnSite >> raidAfter arrival) 400
 
                     let m = milestonesOf trace
-                    let failure = $"arrival {arrival}: {m}"
-                    Expect.equal m.Rcl2 (Some 7) failure
+                    let failure = $"arrival {arrival}, claim t{claim}: {m}"
+                    Expect.equal (m.Rcl2 |> Option.map (fun t -> t - claim)) (Some 7) failure
 
                     match m.SafeMode with
                     | Some fired ->
-                        Expect.isLessThanOrEqual fired (arrival + 10) $"on entry\n{failure}"
+                        Expect.isLessThanOrEqual fired (claim + arrival + 10) $"on entry\n{failure}"
                     | None -> failtest $"safe mode fires\n{failure}"
 
                     Expect.isEmpty m.Taps failure
@@ -822,9 +798,9 @@ let arenaClaimTests =
 
                 // No site begun: only the claimer arm can fire, at
                 // `SafeModeDeadline` (3) of the controller.
-                let _, trace =
-                    claimWorld 0 beforeClaim (claimer :: motherStaff @ party @ raidFrom 20)
-                    |> claimThenRaise partyHolds 200
+                let _, _, trace =
+                    claimWorld 0 beforeClaim (claimer :: motherStaff)
+                    |> claimThen (raidAfter 20) 200
 
                 let m = milestonesOf trace
 
@@ -843,19 +819,17 @@ let arenaClaimTests =
                 Expect.isEmpty m.Taps $"no tap\n{m}"
             }
 
-            // A live-code defect (G1): a loaded party on the controller's ring
-            // at the claim does not hold the nursery's Upgrade. On the claim's
-            // own tick W17S25 is still W15S28's Claim outpost and no nursery,
-            // so the Matcher gives the party W15S28's own Upgrade; it keeps it
-            // after the nursery forms and walks home with its 1,700 energy:
-            // worker-920800-Spawn3 at W17S25 18,38 on t3, W17S26 34,1 on t50,
-            // W16S26 25,47 on t300, W15S28 4,0 on t400, then
-            // `harvest:...319014` at home; the nursery's progress stays 0.
-            ptest
+            // Was a live-code defect (#471): on the claim's own tick W17S25
+            // was still W15S28's Claim outpost and no nursery, so the party
+            // was handed W15S28's own Upgrade and walked home with its 1,700
+            // energy. The party now holds the candidate's Upgrade as its walk
+            // left it, the Claim's outpost entry standing throughout.
+            test
                 "G1: a loaded party standing at the controller when the claim lands upgrades it to RCL2 inside 20 ticks" {
                 let _, trace =
-                    claimWorld liveCooldown beforeClaim (claimer :: motherStaff @ party)
-                    |> claimThenRaise id 100
+                    claimWorld 0 beforeClaim (claimer :: motherStaff @ party)
+                    |> partyHolds
+                    |> run 100
 
                 let m = milestonesOf trace
                 Expect.isTrue (m.Rcl2 |> Option.exists (fun t -> t <= 20)) $"RCL2: {m.Rcl2}"
@@ -864,12 +838,13 @@ let arenaClaimTests =
             test
                 "scenario 3, G2 with G1 under the live cooldown: the residents kill the tapper before it taps, at least one resident dies, and the duo's Fight pools" {
                 for arrival in [ 20; 100; 300 ] do
-                    let final, trace =
+                    let _, final, trace =
                         claimWorld
                             0
                             beforeClaim
                             (claimer :: motherStaff @ party @ residents @ raidFrom arrival)
-                        |> claimThenRaise (cooled >> partyHolds >> residentsHold) 700
+                        |> partyHolds
+                        |> claimThen (cooled >> residentsHold) 699
 
                     let m = milestonesOf trace
                     let failure = $"arrival {arrival}: {m}"
@@ -924,10 +899,21 @@ let arenaClaimTests =
             // being clear — and die at t489 with no Flee; now it flees the
             // tick the Reach takes it and waits at the Reach's edge.
             test "a pioneer bound for the nursery's site is not walked into a parked raid's reach" {
-                let _, trace =
+                // The two at the Storage sent to the site the tick it is
+                // placed: with the party holding the claim's Upgrade (#471)
+                // they spend their load at home first, and the arena digs
+                // nothing to send them out with afterwards.
+                let sentToSite =
+                    holding
+                        [
+                            "worker-920100-Spawn3", "build:site-spawn-14-28"
+                            "worker-920101-Spawn8", "build:site-spawn-14-28"
+                        ]
+
+                let _, _, trace =
                     claimWorld 0 beforeClaim (claimer :: motherStaff @ party @ raidFrom 300)
-                    |> withSpawnSite
-                    |> claimThenRaise (cooled >> partyHolds) 520
+                    |> partyHolds
+                    |> claimThen (cooled >> withSpawnSite >> sentToSite) 519
 
                 let m = milestonesOf trace
 
@@ -941,9 +927,9 @@ let arenaClaimTests =
 
             test
                 "under the live cooldown the Claim waits: the claimer on the ring claims the tick the cooldown ends (#474)" {
-                let _, trace =
-                    claimWorld (921_000 + 30) beforeClaim (claimer :: motherStaff)
-                    |> claimThenRaise id 40
+                // The claimer alone: with a loaded worker at home the claim
+                // would wait out its party's walk as well (#471).
+                let _, trace = claimWorld (921_000 + 30) beforeClaim [ claimer ] |> run 40
 
                 Expect.equal
                     (firstTick

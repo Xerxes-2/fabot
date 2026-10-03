@@ -49,6 +49,11 @@ type Intent =
     /// spelling had no reader outside this module — the persisted Task id is
     /// `Facts.taskId`'s `pickup:<id>`, unchanged.
     | PickupPile of creepName: string * resourceId: string
+    /// The drop act: a body puts down every unit of energy it carries on the
+    /// tile it stands on. The [[ferry]]'s delivery into a [[nursery]] (#473),
+    /// which has no store: the load lands beside the spawn site for the
+    /// pioneers building it to pick up.
+    | DropEnergy of creepName: string
     /// One creep writing the colony's signature onto a controller it stands
     /// beside. Carries the text so the Executor needs no declaration of its
     /// own: what a room says is a human's to write (`Colony.signature`), and

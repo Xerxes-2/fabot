@@ -1005,7 +1005,13 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
     view.Sources
     |> List.choose (fun s ->
         match Atlas.positionOf atlas s.Id with
-        | Some tile when tile.Room <> home && Map.containsKey tile.Room view.RoomControl ->
+        // Not a nursery's rock its pioneers dig (#473): a container is a
+        // third of a spawn, and the child plans its own once it casts.
+        | Some tile when
+            tile.Room <> home
+            && Map.containsKey tile.Room view.RoomControl
+            && not (List.contains tile.Room view.Borrowed.Rooms)
+            ->
             Some(s.Id, tile)
         | _ -> None)
     |> List.choose (fun (sourceId, source) ->
@@ -1077,9 +1083,23 @@ let internal planPickups (view: ColonyView) atlas : Intent list =
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
+    // A nursery's floor is the ferry's drop (#473): only a Work body, which
+    // builds with it, takes it up, or the hauler takes its load back.
+    let builds =
+        view.Creeps
+        |> List.filter (fun c -> partCount c.Body Work > 0)
+        |> List.map (fun c -> c.Name)
+        |> Set.ofList
+
     Atlas.placedCreeps atlas
     |> List.groupBy (fun (_, tile) -> tile.Room)
     |> List.collect (fun (room, placed) ->
+        let placed =
+            if isNurseryRoom view room then
+                placed |> List.filter (fun (name, _) -> Set.contains name builds)
+            else
+                placed
+
         match Atlas.droppedEnergyIn atlas room with
         | [] -> []
         | piles ->
