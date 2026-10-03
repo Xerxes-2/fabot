@@ -810,7 +810,8 @@ module Assault =
     /// W18S26's far line again (#496), to hurt its economy: the source at
     /// (23,43) hauls by the link at (25,41), five tiles inside the breach
     /// #490's arena took from W17S26 with no loss, and far from the towers.
-    /// Off until the user has the arena's result.
+    /// Switched on by the user (2026-10-03) after the arena: breach t366,
+    /// link t372, out by t396 with no loss; two lost if they safe-mode.
     let w18s26Link: Assault =
         {
             RoomName = "W18S26"
@@ -820,7 +821,7 @@ module Assault =
             Mode = Provoke
             Targets = [ { X = 25; Y = 41 } ]
             Entry = Some "W17S26"
-            Active = false
+            Active = true
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
