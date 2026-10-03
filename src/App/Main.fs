@@ -765,11 +765,14 @@ let private fullTick
         seen
         |> Option.map (fun seen ->
             let record =
-                LightTick.lastFull
+                LightTick.lastFullWith
                     seen
                     (decisions
                      |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Steps)
                      |> Fresh.mapOfSeq)
+                    (decisions
+                     |> Seq.collect (fun (_, _, decision, _, _) -> decision.Next)
+                     |> List.ofSeq)
                     (executionPlan |> Fabot.Core.IntentPlan.intents)
 
             Game.time,

@@ -481,4 +481,8 @@ type Decision =
         /// tick: the tile it asked to step onto and the one after it, both in
         /// the room it stands in. What a light tick walks it on along.
         Steps: Map<string, RoomPos * RoomPos>
+        /// The light tick's next pours: each refiller that poured this tick
+        /// and stands beside another hungry member of the refill cluster,
+        /// its transfer into that one. Never issued on this tick.
+        Next: Intent list
     }

@@ -474,6 +474,71 @@ let decideUnarbitrated
 
     let movement = movementOf view atlas threats pool assigned crossings verbose
 
+    // A refiller that poured this tick has nothing for the light tick after it
+    // to replay, a pour being one-shot, so it stood still a tick per member
+    // (user, 2026-10-04). Its next act is laid now, off the pour this tick
+    // makes: the next hungry member beside it, or else a step toward the rest
+    // (`Atlas.recordStep`, ahead of `stepPlans` below).
+    let nextPours =
+        match Atlas.cluster atlas with
+        | None -> []
+        | Some cluster ->
+            view.Creeps
+            |> List.choose (fun creep ->
+                let poured =
+                    intents
+                    |> List.tryPick (function
+                        | TransferEnergyToStructure(name, target, Energy) when name = creep.Name ->
+                            Some target
+                        | _ -> None)
+
+                match
+                    Map.tryFind creep.Name assigned, poured, Atlas.creepTile atlas creep.Name
+                with
+                | Some(Refill(spawnId, Energy)), Some target, Some at when spawnId = cluster.Spawn ->
+                    let room = Map.tryFind target cluster.Members |> Option.defaultValue 0
+                    let left = creep.Energy - min creep.Energy room
+
+                    let rest =
+                        RefillCluster.hungry cluster
+                        |> List.filter ((<>) target)
+                        |> List.choose (fun id ->
+                            Atlas.positionOf atlas id |> Option.map (fun tile -> id, tile))
+                        |> List.filter (fun (_, tile) -> tile.Room = at.Room)
+
+                    let beside =
+                        rest
+                        |> List.choose (fun (id, tile) ->
+                            RoomPos.range at tile
+                            |> Option.filter (fun r -> r <= 1)
+                            |> Option.map (fun r -> r, id))
+
+                    if left <= 0 || List.isEmpty rest then
+                        None
+                    else
+                        match beside with
+                        | _ :: _ ->
+                            let _, id = List.min beside
+                            Some(TransferEnergyToStructure(creep.Name, id, Energy))
+                        | [] ->
+                            let goals =
+                                rest
+                                |> List.collect (fun (_, tile) ->
+                                    Atlas.adjacentWalkableIn atlas tile.Room (RoomPos.pos tile)
+                                    |> List.map (RoomPos.at tile.Room))
+                                |> Set.ofList
+
+                            match
+                                Atlas.withoutRecording atlas creep.Name (fun () ->
+                                    Atlas.firstStepWithin atlas creep.Name goals)
+                            with
+                            | Some step when step.Room = at.Room && step <> at ->
+                                Atlas.recordStep atlas creep.Name (at, step)
+                            | _ -> ()
+
+                            None
+                | _ -> None)
+
     // Read after the mover, which is what fills the table. A pair whose tiles
     // name two rooms is no plan a light tick could walk.
     let steps = Atlas.stepPlans atlas |> Fresh.mapOfSeq
@@ -492,6 +557,7 @@ let decideUnarbitrated
             }
         OutpostRooms = outposts.Declared
         Steps = steps
+        Next = nextPours
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:

@@ -66,6 +66,22 @@ let replayTests =
                     "the harvest again and the next step; never the transfer or the spawn"
             }
 
+            test "a refiller still on its tile issues the full tick's next pour, once" {
+                // User, 2026-10-04: a pour is one-shot, so the light tick after it
+                // stood still; the full tick lays the next one (`Decision.Next`).
+                let withNext =
+                    LightTick.lastFullWith
+                        quiet
+                        Map.empty
+                        [ TransferEnergyToStructure("digger", "ext-9", Energy) ]
+                        [ TransferEnergyToStructure("digger", "link-1", Energy) ]
+
+                Expect.equal
+                    (LightTick.intents withNext quiet)
+                    [ TransferEnergyToStructure("digger", "ext-9", Energy) ]
+                    "the next pour, and never the full tick's own"
+            }
+
             test "every repeatable work intent is kept and every one-shot one dropped" {
                 let work =
                     [

@@ -171,6 +171,8 @@ let private repeatableActor (intent: Intent) : string option =
 let private workActor (intent: Intent) : string option =
     match intent with
     | WithdrawFromStore(creep, _, _, _) -> Some creep
+    // The full tick's next pour into the refill cluster (`lastFull`'s `next`).
+    | TransferEnergyToStructure(creep, _, _) -> Some creep
     | _ -> repeatableActor intent
 
 /// The full tick's work worth replaying: the repeatable intents, and a
@@ -235,9 +237,20 @@ let private fights (intent: Intent) : bool =
 /// The full tick's record, off the glance taken at its start, its step plans
 /// and every intent it issued. It outlives the tick, so every collection in
 /// it is built by `Fresh` (#401).
-let lastFull
+let rec lastFull
     (glance: Glance)
     (steps: Map<string, RoomPos * RoomPos>)
+    (intents: Intent list)
+    : LastFull =
+    lastFullWith glance steps [] intents
+
+/// `lastFull` with the full tick's planned **next** acts beside its own: a
+/// refiller's pour into the next hungry member it stands beside, which the
+/// light tick issues once (`Decision.Next`), the full tick never.
+and lastFullWith
+    (glance: Glance)
+    (steps: Map<string, RoomPos * RoomPos>)
+    (next: Intent list)
     (intents: Intent list)
     : LastFull =
     {
@@ -247,7 +260,7 @@ let lastFull
             |> Seq.map (fun (name, creep) -> name, creep.Tile)
             |> Fresh.mapOfSeq
         Steps = steps
-        Work = workOf intents
+        Work = workOf intents @ next
         Fought = intents |> List.exists fights
         Hits =
             glance.Creeps

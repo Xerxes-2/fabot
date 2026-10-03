@@ -1155,3 +1155,66 @@ let firstTowerTests =
                     "with a tower standing, the nearer site again"
             }
         ]
+
+[<Tests>]
+let nextPourTests =
+    testList
+        "a refiller's next pour, laid for the light tick"
+        [
+            test "beside a second hungry member: the next pour is its transfer, not issued now" {
+                // User, 2026-10-04: a refiller stood still on the light tick after
+                // every pour, a pour being one-shot. `h` at (11,11) is beside the
+                // spawn (10,10) and ext-1 (10,12), carrying enough for both.
+                let colony =
+                    clusterColony
+                        (50, 50, 0)
+                        [ creepWith "h" 100 0 [ Carry; Carry; Move ] ]
+                        [ "h", { X = 11; Y = 11 } ]
+
+                let sticky = Map.ofList [ "h", taskId (Refill("spawn-1", Energy)) ]
+                let { Intents = intents; Next = next } = decideFrom sticky colony
+
+                Expect.contains
+                    intents
+                    (TransferEnergyToStructure("h", "ext-1", Energy))
+                    "this tick's pour: the nearer by id of the two beside it"
+
+                Expect.equal
+                    next
+                    [ TransferEnergyToStructure("h", "spawn-1", Energy) ]
+                    "the light tick's: the other one beside it"
+            }
+
+            test "no other hungry member beside it: a step toward the next is planned" {
+                let colony =
+                    clusterColony
+                        (0, 50, 50)
+                        [ creepWith "h" 100 0 [ Carry; Carry; Move ] ]
+                        [ "h", { X = 11; Y = 11 } ]
+
+                let room = SpatialInfo.homeName colony.Spatial
+                let sticky = Map.ofList [ "h", taskId (Refill("spawn-1", Energy)) ]
+                let { Next = next; Steps = steps } = decideFrom sticky colony
+
+                Expect.isEmpty next "nothing beside it to pour into"
+
+                match Map.tryFind "h" steps with
+                | Some(first, second) ->
+                    Expect.equal first (RoomPos.at room { X = 11; Y = 11 }) "from where it stands"
+                    Expect.equal second.Y 12 "one tile on toward ext-2"
+                | None -> failtest "a step plan toward ext-2"
+            }
+
+            test "a load spent on this tick's pour plans nothing more" {
+                let colony =
+                    clusterColony
+                        (50, 50, 0)
+                        [ creepWith "h" 50 0 [ Carry; Carry; Move ] ]
+                        [ "h", { X = 11; Y = 11 } ]
+
+                let sticky = Map.ofList [ "h", taskId (Refill("spawn-1", Energy)) ]
+                let { Next = next } = decideFrom sticky colony
+
+                Expect.isEmpty next "an empty store has no next pour"
+            }
+        ]
