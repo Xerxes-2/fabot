@@ -121,6 +121,37 @@ let guardRowTests =
                     "and the lone smallMelee nine raids in ten arrive as hires exactly one"
             }
 
+            test
+                "a level-0 core in an outpost casts one guard, as big as the bank buys; a stronghold's none" {
+                // #487: W15S27's level-0 core held the room for 47,240 ticks. Its
+                // 100,000 hits are a race against the guard's life, so the body is
+                // the bank's, not the one block an empty exchange takes (#375).
+                let colony = guardColony [] []
+
+                let castsAgainst level =
+                    { colony with
+                        InvaderCores =
+                            [
+                                {
+                                    Id = "core-W1N2"
+                                    RoomName = "W1N2"
+                                    Tile = raidTile
+                                    CollapseTick = Some 47_000
+                                    Level = level
+                                }
+                            ]
+                    }
+                    |> decideOn
+                    |> fun result -> guardCasts result.Intents
+
+                Expect.equal
+                    (castsAgainst 0)
+                    [ bodyFor guardPattern colony.Bank.Capacity ]
+                    "a level-0 core: one guard, every block the bank buys"
+
+                Expect.isEmpty (castsAgainst 1) "a stronghold's: none, the stand-down answers it"
+            }
+
             test "a held exit hires no guard and withholds no reserver seat" {
                 // #450: a hold keeps a living guard on the exit a raid left by. With
                 // none alive it is no raid: nothing is cast, and the seat is open.

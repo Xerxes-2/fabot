@@ -288,10 +288,16 @@ module RoomControlInfo =
     /// controller anybody but us holds, and neither cares which of the two it
     /// is (#333). Deliberately not `heldBy` twice over: the rules above derive
     /// **clocks**, which the two holds disagree about, and this one derives a
-    /// **refusal**, which they do not. Three readers (`reservableControllers`,
-    /// `claimTargets`, `Observe.foldRaids` via `RaidState.Holds`) share this
-    /// one predicate, or the record and the rule could disagree about which
-    /// rooms are refused.
+    /// **refusal**, which they do not. `Observe.foldRaids` records it in
+    /// `RaidState.Holds`; what the reserver row reads off it is
+    /// `refusesReserver`'s.
     let heldByOther (control: RoomControlInfo) : ReservationInfo option =
         control.Reservation
         |> Option.filter (fun held -> held.Holder <> ReservationHolder.Ours)
+
+    /// Whether a hold of `heldByOther`'s refuses the reserver row its
+    /// controller (#487): another player's, which is a stand-down of its own.
+    /// The Invader's does not: `attackController` takes a tick per CLAIM part
+    /// off it. One predicate for the vision read (`reservableControllers`) and
+    /// the blind one (`StandDown.HeldOutposts`), or the two could disagree.
+    let refusesReserver (holder: ReservationHolder) : bool = holder = ReservationHolder.Rival

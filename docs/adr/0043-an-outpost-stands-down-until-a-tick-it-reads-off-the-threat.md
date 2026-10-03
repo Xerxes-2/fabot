@@ -1,6 +1,8 @@
 # An outpost stands down until a tick it reads off the threat
 
-> **Status:** amended by 0056, #136, #165, #216 R4, #257, #275, #417
+> **Status:** amended by 0056, #136, #165, #216 R4, #257, #275, #417, #487
+
+> **Amended by #487** on 2026-10-03: only a [[stronghold]]'s core (level 1 and up) opens a stand-down. A level-0 core — 100,000 hits, no tower, no rampart, nothing spawned — is the fight this ADR deferred: live t925,486, the level-0 cores a level-4 stronghold had expanded into stood W15S27 (an outpost) and W17S26 (a harassment room) down for 47,240 ticks. An outpost holding one pools its Guard, the guard row casts the biggest body the bank buys and swings at it (`AttackStructure`), and the reserver takes the Invader's reservation down with `attackController` rather than waiting it out (#333). A stronghold's core is unchanged, ADR 0074 included.
 
 > **Amended by #417** on 2026-09-25: the #257 clause's "a raid the guard row's cap cannot beat (`guardBlocksBeat` at `Engine.guardCap`)" read two guard **bodies** as two **blocks**. A raid is now weighed against the biggest single guard body the bank buys (`Quota.guardBlocksReach`); a raid that body loses is the room to leave.
 

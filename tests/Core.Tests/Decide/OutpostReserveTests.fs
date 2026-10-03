@@ -79,6 +79,35 @@ let reserveTests =
                     "and the bubble carries the Reserve glyph"
             }
 
+            test "a reserver beside a controller the Invader reserves attacks the reservation" {
+                // #487. The engine's `attackController` asks only that the controller
+                // be owned or reserved, and takes a tick per CLAIM part off the
+                // Invader's hold as off anybody's; `reserveController` is refused
+                // until the hold is gone.
+                let actsUnder control =
+                    let colony = reserveColony [ reserver "r1", { X = 10; Y = 44 } ]
+
+                    (decideOn
+                        { colony with
+                            RoomControl = Map.add "W1N2" control colony.RoomControl
+                        })
+                        .Intents
+                    |> List.filter (function
+                        | ReserveController _
+                        | AttackController _ -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (actsUnder (coreReservedRoom 3_000))
+                    [ AttackController("r1", "ctrl-out") ]
+                    "the Invader's hold is attacked"
+
+                Expect.equal
+                    (actsUnder neutralRoom)
+                    [ ReserveController("r1", "ctrl-out") ]
+                    "and the controller it leaves free is reserved, as ever"
+            }
+
             test "a body with no CLAIM part is never matched to Reserve" {
                 // Pairwise against the test above: one body swapped. A generalist
                 // cannot push a reservation up by a tick.
@@ -270,7 +299,8 @@ let reserveTests =
                     "owned, the near controller is no Task and the body crosses to the neutral one"
             }
 
-            test "a controller somebody else reserves is no Task and hires nobody" {
+            test
+                "a controller another player reserves is no Task and hires nobody; the Invader's is worked" {
                 // #333, measured live at W12S27 over t411,226-t411,878: a core collapsed
                 // and its stand-down ended, but the reservation it took outlives it by
                 // `CONTROLLER_RESERVE_MAX`, 4,999 ticks. `reserveController` is refused
@@ -291,14 +321,18 @@ let reserveTests =
                     |> fun colony -> planTasksOn colony noThreats
                     |> reserveTasks
 
-                // The Invader's leftover hold, at the ticks the ticket was filed at.
-                Expect.isEmpty
-                    (castsUnder (coreReservedRoom 4_999))
-                    "the Invader's reservation outliving its core hires no reserver"
+                // The Invader's leftover hold, at the ticks the ticket was filed at:
+                // since #487 a reserver's `attackController` takes it down, so it is
+                // worked rather than waited out.
+                Expect.equal
+                    (castsUnder (coreReservedRoom 4_999) |> List.length)
+                    1
+                    "the Invader's reservation outliving its core hires a reserver"
 
-                Expect.isEmpty
+                Expect.equal
                     (pooledUnder (coreReservedRoom 4_999))
-                    "and its controller is no Reserve, so no other room's reserver is sent to it"
+                    [ "ctrl-W1N2" ]
+                    "and its controller is a Reserve"
 
                 Expect.equal
                     (castsUnder neutralRoom |> List.length)
@@ -363,7 +397,7 @@ let reserveTests =
                 // log, `Observe.standDown` hands it forward, the blind ticks read it.
                 // Driven from the fold because the thing under test is that the two
                 // halves agree about which tick the hold ends.
-                let log =
+                let logOf control =
                     Observe.RaidState.empty
                     // No world roster: one tick folded off an empty log has no `Living`
                     // baseline, so nothing reads as a loss (#191).
@@ -371,13 +405,21 @@ let reserveTests =
                         Set.empty
                         { incomeColony with
                             Time = 100
-                            RoomControl = Map.ofList [ "W1N2", coreReservedRoom 4_999 ]
+                            RoomControl = Map.ofList [ "W1N2", control ]
                         }
+
+                let log = logOf (reservedRoom false 4_999)
 
                 let blindAt t =
                     { reserverColony [ northOutpost true ] (surplusFleet 3) [] with
                         HeldOutposts = (Observe.standDown Tuning.defaults t log).HeldOutposts
                     }
+
+                // The Invader's hold is no refusal since #487: a reserver takes it down.
+                Expect.isEmpty
+                    (Observe.standDown Tuning.defaults 101 (logOf (coreReservedRoom 4_999)))
+                        .HeldOutposts
+                    "the Invader's hold is not recorded against the reserver row"
 
                 Expect.isEmpty
                     (reserverCasts (decideOn (blindAt 101)).Intents)
@@ -536,9 +578,12 @@ let standDownGateTests =
                             InvaderCores =
                                 [
                                     {
+                                        Id = "core-W1N2"
                                         RoomName = "W1N2"
+                                        Tile = { X = 20; Y = 20 }
                                         CollapseTick = Some 900
-                                        Level = 0
+                                        // A stronghold's: a level-0 core stands nothing down (#487).
+                                        Level = 1
                                     }
                                 ]
                         }

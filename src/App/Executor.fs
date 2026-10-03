@@ -94,6 +94,8 @@ let private execute (intent: Intent) : Outcome =
     // `getObjectById` can answer null for it: the shared guard's ActorMissing.
     | ReserveController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.reserveController t)
+    | AttackController(creepName, controllerId) ->
+        withCreepTarget creepName controllerId (fun c t -> c.attackController t)
     // The one act with a precondition Core has no model of: no GCL level left
     // answers ERR_GCL_NOT_ENOUGH, the Task is pooled again next tick, and this
     // can repeat forever with the log line as the only place a human sees it.
@@ -112,6 +114,8 @@ let private execute (intent: Intent) : Outcome =
     // ActorMissing. The heal names one of ours twice, through `Game.creeps`.
     | AttackCreep(creepName, hostileId) ->
         withCreepTarget creepName hostileId (fun c t -> c.attack t)
+    | AttackStructure(creepName, structureId) ->
+        withCreepTarget creepName structureId (fun c t -> c.attack t)
     | RangedAttackCreep(creepName, hostileId) ->
         withCreepTarget creepName hostileId (fun c t -> c.rangedAttack t)
     | HealCreep(creepName, targetName) ->

@@ -127,6 +127,7 @@ let private repeatableActor (intent: Intent) : string option =
     | HarvestSource(creep, _)
     | UpgradeController(creep, _)
     | ReserveController(creep, _)
+    | AttackController(creep, _)
     | BuildSite(creep, _)
     | RepairStructure(creep, _)
     | DismantleStructure(creep, _) -> Some creep
@@ -141,6 +142,8 @@ let private repeatableActor (intent: Intent) : string option =
     | DropEnergy _
     | SignController _
     | AttackCreep _
+    // One-shot (#487), as a swing at a creep is.
+    | AttackStructure _
     | HealCreep _
     | RangedHealCreep _
     | RangedAttackCreep _
@@ -170,6 +173,7 @@ let private fights (intent: Intent) : bool =
     | RepairWithTower _
     | ActivateSafeMode _ -> true
     | AttackCreep _
+    | AttackStructure _
     | RangedAttackCreep _
     | HealCreep _
     | RangedHealCreep _
@@ -184,6 +188,7 @@ let private fights (intent: Intent) : bool =
     | DismantleStructure _
     | UpgradeController _
     | ReserveController _
+    | AttackController _
     | ClaimController _
     | ClaimReactor _
     | PickupPile _

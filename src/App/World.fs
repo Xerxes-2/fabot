@@ -624,12 +624,14 @@ let private seenFacts
             |> Array.filter (fun st -> st.structureType = structureInvaderCore)
             |> Array.map (fun st ->
                 ({
+                    Id = st.id
                     RoomName = room.name
+                    Tile = posOf st.pos
                     CollapseTick = collapseTickOf st
                     // Every core carries a level, so the fallback is
-                    // unreachable, and it reads the wrong direction (safe to
-                    // cross) if it ever fires: the filter above is what the
-                    // rule rests on.
+                    // unreachable, and it reads the wrong direction (no
+                    // stand-down at all) if it ever fires: the filter above is
+                    // what the rule rests on.
                     Level = if isNull (box st.level) then 0 else st.level
                 }
                 : InvaderCoreInfo))

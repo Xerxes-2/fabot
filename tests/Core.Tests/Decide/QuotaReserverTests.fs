@@ -439,14 +439,14 @@ let reserverRowTests =
                     (castWith [ "W1N2", reservedRoom false 4000 ])
                     "the same 4,000 in a rival's name hires nobody at all: the act is refused (#333)"
 
-                // Both holders, because the predicate under this is
-                // `heldByOther` and a `= Rival` version of it would pass
-                // every other assertion in this file while leaving W12S27's
-                // own holder — the NPC Invader, whose core is long gone —
-                // buying a body every 600 ticks.
-                Expect.isEmpty
+                // W12S27's own holder, the NPC Invader whose core is long gone,
+                // bought a body every 600 ticks that `reserveController` was refused
+                // for. Since #487 the body attacks the hold off (`attackController`,
+                // a tick per CLAIM part), so the whole deficit is the body to buy.
+                Expect.equal
                     (castWith [ "W1N2", coreReservedRoom 4000 ])
-                    "and the Invader's hold reads alike: it is the holder the ticket was filed on"
+                    [ nineBlocks ]
+                    "and the Invader's hold hires the whole deficit, to attack it off"
 
                 Expect.equal
                     (castWith [])

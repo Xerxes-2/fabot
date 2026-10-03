@@ -3870,6 +3870,79 @@ let harassViewTests =
                     "the caster is the nearest colony that affords the floor, whoever declared nothing"
             }
 
+            // #487, live t925,486: a level-4 stronghold's level-0 expansion
+            // cores stood W17S26 (harassed by W15S28) and W15S27 (W15S28's
+            // outpost) down for 47,240 ticks.
+            test
+                "a level-0 core stands down neither the harassment room nor the outpost; a stronghold's does" {
+                let coreIn room level : InvaderCoreInfo =
+                    {
+                        Id = $"core-{room}"
+                        RoomName = room
+                        Tile = { X = 20; Y = 20 }
+                        CollapseTick = Some 48_000
+                        Level = level
+                    }
+
+                let worldAt level =
+                    let world = harassWorld (reservedFor enemy) 300
+
+                    { world with
+                        Rooms =
+                            [ harassRoom; outpost ]
+                            |> List.fold
+                                (fun rooms room ->
+                                    rooms
+                                    |> Map.change
+                                        room
+                                        (Option.map (fun (facts: RoomFacts) ->
+                                            { facts with
+                                                InvaderCores = [ coreIn room level ]
+                                            })))
+                                world.Rooms
+                    }
+
+                // The shipped path: the open tick's view folded into the raid log,
+                // and the next tick's view cut under the gate that log answers.
+                let nextTickAt level =
+                    let world = worldAt level
+                    let seen = harassView harassDeclared world mother
+
+                    Expect.isNonEmpty seen.InvaderCores "the premise: the mother sees the cores"
+
+                    let log =
+                        Observe.foldRaids
+                            Observe.capEpisodes
+                            Set.empty
+                            seen
+                            (Planner.outpostFactsOf seen).Declared
+                            Observe.RaidState.empty
+
+                    let gate = Observe.standDown Tuning.defaults (world.Time + 1) log
+                    harassViewUnder gate harassDeclared world mother
+
+                let expansion = nextTickAt 0
+
+                Expect.equal
+                    (expansion.Harass |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "level 0: the mother goes on casting the harassment room"
+
+                Expect.isTrue
+                    (Map.containsKey outpost expansion.Spatial.Rooms)
+                    "and projecting her outpost, so its work is pooled"
+
+                let stronghold = nextTickAt 1
+
+                Expect.isEmpty
+                    stronghold.Harass
+                    "level 1: the harassment room stands down, as before"
+
+                Expect.isFalse
+                    (Map.containsKey outpost stronghold.Spatial.Rooms)
+                    "and so does the outpost"
+            }
+
             test "the tick's casting, decided once, is the caster every colony's view reads" {
                 let harass: Harassment =
                     {

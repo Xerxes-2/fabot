@@ -376,11 +376,19 @@ let rangerBlocksReach (view: ColonyView) : int =
 /// The whole guard blocks one raided room's exchange takes to win: the
 /// smallest count `guardBlocksBeat` answers yes to, the largest body where
 /// none wins. A room the colony is blind in prices at one, since `view.Hostiles`
-/// carries nothing of its raid: enough to go and look.
+/// carries nothing of its raid: enough to go and look. A room holding a
+/// level-0 core takes the biggest body the bank buys (#487): one block's 90 a
+/// tick spends most of a body's life on the core's 100,000 hits.
 let internal guardBlocksFor (view: ColonyView) (room: string) : int =
-    [ 1..guardBlocksMost ]
-    |> List.tryFind (guardBlocksBeat view room)
-    |> Option.defaultValue guardBlocksMost
+    let fight =
+        [ 1..guardBlocksMost ]
+        |> List.tryFind (guardBlocksBeat view room)
+        |> Option.defaultValue guardBlocksMost
+
+    if Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room) then
+        max fight (guardBlocksReach view)
+    else
+        fight
 
 /// The blocks the guard row casts this tick: the worst of the guarded
 /// outposts' answers, one where none is guarded. Every cast carries it, as the

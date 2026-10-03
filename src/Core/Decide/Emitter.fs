@@ -313,6 +313,13 @@ let private unownedController (view: ColonyView) id =
     |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
     |> Option.exists (fun control -> control.Owner = Ownership.Unowned)
 
+/// Whether the Invader reserves a controller, off the same control entry.
+let private invaderHeld (view: ColonyView) id =
+    SpatialInfo.roomOf view.Spatial id
+    |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
+    |> Option.bind (RoomControlInfo.heldBy ReservationHolder.Invader)
+    |> Option.isSome
+
 /// The claim party's walk (#471): for each candidate's controller, the
 /// ticks each loaded holder of its Upgrade still has to walk to reach it.
 let private partyWalksOf (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) =
@@ -399,6 +406,10 @@ let private intentFor
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
+    // The Invader's hold is attacked off before it is reserved over (#487):
+    // `reserveController` is refused on it.
+    | Reserve controllerId when invaderHeld view controllerId ->
+        Some(AttackController(creep.Name, controllerId))
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))
     // Issued on a tick the reactor is not ours and on no other. The engine
@@ -517,12 +528,26 @@ let private guardIntent
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
         |> Option.exists (fun r -> r <= reach)
 
+    // With no creep to hit, a guard swings at a level-0 core beside it (#487).
+    let coreBeside () =
+        if ranged then
+            None
+        else
+            Facts.expansionCores view
+            |> List.tryFind (fun core ->
+                core.RoomName = room
+                && Atlas.creepTile atlas creep.Name
+                   |> Option.bind (fun tile -> RoomPos.range tile (RoomPos.at room core.Tile))
+                   |> Option.exists (fun r -> r <= reach))
+            |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
+
     guardTarget view atlas fighting creep room inReach
     |> Option.map (fun hostile ->
         if ranged then
             RangedAttackCreep(creep.Name, hostile.Id)
         else
             AttackCreep(creep.Name, hostile.Id))
+    |> Option.orElseWith coreBeside
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
 /// part heals itself if it is hurt, else the most-hurt creep of ours beside it,

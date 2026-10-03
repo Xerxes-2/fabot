@@ -9,13 +9,25 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.OutpostFixtures
 
+/// An invader core of this level in a room, at (25,42): `raidedOutpost`'s
+/// field, a tile below its Post, where `beside` is on its ring.
+let private coreIn room level collapse : InvaderCoreInfo =
+    {
+        Id = $"core-{room}"
+        RoomName = room
+        Tile = { X = 25; Y = 42 }
+        CollapseTick = collapse
+        Level = level
+    }
+
 [<Tests>]
 let invaderCoreTests =
     testList
         "the invader core the ColonyView carries"
         [
-            test "a core standing in an outpost moves nothing the colony decides" {
-                // The threat is projected and read by nobody: a core in the projection
+            test "a stronghold's core standing in an outpost moves nothing the colony decides" {
+                // The stand-down is its answer, read a tick later off the raid log
+                // (`Observe.deadlines`): a stronghold's core in the projection
                 // leaves every Task, quota, cast and Verdict where it found them, reach
                 // and flee included, so the comparison is over the whole decision.
                 //
@@ -90,83 +102,74 @@ let invaderCoreTests =
 
                 unchangedWith
                     "a core whose collapse timer is readable"
-                    [
-                        ({
-                            RoomName = "W1N2"
-                            CollapseTick = Some(colony.Time + 64000)
-                            Level = 0
-                        }
-                        : InvaderCoreInfo)
-                    ]
+                    [ coreIn "W1N2" 1 (Some(colony.Time + 64000)) ]
 
-                // A level-0 expansion core: no stronghold under it, so no collapse
-                // timer and no deadline; the case a reader might treat as "no threat".
-                unchangedWith
-                    "a core carrying no deadline at all"
-                    [
-                        ({
-                            RoomName = "W1N2"
-                            CollapseTick = None
-                            Level = 0
-                        }
-                        : InvaderCoreInfo)
-                    ]
+                unchangedWith "a core carrying no deadline at all" [ coreIn "W1N2" 1 None ]
 
                 // And one at home: the list is swept over every room the colony looks
                 // into, and the reflexes that read the spawn room read hostile *creeps*.
+                // A level-0 one too: home is no outpost, and no Guard is pooled for it.
                 unchangedWith
                     "a core standing in the colony's own room"
-                    [
-                        ({
-                            RoomName = "W1N1"
-                            CollapseTick = Some colony.Time
-                            Level = 0
-                        }
-                        : InvaderCoreInfo)
-                    ]
+                    [ coreIn "W1N1" 1 (Some colony.Time); coreIn "W1N1" 0 (Some colony.Time) ]
             }
 
-            test
-                "the whole frontier case — a level-0 core and the reservation it took — decides nothing" {
-                // The shape measured two rooms from W12S27
-                // (docs/research/remote-mining.md 8.4): a level-0 core with no collapse
-                // timer in a room it has reserved. Read against the same room under a
-                // rival's reservation and no core: both price off the neutral rate, so
-                // a decision that differs is a reader of the holder or the core.
-                let withControl control cores =
-                    let colony = postedOutpostColony 19 [ "W1N2", control ]
-                    decideOn { colony with InvaderCores = cores }
+            // #487: live t925,486, W15S27 — W15S28's outpost — stood down for
+            // 47,240 ticks behind a level-0 core: 100,000 hits, no tower, no
+            // rampart, nothing spawned. A guard kills it in ~134 ticks.
+            test "a level-0 core in an outpost pools that room's Guard" {
+                let withCore cores =
+                    { declaredRaid [] with
+                        InvaderCores = cores
+                    }
 
-                let frontier =
-                    withControl
-                        (coreReservedRoom 4900)
-                        [
-                            ({
-                                RoomName = "W1N2"
-                                CollapseTick = None
-                                Level = 0
-                            }
-                            : InvaderCoreInfo)
-                        ]
+                Expect.isSome
+                    (entryFor (Guard "W1N2") (pooledOf (withCore [ coreIn "W1N2" 0 (Some 47_000) ])))
+                    "the outpost holding a level-0 core is a guarded room"
 
-                let rivalHeld = withControl (reservedRoom false 4900) []
+                for label, cores in
+                    [ "no core", []; "a stronghold's core", [ coreIn "W1N2" 1 (Some 47_000) ] ] do
+                    Expect.isNone
+                        (entryFor (Guard "W1N2") (pooledOf (withCore cores)))
+                        $"{label}: no Guard"
+            }
 
-                Expect.isNonEmpty
-                    rivalHeld.Verdicts
-                    "the premise: this colony reaches a decision worth comparing"
+            test "a guard beside a level-0 core swings at it; a guard walking there does not" {
+                let intentsFrom tile =
+                    (decide
+                        ({ declaredRaid [] with
+                            InvaderCores = [ coreIn "W1N2" 0 None ]
+                         }
+                         |> withGuards [ guard "g-1", tile ])
+                        Map.empty
+                        Set.empty
+                        None)
+
+                let inSwing = intentsFrom beside
+                let walking = intentsFrom { X = 28; Y = 48 }
+
+                Expect.isOk
+                    (Fabot.Core.IntentPlan.create inSwing.Intents)
+                    "the guard's turn is executable"
+
+                Expect.contains
+                    inSwing.Intents
+                    (AttackStructure("g-1", "core-W1N2"))
+                    "on the core's ring, the guard swings at it"
+
+                Expect.isFalse
+                    (walking.Intents
+                     |> List.exists (function
+                         | AttackStructure _ -> true
+                         | _ -> false))
+                    "four tiles off, nothing"
 
                 Expect.equal
-                    { frontier with
-                        Memo =
-                            { frontier.Memo with
-                                Walks = rivalHeld.Memo.Walks
-                                SeamWalks = rivalHeld.Memo.SeamWalks
-                                FarFields = rivalHeld.Memo.FarFields
-                                Narrowed = rivalHeld.Memo.Narrowed
-                            }
-                    }
-                    rivalHeld
-                    "a core and the NPC's own reservation decide exactly what a rival's reservation does"
+                    (Map.tryFind "g-1" walking.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the body holds the room's Guard"
+
+                Expect.isNonEmpty (moveIntentsFor "g-1" walking.Intents) "and walks to the core"
             }
         ]
 

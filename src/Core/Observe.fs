@@ -602,11 +602,13 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
 let private deadlines (view: ColonyView) (declared: string list) =
     // The stronghold bit is or-ed over a room's sightings where the clock is
     // maxed: a room seen once with a bunker and once with a raider is a room
-    // with a bunker in it, whichever deadline is longer.
+    // with a bunker in it, whichever deadline is longer. A level-0 core opens
+    // nothing: it only reserves the controller, and a guard kills it (#487).
     (view.InvaderCores
+     |> List.filter InvaderCoreInfo.isStronghold
      |> List.map (fun core ->
          let expiry, basis = deadlineOf view core
-         core.RoomName, (expiry, basis, core.Level >= 1)))
+         core.RoomName, (expiry, basis, true)))
     @ (rivalDeadlines view
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
     @ (raidDeadlines view declared
@@ -742,7 +744,8 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         HeldOutposts =
             state.Holds
             |> Map.toList
-            |> List.filter (fun (_, hold) -> tick < hold.Until)
+            |> List.filter (fun (_, hold) ->
+                tick < hold.Until && RoomControlInfo.refusesReserver hold.Holder)
             |> List.map fst
             |> Set.ofList
         // The standing threat memories, filtered here as well for the same

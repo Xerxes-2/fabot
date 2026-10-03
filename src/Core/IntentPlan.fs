@@ -61,10 +61,13 @@ let private channels =
     function
     | HarvestSource(name, _)
     | AttackCreep(name, _)
+    | AttackStructure(name, _)
     | HealCreep(name, _)
     // In the chain under ranged heal and over repair, and not in the one
     // `rangedAttack` heads.
-    | DismantleStructure(name, _) -> [ name, Exclusive ]
+    | DismantleStructure(name, _)
+    // In the chain under ranged heal and over dismantle.
+    | AttackController(name, _) -> [ name, Exclusive ]
     // In the chain, and each suppresses `rangedAttack` besides (#411); ranged
     // heal is second under `heal` (#409).
     | BuildSite(name, _)

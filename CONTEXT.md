@@ -180,7 +180,7 @@ The repeating [Work; Carry; Move] block worker bodies are built from — the gen
 The row that stands beside the [[buffer]] and spends the surplus into the controller: one Carry and `W = M = floor((capacity − 50) / 150)` pairs, a [[standing body]], hired only while a built controller [[container]] stands and the cast reads back as one, its quota the surplus over one body's lifetime cost rounded down. ADR-0016, ADR-0019, ADR-0037, ADR-0046.
 
 ### Reserver
-The [Claim; Move] row: one per declared [[outpost]] whose controller nobody owns or holds, sized `ceil((5000 − reservation remaining) / 600)` CLAIM parts; one per [[candidate colony]] for the [[claim]]; and one per declared [[errand]] as the [[re-claimer]]. Cast before every other row, and withheld from a room the [[guard]] row still has a gap for. ADR-0006, ADR-0042, ADR-0047, ADR-0057, ADR-0069, ADR-0072.
+The [Claim; Move] row: one per declared [[outpost]] whose controller nobody owns and no other player holds (the Invader's hold it takes down with `attackController`, #487), sized `ceil((5000 − reservation remaining) / 600)` CLAIM parts; one per [[candidate colony]] for the [[claim]]; and one per declared [[errand]] as the [[re-claimer]]. Cast before every other row, and withheld from a room the [[guard]] row still has a gap for. ADR-0006, ADR-0042, ADR-0047, ADR-0057, ADR-0069, ADR-0072.
 
 ### Re-claimer
 The [[reserver]] row's third face: the `[Claim; Move]` body hired one per declared [[errand]], which walks to the sector Reactor and holds the [[reclaim]] Task for the rest of its life, relieved with a 25-tick overlap (`Tuning.ReclaimerOverlap`) on one permanent seat. ADR-0057, ADR-0060, ADR-0069. ☢️
@@ -190,7 +190,7 @@ The fixed `[20 Carry; 10 Move]` body that carries one `Tuning.ReactorLoad` — o
 _Avoid_: hauler, runner, delivery creep
 
 ### Guard
-The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in), and one per child's home its [[mother colony]] defends once the child is `Independent`, and never in an [[errand]] room or a home the mother still raises, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077, ADR-0080. ⚔️
+The `[Tough; Attack×3; Move×5; Heal]` [[body pattern]] cast on contact and never before: one per declared [[outpost]] a [[threat]] stands in (or that the [[raid log]] remembers one in) or a level-0 invader core does — the bank's biggest body, swinging at the core from its ring (#487) — and one per child's home its [[mother colony]] defends once the child is `Independent`, and never in an [[errand]] room or a home the mother still raises, which the [[ranger]] holds, two where the raid's healing outruns one block's damage, sized to win the exchange, and holding the `Guard of roomName` Task on the threats' range-1 ring at Safety priority. Its [[body class]] is Fighter and its quota does not decay. ADR-0003, ADR-0050, ADR-0054, ADR-0056, ADR-0072, ADR-0077, ADR-0080. ⚔️
 _Avoid_: defender, bodyguard, soldier
 
 ### Ranger
@@ -380,7 +380,7 @@ _Avoid_: keeper radius, SK exclusion
 The hard floor on the controller's downgrade timer, half the level's full timer, inside which Upgrade outranks even the feeding tier so the [[safe-mode reflex]] stays fireable. ADR-0007.
 
 ### Stand-down
-An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there — until a tick read off the threat: an invader core's collapse, a rival reservation's end, an armed raid's longest remaining life (in a [[harassment room]], fifty ticks past the squad's last sighting), or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
+An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there — until a tick read off the threat: a [[stronghold]]'s core's collapse (a level-0 core opens none: a guard kills it, #487), a rival reservation's end, an armed raid's longest remaining life (in a [[harassment room]], fifty ticks past the squad's last sighting), or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
 
 ### Stronghold
 An invader core of level 1 or more — towers under ramparts and a garrison — whose room is `StandDown.Impassable` and taken out of every chain until its collapse timer runs out. ADR-0074.

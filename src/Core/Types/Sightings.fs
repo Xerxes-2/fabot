@@ -75,16 +75,19 @@ module HostileInfo =
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
 /// `Hostiles` nor the fire reflex, whose sweep is `FIND_HOSTILE_CREEPS`. It is
-/// the threat an [[outpost]] is stood down from — 100,000 hits, no creeps at
-/// level 0, and it never leaves.
+/// what a [[stronghold]]'s room is stood down from; a level-0 core — 100,000
+/// hits, no creeps, no towers — opens nothing and is a guard's to kill (#487).
 type InvaderCoreInfo =
     {
+        /// The engine's id: what a guard's swing names.
+        Id: string
         /// The room it stands in: the colony works rooms, not tiles.
         RoomName: string
+        /// Where in that room: the tile a guard stands beside.
+        Tile: Pos
         /// The **absolute** tick the core's collapse timer runs out at, or None
-        /// where it carries none — an expanded level-0 core has no stronghold
-        /// to collapse, so the deadline is read off the reservation it took
-        /// (`ReservationHolder.Invader`). The common case on the frontier.
+        /// where it carries none, and the deadline is read off the reservation
+        /// it took (`ReservationHolder.Invader`).
         CollapseTick: int option
         /// The core's level, and what tells a **stronghold** from the level-0
         /// expansion core beside it (#382): a level-1-and-up core is a bunker
@@ -94,6 +97,13 @@ type InvaderCoreInfo =
         /// tell them apart and this can.
         Level: int
     }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module InvaderCoreInfo =
+    /// Whether the core is a [[stronghold]]'s (level 1 and up), which the
+    /// stand-down answers, rather than a level-0 expansion core, which a
+    /// guard does (#487).
+    let isStronghold (core: InvaderCoreInfo) : bool = core.Level >= 1
 
 /// Whose flag a visible sector Reactor carries. Unlike `Ownership`, the rival
 /// case keeps the engine's username: operator attribution, not a decision's

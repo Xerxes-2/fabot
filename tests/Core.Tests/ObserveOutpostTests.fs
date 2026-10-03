@@ -16,16 +16,22 @@ let outpostTests =
             // #382. The two cores of one stronghold carry the **same** collapse
             // timer (live, W15S26's `bunker4` and the level-0 core it expanded into
             // W15S27 were both clocked to t655,973), so the level tells them apart.
-            test "a stronghold's room is shut and impassable; a level-0 core's is only shut" {
+            test "a stronghold's room is shut and impassable; a level-0 core's is neither" {
                 let expiry = 400
 
                 let atLevel level =
                     RaidState.empty |> raidTick 10 (seen [ bunker outpostRoom (Some expiry) level ])
 
+                // #487: live t925,486, five rooms stood down for 47,240 ticks
+                // behind level-0 cores that only reserve the controller.
+                Expect.isEmpty
+                    (standDowns (atLevel 0))
+                    "a level-0 expansion core opens no stand-down: a guard kills it instead"
+
                 Expect.equal
-                    (shutAt 20 (atLevel 0), impassableAt 20 (atLevel 0))
-                    (Set.singleton outpostRoom, Set.empty)
-                    "a level-0 expansion core withholds the work and leaves the walk alone"
+                    (shutAt 20 (atLevel 1), impassableAt 20 (atLevel 1))
+                    (Set.singleton outpostRoom, Set.singleton outpostRoom)
+                    "a level-1 core is a stronghold's, as it was"
 
                 Expect.equal
                     (shutAt 20 (atLevel 4), impassableAt 20 (atLevel 4))
@@ -52,6 +58,35 @@ let outpostTests =
                 Expect.isEmpty
                     (impassableAt (expiry + 1) (atLevel 4))
                     "the core's own timer ends it: the room re-links with no rule of its own"
+            }
+
+            test "a level-0 core stands down no harassment room, outpost or errand room" {
+                // Live t925,486 (#487): W14S26's level-4 stronghold expanded into
+                // W17S26 (harassed), W15S27 (an outpost) and W16S27, all on its
+                // collapse clock, 47,240 ticks out.
+                let harassed = "W17S26"
+                let errandRoom = "W16S27"
+
+                let colony cores =
+                    { seen cores with
+                        HarassCast = Set.singleton harassed
+                    }
+                    |> withDeclaredOutpost outpostRoom
+
+                let rooms = [ harassed; outpostRoom; errandRoom ]
+
+                let atLevel level =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        (colony (rooms |> List.map (fun room -> bunker room (Some 47_250) level)))
+
+                Expect.isEmpty (shutAt 20 (atLevel 0)) "level 0: every room is worked"
+
+                Expect.equal
+                    (shutAt 20 (atLevel 1))
+                    (Set.ofList rooms)
+                    "level 1: every room stands down to the collapse, as before"
             }
 
             test "a raid two guards cannot beat stands the room down to its own life" {
@@ -896,9 +931,9 @@ let holdTests =
                 //
                 // The Invader's leftover hold: no core stands over it, the ring is
                 // clocked off cores, and #165's rival clause does not answer for the
-                // NPC. So the room is mined and only the *reservation* is refused;
-                // written as a stand-down it would have withdrawn the room, which
-                // #333 leaves for a human.
+                // NPC. So the room is mined, and since #487 the reservation is
+                // attacked off rather than refused; written as a stand-down it would
+                // have withdrawn the room, which #333 leaves for a human.
                 //
                 // A rival's identical hold is a clocked stand-down already (#165), so
                 // for that holder the record says *why* a room withheld anyway is
@@ -916,10 +951,9 @@ let holdTests =
 
                 Expect.isEmpty (shutAt 101 invader) "so the gate withholds that room from nothing"
 
-                Expect.equal
+                Expect.isEmpty
                     (heldAt 101 invader)
-                    (Set.singleton outpostRoom)
-                    "what it does narrow is the reservation, on every blind tick of the hold"
+                    "nor the reservation: the reserver attacks it off (#487)"
 
                 Expect.isNonEmpty
                     rival.Outposts
@@ -946,7 +980,7 @@ let holdTests =
                     RaidState.empty
                     |> raidTick
                         100
-                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Rival 4000))
 
                 Expect.equal
                     (heldAt 4099 taken)

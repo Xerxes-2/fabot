@@ -311,6 +311,9 @@ type ICreep =
     /// Push a neutral controller's reservation up by one tick per CLAIM part.
     /// Range 1; refused on a controller anybody owns.
     abstract reserveController: target: obj -> int
+    /// Take one tick per CLAIM part off somebody else's reservation (the
+    /// Invader's included). Range 1.
+    abstract attackController: target: obj -> int
     /// Take a neutral controller's room. Range 1, one CLAIM part, and
     /// ERR_GCL_NOT_ENOUGH while every GCL level is already spent.
     abstract claimController: target: obj -> int
@@ -324,7 +327,7 @@ type ICreep =
     abstract pickup: target: obj -> int
     /// Put the whole of one resource down on the body's own tile.
     abstract drop: resource: string -> int
-    /// Hit a creep at range 1 for `ATTACK_POWER` per ATTACK part.
+    /// Hit a creep or a structure at range 1 for `ATTACK_POWER` per ATTACK part.
     abstract attack: target: obj -> int
     /// Restore `HEAL_POWER` per HEAL part to a creep of ours at range 1,
     /// itself included. A different act from `attack` in the engine, so a body

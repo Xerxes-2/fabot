@@ -311,6 +311,11 @@ let internal residentRooms (view: ColonyView) : Set<string> =
 let internal rangerRooms (view: ColonyView) : Set<string> =
     Set.union (residentRooms view) (harassRooms view)
 
+/// The level-0 invader cores this colony sees (#487): each is a guard's to
+/// kill, where a stronghold's is the stand-down's.
+let internal expansionCores (view: ColonyView) : InvaderCoreInfo list =
+    view.InvaderCores |> List.filter (InvaderCoreInfo.isStronghold >> not)
+
 /// Whether two tiles stand within `reach` of each other; never across rooms.
 let private within (reach: int) (a: RoomPos) (b: RoomPos) =
     RoomPos.range a b |> Option.exists (fun r -> r <= reach)

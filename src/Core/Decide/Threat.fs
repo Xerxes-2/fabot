@@ -542,10 +542,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             else
                 Some(room, RoomPos.setAt room ground))
 
+    // A level-0 core's ring (#487), the tiles a guard swings at it from, in a
+    // room no Threat, held exit or declared ground answers for first: the
+    // raid is fought before the core.
+    let cores =
+        Facts.expansionCores view
+        |> List.filter (fun core ->
+            not (
+                Map.containsKey core.RoomName armed.Ring
+                || Set.contains core.RoomName resident
+                || Map.containsKey core.RoomName harassRing
+                || List.exists (fun (room, _) -> room = core.RoomName) holds
+            ))
+        |> List.map (fun core -> ringAround core.RoomName core.Tile)
+
     { armed with
         Ring =
-            (armed.Ring, holds)
-            ||> List.fold (fun ring (room, ground) -> Map.add room ground ring)
+            (armed.Ring, holds @ cores)
+            ||> List.fold (fun ring (room, ground) ->
+                Map.change
+                    room
+                    (fun prior -> Some(Set.union ground (Option.defaultValue Set.empty prior)))
+                    ring)
         ResidentRing = residentRing
         HarassRing = harassRing
         Kite = kite

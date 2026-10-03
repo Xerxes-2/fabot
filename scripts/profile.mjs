@@ -1267,6 +1267,8 @@ function stubCreep({ name, pos, parts, used, ticksToLive = CREEP_LIFE_TIME }) {
     // reaches for takes the whole run down on the tick that row is first
     // matched — which is how a stub answers "this row does not exist" (#163).
     reserveController: ok,
+    // Its twin under the Invader's hold (#487).
+    attackController: ok,
     // The claim verb (ADR 0047): a **candidate colony** is a declared home
     // this colony does not own yet, and the creep sent to take it calls
     // this. Here for the reason `reserveController` above is, and it is the

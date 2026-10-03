@@ -38,6 +38,11 @@ type Intent =
     /// The reserve act: a CLAIM body standing beside a neutral controller
     /// pushes its reservation up by one tick per CLAIM part. Range 1.
     | ReserveController of creepName: string * controllerId: string
+    /// The un-reserve act (#487): a CLAIM body beside a controller somebody
+    /// else reserves takes one tick per CLAIM part off that reservation. Range
+    /// 1, and the engine's `attackController`, which checks only that the
+    /// controller is owned or reserved — the Invader's reservation included.
+    | AttackController of creepName: string * controllerId: string
     /// The claim act: a CLAIM body standing beside a neutral controller takes
     /// the room for this player. Range 1.
     | ClaimController of creepName: string * controllerId: string
@@ -67,6 +72,9 @@ type Intent =
     /// names a creep this colony does not own — by id, as the fire reflex's
     /// target is.
     | AttackCreep of creepName: string * hostileId: string
+    /// The same swing at a structure (#487): a level-0 invader core, which
+    /// the engine's `attack` takes as it takes a creep.
+    | AttackStructure of creepName: string * structureId: string
     /// The heal act: a body with HEAL parts restores `Engine.healPower` a part
     /// to a creep of ours within range 1, itself included. Heal suppresses
     /// attack in the engine, so it is emitted only with no melee target in

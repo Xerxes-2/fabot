@@ -219,18 +219,21 @@ let raiderIn room i body : HostileInfo =
         TicksToLive = Engine.creepLifetime
     }
 
-/// An invader core standing in a room, with or without a collapse timer to
-/// read a deadline off. A level-0 core — the measured case on this
-/// colony's frontier — carries none.
+/// A stronghold's invader core standing in a room, with or without a
+/// collapse timer to read a deadline off: level 1, the least core that
+/// stands a room down (#487).
 let core room collapse : InvaderCoreInfo =
     {
+        Id = $"core-{room}"
         RoomName = room
+        Tile = { X = 20; Y = 20 }
         CollapseTick = collapse
-        Level = 0
+        Level = 1
     }
 
-/// The same core as a stronghold: level 1 or more, which is to say towers
-/// under million-hit ramparts and a garrison.
+/// The same core at a level of its own: 0 is the expansion core a stronghold
+/// plants next door, 1 and up a bunker of towers under million-hit ramparts
+/// and a garrison.
 let bunker room collapse level : InvaderCoreInfo =
     { core room collapse with
         Level = level

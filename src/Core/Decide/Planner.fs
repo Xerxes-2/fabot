@@ -203,9 +203,11 @@ let private outpostControllers (view: ColonyView) : string list =
         && not (SpatialInfo.roomOf view.Spatial id |> Option.exists (roomHasOwner view)))
 
 /// Those of them this colony may actually hold a reserve on this tick: the ones
-/// nobody else's CLAIM parts are holding (#333). The engine refuses
+/// no other player's CLAIM parts are holding (#333). The engine refuses
 /// `reserveController` on a controller anybody but us reserves, so a body hired
-/// for such a room stands adjacent and is refused for its whole 600-tick life.
+/// for such a room stands adjacent and is refused for its whole 600-tick life;
+/// under the Invader's hold it attacks the hold instead (#487,
+/// `RoomControlInfo.refusesReserver`).
 /// One read for the row and the pool, so a reserver bought for the colony's
 /// *other* outpost cannot be handed this controller by travel cost.
 ///
@@ -229,7 +231,9 @@ let private reservableControllersOf (view: ColonyView) (controllers: string list
         | None -> true
         | Some room ->
             match Map.tryFind room view.RoomControl with
-            | Some control -> RoomControlInfo.heldByOther control |> Option.isNone
+            | Some control ->
+                RoomControlInfo.heldByOther control
+                |> Option.forall (fun held -> not (RoomControlInfo.refusesReserver held.Holder))
             | None -> not (Set.contains room view.HeldOutposts))
 
 /// The declared outposts this colony works this tick — the rooms the guard row
@@ -294,6 +298,16 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
             || (Set.contains room view.ThreatenedOutposts
                 && not (Map.containsKey room view.RoomControl)))
 
+/// The declared outposts a level-0 invader core stands in (#487): it holds the
+/// controller against the reserver for as long as it stands, and a guard
+/// kills it. Vision alone: a core never moves, so the room's own bodies see it.
+let private coredOutpostsOf (view: ColonyView) (declared: string list) : string list =
+    match Facts.expansionCores view with
+    | [] -> []
+    | cores ->
+        declared
+        |> List.filter (fun room -> cores |> List.exists (fun core -> core.RoomName = room))
+
 /// ADR-0077
 /// The errand rooms the ranger row keeps a body in: every one this colony works
 /// this tick, raid or none — the ranger stands on the Reactor's ring and meets
@@ -333,7 +347,7 @@ type OutpostFacts =
         /// The rooms of those controllers, which is what the reserver row
         /// hires per — one body per room the pool offers a controller in.
         ReservableRooms: string list
-        /// The declared outposts a threat stands in, the errand rooms the
+        /// The declared outposts a threat or a level-0 core (#487) stands in, the errand rooms the
         /// guard row keeps a body in (#414), the children's homes this
         /// colony raises (#447) or defends (#428), and the harassment rooms it
         /// casts (#432). Each room once: a raised home that is beaten is one
@@ -366,6 +380,7 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         ReservableRooms = reservableOutpostsOf view reservable
         Guarded =
             guardedOutpostsOf view declared
+            @ coredOutpostsOf view declared
             @ guardedErrandsOf fuelled
             // Raid or none, as an errand room is kept.
             @ (Facts.raisedHomes view |> Set.toList)
