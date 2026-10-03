@@ -785,6 +785,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
             ]
         Sources = capture.Sources |> List.map (fun (id, _) -> { Id = id; TicksToRestock = 0 })
         BorrowedSources = []
+        AidRooms = []
         Controller =
             Some
                 {

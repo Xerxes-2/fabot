@@ -402,6 +402,25 @@ let private intentFor
                 match Facts.deliveryLoad view atlas with
                 | 0 -> None
                 | load -> Some load
+            // A terminal's energy above the consignment's fee reserve and no
+            // more: the aid's arrivals, never the fee its Refill would put back.
+            elif
+                resource = Energy
+                && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Terminal)
+            then
+                let reserve =
+                    if Option.isSome view.Consignee then
+                        view.Tuning.TerminalEnergy
+                    else
+                        0
+
+                Some(
+                    max
+                        0
+                        (min
+                            creep.FreeCapacity
+                            (SpatialInfo.storedIn view.Spatial storeId - reserve))
+                )
             else
                 None
 

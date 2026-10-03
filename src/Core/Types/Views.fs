@@ -87,6 +87,10 @@ type ColonyView =
         /// nursery: dug by its pioneers standing there, and out of every
         /// quota, which `Sources` feeds and the child's own rows count (#192).
         BorrowedSources: SourceInfo list
+        /// Every other colony home with a terminal whose Storage holds under
+        /// `Tuning.AidNeedFloor` energy, the emptiest first: where this
+        /// colony's terminal sends while its own Storage can spare it.
+        AidRooms: string list
         /// This colony's own controller. Never a child's, which reaches the
         /// pool as a target in a layer she projects.
         Controller: ControllerInfo option
@@ -979,6 +983,27 @@ module ColonyView =
             // with the declared outpost rocks laid in beside them.
             Sources = sourcesWhere (raised >> not) |> Outpost.pooledSources scanned outposts
             BorrowedSources = sourcesWhere raised
+            AidRooms =
+                colonies
+                |> List.map (fun other -> other.Home)
+                |> List.filter ((<>) home)
+                |> List.choose (fun other ->
+                    let facts = World.roomOf world other
+
+                    let ids kind =
+                        SpatialInfo.idsOfKindIn facts.TargetKinds (Structure kind)
+
+                    match ids BuiltKind.Terminal, ids BuiltKind.Storage with
+                    | _ :: _, storage :: _ ->
+                        let energy = Map.tryFind storage facts.Stores |> Option.defaultValue 0
+
+                        if energy < tuning.AidNeedFloor then
+                            Some(energy, other)
+                        else
+                            None
+                    | _ -> None)
+                |> List.sort
+                |> List.map snd
             Controller = homeFacts.Controller
             RoomControl = control
             // The gate's third and fourth sets, verbatim (#333, #366). Not

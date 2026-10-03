@@ -814,14 +814,41 @@ let planTasks
         | None -> []
         | Some _ ->
             terminals
-            |> List.collect (fun id ->
-                [
-                    if SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity then
-                        Refill(id, Thorium)
+            |> List.filter (fun id ->
+                SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity)
+            |> List.map (fun id -> Refill(id, Thorium))
 
-                    if stored id < view.Tuning.TerminalEnergy then
-                        Refill(id, Energy)
-                ])
+    // Energy aid by terminal (user, 2026-10-04: W13S28 held 134k while three
+    // colonies stood at 0). A colony whose Storage can spare it stocks its
+    // terminal for a send (`planAid`); one under the need line draws what
+    // arrives, down to the fee reserve its consignment keeps.
+    let banked = storages |> List.sumBy stored
+
+    let donates =
+        banked >= view.Tuning.AidDonorFloor && not (List.isEmpty view.AidRooms)
+
+    let feeReserve =
+        if Option.isSome view.Consignee then
+            view.Tuning.TerminalEnergy
+        else
+            0
+
+    // One energy Refill per terminal, to the larger of the two stocks it is
+    // kept at: the consignment's fee and the aid's load.
+    let terminalEnergyRefills =
+        let target = max feeReserve (if donates then view.Tuning.AidTerminalEnergy else 0)
+
+        terminals
+        |> List.filter (fun id -> stored id < target)
+        |> List.map (fun id -> Refill(id, Energy))
+
+    let aidWithdraws =
+        if not (List.isEmpty storages) && banked < view.Tuning.AidNeedFloor then
+            terminals
+            |> List.filter (fun id -> stored id > feeReserve)
+            |> List.map (fun id -> Withdraw(id, Energy))
+        else
+            []
 
     // Inbound, at the far end: ore that arrived by `send` sits in the terminal,
     // and the courier's draw reads the *Storage*, so it has to be walked across
@@ -891,6 +918,7 @@ let planTasks
             List.isEmpty refills
             && List.isEmpty containerRefills
             && List.isEmpty ferryRefills
+            && List.isEmpty terminalEnergyRefills
         then
             []
         else
@@ -907,6 +935,8 @@ let planTasks
     @ consignWithdraws
     @ arrivalWithdraws
     @ consignRefills
+    @ terminalEnergyRefills
+    @ aidWithdraws
     // Behind the sources' own, which is pool order and so the last rung of the
     // Matcher's ladder: the two never tie for a body anyway, the deposit's
     // Harvest reaching only a body with no Carry at all.

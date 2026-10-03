@@ -480,6 +480,16 @@ type Tuning =
         /// energy a thousand units over three rooms, so 4,000 ships the whole
         /// 36,484 T banked in the two shipping colonies with room to spare.
         TerminalEnergy: int
+        /// **Energy aid** by terminal: a colony whose Storage holds this much
+        /// energy or more sends to the colonies under `AidNeedFloor`. Energy,
+        /// so the same at every stage that has a Storage and a terminal.
+        AidDonorFloor: int
+        /// The Storage energy under which a colony with a terminal is sent
+        /// aid, and draws the arrivals out of its terminal.
+        AidNeedFloor: int
+        /// The energy a donor keeps its terminal stocked with while it gives:
+        /// the load and the fee of one send.
+        AidTerminalEnergy: int
         /// How many of a generalist's 1,500 ticks the worker row's backlog term
         /// assumes it spends **building** (#364). Not the lifetime, which made
         /// the term dead code. Measured live at W13S28 on 2026-09-17 over the
@@ -685,6 +695,11 @@ module Tuning =
             HarassBlocks = 3
             HarassClearTicks = 50
             TerminalEnergy = 4_000
+            // User, 2026-10-04: W13S28 held 134k while three colonies stood at 0.
+            AidDonorFloor = 50_000
+            AidNeedFloor = 10_000
+            // A 10,000 send plus its fee over the shard's few-room ranges.
+            AidTerminalEnergy = 12_000
             BuildTicksPerLife = 300
             DeliveryInterval = 636
             ReclaimerOverlap = 25

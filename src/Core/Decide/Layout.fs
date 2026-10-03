@@ -200,6 +200,58 @@ let internal planConsignment (view: ColonyView) : Intent list =
         |> List.choose (fst >> ship)
     | _ -> []
 
+/// Energy aid by terminal (user, 2026-10-04): a colony whose Storage holds
+/// `Tuning.AidDonorFloor` or more ships its terminal's energy above the
+/// consignment's fee reserve to the emptiest colony in `ColonyView.AidRooms`,
+/// the send's own fee paid out of the same energy. A terminal already
+/// shipping this tick (`sending`) is skipped: one send a terminal a tick.
+let internal planAid (view: ColonyView) (sending: Set<string>) : Intent list =
+    let banked =
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Storage)
+        |> List.sumBy (SpatialInfo.storedIn view.Spatial)
+
+    match view.AidRooms, view.Spatial.RoomName with
+    | destination :: _, Some home when banked >= view.Tuning.AidDonorFloor ->
+        let reserve =
+            if Option.isSome view.Consignee then
+                view.Tuning.TerminalEnergy
+            else
+                0
+
+        // Chebyshev, the engine's metric for the fee (`planConsignment`).
+        let range =
+            RoomName.offsetOf home destination
+            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+        let ship terminalId =
+            let spare = SpatialInfo.storedIn view.Spatial terminalId - reserve
+
+            match range with
+            | Some range when spare >= Engine.terminalMinSend ->
+                // The load and its fee out of the one spare: the fee is linear
+                // in the amount, so one scaling and a step back cover it.
+                let fits amount =
+                    amount + Engine.sendFee range amount <= spare
+
+                let amount =
+                    let scaled =
+                        float spare / (1.0 + float (Engine.sendFee range 1000) / 1000.0)
+                        |> floor
+                        |> int
+
+                    if fits scaled then scaled else scaled - 1
+
+                if amount >= Engine.terminalMinSend && fits amount then
+                    Some(SendFromTerminal(terminalId, Energy, amount, destination))
+                else
+                    None
+            | _ -> None
+
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Terminal)
+        |> List.filter (fun id -> not (Set.contains id sending))
+        |> List.choose ship
+    | _ -> []
+
 /// A tower's energy this tick; one the projection holds no store for is read
 /// as empty.
 let private towerEnergy (view: ColonyView) (towerId: string) =

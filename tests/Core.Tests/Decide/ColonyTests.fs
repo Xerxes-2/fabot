@@ -3732,3 +3732,72 @@ let unbufferedChildMatchTests =
                     $"%A{mine}"
             }
         ]
+
+/// `mineHaulColony` at W1N1 with its Storage "sto-1" holding `banked`
+/// energy, a terminal "term-1" holding `terminal`, no consignee, and
+/// `aidRooms` the colonies under the aid line.
+let private aidColony banked terminal aidRooms =
+    let home = named "W1N1" mineHaulColony
+
+    { home with
+        Consignee = None
+        AidRooms = aidRooms
+        Spatial =
+            { home.Spatial with
+                Stores = home.Spatial.Stores |> Map.add "sto-1" banked |> Map.add "term-1" terminal
+            }
+            |> withTargets [ "term-1", { X = 15; Y = 10 }, Structure BuiltKind.Terminal ]
+    }
+
+[<Tests>]
+let energyAidTests =
+    testList
+        "energy aid by terminal"
+        [
+            test "a colony over the donor line ships its terminal's energy to the emptiest colony" {
+                // User, 2026-10-04: W13S28 held 134k while three colonies stood at 0.
+                match sends (decideOn (aidColony 60_000 12_000 [ "W1N4"; "W1N3" ])).Intents with
+                | [ ("term-1", Energy, amount, "W1N4") ] ->
+                    Expect.isLessThanOrEqual
+                        (amount + Engine.sendFee 3 amount)
+                        12_000
+                        "the load and its fee out of the terminal's energy"
+
+                    Expect.isGreaterThan amount 10_000 "and nearly all of it"
+                | other -> failtest $"one energy send to W1N4, got %A{other}"
+
+                Expect.isEmpty
+                    (sends (decideOn (aidColony 40_000 12_000 [ "W1N4" ])).Intents)
+                    "under the donor line: nothing leaves"
+
+                Expect.isEmpty
+                    (sends (decideOn (aidColony 60_000 12_000 [])).Intents)
+                    "nobody in need: nothing leaves"
+            }
+
+            test "a donor stocks its terminal for the send; a colony that is not giving does not" {
+                Expect.contains
+                    (planTasksOn (aidColony 60_000 5_000 [ "W1N4" ]) noThreats)
+                    (Refill("term-1", Energy))
+                    "the donor's terminal is a sink up to the aid's load"
+
+                Expect.isFalse
+                    (List.contains
+                        (Refill("term-1", Energy))
+                        (planTasksOn (aidColony 40_000 5_000 [ "W1N4" ]) noThreats))
+                    "under the donor line the terminal is no sink"
+            }
+
+            test "a colony under the need line draws the arrivals out of its terminal" {
+                Expect.contains
+                    (planTasksOn (aidColony 5_000 8_000 []) noThreats)
+                    (Withdraw("term-1", Energy))
+                    "under the need line: the terminal is an intake"
+
+                Expect.isFalse
+                    (List.contains
+                        (Withdraw("term-1", Energy))
+                        (planTasksOn (aidColony 20_000 8_000 []) noThreats))
+                    "over it: the terminal keeps what it holds"
+            }
+        ]

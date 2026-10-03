@@ -17,6 +17,7 @@ let snapshotWith creeps spatial =
         Refillables = []
         Sources = []
         BorrowedSources = []
+        AidRooms = []
         Controller = None
         // Everything below the projection and the creeps is empty: the
         // Atlas reads geometry and nothing else. An invader core reaches
