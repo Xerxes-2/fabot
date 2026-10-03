@@ -703,12 +703,14 @@ let private actionIntents
     // as a guard and a ranger do.
     | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
     | Fight room -> guardIntent view atlas fighting creep room |> Option.toList
-    // A launched sapper takes its target down from beside it; a medic's act
-    // is the heal reflex's.
+    // A launched sapper or probe takes its target down from beside it; a
+    // medic's act is the heal reflex's.
     | Assault room ->
         match Map.tryFind room threats.Assault with
         | Some ground when
-            ground.Launched && Threats.assaultRoleOf threats room creep.Name = Some Sapper
+            ground.Launched
+            && Threats.assaultRoleOf threats room creep.Name
+               |> Option.exists SquadRole.dismantles
             ->
             ground.Target
             |> Option.filter (fun (_, tile) ->

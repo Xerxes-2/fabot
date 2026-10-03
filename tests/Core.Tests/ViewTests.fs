@@ -5236,6 +5236,7 @@ let private assaultDeclared (mode: AssaultMode) (active: bool) : Colony list =
                             Breach = [ { X = 10; Y = 20 } ]
                             Squad = Assault.breachers
                             Mode = mode
+                            Entry = None
                             Active = active
                         }
                     ]
@@ -5266,11 +5267,41 @@ let assaultViewTests =
     testList
         "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
         [
-            test "no declared assault is switched on: a human does that in a commit" {
-                for colony in Colony.declared do
-                    Expect.isEmpty
-                        (Assault.worked colony.Assaults)
-                        $"{colony.Home}: an assault runs only once the user switches it on"
+            test
+                "the one declared assault switched on is W18S26's probe (#493): the user switched it on" {
+                let worked =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        Assault.worked colony.Assaults
+                        |> List.map (fun assault -> colony.Home, assault))
+
+                Expect.equal worked [ "W17S29", Assault.w18s26 ] "exactly one, cast from W17S29"
+
+                Expect.equal
+                    (Assault.w18s26.RoomName, Assault.w18s26.Squad, Assault.w18s26.Mode)
+                    ("W18S26", Assault.probe, Provoke)
+                    "a probe's Provoke on W18S26"
+            }
+
+            test "W17S24's Strike is declared, and off until the user switches it on" {
+                let declared =
+                    Colony.declared
+                    |> List.collect (fun colony -> colony.Assaults)
+                    |> List.filter (fun assault -> assault.RoomName = "W17S24")
+
+                Expect.equal declared [ Assault.w17s24 ] "declared once"
+
+                Expect.equal
+                    (Assault.w17s24.Mode, Assault.w17s24.Squad, Assault.w17s24.Active)
+                    (Strike, Assault.breachers, false)
+                    "the default squad's Strike, off"
+
+                Expect.equal
+                    Assault.w17s24.Breach
+                    [ { X = 2; Y = 20 } ]
+                    "its west line, x2 y18-21, opened at y20"
+
+                Expect.equal Assault.w17s24.Entry (Some "W18S24") "walked in from the west"
             }
 
             test "an assault switched off projects nothing and runs nothing" {

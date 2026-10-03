@@ -30,6 +30,9 @@ type SquadRole =
     | Brawler
     /// An [[assault]]'s front: WORK that takes a rampart down (#490).
     | Sapper
+    /// An [[assault]]'s cheap lone sapper (#493): dismantles until the room
+    /// shows safe mode or it dies, never falling back on its hits.
+    | Probe
     /// The healer walking behind it.
     | Medic
     /// The ranged member.
@@ -39,7 +42,10 @@ type SquadRole =
 module SquadRole =
     /// Every role, in the order a squad casts them: the fronts the medic
     /// walks behind first.
-    let all = [ Brawler; Sapper; Medic; Kiter ]
+    let all = [ Brawler; Sapper; Probe; Medic; Kiter ]
+
+    /// Whether the role takes structures down: an assault's front.
+    let dismantles (role: SquadRole) = role = Sapper || role = Probe
 
     /// How many of these slots are this role's.
     let slots (role: SquadRole) (roles: SquadRole list) =

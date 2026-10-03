@@ -71,6 +71,7 @@ const emptyRaids = {
   holds: {},
   threatened: {},
   fought: {},
+  probes: {},
   living: [],
   placed: {},
   hits: {},
@@ -86,6 +87,11 @@ const episode = {
 };
 
 const outpost = { room: "W1N2", opened: 10, last: 20, expiry: 500, basis: "collapse-timer" };
+
+// Two probe logs (#493): one out of its room alive once safe mode showed, one
+// still dismantling, its last decided dismantle on `hitAt`.
+const probeOut = { probe: "probe-1", first: 900, hits: 1, expires: 2300, fate: "out", ended: 902, safeMode: 901 };
+const probeProbing = { probe: "probe-2", first: 950, hits: 4, expires: 2400, fate: "probing", hitAt: 953 };
 
 for (const [name, leaf] of [
   ["absent", undefined],
@@ -109,6 +115,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     holds: { W1N4: { holder: "invader", until: 900 } },
     threatened: { W1N5: { until: 800 } },
     fought: { W1N6: { seen: 700, squad: "duo" }, W1N7: { seen: 690 } },
+    probes: { W18S26: probeOut, W17S24: probeProbing },
     living: ["w1", "w2"],
     placed: { w1: { room: "W1N2", x: 8, y: 49 } },
     hits: { "struct-1": 3000 },
@@ -150,6 +157,25 @@ wire("raids: a fought room with no squad, or one that is no name, reads unlatche
     stable(written.fought),
     stable({ W1N6: { seen: 700 }, W1N7: { seen: 690 }, W1N8: { seen: 680, squad: "duo" } }),
   );
+});
+
+wire("raids: a probe log (#493) off its shape costs its own room, and a legacy leaf reads none", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    probes: {
+      W18S26: probeOut,
+      W17S24: { ...probeOut, probe: 3 },
+      W17S25: { ...probeOut, fate: "fled" },
+      W17S26: { ...probeOut, ended: undefined },
+      W17S27: { ...probeOut, safeMode: "soon" },
+      W17S28: null,
+    },
+  });
+
+  assert.equal(stable(written.probes), stable({ W18S26: probeOut }));
+
+  const { probes, ...legacy } = emptyRaids;
+  assert.equal(stable((await raidsThrough(legacy)).probes), stable({}));
 });
 
 wire("raids: a stand-down with no expiry costs its row and no other", async () => {

@@ -345,6 +345,38 @@ type ThreatLatch =
         Until: int
     }
 
+/// How an [[assault]]'s probe ended (#493).
+type ProbeFate =
+    /// Still in it: no safe mode yet, or walking out of one.
+    | Probing
+    /// Out of the room alive once safe mode was up, on this tick.
+    | Out of tick: int
+    /// Gone on this tick with life left: killed.
+    | Died of tick: int
+    /// Gone on this tick with its life run out.
+    | Expired of tick: int
+
+/// What one probe learnt of a rival room's safe-mode trigger (#493): from
+/// its first dismantle there to its fate.
+type ProbeLog =
+    {
+        /// The probe's name.
+        Probe: string
+        /// The tick of its first dismantle in the room.
+        FirstHit: int
+        /// Its dismantles before safe mode was seen, a light tick's replay of
+        /// one counted.
+        Hits: int
+        /// The tick of the last decided tick it dismantled on, while it still
+        /// does: the light ticks after it replay that dismantle.
+        HitAt: int option
+        /// The tick safe mode was first seen in the room.
+        SafeModeAt: int option
+        Fate: ProbeFate
+        /// The tick its life runs out on, as last seen.
+        Expires: int
+    }
+
 /// The whole persisted Raid log.
 type RaidState =
     {
@@ -385,6 +417,10 @@ type RaidState =
         /// Fight pooled through the ticks its raid steps out, and then bars a
         /// second cast. Bounded by the resident rooms.
         Fought: Map<string, FightLatch>
+        /// Each [[assault]] room's last probe (`foldProbes`, #493): what
+        /// `observe.mjs raids` prints of what raised its safe mode. Bounded
+        /// by the declared assaults.
+        Probes: Map<string, ProbeLog>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -416,6 +452,7 @@ module RaidState =
             Holds = Map.empty
             Threatened = Map.empty
             Fought = Map.empty
+            Probes = Map.empty
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -1031,6 +1068,8 @@ let foldRaids
                 else
                     Map.remove room rooms)
         Fought = foldFights view prior.Fought
+        // `foldProbes`', which reads the tick's intents as well.
+        Probes = prior.Probes
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged
@@ -1041,6 +1080,102 @@ let foldRaids
             else
                 Map.empty
     }
+
+/// The probe log's fold (#493), off this tick's view and the intents decided
+/// on it: a probe's first dismantle on one of its assault room's targets
+/// opens the room's log; each decided tick after counts its dismantles, and
+/// the light ticks' replays of one, until safe mode is seen in the room, and
+/// settles its fate — out of the room alive once safe mode is up, or gone,
+/// killed or of age. A settled log stands until the next probe's first
+/// dismantle there. Built by `Fresh`: the map is carried to the next tick.
+let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : RaidState =
+    let alive = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+
+    let expiresOf (creep: CreepInfo) = view.Time + creep.TicksToLive
+
+    let foldRoom (probes: Map<string, ProbeLog>) (facts: AssaultFacts) =
+        let room = facts.Assault.RoomName
+
+        let targets = facts.Targets |> Option.defaultValue [] |> List.map fst |> Set.ofList
+
+        // The probes that dismantled one of the room's targets this tick.
+        let hitters =
+            intents
+            |> List.choose (function
+                | DismantleStructure(name, id) when
+                    Set.contains id targets && squadRoleByName name = Some Probe
+                    ->
+                    Some name
+                | _ -> None)
+
+        match Map.tryFind room probes with
+        | Some({ Fate = Probing } as log) ->
+            let next =
+                match Map.tryFind log.Probe alive with
+                | None ->
+                    { log with
+                        HitAt = None
+                        Fate =
+                            if view.Time < log.Expires then
+                                Died view.Time
+                            else
+                                Expired view.Time
+                    }
+                | Some creep ->
+                    let safeModeAt =
+                        log.SafeModeAt
+                        |> Option.orElse (if facts.SafeMode then Some view.Time else None)
+
+                    let hit = Option.isNone safeModeAt && List.contains log.Probe hitters
+
+                    // Every tick since the last decided one was light, and
+                    // replayed that tick's dismantle.
+                    let replayed =
+                        log.HitAt
+                        |> Option.map (fun at -> view.Time - at - 1)
+                        |> Option.defaultValue 0
+
+                    let out =
+                        Option.isSome safeModeAt
+                        && SpatialInfo.creepPlacementOf view.Spatial log.Probe
+                           |> Option.map (fun tile -> tile.Room)
+                           <> Some room
+
+                    { log with
+                        Hits = log.Hits + replayed + (if hit then 1 else 0)
+                        HitAt = if hit then Some view.Time else None
+                        SafeModeAt = safeModeAt
+                        Fate = if out then Out view.Time else Probing
+                        Expires = expiresOf creep
+                    }
+
+            Map.add room next probes
+        | _ ->
+            match hitters with
+            | name :: _ ->
+                Map.add
+                    room
+                    {
+                        Probe = name
+                        FirstHit = view.Time
+                        Hits = 1
+                        HitAt = Some view.Time
+                        SafeModeAt = None
+                        Fate = Probing
+                        Expires =
+                            Map.tryFind name alive
+                            |> Option.map expiresOf
+                            |> Option.defaultValue view.Time
+                    }
+                    probes
+            | [] -> probes
+
+    match view.Assaults with
+    | [] -> state
+    | assaults ->
+        { state with
+            Probes = List.fold foldRoom state.Probes assaults |> Map.toSeq |> Fresh.mapOfSeq
+        }
 
 /// One reading of `Grid.Counters`: floods built, how many of them
 /// free-origin, and heap pops. Cumulative where the shell reads it,

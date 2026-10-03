@@ -1236,7 +1236,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                  alive
                  view
                  decision.OutpostRooms
-                 (raidsOf a c.Home)),
+                 (raidsOf a c.Home)
+             |> Observe.foldProbes view decision.Intents),
             (c.Home, decision))
 
     let decisions = decided |> List.map snd

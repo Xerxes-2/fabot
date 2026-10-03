@@ -739,6 +739,10 @@ type Assault =
         /// The rows its squad casts, by name, in cast order.
         Squad: string list
         Mode: AssaultMode
+        /// The room beside it the squad walks in from (#493), where a breach
+        /// faces an exit no shortest chain from home crosses; None for
+        /// whichever the chain search finds.
+        Entry: string option
         /// Whether it runs. Off, nothing is projected, pooled or cast for it:
         /// a human switches it on in a commit.
         Active: bool
@@ -750,29 +754,62 @@ module Assault =
     /// and two 18-HEAL medics, 18,300.
     let breachers = [ "sapper"; "sapper"; "medic"; "medic" ]
 
+    /// One probe (#493): a cheap sapper sent alone to learn what raises a
+    /// rival's safe mode.
+    let probe = [ "probe" ]
+
     /// The assaults a colony runs this tick: the ones switched on.
     let worked (assaults: Assault list) : Assault list =
         assaults |> List.filter (fun assault -> assault.Active)
 
     /// The rooms the assaults add to the scan set: each room and every room a
-    /// shortest walk to it could cross (`Errand.roomsProjected`), and every
-    /// room beside it: the ways a squad falling back may leave it by (#492).
+    /// shortest walk to it could cross (`Errand.roomsProjected`), every room
+    /// beside it — the ways a squad falling back may leave it by (#492) —
+    /// and the walk to its entry (#493).
     let roomsProjected (assaults: Assault list) (home: string) : string list =
         assaults
         |> List.collect (fun assault ->
-            assault.RoomName :: RoomName.transitBetween home assault.RoomName
-            @ RoomName.adjacent assault.RoomName)
-        |> List.filter ((<>) home)
+            let entry =
+                assault.Entry
+                |> Option.map (fun entry -> RoomName.transitBetween home entry)
+                |> Option.defaultValue []
 
-    /// W18S26's far line (boosts.md §4.2: breached in ~322 ticks with no
-    /// loss; its near line at x30 y8 wipes any squad): the bait.
+            assault.RoomName :: RoomName.transitBetween home assault.RoomName
+            @ RoomName.adjacent assault.RoomName
+            @ entry)
+        |> List.filter ((<>) home)
+        |> List.distinct
+
+    /// W18S26's west line, at x2 y7 (#493): the pocket outside it, x1 y5–9,
+    /// opens only on the exits to W19S26, every tile of it under 390 a tick
+    /// of the towers' fire and one step from an exit. The far line at x30
+    /// y44 (#490) is 18 tiles from the nearest exit it can reach (#492).
+    /// The probe goes first: the user switched it on (2026-10-03).
     let w18s26: Assault =
         {
             RoomName = "W18S26"
             Enemy = "Trepidimous"
-            Breach = [ { X = 30; Y = 44 } ]
-            Squad = breachers
+            Breach = [ { X = 2; Y = 7 } ]
+            Squad = probe
             Mode = Provoke
+            Entry = Some "W19S26"
+            Active = true
+        }
+
+    /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
+    /// the default squad at y20, one rampart opening it — every one of the
+    /// four, broken in turn, put the spawn down at t1,455 and not t453 — then
+    /// its tower and spawn, while W18S26's safe mode bars the room's. Off:
+    /// the user switches it on once the probe has told what raises
+    /// Trepidimous's safe mode, and Odiodin, beside it, has been told.
+    let w17s24: Assault =
+        {
+            RoomName = "W17S24"
+            Enemy = "Trepidimous"
+            Breach = [ { X = 2; Y = 20 } ]
+            Squad = breachers
+            Mode = Strike
+            Entry = Some "W18S24"
             Active = false
         }
 
@@ -1159,9 +1196,9 @@ module Colony =
                 Consignee = None
                 Perimeter = []
                 FirstSpawn = None
-                // The RCL7 bank nearest W18S26 (5,600 at t926,162), five
-                // crossings out. Off until the user switches it on.
-                Assaults = [ Assault.w18s26 ]
+                // W18S26's far line was cast from here (#490); its west line
+                // is seven crossings out by W19S26, past `Tuning.MaxHops`.
+                Assaults = []
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
@@ -1176,7 +1213,10 @@ module Colony =
                 Perimeter = []
                 // Placed by hand at t808,3xx; for the record.
                 FirstSpawn = Some { X = 24; Y = 40 }
-                Assaults = []
+                // Six crossings to W18S26's west line by W19S26, the one
+                // colony inside `Tuning.MaxHops` of it; its 2,300 bank buys
+                // the 990 probe (#493).
+                Assaults = [ Assault.w18s26 ]
             }
             // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`).
             // W17S25 held this slot from its Claim at t879,239 until a
@@ -1232,7 +1272,10 @@ module Colony =
                 // ctrl 5 / T 31, every cluster tile inside the perimeter and
                 // at range 4 or more from it.
                 FirstSpawn = Some { X = 14; Y = 28 }
-                Assaults = []
+                // Three crossings to W17S24's west line by W18S25 and W18S24,
+                // the #491 arena's walk; no other colony is inside
+                // `Tuning.MaxHops` of it. Off until the user switches it on.
+                Assaults = [ Assault.w17s24 ]
             }
         ]
 

@@ -1185,3 +1185,130 @@ let fightRecordTests =
                     "and it is dropped once the bar runs out"
             }
         ]
+
+/// `fightingMother`'s child room under a probe's Provoke (#493), a rampart
+/// on its breach, at this tick: the probe with this life left on this tile,
+/// or gone, and safe mode up in the room or not.
+let private probedAt time (life: int) (tile: RoomPos option) (safeMode: bool) =
+    let probe =
+        Decide.Fixtures.creepWith "probe-1" 0 0 Fabot.Core.Decide.Bodies.probePattern.Block
+        |> Decide.Fixtures.withLife life
+
+    { Decide.Fixtures.fightingMother [] (tile |> Option.map (fun at -> probe, at) |> Option.toList) with
+        Time = time
+        Assaults =
+            [
+                {
+                    Assault =
+                        { Assault.w18s26 with
+                            RoomName = "W1N2"
+                            Entry = None
+                        }
+                    Targets = Some [ "rampart-1", { X = 20; Y = 30 } ]
+                    Towers = []
+                    SafeMode = safeMode
+                    BarredUntil = None
+                }
+            ]
+    }
+
+let private inTheRoom = Some(RoomPos.at "W1N2" { X = 20; Y = 31 })
+
+let private dismantles = [ DismantleStructure("probe-1", "rampart-1") ]
+
+let private probeLogOf (state: RaidState) = Map.tryFind "W1N2" state.Probes
+
+[<Tests>]
+let probeLogTests =
+    testList
+        "raid fold: the probe log"
+        [
+            test
+                "a probe's first dismantle opens its room's log; its dismantles, and the light ticks' replays of one, count until safe mode shows" {
+                let opened =
+                    RaidState.empty |> foldProbes (probedAt 100 1_000 inTheRoom false) dismantles
+
+                Expect.equal
+                    (probeLogOf opened)
+                    (Some
+                        {
+                            Probe = "probe-1"
+                            FirstHit = 100
+                            Hits = 1
+                            HitAt = Some 100
+                            SafeModeAt = None
+                            Fate = Probing
+                            Expires = 1_100
+                        })
+                    "opened on the first dismantle"
+
+                let replayed = opened |> foldProbes (probedAt 103 997 inTheRoom false) dismantles
+
+                Expect.equal
+                    (probeLogOf replayed |> Option.map (fun log -> log.Hits))
+                    (Some 4)
+                    "t101 and t102 light, each replaying it, and t103's own"
+
+                let raised = replayed |> foldProbes (probedAt 104 996 inTheRoom true) []
+
+                Expect.equal
+                    (probeLogOf raised |> Option.map (fun log -> log.Hits, log.SafeModeAt, log.Fate))
+                    (Some(4, Some 104, Probing))
+                    "safe mode seen at t104 after four dismantles, the probe still in the room"
+
+                let out =
+                    raised
+                    |> foldProbes
+                        (probedAt 105 995 (Some(RoomPos.at "W1N1" { X = 20; Y = 1 })) true)
+                        []
+
+                Expect.equal
+                    (probeLogOf out |> Option.map (fun log -> log.Fate))
+                    (Some(Out 105))
+                    "out of the room alive at t105"
+
+                Expect.equal
+                    (out |> foldProbes (probedAt 106 0 None true) [] |> probeLogOf)
+                    (probeLogOf out)
+                    "and settled: its going later is not its fate"
+            }
+
+            test "a probe gone with its life left was killed; one gone at its life's end expired" {
+                let opened life =
+                    RaidState.empty |> foldProbes (probedAt 100 life inTheRoom false) dismantles
+
+                Expect.equal
+                    (opened 1_000
+                     |> foldProbes (probedAt 102 0 None false) []
+                     |> probeLogOf
+                     |> Option.map (fun log -> log.Fate))
+                    (Some(Died 102))
+                    "killed"
+
+                Expect.equal
+                    (opened 2
+                     |> foldProbes (probedAt 102 0 None false) []
+                     |> probeLogOf
+                     |> Option.map (fun log -> log.Fate))
+                    (Some(Expired 102))
+                    "of age"
+            }
+
+            test "only a probe's dismantle of the room's target opens a log" {
+                Expect.isNone
+                    (RaidState.empty
+                     |> foldProbes
+                         (probedAt 100 1_000 inTheRoom false)
+                         [ DismantleStructure("sapper-1", "rampart-1") ]
+                     |> probeLogOf)
+                    "a sapper's opens none"
+
+                Expect.isNone
+                    (RaidState.empty
+                     |> foldProbes
+                         (probedAt 100 1_000 inTheRoom false)
+                         [ DismantleStructure("probe-1", "container-1") ]
+                     |> probeLogOf)
+                    "nor a probe's of something else"
+            }
+        ]

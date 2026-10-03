@@ -766,14 +766,15 @@ let private wayOut (view: ColonyView) atlas (facts: AssaultFacts) (inside: Pos l
             |> List.map (RoomPos.at next)
             |> Set.ofList
 
-/// A squad's casts, the front leading: a brawler, else a sapper, else a
-/// kiter, else whoever holds.
+/// A squad's casts, the front leading: a brawler, else a sapper or a probe,
+/// else a kiter, else whoever holds.
 let private frontFirst (members: (string * SquadRole) list) =
     members
     |> List.sortBy (fun (name, role) ->
         (match role with
          | Brawler -> 0
-         | Sapper -> 1
+         | Sapper
+         | Probe -> 1
          | Kiter -> 2
          | Medic -> 3),
         name)
@@ -1101,13 +1102,14 @@ let private withAssaults
             let inside = entered view room members
 
             // Hurt: under half once in, so the squad turns back; under four
-            // fifths at rally, so it waits for its medics.
+            // fifths at rally, so it waits for its medics. A probe has none
+            // to wait for (#493): it holds on until safe mode or its death.
             let fit =
                 let least = if inside then assaultRetreatShare else assaultLaunchShare
 
                 members
-                |> List.forall (fun (name, _) ->
-                    Map.tryFind name share |> Option.exists (fun s -> s >= least))
+                |> List.forall (fun (name, role) ->
+                    role = Probe || Map.tryFind name share |> Option.exists (fun s -> s >= least))
 
             let launched =
                 not (Set.isEmpty rally)

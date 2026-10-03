@@ -183,6 +183,13 @@ let patternTableTests =
                             Block = List.replicate 25 Move @ List.replicate 25 Work
                         }
                         {
+                            Name = "probe"
+                            Block =
+                                List.replicate 4 Tough
+                                @ List.replicate 5 Work
+                                @ List.replicate 9 Move
+                        }
+                        {
                             Name = "medic"
                             Block = List.replicate 18 Move @ List.replicate 18 Heal
                         }
@@ -639,12 +646,14 @@ let dismantlerCensusTests =
                 // Every row the table holds, cast at every bank the colonies stand
                 // at, plus the Anchor and the miner at their smallest: the arm sits
                 // between the miner's and the upgrader's and must take none of them.
-                // A sapper is the dismantler's parts, read back by its name
-                // (`patternByName`) and never by them.
+                // A sapper and a probe are the dismantler's parts, read back by
+                // their names (`patternByName`) and never by them.
                 let others =
                     patternTable
                     |> List.filter (fun row ->
-                        row.Name <> dismantlerPattern.Name && row.Name <> sapperPattern.Name)
+                        row.Name <> dismantlerPattern.Name
+                        && row.Name <> sapperPattern.Name
+                        && row.Name <> probePattern.Name)
                     |> List.collect (fun row ->
                         [
                             for capacity in [ 300; 550; 800; 1300; 1800; 2300; 5600 ] ->
@@ -693,8 +702,17 @@ let squadRoleBodyTests =
                 Expect.equal (bodyCost kiterPattern.Block) 5600 "an RCL7 bank, exactly"
             }
 
+            test "the probe is 4 TOUGH, 5 WORK, then 9 MOVE: legs last, 990 energy (#493)" {
+                Expect.equal
+                    probePattern.Block
+                    (List.replicate 4 Tough @ List.replicate 5 Work @ List.replicate 9 Move)
+                    "no medic heals it: its legs are the last thing damage takes"
+
+                Expect.equal (bodyCost probePattern.Block) 990 "4 × 10 + 5 × 100 + 9 × 50"
+            }
+
             test "every role body walks a plain tile a tick: one MOVE per other part" {
-                for role in [ brawlerPattern; medicPattern; kiterPattern ] do
+                for role in [ brawlerPattern; probePattern; medicPattern; kiterPattern ] do
                     let parts = partCountIn role.Block
                     Expect.equal (parts Move) (List.length role.Block - parts Move) role.Name
             }

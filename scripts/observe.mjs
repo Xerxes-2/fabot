@@ -12,7 +12,9 @@
 // Usage:
 //   observe.mjs tasks              every creep's current Task with its Verdict reason
 //   observe.mjs timeline <creep>   one creep's Transition log, oldest first
-//   observe.mjs raids              the Raid log's episodes, newest first
+//   observe.mjs raids              the Raid log's episodes, newest first, and each
+//                                  assault room's probe: safe mode raised at tick T
+//                                  after N dismantle hits, and its fate (#493)
 //   observe.mjs outposts           every outpost the Raid log knows: shut or
 //                                  open right now, the tick a stand-down runs
 //                                  to, the deadline that tick was read off, the
@@ -884,14 +886,32 @@ if (command === "console") {
   // tick of the last look into the room (#275), ADR 0043's withdrawal with no
   // clock (a rival's reservation is a clocked row of `outposts` since #165) —
   // and is no more a raid than a stand-down is.
+  //
+  // `probes` (#493) is each [[assault]] room's last probe: what it learnt of
+  // the room's safe-mode trigger, `{ probe, first, hits, expires, fate,
+  // hitAt?, safeMode?, ended? }` — its first dismantle, its dismantles before
+  // safe mode showed, the tick that was, and its fate (probing, out, died,
+  // expired) on `ended`. A line each, above the episodes.
   const { home, stored } = await raidLeaf();
   const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const probeLines = Object.entries(stored.probes ?? {}).map(([room, p]) => {
+    const raised =
+      p.safeMode != null
+        ? `safe mode raised by t${p.safeMode} after ${plural(p.hits, "dismantle hit")} from t${p.first}`
+        : `no safe mode yet, ${plural(p.hits, "dismantle hit")} from t${p.first}`;
+    const fate = p.fate === "probing" ? "still probing" : `${p.fate} at t${p.ended}`;
+    return `probe ${room}: ${p.probe} — ${raised}; ${fate}`;
+  });
 
   if (json) {
     console.log(JSON.stringify(episodes, null, 2));
   } else if (episodes.length === 0) {
+    for (const line of probeLines) console.log(line);
     console.log(`no raids recorded for ${home}`);
   } else {
+    for (const line of probeLines) console.log(line);
+    if (probeLines.length > 0) console.log("");
     console.log(`colony ${home}`);
     console.log("");
     for (const e of episodes) {

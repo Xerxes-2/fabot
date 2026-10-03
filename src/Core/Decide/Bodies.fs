@@ -130,6 +130,17 @@ let sapperPattern =
         Block = List.replicate 25 Move @ List.replicate 25 Work
     }
 
+/// An [[assault]]'s probe (#493): a sapper cheap enough to lose, sent to
+/// learn what raises a rival's safe mode. TOUGH first and MOVE last, the
+/// sapper's order reversed: no medic heals it, and a body whose MOVE is shot
+/// off first cannot walk out once the safe mode it came for is up. 1,800
+/// hits outlast W18S26's in, hit and out at 390 a tick; 990.
+let probePattern =
+    {
+        Name = "probe"
+        Block = List.replicate 4 Tough @ List.replicate 5 Work @ List.replicate 9 Move
+    }
+
 /// ADR-0057
 /// The miner row: the store-less Work body over the mineral container. The
 /// block is the row's floor rather than its ratio (one Move per
@@ -170,6 +181,7 @@ let patternTable =
         rangerPattern
         brawlerPattern
         sapperPattern
+        probePattern
         medicPattern
         kiterPattern
         minerPattern
@@ -283,10 +295,17 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
 /// The rows whose casts are read back off the name the cascade gives them
 /// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
 /// also a hauler, a kiter's counts are an eight-block ranger's, a brawler is
-/// an ATTACK body as a guard is, a sapper a dismantler's, and a medic has no
-/// part a row reads.
+/// an ATTACK body as a guard is, a sapper and a probe a dismantler's, and a
+/// medic has no part a row reads.
 let private namedRows =
-    [ courierPattern; brawlerPattern; sapperPattern; medicPattern; kiterPattern ]
+    [
+        courierPattern
+        brawlerPattern
+        sapperPattern
+        probePattern
+        medicPattern
+        kiterPattern
+    ]
 
 /// Whether a creep's name says it was cast by this row.
 let isNamedFor (pattern: BodyPattern) (name: string) = name.StartsWith(pattern.Name + "-")
@@ -300,6 +319,7 @@ let squadPatternOf (role: SquadRole) : BodyPattern =
     match role with
     | Brawler -> brawlerPattern
     | Sapper -> sapperPattern
+    | Probe -> probePattern
     | Medic -> medicPattern
     | Kiter -> kiterPattern
 

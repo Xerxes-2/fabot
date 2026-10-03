@@ -558,6 +558,84 @@ let private fightMapOf (raw: obj) : Map<string, FightLatch> =
                 None)
         |> Map.ofArray
 
+// One room's probe log (#493) on the wire: `{ probe, first, hits, expires,
+// fate, hitAt?, safeMode?, ended? }`, `fate` one of probing, out, died,
+// expired and `ended` its tick, absent while probing.
+let private encodeProbe (log: ProbeLog) =
+    let o = createEmpty<obj>
+    o?probe <- log.Probe
+    o?first <- log.FirstHit
+    o?hits <- log.Hits
+    o?expires <- log.Expires
+
+    log.HitAt |> Option.iter (fun at -> o?hitAt <- at)
+    log.SafeModeAt |> Option.iter (fun at -> o?safeMode <- at)
+
+    match log.Fate with
+    | Probing -> o?fate <- "probing"
+    | Out tick ->
+        o?fate <- "out"
+        o?ended <- tick
+    | Died tick ->
+        o?fate <- "died"
+        o?ended <- tick
+    | Expired tick ->
+        o?fate <- "expired"
+        o?ended <- tick
+
+    o
+
+// A checker and not a cast: a name that is no string, a tick that is no
+// number or a fate the encoder never writes costs the room its log, which
+// the next probe's first dismantle opens afresh.
+let private probeMapOf (raw: obj) : Map<string, ProbeLog> =
+    if isNull raw || jsTypeof raw <> "object" then
+        Map.empty
+    else
+        objectEntries raw
+        |> Array.choose (fun (room, value) ->
+            try
+                if
+                    isNull value || jsTypeof value <> "object" || jsTypeof value?probe <> "string"
+                then
+                    None
+                else
+                    let optional key =
+                        if jsTypeof value?(key) = "undefined" then
+                            None
+                        else
+                            Some(numberOf value key)
+
+                    let named =
+                        if jsTypeof value?fate = "string" then
+                            unbox<string> value?fate
+                        else
+                            ""
+
+                    let fate =
+                        match named with
+                        | "probing" -> Probing
+                        | "out" -> Out(numberOf value "ended")
+                        | "died" -> Died(numberOf value "ended")
+                        | "expired" -> Expired(numberOf value "ended")
+                        | _ -> failwith "not a probe's fate"
+
+                    Some(
+                        room,
+                        {
+                            Probe = unbox<string> value?probe
+                            FirstHit = numberOf value "first"
+                            Hits = numberOf value "hits"
+                            HitAt = optional "hitAt"
+                            SafeModeAt = optional "safeMode"
+                            Fate = fate
+                            Expires = numberOf value "expires"
+                        }
+                    )
+            with _ ->
+                None)
+        |> Map.ofArray
+
 // One latched room on the wire: `{ since, lastLooked }`, the tick the gate
 // shut on and the tick of the last look, which the next look's stride is
 // measured from.
@@ -838,6 +916,7 @@ let loadRaids (home: string) : RaidState =
             Holds = holdMapOf raids?holds
             Threatened = threatMapOf raids?threatened
             Fought = fightMapOf raids?fought
+            Probes = probeMapOf raids?probes
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -885,6 +964,7 @@ let saveRaids (home: string) (state: RaidState) =
     raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
     raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
     raids?fought <- state.Fought |> Map.toSeq |> hashOf encodeFight
+    raids?probes <- state.Probes |> Map.toSeq |> hashOf encodeProbe
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)

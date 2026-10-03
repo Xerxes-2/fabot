@@ -308,10 +308,10 @@ let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
 
 let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
 
-/// Whether a body is an [[assault]]'s sapper, by its name alone: its parts
-/// are a salvage dismantler's.
+/// Whether a body is an [[assault]]'s sapper or probe, by its name alone: its
+/// parts are a salvage dismantler's.
 let internal isSapperBody (creep: CreepInfo) =
-    squadRoleByName creep.Name = Some Sapper
+    squadRoleByName creep.Name |> Option.exists SquadRole.dismantles
 
 /// Any fighting row's body, a squad's medic and sapper among them: what never
 /// flees and walks home when idle.

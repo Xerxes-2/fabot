@@ -1657,6 +1657,15 @@ let private farBreach =
     trepBase().Structures
     |> List.find (fun s -> s.Kind = "rampart" && s.At = { X = 30; Y = 44 })
 
+/// #490's declaration: the default squad's Provoke on the far line.
+let private farLine: Assault =
+    { Assault.w18s26 with
+        Breach = [ farBreach.At ]
+        Squad = Assault.breachers
+        Entry = None
+        Active = true
+    }
+
 /// Our decide this time (#490): W17S26 an RCL7 colony of ours sending the
 /// default squad against W18S26's far line, a Provoke, its four casts
 /// standing apart in W17S26 as the probe's do. Run until the breach's rampart
@@ -1672,7 +1681,7 @@ let private assaultProbe (ticks: int) =
     let colonies =
         [
             { colony "W17S26" with
-                Assaults = [ { Assault.w18s26 with Active = true } ]
+                Assaults = [ farLine ]
             }
         ]
 
@@ -1730,20 +1739,11 @@ let private baitProbe (ticks: int) =
     let colonies =
         [
             { colony "W17S26" with
-                Assaults = [ { Assault.w18s26 with Active = true } ]
+                Assaults = [ farLine ]
             }
+            // The shipped declaration, switched on.
             { colony "W18S25" with
-                Assaults =
-                    [
-                        {
-                            RoomName = "W17S24"
-                            Enemy = "Trepidimous"
-                            Breach = [ { X = 2; Y = 20 } ]
-                            Squad = Assault.breachers
-                            Mode = Strike
-                            Active = true
-                        }
-                    ]
+                Assaults = [ { Assault.w17s24 with Active = true } ]
             }
         ]
 
@@ -1816,6 +1816,107 @@ let private baitProbe (ticks: int) =
         let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
 
         List.isEmpty ours || not (standing a w17s24Tower || standing a w17s24Spawn)
+
+    let final, trace = start |> runUntil over ticks
+    start, final, trace
+
+/// The rampart on W18S26's west line the shipped probe breaks (#493).
+let private westBreach =
+    trepBase().Structures
+    |> List.find (fun s -> s.Kind = "rampart" && s.At = List.head Assault.w18s26.Breach)
+
+/// The default squad on the west line (#493): W19S26 an RCL7 colony of ours
+/// beside it for the arena, its four casts standing at home — the arena's
+/// spawns cast no economy — on the shipped Provoke with the default squad,
+/// Trepidimous raising safe mode wherever struck or not. Run until the
+/// breach falls, every body of ours is dead, or `ticks` are spent.
+let private westProbe (panics: bool) (ticks: int) =
+    let w19s26 x y = RoomPos.at "W19S26" { X = x; Y = y }
+
+    let mother =
+        room "W19S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 38; Y = 3 } 5600
+
+    let colonies =
+        [
+            { colony "W19S26" with
+                Assaults =
+                    [
+                        { Assault.w18s26 with
+                            Squad = Assault.breachers
+                        }
+                    ]
+            }
+        ]
+
+    let squad =
+        [
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (43, 11)
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (44, 11)
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (43, 12)
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (44, 12)
+        ]
+        |> List.mapi (fun i (row, block, (x, y)) ->
+            body $"{row}-889000{i + 1}-Spawn8" Side.Ours block (w19s26 x y) None)
+
+    let target = if panics then trepBase () |> panicking else trepBase ()
+
+    let start =
+        arena 889_849 [ mother; target; room "W18S25"; room "W18S27" ] colonies squad
+
+    let over (a: Arena) =
+        let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
+
+        List.isEmpty ours
+        || not (a.Rooms["W18S26"].Structures |> List.exists (fun s -> s.Id = westBreach.Id))
+
+    let final, trace = start |> runUntil over ticks
+    start, final, trace
+
+/// The shipped probe (#493): W17S29 an RCL6 colony as it is live, declaring
+/// `Assault.w18s26` as shipped, its probe standing at home; every room of the
+/// walk loaded, and Trepidimous raising safe mode wherever struck. Run until
+/// the probe is dead or `ticks` are spent.
+let private probeProbe (ticks: int) =
+    let mother =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 0
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2300
+
+    let colonies =
+        [
+            { colony "W17S29" with
+                Assaults = [ Assault.w18s26 ]
+            }
+        ]
+
+    let probe =
+        body
+            "probe-8890001-Spawn9"
+            Side.Ours
+            Fabot.Core.Decide.Bodies.probePattern.Block
+            (RoomPos.at "W17S29" { X = 25; Y = 38 })
+            None
+
+    // The rectangle from home to the entry, and the rooms beside the target.
+    let between =
+        [
+            for x in 17..19 do
+                for y in 26..29 -> $"W{x}S{y}"
+        ]
+        |> List.filter (fun name -> name <> "W17S29" && name <> "W18S26")
+        |> List.map room
+
+    let start =
+        arena
+            889_849
+            ([ mother; trepBase () |> panicking; room "W18S25" ] @ between)
+            colonies
+            [ probe ]
+
+    let over (a: Arena) =
+        a.Bodies |> List.exists (fun b -> b.Side = Side.Ours) |> not
 
     let final, trace = start |> runUntil over ticks
     start, final, trace
@@ -2314,6 +2415,85 @@ let arenaDefenceTests =
                     |> List.filter (fun b -> Option.isSome (diedOn b.Id trace))
 
                 Expect.isLessThanOrEqual lost.Length 2 $"half the Provoke at most\n{failure}"
+            }
+
+            test
+                "scenario 6 (#493): with no safe mode, the default squad cannot hold W18S26's west line: the pocket outside it fits two sappers and one medic" {
+                let start, _, trace = westProbe false 1_500
+                let failure = describe trace
+
+                // Measured: the first dismantle at t8; the second medic finds
+                // no tile in the pocket (x1 y5–9) and is carried back and forth
+                // over the border; the one inside, the towers' pick, dies at
+                // t34 under 390 a tick with its own heal alone; the squad falls
+                // back after 37 dismantles and is not whole again.
+                Expect.isNone
+                    (firstFallen (Set.singleton westBreach.Id) trace)
+                    $"never breached inside a life\n{failure}"
+
+                let lost =
+                    start.Bodies
+                    |> List.choose (fun b -> diedOn b.Id trace)
+                    |> List.filter (fun tick -> tick < Engine.creepLifetime - 1)
+
+                Expect.equal lost.Length 1 $"one medic lost\n{failure}"
+            }
+
+            test
+                "scenario 6b (#493): Trepidimous safe-modes the default squad's first dismantle on the west line, and it walks out losing nobody" {
+                let start, _, trace = westProbe true 200
+                let failure = describe trace
+                let raised = safeModeOn trace
+
+                // Measured: the first dismantle and the safe mode at t8, every
+                // cast out of W18S26 at t10, a sapper's lowest 3,470.
+                Expect.isSome raised $"safe mode raised\n{failure}"
+
+                for b in start.Bodies do
+                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+
+                    Expect.isTrue
+                        (pathOf b.Id trace
+                         |> List.forall (fun (tick, s) ->
+                             tick <= raised.Value + 3 || s.At.Room <> "W18S26"))
+                        $"{b.Id} out within three ticks of it\n{failure}"
+            }
+
+            test
+                "scenario 7 (#493): the shipped probe walks from W17S29 by W19S26, raises a scripted safe mode on its first dismantle, and walks out alive, the probe log saying so" {
+                let start, final, trace = probeProbe 500
+                let failure = describe trace
+                let probe = start.Bodies |> List.exactlyOne
+
+                Expect.isNone (diedOn probe.Id trace) $"the probe lives\n{failure}"
+
+                let rooms =
+                    pathOf probe.Id trace |> List.map (fun (_, s) -> s.At.Room) |> List.distinct
+
+                Expect.equal
+                    (rooms |> List.skipWhile ((<>) "W19S26") |> List.truncate 2)
+                    [ "W19S26"; "W18S26" ]
+                    $"in from W19S26: {rooms}"
+
+                // Measured: in W18S26 at t258, the first dismantle at t260,
+                // safe mode seen at t261, out at t262 on 660 of its 1,800.
+                let logs =
+                    Map.tryFind "W17S29" final.Carried.Raids
+                    |> Option.map (fun raids -> raids.Probes)
+                    |> Option.defaultValue Map.empty
+
+                match Map.tryFind "W18S26" logs with
+                | Some log ->
+                    Expect.equal log.Hits 1 "one dismantle raised it"
+
+                    Expect.equal log.SafeModeAt (Some(log.FirstHit + 1)) "seen the tick after"
+
+                    Expect.isTrue
+                        (match log.Fate with
+                         | Fabot.Core.Observe.Out tick -> tick <= log.FirstHit + 3
+                         | _ -> false)
+                        $"out alive at once: {log.Fate}"
+                | None -> failtest $"no probe log\n{failure}"
             }
         ]
 

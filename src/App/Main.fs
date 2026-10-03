@@ -710,6 +710,7 @@ let private fullTick
         |> Map.tryFind colony.Home
         |> Option.defaultValue Observe.RaidState.empty
         |> Observe.foldRaids Observe.capEpisodes living view decision.OutpostRooms
+        |> Observe.foldProbes view decision.Intents
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's channel, written every tick, empty or not. The refused

@@ -114,6 +114,10 @@ type Atlas =
             /// The empty list is an answer and is memoised as one.
             Routes:
                 System.Collections.Generic.Dictionary<string * string * Walker, string list list>
+            /// Each [[assault]] room a human named the room beside it to enter
+            /// from (`Assault.Entry`, #493), against that room: a `Siege`
+            /// walker's chain crosses into it from there alone.
+            Entries: Map<string, string>
             /// Memoised traffic-blind cast walk out of a spawner's tile, per (spawner
             /// tile, fatigue factor, goal's room), for bodies the view does not carry:
             /// a lead prices a replacement not yet cast, whose factor is in no creep's
@@ -378,6 +382,11 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         SeamWalks = farFields.SeamWalks
         Seams = System.Collections.Generic.Dictionary()
         Routes = System.Collections.Generic.Dictionary()
+        Entries =
+            view.Assaults
+            |> List.choose (fun facts ->
+                facts.Assault.Entry |> Option.map (fun entry -> facts.Assault.RoomName, entry))
+            |> Map.ofList
         FarFields = farFields
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
@@ -1552,9 +1561,15 @@ let routesFor
             not (Set.contains there atlas.Spatial.RivalRooms)
             || walker = Walker.Siege && there = toRoom
 
+        // An assault's room from its declared entry alone, for a siege.
+        let fromEntry here there =
+            walker <> Walker.Siege
+            || Map.tryFind there atlas.Entries |> Option.forall ((=) here)
+
         let linked here there =
             Keepers.enterable there
             && entered there
+            && fromEntry here there
             && Seam.joinedBy
                 (ringWalkable atlas here)
                 (ringWalkable atlas there)

@@ -136,7 +136,7 @@ let pooledTests =
                 Expect.equal
                     (SquadRole.all
                      |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
-                    [ Some 1; Some 0; Some 1; Some 0 ]
+                    [ Some 1; Some 0; Some 0; Some 1; Some 0 ]
                     "the cheapest winning squad is the duo: a brawler's slot and a medic's"
             }
 
@@ -238,12 +238,12 @@ let pooledTests =
 
                 Expect.equal
                     (fightCaps (shrunk None) [])
-                    (Some [ Some 1; Some 0; Some 1; Some 0 ])
+                    (Some [ Some 1; Some 0; Some 0; Some 1; Some 0 ])
                     "the premise: priced afresh, the duo"
 
                 Expect.equal
                     (fightCaps (shrunk (Some "3×kiter")) [])
-                    (Some [ Some 0; Some 0; Some 0; Some 3 ])
+                    (Some [ Some 0; Some 0; Some 0; Some 0; Some 3 ])
                     "latched, the three kiters' caps"
 
                 Expect.equal
@@ -257,7 +257,7 @@ let pooledTests =
                             Hostiles = []
                         }
                         [])
-                    (Some [ Some 0; Some 0; Some 0; Some 3 ])
+                    (Some [ Some 0; Some 0; Some 0; Some 0; Some 3 ])
                     "and keep their caps while the raid steps out"
             }
         ]
@@ -843,11 +843,12 @@ let private sapper name = creepWith name 0 0 sapperPattern.Block
 /// The rampart an assault on the child's room breaks, and its tile.
 let private breachTile = { X = 20; Y = 30 }
 
-/// `fightingMother` with no raid, sending the default squad against the
-/// child's room as a rival's (#490), a window open in it (#491): the room a rival's, its rampart on the
-/// breach tile a wall to our walk (`ColonyView.assaulting`), these targets
-/// standing, and these bodies of hers each on its tile.
-let private assaultingWith mode (targets: (string * Pos) list option) bodies =
+/// `fightingMother` with no raid, sending this squad against the child's
+/// room as a rival's (#490), a window open in it (#491): the room a rival's,
+/// its rampart on the breach tile a wall to our walk
+/// (`ColonyView.assaulting`), these targets standing, and these bodies of
+/// hers each on its tile.
+let private assaultingBy squad mode (targets: (string * Pos) list option) bodies =
     let colony = fightingMother [] bodies
     let child = SpatialInfo.layerOf colony.Spatial "W1N2"
 
@@ -860,8 +861,9 @@ let private assaultingWith mode (targets: (string * Pos) list option) bodies =
                             RoomName = "W1N2"
                             Enemy = "Trepidimous"
                             Breach = [ breachTile ]
-                            Squad = Assault.breachers
+                            Squad = squad
                             Mode = mode
+                            Entry = None
                             Active = true
                         }
                     Targets = targets
@@ -889,8 +891,18 @@ let private assaultingWith mode (targets: (string * Pos) list option) bodies =
 /// The breach's rampart still standing.
 let private breachStanding = Some [ "rampart-1", breachTile ]
 
+/// The default squad's.
+let private assaultingWith mode targets bodies =
+    assaultingBy Assault.breachers mode targets bodies
+
 let private assaulting bodies =
     assaultingWith Provoke breachStanding bodies
+
+let private probe name = creepWith name 0 0 probePattern.Block
+
+/// A probe Provoke (#493) on the breach, this one probe on its tile.
+let private probing (tile: RoomPos) =
+    assaultingBy Assault.probe Provoke breachStanding [ probe "probe-1", tile ]
 
 /// The default squad, each body on one of these tiles.
 let private squadAt (tiles: RoomPos list) =
@@ -961,7 +973,7 @@ let assaultTests =
                 Expect.equal
                     (SquadRole.all
                      |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
-                    [ Some 0; Some 2; Some 2; Some 0 ]
+                    [ Some 0; Some 2; Some 0; Some 2; Some 0 ]
                     "two sapper slots and two medic slots"
 
                 Expect.equal
@@ -1277,5 +1289,117 @@ let assaultTests =
                     ([ "sapper"; "medic" ] |> List.map (quotaHolding open' []))
                     [ Some 2; Some 2 ]
                     "and its squad cast"
+            }
+
+            test
+                "an assault naming the room it enters from is walked in from that room alone (#493)" {
+                let entering entry =
+                    let colony = assaulting []
+
+                    let colony =
+                        { colony with
+                            Assaults =
+                                colony.Assaults
+                                |> List.map (fun facts ->
+                                    { facts with
+                                        Assault = { facts.Assault with Entry = entry }
+                                    })
+                        }
+
+                    Atlas.siegeRoute (Atlas.ofView colony) "W1N1" "W1N2"
+
+                Expect.equal (entering (Some "W1N1")) (Some [ "W1N1"; "W1N2" ]) "in from home"
+
+                Expect.isNone
+                    (entering (Some "W2N2"))
+                    "in from a room the projection holds no walk through: no chain"
+            }
+
+            test "a probe Provoke (#493) is capped and cast at one cheap probe and nothing else" {
+                let colony = assaultingBy Assault.probe Provoke breachStanding []
+                let atlas = Atlas.ofView colony
+                let threats = assaultThreats colony
+
+                let capacity =
+                    planPool colony atlas threats (planHolding colony [])
+                    |> List.find (fun entry -> entry.Task = Assault "W1N2")
+                    |> fun entry -> entry.Capacity
+
+                Expect.equal
+                    (SquadRole.all
+                     |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
+                    [ Some 0; Some 0; Some 1; Some 0; Some 0 ]
+                    "one probe slot"
+
+                Expect.equal
+                    ([ "probe"; "sapper"; "medic" ] |> List.map (quotaHolding colony []))
+                    [ Some 1; Some 0; Some 0 ]
+                    "and the probe row casts it"
+
+                Expect.isLessThanOrEqual
+                    (bodyCost probePattern.Block)
+                    1_000
+                    "a body cheap enough to lose"
+            }
+
+            test "a lone probe launches off the rally ground with no medic to wait for" {
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats (probing (home 25 5)))).Launched
+                    "a squad of one, whole"
+            }
+
+            test "a launched probe beside the breach dismantles it, and goes on under half its hits" {
+                let dismantles (colony: ColonyView) =
+                    (decide colony (holdingAssault colony) Set.empty None).Intents
+                    |> List.contains (DismantleStructure("probe-1", "rampart-1"))
+
+                let colony = probing (child 20 31)
+
+                Expect.isTrue (dismantles colony) "it dismantles the breach"
+
+                let hurt =
+                    { colony with
+                        Creeps =
+                            colony.Creeps
+                            |> List.map (fun creep ->
+                                { creep with
+                                    Hits =
+                                        { creep.Hits with
+                                            Hits = creep.Hits.HitsMax / 10
+                                        }
+                                })
+                    }
+
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats hurt)).Launched
+                    "a tenth of its hits: no medic to fall back on, so it stays"
+
+                Expect.isTrue (dismantles hurt) "and dismantles until it dies"
+            }
+
+            test "safe mode up, a probe in the room takes the way out at once" {
+                let colony = probing (child 20 31)
+
+                let moded =
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts -> { facts with SafeMode = true })
+                    }
+
+                let ground = assaultGroundOf (assaultThreats moded)
+
+                Expect.isFalse ground.Launched "not launched"
+
+                Expect.isTrue
+                    (outOfTheRoom ground.Front)
+                    $"one step out of the room: {ground.Front}"
+
+                Expect.isFalse
+                    ((decide moded (holdingAssault moded) Set.empty None).Intents
+                     |> List.exists (function
+                         | DismantleStructure _ -> true
+                         | _ -> false))
+                    "and no dismantle"
             }
         ]
