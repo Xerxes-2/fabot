@@ -270,6 +270,27 @@ let movementTests =
                     "up the corridor two tiles, the first being the move Intent's"
             }
 
+            test
+                "a fatigued walker issues no move, and its step plan is its own tile then its next step" {
+                // User, 2026-10-04: a walker fatigued on the full tick had no plan, so
+                // the light tick after it stood still the tick its fatigue cleared.
+                let tired = { worker "w1" 0 50 with Fatigue = 2 }
+                let snapshot = corridorColony [ tired ] [ "w1", { X = 10; Y = 14 } ]
+                let room = SpatialInfo.homeName snapshot.Spatial
+
+                let { Intents = intents; Steps = steps } = decideOn snapshot
+
+                Expect.isEmpty (moveIntents intents) "fatigued: the engine would refuse a move"
+
+                Expect.equal
+                    (Map.toList steps)
+                    [
+                        "w1",
+                        (RoomPos.at room { X = 10; Y = 14 }, RoomPos.at room { X = 10; Y = 13 })
+                    ]
+                    "the light tick re-issues the step from where it stands"
+            }
+
             test "a creep inside its Work Area acts and does not move" {
                 let snapshot =
                     { bareRespawn with

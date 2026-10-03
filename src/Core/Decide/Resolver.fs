@@ -463,6 +463,24 @@ let movementOf
     let idleGround room =
         Map.tryFind room idleGrounds |> Option.defaultValue (Set.empty, Set.empty)
 
+    // A fatigued walker issues no step this tick, so the light tick after it
+    // had none to replay and it stood still the tick its fatigue cleared
+    // (user, 2026-10-04): its plan is its own tile, then the step it would
+    // take. The light tick re-issues it until the engine lets it move.
+    for name, at in placed do
+        match Map.tryFind name assigned with
+        | Some task when Set.contains name tired ->
+            let area = areaFor threats atlas name task
+
+            if not (Set.contains at area) then
+                match
+                    Atlas.withoutRecording atlas name (fun () -> stepToward atlas name task area)
+                with
+                | Some step when step.Room = at.Room && step <> at ->
+                    Atlas.recordStep atlas name (at, step)
+                | _ -> ()
+        | _ -> ()
+
     // A reading and not a move, so it leaves the step plan the mover left for
     // the light tick as it was (`Atlas.withoutRecording`): it prices the
     // Task's own crossing where a Guard's mover prices the named room's.

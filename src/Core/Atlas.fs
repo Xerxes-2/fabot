@@ -2901,6 +2901,11 @@ let withoutRecording (atlas: Atlas) (creep: string) (read: unit -> 'a) : 'a =
 
     answer
 
+/// Sets a creep's step plan by hand: a fatigued walker the mover issued no
+/// step for this tick, standing on the first tile and stepping to the second.
+let recordStep (atlas: Atlas) (creep: string) (plan: RoomPos * RoomPos) =
+    atlas.Steps.[creep] <- plan
+
 /// Every creep's step plan as the mover left it this tick (`Atlas.Steps`),
 /// in creep-name order.
 let stepPlans (atlas: Atlas) : (string * (RoomPos * RoomPos)) list =
