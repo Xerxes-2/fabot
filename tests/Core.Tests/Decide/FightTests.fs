@@ -863,10 +863,12 @@ let private assaultingBy squad mode (targets: (string * Pos) list option) bodies
                             Breach = [ breachTile ]
                             Squad = squad
                             Mode = mode
+                            Targets = []
                             Entry = None
                             Active = true
                         }
                     Targets = targets
+                    Taken = false
                     Towers = []
                     SafeMode = false
                     // A provoked safe mode's whole 20,000 ticks ahead.
@@ -1375,6 +1377,62 @@ let assaultTests =
                     "a tenth of its hits: no medic to fall back on, so it stays"
 
                 Expect.isTrue (dismantles hurt) "and dismantles until it dies"
+            }
+
+            test
+                "past the breach a squad naming targets goes for them, and with them down it leaves by its way out and casts no more (#496)" {
+                let naming taken targets squad =
+                    let colony = assaultingWith Provoke targets squad
+
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts ->
+                                { facts with
+                                    Assault =
+                                        { facts.Assault with
+                                            Targets = [ { X = 25; Y = 41 } ]
+                                        }
+                                    Taken = taken
+                                })
+                    }
+
+                let going =
+                    assaultGroundOf (
+                        assaultThreats (
+                            naming false (Some [ "link-1", { X = 25; Y = 41 } ]) (squadAt atBreach)
+                        )
+                    )
+
+                Expect.isTrue going.Launched "the breach down and the link standing: in"
+                Expect.equal going.Target (Some("link-1", child 25 41)) "on the link"
+
+                let done' = naming true (Some []) (squadAt atBreach)
+                let ground = assaultGroundOf (assaultThreats done')
+
+                Expect.isFalse ground.Launched "the link down: not launched"
+
+                Expect.isTrue
+                    (outOfTheRoom ground.Front && ground.Behind = ground.Front)
+                    $"every member out of the room: {ground.Front}"
+
+                Expect.isFalse
+                    ((decide done' (holdingAssault done') Set.empty None).Intents
+                     |> List.exists (function
+                         | DismantleStructure _ -> true
+                         | _ -> false))
+                    "and no dismantle"
+
+                Expect.equal
+                    ([ "sapper"; "medic" ] |> List.map (quotaHolding done' []))
+                    [ Some 0; Some 0 ]
+                    "nothing cast to replace a body lost on the way out"
+
+                let out = naming true None (squadAt mustered)
+
+                Expect.isFalse
+                    (planHolding out [] |> List.contains (Assault "W1N2"))
+                    "every member out, the room dark: its work is done and it is pooled no more"
             }
 
             test "safe mode up, a probe in the room takes the way out at once" {

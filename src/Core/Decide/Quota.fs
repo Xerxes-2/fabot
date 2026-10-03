@@ -542,10 +542,11 @@ let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) 
             |> max 0)
 
     // Each assault's slots, on the same rally rule; it has no residents. None
-    // while safe mode runs in its room: a squad bought then waits it out.
+    // while safe mode runs in its room: a squad bought then waits it out; nor
+    // once its targets are down (#496).
     let moded =
         view.Assaults
-        |> List.filter (fun facts -> facts.SafeMode)
+        |> List.filter (fun facts -> facts.SafeMode || facts.Taken)
         |> List.map (fun facts -> facts.Assault.RoomName)
         |> Set.ofList
 

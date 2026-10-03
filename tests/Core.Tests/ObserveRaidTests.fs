@@ -1205,6 +1205,7 @@ let private probedAt time (life: int) (tile: RoomPos option) (safeMode: bool) =
                             Entry = None
                         }
                     Targets = Some [ "rampart-1", { X = 20; Y = 30 } ]
+                    Taken = false
                     Towers = []
                     SafeMode = safeMode
                     BarredUntil = None
@@ -1310,5 +1311,35 @@ let probeLogTests =
                          [ DismantleStructure("probe-1", "container-1") ]
                      |> probeLogOf)
                     "nor a probe's of something else"
+            }
+
+            test
+                "an assault room seen with its targets down is recorded taken from that tick, kept while dark, and dropped once one stands again (#496)" {
+                let seenAt time (targets: (string * Pos) list option) (taken: bool) =
+                    let view = probedAt time 1_000 None false
+
+                    { view with
+                        Assaults =
+                            view.Assaults
+                            |> List.map (fun facts ->
+                                { facts with
+                                    Targets = targets
+                                    Taken = taken
+                                })
+                    }
+
+                let opened = foldTaken (seenAt 100 (Some []) true) Map.empty
+                Expect.equal opened (Map.ofList [ "W1N2", 100 ]) "taken at t100"
+
+                Expect.equal
+                    (foldTaken (seenAt 101 (Some []) true) opened)
+                    opened
+                    "seen again: still from t100"
+
+                Expect.equal (foldTaken (seenAt 102 None true) opened) opened "dark: kept"
+
+                Expect.isEmpty
+                    (foldTaken (seenAt 103 (Some [ "link-1", { X = 25; Y = 41 } ]) false) opened)
+                    "the link rebuilt: dropped"
             }
         ]

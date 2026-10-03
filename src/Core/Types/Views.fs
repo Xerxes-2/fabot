@@ -35,10 +35,14 @@ type AssaultFacts =
     {
         Assault: Assault
         /// What its sappers take down, by id and tile, in order: the rampart
-        /// on each declared breach tile still standing, then, for a `Strike`,
-        /// the room's towers and then its spawns. None while the room is
-        /// dark.
+        /// on each declared breach tile still standing, then its declared
+        /// targets (`Assault.Targets`), else, for a `Strike`, the room's
+        /// towers and then its spawns. None while the room is dark.
         Targets: (string * Pos) list option
+        /// Whether its declared targets are all down (#496): seen so this
+        /// tick, or, the room dark, at the last look (`StandDown.Taken`).
+        /// Never for an assault that declares none.
+        Taken: bool
         /// The room's towers' tiles, off this tick's vision: what prices a
         /// fall-back's walk out (#492). Empty while the room is dark.
         Towers: Pos list
@@ -648,7 +652,12 @@ module ColonyView =
 
     /// One assault as this tick's vision of its room reads it, and its safe
     /// mode as the rival controllers remembered read it.
-    let private assaultFacts (tuning: Tuning) (world: World) (assault: Assault) : AssaultFacts =
+    let private assaultFacts
+        (tuning: Tuning)
+        (taken: Set<string>)
+        (world: World)
+        (assault: Assault)
+        : AssaultFacts =
         let facts = World.roomOf world assault.RoomName
 
         let remembered =
@@ -663,23 +672,45 @@ module ColonyView =
                 Map.tryFind id facts.Layer.TargetPositions |> Option.map (fun tile -> id, tile))
             |> List.sortBy snd
 
+        let ramparts = rivalRamparts facts
+
+        let rampartOn tile =
+            Map.tryFind tile ramparts |> Option.map (fun id -> id, tile) |> Option.toList
+
+        // A declared target's tile: its rampart, then what it covers.
+        let declared =
+            assault.Targets
+            |> List.collect (fun tile ->
+                rampartOn tile
+                @ (facts.TargetKinds
+                   |> Map.toList
+                   |> List.filter (fun (id, kind) ->
+                       match kind with
+                       | Structure BuiltKind.Rampart
+                       | Structure BuiltKind.Road -> false
+                       | Structure _ -> Map.tryFind id facts.Layer.TargetPositions = Some tile
+                       | _ -> false)
+                   |> List.map (fun (id, _) -> id, tile)
+                   |> List.sort))
+
         let targets =
             facts.Control
             |> Option.map (fun _ ->
-                let ramparts = rivalRamparts facts
+                let breach = assault.Breach |> List.collect rampartOn
 
-                let breach =
-                    assault.Breach
-                    |> List.choose (fun tile ->
-                        Map.tryFind tile ramparts |> Option.map (fun id -> id, tile))
-
-                match assault.Mode with
-                | Provoke -> breach
-                | Strike -> breach @ placed BuiltKind.Tower @ placed BuiltKind.Spawn)
+                match assault.Mode, assault.Targets with
+                | _, _ :: _ -> breach @ declared
+                | Provoke, [] -> breach
+                | Strike, [] -> breach @ placed BuiltKind.Tower @ placed BuiltKind.Spawn)
 
         {
             Assault = assault
             Targets = targets
+            Taken =
+                not (List.isEmpty assault.Targets)
+                && (match facts.Control with
+                    | Some _ -> List.isEmpty declared
+                    | None -> Set.contains assault.RoomName taken)
             Towers = placed BuiltKind.Tower |> List.map snd
             SafeMode =
                 remembered || facts.Control |> Option.exists (fun control -> control.SafeMode)
@@ -1007,7 +1038,7 @@ module ColonyView =
                    |> List.collect (fun h ->
                        World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
             Harass = scan.Harass
-            Assaults = scan.Assaults |> List.map (assaultFacts tuning world)
+            Assaults = scan.Assaults |> List.map (assaultFacts tuning gate.Taken world)
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
             HarassFloors =
                 scan.Harass

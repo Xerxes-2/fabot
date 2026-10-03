@@ -721,9 +721,11 @@ module HarassCasting =
 
 /// What an [[assault]]'s squad does once its breach falls (#490).
 type AssaultMode =
-    /// Holds at the breach: the strike that baits the room's safe mode.
+    /// Pooled whenever on, and holds at the breach unless it names targets
+    /// (`Assault.Targets`): the strike that baits the room's safe mode.
     | Provoke
-    /// Walks on to the room's towers, then its spawns.
+    /// Waits for a window, and walks on to its targets, by default the
+    /// room's towers, then its spawns.
     | Strike
 
 /// An [[assault]]: a rival's room a human has sent a squad against, cast by
@@ -739,6 +741,12 @@ type Assault =
         /// The rows its squad casts, by name, in cast order.
         Squad: string list
         Mode: AssaultMode
+        /// What its sappers take down past the breach, in order (#496): the
+        /// structures on these tiles, each under its rampart. Empty for the
+        /// mode's own — a `Strike`'s towers then spawns, a `Provoke`'s none.
+        /// Once they are all down the squad leaves and casts no more for them
+        /// until one stands again.
+        Targets: Pos list
         /// The room beside it the squad walks in from (#493), where a breach
         /// faces an exit no shortest chain from home crosses; None for
         /// whichever the chain search finds.
@@ -794,7 +802,24 @@ module Assault =
             Breach = [ { X = 2; Y = 7 } ]
             Squad = probe
             Mode = Provoke
+            Targets = []
             Entry = Some "W19S26"
+            Active = false
+        }
+
+    /// W18S26's far line again (#496), to hurt its economy: the source at
+    /// (23,43) hauls by the link at (25,41), five tiles inside the breach
+    /// #490's arena took from W17S26 with no loss, and far from the towers.
+    /// Off until the user has the arena's result.
+    let w18s26Link: Assault =
+        {
+            RoomName = "W18S26"
+            Enemy = "Trepidimous"
+            Breach = [ { X = 30; Y = 44 } ]
+            Squad = breachers
+            Mode = Provoke
+            Targets = [ { X = 25; Y = 41 } ]
+            Entry = Some "W17S26"
             Active = false
         }
 
@@ -811,6 +836,7 @@ module Assault =
             Breach = [ { X = 2; Y = 20 } ]
             Squad = breachers
             Mode = Strike
+            Targets = []
             Entry = Some "W18S24"
             Active = false
         }
@@ -882,6 +908,10 @@ type StandDown =
         /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
         /// was last seen, and casts nothing for the room as long again.
         Fought: Map<string, FightLatch>
+        /// The [[assault]] rooms whose declared targets were all down at the
+        /// last look (`RaidState.Taken`, #496): what keeps a dark room's
+        /// assault from casting again for them.
+        Taken: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -896,6 +926,7 @@ module StandDown =
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
             Fought = Map.empty
+            Taken = Set.empty
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a
@@ -1198,9 +1229,10 @@ module Colony =
                 Consignee = None
                 Perimeter = []
                 FirstSpawn = None
-                // W18S26's far line was cast from here (#490); its west line
-                // is seven crossings out by W19S26, past `Tuning.MaxHops`.
-                Assaults = []
+                // W18S26's far line was cast from here (#490), five crossings
+                // in by W17S26; its west line is seven out by W19S26, past
+                // `Tuning.MaxHops`.
+                Assaults = [ Assault.w18s26Link ]
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.

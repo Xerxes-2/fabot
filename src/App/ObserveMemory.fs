@@ -917,6 +917,7 @@ let loadRaids (home: string) : RaidState =
             Threatened = threatMapOf raids?threatened
             Fought = fightMapOf raids?fought
             Probes = probeMapOf raids?probes
+            Taken = intMapOf raids?taken
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -965,6 +966,8 @@ let saveRaids (home: string) (state: RaidState) =
     raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
     raids?fought <- state.Fought |> Map.toSeq |> hashOf encodeFight
     raids?probes <- state.Probes |> Map.toSeq |> hashOf encodeProbe
+    // Each taken assault room against its tick (#496).
+    raids?taken <- state.Taken |> Map.toSeq |> hashOf box
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)

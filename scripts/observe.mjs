@@ -903,6 +903,11 @@ if (command === "console") {
     const fate = p.fate === "probing" ? "still probing" : `${p.fate} at t${p.ended}`;
     return `probe ${room}: ${p.probe} — ${raised}; ${fate}`;
   });
+  // `taken` (#496): each assault room whose declared targets were all down
+  // at the last look, against the tick first seen so.
+  for (const [room, tick] of Object.entries(stored.taken ?? {})) {
+    probeLines.push(`taken ${room}: its targets down since t${tick}`);
+  }
 
   if (json) {
     console.log(JSON.stringify(episodes, null, 2));

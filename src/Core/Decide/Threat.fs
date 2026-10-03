@@ -1117,6 +1117,7 @@ let private withAssaults
                 && filled
                 && fit
                 && not facts.SafeMode
+                && not facts.Taken
                 && (together view rally members || inside || linked view members)
 
             let breach = facts.Assault.Breach |> List.map (RoomPos.at room)
@@ -1177,17 +1178,18 @@ let private withAssaults
                     | clear -> clear
                 | None -> rally
 
+            let inRoom =
+                members
+                |> List.choose (fun (name, _) -> tileOf name)
+                |> List.filter (fun tile -> tile.Room = room)
+
             // Falling back with casts still in the room: out of it first,
             // then to rally.
             let back =
                 if launched then
                     rally
                 else
-                    match
-                        members
-                        |> List.choose (fun (name, _) -> tileOf name)
-                        |> List.filter (fun tile -> tile.Room = room)
-                    with
+                    match inRoom with
                     | [] -> rally
                     | inside ->
                         match wayOut view atlas facts (List.map RoomPos.pos inside) with
@@ -1204,14 +1206,17 @@ let private withAssaults
                 Front = launchedOr front
                 Behind = launchedOr behind
                 Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
-            }
+            },
+            // Its targets down (#496): its work is done once its casts are out.
+            not facts.Taken || not (List.isEmpty inRoom)
 
         { threats with
             Assault =
                 assaults
                 |> List.map (fun facts -> facts, groundOf facts)
-                |> List.filter (fun (facts, ground) ->
-                    assaultPooled view atlas ground.Launched facts)
+                |> List.filter (fun (facts, (ground, working)) ->
+                    working && assaultPooled view atlas ground.Launched facts)
+                |> List.map (fun (facts, (ground, _)) -> facts, ground)
                 |> List.map (fun (facts, ground) -> facts.Assault.RoomName, ground)
                 |> Map.ofList
         }

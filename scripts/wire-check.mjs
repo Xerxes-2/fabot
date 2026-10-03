@@ -72,6 +72,7 @@ const emptyRaids = {
   threatened: {},
   fought: {},
   probes: {},
+  taken: {},
   living: [],
   placed: {},
   hits: {},
@@ -116,6 +117,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     threatened: { W1N5: { until: 800 } },
     fought: { W1N6: { seen: 700, squad: "duo" }, W1N7: { seen: 690 } },
     probes: { W18S26: probeOut, W17S24: probeProbing },
+    taken: { W18S26: 930_120 },
     living: ["w1", "w2"],
     placed: { w1: { room: "W1N2", x: 8, y: 49 } },
     hits: { "struct-1": 3000 },
@@ -176,6 +178,18 @@ wire("raids: a probe log (#493) off its shape costs its own room, and a legacy l
 
   const { probes, ...legacy } = emptyRaids;
   assert.equal(stable((await raidsThrough(legacy)).probes), stable({}));
+});
+
+wire("raids: a taken assault room (#496) with no tick costs its own room, and a legacy leaf reads none", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    taken: { W18S26: 930_120, W17S24: "soon", W17S25: null },
+  });
+
+  assert.equal(stable(written.taken), stable({ W18S26: 930_120 }));
+
+  const { taken, ...legacy } = emptyRaids;
+  assert.equal(stable((await raidsThrough(legacy)).taken), stable({}));
 });
 
 wire("raids: a stand-down with no expiry costs its row and no other", async () => {

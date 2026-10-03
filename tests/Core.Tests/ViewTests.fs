@@ -5220,8 +5220,9 @@ let rivalSafeModeTests =
 /// stands, for the salvage case's reason.
 let private assaultRoom = salvageRoom
 
-/// The mother's declaration with that room assaulted, its breach at (10,20).
-let private assaultDeclared (mode: AssaultMode) (active: bool) : Colony list =
+/// The mother's declaration with that room assaulted, its breach at (10,20),
+/// naming these targets past it.
+let private assaultNaming (targets: Pos list) (mode: AssaultMode) (active: bool) : Colony list =
     declared
     |> List.map (fun colony ->
         if colony.Home <> mother then
@@ -5236,11 +5237,17 @@ let private assaultDeclared (mode: AssaultMode) (active: bool) : Colony list =
                             Breach = [ { X = 10; Y = 20 } ]
                             Squad = Assault.breachers
                             Mode = mode
+                            Targets = targets
                             Entry = None
                             Active = active
                         }
                     ]
             })
+
+let private assaultDeclared = assaultNaming []
+
+/// The rival's link inside the line, under a rampart of its own.
+let private linkTile = { X = 12; Y = 24 }
 
 /// The room as vision reads it: the rival's line, a tower and a spawn.
 let private assaultWorld =
@@ -5258,6 +5265,8 @@ let private assaultWorld =
                             "ramp-line", { X = 10; Y = 21 }, Structure BuiltKind.Rampart
                             "tower-rival", { X = 30; Y = 30 }, Structure BuiltKind.Tower
                             "spawn-rival", { X = 31; Y = 31 }, Structure BuiltKind.Spawn
+                            "link-rival", linkTile, Structure BuiltKind.Link
+                            "ramp-link", linkTile, Structure BuiltKind.Rampart
                         ]
                 ))
     }
@@ -5282,6 +5291,117 @@ let assaultViewTests =
                     (Assault.w18s26.RoomName, Assault.w18s26.Squad, Assault.w18s26.Mode)
                     ("W18S26", Assault.probe, Provoke)
                     "a probe's Provoke on W18S26"
+            }
+
+            test
+                "W18S26's link is declared from W15S28 off its far line, and off until the user has the arena's result (#496)" {
+                let declaring =
+                    Colony.declared
+                    |> List.filter (fun colony -> List.contains Assault.w18s26Link colony.Assaults)
+                    |> List.map (fun colony -> colony.Home)
+
+                Expect.equal declaring [ "W15S28" ] "declared once, by the colony #490 cast from"
+
+                let link = Assault.w18s26Link
+
+                Expect.equal
+                    (link.RoomName, link.Breach, link.Targets, link.Entry)
+                    ("W18S26", [ { X = 30; Y = 44 } ], [ { X = 25; Y = 41 } ], Some "W17S26")
+                    "the far line at (30,44), then the link at (25,41), in from W17S26"
+
+                Expect.equal
+                    (link.Squad, link.Mode, link.Active)
+                    (Assault.breachers, Provoke, false)
+                    "the default squad, off"
+            }
+
+            test
+                "an assault naming its targets takes down the breach, then each one's rampart and the structure under it, and no tower (#496)" {
+                let view = viewUnder (assaultNaming [ linkTile ] Strike true) assaultWorld mother
+
+                match view.Assaults with
+                | [ facts ] ->
+                    Expect.equal
+                        facts.Targets
+                        (Some
+                            [
+                                "ramp-breach", { X = 10; Y = 20 }
+                                "ramp-link", linkTile
+                                "link-rival", linkTile
+                            ])
+                        "breach, the link's rampart, the link"
+
+                    Expect.isFalse facts.Taken "the link stands"
+                | other -> failtest $"one assault, not {other}"
+            }
+
+            test
+                "its targets all down, the assault is taken: seen so, or remembered by the raid log while the room is dark (#496)" {
+                let razed =
+                    { assaultWorld with
+                        Rooms =
+                            assaultWorld.Rooms
+                            |> Map.change
+                                assaultRoom
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        TargetKinds =
+                                            facts.TargetKinds
+                                            |> Map.remove "link-rival"
+                                            |> Map.remove "ramp-link"
+                                    }))
+                    }
+
+                let factsUnder gate world =
+                    let colonies = assaultNaming [ linkTile ] Provoke true
+                    let colony = colonies |> List.find (fun colony -> colony.Home = mother)
+
+                    let holders =
+                        World.creepColonies
+                            Tuning.defaults
+                            colonies
+                            (World.living colonies world)
+                            noneShut
+                            world
+
+                    match
+                        (ColonyView.ofWorld Tuning.defaults colonies gate holders world colony)
+                            .Assaults
+                    with
+                    | [ facts ] -> facts
+                    | other -> failtest $"one assault, not {other}"
+
+                let takenGate =
+                    { StandDown.none with
+                        Taken = Set.singleton assaultRoom
+                    }
+
+                let seen = factsUnder StandDown.none razed
+                Expect.isTrue seen.Taken "seen with the link down"
+
+                Expect.equal
+                    seen.Targets
+                    (Some [ "ramp-breach", { X = 10; Y = 20 } ])
+                    "the breach is all that stands"
+
+                Expect.isFalse
+                    (factsUnder takenGate assaultWorld).Taken
+                    "seen standing again: not taken, whatever the log says"
+
+                let dark =
+                    { assaultWorld with
+                        Rooms = assaultWorld.Rooms |> unseen assaultRoom
+                    }
+
+                Expect.isTrue (factsUnder takenGate dark).Taken "dark: the log's answer"
+                Expect.isFalse (factsUnder StandDown.none dark).Taken "dark, and never seen taken"
+
+                let undeclared =
+                    match (viewUnder (assaultDeclared Provoke true) razed mother).Assaults with
+                    | [ facts ] -> facts.Taken
+                    | other -> failtest $"one assault, not {other}"
+
+                Expect.isFalse undeclared "an assault naming no targets is never taken"
             }
 
             test "W17S24's Strike is declared, and off until the user switches it on" {

@@ -421,6 +421,11 @@ type RaidState =
         /// `observe.mjs raids` prints of what raised its safe mode. Bounded
         /// by the declared assaults.
         Probes: Map<string, ProbeLog>
+        /// Each [[assault]] room whose declared targets were all down at the
+        /// last look, against the tick they were first seen so (#496): the
+        /// work done, cast for no more until one stands again. Bounded by the
+        /// declared assaults.
+        Taken: Map<string, int>
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -453,6 +458,7 @@ module RaidState =
             Threatened = Map.empty
             Fought = Map.empty
             Probes = Map.empty
+            Taken = Map.empty
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -799,6 +805,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.map fst
             |> Set.ofList
         Fought = state.Fought
+        Taken = state.Taken |> Map.keys |> Set.ofSeq
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened,
@@ -851,6 +858,26 @@ let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string,
 /// The Raid-log fold: this tick's view plus the previous Raid log produce the
 /// new one. The two families are disjoint (one reads `Hostiles`, the other
 /// `InvaderCores` and the controllers), so `cap` is a depth per family.
+/// The taken half of the Raid-log fold (#496): an assault room seen with its
+/// declared targets all down is recorded on the first tick it is, and dropped
+/// on a tick one is seen standing; a dark room keeps what it had.
+let foldTaken (view: ColonyView) (prior: Map<string, int>) : Map<string, int> =
+    match view.Assaults |> List.filter (fun facts -> Option.isSome facts.Targets) with
+    | [] -> prior
+    | seen ->
+        seen
+        |> List.fold
+            (fun (taken: Map<string, int>) facts ->
+                let room = facts.Assault.RoomName
+
+                match facts.Taken, Map.containsKey room taken with
+                | true, false -> Map.add room view.Time taken
+                | true, true -> taken
+                | false, _ -> Map.remove room taken)
+            prior
+        |> Map.toSeq
+        |> Fresh.mapOfSeq
+
 let foldRaids
     (cap: int)
     (alive: Set<string>)
@@ -1070,6 +1097,7 @@ let foldRaids
         Fought = foldFights view prior.Fought
         // `foldProbes`', which reads the tick's intents as well.
         Probes = prior.Probes
+        Taken = foldTaken view prior.Taken
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged

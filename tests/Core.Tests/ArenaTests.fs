@@ -1922,6 +1922,65 @@ let private probeProbe (ticks: int) =
     let final, trace = start |> runUntil over ticks
     start, final, trace
 
+/// The link inside W18S26's far line (#496), fed by the source at (23,43).
+let private farLink =
+    trepBase().Structures
+    |> List.find (fun s -> s.Kind = "link" && s.At = List.head Assault.w18s26Link.Targets)
+
+/// The shipped link assault, switched on (#496): W17S26 an RCL7 colony of
+/// ours beside the far line, as #490's arena, its four casts standing at
+/// home; Trepidimous raising safe mode wherever struck or not. Run until
+/// the link is down and no body of ours is in W18S26, every body of ours is
+/// dead, or `ticks` are spent.
+let private linkProbe (panics: bool) (ticks: int) =
+    let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
+
+    let mother =
+        room "W17S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 20; Y = 26 } 5600
+
+    let colonies =
+        [
+            { colony "W17S26" with
+                Assaults =
+                    [
+                        { Assault.w18s26Link with
+                            Active = true
+                        }
+                    ]
+            }
+        ]
+
+    let squad =
+        [
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (4, 8)
+            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (4, 10)
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (3, 8)
+            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (3, 10)
+        ]
+        |> List.mapi (fun i (row, block, (x, y)) ->
+            body $"{row}-889000{i + 1}-Spawn8" Side.Ours block (w17s26 x y) None)
+
+    let target = if panics then trepBase () |> panicking else trepBase ()
+
+    let start =
+        arena 889_849 [ mother; target; room "W18S25"; room "W18S27" ] colonies squad
+
+    let over (a: Arena) =
+        let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
+
+        let ended =
+            not (a.Rooms["W18S26"].Structures |> List.exists (fun s -> s.Id = farLink.Id))
+            || (a.Rooms["W18S26"].Controller
+                |> Option.exists (fun c -> c.SafeModeUntil > a.Time))
+
+        List.isEmpty ours
+        || ended && ours |> List.forall (fun b -> b.At.Room <> "W18S26")
+
+    let final, trace = start |> runUntil over ticks
+    start, final, trace
+
 /// Odiodin's garrison outside W17S25's west line, walking in for the room's
 /// west end (#482).
 let private passingGarrison =
@@ -2495,6 +2554,74 @@ let arenaDefenceTests =
                          | _ -> false)
                         $"out alive at once: {log.Fate}"
                 | None -> failtest $"no probe log\n{failure}"
+            }
+
+            test
+                "scenario 8 (#496): the shipped link assault breaks W18S26's far line, dismantles the link behind it and walks out, the raid log saying it is taken" {
+                let start, final, trace = linkProbe false 1_000
+                let failure = describe trace
+                let fell = firstFallen (Set.singleton farBreach.Id) trace
+                let linkDown = firstFallen (Set.singleton farLink.Id) trace
+
+                let out =
+                    trace
+                    |> List.tryFind (fun t ->
+                        linkDown |> Option.exists (fun down -> t.Tick > down)
+                        && start.Bodies
+                           |> List.forall (fun b ->
+                               pathOf b.Id trace
+                               |> List.tryFind (fun (tick, _) -> tick = t.Tick)
+                               |> Option.forall (fun (_, s) -> s.At.Room <> "W18S26")))
+                    |> Option.map (fun t -> t.Tick)
+
+                // Measured: the line down at t366 as #490's, the link at t372
+                // five tiles in, every cast out of the room by W17S26 at t396,
+                // nobody lost.
+                Expect.isSome fell $"breached\n{failure}"
+                Expect.isSome linkDown $"the link down\n{failure}"
+                Expect.isLessThan linkDown.Value (fell.Value + 20) "a few steps past the breach"
+                Expect.isSome out $"every cast out of the room\n{failure}"
+                Expect.isLessThan out.Value (linkDown.Value + 40) "straight out once it is down"
+
+                for b in start.Bodies do
+                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+
+                Expect.isTrue
+                    (Map.tryFind "W17S26" final.Carried.Raids
+                     |> Option.exists (fun raids -> Map.containsKey "W18S26" raids.Taken))
+                    "the raid log has W18S26 taken"
+
+                let _, after = final |> run 30
+
+                Expect.isTrue
+                    (after
+                     |> List.forall (fun t ->
+                         t.Bodies
+                         |> List.forall (fun s ->
+                             s.At.Room <> "W18S26" || not (s.Id.EndsWith "Spawn8"))))
+                    $"its work done, nobody goes back in\n{describe after}"
+            }
+
+            test
+                "scenario 8b (#496): Trepidimous safe-modes the link assault's first dismantle on the far line; the link stands" {
+                let start, final, trace = linkProbe true 400
+                let failure = describe trace
+                let raised = safeModeOn trace
+                let linkDown = firstFallen (Set.singleton farLink.Id) trace
+                let lost = start.Bodies |> List.choose (fun b -> diedOn b.Id trace)
+
+                // Measured: safe mode at t62 off the first dismantle; on the
+                // walk out to W17S26, past the falloff with our heal refused
+                // (#492), a medic dies at t84 and a sapper at t93; the other
+                // two out at t94.
+                Expect.isSome raised $"safe mode raised\n{failure}"
+                Expect.isNone linkDown "the link stands"
+                Expect.isLessThanOrEqual lost.Length 2 $"half the squad at most\n{failure}"
+
+                Expect.isTrue
+                    (final.Bodies
+                     |> List.forall (fun b -> b.Side <> Side.Ours || b.At.Room <> "W18S26"))
+                    $"the rest out of the room\n{failure}"
             }
         ]
 
