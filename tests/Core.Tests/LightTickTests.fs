@@ -203,6 +203,36 @@ let forcedTests =
                     "combat at home is decided"
             }
 
+            test "an armed hostile beside ours in a room under our safe mode forces nothing" {
+                // Live t931,466: Trepidimous' pair in W17S25 under its safe mode
+                // held every tick full at 95 ms.
+                let safe =
+                    { stepped with
+                        Hostiles = [ hostile 21 21 "Invader" true ]
+                        Controllers = Map.ofList [ room, (5, true) ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced
+                        { last with
+                            Controllers = safe.Controllers
+                        }
+                        safe)
+                    None
+                    "it can act on nothing of ours"
+            }
+
+            test "an armed ally beside ours forces nothing" {
+                let ally = Colony.allies |> Seq.head
+
+                let guarded =
+                    { stepped with
+                        Hostiles = [ hostile 21 21 ally true ]
+                    }
+
+                Expect.equal (LightTick.forced last guarded) None "an ally is no threat"
+            }
+
             test
                 "an armed hostile in a harassment room, out of reach of every creep of ours, forces nothing" {
                 // #461: a defender kept standing in a room we only harass took

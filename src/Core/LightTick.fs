@@ -314,12 +314,21 @@ let resetSplit
 /// The first fact that makes replaying the last full tick wrong, in the
 /// ADR's order; `None` when the light tick may run.
 let forced (last: LastFull) (now: Glance) : LightForce option =
+    // An ally fights beside us, and a body in a room under our safe mode can
+    // act on nothing of ours: neither is a reason to decide (live t931,466,
+    // W17S25's safe mode held 100 full ticks of 95 ms).
+    let hostiles =
+        now.Hostiles
+        |> List.filter (fun hostile ->
+            not (Colony.isAlly hostile.Owner)
+            && not (Map.tryFind hostile.Tile.Room now.Controllers |> Option.exists snd))
+
     // Only in a room where we own a structure: an armed body standing off in
     // a remote or harassment room is the near rule's to answer (#461).
     let armed =
         let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
 
-        now.Hostiles
+        hostiles
         |> List.tryFind (fun hostile ->
             hostile.Armed && hostile.Owner <> keeper && Set.contains hostile.Tile.Room homes)
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
@@ -327,7 +336,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
     let near () =
         let ours = oursOf now
 
-        now.Hostiles
+        hostiles
         |> List.tryFind (within ours)
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
