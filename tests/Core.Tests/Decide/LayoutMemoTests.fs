@@ -641,7 +641,7 @@ let censusSignatureTests =
                 Expect.notEqual
                     (stepGridOf "W1N2" bare)
                     (stepGridOf "W1N2" colony)
-                    "the premise: a room the projection carries no layer for is all impassable (ADR 0004), so neither grid compared above is an empty one passing whatever the census did"
+                    "the premise: a room the projection carries no layer for is all impassable, so neither grid compared above is an empty one passing whatever the census did"
             }
 
             // What a replan is charged to (#463): the part of the signature

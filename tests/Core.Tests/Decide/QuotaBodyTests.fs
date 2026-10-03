@@ -173,10 +173,14 @@ let patternTableTests =
                             Name = "ranger"
                             Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
                         }
-                        // The squad's three roles, each one fixed body.
+                        // The squad's four roles, each one fixed body.
                         {
                             Name = "brawler"
                             Block = List.replicate 25 Move @ List.replicate 25 Attack
+                        }
+                        {
+                            Name = "sapper"
+                            Block = List.replicate 25 Move @ List.replicate 25 Work
                         }
                         {
                             Name = "medic"
@@ -635,9 +639,12 @@ let dismantlerCensusTests =
                 // Every row the table holds, cast at every bank the colonies stand
                 // at, plus the Anchor and the miner at their smallest: the arm sits
                 // between the miner's and the upgrader's and must take none of them.
+                // A sapper is the dismantler's parts, read back by its name
+                // (`patternByName`) and never by them.
                 let others =
                     patternTable
-                    |> List.filter (fun row -> row.Name <> dismantlerPattern.Name)
+                    |> List.filter (fun row ->
+                        row.Name <> dismantlerPattern.Name && row.Name <> sapperPattern.Name)
                     |> List.collect (fun row ->
                         [
                             for capacity in [ 300; 550; 800; 1300; 1800; 2300; 5600 ] ->

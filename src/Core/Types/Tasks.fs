@@ -22,11 +22,14 @@ type BodyClass =
     /// Work part at all (the hauler unit and the reserver).
     | Light
 
-/// A [[squad]] member's place in it: what a `Fight`'s capacity counts per
-/// role. A cast carries its role in its name (`Bodies.squadRoleOf`).
+/// A [[squad]] member's place in it: what a `Fight`'s or an `Assault`'s
+/// capacity counts per role. A cast carries its role in its name
+/// (`Bodies.squadRoleOf`).
 type SquadRole =
     /// The melee front.
     | Brawler
+    /// An [[assault]]'s front: WORK that takes a rampart down (#490).
+    | Sapper
     /// The healer walking behind it.
     | Medic
     /// The ranged member.
@@ -34,8 +37,9 @@ type SquadRole =
 
 [<RequireQualifiedAccess>]
 module SquadRole =
-    /// Every role, in the order a squad casts them.
-    let all = [ Brawler; Medic; Kiter ]
+    /// Every role, in the order a squad casts them: the fronts the medic
+    /// walks behind first.
+    let all = [ Brawler; Sapper; Medic; Kiter ]
 
     /// How many of these slots are this role's.
     let slots (role: SquadRole) (roles: SquadRole list) =
@@ -169,7 +173,7 @@ module Capacity =
     let fighters n =
         unbounded |> capping CapScope.Fighters n
 
-    /// A Fight's cap: its squad's slots per role, every role written
+    /// A Fight's or an Assault's cap: its squad's slots per role, every role written
     /// so a role the squad has no slot for is a cap of nothing.
     let roles (slots: SquadRole list) =
         SquadRole.all

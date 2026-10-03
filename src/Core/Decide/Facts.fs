@@ -43,6 +43,7 @@ let taskId =
     // Keyed on the room for the Guard's reason: a squad that loses a member
     // is the same fight.
     | Fight room -> $"fight:{room}"
+    | Assault room -> $"assault:{room}"
 
 /// The target inside a Task id: what `taskId` writes between its first colon
 /// and the next one (neither an object id nor a room name holds a colon).

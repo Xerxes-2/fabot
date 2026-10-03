@@ -666,6 +666,7 @@ let colony (home: string) : Colony =
         Consignee = None
         Perimeter = []
         FirstSpawn = None
+        Assaults = []
     }
 
 /// An outpost declared off a capture's own engine ids.

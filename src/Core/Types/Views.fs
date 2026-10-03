@@ -30,6 +30,19 @@ type BorrowedWork =
 /// name the site goes down under.
 type FirstSpawnSite = { Tile: Pos; Name: string }
 
+/// One [[assault]] this colony runs, as this tick reads its room (#490).
+type AssaultFacts =
+    {
+        Assault: Assault
+        /// What its sappers take down, by id and tile, in order: the rampart
+        /// on each declared breach tile still standing, then, for a `Strike`,
+        /// the room's towers and then its spawns. None while the room is
+        /// dark.
+        Targets: (string * Pos) list option
+        /// Whether vision shows safe mode running in the room this tick.
+        SafeMode: bool
+    }
+
 /// One colony's whole reading of this tick: its home room's projection, the
 /// rooms it works beside it, the bodies it holds, the bank it casts from and
 /// the explicit little it may take of its neighbours'. ADR-0052
@@ -146,6 +159,9 @@ type ColonyView =
         /// (`HarassCasting.Floors`), its ranger's least body (#457). A room
         /// missing here reads the full floor, `Tuning.HarassBlocks`.
         HarassFloors: Map<string, int>
+        /// The [[assault]]s this colony runs this tick (`Assault.worked`):
+        /// what the Assault Tasks, their ground and the squad rows read.
+        Assaults: AssaultFacts list
         /// The home room of the colony this one **ships its banked Thorium to**
         /// (`Colony.Consignee`, #349), a declaration and not a sighting: the
         /// far end is outside every scan set this colony holds. A rule may
@@ -592,6 +608,66 @@ module ColonyView =
                 }
         }
 
+    /// Every rampart standing in a room that is not ours, by tile: the rival's
+    /// own, which the engine lets no body of ours step onto.
+    let private rivalRamparts (facts: RoomFacts) : Map<Pos, string> =
+        facts.TargetKinds
+        |> Map.filter (fun id kind ->
+            kind = Structure BuiltKind.Rampart && not (Map.containsKey id facts.Hits))
+        |> Map.toList
+        |> List.choose (fun (id, _) ->
+            Map.tryFind id facts.Layer.TargetPositions |> Option.map (fun tile -> tile, id))
+        |> Map.ofList
+
+    /// An [[assault]] room's facts (#490): a [[transit room]]'s, with the
+    /// rival's ramparts laid in as obstacles — the projection calls a rampart
+    /// walkable whoever owns it, and a squad that walks for a tower must go
+    /// round the line it has not broken.
+    let private assaulting (facts: RoomFacts) : RoomFacts =
+        let crossed = transiting facts
+
+        { crossed with
+            Layer =
+                { crossed.Layer with
+                    Obstacles =
+                        rivalRamparts facts
+                        |> Map.keys
+                        |> Seq.fold
+                            (fun blocked tile -> Set.add tile blocked)
+                            crossed.Layer.Obstacles
+                }
+        }
+
+    /// One assault as this tick's vision of its room reads it.
+    let private assaultFacts (facts: RoomFacts) (assault: Assault) : AssaultFacts =
+        let placed kind =
+            facts.TargetKinds
+            |> Map.filter (fun _ seen -> seen = Structure kind)
+            |> Map.toList
+            |> List.choose (fun (id, _) ->
+                Map.tryFind id facts.Layer.TargetPositions |> Option.map (fun tile -> id, tile))
+            |> List.sortBy snd
+
+        let targets =
+            facts.Control
+            |> Option.map (fun _ ->
+                let ramparts = rivalRamparts facts
+
+                let breach =
+                    assault.Breach
+                    |> List.choose (fun tile ->
+                        Map.tryFind tile ramparts |> Option.map (fun id -> id, tile))
+
+                match assault.Mode with
+                | Provoke -> breach
+                | Strike -> breach @ placed BuiltKind.Tower @ placed BuiltKind.Spawn)
+
+        {
+            Assault = assault
+            Targets = targets
+            SafeMode = facts.Control |> Option.exists (fun control -> control.SafeMode)
+        }
+
     /// Every declared first spawn still to place (#476), world-wide: each
     /// [[nursery]] with a swept tile, in room order, named `SpawnN` from one
     /// past the highest N standing, so a name a lost room once held is never
@@ -676,6 +752,9 @@ module ColonyView =
         let harassEnemies =
             scan.Harass |> List.map (fun h -> h.RoomName, h.Enemy) |> Map.ofList
 
+        let assaultRooms =
+            scan.Assaults |> List.map (fun assault -> assault.RoomName) |> Set.ofList
+
         let bootstrap = scan.Borrowed
         let scanned = scan.Scanned
 
@@ -702,6 +781,7 @@ module ColonyView =
                 && not (Set.contains room errandRooms)
                 && not (Set.contains room salvageRooms)
                 && not (Map.containsKey room harassEnemies)
+                && not (Set.contains room assaultRooms)
                 && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
             |> Set.ofList
 
@@ -723,6 +803,9 @@ module ColonyView =
                     room, borrowed (Map.tryFind room stages) facts, remembered
                 elif List.contains room scan.Garrisoned then
                     room, garrisoning facts, None
+                // No memory, as a transit room keeps none.
+                elif Set.contains room assaultRooms then
+                    room, assaulting facts, None
                 elif Set.contains room transit then
                     room, transiting facts, None
                 elif Set.contains room errandRooms then
@@ -900,6 +983,10 @@ module ColonyView =
                    |> List.collect (fun h ->
                        World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
             Harass = scan.Harass
+            Assaults =
+                scan.Assaults
+                |> List.map (fun assault ->
+                    assaultFacts (World.roomOf world assault.RoomName) assault)
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
             HarassFloors =
                 scan.Harass

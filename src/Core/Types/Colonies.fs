@@ -719,6 +719,60 @@ module HarassCasting =
     /// No harassment room declared.
     let none: HarassCasting = { Casters = []; Floors = Map.empty }
 
+/// What an [[assault]]'s squad does once its breach falls (#490).
+type AssaultMode =
+    /// Holds at the breach: the strike that baits the room's safe mode.
+    | Provoke
+    /// Walks on to the room's towers, then its spawns.
+    | Strike
+
+/// An [[assault]]: a rival's room a human has sent a squad against, cast by
+/// the colony that declares it (#490). ADR-0084
+type Assault =
+    {
+        RoomName: string
+        /// The player whose room it is, by the username the engine spells.
+        Enemy: string
+        /// The ramparts its sappers break, in order: tiles of the room, chosen
+        /// by a human far from its towers.
+        Breach: Pos list
+        /// The rows its squad casts, by name, in cast order.
+        Squad: string list
+        Mode: AssaultMode
+        /// Whether it runs. Off, nothing is projected, pooled or cast for it:
+        /// a human switches it on in a commit.
+        Active: bool
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Assault =
+    /// The squad `docs/research/boosts.md` §4.2 prices: two 25-WORK sappers
+    /// and two 18-HEAL medics, 18,300.
+    let breachers = [ "sapper"; "sapper"; "medic"; "medic" ]
+
+    /// The assaults a colony runs this tick: the ones switched on.
+    let worked (assaults: Assault list) : Assault list =
+        assaults |> List.filter (fun assault -> assault.Active)
+
+    /// The rooms the assaults add to the scan set: each room and every room a
+    /// shortest walk to it could cross (`Errand.roomsProjected`).
+    let roomsProjected (assaults: Assault list) (home: string) : string list =
+        assaults
+        |> List.collect (fun assault ->
+            assault.RoomName :: RoomName.transitBetween home assault.RoomName)
+
+    /// W18S26's far line (boosts.md §4.2: breached in ~322 ticks with no
+    /// loss; its near line at x30 y8 wipes any squad): the bait.
+    let w18s26: Assault =
+        {
+            RoomName = "W18S26"
+            Enemy = "Trepidimous"
+            Breach = [ { X = 30; Y = 44 } ]
+            Squad = breachers
+            Mode = Provoke
+            Active = false
+        }
+
 /// One resident room's [[fight]] record (`RaidState.Fought`).
 type FightLatch =
     {
@@ -863,6 +917,9 @@ type Colony =
         /// the mother places the site there while the home is her nursery.
         /// `None` for a room nobody swept.
         FirstSpawn: Pos option
+        /// The rival rooms it sends a squad against (#490), each cast from
+        /// this home; an entry not `Active` is inert.
+        Assaults: Assault list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -997,6 +1054,7 @@ module Colony =
                 Consignee = Some "W15S28"
                 Perimeter = []
                 FirstSpawn = None
+                Assaults = []
             }
             // The second colony: the first colony's outpost until its own
             // spawn stood.
@@ -1045,6 +1103,7 @@ module Colony =
                 Consignee = Some "W15S28"
                 Perimeter = []
                 FirstSpawn = None
+                Assaults = []
             }
             // The third colony (2026-09-10, `docs/research/third-colony.md`).
             // The entry with no spawn behind it *was* the decision to take
@@ -1097,6 +1156,9 @@ module Colony =
                 Consignee = None
                 Perimeter = []
                 FirstSpawn = None
+                // The RCL7 bank nearest W18S26 (5,600 at t926,162), five
+                // crossings out. Off until the user switches it on.
+                Assaults = [ Assault.w18s26 ]
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.
@@ -1111,6 +1173,7 @@ module Colony =
                 Perimeter = []
                 // Placed by hand at t808,3xx; for the record.
                 FirstSpawn = Some { X = 24; Y = 40 }
+                Assaults = []
             }
             // The seventh colony (2026-10-01, `docs/research/seventh-colony.md`).
             // W17S25 held this slot from its Claim at t879,239 until a
@@ -1130,6 +1193,7 @@ module Colony =
                 Perimeter = []
                 // Placed by hand; for the record.
                 FirstSpawn = Some { X = 37; Y = 34 }
+                Assaults = []
             }
             // W17S25 again (2026-10-03): the user retakes the room
             // Trepidimous's siege took at t880,418. The plan:
@@ -1165,6 +1229,7 @@ module Colony =
                 // ctrl 5 / T 31, every cluster tile inside the perimeter and
                 // at range 4 or more from it.
                 FirstSpawn = Some { X = 14; Y = 28 }
+                Assaults = []
             }
         ]
 
@@ -1226,6 +1291,7 @@ module Colony =
                     Consignee = None
                     Perimeter = []
                     FirstSpawn = None
+                    Assaults = []
                 })
             |> Option.toList
         | living -> living

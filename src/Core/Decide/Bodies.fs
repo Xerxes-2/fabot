@@ -120,6 +120,16 @@ let kiterPattern =
         Block = List.replicate 16 RangedAttack @ List.replicate 24 Move @ List.replicate 8 Heal
     }
 
+/// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
+/// MOVE then WORK as the brawler is, so damage lames it on the rampart it
+/// stands beside before it slows the dismantle. 3,750. Its own name and row,
+/// apart from the salvage dismantler's.
+let sapperPattern =
+    {
+        Name = "sapper"
+        Block = List.replicate 25 Move @ List.replicate 25 Work
+    }
+
 /// ADR-0057
 /// The miner row: the store-less Work body over the mineral container. The
 /// block is the row's floor rather than its ratio (one Move per
@@ -159,6 +169,7 @@ let patternTable =
         guardPattern
         rangerPattern
         brawlerPattern
+        sapperPattern
         medicPattern
         kiterPattern
         minerPattern
@@ -272,9 +283,10 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
 /// The rows whose casts are read back off the name the cascade gives them
 /// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
 /// also a hauler, a kiter's counts are an eight-block ranger's, a brawler is
-/// an ATTACK body as a guard is, and a medic has no part a row reads.
+/// an ATTACK body as a guard is, a sapper a dismantler's, and a medic has no
+/// part a row reads.
 let private namedRows =
-    [ courierPattern; brawlerPattern; medicPattern; kiterPattern ]
+    [ courierPattern; brawlerPattern; sapperPattern; medicPattern; kiterPattern ]
 
 /// Whether a creep's name says it was cast by this row.
 let isNamedFor (pattern: BodyPattern) (name: string) = name.StartsWith(pattern.Name + "-")
@@ -287,6 +299,7 @@ let patternByName (name: string) : BodyPattern option =
 let squadPatternOf (role: SquadRole) : BodyPattern =
     match role with
     | Brawler -> brawlerPattern
+    | Sapper -> sapperPattern
     | Medic -> medicPattern
     | Kiter -> kiterPattern
 
@@ -294,6 +307,11 @@ let squadPatternOf (role: SquadRole) : BodyPattern =
 let squadRoleByName (name: string) : SquadRole option =
     SquadRole.all
     |> List.tryFind (fun role -> isNamedFor (squadPatternOf role) name)
+
+/// The squad role a row's name casts, or None for a row no squad casts: how
+/// an [[assault]]'s declared squad is read (`Assault.Squad`).
+let squadRoleOfRow (row: string) : SquadRole option =
+    SquadRole.all |> List.tryFind (fun role -> (squadPatternOf role).Name = row)
 
 /// Whether a row is one of the squad's: its bodies fixed, and counted against
 /// its own row and never the fleet's.

@@ -236,6 +236,7 @@ let private declared: Colony list =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
         {
             Home = child
@@ -246,6 +247,7 @@ let private declared: Colony list =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 
@@ -3476,6 +3478,7 @@ let private namedBy task =
     | Refill(id, _) -> Some id
     | Guard _
     | Fight _
+    | Assault _
     | Flee -> None
 
 [<Tests>]
@@ -3819,6 +3822,7 @@ let private claimingDeclared: Colony list =
                 Consignee = None
                 Perimeter = []
                 FirstSpawn = None
+                Assaults = []
             }
         ]
 
@@ -4012,6 +4016,7 @@ let harassViewTests =
                             Consignee = None
                             Perimeter = []
                             FirstSpawn = None
+                            Assaults = []
                         }
                     ]
 
@@ -4605,6 +4610,7 @@ let private declaringOutpost outpost : Colony =
         Consignee = None
         Perimeter = []
         FirstSpawn = None
+        Assaults = []
     }
 
 let private declaringErrand errand : Colony =
@@ -4617,6 +4623,7 @@ let private declaringErrand errand : Colony =
         Consignee = None
         Perimeter = []
         FirstSpawn = None
+        Assaults = []
     }
 
 [<Tests>]
@@ -5137,5 +5144,128 @@ let rivalSafeModeTests =
                         .RivalControllers
                     (Map.ofList [ "W17S24", trepController 4 ])
                     "a room seen with nobody's controller is dropped"
+            }
+        ]
+
+// ---- the assault room -------------------------------------------------------
+
+/// A rival's room two crossings south of the mother, where the salvage room
+/// stands, for the salvage case's reason.
+let private assaultRoom = salvageRoom
+
+/// The mother's declaration with that room assaulted, its breach at (10,20).
+let private assaultDeclared (mode: AssaultMode) (active: bool) : Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home <> mother then
+            colony
+        else
+            { colony with
+                Assaults =
+                    [
+                        {
+                            RoomName = assaultRoom
+                            Enemy = "Trepidimous"
+                            Breach = [ { X = 10; Y = 20 } ]
+                            Squad = Assault.breachers
+                            Mode = mode
+                            Active = active
+                        }
+                    ]
+            })
+
+/// The room as vision reads it: the rival's line, a tower and a spawn.
+let private assaultWorld =
+    { salvageWorld with
+        Rooms =
+            salvageWorld.Rooms
+            |> Map.add
+                assaultRoom
+                (snd (
+                    roomOf
+                        assaultRoom
+                        Ownership.Rival
+                        [
+                            "ramp-breach", { X = 10; Y = 20 }, Structure BuiltKind.Rampart
+                            "ramp-line", { X = 10; Y = 21 }, Structure BuiltKind.Rampart
+                            "tower-rival", { X = 30; Y = 30 }, Structure BuiltKind.Tower
+                            "spawn-rival", { X = 31; Y = 31 }, Structure BuiltKind.Spawn
+                        ]
+                ))
+    }
+
+[<Tests>]
+let assaultViewTests =
+    testList
+        "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
+        [
+            test "no declared assault is switched on: a human does that in a commit" {
+                for colony in Colony.declared do
+                    Expect.isEmpty
+                        (Assault.worked colony.Assaults)
+                        $"{colony.Home}: an assault runs only once the user switches it on"
+            }
+
+            test "an assault switched off projects nothing and runs nothing" {
+                let view = viewUnder (assaultDeclared Provoke false) assaultWorld mother
+
+                Expect.isEmpty view.Assaults "no assault"
+
+                Expect.isFalse
+                    (Map.containsKey assaultRoom view.Spatial.Rooms)
+                    "and its room is in no scan set"
+            }
+
+            test
+                "a Provoke's sappers take down the breach's rampart and nothing more, round the rest of the line" {
+                let view = viewUnder (assaultDeclared Provoke true) assaultWorld mother
+
+                match view.Assaults with
+                | [ facts ] ->
+                    Expect.equal
+                        facts.Targets
+                        (Some [ "ramp-breach", { X = 10; Y = 20 } ])
+                        "the declared tile's rampart"
+
+                    Expect.isFalse facts.SafeMode "no safe mode in sight"
+                | other -> failtest $"one assault, not {other}"
+
+                let layer = SpatialInfo.layerOf view.Spatial assaultRoom
+
+                for tile in [ { X = 10; Y = 20 }; { X = 10; Y = 21 } ] do
+                    Expect.isTrue
+                        (Set.contains tile layer.Obstacles)
+                        $"the rival's rampart at {tile} is a wall to our walk"
+
+                Expect.isFalse
+                    (Map.containsKey "tower-rival" view.Spatial.TargetKinds)
+                    "and nothing there is classified, as in any room we cross"
+            }
+
+            test "a Strike's go on to the towers and then the spawns; a dark room names none" {
+                let view = viewUnder (assaultDeclared Strike true) assaultWorld mother
+
+                Expect.equal
+                    (view.Assaults |> List.map (fun facts -> facts.Targets))
+                    [
+                        Some
+                            [
+                                "ramp-breach", { X = 10; Y = 20 }
+                                "tower-rival", { X = 30; Y = 30 }
+                                "spawn-rival", { X = 31; Y = 31 }
+                            ]
+                    ]
+                    "breach, tower, spawn"
+
+                let dark =
+                    { assaultWorld with
+                        Rooms = assaultWorld.Rooms |> unseen assaultRoom
+                    }
+
+                Expect.equal
+                    ((viewUnder (assaultDeclared Strike true) dark mother).Assaults
+                     |> List.map (fun facts -> facts.Targets))
+                    [ None ]
+                    "dark: nothing known"
             }
         ]

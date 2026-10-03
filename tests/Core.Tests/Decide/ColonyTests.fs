@@ -1142,6 +1142,7 @@ let private splitPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
         {
             Home = "W1N2"
@@ -1152,6 +1153,7 @@ let private splitPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 
@@ -1178,6 +1180,7 @@ let private nurseryPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
         {
             Home = "W1N2"
@@ -1188,6 +1191,7 @@ let private nurseryPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 
@@ -1205,6 +1209,7 @@ let private raisedPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
         {
             Home = "W1N2"
@@ -1215,6 +1220,7 @@ let private raisedPair =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 
@@ -1754,6 +1760,7 @@ let twoColonyTests =
                             Consignee = None
                             Perimeter = []
                             FirstSpawn = None
+                            Assaults = []
                         }
                         {
                             Home = child
@@ -1764,6 +1771,7 @@ let twoColonyTests =
                             Consignee = None
                             Perimeter = []
                             FirstSpawn = None
+                            Assaults = []
                         }
                     ]
 
@@ -2783,6 +2791,7 @@ let private raisingPair: Colony list =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
         {
             Home = "W1N2"
@@ -2793,6 +2802,7 @@ let private raisingPair: Colony list =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 

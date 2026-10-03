@@ -450,12 +450,16 @@ let private approachAt (view: ColonyView) : Approach option =
     // on the roster.
     //
     // Nor anything in a harassment room this colony casts, shut or not
-    // (#432): the raid there is ours.
+    // (#432), or in a room it assaults (#490): the raid there is ours.
+    let assaulted =
+        view.Assaults |> List.map (fun facts -> facts.Assault.RoomName) |> Set.ofList
+
     let armed =
         view.Hostiles
         |> List.filter (fun hostile ->
             Decide.Facts.isArmed hostile
-            && not (Set.contains hostile.Pos.Room view.HarassCast))
+            && not (Set.contains hostile.Pos.Room view.HarassCast)
+            && not (Set.contains hostile.Pos.Room assaulted))
 
     if List.isEmpty armed then
         None

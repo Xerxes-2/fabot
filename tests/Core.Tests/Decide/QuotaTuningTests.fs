@@ -512,6 +512,7 @@ let quotasRecordTests =
                         "guard"
                         "ranger"
                         "brawler"
+                        "sapper"
                         "medic"
                         "kiter"
                         "reserver"

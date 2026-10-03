@@ -1652,6 +1652,52 @@ let private offenceProbe (striker: BodyPart list) =
     let final, trace = start |> runUntil over Engine.creepLifetime
     start, final, trace
 
+/// The rampart on W18S26's far line at x30 y44 (boosts.md §4.2).
+let private farBreach =
+    trepBase().Structures
+    |> List.find (fun s -> s.Kind = "rampart" && s.At = { X = 30; Y = 44 })
+
+/// Our decide this time (#490): W17S26 an RCL7 colony of ours sending the
+/// default squad against W18S26's far line, a Provoke, its four casts
+/// standing apart in W17S26 as the probe's do. Run until the breach's rampart
+/// falls, every body of ours is dead, or `ticks` are spent.
+let private assaultProbe (ticks: int) =
+    let w17s26 x y = RoomPos.at "W17S26" { X = x; Y = y }
+
+    let mother =
+        room "W17S26"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn8" { X = 20; Y = 26 } 5600
+
+    let colonies =
+        [
+            { colony "W17S26" with
+                Assaults = [ { Assault.w18s26 with Active = true } ]
+            }
+        ]
+
+    let cast row (block: BodyPart list) n at =
+        body $"{row}-889000{n}-Spawn8" Side.Ours block at None
+
+    let squad =
+        [
+            cast "sapper" Fabot.Core.Decide.Bodies.sapperPattern.Block 1 (w17s26 4 8)
+            cast "sapper" Fabot.Core.Decide.Bodies.sapperPattern.Block 2 (w17s26 4 10)
+            cast "medic" Fabot.Core.Decide.Bodies.medicPattern.Block 3 (w17s26 3 8)
+            cast "medic" Fabot.Core.Decide.Bodies.medicPattern.Block 4 (w17s26 3 10)
+        ]
+
+    let start = arena 889_849 [ mother; trepBase () ] colonies squad
+
+    let over (a: Arena) =
+        let ours = a.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
+
+        List.isEmpty ours
+        || not (a.Rooms["W18S26"].Structures |> List.exists (fun s -> s.Id = farBreach.Id))
+
+    let final, trace = start |> runUntil over ticks
+    start, final, trace
+
 /// Odiodin's garrison outside W17S25's west line, walking in for the room's
 /// west end (#482).
 let private passingGarrison =
@@ -2008,6 +2054,55 @@ let arenaDefenceTests =
                         // 400 a tick against ~780,000: not inside a life.
                         Expect.isNone fell $"never breached inside a life\n{failure}"
                 }
+
+            test
+                "scenario 4, our decide (#490): the default assault squad musters, launches whole and breaks W18S26's far line with no loss" {
+                let start, _, trace = assaultProbe 450
+                let failure = describe trace
+                let fell = firstFallen (Set.singleton farBreach.Id) trace
+
+                // Measured: in at t3, the first dismantle at t62 after the
+                // walk, the line down at t366 (2 × 1,250 a tick on 758,201),
+                // no body under 72% of its hits. boosts.md §4.2 prices it
+                // at t322 with the walk shorter.
+                Expect.isSome fell $"breached\n{failure}"
+                Expect.isLessThan fell.Value 400 "inside 400 ticks"
+
+                for b in start.Bodies do
+                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+
+                let sappers =
+                    start.Bodies
+                    |> List.filter (fun b -> b.Id.StartsWith "sapper")
+                    |> List.map (fun b -> b.Id)
+
+                let firstIn id =
+                    pathOf id trace
+                    |> List.tryFind (fun (_, s) -> s.At.Room = "W18S26")
+                    |> Option.map fst
+
+                let entries = start.Bodies |> List.map (fun b -> firstIn b.Id)
+
+                Expect.isTrue
+                    (entries |> List.forall Option.isSome)
+                    $"every cast went in: {entries}\n{failure}"
+
+                Expect.isLessThanOrEqual
+                    ((entries |> List.choose id |> List.max)
+                     - (entries |> List.choose id |> List.min))
+                    4
+                    $"together, not one by one: {entries}"
+
+                Expect.isTrue
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Ours
+                         |> List.exists (function
+                             | DismantleStructure(name, id) ->
+                                 id = farBreach.Id && List.contains name sappers
+                             | _ -> false)))
+                    "the sappers took it down"
+            }
         ]
 
 /// W13S28 at RCL8 with its observer, and W14S27 declared a colony of ours

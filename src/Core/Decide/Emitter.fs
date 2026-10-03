@@ -284,8 +284,9 @@ let internal applicable
     // was safe would be released the tick it took it and walk three rooms home.
     | Reclaim _ -> has BodyPart.Claim
     // The row's own body and no other: a generalist walked two crossings out
-    // for it is a generalist lost to the colony for the walk.
-    | Dismantle _ -> isDismantlerParts heavy creep.Body
+    // for it is a generalist lost to the colony for the walk, and a sapper
+    // an assault lost.
+    | Dismantle _ -> isDismantlerParts heavy creep.Body && not (isSapperBody creep)
     // Spelled through the row predicate the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree. The room decides which row: an
     // errand room's Guard is the ranger's (#411), and a harassment room's
@@ -300,6 +301,8 @@ let internal applicable
     // parts fit a slot (`FightGround.Roles`); how many of each role is the
     // capacity's.
     | Fight room -> Option.isSome (Threats.fightRoleOf threats room creep.Name)
+    // A squad cast of a role the assault's squad casts (`AssaultGround.Roles`).
+    | Assault room -> Option.isSome (Threats.assaultRoleOf threats room creep.Name)
     // Without the Fighter exemption a guard on the ring is offered both
     // Safety-tier Tasks and kept in the fight by travel cost alone, so the tick
     // a raid steps toward it the body bought to stand still walks away.
@@ -429,7 +432,8 @@ let private intentFor
     // The Guard's attack names a hostile chosen at arrival, rather than a
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
     | Guard _
-    | Fight _ -> None
+    | Fight _
+    | Assault _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
 /// legible in the viewer at one glyph per creep.
@@ -452,6 +456,7 @@ let private glyphFor =
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
     | Fight _ -> "🛡️"
+    | Assault _ -> "🏰"
 
 /// The Threat a fighter acts on out of the ones standing in the room its Task
 /// names and passing the caller's own gate: first by the kill order
@@ -698,6 +703,21 @@ let private actionIntents
     // as a guard and a ranger do.
     | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
     | Fight room -> guardIntent view atlas fighting creep room |> Option.toList
+    // A launched sapper takes its target down from beside it; a medic's act
+    // is the heal reflex's.
+    | Assault room ->
+        match Map.tryFind room threats.Assault with
+        | Some ground when
+            ground.Launched && Threats.assaultRoleOf threats room creep.Name = Some Sapper
+            ->
+            ground.Target
+            |> Option.filter (fun (_, tile) ->
+                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                |> Option.bind (RoomPos.range tile)
+                |> Option.exists (fun r -> r <= Engine.meleeRange))
+            |> Option.map (fun (id, _) -> DismantleStructure(creep.Name, id))
+            |> Option.toList
+        | _ -> []
     | _ ->
         if
             mayActNow threats atlas creep.Name task

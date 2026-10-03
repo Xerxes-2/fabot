@@ -46,6 +46,33 @@ type FightGround =
         Residents: Map<string, SquadRole>
     }
 
+/// One `Assault`'s ground this tick (#490), off its squad's holders: the
+/// rally ground until the squad launches, beside its target after.
+type AssaultGround =
+    {
+        /// The roles the declared squad casts (`Assault.Squad`).
+        Slots: SquadRole list
+        /// A `Fight`'s launch, over its casts alone, and never while one of
+        /// them is hurt — under half its hits once in, under four fifths
+        /// before — or while safe mode runs in the room.
+        Launched: bool
+        /// The rally ground, as a `Fight`'s, on the chain that ends in the
+        /// rival's room.
+        Rally: Set<RoomPos>
+        /// What the sappers take down this tick (`AssaultFacts.Targets`'
+        /// head), None while the room is dark or nothing is left.
+        Target: (string * RoomPos) option
+        /// A sapper's ground: the rally ground, or, launched, the tiles beside
+        /// the target — beside the first declared breach tile while the room is
+        /// dark, and beside the last once a `Provoke`'s breach has fallen.
+        Front: Set<RoomPos>
+        /// A medic's: the rally ground, or, launched, the tiles beside the
+        /// leading sapper that are not the front.
+        Behind: Set<RoomPos>
+        /// Its casts holding it, by role.
+        Roles: Map<string, SquadRole>
+    }
+
 /// ADR-0033. Derived once a tick and shared by the applicability gate, Flee's
 /// Work Area and the spawn hold. Keyed by the room the hostile stands in: a
 /// `Set<Pos>` cannot say which room's tiles it holds, so the room rides on the
@@ -98,6 +125,9 @@ type Threats =
         /// Per room a Fight is pooled for (`Facts.fights`), its ground
         /// (`threatsOfHeld`); empty off `threatsOf`.
         Fight: Map<string, FightGround>
+        /// Per room an Assault is pooled for (`ColonyView.Assaults`), its
+        /// ground (`threatsOfHeld`); empty off `threatsOf`.
+        Assault: Map<string, AssaultGround>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -112,6 +142,7 @@ let noThreats =
         Kite = Map.empty
         Held = Set.empty
         Fight = Map.empty
+        Assault = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -174,6 +205,20 @@ module Threats =
 
     /// The rooms a Fight is pooled for.
     let fightRooms (threats: Threats) : Set<string> = threats.Fight |> Map.keys |> Set.ofSeq
+
+    /// The role a cast holds a room's Assault in, or None where the Assault
+    /// does not admit it.
+    let assaultRoleOf (threats: Threats) (room: string) (creep: string) : SquadRole option =
+        Map.tryFind room threats.Assault
+        |> Option.bind (fun ground -> Map.tryFind creep ground.Roles)
+
+    /// One member's ground in an Assault's room, by its role; empty for a
+    /// room with no Assault ground or a body it does not admit.
+    let assaultGroundIn (threats: Threats) (room: string) (creep: string) : Set<RoomPos> =
+        match Map.tryFind room threats.Assault, assaultRoleOf threats room creep with
+        | Some ground, Some Medic -> ground.Behind
+        | Some ground, Some _ -> ground.Front
+        | _ -> Set.empty
 
 /// The kill order's head among one room's targets (`Facts.killRank`), ties by
 /// id; each target's rank priced once, not once a comparison.
@@ -315,6 +360,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 Kite = Map.empty
                 Held = Set.empty
                 Fight = Map.empty
+                Assault = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -629,6 +675,79 @@ let rallyHop (rivals: Set<string>) (chain: string list) : (string * string) opti
     |> List.tryFind (fun (from, _) ->
         not (Keepers.isKeeperRoom from) && not (Set.contains from rivals))
 
+/// The ground beside the middle of the crossing from one room into the next,
+/// clear of the border and of the room's Reach.
+let private besideCrossing atlas (threats: Threats) (from: string) (into: string) =
+    match Atlas.seams atlas from into |> List.map fst with
+    | [] -> Set.empty
+    | exits ->
+        let middle = List.item (List.length exits / 2) exits
+        let reach = Threats.reachIn threats from
+
+        Atlas.walkableWithinIn atlas from rallyReach middle
+        |> List.filter (fun tile -> edgeGap tile > crossingGap && not (Set.contains tile reach))
+        |> Set.ofList
+        |> RoomPos.setAt from
+
+/// A squad's rally ground on its chain from home (`rallyHop`); empty where no
+/// chain reaches its room.
+let private rallyOn (view: ColonyView) atlas (threats: Threats) (chain: string list option) =
+    chain
+    |> Option.bind (rallyHop view.Spatial.RivalRooms)
+    |> Option.map (fun (from, into) -> besideCrossing atlas threats from into)
+    |> Option.defaultValue Set.empty
+
+/// A squad's casts, the front leading: a brawler, else a sapper, else a
+/// kiter, else whoever holds.
+let private frontFirst (members: (string * SquadRole) list) =
+    members
+    |> List.sortBy (fun (name, role) ->
+        (match role with
+         | Brawler -> 0
+         | Sapper -> 1
+         | Kiter -> 2
+         | Medic -> 3),
+        name)
+
+/// Whether each cast stands on the rally ground or with the squad: the
+/// others within two of the leader, and the leader within two of one of
+/// them. A leader is never with the squad by standing on its own tile, so a
+/// recast front far off the rally ground is not.
+let private together (view: ColonyView) (rally: Set<RoomPos>) (members: (string * SquadRole) list) =
+    let tileOf name =
+        SpatialInfo.creepPlacementOf view.Spatial name
+
+    let leader = frontFirst members |> List.tryHead |> Option.map fst
+
+    members
+    |> List.forall (fun (name, _) ->
+        tileOf name
+        |> Option.exists (fun tile ->
+            Set.contains tile rally
+            || members
+               |> List.exists (fun (other, _) ->
+                   other <> name
+                   && (Some name = leader || Some other = leader)
+                   && tileOf other
+                      |> Option.bind (rangeAcross tile)
+                      |> Option.exists (fun r -> r <= squadSpread))))
+
+/// Whether every cast stands in the room or at its crossing: a front chasing
+/// its target, or carried over the border off an exit tile, is not called
+/// back to the rally ground.
+let private entered (view: ColonyView) (room: string) (members: (string * SquadRole) list) =
+    members
+    |> List.forall (fun (name, _) ->
+        SpatialInfo.creepPlacementOf view.Spatial name
+        |> Option.exists (fun tile -> tile.Room = room || atCrossingInto room tile))
+
+/// Every squad cast of this colony, by the role its name carries.
+let private squadCasts (view: ColonyView) : Map<string, SquadRole> =
+    view.Creeps
+    |> List.choose (fun creep ->
+        squadRoleByName creep.Name |> Option.map (fun role -> creep.Name, role))
+    |> Map.ofList
+
 /// The tick's Threats with each pooled Fight's ground on it
 /// (`HeldTaskFacts.Fights`), its squad whoever holds the room's Fight. A
 /// launched squad's room keeps its residents on the kite ground.
@@ -646,33 +765,10 @@ let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: 
         let bodies =
             view.Creeps |> List.map (fun creep -> creep.Name, creep.Body) |> Map.ofList
 
-        // Every squad cast of this colony, by the role its name carries.
-        let casts =
-            view.Creeps
-            |> List.choose (fun creep ->
-                squadRoleByName creep.Name |> Option.map (fun role -> creep.Name, role))
-            |> Map.ofList
-
-        // The ground beside the middle of the crossing from one room into the
-        // next, clear of the border and of the room's Reach.
-        let besideCrossing (from: string) (into: string) =
-            match Atlas.seams atlas from into |> List.map fst with
-            | [] -> Set.empty
-            | exits ->
-                let middle = List.item (List.length exits / 2) exits
-                let reach = Threats.reachIn threats from
-
-                Atlas.walkableWithinIn atlas from rallyReach middle
-                |> List.filter (fun tile ->
-                    edgeGap tile > crossingGap && not (Set.contains tile reach))
-                |> Set.ofList
-                |> RoomPos.setAt from
+        let casts = squadCasts view
 
         let rallyFor room =
-            Atlas.route atlas home room
-            |> Option.bind (rallyHop view.Spatial.RivalRooms)
-            |> Option.map (fun (from, into) -> besideCrossing from into)
-            |> Option.defaultValue Set.empty
+            rallyOn view atlas threats (Atlas.route atlas home room)
 
         let groundOf room (squad: Squad) =
             let slots = squadRoles squad
@@ -711,54 +807,17 @@ let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: 
                     + (residents |> Map.filter (fun _ fits -> fits = role) |> Map.count)
                     >= SquadRole.slots role slots)
 
-            // The front leads: a brawler, else a kiter, else whoever holds.
-            let ranked =
-                members
-                |> List.sortBy (fun (name, role) ->
-                    (match role with
-                     | Brawler -> 0
-                     | Kiter -> 1
-                     | Medic -> 2),
-                    name)
-
-            let leader = ranked |> List.tryHead |> Option.map fst
-
-            // Each cast on the rally ground, or with the squad: the others
-            // within two of the leader, and the leader within two of one of
-            // them. A leader is never with the squad by standing on its own
-            // tile, so a recast brawler far off the rally ground is not.
-            let together =
-                members
-                |> List.forall (fun (name, _) ->
-                    tileOf name
-                    |> Option.exists (fun tile ->
-                        Set.contains tile rally
-                        || members
-                           |> List.exists (fun (other, _) ->
-                               other <> name
-                               && (Some name = leader || Some other = leader)
-                               && tileOf other
-                                  |> Option.bind (rangeAcross tile)
-                                  |> Option.exists (fun r -> r <= squadSpread))))
-
-            // Gone in, and held there while every cast stands in the room or
-            // at its crossing: a brawler chasing its target, or carried over
-            // the border off an exit tile, is not called back to the rally
-            // ground.
-            let entered =
-                members
-                |> List.forall (fun (name, _) ->
-                    tileOf name
-                    |> Option.exists (fun tile -> tile.Room = room || atCrossingInto room tile))
+            let ranked = frontFirst members
 
             // Never with a slot empty: a squad that loses a member, or whose
             // replacement is on its way, waits on the rally ground until it is
-            // whole again.
+            // whole again. Gone in, it is held there while every cast stands
+            // in the room or at its crossing.
             let launched =
                 not (Set.isEmpty rally)
                 && not (List.isEmpty members)
                 && filled
-                && (together || entered)
+                && (together view rally members || entered view room members)
 
             // The tiles beside a tile no hostile stands on, in its room.
             let besideIn (tile: RoomPos) =
@@ -867,8 +926,162 @@ let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: 
             Kite = kite
         }
 
+/// The share of its hits under which a launched assault's cast sends its
+/// squad back to rally, and the share every cast must hold to launch from
+/// there: the gap is what its medics heal at rally, so a squad that turned
+/// back at one does not walk straight back in.
+let private assaultRetreatShare = 0.5
+
+let private assaultLaunchShare = 0.8
+
+/// The tick's Threats with each Assault's ground on it (`ColonyView.Assaults`):
+/// a Fight's rally and launch over the casts holding it, kept whole on the
+/// walk in.
+let private withAssaults
+    (view: ColonyView)
+    atlas
+    (held: HeldTaskFacts)
+    (threats: Threats)
+    : Threats =
+    match view.Assaults with
+    | [] -> threats
+    | assaults ->
+        let home = SpatialInfo.homeName view.Spatial
+        let casts = squadCasts view
+
+        let tileOf name =
+            SpatialInfo.creepPlacementOf view.Spatial name
+
+        let share =
+            view.Creeps
+            |> List.map (fun creep ->
+                creep.Name, float creep.Hits.Hits / float (max 1 creep.Hits.HitsMax))
+            |> Map.ofList
+
+        // The walkable tiles beside a tile, in its room.
+        let besideIn (tile: RoomPos) =
+            Atlas.adjacentWalkableIn atlas tile.Room (RoomPos.pos tile)
+            |> List.map (RoomPos.at tile.Room)
+            |> Set.ofList
+
+        let groundOf (facts: AssaultFacts) =
+            let room = facts.Assault.RoomName
+            let slots = facts.Assault.Squad |> List.choose squadRoleOfRow
+
+            // The casts holding the room's Assault, by role.
+            let members =
+                HeldTaskFacts.holdersOf held (taskId (Assault room))
+                |> List.choose (fun name ->
+                    Map.tryFind name casts |> Option.map (fun role -> name, role))
+                |> List.sort
+
+            let rally = rallyOn view atlas threats (Atlas.siegeRoute atlas home room)
+
+            let filled =
+                SquadRole.all
+                |> List.forall (fun role ->
+                    SquadRole.slots role (List.map snd members) >= SquadRole.slots role slots)
+
+            let inside = entered view room members
+
+            // Hurt: under half once in, so the squad turns back; under four
+            // fifths at rally, so it waits for its medics.
+            let fit =
+                let least = if inside then assaultRetreatShare else assaultLaunchShare
+
+                members
+                |> List.forall (fun (name, _) ->
+                    Map.tryFind name share |> Option.exists (fun s -> s >= least))
+
+            let launched =
+                not (Set.isEmpty rally)
+                && not (List.isEmpty members)
+                && filled
+                && fit
+                && not facts.SafeMode
+                && (together view rally members || inside)
+
+            let breach = facts.Assault.Breach |> List.map (RoomPos.at room)
+
+            // The target: vision's head, else the first declared breach tile
+            // while the room is dark.
+            let target =
+                match facts.Targets with
+                | Some targets ->
+                    targets
+                    |> List.tryHead
+                    |> Option.map (fun (id, tile) -> id, RoomPos.at room tile)
+                | None -> None
+
+            let front =
+                match target, facts.Targets with
+                | Some(_, tile), _ -> besideIn tile
+                | None, None ->
+                    breach |> List.tryHead |> Option.map besideIn |> Option.defaultValue Set.empty
+                // Nothing left standing: a `Provoke` holds the breach it made,
+                // and a `Strike` the last one too.
+                | None, Some _ ->
+                    breach
+                    |> List.tryLast
+                    |> Option.map (fun tile -> Set.add tile (besideIn tile))
+                    |> Option.defaultValue Set.empty
+
+            let leader =
+                frontFirst members
+                |> List.tryFind (snd >> (<>) Medic)
+                |> Option.bind (fun (name, _) -> tileOf name |> Option.map (fun tile -> name, tile))
+
+            // Strung out under fire, the squad's medics cannot reach the body
+            // the towers pick: every cast within two of the leader, or the
+            // leader holds its tile and the rest close on it.
+            let strung =
+                match leader with
+                | Some(name, at) ->
+                    members
+                    |> List.exists (fun (other, _) ->
+                        other <> name
+                        && tileOf other
+                           |> Option.bind (rangeAcross at)
+                           |> Option.forall (fun r -> r > squadSpread))
+                | None -> false
+
+            let front =
+                match leader with
+                | Some(_, at) when strung -> Set.add at (besideIn at)
+                | _ -> front
+
+            // Beside the leading sapper, off the front it works from.
+            let behind =
+                match leader with
+                | Some(_, tile) ->
+                    match Set.difference (besideIn tile) front with
+                    | clear when Set.isEmpty clear -> besideIn tile
+                    | clear -> clear
+                | None -> rally
+
+            let launchedOr ground = if launched then ground else rally
+
+            {
+                Slots = slots
+                Launched = launched
+                Rally = rally
+                Target = target
+                Front = launchedOr front
+                Behind = launchedOr behind
+                Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
+            }
+
+        { threats with
+            Assault =
+                assaults
+                |> List.map (fun facts -> facts.Assault.RoomName, groundOf facts)
+                |> Map.ofList
+        }
+
 /// The tick's Threats off what the colony holds (`heldTaskFacts`): an
 /// outmatched room's safe ground for every ranger holding its Guard, wherever
-/// it stands, and each pooled Fight's ground.
+/// it stands, each pooled Fight's ground and each Assault's.
 let threatsOfHeld (view: ColonyView) atlas (held: HeldTaskFacts) : Threats =
-    threatsHeldBy view atlas held |> withFights view atlas held
+    threatsHeldBy view atlas held
+    |> withFights view atlas held
+    |> withAssaults view atlas held

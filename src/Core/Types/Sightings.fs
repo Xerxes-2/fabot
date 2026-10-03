@@ -1190,6 +1190,9 @@ module World =
             /// The harassment rooms no colony casts this tick
             /// (`harassCasters`).
             Uncast: Harass list
+            /// The [[assault]]s this colony runs (`Assault.worked`): no
+            /// stand-down or chain narrows them, the room being a rival's.
+            Assaults: Assault list
             /// The scan set: this colony's home and all six of those, the
             /// one place that union is spelled. A cast harassment room its
             /// stand-down shuts stays in it, as a transit room: a ranger
@@ -1273,6 +1276,8 @@ module World =
         let defended =
             Colony.defending stages (defends world covered colony.Home) colonies colony
 
+        let assaults = Assault.worked colony.Assaults
+
         {
             Outposts = outposts
             Errands = errands
@@ -1283,6 +1288,7 @@ module World =
             Harass = Harass.worked gate.Shut cast
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
+            Assaults = assaults
             Scanned =
                 Colony.roomsProjected
                     outposts
@@ -1292,6 +1298,7 @@ module World =
                     (defended @ garrisoned)
                     colony.Home
                 @ Harass.roomsProjected cast colony.Home
+                @ Assault.roomsProjected assaults colony.Home
                 |> List.distinct
         }
 

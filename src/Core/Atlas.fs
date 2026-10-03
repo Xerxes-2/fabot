@@ -12,6 +12,9 @@ type Walker =
     /// A fighter on its way to the fight: the shortest chains, rooms with
     /// rivals in them and all.
     | Bold
+    /// An [[assault]]'s squad (#490): a `Bold` walker whose chain may end in
+    /// a rival's room, never cross one.
+    | Siege
 
 /// The per-tick, task-aware query interface over the spatial projection.
 /// Total: geometry the projection cannot place gets one documented answer per
@@ -881,7 +884,8 @@ let private actionOn =
     | Upgrade id -> Some(id, 3)
     | Flee
     | Guard _
-    | Fight _ -> None
+    | Fight _
+    | Assault _ -> None
 
 /// The colony's [[refill cluster]] as this tick's Atlas holds it — the one
 /// `RefillCluster.ofRefillables` laid at construction. The Planner's Refill
@@ -1509,9 +1513,13 @@ let routesFor
     (toRoom: string)
     : string list list =
     memoised atlas.Routes (fromRoom, toRoom, walker) (fun () ->
+        let entered there =
+            not (Set.contains there atlas.Spatial.RivalRooms)
+            || walker = Walker.Siege && there = toRoom
+
         let linked here there =
             Keepers.enterable there
-            && not (Set.contains there atlas.Spatial.RivalRooms)
+            && entered there
             && Seam.joinedBy
                 (ringWalkable atlas here)
                 (ringWalkable atlas there)
@@ -1520,7 +1528,8 @@ let routesFor
                 there
 
         match walker with
-        | Walker.Bold -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
+        | Walker.Bold
+        | Walker.Siege -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
         | Walker.Wary ->
             RoomName.routesAvoiding
                 linked
@@ -1533,11 +1542,13 @@ let routesFor
 let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list =
     routesFor atlas Walker.Wary fromRoom toRoom
 
-/// Whose walk a Task asks for: a Guard's or a Fight's is a fighter's.
+/// Whose walk a Task asks for: a Guard's or a Fight's is a fighter's, an
+/// Assault's a siege's.
 let walkerOf (task: Task) : Walker =
     match task with
     | Guard _
     | Fight _ -> Walker.Bold
+    | Assault _ -> Walker.Siege
     | _ -> Walker.Wary
 
 /// The table with only the entries `keep` answers for, in place. Keys are
@@ -1609,6 +1620,10 @@ let evictAvoided (atlas: Atlas) (wasAvoided: Set<string>) : unit =
 /// the crossing its walk to the fight will take.
 let route (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
     routesFor atlas Walker.Bold fromRoom toRoom |> List.tryHead
+
+/// The same for an [[assault]]'s squad, whose chain ends in the rival's room.
+let siegeRoute (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list option =
+    routesFor atlas Walker.Siege fromRoom toRoom |> List.tryHead
 
 /// Whether a creep stands on a Seam — its room's border ring, the tile the
 /// engine put it down on the tick it crossed. Read off the coordinate alone.

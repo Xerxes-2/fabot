@@ -125,6 +125,9 @@ let salvagePoolTests =
                             creepWith "h" 0 100 [ Carry; Carry; Move ], { X = 20; Y = 21 }
                             miner "m", { X = 19; Y = 21 }
                             dismantler "d", { X = 21; Y = 19 }
+                            // An assault's sapper: the dismantler's parts, its
+                            // own name (#490).
+                            creepWith "sapper-1-Spawn1" 0 0 sapperPattern.Block, { X = 22; Y = 21 }
                         ]
 
                 let dismantling name =
@@ -132,7 +135,7 @@ let salvagePoolTests =
 
                 Expect.isTrue (dismantling "d") "the dismantler takes one"
 
-                for name in [ "w"; "h"; "m" ] do
+                for name in [ "w"; "h"; "m"; "sapper-1-Spawn1" ] do
                     Expect.isFalse
                         (dismantling name)
                         $"{name} is never sent to take a structure down"

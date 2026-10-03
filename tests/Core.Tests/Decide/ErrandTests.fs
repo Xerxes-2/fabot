@@ -727,6 +727,7 @@ let errandStandDownTests =
                         Consignee = None
                         Perimeter = []
                         FirstSpawn = None
+                        Assaults = []
                     }
 
                 let world =

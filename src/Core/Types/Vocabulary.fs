@@ -164,3 +164,8 @@ type Task =
     /// Area is the rally ground until the squad launches, and the fighting
     /// ground after.
     | Fight of roomName: string
+    /// Breaking into a rival's room with a [[squad]] (#490): one Task per
+    /// declared [[assault]] a human has switched on, held by the role bodies
+    /// its capacity counts. Its Work Area is the rally ground until the squad
+    /// launches, then beside the structure its sappers take down.
+    | Assault of roomName: string

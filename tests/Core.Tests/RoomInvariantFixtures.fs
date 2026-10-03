@@ -212,6 +212,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Harass = []
         HarassCast = Set.empty
         HarassFloors = Map.empty
+        Assaults = []
         Consignee = None
         Perimeter = []
         Defenders = Map.empty

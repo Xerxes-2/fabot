@@ -45,6 +45,7 @@ let snapshotWith creeps spatial =
         Harass = []
         HarassCast = Set.empty
         HarassFloors = Map.empty
+        Assaults = []
         Consignee = None
         Perimeter = []
         Defenders = Map.empty

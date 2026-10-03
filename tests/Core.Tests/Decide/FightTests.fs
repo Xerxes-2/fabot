@@ -136,7 +136,7 @@ let pooledTests =
                 Expect.equal
                     (SquadRole.all
                      |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
-                    [ Some 1; Some 1; Some 0 ]
+                    [ Some 1; Some 0; Some 1; Some 0 ]
                     "the cheapest winning squad is the duo: a brawler's slot and a medic's"
             }
 
@@ -238,12 +238,12 @@ let pooledTests =
 
                 Expect.equal
                     (fightCaps (shrunk None) [])
-                    (Some [ Some 1; Some 1; Some 0 ])
+                    (Some [ Some 1; Some 0; Some 1; Some 0 ])
                     "the premise: priced afresh, the duo"
 
                 Expect.equal
                     (fightCaps (shrunk (Some "3×kiter")) [])
-                    (Some [ Some 0; Some 0; Some 3 ])
+                    (Some [ Some 0; Some 0; Some 0; Some 3 ])
                     "latched, the three kiters' caps"
 
                 Expect.equal
@@ -257,7 +257,7 @@ let pooledTests =
                             Hostiles = []
                         }
                         [])
-                    (Some [ Some 0; Some 0; Some 3 ])
+                    (Some [ Some 0; Some 0; Some 0; Some 3 ])
                     "and keep their caps while the raid steps out"
             }
         ]
@@ -833,5 +833,284 @@ let targetTests =
                 Expect.isFalse
                     (swings (colony false))
                     "the premise: with no Fight it is no raid's healer"
+            }
+        ]
+
+// ---- the assault ------------------------------------------------------------
+
+let private sapper name = creepWith name 0 0 sapperPattern.Block
+
+/// The rampart an assault on the child's room breaks, and its tile.
+let private breachTile = { X = 20; Y = 30 }
+
+/// `fightingMother` with no raid, sending the default squad against the
+/// child's room as a rival's (#490): the room a rival's, its rampart on the
+/// breach tile a wall to our walk (`ColonyView.assaulting`), these targets
+/// standing, and these bodies of hers each on its tile.
+let private assaultingWith mode (targets: (string * Pos) list option) bodies =
+    let colony = fightingMother [] bodies
+    let child = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Assaults =
+            [
+                {
+                    Assault =
+                        {
+                            RoomName = "W1N2"
+                            Enemy = "Trepidimous"
+                            Breach = [ breachTile ]
+                            Squad = Assault.breachers
+                            Mode = mode
+                            Active = true
+                        }
+                    Targets = targets
+                    SafeMode = false
+                }
+            ]
+        Spatial =
+            { colony.Spatial with
+                RivalRooms = Set.ofList [ "W1N2" ]
+            }
+            |> withNeighbour
+                "W1N2"
+                { child with
+                    Obstacles =
+                        match targets with
+                        | Some((_, tile) :: _) when tile = breachTile ->
+                            Set.add breachTile child.Obstacles
+                        | _ -> child.Obstacles
+                }
+    }
+
+/// The breach's rampart still standing.
+let private breachStanding = Some [ "rampart-1", breachTile ]
+
+let private assaulting bodies =
+    assaultingWith Provoke breachStanding bodies
+
+/// The default squad, each body on one of these tiles.
+let private squadAt (tiles: RoomPos list) =
+    List.zip [ sapper "sapper-1"; sapper "sapper-2"; medic "medic-1"; medic "medic-2" ] tiles
+
+/// The tick's Threats, every name holding the child's room's Assault.
+let private assaultThreats (colony: ColonyView) =
+    threatsHolding
+        colony
+        (heldOn colony (colony.Creeps |> List.map (fun creep -> creep.Name, Assault "W1N2")))
+
+let private assaultGroundOf (threats: Threats) = Map.find "W1N2" threats.Assault
+
+/// Four tiles together, two short of the home's north edge.
+let private mustered = [ home 25 5; home 26 5; home 25 6; home 26 6 ]
+
+/// The tiles beside the breach on the near side, where the sappers stand.
+let private atBreach = [ child 20 31; child 21 31; child 19 32; child 20 32 ]
+
+let private holdingAssault (colony: ColonyView) =
+    colony.Creeps
+    |> List.map (fun creep -> creep.Name, taskId (Assault "W1N2"))
+    |> Map.ofList
+
+[<Tests>]
+let assaultTests =
+    testList
+        "an Assault on a rival's room"
+        [
+            test
+                "a switched-on assault pools one Assault, capped and cast at two sappers and two medics" {
+                let colony = assaulting []
+
+                Expect.contains
+                    (planHolding colony [])
+                    (Assault "W1N2")
+                    "one Assault, under the room's name"
+
+                let atlas = Atlas.ofView colony
+                let threats = assaultThreats colony
+
+                let capacity =
+                    planPool colony atlas threats (planHolding colony [])
+                    |> List.find (fun entry -> entry.Task = Assault "W1N2")
+                    |> fun entry -> entry.Capacity
+
+                Expect.equal
+                    (SquadRole.all
+                     |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
+                    [ Some 0; Some 2; Some 2; Some 0 ]
+                    "two sapper slots and two medic slots"
+
+                Expect.equal
+                    ([ "sapper"; "medic"; "brawler"; "kiter" ] |> List.map (quotaHolding colony []))
+                    [ Some 2; Some 2; Some 0; Some 0 ]
+                    "and the rows cast them"
+            }
+
+            test
+                "its rally ground is short of the rival's room, on the one chain that may end in it" {
+                let colony = assaulting []
+                let atlas = Atlas.ofView colony
+                let ground = assaultGroundOf (assaultThreats colony)
+
+                Expect.isNone
+                    (Atlas.route atlas "W1N1" "W1N2")
+                    "no fighter's chain enters a rival's room"
+
+                Expect.equal
+                    (Atlas.siegeRoute atlas "W1N1" "W1N2")
+                    (Some [ "W1N1"; "W1N2" ])
+                    "a siege's ends in it"
+
+                Expect.isNonEmpty ground.Rally "a rally ground"
+
+                Expect.isTrue
+                    (ground.Rally |> Set.forall (fun tile -> tile.Room = "W1N1"))
+                    "in the last room short of it"
+            }
+
+            test
+                "the squad waits on the rally ground until it is whole, then launches beside the breach" {
+                let three = assaulting (squadAt mustered |> List.take 3)
+                let ground = assaultGroundOf (assaultThreats three)
+
+                Expect.isFalse ground.Launched "a medic short: not launched"
+                Expect.equal ground.Front ground.Rally "and the sappers wait at rally"
+
+                let whole = assaultGroundOf (assaultThreats (assaulting (squadAt mustered)))
+
+                Expect.isTrue whole.Launched "whole and together: launched"
+
+                Expect.equal whole.Target (Some("rampart-1", child 20 30)) "on the breach's rampart"
+
+                Expect.isTrue
+                    (Set.contains (child 20 31) whole.Front
+                     && whole.Front
+                        |> Set.forall (fun tile -> RoomPos.range tile (child 20 30) = Some 1))
+                    $"the sappers' ground beside it: {whole.Front}"
+            }
+
+            test
+                "a launched sapper beside the breach dismantles it, and a medic leaves its act to the heal reflex" {
+                let colony = assaulting (squadAt atBreach)
+                let intents = (decide colony (holdingAssault colony) Set.empty None).Intents
+
+                for name in [ "sapper-1"; "sapper-2" ] do
+                    Expect.contains
+                        intents
+                        (DismantleStructure(name, "rampart-1"))
+                        $"{name} dismantles"
+
+                Expect.isFalse
+                    (intents
+                     |> List.exists (function
+                         | DismantleStructure(name, _) -> name.StartsWith "medic"
+                         | _ -> false))
+                    "no medic does"
+            }
+
+            test "the breach down, a Provoke holds it and a Strike walks on to the tower" {
+                let fallen mode targets =
+                    assaultGroundOf (
+                        assaultThreats (assaultingWith mode targets (squadAt atBreach))
+                    )
+
+                let provoke = fallen Provoke (Some [])
+
+                Expect.isNone provoke.Target "nothing left for a Provoke"
+
+                Expect.isTrue
+                    (Set.contains (child 20 30) provoke.Front)
+                    "it holds the breach it made"
+
+                let strike = fallen Strike (Some [ "tower-1", { X = 30; Y = 10 } ])
+
+                Expect.equal
+                    strike.Target
+                    (Some("tower-1", child 30 10))
+                    "a Strike's next is the tower"
+
+                Expect.isTrue
+                    (strike.Front
+                     |> Set.forall (fun tile -> RoomPos.range tile (child 30 10) = Some 1))
+                    "and its sappers' ground beside it"
+            }
+
+            test
+                "a member under half its hits turns the squad back to rally, which goes again at four fifths" {
+                let hurt share =
+                    let squad = squadAt atBreach
+
+                    let wounded =
+                        squad
+                        |> List.map (fun (creep, tile) ->
+                            if creep.Name = "sapper-1" then
+                                { creep with
+                                    Hits =
+                                        { creep.Hits with
+                                            Hits = creep.Hits.HitsMax * share / 100
+                                        }
+                                },
+                                tile
+                            else
+                                creep, tile)
+
+                    assaulting wounded
+
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats (hurt 51))).Launched
+                    "at half and over, it fights on"
+
+                let back = assaultGroundOf (assaultThreats (hurt 49))
+
+                Expect.isFalse back.Launched "under half, it turns back"
+                Expect.equal back.Front back.Rally "every member to rally"
+
+                let atRally share =
+                    let colony = hurt share
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        List.zip
+                                            [ "sapper-1"; "sapper-2"; "medic-1"; "medic-2" ]
+                                            (mustered |> List.map RoomPos.pos)
+                                        |> Map.ofList
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { SpatialInfo.layerOf colony.Spatial "W1N2" with
+                                    CreepPositions = Map.empty
+                                }
+                    }
+
+                Expect.isFalse
+                    (assaultGroundOf (assaultThreats (atRally 79))).Launched
+                    "at rally under four fifths it waits on its medics"
+
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats (atRally 80))).Launched
+                    "and goes at four fifths"
+            }
+
+            test "safe mode in the rival's room turns the squad back: the bait has worked" {
+                let colony = assaulting (squadAt atBreach)
+
+                let moded =
+                    { colony with
+                        Assaults =
+                            colony.Assaults
+                            |> List.map (fun facts -> { facts with SafeMode = true })
+                    }
+
+                Expect.isTrue
+                    (assaultGroundOf (assaultThreats colony)).Launched
+                    "the premise: in and fighting"
+
+                let ground = assaultGroundOf (assaultThreats moded)
+                Expect.isFalse ground.Launched "safe mode: not launched"
+                Expect.equal ground.Front ground.Rally "and back to rally"
             }
         ]

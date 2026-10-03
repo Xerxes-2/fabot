@@ -308,10 +308,18 @@ let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
 
 let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
 
-/// Any fighting row's body, a squad's medic among them: what never flees and
-/// walks home when idle.
+/// Whether a body is an [[assault]]'s sapper, by its name alone: its parts
+/// are a salvage dismantler's.
+let internal isSapperBody (creep: CreepInfo) =
+    squadRoleByName creep.Name = Some Sapper
+
+/// Any fighting row's body, a squad's medic and sapper among them: what never
+/// flees and walks home when idle.
 let internal isFighterBody (creep: CreepInfo) =
-    isGuardBody creep || isRangerBody creep || isMedicBody creep
+    isGuardBody creep
+    || isRangerBody creep
+    || isMedicBody creep
+    || isSapperBody creep
 
 /// Whether a towerless room of ours holds the raid standing in it without
 /// safe mode (#448): some one armed body of ours standing there, whichever
@@ -521,16 +529,26 @@ let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
 /// One squad role's row quota: every pooled Fight's slots of the role, less
 /// the residents already filling them, in each room whose Fight is not
 /// barred from a cast (`Facts.fightCooling`) and has a rally ground to wait
-/// on.
+/// on; and every pooled Assault's slots of it.
 let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) : int =
-    threats.Fight
-    |> Map.toList
-    |> List.filter (fun (room, ground) ->
-        not (fightCooling view room) && not (Set.isEmpty ground.Rally))
-    |> List.sumBy (fun (_, ground) ->
-        SquadRole.slots role (squadRoles ground.Squad)
-        - (ground.Residents |> Map.filter (fun _ held -> held = role) |> Map.count)
-        |> max 0)
+    let fights =
+        threats.Fight
+        |> Map.toList
+        |> List.filter (fun (room, ground) ->
+            not (fightCooling view room) && not (Set.isEmpty ground.Rally))
+        |> List.sumBy (fun (_, ground) ->
+            SquadRole.slots role (squadRoles ground.Squad)
+            - (ground.Residents |> Map.filter (fun _ held -> held = role) |> Map.count)
+            |> max 0)
+
+    // Each assault's slots, on the same rally rule; it has no residents.
+    let assaults =
+        threats.Assault
+        |> Map.toList
+        |> List.filter (fun (_, ground) -> not (Set.isEmpty ground.Rally))
+        |> List.sumBy (fun (_, ground) -> SquadRole.slots role ground.Slots)
+
+    fights + assaults
 
 /// Whether the squad rows are filled: every role's casts standing or in an
 /// oven.

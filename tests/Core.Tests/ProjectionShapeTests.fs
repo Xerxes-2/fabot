@@ -214,6 +214,7 @@ let private declared: Colony list =
             Consignee = None
             Perimeter = []
             FirstSpawn = None
+            Assaults = []
         }
     ]
 

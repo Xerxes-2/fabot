@@ -556,11 +556,11 @@ if (command === "console") {
 
   // Standing still over every sample while holding a Task that is done on
   // the way somewhere — a haul, a pickup, a claim, a flight. Work done in
-  // place (harvest, build, repair, upgrade, reserve, dismantle, guard, fight —
-  // a squad waits at its rally ground) is
+  // place (harvest, build, repair, upgrade, reserve, dismantle, guard, fight,
+  // assault — a squad waits at its rally ground) is
   // still by design, and an idle creep already has its line above.
   const assignments = (await memoryGet("fabot.assignments")) ?? {};
-  const IN_PLACE = ["harvest", "build", "repair", "upgrade", "reserve", "reclaim", "dismantle", "guard", "fight"];
+  const IN_PLACE = ["harvest", "build", "repair", "upgrade", "reserve", "reclaim", "dismantle", "guard", "fight", "assault"];
   for (const name of names) {
     const kind = typeof assignments[name] === "string" ? assignments[name].split(":")[0] : undefined;
     if (idle.has(name) || IN_PLACE.includes(kind)) continue;

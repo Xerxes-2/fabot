@@ -139,6 +139,7 @@ let internal restockWait (view: ColonyView) task =
     | Dismantle _
     | Guard _
     | Fight _
+    | Assault _
     | Flee -> 0
 
 /// ADR-0025. The walk and the wait that hold a Task up for this creep, or None
@@ -160,16 +161,17 @@ let internal tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: La
         | _ -> None
     | _ -> None
 
-/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard and Fight.
-/// A predicate, because the two rules that turn on it (`areaFor` skipping the
-/// Reach subtraction, `threatened` written beneath it) are asked before
-/// `planPool` ranks anything, and `tierOf` ranks exactly these into `Safety`.
-/// Exhaustive on purpose.
+/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight and
+/// Assault. A predicate, because the two rules that turn on it (`areaFor`
+/// skipping the Reach subtraction, `threatened` written beneath it) are asked
+/// before `planPool` ranks anything, and `tierOf` ranks exactly these into
+/// `Safety`. Exhaustive on purpose.
 let private safetyTier task =
     match task with
     | Flee
     | Guard _
-    | Fight _ -> true
+    | Fight _
+    | Assault _ -> true
     | Harvest _
     | Withdraw _
     | Pickup _
@@ -201,7 +203,8 @@ let private roomOfWork atlas task =
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room
-    | Fight room -> Some room
+    | Fight room
+    | Assault room -> Some room
     | Flee -> None
 
 /// Whether a tile stands in the Reach on a Task's own room, or None when the
@@ -250,6 +253,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             |> Option.defaultWith (fun () -> Atlas.sourceRingIn atlas room)
         // The member's own ground, rally or fight (`Threats.fightGroundIn`).
         | Fight room -> Threats.fightGroundIn threats room creep
+        | Assault room -> Threats.assaultGroundIn threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with
@@ -262,7 +266,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
 let internal mayActNow (threats: Threats) atlas (creep: string) task =
     Atlas.mayAct atlas creep task (areaFor threats atlas creep task)
 
-/// The room a Fight's ground lies in: the rally ground's room until launch,
+/// The room a Fight's or an Assault's ground lies in: the rally ground's room until launch,
 /// the Task's own after. Read off the tiles, which name it.
 let private groundRoom (room: string) (area: Set<RoomPos>) =
     if Set.isEmpty area then
@@ -286,7 +290,8 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
     | Guard room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
-    | Fight room ->
+    | Fight room
+    | Assault room ->
         let area = areaFor threats atlas creep task
         Atlas.travelCostToward atlas creep task (groundRoom room area) area
     | _ ->
@@ -303,7 +308,8 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
 let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
     | Guard room -> Atlas.firstStepToward atlas creep task room area
-    | Fight room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
+    | Fight room
+    | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | _ -> Atlas.firstStep atlas creep task area
 
 /// Whether the Reach has taken the whole of a Task's Work Area: it had
@@ -718,12 +724,13 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
     let tierOf task =
         match task with
         | Flee -> Safety
-        // The tier holds three Tasks and no ordering between them: Flee is
-        // inapplicable to a Fighter, a Guard and a Fight to nothing else, and
-        // a room's Guard and its Fight admit different bodies until its squad
-        // launches.
+        // The tier holds four Tasks and no ordering between them: Flee is
+        // inapplicable to a Fighter, a Guard, a Fight and an Assault to
+        // nothing else, and a room's Guard and its Fight admit different
+        // bodies until its squad launches.
         | Guard _
-        | Fight _ -> Safety
+        | Fight _
+        | Assault _ -> Safety
         | Harvest _ -> Feeding
         // A decision made here, because nothing else made it: the ADRs fix the
         // reserver row's casting order and say nothing about its matching
@@ -994,6 +1001,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         | Fight room ->
             Map.tryFind room threats.Fight
             |> Option.map (fun ground -> Capacity.roles (squadRoles ground.Squad))
+            |> Option.defaultValue (Capacity.roles [])
+        | Assault room ->
+            Map.tryFind room threats.Assault
+            |> Option.map (fun ground -> Capacity.roles ground.Slots)
             |> Option.defaultValue (Capacity.roles [])
         // One holder per controller: a second body there buys nothing.
         | Reserve _

@@ -371,6 +371,7 @@ let minerCastTests =
                         "guard"
                         "ranger"
                         "brawler"
+                        "sapper"
                         "medic"
                         "kiter"
                         "reserver"
