@@ -918,6 +918,32 @@ let private assaultThreats (colony: ColonyView) =
 
 let private assaultGroundOf (threats: Threats) = Map.find "W1N2" threats.Assault
 
+/// The default squad standing in W2N1, a room on neither end of its walk,
+/// one cast on each of these tiles.
+let private between (tiles: (int * int) list) =
+    let placed = tiles |> List.map (fun (x, y) -> RoomPos.at "W2N1" { X = x; Y = y })
+    let colony = assaulting (squadAt placed)
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W2N1"
+                { RoomLayer.empty with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 2..47 do
+                                    for y in 2..47 -> { X = x; Y = y }, Plain
+                            ]
+                    CreepPositions =
+                        List.zip
+                            (colony.Creeps |> List.map (fun creep -> creep.Name))
+                            (List.map RoomPos.pos placed)
+                        |> Map.ofList
+                }
+    }
+
 /// Four tiles together, two short of the home's north edge.
 let private mustered = [ home 25 5; home 26 5; home 25 6; home 26 6 ]
 
@@ -1040,6 +1066,59 @@ let assaultTests =
                 Expect.isFalse
                     (assaultGroundOf (assaultThreats (assaulting (squadAt behind)))).Launched
                     "a medic five tiles back: not launched"
+            }
+
+            test
+                "a file strung past two of its leader walks on in a room between home and the rival's, and holds for a broken file; at home and in the rival's room the leader holds for the rest" {
+                let holds (ground: AssaultGround) (leader: RoomPos) =
+                    Set.contains leader ground.Front
+                    && ground.Front
+                       |> Set.forall (fun tile ->
+                           RoomPos.range tile leader |> Option.exists (fun r -> r <= 1))
+
+                let atHome =
+                    assaultGroundOf (
+                        assaultThreats (
+                            assaulting (squadAt [ home 25 5; home 26 5; home 27 5; home 28 5 ])
+                        )
+                    )
+
+                Expect.isTrue atHome.Launched "the premise: one file, launched"
+                Expect.isTrue (holds atHome (home 25 5)) $"at home the leader holds: {atHome.Front}"
+
+                let file = [ 25, 20; 26, 20; 27, 20; 28, 20 ]
+                let broken = [ 25, 20; 26, 20; 27, 20; 31, 20 ]
+
+                let walking = assaultGroundOf (assaultThreats (between file))
+
+                Expect.isTrue walking.Launched "the premise: one file, launched"
+
+                Expect.isTrue
+                    (walking.Front |> Set.forall (fun tile -> tile.Room = "W1N2"))
+                    $"between, the sappers walk on to the breach: {walking.Front}"
+
+                let gapped = assaultGroundOf (assaultThreats (between broken))
+
+                Expect.isTrue gapped.Launched "every cast out of home: still on its walk"
+
+                Expect.isTrue
+                    (holds gapped (RoomPos.at "W2N1" { X = 25; Y = 20 }))
+                    $"a medic three off the file: the leader holds for it: {gapped.Front}"
+
+                let inside =
+                    assaultGroundOf (
+                        assaultThreats (
+                            assaulting (
+                                squadAt [ child 20 36; child 20 37; child 20 38; child 20 39 ]
+                            )
+                        )
+                    )
+
+                Expect.isTrue inside.Launched "the premise: in the room, launched"
+
+                Expect.isTrue
+                    (holds inside (child 20 36))
+                    $"the leader holds its tile under fire, the rest close on it: {inside.Front}"
             }
 
             test

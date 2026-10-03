@@ -57,8 +57,8 @@ type AssaultGround =
         /// once in, under four fifths before — or while safe mode runs in the
         /// room.
         Launched: bool
-        /// The rally ground, as a `Fight`'s, on the chain that ends in the
-        /// rival's room.
+        /// The rally ground: at home, beside the exit its chain into the
+        /// rival's room leaves by (`musterAtHome`).
         Rally: Set<RoomPos>
         /// What the sappers take down this tick (`AssaultFacts.Targets`'
         /// head), None while the room is dark or nothing is left.
@@ -667,7 +667,7 @@ let private atCrossingInto (room: string) (tile: RoomPos) =
 
         max (across tile.X dx) (across tile.Y dy) <= crossingGap + 1)
 
-/// The crossing a squad musters beside on a chain from home to its target:
+/// The crossing a Fight's squad musters beside on a chain from home to its target:
 /// out of the last room short of the target that is neither a Source Keeper's
 /// nor a rival's — home, which is neither, at the last — toward the next room
 /// on the chain. None for a chain of one room.
@@ -699,6 +699,21 @@ let private rallyOn (view: ColonyView) atlas (threats: Threats) (chain: string l
     |> Option.bind (rallyHop view.Spatial.RivalRooms)
     |> Option.map (fun (from, into) -> besideCrossing atlas threats from into)
     |> Option.defaultValue Set.empty
+
+/// An assault's rally ground: at home, beside the crossing out toward the
+/// next room on its chain, off the idle ground (`Atlas.idleGroundIn`) — the
+/// rings of the spawns, extensions and stores — where any of it is left.
+/// Empty where no chain reaches its room.
+let private musterAtHome atlas (threats: Threats) (chain: string list option) =
+    match chain with
+    | Some(home :: next :: _) ->
+        let ground = besideCrossing atlas threats home next
+        let idle = Atlas.idleGroundIn atlas home |> RoomPos.setAt home
+
+        match Set.difference ground idle with
+        | clear when Set.isEmpty clear -> ground
+        | clear -> clear
+    | _ -> Set.empty
 
 /// A step onto a tile under these towers' fire, priced one plus a unit per
 /// 50 hits of it: fine enough that a tile a range further off is cheaper,
@@ -1092,7 +1107,7 @@ let private withAssaults
                     Map.tryFind name casts |> Option.map (fun role -> name, role))
                 |> List.sort
 
-            let rally = rallyOn view atlas threats (Atlas.siegeRoute atlas home room)
+            let rally = musterAtHome atlas threats (Atlas.siegeRoute atlas home room)
 
             let filled =
                 SquadRole.all
@@ -1100,6 +1115,14 @@ let private withAssaults
                     SquadRole.slots role (List.map snd members) >= SquadRole.slots role slots)
 
             let inside = entered view room members
+
+            // Every cast out of home: on the walk it launched on, however the
+            // file strings out over the rooms between; a recast at home calls
+            // it back.
+            let away =
+                members
+                |> List.forall (fun (name, _) ->
+                    tileOf name |> Option.exists (fun tile -> tile.Room <> home))
 
             // Hurt: under half once in, so the squad turns back; under four
             // fifths at rally, so it waits for its medics. A probe has none
@@ -1118,7 +1141,7 @@ let private withAssaults
                 && fit
                 && not facts.SafeMode
                 && not facts.Taken
-                && (together view rally members || inside || linked view members)
+                && (together view rally members || inside || linked view members || away)
 
             let breach = facts.Assault.Breach |> List.map (RoomPos.at room)
 
@@ -1152,16 +1175,20 @@ let private withAssaults
 
             // Strung out under fire, the squad's medics cannot reach the body
             // the towers pick: every cast within two of the leader, or the
-            // leader holds its tile and the rest close on it.
+            // leader holds its tile and the rest close on it: at home, in the
+            // room or at its crossing. In the rooms between it holds only for
+            // a broken file: a one-tile corridor fits no four within two of
+            // one.
             let strung =
                 match leader with
-                | Some(name, at) ->
+                | Some(name, at) when at.Room = home || at.Room = room || atCrossingInto room at ->
                     members
                     |> List.exists (fun (other, _) ->
                         other <> name
                         && tileOf other
                            |> Option.bind (rangeAcross at)
                            |> Option.forall (fun r -> r > squadSpread))
+                | Some _ -> not (linked view members)
                 | None -> false
 
             let front =

@@ -5277,17 +5277,16 @@ let assaultViewTests =
         "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
         [
             test
-                "the one declared assault switched on is W18S26's link raid (#496); the probe stays off (#493)" {
+                "no declared assault is switched on: the link raid waits for the south approach (#494), the probe stays off (#493)" {
                 let worked =
                     Colony.declared
                     |> List.collect (fun colony ->
                         Assault.worked colony.Assaults
                         |> List.map (fun assault -> colony.Home, assault))
 
-                Expect.equal
+                Expect.isEmpty
                     worked
-                    [ "W15S28", Assault.w18s26Link ]
-                    "the user switched the link raid on (2026-10-03); the probe answered and stays off"
+                    "the user wants the link raid from the south (2026-10-03); the probe answered and stays off"
 
                 Expect.equal
                     (Assault.w18s26.RoomName, Assault.w18s26.Squad, Assault.w18s26.Mode)
@@ -5296,7 +5295,7 @@ let assaultViewTests =
             }
 
             test
-                "W18S26's link is declared from W15S28 off its far line, switched on by the user after the arena (#496)" {
+                "W18S26's link is declared from W15S28 off its far line, paused for the south approach (#496)" {
                 let declaring =
                     Colony.declared
                     |> List.filter (fun colony -> List.contains Assault.w18s26Link colony.Assaults)
@@ -5313,8 +5312,8 @@ let assaultViewTests =
 
                 Expect.equal
                     (link.Squad, link.Mode, link.Active)
-                    (Assault.breachers, Provoke, true)
-                    "the default squad, on"
+                    (Assault.breachers, Provoke, false)
+                    "the default squad, paused"
             }
 
             test
