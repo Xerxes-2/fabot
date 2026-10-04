@@ -960,6 +960,10 @@ type StandDown =
         /// live W11S28). It ends by its own clock (`Tuning.ThreatMemory`)
         /// because a raid nobody can see is a raid nothing ends.
         ThreatenedOutposts: Set<string>
+        /// The rooms of `Shut` shut on a raid (`Observe.standDown`, #514):
+        /// a raid nobody can see any more, the last body out having taken our
+        /// vision with it, which may walk on to the home beside it.
+        RaidedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`RaidState.Fought`): what
         /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
         /// was last seen, and casts nothing for the room as long again.
@@ -989,6 +993,7 @@ module StandDown =
             Rechecked = Set.empty
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
+            RaidedOutposts = Set.empty
             Fought = Map.empty
             Taken = Set.empty
             ReserveShort = false

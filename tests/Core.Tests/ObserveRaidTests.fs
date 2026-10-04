@@ -1010,6 +1010,40 @@ let harassStandDownTests =
                     "off the player's-raid window"
             }
 
+            test "a room shut on a raid's clock is a raided outpost, one shut on a core's is not" {
+                // #514: what lays the home's shelter once the raid is out of sight.
+                let episode room basis =
+                    {
+                        RoomName = room
+                        Opened = 100
+                        LastSeen = 100
+                        Expiry = 500
+                        Basis = basis
+                        Stronghold = false
+                        Raiders = Set.empty
+                        PlayerSince = None
+                    }
+
+                let state =
+                    { RaidState.empty with
+                        Outposts =
+                            [
+                                episode "W1N2" StandDownBasis.PlayerRaidHold
+                                episode "W2N1" StandDownBasis.InvaderRaid
+                                episode "W1N0" StandDownBasis.CollapseTimer
+                            ]
+                    }
+
+                Expect.equal
+                    (standDown Tuning.defaults 200 state).RaidedOutposts
+                    (Set.ofList [ "W1N2"; "W2N1" ])
+                    "the two raids, not the core"
+
+                Expect.isEmpty
+                    (standDown Tuning.defaults 500 state).RaidedOutposts
+                    "and neither once its clock has run"
+            }
+
             test "the enemy's escort the ranger beats is fought, not withdrawn from" {
                 let escort =
                     { raiderIn harassRoom 1 [ Move; Move; Move; RangedAttack; Heal ] with

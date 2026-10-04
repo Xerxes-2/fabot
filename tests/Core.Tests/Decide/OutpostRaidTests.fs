@@ -765,9 +765,25 @@ let crossSeamThreatTests =
                     None
                     "and under the raid the same Task is gone for it too: the ground is the target room's"
 
-                Expect.isEmpty
+                // #514: the raid next door lays the home's shelter, and the
+                // spawn's doorstep is no part of it, so the body steps one tile
+                // up onto it and stops there.
+                Expect.equal
                     (moveIntentsFor "w-home" raided.Intents)
-                    "so nothing walks it across the Seam"
+                    [ MoveCreep("w-home", Direction.Top) ]
+                    "it steps off the spawn's doorstep onto the shelter"
+
+                let settled =
+                    decide
+                        (declaredRaid raiders
+                         |> withBodyAtHome (worker "w-home" 0 50) { atSpawn with Y = atSpawn.Y - 1 })
+                        Map.empty
+                        Set.empty
+                        None
+
+                Expect.isEmpty
+                    (moveIntentsFor "w-home" settled.Intents)
+                    "and nothing walks it on across the Seam"
             }
         ]
 

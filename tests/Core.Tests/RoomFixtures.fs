@@ -801,6 +801,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                 }
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
+        RaidedOutposts = Set.empty
         Fought = Map.empty
         RoomControl =
             Map.ofList

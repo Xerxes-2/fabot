@@ -2747,7 +2747,7 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 /// `firstStepWithin` over a path that never enters `avoid`, tiles of the
 /// creep's own room (#472): a Reach a body Flee applies to walks round.
 /// Flooded fresh and never memoised or recorded for the light tick, being
-/// asked only of a room a Threat stands in. None where every goal in the
+/// asked only of a room a Reach lies in. None where every goal in the
 /// creep's room lies in `avoid` or behind it.
 let firstStepAvoiding
     (atlas: Atlas)

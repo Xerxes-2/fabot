@@ -77,12 +77,14 @@ type AssaultGround =
     }
 
 /// ADR-0033. Derived once a tick and shared by the applicability gate, Flee's
-/// Work Area and the spawn hold. Keyed by the room the hostile stands in: a
-/// `Set<Pos>` cannot say which room's tiles it holds, so the room rides on the
-/// outer key. A room with no entry answers the empty set.
+/// Work Area and the spawn hold. Keyed by room: a `Set<Pos>` cannot say which
+/// room's tiles it holds, so the room rides on the outer key. A room with no
+/// entry answers the empty set.
 type Threats =
     {
-        /// Per room, the tiles a Threat standing in it can hurt. Never an
+        /// Per room, the tiles a Threat can hurt there — one standing in it,
+        /// or one beside an exit into it (#514), so a room with no Threat
+        /// can hold a Reach. Never an
         /// empty set under a room: a room whose whole Reach our ramparts
         /// took back has no entry, so `Map.isEmpty` is "no Reach
         /// anywhere" — the one question the pool asks of it.
@@ -142,6 +144,15 @@ type Threats =
         /// Under the home, while a raid stands at its line, the
         /// [[defender]]'s ground (#504, `defendGroundOf`).
         Defend: Map<string, Set<RoomPos>>
+        /// Under the home, while an armed Threat stands in a room beside it
+        /// or a raid this colony stands down from there is out of sight, the
+        /// ground every idle body at home but a Fighter walks in to and stays
+        /// on (#514): the walkable tiles behind the declared perimeter, else
+        /// those five or more from every exit, less the home's Reach and the
+        /// tiles beside a spawn (`shelterOf`). None under the
+        /// home's safe mode. `Lazy` for `Safe`'s reason: most raid ticks no
+        /// body idles at home.
+        Shelter: Map<string, Lazy<Set<RoomPos>>>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -160,10 +171,17 @@ let noThreats =
         AtLine = []
         DefendAvoid = Map.empty
         Defend = Map.empty
+        Shelter = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Threats =
+    /// One room's shelter (#514); empty for a room with none.
+    let shelterIn (threats: Threats) (room: string) : Set<RoomPos> =
+        Map.tryFind room threats.Shelter
+        |> Option.map (fun ground -> ground.Force())
+        |> Option.defaultValue Set.empty
+
     /// One room's `DefendAvoid`; empty for a room with none.
     let defendAvoidIn (threats: Threats) (room: string) : Set<Pos> =
         Map.tryFind room threats.DefendAvoid |> Option.defaultValue Set.empty
@@ -190,7 +208,8 @@ module Threats =
         | _ when List.isEmpty (perimeterRamparts view) -> 0
         | raid -> min view.Tuning.DefenderCap (List.length raid)
 
-    /// One room's Reach; empty for a room no Threat stands in.
+    /// One room's Reach; empty for a room no Threat stands in or reaches
+    /// across a border into (#514).
     let reachIn (threats: Threats) (room: string) : Set<Pos> =
         Map.tryFind room threats.Reach |> Option.defaultValue Set.empty
 
@@ -363,9 +382,66 @@ let private defendGroundOf
         else
             Map.ofList [ home, ground ]
 
+/// The tiles a Threat at `pos` reaches across its room's borders within `r`
+/// (#514), by neighbouring room: from each passable crossing (`Atlas.seams`),
+/// what is left of `r` after the walk to the exit and the carry across,
+/// measured from the tile it lands on. None for one farther than `r` from
+/// every edge, the quiet case asked first.
+let private reachAcross atlas (room: string) (pos: Pos) (r: int) : (string * Pos list) list =
+    let edge = Seam.exitEdge
+
+    if min (min pos.X (edge - pos.X)) (min pos.Y (edge - pos.Y)) >= r then
+        []
+    else
+        RoomName.adjacent room
+        |> List.choose (fun next ->
+            match
+                Atlas.seams atlas room next
+                |> List.collect (fun (exit, landing) ->
+                    tilesWithin (r - range pos exit - 1) landing |> List.filter inGrid)
+            with
+            | [] -> None
+            | tiles -> Some(next, tiles))
+
+// Past a melee's step and swing plus the margin from the exit it comes in
+// by, so a body steps in only as far as that and the interior stays put.
+let private shelterDepth = 5
+
+/// The home's shelter (#514): its walkable tiles behind the declared
+/// perimeter (`Colony.Perimeter`) — neither outside the line (`outsideLine`)
+/// nor on it — else those at least `shelterDepth` from every exit tile; in
+/// either case less `hot` and every tile beside a spawn, which a cast needs
+/// free to step out onto.
+let private shelterOf (view: ColonyView) atlas (home: string) (hot: Set<Pos>) : Set<RoomPos> =
+    let walkable = Atlas.walkableTilesIn atlas home
+
+    let ground =
+        match view.Perimeter with
+        | [] ->
+            let nearExit =
+                Map.tryFind home view.Spatial.Borders
+                |> Option.defaultValue Map.empty
+                |> Map.toList
+                |> List.filter (fun (exit, terrain) -> terrain <> Wall && Seam.isExit exit)
+                |> List.collect (fun (exit, _) -> tilesWithin (shelterDepth - 1) exit)
+                |> Set.ofList
+
+            Set.difference walkable nearExit
+        | line -> Set.difference walkable (Set.union (outsideLine view) (Set.ofList line))
+
+    let besideSpawns =
+        view.Spawns
+        |> List.choose (fun s -> Atlas.positionOf atlas s.Id)
+        |> List.filter (fun tile -> tile.Room = home)
+        |> List.collect (RoomPos.pos >> tilesWithin 1)
+        |> Set.ofList
+
+    Set.difference ground (Set.union hot besideSpawns) |> RoomPos.setAt home
+
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
-/// room: weapon range plus the margin in Chebyshev tiles, less every tile under
-/// one of our standing ramparts in that room. The held facts say which rangers
+/// room: weapon range plus the margin in Chebyshev tiles, and across a border
+/// as far onto the next room's tiles (#514), less every tile under one of our
+/// standing ramparts in the room it lands in. The held facts say which rangers
 /// hold each room's Guard, which an outmatched room's safe ground is laid for.
 let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threats =
     // Under safe mode a hostile in a room of ours can hurt nothing, so it is no
@@ -394,19 +470,23 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             // three separate regroupings nothing said so.
             let byRoom = threats |> List.groupBy (fun (room, _, _) -> room)
 
+            // Filed by the room each tile lies in, which across a border is not
+            // the room the Threat stands in, and none in a room of ours under
+            // safe mode, where it could hurt nothing either.
             let reach =
-                byRoom
-                |> List.choose (fun (room, inRoom) ->
+                threats
+                |> List.collect (fun (room, pos, weapon) ->
+                    let r = weapon + view.Tuning.ReachMargin
+                    (room, tilesWithin r pos) :: reachAcross atlas room pos r)
+                |> List.groupBy fst
+                |> List.filter (fun (room, _) -> not (shielded room))
+                |> List.choose (fun (room, shares) ->
                     let ramparts = Atlas.ourRampartTilesIn atlas room
 
                     let tiles =
-                        inRoom
-                        |> List.collect (fun (_, pos, weapon) ->
-                            let r = weapon + view.Tuning.ReachMargin
-
-                            pos
-                            |> tilesWithin r
-                            |> List.filter (fun tile -> not (Set.contains tile ramparts)))
+                        shares
+                        |> List.collect snd
+                        |> List.filter (fun tile -> not (Set.contains tile ramparts))
                         |> Set.ofList
 
                     // Nothing left to run from once our own ramparts have taken
@@ -452,6 +532,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 AtLine = []
                 DefendAvoid = Map.empty
                 Defend = Map.empty
+                Shelter = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -768,8 +849,30 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         |> List.exists (fun m -> range (RoomPos.pos m.Pos) tile <= stepAndSwing))
                 ]
 
+    // The home's shelter (#514): laid while an armed Threat stands in a room
+    // beside it, or a raid this colony stands down from there is out of sight,
+    // and never under the home's own safe mode.
+    let shelter =
+        let home = SpatialInfo.homeName view.Spatial
+        let beside room = RoomName.neighbouring home room
+
+        let nextDoor =
+            view.Hostiles
+            |> List.exists (fun hostile ->
+                beside hostile.Pos.Room
+                && not (shielded hostile.Pos.Room)
+                && (weaponRange hostile).IsSome)
+            || Set.exists beside view.RaidedOutposts
+
+        if nextDoor && not (shielded home) then
+            let hot = Threats.reachIn armed home
+            Map.ofList [ home, lazy (shelterOf view atlas home hot) ]
+        else
+            Map.empty
+
     { armed with
         AtLine = atLine
+        Shelter = shelter
         DefendAvoid = defendAvoid
         Defend = defendGroundOf view atLine
         Ring =

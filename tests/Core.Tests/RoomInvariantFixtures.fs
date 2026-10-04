@@ -169,6 +169,7 @@ let internal colonyOf (room: LoadedRoom) level =
         // sources are priced at the full rate.
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
+        RaidedOutposts = Set.empty
         Fought = Map.empty
         RoomControl =
             Map.ofList

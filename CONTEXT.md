@@ -300,7 +300,7 @@ A room a [[colony]] declares because it must walk a body there and act on one na
 _Avoid_: goal, mission, remote target
 
 ### Evacuating room
-A [[stand-down]] room of a [[colony]]'s — outpost, errand or salvage — or a [[transit room]] of the walk home from it, projected as a transit room only while a body of that colony stands on that walk (#512): every idle body standing in it walks home round the [[reach]], nothing is pooled there (not even ore to sweep), and an anchor in it is out of the anchor row's census. A body standing there stays its caster's whoever else projects the room. Not the **stranded** anchor of #506, which is one off every Post that cannot reach a vacant one in time, or one the projection places nowhere. A shut [[harassment room]] is no evacuating room: it stays projected for its ranger regardless. ADR-0043.
+A [[stand-down]] room of a [[colony]]'s — outpost, errand or salvage — or a [[transit room]] of the walk home from it, projected as a transit room only while a body of that colony stands on that walk (#512): every idle body standing in it walks home round the [[reach]] — and, arrived, on in to the [[shelter]] rather than idle on the exit — nothing is pooled there (not even ore to sweep), and an anchor in it is out of the anchor row's census. A body standing there stays its caster's whoever else projects the room. Not the **stranded** anchor of #506, which is one off every Post that cannot reach a vacant one in time, or one the projection places nowhere. A shut [[harassment room]] is no evacuating room: it stays projected for its ranger regardless. ADR-0043.
 _Avoid_: stranded room
 
 ### Salvage
@@ -385,8 +385,11 @@ A [[hostile]] carrying an ATTACK or RANGED_ATTACK part, read off the parts and n
 _Avoid_: enemy, attacker
 
 ### Reach
-The tiles a [[threat]] can hurt — its weapon range plus a margin of two, less the tiles under our standing [[rampart]]s — filed by the room the Threat stands in. It subtracts from every Task's [[work area]], is what [[flee]] is applicable inside of, and holds the spawn while a tile beside it lies in one. ADR-0033, ADR-0041.
+The tiles a [[threat]] can hurt — its weapon range plus a margin of two, less the tiles under our standing [[rampart]]s — filed by the room each tile lies in: a Threat within that much of an exit also reaches across it, from each [[seam]] crossing onto the next room's tiles within what is left after the walk to the exit and the carry across (#514). It subtracts from every Task's [[work area]], is what [[flee]] is applicable inside of, and holds the spawn while a tile beside it lies in one. ADR-0033, ADR-0041.
 _Avoid_: danger zone, threat radius
+
+### Shelter
+The home's ground every idle body of ours at home but a Fighter walks in to and stays on while an armed [[threat]] stands in a room next door, or a raid [[stand-down]] of this colony's runs there with nothing in sight (#514): the walkable tiles behind the declared perimeter, neither outside the line nor on it, else those five or more from every exit tile, less the home's [[reach]] and the tiles beside a spawn, which a cast needs free. A body steps in only to the nearest such tile, and one already on it does not move. The walk goes round the Reach, a body already standing in one (a [[work-heavy body]], which has no [[flee]]) stepping on inward through it; a body on it steps nowhere off it. Read each tick off where the body stands, so a walk begun on an exit runs until it arrives. None under the home's own safe mode, and nothing laid on a tick with neither. ADR-0033.
 
 ### Keeper margin
 The tiles masked out of a Source Keeper room's walkable ground within `Tuning.keeperMargin` (six, derived) of every rock a keeper is pinned to, and one tile less of every lair it is cast on, declared by room name and applied to the raw ground and the border ring before any query reads them; a keeper room with none declared is linked to nothing. The hostile list is untouched; the ground is. ADR-0004, ADR-0060, ADR-0062.

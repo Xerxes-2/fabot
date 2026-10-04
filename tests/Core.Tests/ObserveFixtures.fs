@@ -39,6 +39,7 @@ let quiet: ColonyView =
         RoomControl = Map.empty
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
+        RaidedOutposts = Set.empty
         Fought = Map.empty
         ConstructionSites = []
         Creeps = []

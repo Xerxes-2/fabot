@@ -33,6 +33,9 @@ let private moveIntentFor
     (runs: bool)
     // A body walking home out of an evacuating room, round its Reach (#512).
     (walksRound: bool)
+    // The home's shelter for an idle body at home that walks in to it and
+    // stays on it (#514); empty for every other.
+    (shelter: Set<RoomPos>)
     (at: RoomPos)
     (task: Task option)
     (crossing: string option)
@@ -126,10 +129,24 @@ let private moveIntentFor
             |> Option.map RoomPos.pos
         | _ -> None
 
-    match crossingStep, task with
+    // The walk in to the shelter (#514), round the Reach as a runner's is,
+    // every tick until the body stands on it. One standing in a Reach — a
+    // Work-heavy body, which has no Flee — takes the plain step inward, even
+    // into the Reach, rather than stand still in it (`round`).
+    let shelterStep () =
+        if task.IsNone && not (Set.isEmpty shelter) && not (Set.contains at shelter) then
+            let reach = Threats.reachIn threats room
+
+            round reach (fun () -> Atlas.firstStepAvoiding atlas creep reach shelter) (fun () ->
+                Atlas.firstStepWithin atlas creep shelter)
+            |> Option.map RoomPos.pos
+        else
+            None
+
+    match crossingStep |> Option.orElseWith shelterStep, task with
     | Some step, _ ->
-        // Walking toward a room it cannot even see, so it pushes at the idle
-        // rank.
+        // Walking toward a room it cannot even see, or in to the shelter with
+        // no Task, so it pushes at the idle rank.
         travelling idleRank step
     | None, None ->
         // The room's idle ground and the ground just off it: any way off runs
@@ -137,11 +154,19 @@ let private moveIntentFor
         // rather than the whole room.
         let ground, offGround = idleGround room
 
+        // A body on the shelter steps nowhere off it (#514), neither off the
+        // idle ground nor when shoved.
+        let sheltered (tile: Pos) =
+            Set.isEmpty shelter || Set.contains (here tile) shelter
+
         // The tail, ordered off the idle ground first: `arbitrate` re-houses a
         // displaced body on the first free tile of its list, so an unordered
         // tail puts a body shoved off the ground straight back onto it, and
         // two idle bodies trade the one tile off the ground every tick.
-        let off, on = beside |> List.partition (fun tile -> not (Set.contains tile ground))
+        let off, on =
+            beside
+            |> List.filter sheltered
+            |> List.partition (fun tile -> not (Set.contains tile ground))
 
         let tail = staying @ off @ on
 
@@ -154,7 +179,8 @@ let private moveIntentFor
                 let reach = Threats.reachIn threats room
 
                 offGround
-                |> Set.filter (fun tile -> not (Set.contains (RoomPos.pos tile) reach))
+                |> Set.filter (fun tile ->
+                    not (Set.contains (RoomPos.pos tile) reach) && sheltered (RoomPos.pos tile))
                 |> Atlas.firstStepWithin atlas creep
                 |> Option.map RoomPos.pos
             else
@@ -476,6 +502,25 @@ let movementOf
             |> List.map fst
             |> Set.ofList
 
+    // The idle bodies at home while it has a shelter (#514): any but a
+    // Fighter, each walking in to it until it stands on it and staying on it
+    // after. Read off where the body stands and nothing remembered, so a walk
+    // begun beside an exit is kept every tick until it arrives. Asked only on
+    // a tick with a shelter; a tired body issues no step at all.
+    let sheltering =
+        if Map.containsKey home threats.Shelter then
+            view.Creeps
+            |> List.filter (fun creep ->
+                not (isFighterBody creep)
+                && not (Map.containsKey creep.Name assigned)
+                && not (Map.containsKey creep.Name crossings)
+                && not (Set.contains creep.Name tired)
+                && Atlas.creepRoom atlas creep.Name = Some home)
+            |> List.map (fun creep -> creep.Name)
+            |> Set.ofList
+        else
+            Set.empty
+
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of
     // ours idles in, and none at all for a tick where every body has a Task,
@@ -558,6 +603,9 @@ let movementOf
                     name
                     (Set.contains name runners)
                     (Set.contains name roundWalkers)
+                    (match Map.tryFind home threats.Shelter with
+                     | Some ground when Set.contains name sheltering -> ground.Force()
+                     | _ -> Set.empty)
                     at
                     (Map.tryFind name assigned)
                     (Map.tryFind name crossings))

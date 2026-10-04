@@ -264,7 +264,7 @@ let internal perimeterRamparts (view: ColonyView) : (string * RoomPos * int) lis
 /// The home's tiles outside its line: what a walk in from the exits reaches
 /// over the terrain without crossing a declared perimeter tile. Empty for a
 /// home that declares no perimeter.
-let private outsideLine (view: ColonyView) : Set<Pos> =
+let internal outsideLine (view: ColonyView) : Set<Pos> =
     match view.Perimeter with
     | [] -> Set.empty
     | perimeter ->

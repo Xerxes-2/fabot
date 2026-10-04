@@ -982,6 +982,20 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.filter (fun (_, latch) -> tick < latch.Until)
             |> List.map fst
             |> Set.ofList
+        // A clock read off a raid's bodies, not a core's, a reservation's or
+        // the fallback's.
+        RaidedOutposts =
+            state.Outposts
+            |> List.filter (fun episode ->
+                standingDown tick episode
+                && (match episode.Basis with
+                    | StandDownBasis.InvaderRaid
+                    | StandDownBasis.PlayerRaidHold
+                    | StandDownBasis.RaidGone
+                    | StandDownBasis.HarassSighting -> true
+                    | _ -> false))
+            |> List.map (fun episode -> episode.RoomName)
+            |> Set.ofList
         Fought = state.Fought
         Taken = state.Taken |> Map.keys |> Set.ofSeq
         ReserveShort = state.ReserveShort

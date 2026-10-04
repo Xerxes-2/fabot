@@ -3853,3 +3853,329 @@ let dyingRampartTests =
                     "over the dying line its Repair is surplus again"
             }
         ]
+
+/// `defenderHome` with the room west of it, W2N1, joined to the home's
+/// corridor across x = 0, y 33..35: its own ground x 40..48 on those rows
+/// and the matching exits on its east column, `hostiles` standing wherever
+/// the caller puts them, in either room. `perimeter` false is the same home
+/// with no line declared.
+let private borderHome perimeter ramparts hostiles creeps =
+    let colony = defenderHome ramparts hostiles creeps
+
+    let westRing = Map.ofList [ for y in 33..35 -> { X = 49; Y = y }, Plain ]
+
+    { colony with
+        Perimeter = if perimeter then colony.Perimeter else []
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.add "W2N1" westRing colony.Spatial.Borders
+            }
+            |> withNeighbour
+                "W2N1"
+                { RoomLayer.empty with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 40..48 do
+                                    for y in 33..35 -> { X = x; Y = y }, Plain
+                            ]
+                }
+    }
+
+/// Trepidimous' melee standing in W2N1.
+let private meleeWestAt (pos: Pos) =
+    { raidMeleeAt "h-west" pos with
+        Pos = RoomPos.at "W2N1" pos
+    }
+
+let private homeReach colony =
+    Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N1"
+
+let private reserverAt (pos: Pos) =
+    creepWith "reserver-1" 0 0 [ BodyPart.Claim; Move ], pos
+
+/// The same colony with the home under our own safe mode.
+let private shieldedHome (colony: ColonyView) =
+    { colony with
+        RoomControl =
+            Map.add
+                "W1N1"
+                { ownedRoom with
+                    Owner = Ownership.Ours
+                    SafeMode = true
+                }
+                colony.RoomControl
+    }
+
+/// The one body's tiles over `ticks` decided ticks, each tick's move applied
+/// as the engine would, its own tile first.
+let private walkOf name (start: Pos) ticks (colonyAt: Pos -> ColonyView) =
+    (start, [ 1..ticks ])
+    ||> List.scan (fun at _ ->
+        match moveIntentsFor name (decideOn (colonyAt at)).Intents with
+        | [ MoveCreep(_, direction) ] -> stepFrom at direction
+        | _ -> at)
+
+[<Tests>]
+let acrossTheBorderTests =
+    testList
+        "a Threat across the border"
+        [
+            test
+                "a melee within its margin of an exit reaches the first two columns across it, and no further" {
+                // #514, live t958,965: the 18A melee on W18S25's east edge put no
+                // Reach on W17S25's x = 0..2, and the reserver idling beside the
+                // exit there died the tick the melee stepped across. Here the
+                // corridor is rows 33..35.
+                let reach = homeReach (borderHome true [] [ meleeWestAt { X = 48; Y = 34 } ] [])
+
+                for x in 0..1 do
+                    for y in 33..35 do
+                        Expect.contains
+                            reach
+                            { X = x; Y = y }
+                            $"({x},{y}) is a step and a swing across"
+
+                Expect.isTrue
+                    (reach |> Set.forall (fun tile -> tile.X <= 1))
+                    $"nothing past its margin: {reach}"
+
+                Expect.isEmpty
+                    (homeReach (borderHome true [] [ meleeWestAt { X = 45; Y = 34 } ] []))
+                    "a melee four columns short of the exit reaches nothing across it"
+            }
+
+            test "a ranged one reaches across by its range" {
+                let ranged =
+                    { meleeWestAt { X = 48; Y = 34 } with
+                        Body = [ RangedAttack; Move ]
+                    }
+
+                let reach = homeReach (borderHome true [] [ ranged ] [])
+
+                Expect.contains reach { X = 3; Y = 34 } "three columns in"
+
+                Expect.isTrue
+                    (reach |> Set.forall (fun tile -> tile.X <= 3))
+                    $"and no further: {reach}"
+            }
+
+            test "a rampart of ours across the border still takes its tile back" {
+                let reach =
+                    homeReach (
+                        borderHome
+                            true
+                            [ "ram-x", { X = 1; Y = 34 } ]
+                            [ meleeWestAt { X = 48; Y = 34 } ]
+                            []
+                    )
+
+                Expect.isFalse
+                    (Set.contains { X = 1; Y = 34 } reach)
+                    "the ramparted tile is in no Reach"
+
+                Expect.contains reach { X = 1; Y = 33 } "the bare one beside it is"
+            }
+
+            test "a body beside the exit inside the cross-border Reach takes Flee" {
+                let decision =
+                    decideOn (
+                        borderHome
+                            true
+                            []
+                            [ meleeWestAt { X = 48; Y = 34 } ]
+                            [ reserverAt { X = 1; Y = 34 } ]
+                    )
+
+                Expect.equal
+                    (Map.tryFind "reserver-1" decision.Assignments)
+                    (Some(taskId Flee))
+                    "it runs from the melee next door"
+            }
+
+            test
+                "an idle body beside a home exit walks in while a raid stands across it, and stands when none does" {
+                // Three columns short: the melee's Reach stops short of the
+                // exit, so the reserver on (1,34) is in none and holds nothing.
+                let raid = [ meleeWestAt { X = 46; Y = 34 } ]
+                let placed = [ reserverAt { X = 1; Y = 34 } ]
+
+                let quiet = decideOn (borderHome true [] [] placed)
+                let raided = decideOn (borderHome true [] raid placed)
+
+                Expect.isEmpty
+                    (moveIntentsFor "reserver-1" quiet.Intents)
+                    "the premise: with nothing next door it stands where it is"
+
+                Expect.isNone
+                    (Map.tryFind "reserver-1" raided.Assignments)
+                    "the premise: in no Reach, it holds nothing"
+
+                let step = moveIntentsFor "reserver-1" raided.Intents
+
+                Expect.isTrue
+                    (step
+                     |> List.forall (function
+                         | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                         | _ -> false)
+                     && not (List.isEmpty step))
+                    $"it walks in along the corridor, away from the exit: {step}"
+            }
+
+            test
+                "the ground it walks to is behind the declared line, else five in from the exits, never beside a spawn" {
+                let raid = [ meleeWestAt { X = 46; Y = 34 } ]
+
+                let shelter colony =
+                    Threats.shelterIn (threatsOf colony (Atlas.ofView colony)) "W1N1"
+                    |> Set.map RoomPos.pos
+
+                let behind = shelter (borderHome true [] raid [])
+
+                Expect.contains behind { X = 21; Y = 34 } "the first tile behind the line"
+
+                Expect.isTrue
+                    (behind |> Set.forall (fun tile -> tile.X > 20))
+                    "and nothing on the line or outside it"
+
+                let spawnPos = { X = 25; Y = 25 }
+
+                Expect.isTrue
+                    (behind |> Set.forall (fun tile -> range tile spawnPos > 1))
+                    "and no tile beside the spawn, which a cast steps out onto"
+
+                let inland = shelter (borderHome false [] raid [])
+
+                Expect.contains
+                    inland
+                    { X = 5; Y = 34 }
+                    "with no line, the first tile five in from the exits"
+
+                Expect.isFalse (Set.contains { X = 4; Y = 34 } inland) "not one nearer"
+
+                Expect.isTrue
+                    (inland |> Set.forall (fun tile -> range tile spawnPos > 1))
+                    "nor beside the spawn"
+
+                Expect.isEmpty
+                    (shelter (borderHome true [] [] []))
+                    "and none at all with nothing next door"
+            }
+
+            test "a body walks from beside the exit all the way onto the shelter, and stays on it" {
+                let raid = [ meleeWestAt { X = 46; Y = 34 } ]
+
+                for perimeter, onShelter, ticks in
+                    [
+                        true, (fun (tile: Pos) -> tile.X > 20), 30
+                        false, (fun tile -> tile.X >= 5), 10
+                    ] do
+                    let walk =
+                        walkOf "reserver-1" { X = 1; Y = 34 } ticks (fun at ->
+                            borderHome perimeter [] raid [ reserverAt at ])
+
+                    let arrived = walk |> List.skipWhile (onShelter >> not)
+
+                    Expect.isNonEmpty arrived $"it arrives (line {perimeter}): {walk}"
+
+                    Expect.isTrue
+                        (List.forall onShelter arrived)
+                        $"and never steps off it again (line {perimeter}): {arrived}"
+
+                    Expect.isTrue
+                        (walk
+                         |> List.takeWhile (onShelter >> not)
+                         |> List.pairwise
+                         |> List.forall (fun (a, b) -> b <> a && b.X >= a.X))
+                        $"stepping in every tick until it does (line {perimeter}): {walk}"
+
+                    if not perimeter then
+                        Expect.equal
+                            (List.last walk).X
+                            5
+                            $"with no line it stops five in, nowhere near the spawn: {walk}"
+            }
+
+            test "an idle body already in the interior does not move for a raid next door" {
+                let raid = [ meleeWestAt { X = 46; Y = 34 } ]
+
+                for perimeter in [ true; false ] do
+                    let decision =
+                        decideOn (borderHome perimeter [] raid [ reserverAt { X = 32; Y = 30 } ])
+
+                    Expect.isEmpty
+                        (moveIntentsFor "reserver-1" decision.Intents)
+                        $"it stands where it is (line {perimeter})"
+            }
+
+            test
+                "a Work-heavy body in the Reach across the border keeps walking in, never standing in it" {
+                // An anchor has no Flee: standing in the spilled Reach it takes
+                // the plain step inward. No rock at home, so it has no dig to
+                // walk to either.
+                let decision =
+                    decideOn
+                        { borderHome
+                              true
+                              []
+                              [ meleeWestAt { X = 48; Y = 34 } ]
+                              [ anchor "a-1" 0 50, { X = 1; Y = 34 } ] with
+                            Sources = []
+                        }
+
+                Expect.isNone
+                    (Map.tryFind "a-1" decision.Assignments)
+                    "the premise: no Flee for it, and no work"
+
+                let step = moveIntentsFor "a-1" decision.Intents
+
+                Expect.isTrue
+                    (step
+                     |> List.forall (function
+                         | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                         | _ -> false)
+                     && not (List.isEmpty step))
+                    $"it steps inward: {step}"
+            }
+
+            test
+                "under the home's own safe mode nothing reaches across into it and no shelter is laid" {
+                let colony = shieldedHome (borderHome true [] [ meleeWestAt { X = 48; Y = 34 } ] [])
+                let threats = threatsOf colony (Atlas.ofView colony)
+
+                Expect.isEmpty (Threats.reachIn threats "W1N1") "no Reach lands in a shielded room"
+                Expect.isEmpty (Threats.shelterIn threats "W1N1") "and nothing is sheltered from"
+
+                Expect.isNonEmpty
+                    (Threats.reachIn threats "W2N1")
+                    "the premise: the melee keeps its Reach where it stands"
+            }
+
+            test "a raid stood down from beside the home lays the shelter with nothing in sight" {
+                // The last body out of the outpost took our vision with it.
+                let blind raided =
+                    { borderHome true [] [] [ reserverAt { X = 1; Y = 34 } ] with
+                        RaidedOutposts = raided
+                    }
+
+                let shelter colony =
+                    Threats.shelterIn (threatsOf colony (Atlas.ofView colony)) "W1N1"
+
+                Expect.isNonEmpty (shelter (blind (Set.singleton "W2N1"))) "the room beside home"
+
+                Expect.isEmpty
+                    (shelter (blind (Set.singleton "W5N5")))
+                    "not a raided room that borders it nowhere"
+
+                let step =
+                    moveIntentsFor "reserver-1" (decideOn (blind (Set.singleton "W2N1"))).Intents
+
+                Expect.isTrue
+                    (step
+                     |> List.forall (function
+                         | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                         | _ -> false)
+                     && not (List.isEmpty step))
+                    $"and the body beside the exit walks in: {step}"
+            }
+        ]
