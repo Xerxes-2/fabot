@@ -962,6 +962,7 @@ let harassStandDownTests =
                                     Basis = basis
                                     Stronghold = false
                                     Raiders = Set.empty
+                                    PlayerSince = None
                                 }
                             ]
                     }
@@ -982,7 +983,7 @@ let harassStandDownTests =
                     "a core's clock is the core's, and the squad does not cut it short"
             }
 
-            test "an outpost under the same raid keeps the raid's life" {
+            test "an outpost under a harassing squad is held the player window past its opening" {
                 let colony =
                     { (withDeclaredOutpost harassRoom quiet) with
                         Hostiles = trepidimousSquad
@@ -994,16 +995,19 @@ let harassStandDownTests =
                     |> raidTick 100 colony
                     |> raidTick 101 { colony with Hostiles = [] }
 
-                Expect.contains (shutAt 799 state) harassRoom "withdrawn while the squad lives"
+                Expect.contains
+                    (shutAt 299 state)
+                    harassRoom
+                    "withdrawn past the harassment clear (#513)"
 
                 Expect.isFalse
-                    (Set.contains harassRoom (shutAt 800 state))
-                    "and worked again when it cannot"
+                    (Set.contains harassRoom (shutAt 300 state))
+                    "and worked again at its opening plus 200, the squad still alive"
 
                 Expect.equal
                     (standDowns state |> List.map (fun (_, _, _, _, basis) -> basis))
-                    [ StandDownBasis.InvaderRaid ]
-                    "off the raid's life"
+                    [ StandDownBasis.PlayerRaidHold ]
+                    "off the player's-raid window"
             }
 
             test "the enemy's escort the ranger beats is fought, not withdrawn from" {

@@ -441,6 +441,11 @@ let private encodeOutpost (episode: OutpostEpisode) =
     if not (Set.isEmpty episode.Raiders) then
         o?raiders <- episode.Raiders |> Set.toArray
 
+    // Written only on a player's raid, so a legacy row reads as none.
+    match episode.PlayerSince with
+    | Some since -> o?player <- since
+    | None -> ()
+
     o
 
 let private decodeOutpost (raw: obj) : OutpostEpisode =
@@ -463,6 +468,13 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         Stronghold = not (isNull raw?stronghold) && unbox<bool> raw?stronghold
         // Absent on a legacy row and on one no body holds: the clock alone.
         Raiders = idsOf raw?raiders |> Fresh.setOfSeq
+        // Absent on a legacy row and on one no player's raid stood in;
+        // present and off-shape costs the row like every number.
+        PlayerSince =
+            if isNull raw?player then
+                None
+            else
+                Some(numberOf raw "player")
     }
 
 // One room held by somebody else's reservation on the wire: `{ holder,

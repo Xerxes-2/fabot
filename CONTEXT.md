@@ -396,7 +396,15 @@ _Avoid_: keeper radius, SK exclusion
 The hard floor on the controller's downgrade timer, half the level's full timer, inside which Upgrade outranks even the feeding tier so the [[safe-mode reflex]] stays fireable. ADR-0007.
 
 ### Stand-down
-An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there, except that while a body of the colony stands in it the room is an [[evacuating room]] its bodies walk home from — until a tick read off the threat: a [[stronghold]]'s core's collapse (a level-0 core opens none: a guard kills it, #487), a rival reservation's end, an armed raid's longest remaining life (in a [[harassment room]], fifty ticks past the squad's last sighting) or, sooner, the tick every body of the raid is seen gone — dead, or a player's in another room the colony projects (#507), or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
+An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there, except that while a body of the colony stands in it the room is an [[evacuating room]] its bodies walk home from — until a tick read off the threat, one clock per threat:
+- a [[stronghold]]'s core: its collapse (a level-0 core opens none: a guard kills it, #487), or 2,500 ticks where none can be read;
+- a rival's reservation: its end;
+- a raid (bodies with a live ATTACK, RANGED_ATTACK or WORK part): its longest remaining life;
+- a player's raid alone in an outpost: at most `Tuning.PlayerRaidHold` (200) past its first sighting, never short of a rival's hold (#513);
+- a squad in a [[harassment room]]: fifty ticks past its last sighting;
+- any raid, sooner: the tick every body is seen gone — dead, disarmed, or a player's in another room the colony projects (#507).
+
+A rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
 
 ### Stronghold
 An invader core of level 1 or more — towers under ramparts and a garrison — whose room is `StandDown.Impassable` and taken out of every chain until its collapse timer runs out. ADR-0074.

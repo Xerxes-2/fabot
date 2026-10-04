@@ -1248,6 +1248,10 @@ if (command === "console") {
     "raid-gone":
       "every body of the raid was seen dead, or seen in another room after it left " +
       "(a player's) — ended on the tick the last one went (ADR 0043)",
+    // A player's raid, held at most Tuning.PlayerRaidHold past its first sighting (#513).
+    "player-raid-hold":
+      "a player's raid — held at most 200 ticks past its first sighting, since a body that " +
+      "walks off unseen leaves no evidence it went (ADR 0043)",
   };
 
   // What a row's `last` tick is the last sighting *of*, keyed off the same
@@ -1265,6 +1269,7 @@ if (command === "console") {
     "invader-raid": "a raider last seen there",
     "harass-sighting": "the squad last seen there",
     "raid-gone": "a raider last seen there",
+    "player-raid-hold": "a raider last seen there",
   };
 
   // The stride between looks into a latched room, mirroring

@@ -56,8 +56,9 @@ module HostileInfo =
             | [] -> None
             | ranges -> Some(List.max ranges)
 
-    /// Whether a hostile can hurt anything at all: `weaponRange` asked as a
-    /// yes/no, written once because many rules turn on it.
+    /// Whether a hostile's body carries an ATTACK or RANGED_ATTACK part, live
+    /// or shot off: `weaponRange` asked as a yes/no, written once because many
+    /// rules turn on it. What still acts, WORK included, is `hurtsLive`.
     let isArmed (hostile: HostileInfo) : bool = weaponRange hostile |> Option.isSome
 
     /// Whether a hostile is a Source Keeper: the room's own NPC, never a raid.
@@ -68,6 +69,13 @@ module HostileInfo =
     /// (`creeps/tick.js` skips users '2' and '3').
     let crossesExits (hostile: HostileInfo) : bool =
         hostile.Owner <> "Invader" && not (isKeeper hostile)
+
+    /// Whether a hostile has a live part that damages a creep or a structure:
+    /// ATTACK, RANGED_ATTACK or WORK. A scout, a claimer, a hauler and a body
+    /// whose weapons are all shot off have none.
+    let hurtsLive (hostile: HostileInfo) : bool =
+        Engine.liveParts hostile.Body hostile.Hits
+        |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Work)
 
     /// What a hostile heals a tick, its HEAL parts priced unboosted: the
     /// projection carries no boosts.
@@ -174,6 +182,11 @@ type StandDownBasis =
     /// clock ends on the tick the last one went. An Invader seen elsewhere is
     /// not gone, so a live NPC raid keeps its life.
     | RaidGone
+    /// A raid of a player's bodies alone, cut to its first sighting plus
+    /// `Tuning.PlayerRaidHold` (#513, `OutpostEpisode.PlayerSince`): a squad
+    /// that walks off unseen is no evidence it stays, and a return shuts the
+    /// room again on sight. The printed reason; the fact is the row's.
+    | PlayerRaidHold
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =

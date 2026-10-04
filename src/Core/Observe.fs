@@ -292,6 +292,12 @@ type OutpostEpisode =
         /// (`strikeGone`), by id: what ends a raid's clock early once it
         /// empties (#507). Empty on a row no raid clocks, and on one spent.
         Raiders: Set<string>
+        /// The tick a raid of a player's bodies alone was first seen standing
+        /// in this outpost while the row stood (#513): the row runs no later
+        /// than this plus `Tuning.PlayerRaidHold`, nor short of a rival's hold.
+        /// A fact beside the basis, which a later deadline overwrites. None
+        /// once an Invader stands among the bodies, and on any other row.
+        PlayerSince: int option
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: the one
@@ -634,30 +640,26 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
 
     let outpostRooms = Set.ofList declared
 
+    // The raid is the bodies that still hurt something, the one predicate
+    // `strikeGone` enrols on (#513): a body whose weapons are shot off
+    // neither opens a row nor holds one.
     view.Hostiles
-    |> List.filter (fun h -> h.Pos.Room <> SpatialInfo.homeName view.Spatial)
+    |> List.filter (fun h ->
+        h.Pos.Room <> SpatialInfo.homeName view.Spatial
+        && HostileInfo.hurtsLive h
+        && not (HostileInfo.isKeeper h))
     |> List.groupBy (fun h -> h.Pos.Room)
-    |> List.filter (fun (room, hostiles) ->
-        let armed = hostiles |> List.filter Decide.Facts.isArmed
-
+    |> List.filter (fun (room, _) ->
         if Set.contains room rangerRooms then
-            hostiles |> List.exists Decide.Facts.isRaider
-            && not (Decide.Facts.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
+            not (Decide.Facts.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
         else if Set.contains room outpostRooms then
-            not (List.isEmpty armed)
-            && not (Decide.Facts.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
+            not (Decide.Facts.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
         else
             false)
-    |> List.map (fun (room, hostiles) ->
+    |> List.map (fun (room, raid) ->
         if Set.contains room view.HarassCast then
             room, (view.Time + view.Tuning.HarassClearTicks, StandDownBasis.HarassSighting)
         else
-            let raid =
-                if Set.contains room rangerRooms then
-                    hostiles |> List.filter (Decide.Facts.isKeeper >> not)
-                else
-                    hostiles
-
             let life = raid |> List.map (fun h -> h.TicksToLive) |> List.max
 
             room, (view.Time + life, StandDownBasis.InvaderRaid))
@@ -689,6 +691,7 @@ let private deadlines (view: ColonyView) (declared: string list) =
 let private harassOverrides (basis: StandDownBasis) =
     match basis with
     | StandDownBasis.InvaderRaid
+    | StandDownBasis.PlayerRaidHold
     | StandDownBasis.RivalReservation -> true
     | StandDownBasis.CollapseTimer
     | StandDownBasis.Reservation
@@ -735,6 +738,7 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
                 Stronghold = stronghold
                 // `strikeGone`'s to fill, on this same tick.
                 Raiders = Fresh.setOfSeq Seq.empty
+                PlayerSince = None
             }
         ]
 
@@ -743,6 +747,7 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
 let private raidClocked (episode: OutpostEpisode) =
     not episode.Stronghold
     && (episode.Basis = StandDownBasis.InvaderRaid
+        || episode.Basis = StandDownBasis.PlayerRaidHold
         || episode.Basis = StandDownBasis.RaidGone)
 
 /// The least tick a raid's row may end on once its bodies are gone: now, or,
@@ -769,14 +774,19 @@ let private bounceFloor
         view.Time
 
 /// Keep every standing raid row's bodies, and end its clock on the tick the
-/// last one is gone (#507). A body standing in the room is (re-)enrolled,
-/// beaten or not; one is struck only when absent from the room and seen dead
-/// anywhere the colony sees or, a player's, standing in another room. Never
+/// last one is gone (#507). A body standing in the room that can hurt
+/// something (`HostileInfo.hurtsLive`) is (re-)enrolled, beaten or not; a scout
+/// never holds a row. One is struck when seen with nothing left that hurts, or
+/// absent from the room and seen dead anywhere the colony sees or, a player's,
+/// standing in another room. Never
 /// on an absence, so a raid nobody sees go keeps its life; an Invader seen
-/// elsewhere is not gone, its clock being its life. The cut never runs past
-/// the clock, nor short of a rival's hold on the room (`rivalHolds`).
+/// elsewhere is not gone, its clock being its life. A player's raid in a
+/// declared outpost is cut to its first sighting plus `Tuning.PlayerRaidHold`
+/// (#513, `PlayerSince`). Neither cut runs past the clock, nor short of a
+/// rival's hold on the room (`rivalHolds`).
 let private strikeGone
     (view: ColonyView)
+    (declared: string list)
     (rivalHolds: Map<string, int>)
     (episodes: OutpostEpisode list)
     =
@@ -787,48 +797,97 @@ let private strikeGone
 
     let gone room id =
         match Map.tryFind id whereNow with
-        | Some hostile -> hostile.Pos.Room <> room && HostileInfo.crossesExits hostile
+        // A body with nothing left that hurts is no raid, wherever it stands;
+        // a heal that brings a weapon back is a fresh sighting.
+        | Some hostile ->
+            not (HostileInfo.hurtsLive hostile)
+            || hostile.Pos.Room <> room && HostileInfo.crossesExits hostile
         | None -> Set.contains id fallen
 
     episodes
     |> List.map (fun episode ->
         if not (standingDown view.Time episode) then
-            if Set.isEmpty episode.Raiders then
+            if Set.isEmpty episode.Raiders && Option.isNone episode.PlayerSince then
                 episode
             else
                 { episode with
                     Raiders = Fresh.setOfSeq Seq.empty
+                    PlayerSince = None
                 }
         elif not (raidClocked episode) then
             episode
         else
             let room = episode.RoomName
 
-            let present =
+            let standing =
                 view.Hostiles
                 |> List.filter (fun hostile ->
-                    hostile.Pos.Room = room && not (HostileInfo.isKeeper hostile))
-                |> List.map (fun hostile -> hostile.Id)
+                    hostile.Pos.Room = room
+                    && not (HostileInfo.isKeeper hostile)
+                    && HostileInfo.hurtsLive hostile)
 
             let raiders =
-                Seq.append episode.Raiders present
+                Seq.append episode.Raiders (standing |> Seq.map (fun hostile -> hostile.Id))
                 |> Seq.filter (gone room >> not)
                 |> Fresh.setOfSeq
 
+            let holdPast tick =
+                Map.tryFind room rivalHolds |> Option.filter (fun until -> until > tick)
+
+            // Set on the first tick a player's bodies alone stand in a declared
+            // outpost (never an errand room, whose raid stays to hold the
+            // room's prize); an Invader among them puts the row back on the
+            // raid's life.
+            let playerSince =
+                match episode.PlayerSince with
+                | _ when standing |> List.exists (HostileInfo.crossesExits >> not) -> None
+                | Some since -> Some since
+                | None when not (List.isEmpty standing) && List.contains room declared ->
+                    Some view.Time
+                | None -> None
+
+            let windowed =
+                match playerSince with
+                | Some since ->
+                    let ends = since + view.Tuning.PlayerRaidHold
+                    let until = holdPast ends
+
+                    match until with
+                    | Some until when until < episode.Expiry ->
+                        { episode with
+                            PlayerSince = playerSince
+                            Expiry = until
+                            Basis = StandDownBasis.RivalReservation
+                        }
+                    | None when ends < episode.Expiry ->
+                        { episode with
+                            PlayerSince = playerSince
+                            Expiry = ends
+                            Basis = StandDownBasis.PlayerRaidHold
+                        }
+                    | _ ->
+                        { episode with
+                            PlayerSince = playerSince
+                        }
+                | None ->
+                    { episode with
+                        PlayerSince = playerSince
+                    }
+
             let floor = bounceFloor view episodes episode
 
-            let hold = Map.tryFind room rivalHolds |> Option.filter (fun until -> until > floor)
+            let hold = holdPast floor
 
             let cut = hold |> Option.defaultValue floor
 
             if
                 not (Set.isEmpty raiders)
                 || Set.isEmpty episode.Raiders
-                || cut >= episode.Expiry
+                || cut >= windowed.Expiry
             then
-                { episode with Raiders = raiders }
+                { windowed with Raiders = raiders }
             else
-                { episode with
+                { windowed with
                     Raiders = raiders
                     Expiry = cut
                     Basis =
@@ -1171,7 +1230,7 @@ let foldRaids
         Outposts =
             (prior.Outposts, deadlines view declared)
             ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
-            |> strikeGone view rivalHolds
+            |> strikeGone view declared rivalHolds
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
         // alone: a room with no `RoomControl` entry keeps whatever the last

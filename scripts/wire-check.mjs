@@ -251,6 +251,7 @@ wire("raids: every stand-down basis round-trips, #441's harass-sighting included
     "invader-raid",
     "harass-sighting",
     "raid-gone",
+    "player-raid-hold",
   ];
   const outposts = bases.map((basis, i) => ({ ...outpost, room: `W1N${i + 10}`, basis }));
   const written = await raidsThrough({ ...emptyRaids, outposts });
@@ -318,6 +319,17 @@ wire("raids: a raid-body entry that is no id costs the entry, never the row", as
     assert.equal(written.outposts[0].raiders, undefined);
     assert.equal(written.episodes[0].killed, undefined);
   }
+});
+
+wire("raids: a player's raid tick (#513) round-trips, and a legacy row writes none", async () => {
+  const player = { ...outpost, basis: "player-raid-hold", player: 15 };
+  const written = await raidsThrough({ ...emptyRaids, outposts: [player, outpost] });
+
+  assert.equal(stable(written.outposts), stable([player, outpost]));
+  assert.equal(written.outposts[1].player, undefined, "absent means no player's raid, as before #513");
+
+  const bad = await raidsThrough({ ...emptyRaids, outposts: [{ ...outpost, player: "soon" }] });
+  assert.equal(bad.outposts.length, 0, "an off-shape tick costs its row, like every number");
 });
 
 wire("raids: a legacy stand-down with no stronghold flag reads as no bunker", async () => {
