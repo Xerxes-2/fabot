@@ -221,6 +221,30 @@ let refillClusterTests =
                     "fifty of room: the light holder's fifty covers it, and the full body is refused"
             }
 
+            test
+                "a holder still walking from far off does not refuse a loaded body that arrives first" {
+                // W17S25, 2026-10-04: a hauler with 500 held the 472 of room
+                // from the far edge of the swamp while two loaded haulers by
+                // the ring were sent to the controller container instead.
+                let colony =
+                    clusterColony
+                        (50, 0, 0)
+                        [
+                            creepWith "far" 50 0 [ Carry; Carry; Move ]
+                            creepWith "near" 50 0 [ Carry; Carry; Move ]
+                        ]
+                        [ "far", { X = 10; Y = 18 }; "near", { X = 11; Y = 10 } ]
+
+                let sticky = Map.ofList [ "far", taskId (Refill("spawn-1", Energy)) ]
+
+                let { Assignments = assignments } = decideFrom sticky colony
+
+                Expect.equal
+                    (Map.tryFind "near" assignments)
+                    (Some(taskId (Refill("spawn-1", Energy))))
+                    "the body beside the spawn takes the ring; the far holder's load lands second"
+            }
+
             test "an extension filled while a body walks costs it a neighbour, not its Task" {
                 // The body is aimed at the ring, not the nearest extension,
                 // so somebody topping that one up leaves the assignment

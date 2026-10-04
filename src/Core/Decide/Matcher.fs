@@ -255,10 +255,18 @@ let matchCreeps
             // The budget is a number about loads: strict, like every cap
             // above, and read over the same arrival-counted holders, so a body
             // still walking counts what it carries and a body that has poured
-            // counts nothing.
+            // counts nothing. A holder arriving after the candidate does not
+            // count: its load lands second, and a loaded body beside the ring
+            // must not wait on one still crossing the swamp.
+            let arrivesFirst name =
+                match arrival.Value, Atlas.walkTicks atlas name pooled.Task with
+                | Some mine, Some theirs -> theirs <= mine
+                | _ -> true
+
             let budgetHolds =
                 capacity.Budget
-                |> Option.forall (fun budget -> (holders |> List.sumBy carriedBy) < budget)
+                |> Option.forall (fun budget ->
+                    (holders |> List.filter arrivesFirst |> List.sumBy carriedBy) < budget)
 
             let workBudgetHolds =
                 capacity.WorkBudget
