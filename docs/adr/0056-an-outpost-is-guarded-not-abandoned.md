@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282, #417
+> **Status:** amended by 0072, #272, #280, #282, #417, #507
+
+> **Amended by #507** on 2026-10-04: the stand-down clocked to the raid's life ends sooner once every body of the raid is seen gone; see ADR 0043's #507 note.
 
 > **Amended by #417** on 2026-09-25: the withdrawal line is the biggest single guard body the bank buys (`Quota.guardBlocksReach`), not two blocks; so the bounded loss before a stand-down opens is two bodies of that size, up to 2 × 3,750 energy at RCL7, and no longer two 750-energy blocks.
 

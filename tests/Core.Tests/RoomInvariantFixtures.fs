@@ -189,6 +189,7 @@ let internal colonyOf (room: LoadedRoom) level =
         // A captured room holds no invader core: the captures were taken
         // off a sector whose cores stand four rooms away.
         InvaderCores = []
+        Fallen = []
         Spatial = room.Spatial
         // One owned room with a spawn in it declares no candidate colony.
         Declared = []

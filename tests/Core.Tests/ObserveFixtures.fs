@@ -48,6 +48,7 @@ let quiet: ColonyView =
         // spawn room's raid measurements regress against that family
         // arriving.
         InvaderCores = []
+        Fallen = []
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some raidRoom

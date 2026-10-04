@@ -487,6 +487,9 @@ type Tuning =
         /// How long a [[harassment room]] stays shut after a squad the ranger
         /// cannot beat was last seen there (#441).
         HarassClearTicks: int
+        /// How long a stand-down a raid's return reopens soon after its bodies
+        /// were all gone holds at least (#507): a squad bouncing on the border.
+        RaidBounceTicks: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -721,6 +724,8 @@ module Tuning =
             RangerResidents = 2
             HarassBlocks = 3
             HarassClearTicks = 50
+            // A harassment room's clear-gap: long enough that one border bounce costs one walk.
+            RaidBounceTicks = 50
             TerminalEnergy = 4_000
             // User, 2026-10-04: every Storage stood near 0 while the towers were full.
             EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]

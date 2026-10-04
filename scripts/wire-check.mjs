@@ -222,6 +222,7 @@ wire("raids: every stand-down basis round-trips, #441's harass-sighting included
     "rival-reservation",
     "invader-raid",
     "harass-sighting",
+    "raid-gone",
   ];
   const outposts = bases.map((basis, i) => ({ ...outpost, room: `W1N${i + 10}`, basis }));
   const written = await raidsThrough({ ...emptyRaids, outposts });
@@ -247,6 +248,48 @@ wire("raids: a legacy episode with no damage and no loss tile reads as zero and 
 
   assert.equal(written.episodes[0].damage, 0, "a bundle written before ADR 0034 charges nothing");
   assert.equal(written.episodes[0].losses[0].room, undefined, "and a loss written before #376 has no tile");
+});
+
+wire("raids: a stand-down's raid bodies and an episode's dead round-trip (#507)", async () => {
+  const full = {
+    ...emptyRaids,
+    episodes: [{ ...episode, killed: ["h1"] }],
+    outposts: [{ ...outpost, basis: "invader-raid", raiders: ["h1", "h2"] }],
+  };
+
+  assert.equal(stable(await raidsThrough(full)), stable(full));
+});
+
+wire("raids: a legacy row has no raid bodies and no dead, and writes none", async () => {
+  const written = await raidsThrough({ ...emptyRaids, episodes: [episode], outposts: [outpost] });
+
+  assert.equal(written.outposts[0].raiders, undefined, "no body to wait on: the clock alone, as before #507");
+  assert.equal(written.episodes[0].killed, undefined);
+});
+
+wire("raids: a raid-body entry that is no id costs the entry, never the row", async () => {
+  for (const bad of [7, {}, "", null]) {
+    const written = await raidsThrough({
+      ...emptyRaids,
+      episodes: [{ ...episode, killed: [bad, "h1"] }],
+      outposts: [{ ...outpost, raiders: [bad, "h2"] }],
+    });
+
+    assert.deepEqual(written.outposts[0].raiders, ["h2"], `raiders ${JSON.stringify(bad)}`);
+    assert.deepEqual(written.episodes[0].killed, ["h1"], `killed ${JSON.stringify(bad)}`);
+  }
+
+  for (const notAList of [7, "h1", { h1: true }]) {
+    const written = await raidsThrough({
+      ...emptyRaids,
+      episodes: [{ ...episode, killed: notAList }],
+      outposts: [{ ...outpost, raiders: notAList }],
+    });
+
+    assert.equal(written.outposts.length, 1, "the shut stands: the row is the shut");
+    assert.equal(written.outposts[0].raiders, undefined);
+    assert.equal(written.episodes[0].killed, undefined);
+  }
 });
 
 wire("raids: a legacy stand-down with no stronghold flag reads as no bunker", async () => {

@@ -159,6 +159,9 @@ type ColonyView =
         /// room is withheld from for thousands, and `FIND_HOSTILE_CREEPS` can
         /// never answer with a structure.
         InvaderCores: InvaderCoreInfo list
+        /// The ids of the creeps not ours whose tombstones lie in the rooms
+        /// this colony works and can see: a raid body seen dead (#507).
+        Fallen: string list
         /// This colony's spatial projection: the home room and every room it
         /// works beside it. `RoomName` is the home room and the `Rooms` keys
         /// are the scan set, so neither is stored a second time beside it.
@@ -1076,6 +1079,7 @@ module ColonyView =
                 collected (fun facts -> facts.Hostiles)
                 |> List.filter (fun hostile -> Colony.isAlly hostile.Owner)
             InvaderCores = collected (fun facts -> facts.InvaderCores)
+            Fallen = collected (fun facts -> facts.Fallen)
             Spatial =
                 {
                     RoomName = Some home

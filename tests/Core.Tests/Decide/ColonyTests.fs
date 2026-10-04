@@ -2157,7 +2157,7 @@ let twoColonyTests =
                 Expect.equal
                     (placed motherCast (Some "W1N3"))
                     (Some "W1N1")
-                    "a room nobody projects — a stood-down outpost (ADR 0043) — adopts nobody, so the creep is still its caster's"
+                    "a room nobody projects — a stood-down outpost — adopts nobody, so the creep is still its caster's"
 
                 Expect.equal
                     (placed motherCast None)

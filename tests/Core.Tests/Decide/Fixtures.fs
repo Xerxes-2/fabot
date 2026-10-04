@@ -169,6 +169,7 @@ let bareRespawn =
         Hostiles = []
         Allies = []
         InvaderCores = []
+        Fallen = []
         Spatial = SpatialInfo.empty
         // No colony declared but this one, which claims nothing.
         Declared = []

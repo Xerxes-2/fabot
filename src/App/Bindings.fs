@@ -158,12 +158,19 @@ type IResource =
     /// How much the pile holds: a bare amount, not a store.
     abstract amount: int
 
+/// The creep a tombstone holds: what is left of the dead one to read.
+type IFallenCreep =
+    abstract id: string
+    abstract my: bool
+
 /// A tombstone or a ruin: one binding, since the projection reads the same
 /// three fields off both and `creep.withdraw` takes any store.
 type ITombstone =
     abstract id: string
     abstract pos: IRoomPosition
     abstract store: IStore
+    /// The dead creep; a tombstone's alone, undefined on a ruin.
+    abstract creep: IFallenCreep
 
 type IConstructionSite =
     abstract id: string

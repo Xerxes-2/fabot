@@ -959,6 +959,9 @@ if (command === "console") {
           console.log(`    ${room}  ${rows.length}: ${line}`);
         }
       }
+      // The raid's own dead (#507): roster ids seen as tombstones.
+      const killed = e.killed ?? [];
+      if (killed.length > 0) console.log(`  killed ${killed.length}: ${killed.join(", ")}`);
       console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
     }
@@ -968,7 +971,7 @@ if (command === "console") {
 
   // The wire shape written by ObserveMemory.fs, a key of its own beside
   // `episodes` in the same leaf:
-  //   { outposts: [{ room, opened, last, expiry, basis }],
+  //   { outposts: [{ room, opened, last, expiry, basis, stronghold?, raiders? }],
   //     rivalHeld: { <room>: { since, lastLooked } },
   //     holds: { <room>: { holder, until } } }
   // One `outposts` row per clocked [[stand-down]]: the room it shuts, the
@@ -1241,6 +1244,10 @@ if (command === "console") {
     "harass-sighting":
       "a squad the ranger cannot beat in a harassment room — the deadline is its " +
       "last sighting plus 50 ticks (ADR 0081)",
+    // Every body of the raid seen dead, or (a player's) seen elsewhere (#507).
+    "raid-gone":
+      "every body of the raid was seen dead, or seen in another room after it left " +
+      "(a player's) — ended on the tick the last one went (ADR 0043)",
   };
 
   // What a row's `last` tick is the last sighting *of*, keyed off the same
@@ -1257,6 +1264,7 @@ if (command === "console") {
     // here is the last tick one of them was standing in the room (#368).
     "invader-raid": "a raider last seen there",
     "harass-sighting": "the squad last seen there",
+    "raid-gone": "a raider last seen there",
   };
 
   // The stride between looks into a latched room, mirroring
@@ -1521,6 +1529,10 @@ if (command === "console") {
           // off a controller with no core anywhere near it, and naming a core
           // under such a row contradicts the `because` line printed above it.
           console.log(`  opened ${tickOf(row.opened)}, ${SIGHTING[row.basis]} ${tickOf(row.last)}`);
+          // The raid bodies not yet seen dead or elsewhere (#507): the row ends
+          // early once this reaches none.
+          const pending = Array.isArray(row.raiders) ? row.raiders.length : 0;
+          if (pending > 0) console.log(`  waiting on ${pending} raid bod${pending === 1 ? "y" : "ies"} to be seen gone`);
         } else {
           const row = spent[0];
           console.log(

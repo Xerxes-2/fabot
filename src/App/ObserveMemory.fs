@@ -345,8 +345,23 @@ let private encodeEpisode (episode: RaidEpisode) =
             d)
         |> List.toArray
 
+    // Written only once the raid has lost a body, so a legacy row reads alike.
+    if not (List.isEmpty episode.Killed) then
+        o?killed <- List.toArray episode.Killed
+
     o?damage <- episode.Damage
     o
+
+// A list of creep ids off the wire (#507): anything not a list reads as none,
+// and an entry that is no id costs the entry and never the row around it.
+let private idsOf (raw: obj) : string[] =
+    if not (JS.Constructors.Array.isArray raw) then
+        [||]
+    else
+        raw
+        |> unbox<obj[]>
+        |> Array.filter (fun id -> jsTypeof id = "string" && (unbox<string> id).Length > 0)
+        |> Array.map unbox<string>
 
 let private decodeEpisode (raw: obj) : RaidEpisode =
     {
@@ -401,6 +416,8 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     Where = if isNull d?room then None else Some(roomPosOf d)
                 })
             |> Array.toList
+        // Absent on a legacy episode and on one whose raid lost nobody.
+        Killed = idsOf raw?killed |> Array.toList
         // Absent on a legacy episode, and zero is what that says; present and
         // off-shape costs the row like every number.
         Damage = if isNull raw?damage then 0 else numberOf raw "damage"
@@ -418,6 +435,11 @@ let private encodeOutpost (episode: OutpostEpisode) =
     // Written only when true, so a legacy row reads `false`.
     if episode.Stronghold then
         o?stronghold <- true
+
+    // Written only while a raid body is unaccounted for, so a legacy row and
+    // a spent one read alike: no body to wait on, the clock alone.
+    if not (Set.isEmpty episode.Raiders) then
+        o?raiders <- episode.Raiders |> Set.toArray
 
     o
 
@@ -439,6 +461,8 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         // Absent on a legacy row and on one that never saw a bunker: both
         // mean "no bunker here".
         Stronghold = not (isNull raw?stronghold) && unbox<bool> raw?stronghold
+        // Absent on a legacy row and on one no body holds: the clock alone.
+        Raiders = idsOf raw?raiders |> Fresh.setOfSeq
     }
 
 // One room held by somebody else's reservation on the wire: `{ holder,

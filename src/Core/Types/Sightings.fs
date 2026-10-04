@@ -169,6 +169,11 @@ type StandDownBasis =
     /// by every later one. The room is ours to walk back into, so a squad that
     /// crosses it once shuts it briefly and not for its whole life.
     | HarassSighting
+    /// A raid every body of which is gone from the room (#507): seen dead, or,
+    /// a player's, seen in another room after its last sighting here. The
+    /// clock ends on the tick the last one went. An Invader seen elsewhere is
+    /// not gone, so a live NPC raid keeps its life.
+    | RaidGone
 
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
@@ -290,6 +295,8 @@ type RoomFacts =
         Hostiles: HostileInfo list
         /// The invader cores standing here.
         InvaderCores: InvaderCoreInfo list
+        /// The ids of the creeps not ours whose tombstones lie here.
+        Fallen: string list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -320,6 +327,7 @@ module RoomFacts =
             ConstructionSites = []
             Hostiles = []
             InvaderCores = []
+            Fallen = []
         }
 
 /// One creep of ours, in the world's reading, before any colony has claimed

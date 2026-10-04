@@ -148,6 +148,26 @@ let rosterTests =
                     "a squad reads as one row a creep, however often it re-enters"
             }
 
+            // #507: the four Trepidimous bodies died at W17S25's ramparts and the
+            // log said nothing of it.
+            test "a raider's tombstone is the raid's loss, recorded once" {
+                let dead =
+                    { quiet with
+                        Fallen = [ "TWX"; "not-a-raider" ]
+                    }
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (raid squad)
+                    |> raidTick 11 dead
+                    |> raidTick 12 dead
+
+                Expect.equal
+                    (state.Episodes |> List.map (fun episode -> episode.Killed))
+                    [ [ "TWX" ] ]
+                    "the roster's body, once however long its tombstone lies, and nobody else's"
+            }
+
             test "a row keeps the body that entered the room, not what the tower left of it" {
                 let whole = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
                 let chewed = raider "TWX" "giaco" { X = 38; Y = 48 } [ Attack; Move ]
@@ -941,6 +961,7 @@ let harassStandDownTests =
                                     Expiry = expiry
                                     Basis = basis
                                     Stronghold = false
+                                    Raiders = Set.empty
                                 }
                             ]
                     }

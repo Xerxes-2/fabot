@@ -211,9 +211,10 @@ let private seenFacts
     // `Ruin` with any of `RESOURCES_ALL`, and a decaying tombstone drops its
     // whole store as piles (`intents/tombstones/tick.js`), so ore left in one
     // bleeds on the floor at `ceil(amount / 1000)` a tick.
+    let graves = room.find findTombstones |> Array.map (fun o -> o :?> ITombstone)
+
     let tombstones =
-        Array.append (room.find findTombstones) (room.find findRuins)
-        |> Array.map (fun o -> o :?> ITombstone)
+        Array.append graves (room.find findRuins |> Array.map (fun o -> o :?> ITombstone))
         |> Array.filter (fun r ->
             r.store.getUsedCapacity (resourceName Energy) > 0
             || r.store.getUsedCapacity (resourceName Thorium) > 0)
@@ -661,6 +662,14 @@ let private seenFacts
                     Level = if isNull (box st.level) then 0 else st.level
                 }
                 : InvaderCoreInfo))
+            |> Array.toList
+        // Every tombstone, empty ones too: a raid body seen dead (#507).
+        Fallen =
+            graves
+            |> Array.choose (fun grave ->
+                let dead = grave.creep
+
+                if isNull (box dead) || dead.my then None else Some dead.id)
             |> Array.toList
     }
 

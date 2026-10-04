@@ -34,6 +34,7 @@ let snapshotWith creeps spatial =
         Hostiles = []
         Allies = []
         InvaderCores = []
+        Fallen = []
         Spatial = spatial
         Declared = []
         Stages = Map.empty

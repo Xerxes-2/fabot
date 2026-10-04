@@ -819,6 +819,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Hostiles = []
         Allies = []
         InvaderCores = []
+        Fallen = []
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some capture.RoomName

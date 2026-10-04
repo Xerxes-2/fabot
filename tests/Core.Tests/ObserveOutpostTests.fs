@@ -8,6 +8,32 @@ open Expecto
 open Fabot.Core.Types
 open Fabot.Core.Observe
 
+/// Five attackers two guard blocks cannot beat, all one owner's, standing in
+/// `room` while the colony has `outpostRoom` declared.
+let private squadIn room owner =
+    { (quiet |> withDeclaredOutpost outpostRoom) with
+        Hostiles =
+            List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+            |> List.mapi (raiderIn room)
+            |> List.map (fun hostile -> { hostile with Owner = owner })
+        Bank = { Available = 0; Capacity = 1_500 }
+    }
+
+/// The same five Trepidimous bodies, `raid-i` standing in `rooms[i]`; a
+/// room named "" holds nobody that tick.
+let private spread (rooms: string list) =
+    let squad = squadIn outpostRoom "Trepidimous"
+
+    { squad with
+        Hostiles =
+            List.zip squad.Hostiles rooms
+            |> List.filter (fun (_, room) -> room <> "")
+            |> List.map (fun (hostile, room) ->
+                { hostile with
+                    Pos = { hostile.Pos with Room = room }
+                })
+    }
+
 [<Tests>]
 let outpostTests =
     testList
@@ -135,6 +161,200 @@ let outpostTests =
                                 ])
                     ))
                     "and the lone smallMelee two blocks beat opens no stand-down: that room is a fight"
+            }
+
+            // #507. Live t951,362: a Trepidimous squad crossed W17S26 on its way to
+            // W17S25's ramparts and the outpost stood down for its whole ~1,450-tick
+            // life. A player's squad walks on, so a sighting of every body elsewhere
+            // reopens the room; absence alone never does.
+            test "a player's raid seen in another room after the outpost reopens it that tick" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (squadIn outpostRoom "Trepidimous")
+                    |> raidTick 110 (squadIn raidRoom "Trepidimous")
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
+                    "the clock ends on the tick the last body is seen at home"
+
+                Expect.isEmpty (shutAt 111 state) "and the outpost is worked again"
+            }
+
+            // Live t951,384-417: the four Trepidimous bodies died at W17S25's
+            // ramparts and W17S26 stayed shut on their lives. A tombstone is the
+            // body gone, for any owner: an Invader's clock only stood for its life.
+            test "a raid seen dead ends its stand-down that tick, an Invader's as a player's" {
+                for owner in [ "Trepidimous"; "Invader" ] do
+                    let raid = squadIn outpostRoom owner
+
+                    let state =
+                        RaidState.empty
+                        |> raidTick 100 raid
+                        |> raidTick
+                            110
+                            { raid with
+                                Hostiles = []
+                                Fallen = raid.Hostiles |> List.map (fun hostile -> hostile.Id)
+                            }
+
+                    Expect.equal
+                        (standDowns state)
+                        [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
+                        $"{owner}: five tombstones are five bodies gone"
+            }
+
+            test "a player's raid partly dead and partly seen elsewhere is gone" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (squadIn outpostRoom "Trepidimous")
+                    |> raidTick
+                        110
+                        { squadIn raidRoom "Trepidimous" with
+                            Hostiles = (squadIn raidRoom "Trepidimous").Hostiles |> List.take 3
+                            Fallen = [ "raid-3"; "raid-4" ]
+                        }
+
+                Expect.isEmpty (shutAt 111 state) "three at home and two dead are all five"
+
+                let invaders =
+                    RaidState.empty
+                    |> raidTick 100 (squadIn outpostRoom "Invader")
+                    |> raidTick
+                        110
+                        { squadIn raidRoom "Invader" with
+                            Hostiles = (squadIn raidRoom "Invader").Hostiles |> List.take 1
+                            Fallen = [ "raid-1"; "raid-2"; "raid-3"; "raid-4" ]
+                        }
+
+                Expect.equal
+                    (shutAt 111 invaders)
+                    (Set.singleton outpostRoom)
+                    "an Invader alive elsewhere is not gone"
+            }
+
+            test "an Invader raid seen elsewhere keeps its clock" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (squadIn outpostRoom "Invader")
+                    |> raidTick 110 (squadIn raidRoom "Invader")
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
+                    "an NPC raid is clocked off its life, wherever it is seen"
+            }
+
+            test "a player's raid not seen elsewhere keeps its clock" {
+                let trep = squadIn outpostRoom "Trepidimous"
+
+                let quietly =
+                    RaidState.empty |> raidTick 100 trep |> raidTick 110 { trep with Hostiles = [] }
+
+                Expect.equal
+                    (shutAt 111 quietly)
+                    (Set.singleton outpostRoom)
+                    "not seeing the raid is no evidence it left"
+
+                let partly =
+                    RaidState.empty
+                    |> raidTick 100 trep
+                    |> raidTick
+                        110
+                        { trep with
+                            Hostiles = (squadIn raidRoom "Trepidimous").Hostiles |> List.take 4
+                        }
+
+                Expect.equal
+                    (shutAt 111 partly)
+                    (Set.singleton outpostRoom)
+                    "one body unaccounted for holds it shut"
+            }
+
+            test "a player's raid that comes back shuts the outpost again" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (squadIn outpostRoom "Trepidimous")
+                    |> raidTick 110 (squadIn raidRoom "Trepidimous")
+                    |> raidTick 300 (squadIn outpostRoom "Trepidimous")
+
+                Expect.equal
+                    (shutAt 301 state)
+                    (Set.singleton outpostRoom)
+                    "a return is a fresh sighting"
+
+                Expect.equal
+                    (state |> raidTick 310 (squadIn raidRoom "Trepidimous") |> shutAt 311)
+                    Set.empty
+                    "and leaving again reopens it again"
+            }
+
+            test "a squad bouncing on the border flips the outpost once a bounce, not once a tick" {
+                let bouncing =
+                    [ 100..140 ]
+                    |> List.scan
+                        (fun state t ->
+                            let room = if t % 2 = 0 then outpostRoom else raidRoom
+                            state |> raidTick t (squadIn room "Trepidimous"))
+                        RaidState.empty
+                    |> List.tail
+
+                let shut =
+                    List.zip [ 100..140 ] bouncing
+                    |> List.map (fun (t, state) ->
+                        t, Set.contains outpostRoom (shutAt (t + 1) state))
+
+                Expect.equal
+                    (shut |> List.filter (fun (t, _) -> t >= 102) |> List.filter (snd >> not))
+                    []
+                    "the first return shuts it for RaidBounceTicks, however often the squad steps out"
+
+                Expect.isEmpty
+                    (shutAt
+                        153
+                        (List.last bouncing |> raidTick 141 (squadIn raidRoom "Trepidimous")))
+                    "and it reopens once the bounce hold runs out with the squad gone"
+            }
+
+            // The review's leapfrog: a lone body that steps back in is beaten by
+            // the guard row, so no deadline enrols it, while the body the row was
+            // waiting on goes home.
+            test "a raid body standing in the room is waited on, beaten or not" {
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 (spread (List.replicate 5 outpostRoom))
+                    |> raidTick 110 (spread [ raidRoom; raidRoom; raidRoom; raidRoom; outpostRoom ])
+                    |> raidTick 115 (spread [ outpostRoom; raidRoom; raidRoom; raidRoom; raidRoom ])
+
+                Expect.equal
+                    (shutAt 116 state)
+                    (Set.singleton outpostRoom)
+                    "raid-0 stands in the outpost, so the raid is not gone"
+
+                Expect.isEmpty
+                    (state |> raidTick 120 (spread (List.replicate 5 raidRoom)) |> shutAt 121)
+                    "and once it too is seen at home the room reopens"
+            }
+
+            test "a raid's going never cuts a rival's hold on the room short" {
+                let held =
+                    squadIn outpostRoom "Trepidimous"
+                    |> visible outpostRoom (heldBy ReservationHolder.Rival 500)
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 held
+                    |> raidTick 110 (squadIn raidRoom "Trepidimous")
+
+                Expect.equal
+                    (standDowns state)
+                    [ outpostRoom, 100, 100, 600, StandDownBasis.RivalReservation ]
+                    "the raid's clock is cut to the hold's end, which is the hold's"
+
+                Expect.equal
+                    (shutAt 599 state, shutAt 600 state)
+                    (Set.singleton outpostRoom, Set.empty)
+                    "shut until the hold ends"
             }
 
             test "two melee blocks cannot use self-heal to win an equal exchange" {

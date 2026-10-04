@@ -250,6 +250,9 @@ type RaidEpisode =
         /// Owned creeps lost inside the window, oldest first — every one
         /// stamped at a tick between `Opened` and `LastSeen`.
         Losses: Loss list
+        /// The roster's ids seen dead (a tombstone) inside the window, first
+        /// seen first (#507): what the raid lost.
+        Killed: string list
         /// Hits lost across the Keep and the ramparts inside the window:
         /// decreases summed tick over tick, repairs ignored. Read only on the
         /// ticks a hostile stood there or the one after, so a quiet gap's
@@ -285,6 +288,10 @@ type OutpostEpisode =
         /// whenever a later deadline arrives, and a room whose raid outlived
         /// its core would have gone back to being crossed.
         Stronghold: bool
+        /// The raid bodies sighted here while the row stood and not gone since
+        /// (`strikeGone`), by id: what ends a raid's clock early once it
+        /// empties (#507). Empty on a row no raid clocks, and on one spent.
+        Raiders: Set<string>
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: the one
@@ -681,7 +688,8 @@ let private harassOverrides (basis: StandDownBasis) =
     | StandDownBasis.CollapseTimer
     | StandDownBasis.Reservation
     | StandDownBasis.Fallback
-    | StandDownBasis.HarassSighting -> false
+    | StandDownBasis.HarassSighting
+    | StandDownBasis.RaidGone -> false
 
 /// Fold one room's sighting into the outpost ring: the room's standing
 /// episode takes it, or the sighting opens one. The re-read only ever moves a
@@ -720,8 +728,110 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
                 Expiry = expiry
                 Basis = basis
                 Stronghold = stronghold
+                // `strikeGone`'s to fill, on this same tick.
+                Raiders = Fresh.setOfSeq Seq.empty
             }
         ]
+
+/// Whether a row runs on a raid's clock, and so on its bodies (#507): a core's
+/// or a reservation's clock is not a raid's, and a bunker is a bunker.
+let private raidClocked (episode: OutpostEpisode) =
+    not episode.Stronghold
+    && (episode.Basis = StandDownBasis.InvaderRaid
+        || episode.Basis = StandDownBasis.RaidGone)
+
+/// The least tick a raid's row may end on once its bodies are gone: now, or,
+/// where the row reopened inside `Tuning.RaidBounceTicks` of an earlier one
+/// the raid's going ended, that many ticks past its opening, so a squad
+/// bouncing on the border flips the projection once a bounce and not once a
+/// tick.
+let private bounceFloor
+    (view: ColonyView)
+    (episodes: OutpostEpisode list)
+    (episode: OutpostEpisode)
+    =
+    let bounced =
+        episodes
+        |> List.exists (fun earlier ->
+            earlier.RoomName = episode.RoomName
+            && earlier.Basis = StandDownBasis.RaidGone
+            && earlier.Opened < episode.Opened
+            && episode.Opened - earlier.Expiry <= view.Tuning.RaidBounceTicks)
+
+    if bounced then
+        max view.Time (episode.Opened + view.Tuning.RaidBounceTicks)
+    else
+        view.Time
+
+/// Keep every standing raid row's bodies, and end its clock on the tick the
+/// last one is gone (#507). A body standing in the room is (re-)enrolled,
+/// beaten or not; one is struck only when absent from the room and seen dead
+/// anywhere the colony sees or, a player's, standing in another room. Never
+/// on an absence, so a raid nobody sees go keeps its life; an Invader seen
+/// elsewhere is not gone, its clock being its life. The cut never runs past
+/// the clock, nor short of a rival's hold on the room (`rivalHolds`).
+let private strikeGone
+    (view: ColonyView)
+    (rivalHolds: Map<string, int>)
+    (episodes: OutpostEpisode list)
+    =
+    let fallen = Fresh.setOfSeq view.Fallen
+
+    let whereNow =
+        view.Hostiles |> List.map (fun hostile -> hostile.Id, hostile) |> Fresh.mapOfSeq
+
+    let gone room id =
+        match Map.tryFind id whereNow with
+        | Some hostile -> hostile.Pos.Room <> room && HostileInfo.crossesExits hostile
+        | None -> Set.contains id fallen
+
+    episodes
+    |> List.map (fun episode ->
+        if not (standingDown view.Time episode) then
+            if Set.isEmpty episode.Raiders then
+                episode
+            else
+                { episode with
+                    Raiders = Fresh.setOfSeq Seq.empty
+                }
+        elif not (raidClocked episode) then
+            episode
+        else
+            let room = episode.RoomName
+
+            let present =
+                view.Hostiles
+                |> List.filter (fun hostile ->
+                    hostile.Pos.Room = room && not (HostileInfo.isKeeper hostile))
+                |> List.map (fun hostile -> hostile.Id)
+
+            let raiders =
+                Seq.append episode.Raiders present
+                |> Seq.filter (gone room >> not)
+                |> Fresh.setOfSeq
+
+            let floor = bounceFloor view episodes episode
+
+            let hold = Map.tryFind room rivalHolds |> Option.filter (fun until -> until > floor)
+
+            let cut = hold |> Option.defaultValue floor
+
+            if
+                not (Set.isEmpty raiders)
+                || Set.isEmpty episode.Raiders
+                || cut >= episode.Expiry
+            then
+                { episode with Raiders = raiders }
+            else
+                { episode with
+                    Raiders = raiders
+                    Expiry = cut
+                    Basis =
+                        if Option.isSome hold then
+                            StandDownBasis.RivalReservation
+                        else
+                            StandDownBasis.RaidGone
+                })
 
 /// Trim the outpost ring to the cap, oldest first, and never over an episode
 /// that is still standing down: evicting that reopens the gate mid-stand-down.
@@ -990,8 +1100,11 @@ let foldRaids
                         Roster = Map.empty
                         Closest = None
                         Losses = []
+                        Killed = []
                         Damage = 0
                     }
+
+            let roster = (episode.Roster, hostiles) ||> List.fold enrol
 
             Some
                 { episode with
@@ -1000,11 +1113,47 @@ let foldRaids
                             episode.LastSeen
                         else
                             view.Time
-                    Roster = (episode.Roster, hostiles) ||> List.fold enrol
+                    Roster = roster
                     Closest = nearer episode.Closest (approachAt view)
                     Losses = episode.Losses @ lost
+                    // A tombstone lies for ticks: each id once.
+                    Killed =
+                        episode.Killed
+                        @ (view.Fallen
+                           |> List.distinct
+                           |> List.filter (fun id ->
+                               Map.containsKey id roster && not (List.contains id episode.Killed)))
                     Damage = episode.Damage + damage
                 }
+
+    // The holds, on the latch's two rules (a tick with vision decides a
+    // room either way, a tick without leaves the last conclusion), ending
+    // themselves on the tick they named. An expired entry is dropped here
+    // rather than filtered by every reader, so the leaf cannot accumulate
+    // holds that ended hours ago.
+    let holds =
+        let standing = prior.Holds |> Map.filter (fun _ hold -> view.Time < hold.Until)
+
+        (standing, view.RoomControl)
+        ||> Map.fold (fun rooms room control ->
+            match RoomControlInfo.heldByOther control with
+            | Some held ->
+                Map.add
+                    room
+                    {
+                        Holder = held.Holder
+                        Until = view.Time + held.TicksToEnd
+                    }
+                    rooms
+            | None -> Map.remove room rooms)
+
+    // A rival's hold is a clock of its own (`rivalDeadlines`), and a raid's
+    // going cuts only the raid's.
+    let rivalHolds =
+        holds
+        |> Map.filter (fun room hold ->
+            hold.Holder = ReservationHolder.Rival && not (Set.contains room view.HarassCast))
+        |> Map.map (fun _ hold -> hold.Until)
 
     {
         Episodes =
@@ -1016,6 +1165,7 @@ let foldRaids
         Outposts =
             (prior.Outposts, deadlines view declared)
             ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
+            |> strikeGone view rivalHolds
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
         // alone: a room with no `RoomControl` entry keeps whatever the last
@@ -1047,26 +1197,7 @@ let foldRaids
                             rooms
                 else
                     Map.remove room rooms)
-        // The holds, on the latch's two rules (a tick with vision decides a
-        // room either way, a tick without leaves the last conclusion), ending
-        // themselves on the tick they named. An expired entry is dropped here
-        // rather than filtered by every reader, so the leaf cannot accumulate
-        // holds that ended hours ago.
-        Holds =
-            let standing = prior.Holds |> Map.filter (fun _ hold -> view.Time < hold.Until)
-
-            (standing, view.RoomControl)
-            ||> Map.fold (fun rooms room control ->
-                match RoomControlInfo.heldByOther control with
-                | Some held ->
-                    Map.add
-                        room
-                        {
-                            Holder = held.Holder
-                            Until = view.Time + held.TicksToEnd
-                        }
-                        rooms
-                | None -> Map.remove room rooms)
+        Holds = holds
         // The guard row's memory of a raid, on `Holds`' two rules; a
         // `RoomControl` entry is exactly "the colony looked into this room
         // this tick" (`World.ofGame`). The clock is a backstop, not a
