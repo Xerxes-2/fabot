@@ -610,3 +610,34 @@ let minedHarassTests =
                     "a room nobody of ours mines: the seats, as before"
             }
         ]
+
+[<Tests>]
+let diggerFirstTests =
+    testList
+        "a harassment ranger goes for the digger before the hauler"
+        [
+            test "a hauler on the source's work spot and a slow miner off it: the miner's ground" {
+                // W19S25, t943,777: a hauler stepping on and off the source's work
+                // spot turned the ground between it and a miner at the room's other
+                // source, and the ranger stood between the two.
+                let quiet = bareHome |> harassing
+
+                let ground (colony: ColonyView) =
+                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
+
+                let haulerTile = { X = 18; Y = 10 }
+                let minerTile = { X = 6; Y = 30 }
+
+                Expect.equal
+                    (ground
+                        { quiet with
+                            Hostiles =
+                                [
+                                    theirs "hauler" enemy haulerTile [ Carry; Move ]
+                                    miner "miner" minerTile
+                                ]
+                        })
+                    (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
+                    "the miner, wherever it digs; the hauler only when no digger is caught"
+            }
+        ]

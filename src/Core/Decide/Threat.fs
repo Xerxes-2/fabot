@@ -466,21 +466,29 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     && not (within h.Controller 3 hostile)
                     && catchable hostile)
 
+            // A digger first, at the source or caught off it: the income is
+            // the miner's. A hauler stepping on and off the source's work
+            // spot otherwise turned the ground between it and a slow miner at
+            // the room's other source every few ticks, the ranger caught
+            // between the two (W19S25, t943,777).
+            let atSource = unarmedTargets |> List.filter (within h.Stand 2)
+            let digs (hostile: HostileInfo) = List.contains Work hostile.Body
+
+            let reachOf targets =
+                targets
+                |> List.map (fun (hostile: HostileInfo) ->
+                    Engine.rangedRange, RoomPos.pos hostile.Pos)
+
             let working =
-                match unarmedTargets |> List.filter (within h.Stand 2) with
-                | [] when not (List.isEmpty chased) ->
-                    chased |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
-                | [] when
-                    unarmedTargets |> List.exists (fun hostile -> List.contains Work hostile.Body)
-                    ->
-                    seats
-                | [] ->
-                    unarmedTargets
-                    |> List.filter (within h.Controller 3)
-                    |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
-                | atSource ->
-                    atSource
-                    |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
+                match List.filter digs atSource, List.filter digs chased with
+                | (_ :: _ as diggers), _
+                | [], (_ :: _ as diggers) -> reachOf diggers
+                | [], [] ->
+                    match atSource with
+                    | _ :: _ -> reachOf atSource
+                    | [] when not (List.isEmpty chased) -> reachOf chased
+                    | [] when unarmedTargets |> List.exists digs -> seats
+                    | [] -> unarmedTargets |> List.filter (within h.Controller 3) |> reachOf
 
             let ambushed =
                 (armedTargets |> List.map (fun hostile -> 1, RoomPos.pos hostile.Pos)) @ working
