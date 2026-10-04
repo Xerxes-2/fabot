@@ -374,6 +374,29 @@ let private waitsForParty
 
     Map.tryFind id walks |> Option.exists (List.exists (fun walk -> walk < inHand))
 
+/// The container under a loaded harvester's feet, when it has decayed below
+/// half: an outpost's container loses 5,000 hits a hundred ticks and no worker
+/// may come for thousands (W17S26's decayed away on 2026-10-04), while the
+/// body standing on it repairs 100 a Work part for one energy each.
+let private wornContainerUnder (view: ColonyView) atlas (creep: CreepInfo) =
+    if creep.Energy <= 0 then
+        None
+    else
+        Atlas.creepTile atlas creep.Name
+        |> Option.bind (fun tile ->
+            let placed = (SpatialInfo.layerOf view.Spatial tile.Room).TargetPositions
+
+            SpatialInfo.structureHits view.Spatial
+            |> List.tryPick (fun (id, kind, hits) ->
+                if
+                    kind = BuiltKind.Container
+                    && 2 * hits.Hits < hits.HitsMax
+                    && Map.tryFind id placed = Some(RoomPos.pos tile)
+                then
+                    Some id
+                else
+                    None))
+
 /// The action Intent a Task asks of a creep, and `None` where this tick asks
 /// for none: Flee is movement and nothing else, and Reclaim withholds its act
 /// on the ticks the reactor is already ours — the one act gated on a fact about
@@ -392,7 +415,10 @@ let private intentFor
     // The claim waits for its party (#471): a tap lands before a party cast
     // after the claim can walk in.
     | Claim controllerId when waitsForParty view partyWalks creep controllerId -> None
-    | Harvest sourceId -> Some(HarvestSource(creep.Name, sourceId))
+    | Harvest sourceId ->
+        match wornContainerUnder view atlas creep with
+        | Some containerId -> Some(RepairStructure(creep.Name, containerId))
+        | None -> Some(HarvestSource(creep.Name, sourceId))
     // The same Intent for a tombstone or a ruin as for a container: the engine's
     // `withdraw` is one method over every store. `None` for the amount means
     // "as much as the body has room for".
