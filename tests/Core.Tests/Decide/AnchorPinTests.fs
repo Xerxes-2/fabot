@@ -135,6 +135,57 @@ let anchorTests =
                 Expect.isEmpty (moveIntentsFor "a1" intents) "and it stays"
             }
 
+            test
+                "an Anchor with energy aboard repairs the container under it once it falls below half" {
+                // W17S26's outpost container decayed away on 2026-10-04 while
+                // its Repair waited on a worker; the body standing on it is
+                // the one that is always there.
+                let onPost hits energy =
+                    { unpostedColony with
+                        Creeps = [ anchor "a1" energy (50 - energy) ]
+                        Spatial =
+                            { spatial
+                                  [
+                                      "src-a", { X = 10; Y = 10 }
+                                      "ctrl-1", { X = 40; Y = 40 }
+                                      "cont-1", { X = 9; Y = 10 }
+                                  ]
+                                  (openSeats { X = 10; Y = 10 }) with
+                                TargetKinds =
+                                    Map.ofList
+                                        [
+                                            "src-a", Source
+                                            "ctrl-1", Controller
+                                            "cont-1", Structure BuiltKind.Container
+                                        ]
+                            }
+                            |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
+                    }
+                    |> withHits "cont-1" BuiltKind.Container hits 250_000
+
+                let actsOf colony =
+                    (decideFrom (Map.ofList [ "a1", taskId (Harvest "src-a") ]) colony).Intents
+                    |> List.filter (function
+                        | HarvestSource _
+                        | RepairStructure _ -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (actsOf (onPost 100_000 20))
+                    [ RepairStructure("a1", "cont-1") ]
+                    "under half, with energy aboard: it repairs instead of digging"
+
+                Expect.equal
+                    (actsOf (onPost 200_000 20))
+                    [ HarvestSource("a1", "src-a") ]
+                    "over half: it digs"
+
+                Expect.equal
+                    (actsOf (onPost 100_000 0))
+                    [ HarvestSource("a1", "src-a") ]
+                    "empty: it digs the energy the repair will spend"
+            }
+
             test "a Post and banked capacity plan an Anchor body" {
                 let snapshot =
                     { postedColony with
