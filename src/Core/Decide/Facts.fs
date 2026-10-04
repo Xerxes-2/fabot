@@ -196,6 +196,13 @@ let internal rampartsUnderAttack (view: ColonyView) : Set<string> =
             | _ -> None)
         |> Set.ofList
 
+/// Whether a structure is a dying rampart: under `Tuning.RampartDying` hits,
+/// built at 1 and decaying away within a hundred ticks.
+let internal isDyingRampart (view: ColonyView) (id: string) =
+    match Map.tryFind id view.Spatial.TargetKinds, Map.tryFind id view.Spatial.Hits with
+    | Some(Structure BuiltKind.Rampart), Some hits -> hits.Hits < view.Tuning.RampartDying
+    | _ -> false
+
 /// The floor a structure of the home is whole at: its tile's declared one
 /// (`ColonyView.RampartFloors`), else `Tuning.RampartFloor`.
 let private floorOf (view: ColonyView) (id: string) =
@@ -1299,6 +1306,50 @@ let internal stockedEnergy (view: ColonyView) : int =
             else
                 total)
         0
+
+/// This colony's [[emergency reserve]] (#505): `Tuning.energyReserve` at its
+/// own controller's level, and nothing for a colony with no controller.
+let internal energyReserve (view: ColonyView) : int =
+    view.Controller
+    |> Option.map (fun controller -> Tuning.energyReserve view.Tuning controller.Level)
+    |> Option.defaultValue 0
+
+/// The energy in the home room's own Storage, or None with no Storage
+/// standing there: a colony whose Storage is gone has no stock to keep.
+let private homeStock (view: ColonyView) : int option =
+    match
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Storage)
+        |> List.filter (SpatialInfo.placedAway view.Spatial >> not)
+    with
+    | [] -> None
+    | ids -> Some(ids |> List.sumBy (SpatialInfo.storedIn view.Spatial))
+
+/// Whether the stock stands under the [[emergency reserve]]: the one
+/// question every reader of the reserve asks (#505). Below it the Storage
+/// feeds the refill cluster, the towers and a struck or dying rampart's
+/// Repair, and nothing else. Latched (`ColonyView.ReserveShort`): a colony
+/// under it stays under until it banks one hauler load past the line, so a
+/// single draw at the line does not flip every gate that reads it.
+let internal belowReserve (view: ColonyView) : bool =
+    let reserve = energyReserve view
+
+    match homeStock view with
+    | Some stock when reserve > 0 ->
+        let band =
+            if view.ReserveShort then
+                carryCapacityOf (bodyFor haulerPattern view.Bank.Capacity)
+            else
+                0
+
+        stock < reserve + band
+    | _ -> false
+
+/// Whether this colony gives energy aid this tick: somebody is under their
+/// reserve, and its own stock stands `Tuning.AidDonorMargin` over its own.
+let internal givesAid (view: ColonyView) : bool =
+    not (List.isEmpty view.AidRooms)
+    && homeStock view
+       |> Option.exists (fun stock -> stock >= energyReserve view + view.Tuning.AidDonorMargin)
 
 /// Whether more ore is still on its way to the Storage: a diggable deposit of
 /// ours, or ore already standing in a mineral container. The question the last

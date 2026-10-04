@@ -156,6 +156,7 @@ let bareRespawn =
         Sources = [ source "src-a"; source "src-b" ]
         BorrowedSources = []
         AidRooms = []
+        ReserveShort = false
         MinedRooms = Set.empty
         Controller = Some(controllerAt 1)
         RoomControl = homeControl

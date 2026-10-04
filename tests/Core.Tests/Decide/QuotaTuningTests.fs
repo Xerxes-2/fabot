@@ -337,6 +337,23 @@ let tuningTests =
                     "read at a level the engine allows none, the reservation is empty and nothing is placed"
             }
 
+            test "EnergyReserves is the stock each controller level keeps for spawning and defence" {
+                // User, 2026-10-04: the four numbers, approved.
+                Expect.equal
+                    ([ 1..8 ] |> List.map (Tuning.energyReserve Tuning.defaults))
+                    [ 0; 0; 0; 10_000; 10_000; 20_000; 30_000; 50_000 ]
+                    "none before the Storage, then 10k, 20k, 30k and 50k"
+
+                Expect.equal
+                    (Tuning.energyReserve
+                        { Tuning.defaults with
+                            EnergyReserves = [ 4, 5_000 ]
+                        }
+                        8)
+                    5_000
+                    "one step moved and every level above it reads the step"
+            }
+
             test "HorizonLookahead is how far above its own level a room is sized at" {
                 // The field sizes the clustered placement alone, and the
                 // placement filter is the current level's allowance either

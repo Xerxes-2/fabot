@@ -3722,10 +3722,14 @@ let unbufferedChildMatchTests =
                 let colony =
                     let child = unbufferedChild [ worker "p1" 0 50, { X = 10; Y = 44 } ]
 
+                    // The mother's stock over her reserve (#505): under it her
+                    // income banks before it crosses.
                     { child with
                         Creeps = child.Creeps @ [ hauler "w" 1600 0 ]
                         Spatial =
-                            child.Spatial
+                            { child.Spatial with
+                                Stores = Map.add "storage-1" 50_000 child.Spatial.Stores
+                            }
                             |> withHome (fun layer ->
                                 { layer with
                                     CreepPositions = Map.ofList [ "w", { X = 10; Y = 5 } ]
@@ -3743,9 +3747,10 @@ let unbufferedChildMatchTests =
             }
         ]
 
-/// `mineHaulColony` at W1N1 with its Storage "sto-1" holding `banked`
+/// `mineHaulColony` at W1N1 and RCL6 — an emergency reserve of 20,000, so a
+/// donor line of 40,000 (#505) — with its Storage "sto-1" holding `banked`
 /// energy, a terminal "term-1" holding `terminal`, no consignee, and
-/// `aidRooms` the colonies under the aid line.
+/// `aidRooms` the colonies under their own reserves.
 let private aidColony banked terminal aidRooms =
     let home = named "W1N1" mineHaulColony
 
@@ -3758,6 +3763,7 @@ let private aidColony banked terminal aidRooms =
             }
             |> withTargets [ "term-1", { X = 15; Y = 10 }, Structure BuiltKind.Terminal ]
     }
+    |> withLevel 6
 
 [<Tests>]
 let energyAidTests =
@@ -3777,8 +3783,12 @@ let energyAidTests =
                 | other -> failtest $"one energy send to W1N4, got %A{other}"
 
                 Expect.isEmpty
+                    (sends (decideOn (aidColony 39_999 12_000 [ "W1N4" ])).Intents)
+                    "under the donor line, its reserve and the margin: nothing leaves"
+
+                Expect.isNonEmpty
                     (sends (decideOn (aidColony 40_000 12_000 [ "W1N4" ])).Intents)
-                    "under the donor line: nothing leaves"
+                    "at it the donor gives: the reserve is never what it gives"
 
                 Expect.isEmpty
                     (sends (decideOn (aidColony 60_000 12_000 [])).Intents)
@@ -3794,20 +3804,21 @@ let energyAidTests =
                 Expect.isFalse
                     (List.contains
                         (Refill("term-1", Energy))
-                        (planTasksOn (aidColony 40_000 5_000 [ "W1N4" ]) noThreats))
+                        (planTasksOn (aidColony 39_999 5_000 [ "W1N4" ]) noThreats))
                     "under the donor line the terminal is no sink"
             }
 
             test "a colony under the need line draws the arrivals out of its terminal" {
+                // The need line is the colony's own reserve (#505).
                 Expect.contains
-                    (planTasksOn (aidColony 5_000 8_000 []) noThreats)
+                    (planTasksOn (aidColony 19_999 8_000 []) noThreats)
                     (Withdraw("term-1", Energy))
-                    "under the need line: the terminal is an intake"
+                    "under RCL6's 20,000: the terminal is an intake"
 
                 Expect.isFalse
                     (List.contains
                         (Withdraw("term-1", Energy))
                         (planTasksOn (aidColony 20_000 8_000 []) noThreats))
-                    "over it: the terminal keeps what it holds"
+                    "at it: the terminal keeps what it holds"
             }
         ]

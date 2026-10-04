@@ -207,7 +207,9 @@ let matchCreeps
                 | CapScope.Standing -> (=) Standing
                 | CapScope.Generalists -> fun c -> c <> Heavy && c <> Standing
                 | CapScope.Fighters -> (=) Fighter
-                // Counted by role and never by class (`capsHold`).
+                // Counted by role or by parts and never by class (`capsHold`).
+                | CapScope.Workers
+                | CapScope.Carriers
                 | CapScope.Role _ -> fun _ -> false
 
             let counted =
@@ -218,6 +220,10 @@ let matchCreeps
                 | CapScope.Standing -> standingRow
                 | CapScope.Generalists -> all - heavy - standingRow
                 | CapScope.Fighters -> inClass Fighter |> List.length
+                | CapScope.Workers ->
+                    holders |> List.filter (fun name -> workBy name > 0) |> List.length
+                | CapScope.Carriers ->
+                    holders |> List.filter (fun name -> workBy name = 0) |> List.length
                 | CapScope.Role role ->
                     holders |> List.filter (fun name -> roleOf name = Some role) |> List.length
 
@@ -231,6 +237,9 @@ let matchCreeps
                     // The one cap that refuses a class outright rather than
                     // counting it (`CapScope.Fighters`).
                     | CapScope.Fighters -> cls = Some Fighter && counted scope < limit
+                    // A body counts in the one of the two Work crowds it is in.
+                    | CapScope.Workers -> partCount creep.Body Work = 0 || counted scope < limit
+                    | CapScope.Carriers -> partCount creep.Body Work > 0 || counted scope < limit
                     // A role's slots are its own bodies'; a body of no role is
                     // refused by every one of them, and the Task writes all three.
                     | CapScope.Role role ->

@@ -1343,3 +1343,38 @@ let probeLogTests =
                     "the link rebuilt: dropped"
             }
         ]
+
+[<Tests>]
+let reserveLatchTests =
+    testList
+        "the emergency reserve's latch"
+        [
+            test
+                "the fold latches a colony under its reserve until it banks one hauler load past it (#505)" {
+                // RCL4 keeps 10,000; the 300 bank's hauler carries 200. The
+                // latch the view carries is the one the last fold wrote.
+                let stocked energy latched =
+                    { quiet with
+                        Controller = Some(Fabot.Core.Tests.Decide.Fixtures.controllerAt 4)
+                        Bank = { Available = 300; Capacity = 300 }
+                        ReserveShort = latched
+                        Spatial =
+                            { quiet.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "sto-1"
+                                        (Structure BuiltKind.Storage)
+                                        quiet.Spatial.TargetKinds
+                                Stores = Map.add "sto-1" energy quiet.Spatial.Stores
+                            }
+                    }
+
+                let latch energy latched =
+                    (raidTick 100 (stocked energy latched) RaidState.empty).ReserveShort
+
+                Expect.isTrue (latch 9_999 false) "under the reserve: latched"
+                Expect.isTrue (latch 10_100 true) "latched, a hundred past the line is still under"
+                Expect.isFalse (latch 10_200 true) "a hauler load past it: released"
+                Expect.isFalse (latch 10_100 false) "unlatched, the line is the reserve itself"
+            }
+        ]

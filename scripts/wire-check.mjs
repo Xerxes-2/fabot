@@ -73,6 +73,7 @@ const emptyRaids = {
   fought: {},
   probes: {},
   taken: {},
+  reserveShort: false,
   living: [],
   placed: {},
   hits: {},
@@ -118,6 +119,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     fought: { W1N6: { seen: 700, squad: "duo" }, W1N7: { seen: 690 } },
     probes: { W18S26: probeOut, W17S24: probeProbing },
     taken: { W18S26: 930_120 },
+    reserveShort: true,
     living: ["w1", "w2"],
     placed: { w1: { room: "W1N2", x: 8, y: 49 } },
     hits: { "struct-1": 3000 },
@@ -190,6 +192,16 @@ wire("raids: a taken assault room (#496) with no tick costs its own room, and a 
 
   const { taken, ...legacy } = emptyRaids;
   assert.equal(stable((await raidsThrough(legacy)).taken), stable({}));
+});
+
+wire("raids: the reserve latch (#505) is true only as a boolean, and a legacy leaf reads unlatched", async () => {
+  for (const value of [1, "true", {}, null]) {
+    const written = await raidsThrough({ ...emptyRaids, reserveShort: value });
+    assert.equal(written.reserveShort, false, `reserveShort ${JSON.stringify(value)}`);
+  }
+
+  const { reserveShort, ...legacy } = emptyRaids;
+  assert.equal((await raidsThrough(legacy)).reserveShort, false);
 });
 
 wire("raids: a stand-down with no expiry costs its row and no other", async () => {

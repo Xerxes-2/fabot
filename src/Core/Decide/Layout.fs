@@ -200,18 +200,14 @@ let internal planConsignment (view: ColonyView) : Intent list =
         |> List.choose (fst >> ship)
     | _ -> []
 
-/// Energy aid by terminal (user, 2026-10-04): a colony whose Storage holds
-/// `Tuning.AidDonorFloor` or more ships its terminal's energy above the
-/// consignment's fee reserve to the emptiest colony in `ColonyView.AidRooms`,
+/// Energy aid by terminal (user, 2026-10-04): a colony that gives
+/// (`Facts.givesAid`) ships its terminal's energy above the consignment's
+/// fee reserve to the colony furthest short in `ColonyView.AidRooms`,
 /// the send's own fee paid out of the same energy. A terminal already
 /// shipping this tick (`sending`) is skipped: one send a terminal a tick.
 let internal planAid (view: ColonyView) (sending: Set<string>) : Intent list =
-    let banked =
-        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Storage)
-        |> List.sumBy (SpatialInfo.storedIn view.Spatial)
-
     match view.AidRooms, view.Spatial.RoomName with
-    | destination :: _, Some home when banked >= view.Tuning.AidDonorFloor ->
+    | destination :: _, Some home when Facts.givesAid view ->
         let reserve =
             if Option.isSome view.Consignee then
                 view.Tuning.TerminalEnergy

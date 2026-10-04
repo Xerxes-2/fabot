@@ -824,14 +824,16 @@ let planTasks
                 SpatialInfo.heldIn view.Spatial Thorium id < Engine.terminalCapacity)
             |> List.map (fun id -> Refill(id, Thorium))
 
+    // The emergency reserve (#505): under it the stock feeds spawning and
+    // defence alone, so the terminal is no energy sink and the stock's draw
+    // opens for those sinks only (`storageWithdraws`).
+    let reserveShort = Facts.belowReserve view
+
     // Energy aid by terminal (user, 2026-10-04: W13S28 held 134k while three
     // colonies stood at 0). A colony whose Storage can spare it stocks its
-    // terminal for a send (`planAid`); one under the need line draws what
+    // terminal for a send (`planAid`); one under its reserve draws what
     // arrives, down to the fee reserve its consignment keeps.
-    let banked = storages |> List.sumBy stored
-
-    let donates =
-        banked >= view.Tuning.AidDonorFloor && not (List.isEmpty view.AidRooms)
+    let donates = Facts.givesAid view
 
     let feeReserve =
         if Option.isSome view.Consignee then
@@ -844,12 +846,15 @@ let planTasks
     let terminalEnergyRefills =
         let target = max feeReserve (if donates then view.Tuning.AidTerminalEnergy else 0)
 
-        terminals
-        |> List.filter (fun id -> stored id < target)
-        |> List.map (fun id -> Refill(id, Energy))
+        if reserveShort then
+            []
+        else
+            terminals
+            |> List.filter (fun id -> stored id < target)
+            |> List.map (fun id -> Refill(id, Energy))
 
     let aidWithdraws =
-        if not (List.isEmpty storages) && banked < view.Tuning.AidNeedFloor then
+        if reserveShort then
             terminals
             |> List.filter (fun id -> stored id > feeReserve)
             |> List.map (fun id -> Withdraw(id, Energy))
@@ -919,13 +924,27 @@ let planTasks
     // Its own Refill is deliberately no such sink: counting it would gate the
     // Storage open against itself. Both halves can still be pooled on one
     // tick, and there the tier gap carries the load away.
-    let storageWithdraws =
-        if
+    //
+    // Under the reserve only the emergency sinks open it: the refill cluster
+    // and the towers (`refills`), and a struck or dying rampart's Repair.
+    let shut =
+        if reserveShort then
+            List.isEmpty refills
+            && (let struck = Facts.rampartsUnderAttack view
+
+                repairs
+                |> List.exists (function
+                    | Repair id -> Facts.isDyingRampart view id || Set.contains id struck
+                    | _ -> false)
+                |> not)
+        else
             List.isEmpty refills
             && List.isEmpty containerRefills
             && List.isEmpty ferryRefills
             && List.isEmpty terminalEnergyRefills
-        then
+
+    let storageWithdraws =
+        if shut then
             []
         else
             storages

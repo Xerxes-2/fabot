@@ -492,13 +492,20 @@ type Tuning =
         /// energy a thousand units over three rooms, so 4,000 ships the whole
         /// 36,484 T banked in the two shipping colonies with room to spare.
         TerminalEnergy: int
+        /// The **[[emergency reserve]]** steps (#505): `(level, energy)`, the
+        /// Storage energy a colony at that controller level or above keeps
+        /// for spawning and defence, the last step at or under the level
+        /// governing. Read through `Tuning.energyReserve`.
+        EnergyReserves: (int * int) list
+        /// The percent of the colony's surplus the income rows (the
+        /// upgrader's income half and the worker's income term) are sized to
+        /// while the stock stands under its [[emergency reserve]]: the rest
+        /// banks.
+        ReserveIncomeShare: int
         /// **Energy aid** by terminal: a colony whose Storage holds this much
-        /// energy or more sends to the colonies under `AidNeedFloor`. Energy,
-        /// so the same at every stage that has a Storage and a terminal.
-        AidDonorFloor: int
-        /// The Storage energy under which a colony with a terminal is sent
-        /// aid, and draws the arrivals out of its terminal.
-        AidNeedFloor: int
+        /// over its own [[emergency reserve]] sends to the colonies under
+        /// theirs.
+        AidDonorMargin: int
         /// The energy a donor keeps its terminal stocked with while it gives:
         /// the load and the fee of one send.
         AidTerminalEnergy: int
@@ -715,9 +722,12 @@ module Tuning =
             HarassBlocks = 3
             HarassClearTicks = 50
             TerminalEnergy = 4_000
-            // User, 2026-10-04: W13S28 held 134k while three colonies stood at 0.
-            AidDonorFloor = 50_000
-            AidNeedFloor = 10_000
+            // User, 2026-10-04: every Storage stood near 0 while the towers were full.
+            EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]
+            // Half: a 20-40 e/t surplus refills a 10-20k reserve inside about a creep's life.
+            ReserveIncomeShare = 50
+            // Over one send's `AidTerminalEnergy`, so stocking the terminal never dips the reserve.
+            AidDonorMargin = 20_000
             // A 10,000 send plus its fee over the shard's few-room ranges.
             AidTerminalEnergy = 12_000
             BuildTicksPerLife = 300
@@ -763,6 +773,13 @@ module Tuning =
     /// eight W15S26 cannot be crossed at all.
     let keeperMargin (tuning: Tuning) : int =
         Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin
+
+    /// The [[emergency reserve]] at a controller level: the last of
+    /// `EnergyReserves`' steps at or under it, and none under the first —
+    /// a room with no Storage keeps nothing back.
+    let energyReserve (tuning: Tuning) (level: int) : int =
+        tuning.EnergyReserves
+        |> List.fold (fun kept (from, energy) -> if level >= from then energy else kept) 0
 
     /// The **Layout horizon**: the controller level the clustered kinds are
     /// *placed* at, where the level they are *filtered* at is the room's own.

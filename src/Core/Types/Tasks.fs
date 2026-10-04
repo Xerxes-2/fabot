@@ -72,6 +72,11 @@ type CapScope =
     /// "not a Fighter" between them — `Commuters` and `Generalists` each
     /// contain the class.
     | Fighters
+    /// Holders with a Work part, of whatever class: counted by parts and
+    /// never by class, as a role is (#505).
+    | Workers
+    /// Holders with no Work part, counted the same way: the carriers.
+    | Carriers
     /// Holders of one squad role. A Task carrying any role cap is
     /// held by role bodies alone: a candidate of a role with no slot, or of
     /// no role, is refused.

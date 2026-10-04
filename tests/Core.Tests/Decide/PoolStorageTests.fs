@@ -44,6 +44,28 @@ let stockTests =
                     "the buffer is filled before the stock: rank decided"
             }
 
+            test
+                "under the emergency reserve the stock outbids the upgrade buffer: income banks first" {
+                // RCL4 keeps 10,000 (#505): under it the load goes to the
+                // stock, at it the buffer is fed first again.
+                let verdictsAt stock =
+                    (decideOn (
+                        stockColony [] (Map.ofList [ "can-ctrl", 800; "sto-1", stock ])
+                        |> withLevel 4
+                    ))
+                        .Verdicts
+
+                Expect.equal
+                    (verdictsAt 5_000)
+                    [ Verdict.Matched("h1", taskId (Refill("sto-1", Energy)), MatchFactor.Rank) ]
+                    "under the reserve the stock is filled before the buffer: rank decided"
+
+                Expect.equal
+                    (verdictsAt 10_000)
+                    [ Verdict.Matched("h1", taskId (Refill("can-ctrl", Energy)), MatchFactor.Rank) ]
+                    "at it the buffer outbids the stock again"
+            }
+
             test "a hungry tower outbids the stock, however close the stock stands" {
                 // The buffer is brimming, so the tower is the stock's one
                 // rival and the factor is evidence about that pair alone.
@@ -165,6 +187,136 @@ let stockGateTests =
                     (withdrawTasks tasks)
                     [ "can-ctrl"; "sto-1" ]
                     "and it opens the draw on the stock"
+            }
+
+            test "under the emergency reserve the buffer's hunger opens no draw on the stock" {
+                // RCL4 keeps 10,000 (#505): one short of it the buffer is
+                // routine Upgrade, fed from the flow and never the stock.
+                let poolAt stock =
+                    planTasksOn
+                        (stockColony
+                            [ refillable "spawn-1" 0 BuiltKind.Spawn ]
+                            (Map.ofList [ "can-ctrl", 800; "sto-1", stock ])
+                         |> withLevel 4)
+                        noThreats
+
+                Expect.equal
+                    (withdrawTasks (poolAt 9_999))
+                    [ "can-ctrl" ]
+                    "one short of the reserve: the stock stays shut"
+
+                Expect.equal
+                    (withdrawTasks (poolAt 10_000))
+                    [ "can-ctrl"; "sto-1" ]
+                    "at the reserve: the hungry-sink gate, unchanged"
+            }
+
+            test "a colony latched under its reserve stays under until one hauler load past it" {
+                // The 300 bank's hauler carries 200 (#505).
+                let poolAt stock latched =
+                    planTasksOn
+                        ({ stockColony
+                               [ refillable "spawn-1" 0 BuiltKind.Spawn ]
+                               (Map.ofList [ "can-ctrl", 800; "sto-1", stock ]) with
+                            ReserveShort = latched
+                         }
+                         |> withLevel 4)
+                        noThreats
+
+                Expect.equal
+                    (withdrawTasks (poolAt 10_199 true))
+                    [ "can-ctrl" ]
+                    "latched, one short of a load past the line: still shut"
+
+                Expect.equal
+                    (withdrawTasks (poolAt 10_200 true))
+                    [ "can-ctrl"; "sto-1" ]
+                    "a load past it: open"
+
+                Expect.equal
+                    (withdrawTasks (poolAt 10_000 false))
+                    [ "can-ctrl"; "sto-1" ]
+                    "unlatched, the reserve itself is the line"
+            }
+
+            test "a colony with no Storage of its own is never under its reserve" {
+                // A destroyed Storage must not stop the consignor's fee
+                // Refill its container income pays.
+                let colony =
+                    let fed =
+                        stockColony
+                            [ refillable "spawn-1" 0 BuiltKind.Spawn ]
+                            (Map.ofList [ "can-ctrl", 2000; "term-1", 0 ])
+
+                    { fed with
+                        Consignee = Some "W1N9"
+                        Spatial =
+                            { fed.Spatial with
+                                TargetKinds = Map.remove "sto-1" fed.Spatial.TargetKinds
+                            }
+                            |> withTargets
+                                [ "term-1", { X = 12; Y = 11 }, Structure BuiltKind.Terminal ]
+                    }
+                    |> withLevel 6
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Refill("term-1", Energy))
+                    "no Storage: the fee stock is still a sink"
+            }
+
+            test "under the emergency reserve the refill cluster and the towers still open the draw" {
+                let poolWith refillables =
+                    planTasksOn
+                        (stockColony refillables (Map.ofList [ "can-ctrl", 2000; "sto-1", 5_000 ])
+                         |> withLevel 4)
+                        noThreats
+
+                Expect.contains
+                    (withdrawTasks (poolWith [ refillable "ext-1" 50 BuiltKind.Extension ]))
+                    "sto-1"
+                    "a hungry extension: spawning draws below the reserve"
+
+                Expect.contains
+                    (withdrawTasks (poolWith [ refillable "tower-1" 500 BuiltKind.Tower ]))
+                    "sto-1"
+                    "a hungry tower: so does defence"
+            }
+
+            test
+                "under the emergency reserve a terminal's energy Refill neither pools nor opens the stock" {
+                // A consignor keeps its fee stock in the terminal; under the
+                // reserve the Storage pays it no more.
+                let poolAt stock =
+                    let colony =
+                        stockColony
+                            [ refillable "spawn-1" 0 BuiltKind.Spawn ]
+                            (Map.ofList [ "can-ctrl", 2000; "sto-1", stock; "term-1", 0 ])
+
+                    planTasksOn
+                        ({ colony with
+                            Consignee = Some "W1N9"
+                            Spatial =
+                                colony.Spatial
+                                |> withTargets
+                                    [ "term-1", { X = 12; Y = 11 }, Structure BuiltKind.Terminal ]
+                         }
+                         |> withLevel 6)
+                        noThreats
+
+                Expect.isFalse
+                    (List.contains (Refill("term-1", Energy)) (poolAt 19_999))
+                    "under RCL6's 20,000 the terminal is no energy sink"
+
+                Expect.equal
+                    (withdrawTasks (poolAt 19_999))
+                    [ "can-ctrl" ]
+                    "and the stock stays shut"
+
+                Expect.contains
+                    (poolAt 20_000)
+                    (Refill("term-1", Energy))
+                    "at the reserve the fee stock is a sink again"
             }
 
             test "an empty Storage pools no Withdraw, however hungry the colony" {
@@ -534,6 +686,172 @@ let stockDrawTests =
                     heavy.Verdicts
                     (Verdict.Unassigned("a1", IdleReason.NoneApplicable))
                     "the idle Verdict names the body gate, as ADR 0016 left it"
+            }
+
+            test
+                "under the emergency reserve a carrier draws the stock for the spawn and a Work body does not" {
+                // The hungry spawn opens the stock either side of RCL4's
+                // 10,000 (#505); under it the stock is the carriers', because
+                // a Work body's load goes to routine work. Both containers
+                // dry, so the stock is the one intake there is.
+                let colonyFor stock (creeps: (CreepInfo * Pos) list) =
+                    let colony =
+                        { drawColony
+                              (Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", stock ])
+                              (fst creeps.Head)
+                              (snd creeps.Head) with
+                            Sources = []
+                            Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        }
+
+                    { colony with
+                        Creeps = creeps |> List.map fst
+                        Spatial =
+                            colony.Spatial
+                            |> withCreepsAt [ for creep, pos in creeps -> creep.Name, pos ]
+                    }
+                    |> withLevel 4
+
+                let carrier = creepWith "h1" 0 100 [ Carry; Carry; Move ], { X = 16; Y = 10 }
+                let digger = worker "w1" 0 50, { X = 17; Y = 10 }
+
+                let drawsStock stock creeps name =
+                    (decideOn (colonyFor stock creeps)).Assignments |> Map.tryFind name = Some(
+                        taskId (Withdraw("sto-1", Energy))
+                    )
+
+                Expect.isTrue
+                    (drawsStock 5_000 [ carrier; digger ] "h1")
+                    "a carrier draws the reserve for the spawn"
+
+                Expect.isFalse
+                    (drawsStock 5_000 [ carrier; digger ] "w1")
+                    "a Work body beside it may not"
+
+                Expect.isTrue
+                    (drawsStock 10_000 [ carrier; digger ] "w1")
+                    "at the reserve the Work body draws on the same terms again"
+
+                // No carrier of ours alive: the Work body is the only body
+                // that can feed the spawn from the stock.
+                Expect.isTrue
+                    (drawsStock 5_000 [ digger ] "w1")
+                    "with no carrier alive the Work body draws the reserve for the spawn"
+            }
+
+            test "under the emergency reserve a struck rampart's Repair opens the stock" {
+                // Every refillable full and the buffer empty, so only the
+                // rampart can open the stock; a melee raider beside it
+                // strikes it (`rampartsUnderAttack`).
+                let colonyWith hostiles =
+                    let colony =
+                        { drawColony
+                              (Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", 5_000 ])
+                              (worker "w1" 0 50)
+                              { X = 16; Y = 10 } with
+                            Sources = []
+                            Hostiles = hostiles
+                        }
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "ram-1", { X = 12; Y = 11 }, Structure BuiltKind.Rampart ]
+                    }
+                    |> withLevel 4
+                    |> withHits "ram-1" BuiltKind.Rampart 50_000 300_000
+
+                let struck =
+                    planTasksOn
+                        (colonyWith [ hostileAt "raider" { X = 12; Y = 10 } [ Attack; Move ] ])
+                        noThreats
+
+                Expect.contains (repairTasks struck) "ram-1" "the struck rampart's Repair is pooled"
+
+                Expect.contains
+                    (withdrawTasks struck)
+                    "sto-1"
+                    "and it opens the stock under the reserve"
+
+                Expect.isFalse
+                    (List.contains
+                        (Withdraw("sto-1", Energy))
+                        (planTasksOn (colonyWith []) noThreats))
+                    "the same rampart unstruck is routine Repair: the stock stays shut"
+            }
+
+            test
+                "under the emergency reserve a dying rampart's Repair opens the stock to a Work body" {
+                // Every refillable full and the buffer empty, so only the
+                // rampart can be what opens the stock under the reserve.
+                let colonyWith hits =
+                    { drawColony
+                          (Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", 5_000 ])
+                          (worker "w1" 0 50)
+                          { X = 16; Y = 10 } with
+                        Sources = []
+                    }
+                    |> withLevel 4
+                    |> withHits "ram-1" BuiltKind.Rampart hits 300_000
+
+                let dying = colonyWith 1
+
+                Expect.contains
+                    (repairTasks (planTasksOn dying noThreats))
+                    "ram-1"
+                    "the rampart at one hit is pooled"
+
+                Expect.equal
+                    (Map.tryFind "w1" (decideOn dying).Assignments)
+                    (Some(taskId (Withdraw("sto-1", Energy))))
+                    "and its Repair is the emergency the Work body draws the reserve for"
+
+                Expect.isFalse
+                    (List.contains
+                        (Withdraw("sto-1", Energy))
+                        (planTasksOn (colonyWith 50_000) noThreats))
+                    "a rampart merely under its floor is routine Repair: the stock stays shut"
+            }
+
+            test "under the emergency reserve the draw admits the loads the emergency sinks take" {
+                // Fifty of room in the ring and a 200 load at the 300 bank,
+                // with the fixture's carrier alive: one carrier, and no Work
+                // body at all with no emergency Repair.
+                let capOf colony =
+                    poolOn colony
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = Withdraw("sto-1", Energy) then
+                            Some(
+                                Capacity.capOf CapScope.Carriers entry.Capacity,
+                                Capacity.capOf CapScope.Workers entry.Capacity,
+                                Capacity.capOf CapScope.Everyone entry.Capacity
+                            )
+                        else
+                            None)
+
+                let colony stock =
+                    stockColony
+                        [ refillable "ext-1" 50 BuiltKind.Extension ]
+                        (Map.ofList [ "can-ctrl", 2000; "sto-1", stock ])
+                    |> withLevel 4
+
+                Expect.equal
+                    (capOf (colony 5_000))
+                    (Some(Some 1, Some 0, None))
+                    "one carrier's load, and no Work body"
+
+                // A dying rampart's slot is a Work body's: a carrier cannot
+                // repair it.
+                Expect.equal
+                    (capOf (colony 5_000 |> withHits "ram-1" BuiltKind.Rampart 1 300_000))
+                    (Some(Some 1, Some 1, None))
+                    "the emergency Repair adds one slot, for a Work body alone"
+
+                Expect.equal
+                    (capOf (colony 50_000))
+                    (Some(None, None, Some 250))
+                    "over the reserve: the stock over a load, for anybody"
             }
 
             test "the tick the last other sink fills, the holder is released task-gone" {

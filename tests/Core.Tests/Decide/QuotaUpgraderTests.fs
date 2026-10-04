@@ -164,6 +164,24 @@ let upgraderQuotaTests =
                     "one standing body and one generalist are still the whole of what this colony hires"
             }
 
+            test
+                "under the emergency reserve the income row is sized to its share and the rest banks" {
+                // RCL5 keeps 10,000 (#505). The 26,800 surplus buys one
+                // 16,500 standing body; half of it, 13,400, buys none.
+                let banked units =
+                    stocking units (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                let castsUpgrader units =
+                    casts (banked units) (upgraderFleet 0 1)
+                    |> List.exists (fun (_, _, name) -> name.StartsWith "upgrader-")
+
+                Expect.isFalse
+                    (castsUpgrader 5_000)
+                    "under the reserve: half the surplus, no standing body"
+
+                Expect.isTrue (castsUpgrader 10_000) "at it: the whole surplus, as before"
+            }
+
             test "the stock may double the row and no more" {
                 // 200,000 over the floor is eleven bodies' worth of drink, and
                 // the cap is the row the income itself buys — one. A second
@@ -838,15 +856,17 @@ let quotaInputTests =
                 // stock shut: the body hired for the lend had a sink and no intake.
                 // This fixture is that state: no Refillables, no home buffer, a stocked
                 // Storage.
-                let stocked stage =
+                let stockedWith energy stage =
                     let mother = ferryMother stage
 
                     { mother with
                         Spatial =
                             { mother.Spatial with
-                                Stores = Map.add "storage-1" 240000 mother.Spatial.Stores
+                                Stores = Map.add "storage-1" energy mother.Spatial.Stores
                             }
                     }
+
+                let stocked = stockedWith 240000
 
                 let lending = planTasksOn (stocked Bootstrapping) noThreats
 
@@ -865,6 +885,19 @@ let quotaInputTests =
                         (Withdraw("storage-1", Energy))
                         (planTasksOn (stocked Independent) noThreats))
                     "and with nothing to feed, the stock stays shut"
+
+                // Under the mother's RCL5 reserve of 10,000 (#505) the lend
+                // is no emergency: the child's buffer stays a sink for
+                // what the flow brings, and the stock stays hers.
+                let short = planTasksOn (stockedWith 9_999 Bootstrapping) noThreats
+
+                Expect.isTrue
+                    (List.contains (Refill("can-child", Energy)) short)
+                    "under the reserve the lend is still pooled"
+
+                Expect.isFalse
+                    (List.contains (Withdraw("storage-1", Energy)) short)
+                    "but it no longer opens the stock"
             }
 
             test "a nursery's spawn site hires `Tuning.NurseryFerries` ferry bodies" {

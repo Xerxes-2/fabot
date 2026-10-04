@@ -947,6 +947,11 @@ type StandDown =
         /// last look (`RaidState.Taken`, #496): what keeps a dark room's
         /// assault from casting again for them.
         Taken: Set<string>
+        /// Whether the last decided tick read the stock under its
+        /// [[emergency reserve]] (`RaidState.ReserveShort`, #505): the latch
+        /// that holds the colony under it until it banks one hauler load
+        /// past the line.
+        ReserveShort: bool
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -962,6 +967,7 @@ module StandDown =
             ThreatenedOutposts = Set.empty
             Fought = Map.empty
             Taken = Set.empty
+            ReserveShort = false
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

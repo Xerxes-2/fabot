@@ -426,6 +426,9 @@ type RaidState =
         /// work done, cast for no more until one stands again. Bounded by the
         /// declared assaults.
         Taken: Map<string, int>
+        /// Whether this tick read the stock under its [[emergency reserve]]
+        /// (`Facts.belowReserve`, #505): next tick's latch.
+        ReserveShort: bool
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -459,6 +462,7 @@ module RaidState =
             Fought = Map.empty
             Probes = Map.empty
             Taken = Map.empty
+            ReserveShort = false
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -806,6 +810,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> Set.ofList
         Fought = state.Fought
         Taken = state.Taken |> Map.keys |> Set.ofSeq
+        ReserveShort = state.ReserveShort
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened,
@@ -1098,6 +1103,7 @@ let foldRaids
         // `foldProbes`', which reads the tick's intents as well.
         Probes = prior.Probes
         Taken = foldTaken view prior.Taken
+        ReserveShort = Decide.Facts.belowReserve view
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged

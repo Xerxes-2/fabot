@@ -1,6 +1,8 @@
 # Storage is stock, not flow: deepest Refill, second-tier Withdraw, pooled only while another sink is hungry
 
-> **Status:** amended by 0071, #216 R5, #232
+> **Status:** amended by 0071, #216 R5, #232, #505
+
+> **Amended by #505** (user, 2026-10-04: every Storage stood near 0 while the towers were full). Under the colony's [[emergency reserve]] the Storage's Withdraw opens only for the refill cluster, the towers and a struck or dying rampart's Repair; its carriers are capped at the refillables' room over a hauler load, and a body with a Work part is admitted only to an emergency Repair's slot, or for the cluster when no carrier of the colony is alive — so "Workers with a Work part draw from it on the same terms" no longer holds under the line. The Storage's own Refill rises a rung over the buffer and the [[ferry]]'s sinks there, so income banks first. Accepted cost: a carrier's load can still go to the buffer once the ring fills under it (at most the loads admitted, and the Storage now outranks the buffer for it), and workers under the line harvest or draw containers.
 
 > **Amended by #374** (ADR 0071) with one exception to the second-tier Withdraw: while the colony is **starved** at its refill cluster — room in the ring and a bank that cannot afford the hauler unit it would cast — the Storage's energy draw ranks with the containers' and travel cost decides, capped at the loads the ring can take. At RCL4–6 that condition holds whenever the ring is not full, so at those levels the exception is the steady state of a colony with a stocked Storage; the deepest-tier Refill, the hungry-sink gate and the tier gap that closes the cycle stand as written below.
 

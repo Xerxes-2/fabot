@@ -680,6 +680,78 @@ let colonyViewTests =
     testList
         "the view one colony is cut"
         [
+            test "aid goes to a colony under its own emergency reserve and never to one at it" {
+                // The child raised to RCL6 with a Storage and a terminal:
+                // its need line is RCL6's 20,000 (#505), read off its own
+                // controller and not the donor's.
+                let banking energy =
+                    let room = World.roomOf pairWorld child
+
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.add
+                                child
+                                { room with
+                                    TargetKinds =
+                                        room.TargetKinds
+                                        |> Map.add "sto-child" (Structure BuiltKind.Storage)
+                                        |> Map.add "term-child" (Structure BuiltKind.Terminal)
+                                    Stores = Map.add "sto-child" energy room.Stores
+                                    Controller =
+                                        room.Controller
+                                        |> Option.map (fun controller ->
+                                            { controller with Level = 6 })
+                                }
+                    }
+
+                Expect.equal
+                    (viewOf (banking 19_999) mother).AidRooms
+                    [ child ]
+                    "one short of its reserve, the child is where aid goes"
+
+                Expect.isEmpty
+                    (viewOf (banking 20_000) mother).AidRooms
+                    "at its reserve it needs none"
+
+                // A third colony at RCL8 holding more than the child but
+                // further short of its 50,000: the shortfall orders, not the
+                // energy.
+                let third = "W11S28"
+
+                let colonies =
+                    declared
+                    @ [
+                        { (List.last declared) with
+                            Home = third
+                            Mother = None
+                        }
+                    ]
+
+                let world =
+                    let child15k = banking 15_000
+
+                    let name, facts =
+                        roomOf
+                            third
+                            Ownership.Ours
+                            [
+                                "sto-third", { X = 20; Y = 20 }, Structure BuiltKind.Storage
+                                "term-third", { X = 21; Y = 20 }, Structure BuiltKind.Terminal
+                            ]
+                        |> ourColony "Spawn3" 8 300
+                        |> withStores [ "sto-third", 30_000 ]
+
+                    { child15k with
+                        Rooms = Map.add name facts child15k.Rooms
+                    }
+
+                Expect.equal
+                    (viewUnder colonies world mother).AidRooms
+                    [ third; child ]
+                    "20,000 short before 5,000 short"
+            }
+
             test "the mother mines her own rooms and never the child's rock" {
                 // #192's trap, and what the borrowed layer is for: a rock
                 // in a room she only raises is the child's to pool, or she

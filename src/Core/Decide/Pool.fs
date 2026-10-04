@@ -712,17 +712,22 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
     let dying =
         tasks
         |> List.choose (function
-            | Repair id ->
-                match Map.tryFind id view.Spatial.TargetKinds, Map.tryFind id view.Spatial.Hits with
-                | Some(Structure BuiltKind.Rampart), Some hits when
-                    hits.Hits < view.Tuning.RampartDying
-                    ->
-                    Some id
-                | _ -> None
+            | Repair id when Facts.isDyingRampart view id -> Some id
             | _ -> None)
         |> Set.ofList
 
     let underAttack = Facts.rampartsUnderAttack view
+
+    // The emergency reserve (#505): under it the stock's draw is the
+    // emergency sinks' — the refill cluster and the towers, and the Repairs
+    // of a dying or a struck rampart.
+    let reserveShort = Facts.belowReserve view
+
+    let emergencyRepairs =
+        tasks
+        |> List.sumBy (function
+            | Repair id when Set.contains id dying || Set.contains id underAttack -> 1
+            | _ -> 0)
 
     // The queue the builders' budget rations: every site the pool holds in a
     // room this colony merely mines and that no other rule already feeds. A
@@ -864,6 +869,13 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // A pile is flow and not stock: the haul cycle's energy lying where it
         // fell.
         | Pickup(_, Energy) -> Feeding
+        // Under the reserve income banks before it feeds the buffer or a
+        // child (#505): the ferry's sinks drop to the buffer's tier, and the
+        // Storage's own Refill rises to it, a rung over both.
+        | Refill(structureId, Energy) when
+            reserveShort && (isStorage structureId || Set.contains structureId ferrySinks)
+            ->
+            UpgradeBuffer
         | Refill(structureId, _) ->
             let isTower =
                 view.Refillables
@@ -1025,6 +1037,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
+            | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | _ -> OnTheTier
 
         match task with
@@ -1121,6 +1134,26 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // two facts the tier is, so the cap and the rank cannot disagree.
         | Withdraw(storeId, Thorium) when isStorage storeId && Facts.courierProgrammeOpen view atlas ->
             Capacity.total 1
+        // Under the reserve the stock admits the loads the emergency sinks
+        // take (#505): the carriers the refillables' room over a hauler's
+        // load, and a Work body per emergency Repair — a carrier cannot
+        // repair, and a Work body's load would otherwise go to routine work.
+        // With no carrier of ours alive the Work bodies take the carriers'
+        // loads too, or the spawn and the towers would go unfed.
+        | Withdraw(storeId, Energy) when reserveShort && isStorage storeId ->
+            let room = view.Refillables |> List.sumBy (fun r -> r.FreeCapacity)
+            let carried = ceilDiv room haulerLoad
+
+            let noCarrier =
+                view.Creeps
+                |> List.forall (fun creep ->
+                    partCount creep.Body Work > 0 || partCount creep.Body Carry = 0)
+
+            Capacity.unbounded
+            |> Capacity.capping CapScope.Carriers carried
+            |> Capacity.capping
+                CapScope.Workers
+                (emergencyRepairs + (if noCarrier then carried else 0))
         // The starved cluster's draw on the stock admits the loads the ring
         // can take, not the loads the Storage divides into — #367's hazard on
         // the energy column otherwise. At least one, or the lift would be a

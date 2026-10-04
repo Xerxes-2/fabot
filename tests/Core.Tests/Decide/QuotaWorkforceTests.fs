@@ -850,6 +850,32 @@ let backlogWorkforceTests =
                     "and a stock that covers the site and the crowd hires the crowd"
             }
 
+            test "the emergency reserve is no part of what the backlog is paid out of" {
+                // RCL6 keeps 20,000 (#505): the site and the body are paid
+                // out of what stands over it, one unit short hires nobody.
+                let colony = trunkColony 6
+                let body = Bodies.bodyFor Bodies.workerPattern colony.Bank.Capacity
+
+                let owed =
+                    partCountIn body Work * Engine.buildPerWork * colony.Tuning.BuildTicksPerLife
+
+                let reserve = Tuning.energyReserve colony.Tuning 6
+
+                let extra units =
+                    targetOf (stocking units colony |> owing [ owed ])
+                    - targetOf (stocking units colony)
+
+                Expect.equal
+                    (extra (owed + bodyCost body + reserve - 1))
+                    0
+                    "one short over the reserve: nobody"
+
+                Expect.equal
+                    (extra (owed + bodyCost body + reserve))
+                    1
+                    "the whole body over it: one"
+            }
+
             test "the term retires itself: no sites, no addend" {
                 let banked = stocking 600_000 (trunkColony 6)
 

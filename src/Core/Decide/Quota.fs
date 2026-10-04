@@ -7,11 +7,6 @@ module Fabot.Core.Decide.Quota
 open Fabot.Core
 open Fabot.Core.Types
 
-/// What one body of this shape hauls in a trip. Written once: the hauler
-/// quota and a Withdraw's cap both turn Carry parts into energy through it.
-let internal carryCapacityOf body =
-    partCountIn body Carry * Engine.carryPartCapacity
-
 /// Ceiling division for the quota rows: a fraction of a body hires the whole
 /// body. A numerator at or below zero lands at or below zero (F# divides
 /// toward zero); each row's own floor answers for it.
@@ -957,7 +952,15 @@ let internal quotaRowsOf
     (sizing: RowSizing)
     haulerQuota
     : QuotaRows =
-    let surplus = surplusOverLifetime view atlas sizing haulerQuota
+    // Under the emergency reserve the income rows are sized to a share of
+    // the surplus and the rest banks (#505).
+    let surplus =
+        let whole = surplusOverLifetime view atlas sizing haulerQuota
+
+        if Facts.belowReserve view then
+            whole * view.Tuning.ReserveIncomeShare / 100
+        else
+            whole
 
     let onIncome, onStock = upgraderRow view atlas sizing surplus
 
@@ -1083,7 +1086,10 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
             // `Bank` is not this number: that is the spawn account the hauler
             // row keeps full out of this very stock, so reading it here would
             // count the same energy twice.
-            (stockedEnergy view - owed) / bodyCost body |> max 0 |> min wanted
+            // The emergency reserve is no part of it (#505).
+            (stockedEnergy view - energyReserve view - owed) / bodyCost body
+            |> max 0
+            |> min wanted
 
     let workerRow =
         (unpostedSeats + incomeWorkers |> max (workerFloor tasks))

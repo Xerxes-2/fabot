@@ -39,7 +39,7 @@ Where a pooled Task ranks against every other, lower first — the first compone
 _Avoid_: rank (for the tier itself), weight, urgency
 
 ### Capacity
-How many creeps a pooled Task admits at once, set by the [[planner]] and counted by the [[matcher]] at [[arrival]]: a total over holders of every shape, a share per set of [[body class]]es, a budget the holders' loads are counted against, and the set of [[post]] tiles whose standing bodies count beside the holders. A Task with no capacity at all is the ordinary case. ADR-0024, ADR-0026, ADR-0045, ADR-0051, ADR-0052, ADR-0054, ADR-0056, ADR-0069, ADR-0071.
+How many creeps a pooled Task admits at once, set by the [[planner]] and counted by the [[matcher]] at [[arrival]]: a total over holders of every shape, a share per set of [[body class]]es or of bodies with a Work part, a budget the holders' loads are counted against, and the set of [[post]] tiles whose standing bodies count beside the holders. A Task with no capacity at all is the ordinary case. ADR-0024, ADR-0026, ADR-0045, ADR-0051, ADR-0052, ADR-0054, ADR-0056, ADR-0069, ADR-0071.
 
 ### Body class
 Which of four shapes a body is, as far as a [[capacity]] is concerned, read off the parts in order: **Fighter** (an ATTACK part), **Heavy** (the [[work-heavy body]]), **Standing** (the [[standing body]]) and **Light** (everything else). A body is exactly one class, so a per-class cap is one fold over the holders. ADR-0006, ADR-0016, ADR-0046, ADR-0052, ADR-0056.
@@ -55,7 +55,7 @@ The colony's spawn and every extension of it as one [[refill]] Task, keyed by th
 _Avoid_: extension cluster, the spawn ring, anchor
 
 ### Withdraw
-The Task of taking a resource out of a stocked [[container]], a tombstone or a ruin, or — one tier lower and only while another sink is hungry — the [[storage]]. Applicable to a body with a Carry part, half its store free, no more Work than Move and (at the [[buffer]]) a Work part, to a store that can half fill it; capped by the store's stock over the drawing row's load. ADR-0012, ADR-0016, ADR-0019, ADR-0023, ADR-0026, ADR-0046, ADR-0057, ADR-0071.
+The Task of taking a resource out of a stocked [[container]], a tombstone or a ruin, or — one tier lower and only while another sink is hungry, an emergency one under the [[emergency reserve]] — the [[storage]]. Applicable to a body with a Carry part, half its store free, no more Work than Move and (at the [[buffer]]) a Work part, to a store that can half fill it; capped by the store's stock over the drawing row's load. ADR-0012, ADR-0016, ADR-0019, ADR-0023, ADR-0026, ADR-0046, ADR-0057, ADR-0071.
 
 ### Pickup
 The Task of walking to a dropped pile and taking it, pooled from a threshold of a hundred and capped by the pile's amount over one [[hauler unit]] load; a pile carries one resource, and a [[thorium]] pile ranks at the [[storage]]'s draw tier. ADR-0010, ADR-0016, ADR-0026, ADR-0057.
@@ -233,7 +233,11 @@ The tiles the colony works from — every source's [[seat]]s, every [[thorium]] 
 Where standing idle blocks somebody: the [[working ground]] plus the walkable range-1 ring of each store — the set a body with no [[task]] heads its first step off. ADR-0001, ADR-0022.
 
 ### Storage
-The colony's stock, placed on the cluster's first pick from RCL4: the deepest [[refill]] target, a [[withdraw]] source pooled only while another sink is hungry (ranked with the containers while the colony is starved), the [[thorium]] sink, and a [[keep]] structure. ADR-0022, ADR-0023, ADR-0034, ADR-0057, ADR-0071.
+The colony's stock, placed on the cluster's first pick from RCL4: the deepest [[refill]] target, a [[withdraw]] source pooled only while another sink is hungry (ranked with the containers while the colony is starved, and only for the emergency sinks under the [[emergency reserve]]), the [[thorium]] sink, and a [[keep]] structure. ADR-0022, ADR-0023, ADR-0034, ADR-0057, ADR-0071.
+
+### Emergency reserve
+The [[storage]] energy a colony keeps for spawning and defence, by its controller level (`Tuning.EnergyReserves`; none below RCL4 or with no Storage of its own). A colony under it stays under until it banks one hauler load past it; meanwhile the stock feeds only the [[refill cluster]], the towers and a struck or dying [[rampart]]'s [[repair]], and income banks before anything deeper. ADR-0023.
+_Avoid_: floor (the upgrader row's own), buffer
 
 ### Thorium
 The season's scoring resource and the one resource beside energy this colony names (`Resource = Energy | Thorium`): a finite deposit read off `FIND_MINERALS`, dug by the [[miner]] through an extractor from `Tuning.ExtractorLevel`, moved by the [[hauler unit]] row at the [[storage]]'s tiers, banked in the [[storage]] and carried to the Reactor by the [[courier]]. A body carries one resource at a time. ADR-0057, ADR-0060, ADR-0067.

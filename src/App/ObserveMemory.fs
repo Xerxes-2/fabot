@@ -918,6 +918,10 @@ let loadRaids (home: string) : RaidState =
             Fought = fightMapOf raids?fought
             Probes = probeMapOf raids?probes
             Taken = intMapOf raids?taken
+            // `true` and nothing else: `unbox` is erased, so a truthy
+            // non-boolean would latch a colony under its reserve (#505).
+            ReserveShort =
+                jsTypeof raids?reserveShort = "boolean" && unbox<bool> raids?reserveShort
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -968,6 +972,8 @@ let saveRaids (home: string) (state: RaidState) =
     raids?probes <- state.Probes |> Map.toSeq |> hashOf encodeProbe
     // Each taken assault room against its tick (#496).
     raids?taken <- state.Taken |> Map.toSeq |> hashOf box
+    // The emergency reserve's latch (#505).
+    raids?reserveShort <- state.ReserveShort
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)

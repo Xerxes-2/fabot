@@ -88,9 +88,12 @@ type ColonyView =
         /// quota, which `Sources` feeds and the child's own rows count (#192).
         BorrowedSources: SourceInfo list
         /// Every other colony home with a terminal whose Storage holds under
-        /// `Tuning.AidNeedFloor` energy, the emptiest first: where this
-        /// colony's terminal sends while its own Storage can spare it.
+        /// its own [[emergency reserve]], the furthest short of it first: where
+        /// this colony's terminal sends while its own Storage can spare it.
         AidRooms: string list
+        /// `StandDown.ReserveShort`: whether the last decided tick read this
+        /// colony's stock under its [[emergency reserve]].
+        ReserveShort: bool
         /// Every room any colony of ours declares as an outpost: a harassment
         /// room among them keeps its source's seats for our miners, never
         /// the ranger's (W17S26, 2026-10-04).
@@ -1019,13 +1022,22 @@ module ColonyView =
                     | _ :: _, storage :: _ ->
                         let energy = Map.tryFind storage facts.Stores |> Option.defaultValue 0
 
-                        if energy < tuning.AidNeedFloor then
-                            Some(energy, other)
+                        let reserve =
+                            facts.Controller
+                            |> Option.map (fun controller ->
+                                Tuning.energyReserve tuning controller.Level)
+                            |> Option.defaultValue 0
+
+                        // Keyed on the shortfall, negated, so the furthest
+                        // short sorts first.
+                        if energy < reserve then
+                            Some(energy - reserve, other)
                         else
                             None
                     | _ -> None)
                 |> List.sort
                 |> List.map snd
+            ReserveShort = gate.ReserveShort
             Controller = homeFacts.Controller
             RoomControl = control
             // The gate's third and fourth sets, verbatim (#333, #366). Not

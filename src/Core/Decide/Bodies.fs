@@ -12,6 +12,12 @@ open Fabot.Core.Types
 /// is good at, never what it is assigned.
 type BodyPattern = { Name: string; Block: BodyPart list }
 
+/// What one body of this shape hauls in a trip. Written once: the hauler
+/// quota, a Withdraw's cap and the reserve's latch band all turn Carry parts
+/// into energy through it.
+let internal carryCapacityOf body =
+    partCountIn body Carry * Engine.carryPartCapacity
+
 /// The generalist pattern: 200 energy, full speed empty, half speed loaded.
 let workerPattern =
     {
