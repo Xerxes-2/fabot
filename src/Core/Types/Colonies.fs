@@ -442,6 +442,16 @@ module Outpost =
             Controller = "6a8caa7ddd4872bccd318c79", { Room = "W17S26"; X = 8; Y = 21 }
         }
 
+    /// W17S25's second outpost, declared 2026-10-04 (user): one exit west, a
+    /// single source (32,4), unowned and unreserved; beside Trepidimous'
+    /// W18S26 but with no way through between the two (user).
+    let w18s25: Outpost =
+        {
+            RoomName = "W18S25"
+            Sources = [ "6a8caa71dd4872bccd318b28", { Room = "W18S25"; X = 32; Y = 4 } ]
+            Controller = "6a8caa71dd4872bccd318b29", { Room = "W18S25"; X = 16; Y = 9 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`: one hop, one source at a 210-tick
     /// round trip, about 6.25 energy a tick net, and the cheapest tick of the
@@ -1330,7 +1340,7 @@ module Colony =
             //   afterwards (#446, #467).
             {
                 Home = "W17S25"
-                Outposts = [ Outpost.w17s26 ]
+                Outposts = [ Outpost.w17s26; Outpost.w18s25 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"
