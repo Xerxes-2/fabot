@@ -563,12 +563,12 @@ let internal planSpawns
                 filled
                 |> List.forall (fun (row, _, _, _) -> row.Pattern <> anchorPattern || row.Quota = 0)
                 || view.Bank.Available >= view.Bank.Capacity
-                // A stranded Anchor digs nothing (#506): the colony whose only
-                // one is stuck buys its replacement from what is banked.
+                // A stranded Anchor still answers: the floor is for a colony
+                // with no harvester at all, and one whose outpost anchor is
+                // merely stuck has income enough to wait for a whole body
+                // (W17S25 bought a 3W one off a short bank, 2026-10-05).
                 || view.Creeps
-                   |> List.exists (fun creep ->
-                       (isAnchorBody creep && not (Set.contains creep.Name stranded))
-                       || isMinerBody creep)
+                   |> List.exists (fun creep -> isAnchorBody creep || isMinerBody creep)
                 // Exactly once, as above: a harvester in the oven answers.
                 || casting
                    |> List.exists (fun cast ->

@@ -829,10 +829,11 @@ let strandedAnchorTests =
                     "a tick short of the stay: counted out"
             }
 
-            test "a colony whose only anchor is stranded buys one from what is banked" {
-                // The harvest floor (#460) reads the census without the stray:
-                // the bank is short of a capacity-sized body, so only the
-                // floor can cast.
+            test "a colony whose only anchor is stranded waits for a whole body, not the floor's" {
+                // The harvest floor (#460) is for a colony with no harvester
+                // at all: W17S25 bought a 3W anchor off a short bank when its
+                // only one was stuck in a shut outpost (2026-10-05). The row
+                // still owes the replacement, at the bank's capacity.
                 let colony = strandedAnchorColony 1000 false
 
                 let stuck =
@@ -841,10 +842,14 @@ let strandedAnchorTests =
                         Bank = bank 400 1800
                     }
 
-                Expect.hasLength
+                Expect.isEmpty
                     (anchorCastsBy stuck)
+                    "400 of 1,800 banked: no small Anchor off the floor"
+
+                Expect.hasLength
+                    (anchorCastsBy { stuck with Bank = bank 1800 1800 })
                     1
-                    "the floor casts the Anchor the stray cannot be"
+                    "the bank full, the row casts the whole body"
             }
         ]
 
