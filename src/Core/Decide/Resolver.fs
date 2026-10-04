@@ -134,8 +134,9 @@ let private moveIntentFor
 
     // The walk in to the shelter (#514), round the Reach as a runner's is,
     // every tick until the body stands on it. One standing in a Reach — a
-    // Work-heavy body, which has no Flee — takes the plain step inward, even
-    // into the Reach, rather than stand still in it (`round`).
+    // Work-heavy body on its footing, which has no Flee — takes the plain
+    // step inward, even into the Reach, rather than stand still in it
+    // (`round`).
     let shelterStep () =
         if task.IsNone && not (Set.isEmpty shelter) && not (Set.contains at shelter) then
             let reach = Threats.reachIn threats room
@@ -174,9 +175,10 @@ let private moveIntentFor
         let tail = staying @ off @ on
 
         // The way off, less this tick's Reach — the subtraction `areaFor`
-        // makes below, made here too because a work-heavy body has no Flee,
-        // so a step out of a safe pocket into an attacker is one nothing walks
-        // it back from. Nowhere safe off the ground is nowhere to go: it parks.
+        // makes below, made here too because a work-heavy body on its footing
+        // has no Flee, so a step out of a safe pocket into an attacker is one
+        // nothing walks it back from. Nowhere safe off the ground is nowhere
+        // to go: it parks.
         let stepOff =
             if Set.contains pos ground then
                 let reach = Threats.reachIn threats room
@@ -496,7 +498,8 @@ let movementOf
         else
             view.Creeps
             // And a [[defender]], to its rampart (#504).
-            |> List.filter (fun c -> runsFromThreats atlas c || isNamedFor defenderPattern c.Name)
+            |> List.filter (fun c ->
+                runsFromThreats view atlas c || isNamedFor defenderPattern c.Name)
             |> List.map (fun c -> c.Name)
             |> Set.ofList
 

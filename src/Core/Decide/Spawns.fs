@@ -68,6 +68,39 @@ let private anchorCapAt (caps: Map<RoomPos, int>) (tile: RoomPos) =
     | Some cap -> cap
     | None -> richestAnchorCap caps
 
+/// Legs for an Anchor bought while these Posts stand vacant: an outpost's walk
+/// if the finished body may take any of them that is an outpost's (#515),
+/// since travel cost and not the caster picks its Post.
+let private anchorLegsFor (view: ColonyView) (vacant: RoomPos seq) =
+    let home = SpatialInfo.homeName view.Spatial
+
+    if vacant |> Seq.exists (fun tile -> anchorLegsIn home tile.Room = OutpostLegs) then
+        OutpostLegs
+    else
+        HomeLegs
+
+/// The legs an incumbent's successor is cast with: its own Post's, or an
+/// outpost's while an outpost Post stands with no heavy body on it — the cast
+/// that replaces it will be bought beside that vacancy. Read off who stands
+/// where now, not off arrival: a lead cannot read the vacancies leads decide.
+let private successorLegs (view: ColonyView) atlas (sizing: RowSizing) (tile: RoomPos) =
+    let manned () =
+        view.Creeps
+        |> List.filter (fun creep -> Atlas.workHeavy atlas creep.Name)
+        |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
+        |> Set.ofList
+
+    match anchorLegsFor view [ tile ] with
+    | OutpostLegs -> OutpostLegs
+    | HomeLegs ->
+        let manned = manned ()
+
+        sizing.AnchorPostCaps
+        |> Map.toSeq
+        |> Seq.map fst
+        |> Seq.filter (fun post -> not (Set.contains post manned))
+        |> anchorLegsFor view
+
 /// The body a row casts to put a creep on one tile, at this colony's bank and
 /// under this tick's second fact where the row has one. A tile and not a row,
 /// because the anchor row casts no single body: its ceiling is the rock the
@@ -76,6 +109,7 @@ let private anchorCapAt (caps: Map<RoomPos, int>) (tile: RoomPos) =
 /// rule.
 let private castBodyOf
     (view: ColonyView)
+    atlas
     (sizing: RowSizing)
     (pattern: BodyPattern)
     (tile: RoomPos)
@@ -83,6 +117,11 @@ let private castBodyOf
     sizedBodyFor
         {
             AnchorCap = anchorCapAt sizing.AnchorPostCaps tile
+            AnchorLegs =
+                if pattern = anchorPattern then
+                    successorLegs view atlas sizing tile
+                else
+                    HomeLegs
             ReserverClaims = sizing.ReserverClaims
             MinerWorkPerMove = sizing.MinerWorkPerMove
             GuardBlocks = sizing.GuardBlocks
@@ -109,7 +148,7 @@ let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInf
     | Some tile ->
         // The colony's one bank, whatever room the spawn is filed under:
         // every spawn stands in the home room.
-        let body = castBodyOf view sizing pattern tile
+        let body = castBodyOf view atlas sizing pattern tile
 
         view.Spawns
         |> List.choose (fun s ->
@@ -355,6 +394,8 @@ let internal planSpawns
             |> List.tryHead
             |> Option.defaultValue (richestAnchorCap sizing.AnchorPostCaps)
 
+        let anchorLegs = anchorLegsFor view (vacantPosts |> Map.toSeq |> Seq.map fst)
+
         // The casting order is the row list's below and nowhere else: the
         // seats are cast in it, the `quotas` view reports in it, and the
         // worker row subtracts the sum of it. Each specialist gap is that
@@ -367,6 +408,7 @@ let internal planSpawns
         let rowSizing =
             {
                 AnchorCap = anchorCap
+                AnchorLegs = anchorLegs
                 ReserverClaims = rows.Reserver
                 MinerWorkPerMove = sizing.MinerWorkPerMove
                 GuardBlocks = sizing.GuardBlocks

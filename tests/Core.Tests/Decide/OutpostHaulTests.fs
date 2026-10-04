@@ -325,7 +325,7 @@ let outpostHaulTests =
         [
             test "an outpost container hires haul capacity, priced at its own room's rate" {
                 // The round trip is the Seam join (`Atlas.haulRoundTripTicks`), 51
-                // ticks over this corridor. At the 600 bank the hauler carries 400, so
+                // ticks over this corridor. At the 700 bank the hauler carries 400, so
                 // held the rock ships ten a tick and hires ceil(51 x 10 / 400) = 2.
                 //
                 // Pairwise: the two colonies differ in who holds W1N2 and nothing else.
@@ -393,12 +393,12 @@ let outpostHaulTests =
 
                 let atlas = Atlas.ofView colony
 
-                // The body the quota itself divides by: this fixture's 600 bank, not
+                // The body the quota itself divides by: this fixture's 700 bank, not
                 // `haulRoundingBody`'s 300 (#208). Road parity holds at every size.
                 let roundTrip from =
                     Atlas.haulRoundTripTicks
                         atlas
-                        (bodyFor haulerPattern 600)
+                        (bodyFor haulerPattern 700)
                         (RoomPos.at "W1N2" from)
                         (RoomPos.at "W1N1" { X = 25; Y = 10 })
 

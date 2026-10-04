@@ -217,19 +217,21 @@ let internal detourGround =
 /// refillable with room and no home source, so the hauler quota folds the
 /// outpost's one container and nothing beside it.
 ///
-/// **A 600 bank and not the default 300, because the rate is what these
+/// **A 700 bank and not the default 300, because the rate is what these
 /// cases read** (#208). At 300 the Anchor row casts `2W/1C/1M` and digs
 /// four, under the neutral five as well as the held ten, so the two rates
-/// would price alike. At 600 the row casts five Work against a held rock
+/// would price alike. At 700 the row casts five Work against a held rock
 /// and three against a neutral one (`sourceOutputOf`), which digs ten and
-/// six. The bank's other effect is the divisor, 400 here rather than 200;
-/// the round trips are unmoved, both bodies at road parity.
+/// six — 700 and not 600 because an outpost Post's Anchor carries a Move per
+/// two Work (#515), and at 600 that costs the fifth. The bank's other effect
+/// is the divisor, four hauler blocks' 400 here rather than 200; the round
+/// trips are unmoved, both bodies at road parity.
 let internal haulHome =
     { bareRespawn with
         Controller = None
         Refillables = []
         Sources = [ source "src-out" ]
-        Bank = bank 600 600
+        Bank = bank 700 700
         Spatial =
             { SpatialInfo.empty with
                 RoomName = Some "W1N1"

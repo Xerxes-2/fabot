@@ -2519,6 +2519,27 @@ let threatGateTests =
                     "it stays and waits, as ADR 0033 says it must"
             }
 
+            test "a Work-heavy body still walking to its Post flees a Reach it stands in" {
+                // Live W18S25 (#515): three Anchors died on the walk to the
+                // Post, never on it. Off its Post the heavy body is a walker
+                // like any other, and a walker in a Reach runs.
+                let colony =
+                    postLane [ garrison "a1" ] [ "a1", { X = 25; Y = 23 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 25 } [ Attack; Move ] ]
+
+                Expect.isTrue
+                    (Set.contains { X = 25; Y = 23 } (reachIn colony))
+                    "the premise: the lane tile it walks is inside the Reach"
+
+                let { Assignments = assignments } =
+                    decideFrom (Map.ofList [ "a1", taskId (Harvest "src-a") ]) colony
+
+                Expect.equal
+                    (Map.tryFind "a1" assignments)
+                    (Some(taskId Flee))
+                    "the walking Anchor runs"
+            }
+
             test "a body standing on a hot Post digs from neither it nor the cold one it walks to" {
                 // Two Posts, one hot: the Task keeps the cold one and stays
                 // applicable, so the Anchor holds it — but a creep acts only
@@ -4108,11 +4129,10 @@ let acrossTheBorderTests =
                         $"it stands where it is (line {perimeter})"
             }
 
-            test
-                "a Work-heavy body in the Reach across the border keeps walking in, never standing in it" {
-                // An anchor has no Flee: standing in the spilled Reach it takes
-                // the plain step inward. No rock at home, so it has no dig to
-                // walk to either.
+            test "a Work-heavy body off its Post in the Reach across the border flees inward" {
+                // Off its Post an anchor runs like any other body (#515):
+                // standing in the spilled Reach it takes Flee, whose way out is
+                // inward. No rock at home, so it has no dig to walk to either.
                 let decision =
                     decideOn
                         { borderHome
@@ -4123,6 +4143,66 @@ let acrossTheBorderTests =
                             Sources = []
                         }
 
+                Expect.equal
+                    (Map.tryFind "a-1" decision.Assignments)
+                    (Some(taskId Flee))
+                    "the premise: Flee for it, and no work"
+
+                let step = moveIntentsFor "a-1" decision.Intents
+
+                Expect.isTrue
+                    (step
+                     |> List.forall (function
+                         | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                         | _ -> false)
+                     && not (List.isEmpty step))
+                    $"it steps inward: {step}"
+            }
+
+            test
+                "a Work-heavy body where it digs in the Reach across the border takes the shelter's inward step" {
+                // On a bare home Seat it digs from, the anchor has no Flee;
+                // its rock's Seats are all hot, so it holds nothing, and the
+                // shelter walk takes the plain step inward through the Reach
+                // rather than leave it standing in it. The idle rule alone
+                // would leave it there: with the spawn taken out its rock's
+                // Seats are the room's whole idle ground, and every tile off
+                // them is hot.
+                let border =
+                    borderHome
+                        true
+                        []
+                        [
+                            { meleeWestAt { X = 48; Y = 34 } with
+                                Body = [ RangedAttack; Move ]
+                            }
+                        ]
+                        [ anchor "a-1" 0 50, { X = 1; Y = 34 } ]
+
+                let colony =
+                    { border with
+                        Sources = [ source "src-x" ]
+                        Spatial =
+                            { border.Spatial with
+                                TargetKinds = border.Spatial.TargetKinds |> Map.remove "spawn-1"
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        layer.Terrain |> TerrainGrid.add { X = 1; Y = 33 } Wall
+                                    TargetPositions = layer.TargetPositions |> Map.remove "spawn-1"
+                                    Obstacles = Set.empty
+                                })
+                    }
+                    |> withTarget "src-x" { X = 1; Y = 33 } Source
+
+                Expect.isTrue
+                    ([ 1, 34; 1, 35; 2, 33; 2, 34; 2, 35; 3, 33; 3, 34; 3, 35 ]
+                     |> List.forall (fun (x, y) -> Set.contains { X = x; Y = y } (homeReach colony)))
+                    "the premise: the rock's Seats and the ground off them are in the archer's spilled Reach"
+
+                let decision = decideOn colony
+
                 Expect.isNone
                     (Map.tryFind "a-1" decision.Assignments)
                     "the premise: no Flee for it, and no work"
@@ -4132,7 +4212,7 @@ let acrossTheBorderTests =
                 Expect.isTrue
                     (step
                      |> List.forall (function
-                         | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                         | MoveCreep(_, (Right | TopRight)) -> true
                          | _ -> false)
                      && not (List.isEmpty step))
                     $"it steps inward: {step}"

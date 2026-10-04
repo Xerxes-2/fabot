@@ -1303,6 +1303,11 @@ let sixWork = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
 
 let threeWork = [ Work; Work; Work; Carry; Move ]
 
+/// The same two cast for an outpost's Post: one Move per two Work (#515).
+let outpostSixWork = sixWork @ [ Move; Move ]
+
+let outpostThreeWork = threeWork @ [ Move ]
+
 /// The Reach of one tick, read at the seam its three readers share: this is
 /// that derivation, not a second one. The home room's share, since these
 /// colonies stand their hostiles at home.

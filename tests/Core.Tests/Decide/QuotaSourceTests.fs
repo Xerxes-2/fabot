@@ -235,8 +235,10 @@ let sourceOutputTests =
                 // projection, so its Post is still in the Anchor row and the fleet
                 // still carries `a-out`. Live the two arrive and vanish together,
                 // because the shell gates the structure census and the control entry
-                // on the same `seen` list.
-                let blind = postedOutpostColony 6 []
+                // on the same `seen` list. Seven workers: the outpost Post's
+                // Anchor is charged at its legged body (#515), 50 under the
+                // home one at this bank.
+                let blind = postedOutpostColony 7 []
 
                 Expect.isEmpty
                     (spawnIntents (decideOn blind).Intents)

@@ -200,6 +200,33 @@ let anchorDigTests =
             }
         ]
 
+/// `anchorCapColony`'s W1N2 with its controller placed, so the room is a
+/// declared outpost this colony reserves, and a reserver already standing
+/// for it, so the reserver row spends none of the bank. Nobody holds the
+/// controller: the reservation has lapsed.
+let private lapsedOutpostColony () =
+    let rock = { X = 40; Y = 40 }
+
+    let colony =
+        { incomeColony with
+            Bank = bank 1300 1300
+            Sources = incomeColony.Sources @ [ source "src-out" ]
+            Creeps = [ worker "w1" 0 50; creepWith "reserver-r1" 0 0 [ BodyPart.Claim; Move ] ]
+        }
+        |> withoutHomePosts
+        |> withOutpost
+            "W1N2"
+            [
+                "src-out", rock, Source
+                "can-out", { rock with X = rock.X - 1 }, Structure BuiltKind.Container
+                "ctrl-out", { rock with Y = rock.Y + 2 }, Controller
+            ]
+            (threeSeatField rock)
+
+    { colony with
+        RoomControl = Map.add "W1N2" neutralRoom colony.RoomControl
+    }
+
 [<Tests>]
 let anchorWorkCapTests =
     testList
@@ -213,27 +240,40 @@ let anchorWorkCapTests =
                 // Only who holds W1N2 moves between the two calls.
                 Expect.equal
                     (anchorCastBy (anchorCapColony false [ "W1N2", reservedRoom true 4000 ]))
-                    sixWork
+                    outpostSixWork
                     "reserved, the rock gives ten a tick and the row buys the six Work that dig it"
 
                 Expect.equal
                     (anchorCastBy (anchorCapColony false [ "W1N2", neutralRoom ]))
-                    threeWork
+                    outpostThreeWork
                     "unreserved it gives five, and three Work drain it as fast as it fills"
             }
 
+            test
+                "a declared outpost whose reservation lapsed is cast for the rate its reserver restores" {
+                // Live t961,374: W18S25's reserver died under a raid, the
+                // reservation ran out, and the Anchor cast that tick was
+                // `3W1C1M` for its whole 1,500 ticks — half the rock once the
+                // next reserver lands. A room this colony reserves is cast
+                // for the held rate whatever the reservation reads now.
+                Expect.equal
+                    (anchorCastBy (lapsedOutpostColony ()))
+                    outpostSixWork
+                    "W1N2 is ours to reserve, so its Post's Anchor is the held six Work"
+            }
             test "a neutral outpost Post does not shrink the ceiling the home room asks for" {
                 // The same neutral W1N2 with the colony's own two Posts
                 // added and a fleet of one worker: three Posts empty. Every
                 // cast is bought under the dearest vacancy's rock, since
                 // travel cost pins the finished body on whichever Post is
-                // nearest. Two spawns and a 1,300 bank buy exactly one: 700
-                // for six Work, and the 600 left cannot pay a second, so the
-                // second spawn yields the seat rather than spend 400 on the
-                // neutral Post's `3W/1C/1M`.
+                // nearest — legged, since that may be the outpost's (#515).
+                // Two spawns and a 1,300 bank buy exactly one: 800 for six
+                // Work, and the 500 left cannot pay a second, so the second
+                // spawn yields the seat rather than spend 450 on the neutral
+                // Post's `3W/1C/2M`.
                 Expect.equal
                     (anchorCastsBy (anchorCapColony true [ "W1N2", neutralRoom ]))
-                    [ sixWork ]
+                    [ outpostSixWork ]
                     "the home room's held rock keeps its own replacement at six Work, and the neutral rock beside it buys nothing"
             }
 
@@ -258,7 +298,7 @@ let anchorWorkCapTests =
                 // largest, and the safe direction to be wrong in.
                 Expect.equal
                     (anchorCastBy (anchorCapColony false []))
-                    sixWork
+                    outpostSixWork
                     "a rock nobody can price caps nothing, and the row keeps the held ceiling"
             }
 
@@ -284,6 +324,18 @@ let anchorWorkCapTests =
                         "worker-"
                         "one short of it the worker row is short, which the held charge would not have hired"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
+            }
+
+            test "an outpost Post is charged the legged body its row casts there" {
+                // At the 600 bank an outpost Post's Anchor is `4W/1C/2M`, 550
+                // (#515), where a home Post's is `5W/1C/1M`, 600. The 50 is
+                // the straddle here: charged the home body this fleet of eleven
+                // is the whole target, charged the cast one the surplus buys a
+                // seventh worker.
+                Expect.equal
+                    (decideOn (postedOutpostColony 6 [])).Quotas.Target
+                    12
+                    "the outpost Post is charged 550, and the surplus it leaves hires one more"
             }
 
             test "the charge is one body a Post and not the quota times one ceiling" {

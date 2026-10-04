@@ -8,10 +8,15 @@ open Fabot.Core
 open Fabot.Core.Types
 
 /// The bodies that run from a Threat: Flee's body gate, and the mover's, which
-/// walks them round a Reach (#472). A Work-heavy body cannot run (the answer
-/// for its Post is a rampart), and a Fighter will not.
-let internal runsFromThreats atlas (creep: CreepInfo) =
-    not (isFighterBody creep) && not (Atlas.workHeavy atlas creep.Name)
+/// walks them round a Reach (#472). A Fighter will not run, nor a Work-heavy
+/// body standing where it digs (the answer for its Post is a rampart); one
+/// walking anywhere runs like any other body (#515).
+let internal runsFromThreats (view: ColonyView) atlas (creep: CreepInfo) =
+    not (isFighterBody creep)
+    && not (
+        Atlas.workHeavy atlas creep.Name
+        && Atlas.standsWhereItDigs atlas (view.Sources |> List.map (fun s -> s.Id)) creep.Name
+    )
 
 /// Whether a creep can usefully work this Task right now: the body must be able
 /// to do it, and its energy state must call for it. Gates read part arithmetic,
@@ -331,10 +336,10 @@ let internal applicable
     // rampart, with the raid through, it is only a target, and a raider
     // beside it draws the towers' reserve.
     | Flee ->
-        (runsFromThreats atlas creep
-         || isNamedFor defenderPattern creep.Name
-            && Threats.defendersWanted view threats = 0)
-        && standsInReach threats atlas creep.Name
+        standsInReach threats atlas creep.Name
+        && (runsFromThreats view atlas creep
+            || isNamedFor defenderPattern creep.Name
+               && Threats.defendersWanted view threats = 0)
 
 /// Whether a controller stands in a room nobody owns: the claim party's
 /// (#471), the one Upgrade pooled on such a controller. Read off the room's

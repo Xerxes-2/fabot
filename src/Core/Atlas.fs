@@ -1415,6 +1415,18 @@ let workAreaFor (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
 let workAreaAcross (atlas: Atlas) (creep: string) (task: Task) : Set<RoomPos> =
     narrowedArea atlas creep task
 
+/// Whether a Work-heavy body stands where it digs from (#515): a mine Post of
+/// its room, or a tile of one of the named sources' Harvest Work Area narrowed
+/// for it — a Post, or at home a bare Seat of a source with no Post.
+let standsWhereItDigs (atlas: Atlas) (sourceIds: string list) (creep: string) : bool =
+    match creepAt atlas creep with
+    | None -> false
+    | Some(room, tile) ->
+        Set.contains tile (minePostsIn atlas room)
+        || sourceIds
+           |> List.exists (fun id ->
+               Set.contains (RoomPos.at room tile) (narrowedArea atlas creep (Harvest id)))
+
 /// The controller's upgrade buffers, by id: built containers standing inside
 /// a controller's Upgrade Work Area and on no Post (#405). No
 /// controller, none placed or no built container answers with the empty set,

@@ -957,21 +957,21 @@ let quotaInputTests =
                 // An Anchor is expiring when its life is at or under the ticks its
                 // replacement needs to stand where it stands. Pairwise on the
                 // reservation of the room its one Post stands in: held, the cast is
-                // `6W/1C/1M`, eight parts, 24 in the spawner and a slow walk, and an
-                // Anchor with fifty ticks left is inside that lead; unheld the rock
-                // gives five, the cast is `3W/1C/1M`, and it is not. Priced at
-                // `bodyFor`'s held ceiling both arms read "expiring" and the successor
-                // stood beside the spawn reading its own Post as full
-                // (`IdleReason.NoneFree`).
+                // `6W/1C/3M`, ten parts, 30 in the spawner, and an Anchor with forty
+                // ticks left is inside that lead; unheld the rock gives five, the
+                // cast is `3W/1C/2M`, twelve ticks sooner out at the same pace, and
+                // it is not. Priced at `bodyFor`'s held ceiling both arms read
+                // "expiring" and the successor stood beside the spawn reading its
+                // own Post as full (`IdleReason.NoneFree`).
                 Expect.equal
-                    (castRows (decideOn (outpostPostColony true 50)).Intents)
+                    (castRows (decideOn (outpostPostColony true 40)).Intents)
                     [ "anchor" ]
-                    "a held rock: the row casts an eight-part body and fifty ticks is inside its lead"
+                    "a held rock: the row casts a ten-part body and forty ticks is inside its lead"
 
                 Expect.equal
-                    (castRows (decideOn (outpostPostColony false 50)).Intents)
+                    (castRows (decideOn (outpostPostColony false 40)).Intents)
                     [ "worker" ]
-                    "an unheld one: the row casts five parts, the lead is shorter, and the incumbent still counts"
+                    "an unheld one: the row casts six parts, the lead is shorter, and the incumbent still counts"
             }
 
             test "a vacant Post is cast into with a body sized for its own rock" {
@@ -982,12 +982,12 @@ let quotaInputTests =
                 // empty Post seats one rock. Pairwise on the outpost's reservation.
                 Expect.equal
                     (anchorCastsBy (pairedPostColony false 1500 20))
-                    [ threeWork ]
+                    [ outpostThreeWork ]
                     "the vacancy is on a rock nobody holds: three Work drain it as fast as it fills"
 
                 Expect.equal
                     (anchorCastsBy (pairedPostColony true 1500 20))
-                    [ sixWork ]
+                    [ outpostSixWork ]
                     "reserved, the same vacancy is worth ten a tick and the row buys the six Work that dig it"
             }
 
@@ -1006,10 +1006,11 @@ let quotaInputTests =
                 // With the outpost's Post genuinely empty a standing read would find
                 // that hole alone and cast the home replacement at three Work; above,
                 // with both garrisoned, it found none and answered six for the wrong
-                // reason.
+                // reason. The open outpost Post legs the cast and its lead (#515),
+                // and the legged lead is shorter, so the incumbent is given 20.
                 Expect.equal
-                    (anchorCastsBy (pairedPostColony false 40 1500 |> withoutOutpostGarrison))
-                    [ sixWork ]
+                    (anchorCastsBy (pairedPostColony false 20 1500 |> withoutOutpostGarrison))
+                    [ outpostSixWork ]
                     "an expiring incumbent's own Post is a vacancy even with a neutral one standing open beside it"
             }
 
@@ -1036,17 +1037,17 @@ let quotaInputTests =
 
                 Expect.equal
                     (atBank 1800)
-                    [ sixWork ]
-                    "and the same two vacancies at a bank that can pay buy the dearer of them"
+                    [ outpostSixWork ]
+                    "and the same two vacancies at a bank that can pay buy the dearer of them, legged for the outpost one"
             }
 
             test "a lead on a Post is priced at the body that Post will be cast" {
                 // A lead is what the successor needs to stand where this creep stands,
                 // so it is the Post's body and not the row's largest. Same 40 ticks on
-                // the same garrison a Seam away: held, `6W/1C/1M` has a lead of 66 and
-                // 40 is expiring; unheld, `3W/1C/1M` has a lead of 36 and 40 still
+                // the same garrison a Seam away: held, the legged `6W/1C/3M` is ten
+                // parts and 40 is expiring; unheld, `3W/1C/2M` is six and 40 still
                 // counts. Priced at the colony's richest ceiling both arms would read
-                // 66 and cast 30 ticks early.
+                // the longer lead and cast early.
                 Expect.equal
                     (castRows (decideOn (pairedPostColony true 1500 40)).Intents)
                     [ "anchor" ]

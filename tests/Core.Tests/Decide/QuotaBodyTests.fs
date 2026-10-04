@@ -288,6 +288,34 @@ let patternTableTests =
                     "an RCL8 bank casts the same six-Work Anchor"
             }
 
+            test "an outpost Post's anchor carries a Move per two Work, and a home Post's keeps one" {
+                // #515; the rule's why is `anchorBodyFor`'s.
+                let outpost =
+                    { largestSizing with
+                        AnchorLegs = OutpostLegs
+                    }
+
+                Expect.equal
+                    (sizedBodyFor outpost anchorPattern 800)
+                    (List.replicate 6 Work @ [ Carry ] @ List.replicate 3 Move)
+                    "800 buys six Work, the Carry and three Move"
+
+                Expect.equal
+                    (sizedBodyFor outpost anchorPattern 550)
+                    (List.replicate 4 Work @ [ Carry ] @ List.replicate 2 Move)
+                    "550 trades no Work for the legs: four Work, two Move"
+
+                Expect.equal
+                    (sizedBodyFor outpost anchorPattern 300)
+                    [ Work; Work; Carry; Move ]
+                    "the block's one Move already carries its two Work"
+
+                Expect.equal
+                    (bodyFor anchorPattern 800)
+                    (List.replicate 6 Work @ [ Carry; Move ])
+                    "the home Post's anchor at the same bank keeps its one Move"
+            }
+
             test "the hauler row builds whole blocks and nothing else" {
                 // 500 buys three whole blocks (450) and strands the rest:
                 // the row's own declaration is road parity, which a padded

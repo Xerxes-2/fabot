@@ -1,6 +1,8 @@
 # Body patterns are colony facts; creeps still have no role
 
-> **Status:** amended by 0016, 0021, 0050, 0057, 0078
+> **Status:** amended by 0016, 0021, 0050, 0057, 0078, #515
+
+> **Amended by #515**: "its single Move is the one-time price of walking to the seat" holds for a home Post only. An Anchor cast for an outpost's Post carries one Move per two Work (`anchorBodyFor`), because its one-time walk crosses rooms a raid crosses, and at a tile per six or seven ticks three Anchors died on it in one afternoon. A cast is legged when any vacant Post it may take is an outpost's (the finished body still chooses its Post by travel cost). Still Work-heavy (Work > Move), so the census and every heavy gate read it as before.
 
 > **Amended by #261** (ADR 0057 decision 2) with a **seventh row**, the [[miner]] — the store-less Work body over the mineral container. Two of this ADR's sentences take the strain and neither breaks. "A row is a name and a sizing rule": the row's block is `[Work; Work; Move]` and its rule is one Move per `Tuning.MinerWorkPerMove` Work capped at twenty Work, exempt from ADR 0003's parity for the [[anchor]]'s own reason and then some — this body walks once and never again. And "the row is read back off the parts alone": Work-heavy with **no Carry at all** is the one cut no other row makes, and it is asked *before* the heavy arm, or a `[20 Work; 4 Move]` would read back as an Anchor and fill a quota counted off the [[post]]s. The no-role axiom, the quota law and the cascade stand unchanged.
 

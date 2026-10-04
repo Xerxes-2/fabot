@@ -472,16 +472,45 @@ let private parityBodyFor (pattern: BodyPattern) capacity =
 
     List.replicate work Work @ List.replicate carry Carry @ List.replicate move Move
 
+/// Which walk an Anchor is cast for: to a home Post, or across rooms to an
+/// outpost's (#515).
+type AnchorLegs =
+    | HomeLegs
+    | OutpostLegs
+
+/// The legs of an Anchor cast for a Post in the named room.
+let internal anchorLegsIn (home: string) (room: string) =
+    if room = home then HomeLegs else OutpostLegs
+
 /// The anchor row's sizing rule: one Carry, one Move, and every part slot the
 /// remaining energy affords on Work up to the row's ceiling. Exempt from
-/// fatigue parity; never below the row's two-Work block.
-let internal anchorBodyFor workCap capacity =
-    let work =
+/// fatigue parity; never below the row's two-Work block. An outpost Post's
+/// Anchor carries one Move per two Work instead (#515): its walk crosses
+/// rooms a raid crosses, and an empty Carry weighs nothing, so that crosses
+/// plain at a tile every two ticks.
+let internal anchorBodyFor workCap legs capacity =
+    let homeWork =
         (capacity - bodyCost [ Carry; Move ]) / bodyCost [ Work ]
         |> max 2
         |> min workCap
 
-    List.replicate work Work @ [ Carry; Move ]
+    let bodyOf work =
+        let moves =
+            match legs with
+            | HomeLegs -> 1
+            | OutpostLegs -> (work + 1) / 2
+
+        List.replicate work Work @ [ Carry ] @ List.replicate moves Move
+
+    // The home body's Work is the most the outpost's can afford, its legs
+    // costing only more.
+    let rec fit work =
+        if work > 2 && bodyCost (bodyOf work) > capacity then
+            fit (work - 1)
+        else
+            work
+
+    bodyOf (fit homeWork)
 
 /// The whole-block rows' shared arithmetic: as many whole blocks as the
 /// capacity buys, never below one and never past the engine's 50-part cap, with
@@ -580,6 +609,7 @@ let internal reserverBodyWithin claims capacity =
 type BodySizing =
     {
         AnchorCap: int
+        AnchorLegs: AnchorLegs
         ReserverClaims: int list
         /// `Tuning`'s own number: a tunable rather than a fact of the tick,
         /// so every caster hands over its colony's own.
@@ -604,6 +634,7 @@ type BodySizing =
 let largestSizing =
     {
         AnchorCap = heldWorkCap
+        AnchorLegs = HomeLegs
         ReserverClaims = []
         MinerWorkPerMove = Tuning.defaults.MinerWorkPerMove
         GuardBlocks = guardBlocksMost
@@ -617,7 +648,7 @@ let largestSizing =
 /// successor and by `bodyFor`: written per caller it was three tables.
 let sizedBodyFor (sizing: BodySizing) pattern capacity =
     if pattern.Name = anchorPattern.Name then
-        anchorBodyFor sizing.AnchorCap capacity
+        anchorBodyFor sizing.AnchorCap sizing.AnchorLegs capacity
     elif pattern.Name = haulerPattern.Name then
         haulerBodyFor capacity
     elif pattern.Name = courierPattern.Name then

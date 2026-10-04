@@ -1,6 +1,8 @@
 # A Threat gates Tasks through its Reach, and a creep inside one flees
 
-> **Status:** amended by #217, #218, #514
+> **Status:** amended by #217, #218, #514, #515
+
+> **Amended 2026-10-05** (#515): "a body that cannot run does not try" narrows to a Work-heavy body **standing where it digs** — a Post or mine Post, or at home a bare Seat of a source with no Post. Walking anywhere, it takes Flee like any other non-Fighter. The outpost Anchor's legs are ADR 0006's #515 amendment.
 
 > **Amended 2026-10-05** (#514, live t958,965: a reserver idling on W17S25's west exit died to a melee on W18S25's east edge that put no Reach on its tile): a Reach is filed by the room each tile lies in, not the room the Threat stands in. A Threat within its weapon range plus margin of an exit also reaches across it — from each passable crossing, onto the next room's tiles within what is left of that distance after the walk to the exit and one tick of carry — less our ramparts there, and none at all into a room of ours under safe mode. So a Reach now lands in rooms no Threat stands in — the home, an outpost, a transit room — and every reader keyed by room (Flee, the Work Area subtraction, the spawn hold) answers it there. And while an **armed** Threat (not merely a hostile) stands in a room beside the home, or a raid [[stand-down]] of this colony's runs in one with nothing in sight — the last body out took our vision with it — every idle body of ours at home other than a Fighter walks in to the home's **shelter** (behind the declared perimeter, else five or more tiles from every exit; less the Reach and the tiles beside a spawn) and stays on it, instead of idling on the exit it arrived by. No shelter is laid under the home's own safe mode.
 

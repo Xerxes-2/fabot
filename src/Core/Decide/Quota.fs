@@ -51,14 +51,26 @@ let private isPosted atlas (s: SourceInfo) =
 /// fallback answers the largest ceiling the rule gives; a Post whose room the
 /// colony cannot price keeps the held ceiling. Keyed by the Post's room
 /// position, never a bare tile: two sources whose Seats overlap share a Post
-/// tile, and the richer rate keeps it.
-let internal postWorkCapsOf (view: ColonyView) atlas : Map<RoomPos, int> =
+/// tile, and the richer rate keeps it. A room the reserver row can reserve is
+/// capped at the held rate whatever its reservation reads this tick (#515): a
+/// body cast in a lapse lives 1,500 ticks, and the reserver restores the rate
+/// in far fewer. A bank that cannot buy a reserver restores nothing.
+let internal postWorkCapsOf (view: ColonyView) atlas (reservable: string list) : Map<RoomPos, int> =
+    let reserved =
+        if view.Bank.Capacity < bodyCost reserverPattern.Block then
+            []
+        else
+            reservable
+
     view.Sources
     |> List.collect (fun s ->
         let cap =
-            sourceRateOf view atlas s.Id
-            |> Option.map workCapOf
-            |> Option.defaultValue heldWorkCap
+            match Atlas.targetRoom atlas s.Id with
+            | Some room when List.contains room reserved -> heldWorkCap
+            | _ ->
+                sourceRateOf view atlas s.Id
+                |> Option.map workCapOf
+                |> Option.defaultValue heldWorkCap
 
         Atlas.postsOf atlas s.Id |> Set.toList |> List.map (fun tile -> tile, cap))
     |> List.fold
@@ -73,12 +85,19 @@ let internal postWorkCapsOf (view: ColonyView) atlas : Map<RoomPos, int> =
 /// this bank, never the living Anchor's body: a quota read off a living body
 /// oscillates on that body's death.
 let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int option =
+    let legs =
+        Atlas.targetRoom atlas sourceId
+        |> Option.map (anchorLegsIn (SpatialInfo.homeName view.Spatial))
+        |> Option.defaultValue HomeLegs
+
     sourceRateOf view atlas sourceId
     |> Option.map (fun rate ->
-        // The same `anchorBodyFor` triple the amortization charges that Post
-        // at, so the two readings cannot drift apart.
+        // The body the amortization charges that Post at, but under today's
+        // rate where a lapsed reservation's Post is charged the held one
+        // (#515): a ceiling at or over the rate's saturation digs the whole
+        // rate either way, so the `min` below cannot tell them apart.
         let dug =
-            partCountIn (anchorBodyFor (workCapOf rate) view.Bank.Capacity) Work
+            partCountIn (anchorBodyFor (workCapOf rate) legs view.Bank.Capacity) Work
             * Engine.harvestPerWork
 
         min rate dug)
@@ -838,7 +857,7 @@ let internal rowSizingOf
     : RowSizing =
     {
         UpgraderWork = upgraderWorkOf view atlas held
-        AnchorPostCaps = postWorkCapsOf view atlas
+        AnchorPostCaps = postWorkCapsOf view atlas outposts.ReservableRooms
         ReserverClaims = reserverClaimsOf view threats outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         GuardBlocks = guardBlocksWanted view threats outposts
@@ -855,6 +874,7 @@ let internal rowSizingOf
 /// ground, so their price is settled before the surplus has a number.
 let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) haulerQuota =
     let capacity = view.Bank.Capacity
+    let home = SpatialInfo.homeName view.Spatial
     let reserverClaims = sizing.ReserverClaims
 
     // Every reserver cast this tick carries the largest outstanding demand
@@ -889,7 +909,10 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
     // would actually buy for that Post.
     let amortization =
         (sizing.AnchorPostCaps
-         |> Map.fold (fun total _ cap -> total + bodyCost (anchorBodyFor cap capacity)) 0)
+         |> Map.fold
+             (fun total (post: RoomPos) cap ->
+                 total + bodyCost (anchorBodyFor cap (anchorLegsIn home post.Room) capacity))
+             0)
         + haulerQuota * bodyCost (bodyFor haulerPattern capacity)
         + reserverCost * Engine.creepLifetime / Engine.claimLifetime
         + minerCost * view.Tuning.MineContactAgeing

@@ -1,6 +1,8 @@
 # The Anchor row's Work is capped at source saturation plus one
 
-> **Status:** amended by 0050, 0053, 0076
+> **Status:** amended by 0050, 0053, 0076, #515
+
+> **Amended by #515** on the cap's input: a Post in a room this colony reserves (the reserver row's rooms) is capped at the **held** rate whatever the reservation reads this tick. Live, reservers dying under raids let W18S25's and W17S26's reservations lapse, and the Anchors cast in the lapse were `3W` bodies for 1,500 ticks against a rate the next reserver restored in a few hundred. A room not ours to reserve keeps the current-rate rule. The haul and income reading (`sourceOutputOf`) stays at today's rate: what the rock ships now is what the haulers carry now.
 
 > **Narrowed by ADR 0053** on the cap's input for the second time and on the rule for neither: saturation plus one spare, now read off the **one rock** the [[post]] being cast into seats rather than folded over the sources the row hires for (ADR 0042's `List.max`). The rejection below stands and is what the new rule is built on — a spawn still does not know which Post an Anchor will man, and a finished body is still pinned by [[travel cost]] — because what pairs the cast to a rock is not the caster's knowledge but the **vacancy** it is filling: one empty Post, one rock, one rate. That is a fact about a source's regeneration exactly as this ADR has it, and none of the arithmetic here moves.
 
