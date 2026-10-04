@@ -183,6 +183,7 @@ let internal colonyOf (room: LoadedRoom) level =
                 ]
         ConstructionSites = []
         Creeps = []
+        Unprojected = Set.empty
         Hostiles = []
         Allies = []
         // A captured room holds no invader core: the captures were taken

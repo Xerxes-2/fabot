@@ -957,18 +957,19 @@ let quotaInputTests =
                 // An Anchor is expiring when its life is at or under the ticks its
                 // replacement needs to stand where it stands. Pairwise on the
                 // reservation of the room its one Post stands in: held, the cast is
-                // `6W/1C/1M`, eight parts, 24 in the spawner and a slow walk, and a
-                // twenty-tick-old Anchor is inside that lead; unheld the rock gives
-                // five, the cast is `3W/1C/1M`, and it is not. Priced at `bodyFor`'s
-                // held ceiling both arms read "expiring" and the successor stood
-                // beside the spawn reading its own Post as full (`IdleReason.NoneFree`).
+                // `6W/1C/1M`, eight parts, 24 in the spawner and a slow walk, and an
+                // Anchor with fifty ticks left is inside that lead; unheld the rock
+                // gives five, the cast is `3W/1C/1M`, and it is not. Priced at
+                // `bodyFor`'s held ceiling both arms read "expiring" and the successor
+                // stood beside the spawn reading its own Post as full
+                // (`IdleReason.NoneFree`).
                 Expect.equal
-                    (castRows (decideOn (outpostPostColony true 20)).Intents)
+                    (castRows (decideOn (outpostPostColony true 50)).Intents)
                     [ "anchor" ]
-                    "a held rock: the row casts an eight-part body and twenty ticks is inside its lead"
+                    "a held rock: the row casts an eight-part body and fifty ticks is inside its lead"
 
                 Expect.equal
-                    (castRows (decideOn (outpostPostColony false 20)).Intents)
+                    (castRows (decideOn (outpostPostColony false 50)).Intents)
                     [ "worker" ]
                     "an unheld one: the row casts five parts, the lead is shorter, and the incumbent still counts"
             }

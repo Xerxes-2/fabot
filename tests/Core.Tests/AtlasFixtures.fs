@@ -30,6 +30,7 @@ let snapshotWith creeps spatial =
         Fought = Map.empty
         ConstructionSites = []
         Creeps = creeps
+        Unprojected = Set.empty
         Hostiles = []
         Allies = []
         InvaderCores = []

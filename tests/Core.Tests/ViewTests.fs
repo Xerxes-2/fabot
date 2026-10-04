@@ -1095,6 +1095,46 @@ let colonyViewTests =
                     "and the colony that has withdrawn remembers nothing of it"
             }
 
+            test "a body standing in a stood-down outpost is named unplaced" {
+                // The anchor row reads this to count out an Anchor the mover
+                // cannot step (#506): the shut room has no layer to place it in.
+                let colony = declared |> List.find (fun colony -> colony.Home = mother)
+
+                let world =
+                    { pairWorld with
+                        Creeps = creep "anchor-900-Spawn1" outpost :: pairWorld.Creeps
+                    }
+
+                let shutView =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        declared
+                        { StandDown.none with
+                            Shut = Set.singleton outpost
+                        }
+                        (World.creepColonies
+                            Tuning.defaults
+                            declared
+                            (World.living declared world)
+                            (Map.ofList [ mother, Set.singleton outpost ])
+                            world)
+                        world
+                        colony
+
+                Expect.isTrue
+                    (shutView.Creeps |> List.exists (fun creep -> creep.Name = "anchor-900-Spawn1"))
+                    "the body is still hers"
+
+                Expect.equal
+                    shutView.Unprojected
+                    (Set.singleton "anchor-900-Spawn1")
+                    "and the one standing outside every room she projects is named, the home worker not"
+
+                Expect.isEmpty
+                    (viewOf world mother).Unprojected
+                    "with the outpost worked, nobody is unplaced"
+            }
+
             test "a re-checked room is looked into and worked no more than before" {
                 // On the one tick in every `Tuning.RivalRecheck` the gate
                 // hands a latched room back to the scan, the colony reads

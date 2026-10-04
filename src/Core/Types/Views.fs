@@ -142,6 +142,11 @@ type ColonyView =
         /// the world's own order, so who holds a body does not move the
         /// Matcher's order.
         Creeps: CreepInfo list
+        /// The names of those creeps standing in a room this colony does not
+        /// project, and so in no layer: the bodies the projection does not
+        /// place because the shell does not, told apart from a fixture that
+        /// simply placed nobody (#506).
+        Unprojected: Set<string>
         /// Hostile creeps standing in any room this colony works and has
         /// vision in, each under its own room's name.
         Hostiles: HostileInfo list
@@ -1056,6 +1061,12 @@ module ColonyView =
             Fought = gate.Fought
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
+            Unprojected =
+                mine
+                |> List.filter (fun creep ->
+                    not (List.exists (fun (room, _) -> room = creep.Room) worked))
+                |> List.map (fun creep -> creep.Info.Name)
+                |> Set.ofList
             // An ally's creep is no hostile (#412): this is the one entry every
             // rule that fires, flees, stands down or counts a rival reads.
             Hostiles =

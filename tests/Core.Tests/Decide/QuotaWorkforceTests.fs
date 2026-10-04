@@ -644,6 +644,210 @@ let incomeWorkforceTests =
             }
         ]
 
+/// `pairedPostColony` with the home Post's garrison gone and a slow
+/// ten-Work Anchor left over from an outpost the gate has shut (#506): the
+/// shut room's Posts have left the projection, so the row is owed the two
+/// Posts still in it, the outpost's garrisoned and the home one empty.
+/// `placed` stands the stray off the Post in W1N2, its walk home the far
+/// side of a border from its lead; unplaced it stands where the shell puts
+/// a body in a room the colony does not project: in no layer, and named in
+/// `Unprojected`.
+let private strandedAnchorColony life placed =
+    let colony = pairedPostColony true 1500 1500
+
+    let stray =
+        creepWith "a-stray" 0 50 [ yield! List.replicate 10 Work; Carry; Move ]
+        |> withLife life
+
+    let outpost = Map.find "W1N2" colony.Spatial.Rooms
+
+    { colony with
+        Creeps = stray :: (colony.Creeps |> List.filter (fun creep -> creep.Name <> "a-home"))
+        Unprojected = if placed then Set.empty else Set.singleton "a-stray"
+        Spatial =
+            colony.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    CreepPositions = Map.remove "a-home" layer.CreepPositions
+                })
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    CreepPositions =
+                        if placed then
+                            Map.add "a-stray" { X = 10; Y = 48 } outpost.CreepPositions
+                        else
+                            outpost.CreepPositions
+                }
+    }
+
+[<Tests>]
+let strandedAnchorTests =
+    testList
+        "an anchor stranded off the projection"
+        [
+            let anchorRow colony =
+                rowOf "anchor" colony
+                |> Option.map (fun row -> row.Quota, row.Living, row.Casting)
+
+            test "an anchor too short of life to walk to the empty Post leaves the row a gap" {
+                Expect.equal
+                    (anchorRow (strandedAnchorColony 80 true))
+                    (Some(2, 1, 0))
+                    "its life outlasts its lead but not its walk home: the outpost's garrison alone fills the row"
+
+                Expect.equal
+                    (anchorCastsBy (strandedAnchorColony 80 true))
+                    [ sixWork ]
+                    "the row casts for the empty home Post"
+            }
+
+            test "an anchor with the life to walk to the empty Post still fills the row" {
+                Expect.equal
+                    (anchorRow (strandedAnchorColony 1000 true))
+                    (Some(2, 2, 0))
+                    "it can reach the home Post, so it is the row's second body and the Matcher's to re-seat"
+
+                Expect.isEmpty (anchorCastsBy (strandedAnchorColony 1000 true)) "nothing is cast"
+            }
+
+            test "an anchor the projection does not place fills no seat of the row" {
+                // The mover steps placed bodies alone, so one standing in a
+                // shut room walks nowhere until the room is projected again,
+                // whatever life it has.
+                Expect.equal
+                    (anchorRow (strandedAnchorColony 1000 false))
+                    (Some(2, 1, 0))
+                    "the shut room's anchor is counted out"
+
+                Expect.equal
+                    (anchorCastsBy (strandedAnchorColony 1000 false))
+                    [ sixWork ]
+                    "the row casts for the empty home Post"
+            }
+
+            test "two anchors walking to one vacancy fill one seat" {
+                let colony = strandedAnchorColony 1000 true
+                let outpost = Map.find "W1N2" colony.Spatial.Rooms
+
+                let twoStrays =
+                    { colony with
+                        Creeps = (anchor "a-stray2" 0 50 |> withLife 1000) :: colony.Creeps
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    CreepPositions =
+                                        Map.add "a-stray2" { X = 11; Y = 48 } outpost.CreepPositions
+                                }
+                    }
+
+                Expect.equal
+                    (anchorRow twoStrays)
+                    (Some(2, 2, 0))
+                    "the outpost's garrison and one of the two walkers; the other is counted out"
+            }
+
+            test
+                "an off-Post anchor beside the spawn without the life to reach the only Post is counted out" {
+                // The shape `outpostPostColony` had before #506: the incumbent two
+                // tiles from the spawn, its one Post across the border. Twenty
+                // ticks is outside its own lead, and short of a walk of forty-odd.
+                let beside life =
+                    let colony = outpostPostColony false life
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.add "a1" { X = 10; Y = 5 } layer.CreepPositions
+                                })
+                            |> withNeighbour
+                                "W1N2"
+                                { Map.find "W1N2" colony.Spatial.Rooms with
+                                    CreepPositions = Map.empty
+                                }
+                    }
+
+                Expect.equal (anchorRow (beside 20)) (Some(1, 0, 0)) "twenty ticks reach nothing"
+
+                Expect.equal
+                    (castRows (decideOn (beside 20)).Intents)
+                    [ "anchor" ]
+                    "so its successor is cast"
+
+                Expect.equal
+                    (anchorRow (beside 1000))
+                    (Some(1, 1, 0))
+                    "with a life to walk there it counts"
+            }
+
+            test "a walk into a nursery counts the pioneers' stay, as the Pool does" {
+                // The outpost's Post is the vacancy and W1N2 is a nursery of
+                // ours: an Anchor at home reaches it in time only with the
+                // walk and `PioneerStay` left, the gate `outlivesTheStay`
+                // holds a Harvest there to.
+                let nurseryWith life =
+                    let colony = pairedPostColony true 1500 1500 |> withoutOutpostGarrison
+
+                    { colony with
+                        Creeps = (anchor "a-home2" 0 50 |> withLife life) :: colony.Creeps
+                        RoomControl = Map.add "W1N2" ownedRoom colony.RoomControl
+                        Stages = Map.add "W1N2" Nursery colony.Stages
+                        Spatial =
+                            colony.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        Map.add "a-home2" { X = 10; Y = 5 } layer.CreepPositions
+                                })
+                    }
+
+                let probe = nurseryWith 1500
+
+                let walk =
+                    Atlas.walkTicks (Atlas.ofView probe) "a-home2" (Harvest "src-out")
+                    |> Option.defaultValue 0
+
+                let stay = probe.Tuning.PioneerStay
+
+                Expect.isGreaterThan walk 0 "premise: the Post is a walk away, across the border"
+
+                Expect.equal
+                    (anchorRow (nurseryWith (walk + stay))
+                     |> Option.map (fun (_, living, _) -> living))
+                    (Some 2)
+                    "life for the walk and the stay: it counts"
+
+                Expect.equal
+                    (anchorRow (nurseryWith (walk + stay - 1))
+                     |> Option.map (fun (_, living, _) -> living))
+                    (Some 1)
+                    "a tick short of the stay: counted out"
+            }
+
+            test "a colony whose only anchor is stranded buys one from what is banked" {
+                // The harvest floor (#460) reads the census without the stray:
+                // the bank is short of a capacity-sized body, so only the
+                // floor can cast.
+                let colony = strandedAnchorColony 1000 false
+
+                let stuck =
+                    { colony with
+                        Creeps = colony.Creeps |> List.filter (fun creep -> creep.Name <> "a-out")
+                        Bank = bank 400 1800
+                    }
+
+                Expect.hasLength
+                    (anchorCastsBy stuck)
+                    1
+                    "the floor casts the Anchor the stray cannot be"
+            }
+        ]
+
 [<Tests>]
 let outpostWorkforceTests =
     testList

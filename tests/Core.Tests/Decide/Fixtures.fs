@@ -165,6 +165,7 @@ let bareRespawn =
         Fought = Map.empty
         ConstructionSites = []
         Creeps = []
+        Unprojected = Set.empty
         Hostiles = []
         Allies = []
         InvaderCores = []

@@ -87,6 +87,12 @@ let internal lastSeenIn (view: ColonyView) (tid: string) : string option =
             else
                 None)
 
+/// Whether a body's life covers a walk and `stay` ticks of work beyond it —
+/// the one in-time sum, for the pool's child-room gate and the anchor row's
+/// census alike. A walk the Atlas cannot price refuses nobody.
+let internal outlivesWalk (creep: CreepInfo) stay (walk: int option) =
+    walk |> Option.forall (fun ticks -> creep.TicksToLive >= ticks + stay)
+
 /// The stage of the colony whose home is the named room, off the one
 /// derivation the shell ran for the tick. `None` for a room no colony of ours
 /// lives in.

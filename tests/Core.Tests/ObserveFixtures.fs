@@ -41,6 +41,7 @@ let quiet: ColonyView =
         Fought = Map.empty
         ConstructionSites = []
         Creeps = []
+        Unprojected = Set.empty
         Hostiles = []
         Allies = []
         // An invader core opens the log's other family; empty here, so the

@@ -164,8 +164,8 @@ let internal tooEarly (view: ColonyView) atlas (creep: CreepInfo) task (walk: La
 
 /// Whether a body walking into a child's room (a [[nursery]] or a
 /// bootstrapping child) for this Task lives to be of use there: the walk, and
-/// for work done in the room `Tuning.PioneerStay` beyond it. A body already in
-/// the room, or a Task in no child's room, is not asked.
+/// for work done in the room `Tuning.PioneerStay` beyond it (`childStay`). A
+/// body already in the room, or a Task in no child's room, is not asked.
 let internal outlivesTheStay
     (view: ColonyView)
     atlas
@@ -173,21 +173,9 @@ let internal outlivesTheStay
     task
     (walk: Lazy<int option>)
     =
-    match Atlas.taskRoom atlas task with
-    | Some room when
-        (isNurseryRoom view room || isBootstrapRoom view room)
-        && Atlas.creepRoom atlas creep.Name <> Some room
-        ->
-        let stay =
-            match task with
-            | Build _
-            | Repair _
-            | Upgrade _
-            | Harvest _ -> view.Tuning.PioneerStay
-            | _ -> 0
-
-        walk.Value |> Option.forall (fun ticks -> creep.TicksToLive >= ticks + stay)
-    | _ -> true
+    match childStay view atlas creep task with
+    | Some stay -> outlivesWalk creep stay walk.Value
+    | None -> true
 
 /// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight,
 /// Defend and Assault. A predicate, because the two rules that turn on it

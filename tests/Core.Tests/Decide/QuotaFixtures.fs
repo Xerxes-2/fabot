@@ -614,8 +614,8 @@ let internal sinkLaneColony available controllerX =
 /// A colony whose one [[post]] is an outpost's, so the Anchor row's ceiling
 /// is that room's rate and moves with the reservation on it — which is
 /// what makes the row's cast, and therefore its lead, readable at this
-/// seam. One Anchor alive with `life` ticks left standing two tiles from
-/// the spawn, and one hauler beside it so the supply floor is quiet.
+/// seam. One Anchor alive with `life` ticks left standing on that Post, and
+/// one hauler beside the spawn so the supply floor is quiet.
 let internal outpostPostColony held life =
     { bareRespawn with
         Controller = None
@@ -650,8 +650,7 @@ let internal outpostPostColony held life =
                                     for y in 1..10 -> { X = x; Y = y }, Plain
                             ]
                     TargetPositions = Map.ofList [ "spawn-1", { X = 10; Y = 3 } ]
-                    CreepPositions =
-                        Map.ofList [ "a1", { X = 10; Y = 5 }; "h1", { X = 10; Y = 6 } ]
+                    CreepPositions = Map.ofList [ "h1", { X = 10; Y = 6 } ]
                     Obstacles = Set.singleton { X = 10; Y = 3 }
                 })
             |> withNeighbour
@@ -666,6 +665,7 @@ let internal outpostPostColony held life =
                             ]
                     TargetPositions =
                         Map.ofList [ "src-out", { X = 10; Y = 45 }; "can-out", { X = 10; Y = 44 } ]
+                    CreepPositions = Map.ofList [ "a1", { X = 10; Y = 44 } ]
                 }
     }
 

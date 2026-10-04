@@ -168,6 +168,52 @@ let heldForDefender (pattern: BodyPattern) =
     && pattern.Name <> guardPattern.Name
     && pattern.Name <> rangerPattern.Name
 
+/// The Anchors stranded off the projection (#506), out of the row's count:
+/// one on no Post that does not live to walk to a vacant one — the Pool's
+/// in-time sum, `childStay` included — and one standing in a room the colony
+/// does not project (`Unprojected`), which the mover never steps whatever its
+/// life. A relief walking to its expiring incumbent's Post reaches a vacancy
+/// and counts. With no vacancy the garrison fills the row without them, so
+/// nobody is stranded; with some, at most one placed walker per vacancy
+/// counts, since two bodies walking to one Post fill one seat.
+let internal strandedAnchors
+    (view: ColonyView)
+    atlas
+    (posts: Map<RoomPos, int>)
+    (vacant: Map<RoomPos, int>)
+    (garrison: CreepInfo list)
+    : Set<string> =
+    if Map.isEmpty vacant then
+        Set.empty
+    else
+        let unprojected, offPost =
+            garrison
+            |> List.filter (fun creep ->
+                match Atlas.creepTile atlas creep.Name with
+                | Some tile -> not (Map.containsKey tile posts)
+                | None -> Set.contains creep.Name view.Unprojected)
+            |> List.partition (fun creep -> Atlas.creepTile atlas creep.Name |> Option.isNone)
+
+        let rocks =
+            vacant
+            |> Map.toList
+            |> List.choose (fun (tile, _) -> Atlas.sourceOfPost atlas tile.Room (RoomPos.pos tile))
+
+        let reaches (creep: CreepInfo) =
+            rocks
+            |> List.exists (fun rock ->
+                let task = Harvest rock
+                let stay = childStay view atlas creep task |> Option.defaultValue 0
+                outlivesWalk creep stay (Atlas.walkTicks atlas creep.Name task))
+
+        let reaching, short = offPost |> List.partition reaches
+
+        unprojected
+        @ short
+        @ List.skip (min (Map.count vacant) (List.length reaching)) reaching
+        |> List.map (fun creep -> creep.Name)
+        |> Set.ofList
+
 /// The spawn Intents the Workforce target's rows are owed. The target is the
 /// quota the *generalist* row is hired against; every other row is hired
 /// against its own unfilled quota and can carry the fleet past the target.
@@ -207,10 +253,45 @@ let internal planSpawns
 
         let target = workforceTarget view atlas tasks rows
 
+        // The miner row's cut: Work-heavy and no Carry, subtracted from the
+        // Anchor row's census because the Carry part is the whole of the
+        // difference between the two.
+        let isMinerBody (creep: CreepInfo) =
+            Atlas.workHeavy atlas creep.Name && partCount creep.Body Carry = 0
+
+        let isAnchorBody (creep: CreepInfo) =
+            Atlas.workHeavy atlas creep.Name && not (isMinerBody creep)
+
         // An expiring creep is already outside the count, so its successor is
         // cast while it still works.
-        let living =
+        let unexpired =
             view.Creeps |> List.filter (fun creep -> not (expiring view atlas sizing creep))
+
+        let unexpiredGarrison = unexpired |> List.filter isAnchorBody
+
+        // ADR-0053
+        // The vacancies this row is casting into: every Post with nobody
+        // standing on it who will still be there when a replacement could
+        // arrive. Judged at arrival and never by who is standing there now:
+        // an expiring incumbent is already out of the count, so its Post
+        // reads empty and its successor is sized off its own rock. Read off
+        // who is standing instead, a home succession would find its Post
+        // occupied and buy the replacement off a neutral rock.
+        let vacantPosts =
+            let manned =
+                unexpiredGarrison
+                |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
+                |> Set.ofList
+
+            sizing.AnchorPostCaps
+            |> Map.filter (fun tile _ -> not (Set.contains tile manned))
+
+        // A stranded Anchor is outside the count as an expiring one is (#506).
+        let stranded =
+            strandedAnchors view atlas sizing.AnchorPostCaps vacantPosts unexpiredGarrison
+
+        let living =
+            unexpired |> List.filter (fun creep -> not (Set.contains creep.Name stranded))
 
         // The bodies already bought and not yet standing (#156): a creep in an
         // oven is in no `Creeps` list, so without this a colony with two idle
@@ -255,38 +336,9 @@ let internal planSpawns
                 else
                     None
 
-        // The miner row's cut: Work-heavy and no Carry, subtracted from the
-        // Anchor row's census because the Carry part is the whole of the
-        // difference between the two.
-        let isMinerBody (creep: CreepInfo) =
-            Atlas.workHeavy atlas creep.Name && partCount creep.Body Carry = 0
-
-        let isAnchorBody (creep: CreepInfo) =
-            Atlas.workHeavy atlas creep.Name && not (isMinerBody creep)
-
-        // As a list and not only a count: `emptyPostCaps` reads the tiles
-        // they stand on, so the census is asked once.
-        let anchorGarrison = living |> List.filter isAnchorBody
-
-        // ADR-0053
-        // The vacancies this row is casting into, richest ceiling first: every
-        // Post with nobody standing on it who will still be there when a
-        // replacement could arrive. Judged at arrival and never by who is
-        // standing there now: an expiring incumbent is already out of
-        // `living`, so its Post reads empty and its successor is sized off its
-        // own rock. Read off who is standing instead, a home succession would
-        // find its Post occupied and buy the replacement off a neutral rock.
-        let emptyPostCaps =
-            let manned =
-                anchorGarrison
-                |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
-                |> Set.ofList
-
-            sizing.AnchorPostCaps
-            |> Map.toList
-            |> List.filter (fun (tile, _) -> not (Set.contains tile manned))
-            |> List.map snd
-            |> List.sortDescending
+        // The vacancies' ceilings, richest first. A stranded Anchor stands on
+        // no Post, so leaving it out of the count leaves these unmoved.
+        let emptyPostCaps = vacantPosts |> Map.toList |> List.map snd |> List.sortDescending
 
         // The ceiling every Anchor cast this tick is sized under: the dearest
         // vacancy's, the richest Post standing in to keep the expression total.
@@ -510,8 +562,12 @@ let internal planSpawns
                 filled
                 |> List.forall (fun (row, _, _, _) -> row.Pattern <> anchorPattern || row.Quota = 0)
                 || view.Bank.Available >= view.Bank.Capacity
+                // A stranded Anchor digs nothing (#506): the colony whose only
+                // one is stuck buys its replacement from what is banked.
                 || view.Creeps
-                   |> List.exists (fun creep -> isAnchorBody creep || isMinerBody creep)
+                   |> List.exists (fun creep ->
+                       (isAnchorBody creep && not (Set.contains creep.Name stranded))
+                       || isMinerBody creep)
                 // Exactly once, as above: a harvester in the oven answers.
                 || casting
                    |> List.exists (fun cast ->

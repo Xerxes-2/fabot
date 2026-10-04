@@ -98,6 +98,26 @@ let internal isBootstrapRoom (view: ColonyView) room =
         | Some Nursery
         | None -> false)
 
+/// The work a body walking into a child's room (a [[nursery]] or a
+/// bootstrapping child) for this Task must live through beyond the walk:
+/// `Tuning.PioneerStay` for work done in the room, 0 for anything else. None
+/// for a body already in the room or a Task in no child's room, which the
+/// Pool does not ask at all. One reading for the Pool's gate and the anchor
+/// row's census.
+let internal childStay (view: ColonyView) atlas (creep: CreepInfo) task : int option =
+    match Atlas.taskRoom atlas task with
+    | Some room when
+        (isNurseryRoom view room || isBootstrapRoom view room)
+        && Atlas.creepRoom atlas creep.Name <> Some room
+        ->
+        match task with
+        | Build _
+        | Repair _
+        | Upgrade _
+        | Harvest _ -> Some view.Tuning.PioneerStay
+        | _ -> Some 0
+    | _ -> None
+
 /// Whether the named room is a nursery whose controller still stands at level
 /// 1 (#449): the one window where its mother pools its Upgrade, on the
 /// Feeding tier, and its sites wait — 200 points bank the safe mode the
