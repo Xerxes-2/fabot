@@ -1127,14 +1127,8 @@ module Colony =
                 Via = [ "W15S29"; "W16S29" ]
                 Blocks = None
             }
-            {
-                RoomName = "W17S26"
-                Enemy = "Trepidimous"
-                Stand = { Room = "W17S26"; X = 28; Y = 10 }
-                Controller = { Room = "W17S26"; X = 8; Y = 21 }
-                Via = []
-                Blocks = None
-            }
+            // W17S26 left this list on 2026-10-05 (user): Trepidimous no
+            // longer mines it, and it is W17S25's own outpost.
             {
                 // Reserved by Trepidimous on 2026-10-02 (t885,888), one
                 // miner on (23,36) and haulers carrying east to W18S26; the

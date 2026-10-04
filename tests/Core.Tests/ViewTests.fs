@@ -4687,9 +4687,9 @@ let harassViewTests =
                      |> List.map (fun h -> h.RoomName))
                     "no room is harassed by one list and kept by another"
 
-                // User, 2026-10-04: W17S26 is W17S25's outpost and W15S28's
-                // harassment room at once. Its miner's view keeps the room
-                // whole (`ofWorld`), the caster's cuts it to the harassment.
+                // User, 2026-10-05: W17S26, W17S25's outpost, left the
+                // harassment list once Trepidimous stopped mining it; no room
+                // is both harassed and mined today.
                 let mined =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -4697,12 +4697,9 @@ let harassViewTests =
                     |> Set.ofList
                     |> fun mined -> Set.difference mined claims
 
-                Expect.equal
-                    (Colony.harass
-                     |> List.filter (fun h -> Set.contains h.RoomName mined)
-                     |> List.map (fun h -> h.RoomName))
-                    [ "W17S26" ]
-                    "W17S26 is the one room both harassed and mined"
+                Expect.isEmpty
+                    (Colony.harass |> List.filter (fun h -> Set.contains h.RoomName mined))
+                    "no room is both harassed and mined"
 
                 Expect.equal
                     (Colony.harass
