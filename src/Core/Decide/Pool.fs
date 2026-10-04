@@ -1198,6 +1198,16 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // leave every generalist free to cross for the same store.
         | Refill(structureId, _) when Set.contains structureId ferrySinks ->
             Capacity.total (Map.tryFind structureId ferryShare |> Option.defaultValue 0)
+        // The controller's buffer, bounded by its room as the cluster is: two
+        // loads of 465 held a container twenty short of full while the ring
+        // the spawn had just emptied waited (W17S25, 2026-10-04).
+        | Refill(structureId, Energy) when
+            Set.contains structureId (Atlas.controllerContainers atlas)
+            ->
+            Capacity.unbounded
+            |> Capacity.budgeting (
+                Engine.containerCapacity - SpatialInfo.heldIn view.Spatial Energy structureId
+            )
         // The party: loaded pioneers until they carry `Tuning.ClaimPartyEnergy`
         // between them.
         | Upgrade controllerId when Set.contains controllerId partyControllers ->

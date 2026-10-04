@@ -44,6 +44,20 @@ let stockTests =
                     "the buffer is filled before the stock: rank decided"
             }
 
+            test "the upgrade buffer is budgeted at its room, as the ring is" {
+                // W17S25, 2026-10-04: two loads of 465 held a container twenty
+                // short of full while the ring the spawn had emptied waited.
+                let budgetAt stored =
+                    poolOn (stockColony [] (Map.ofList [ "can-ctrl", stored; "sto-1", 0 ]))
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = Refill("can-ctrl", Energy) then
+                            Some entry.Capacity.Budget
+                        else
+                            None)
+
+                Expect.equal (budgetAt 1_980) (Some(Some 20)) "twenty of room: one load covers it"
+                Expect.equal (budgetAt 800) (Some(Some 1_200)) "and an emptier buffer admits more"
+            }
             test
                 "under the emergency reserve the stock outbids the upgrade buffer: income banks first" {
                 // RCL4 keeps 10,000 (#505): under it the load goes to the
