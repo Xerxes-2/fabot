@@ -192,6 +192,8 @@ let outpostDeclarationTests =
                         // W15S28's walk dips south round the wall that
                         // W18S27's does, eight crossings, past the budget.
                         "W19S26", [ "W17S29"; "W17S25" ]
+                        // Declared 2026-10-04, north of W19S26: the same two.
+                        "W19S25", [ "W17S29"; "W17S25" ]
                         // Its north edge is wall, so W17S24 (Trepidimous) is
                         // never the way in; W12S26 reaches it in six, by
                         // W14S26 and the sector centre into W16S25.
@@ -358,9 +360,10 @@ let outpostDeclarationTests =
                         "W18S27", Some "W15S28"
                         "W17S26", Some "W15S28"
                         "W19S26", Some "W17S29"
+                        "W19S25", Some "W17S29"
                         "W17S25", Some "W15S28"
                     ]
-                    "W15S28 casts W18S27, W17S26 and W17S25, whose full floor W17S29 at RCL5 (2026-10-02) cannot buy; W17S29 casts W19S26 unseen, which W15S28 is past the budget of"
+                    "W15S28 casts W18S27, W17S26 and W17S25, whose full floor W17S29 at RCL5 (2026-10-02) cannot buy; W17S29 casts W19S26 and W19S25 unseen, which W15S28 is past the budget of"
 
                 Expect.equal
                     (casting 5_600 1_800).Floors
@@ -369,9 +372,10 @@ let outpostDeclarationTests =
                             "W18S27", Tuning.defaults.HarassBlocks
                             "W17S26", Tuning.defaults.HarassBlocks
                             "W19S26", 2
+                            "W19S25", 2
                             "W17S25", Tuning.defaults.HarassBlocks
                         ])
-                    "W18S27, W17S26 and W17S25 (besieged by Trepidimous's 18M17A squad) keep the full floor; W19S26 is floored at its declared two blocks"
+                    "W18S27, W17S26 and W17S25 (besieged by Trepidimous's 18M17A squad) keep the full floor; W19S26 and W19S25 are floored at their declared two blocks"
 
                 Expect.equal
                     (casters 5_650 1_800)
@@ -379,6 +383,7 @@ let outpostDeclarationTests =
                         "W18S27", Some "W15S28"
                         "W17S26", Some "W15S28"
                         "W19S26", Some "W17S29"
+                        "W19S25", Some "W17S29"
                         "W17S25", Some "W15S28"
                     ]
                     "and W13S28's larger bank does not take W17S26 from the nearer W15S28"
@@ -389,9 +394,10 @@ let outpostDeclarationTests =
                         "W18S27", Some "W15S28"
                         "W17S26", Some "W15S28"
                         "W19S26", None
+                        "W19S25", None
                         "W17S25", Some "W15S28"
                     ]
-                    "W17S29's RCL4 bank buys no floor, and W19S26 is refused"
+                    "W17S29's RCL4 bank buys no floor, and W19S26 and W19S25 are refused"
 
                 Expect.equal
                     (casters 5_600 2_300)
@@ -399,9 +405,10 @@ let outpostDeclarationTests =
                         "W18S27", Some "W17S29"
                         "W17S26", Some "W15S28"
                         "W19S26", Some "W17S29"
+                        "W19S25", Some "W17S29"
                         "W17S25", Some "W15S28"
                     ]
-                    "W17S29's RCL6 bank buys the full floor: it casts W19S26 and the nearer W18S27, and never W17S26 or W17S25 behind W18S26"
+                    "W17S29's RCL6 bank buys the full floor: it casts W19S26, W19S25 and the nearer W18S27, and never W17S26 or W17S25 behind W18S26"
 
                 // W17S25 is W15S28's Claim and a harassment room at once
                 // (2026-10-03): harassed until the Claim lands, then ours,
@@ -409,7 +416,12 @@ let outpostDeclarationTests =
                 Expect.equal
                     ((castingAfter true 5_600 1_800).Casters
                      |> List.map (fun (h, caster) -> h.RoomName, caster))
-                    [ "W18S27", Some "W15S28"; "W17S26", Some "W15S28"; "W19S26", Some "W17S29" ]
+                    [
+                        "W18S27", Some "W15S28"
+                        "W17S26", Some "W15S28"
+                        "W19S26", Some "W17S29"
+                        "W19S25", Some "W17S29"
+                    ]
                     "the tick W17S25's Claim lands it is ours, and no colony casts it: the rest are cast as before"
 
                 for h in Colony.harass do

@@ -1093,6 +1093,19 @@ module Colony =
                 Blocks = Some 2
             }
             {
+                // User, 2026-10-04. Reserved by Trepidimous: miners on the
+                // east source's container (27,20) and at (5,19), three 23C
+                // haulers, a 2-CLAIM reserver and 31 sites (t942,148). Its two
+                // 25M13A guards were gone that tick; were they back, the
+                // stand-down (#441) shuts the room.
+                RoomName = "W19S25"
+                Enemy = "Trepidimous"
+                Stand = { Room = "W19S25"; X = 26; Y = 19 }
+                Controller = { Room = "W19S25"; X = 14; Y = 38 }
+                Via = []
+                Blocks = Some 2
+            }
+            {
                 // Given up as a colony at t880,418 after Trepidimous's siege;
                 // harassed again from 2026-10-02 while they mine it. Their
                 // 18M17A squad besieged it, so it keeps the full floor. Also
