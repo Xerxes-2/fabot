@@ -3487,6 +3487,7 @@ let private namedBy task =
     | Refill(id, _) -> Some id
     | Guard _
     | Fight _
+    | Defend _
     | Assault _
     | Flee -> None
 

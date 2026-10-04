@@ -375,11 +375,12 @@ let arenaControllerPhysicsTests =
 let private w15s28 (x: int) (y: int) = RoomPos.at "W15S28" { X = x; Y = y }
 let private w18s25 (x: int) (y: int) = RoomPos.at "W18S25" { X = x; Y = y }
 
-/// W17S25's declared perimeter (#446).
+/// W17S25's declared perimeter (#446), as shipped: the west line, the south
+/// trio and the x=32 neck.
 let private perimeter =
-    [ for y in 15..20 -> tile 2 y ]
-    @ [ for y in 23..27 -> tile 2 y ]
-    @ [ tile 16 44; tile 17 44; tile 18 44; tile 47 27; tile 47 28 ]
+    match Colony.declared |> List.tryFind (fun c -> c.Home = "W17S25") with
+    | Some c -> c.Perimeter
+    | None -> failwith "W17S25 is declared"
 
 let private w17s25Capture = (room "W17S25").Capture
 
@@ -933,8 +934,9 @@ let private layoutExtensions =
 /// spawn at the declared 14,28, the Layout's tower holding `towerEnergy`, its
 /// extensions, the sixteen perimeter ramparts and one on the spawn and on
 /// the tower all at `hits`, the safe mode RCL3 banked under the 30,000 ticks
-/// of cooldown the claim's left, the child's one worker carrying 200; the
-/// mother and the chain as `childWorld` has them, and W16S25 east.
+/// of cooldown the claim's left, the child's one worker carrying 200, and
+/// its own [[defender]] row cast (#504); the mother and the chain as
+/// `childWorld` has them, and W16S25 east.
 let private rcl3World (towerEnergy: int) (hits: int) (bodies: Body list) =
     let mother =
         room "W15S28"
@@ -980,7 +982,7 @@ let private rcl3World (towerEnergy: int) (hits: int) (bodies: Body list) =
         ]
         afterClaim
         (worker :: motherStaff @ bodies)
-    |> withCasts claimRows
+    |> withCasts (claimRows @ [ "defender" ])
 
 /// The t880,341 raid breaking in for the controller's ring as `westRaid`
 /// does, from these tiles: melee, melee, healer, healer, tapper.
@@ -996,15 +998,14 @@ let private raidFrom5 (m1, m2, h1, h2, t) =
     ]
 
 /// By the south line from W17S26, the way the earlier pass came in
-/// (t879,264, `docs/research/squads.md` §1.2), and by the east line from
-/// W16S25, 34 tiles from the tower. Outside the east pair only 48,28 and
-/// 48,29 are ground off the exit row: both melee stand on them, and the
-/// healers on the exits, carried across the seam every tick they end there.
+/// (t879,264, `docs/research/squads.md` §1.2), and by the east neck from
+/// W16S25: in by the exits at 49,28–29 and west along the swamp to the
+/// ramparts at 32,31–32, struck from 33,30–32.
 let private southRaid =
     raidFrom5 (w17s26 17 3, w17s26 19 3, w17s26 17 4, w17s26 19 4, w17s26 18 4)
 
 let private eastRaid =
-    raidFrom5 (w17s25 48 29, w17s25 48 28, w16s25 1 29, w16s25 1 28, w16s25 4 28)
+    raidFrom5 (w16s25 5 27, w16s25 5 29, w16s25 6 27, w16s25 6 29, w16s25 4 28)
 
 let private fighterIds = [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ]
 
@@ -1489,10 +1490,14 @@ let arenaClaimTests =
 
                 let failure = $"{report}\n{describe trace}"
 
-                // Measured: rampart 17,44 down at t106, the relief in at
-                // t336; the tower held its 300 (four urgent shots) and spent
-                // it on the tapper once the line was open: dead at t134, no
-                // tap. At 300k the line fell at t301, still before the relief.
+                // Measured: rampart 17,44 down at t105, the relief in at
+                // t336. The home's defenders (#504), cast on sighting but its
+                // spawn busy with a worker until t36, are born at t71 and t107:
+                // too late for 100k; both live, waiting inside the line once
+                // it is broken. The tower keeps its 300 until the tapper walks
+                // in (t144) and shoots it dead at t148: no tap. At 300k the
+                // defenders hold the line (163,110 left); before the row it
+                // fell at t300.
                 match report.Fell, report.ReliefIn with
                 | Some fell, Some relief ->
                     Expect.isGreaterThanOrEqual
@@ -1508,22 +1513,51 @@ let arenaClaimTests =
             }
 
             test
-                "RCL3: the east pair stands 34 from the tower, so without residents its 100k falls before the relief; with them it holds" {
+                "RCL3, the tower drained and no residents: the home's own defenders hold the 300k south line and the tower keeps its reserve (#504)" {
+                for towerEnergy in [ 500; Tuning.defaults.TowerRepairReserve ] do
+                    let report, _, trace = rcl3World towerEnergy 300_000 southRaid |> lineReport 700
+                    let failure = $"tower {towerEnergy}: {report}\n{describe trace}"
+
+                    // Measured: two defenders cast (t71, t107) onto the
+                    // trio beside the melee; the line holds at 175,490 (tower
+                    // 500) and 163,110 (tower 300), the raid dead by t505, the
+                    // tower at 300 throughout. Before the row the line fell at
+                    // t303 and t300.
+                    Expect.isNone report.Fell $"the line holds\n{failure}"
+
+                    Expect.isTrue
+                        (trace
+                         |> List.exists (fun t ->
+                             t.Bodies |> List.exists (fun b -> b.Id.StartsWith "defender-")))
+                        $"a defender stands\n{failure}"
+
+                    Expect.isGreaterThanOrEqual
+                        report.TowerLeft
+                        Tuning.defaults.TowerRepairReserve
+                        $"the reserve kept\n{failure}"
+
+                    Expect.isEmpty report.Taps "no tap"
+            }
+
+            test
+                "RCL3: the east neck stands 20 from the tower, so without residents its 100k falls before the relief; with them it holds" {
                 let run withResidents =
                     let bodies = if withResidents then residents @ eastRaid else eastRaid
                     let start = rcl3World Engine.towerCapacity Tuning.defaults.RampartFloor bodies
 
                     (if withResidents then residentsHold start else start) |> lineReport 600
 
-                // Measured: the two healers bounce on the exits in turn, so one
-                // stands beside both melee every tick; read at half rate (84
-                // under the tower's 150 at range 34) and killable on a full
-                // tower's 70 shots, they are shot (57 shots, 18 repairs once
-                // a kill is out of reach). Alone the line falls at t163 to
-                // 1,020 a tick, the relief in at t480 (t111 when the bouncers
-                // counted in full and the tower only repaired). With the
-                // residents on 47,27 and 47,28 the raid is dead by t92, the
-                // floor 37,730 (t110 and 10,040 then).
+                // Measured: the melee strike 32,31–32 from 33,30–32, their
+                // healers in the room behind them; the tower's 150 at range
+                // 20 repairs 51 times. Alone the line falls at t162, the
+                // relief in at t336 (t148 before the defender row): the home's
+                // defenders (#504), born at t71 and t107, kill one melee from
+                // the rampart, then the other breaks through. A raider beside
+                // a defender is no urgent shot, so the tower keeps its 300 for
+                // the tapper (in at t182, dead at t186; it drained to 10 when
+                // the defender counted). With the
+                // residents on the neck the raid is dead by t102, the floor
+                // 55,180.
                 let alone, _, trace = run false
                 let failure = $"{alone}\n{describe trace}"
 

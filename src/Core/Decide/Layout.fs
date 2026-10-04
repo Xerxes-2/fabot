@@ -330,9 +330,20 @@ let internal planFire (view: ColonyView) atlas : Intent list =
 
         let keep = Atlas.keepTilesIn atlas home
 
+        // A creep of ours on our own rampart is not hurt: the swing lands on
+        // the rampart (#504). Nor is a [[defender]] ever the reserve's to
+        // save: the expendable body, and a shot does not save a lamed one. A
+        // raider beside either alone is the kill check's.
+        let ramparts = Atlas.ourRampartTilesIn atlas home
+
         let ours =
             Atlas.placedCreeps atlas
-            |> List.choose (fun (_, at) -> if at.Room = home then Some(RoomPos.pos at) else None)
+            |> List.choose (fun (name, at) ->
+                if at.Room = home && not (isNamedFor defenderPattern name) then
+                    Some(RoomPos.pos at)
+                else
+                    None)
+            |> List.filter (fun tile -> not (Set.contains tile ramparts))
             |> Set.ofList
             |> Set.union keep
 

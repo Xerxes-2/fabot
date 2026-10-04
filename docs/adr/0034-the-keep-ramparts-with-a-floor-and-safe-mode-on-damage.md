@@ -1,6 +1,8 @@
 # The Keep: ramparts with a floor, safe mode on damage, and the raid's cost in hits
 
-> **Status:** amended by 0061 (#285), #201, #214, #217, #422, #446, #448, #449
+> **Status:** amended by 0061 (#285), #201, #214, #217, #422, #446, #448, #449, #504
+
+> **Amended by #504**: a home that keeps ramparts casts its own melee [[defender]] — MOVE and ATTACK one to one, up to `Tuning.DefenderBlocks` — on sighting: one a raid body outside the line (the tiles the exits reach without crossing the declared perimeter) with a weapon, or with WORK beside a perimeter rampart, at most `Tuning.DefenderCap`, ahead of every row and holding the economic rows until cast. It stands on a perimeter rampart beside the raid — never a Keep's or a Post container's — and swings only from there: on its own rampart the raid's swing lands on the rampart the raid is already striking, so its damage is free, and off one a swing at an ATTACK body takes its strike-back. Its walk keeps off the tiles outside the line a raid melee reaches in a step and a swing, and waits inside where no way round reaches its rampart. A raid inside the line casts none: a body walked at a breach is fed to it, and a defender with no line left to hold flees. Measured on the W17S25 arena: with the tower drained to its reserve and no residents, two defenders hold the south and east 300k lines and the west 100k one that fell without them; a 100k south or east line still falls before one is cast and walked there.
 
 > **Amended by #449**: the reflex runs over each [[nursery]] too, fired by its mother, which raises it and runs its only tick; no Keep stands there, so its Keep arm is idle.
 

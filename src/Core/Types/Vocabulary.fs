@@ -164,6 +164,11 @@ type Task =
     /// Area is the rally ground until the squad launches, and the fighting
     /// ground after.
     | Fight of roomName: string
+    /// Holding the home's perimeter with its own [[defender]]s (#504): one
+    /// Task per home a raid stands outside the line of, keyed on the room for
+    /// the Guard's reason. Its Work Area is the free perimeter ramparts beside
+    /// the raid, and it is held by defender casts alone.
+    | Defend of roomName: string
     /// Breaking into a rival's room with a [[squad]] (#490): one Task per
     /// declared [[assault]] a human has switched on, held by the role bodies
     /// its capacity counts. Its Work Area is the rally ground until the squad

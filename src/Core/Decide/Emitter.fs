@@ -312,12 +312,21 @@ let internal applicable
     // parts fit a slot (`FightGround.Roles`); how many of each role is the
     // capacity's.
     | Fight room -> Option.isSome (Threats.fightRoleOf threats room creep.Name)
+    // The defender row's casts and no other body (#504).
+    | Defend _ -> isNamedFor defenderPattern creep.Name
     // A squad cast of a role the assault's squad casts (`AssaultGround.Roles`).
     | Assault room -> Option.isSome (Threats.assaultRoleOf threats room creep.Name)
     // Without the Fighter exemption a guard on the ring is offered both
     // Safety-tier Tasks and kept in the fight by travel cost alone, so the tick
     // a raid steps toward it the body bought to stand still walks away.
-    | Flee -> runsFromThreats atlas creep && standsInReach threats atlas creep.Name
+    // A defender with no line to hold runs as a worker does (#504): off a
+    // rampart, with the raid through, it is only a target, and a raider
+    // beside it draws the towers' reserve.
+    | Flee ->
+        (runsFromThreats atlas creep
+         || isNamedFor defenderPattern creep.Name
+            && Threats.defendersWanted view threats = 0)
+        && standsInReach threats atlas creep.Name
 
 /// Whether a controller stands in a room nobody owns: the claim party's
 /// (#471), the one Upgrade pooled on such a controller. Read off the room's
@@ -463,6 +472,7 @@ let private intentFor
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
     | Guard _
     | Fight _
+    | Defend _
     | Assault _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
@@ -486,6 +496,7 @@ let private glyphFor =
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
     | Fight _ -> "🛡️"
+    | Defend _ -> "🧱"
     | Assault _ -> "🏰"
 
 /// The Threat a fighter acts on out of the ones standing in the room its Task
@@ -749,6 +760,33 @@ let private topUp (view: ColonyView) atlas (creep: CreepInfo) : Intent list =
             |> Option.map (fun buffer -> WithdrawFromStore(creep.Name, buffer, Energy, None))
             |> Option.toList
 
+/// A [[defender]]'s swing (#504), and only from a rampart of ours: off one, a
+/// swing at an ATTACK body takes its strike-back. At the body of the raid at
+/// the line beside it with the fewest hits, else at any hostile beside it,
+/// ties by id.
+let private defendIntent
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (creep: CreepInfo)
+    : Intent option =
+    match SpatialInfo.creepPlacementOf view.Spatial creep.Name with
+    | Some here when Set.contains (RoomPos.pos here) (Atlas.ourRampartTilesIn atlas here.Room) ->
+        let beside (hostile: HostileInfo) =
+            RoomPos.range here hostile.Pos
+            |> Option.exists (fun r -> r <= Engine.meleeRange)
+
+        let pick (targets: HostileInfo list) =
+            targets
+            |> List.filter beside
+            |> List.sortBy (fun hostile -> hostile.Hits, hostile.Id)
+            |> List.tryHead
+
+        pick threats.AtLine
+        |> Option.orElse (pick view.Hostiles)
+        |> Option.map (fun target -> AttackCreep(creep.Name, target.Id))
+    | _ -> None
+
 /// Action Intent for one assigned creep: emitted when the Atlas judges the
 /// action reachable from the tick-start position, and — for Harvest alone —
 /// only while the source holds energy. Anticipatory dispatch and the occupancy
@@ -776,6 +814,7 @@ let private actionIntents
     // as a guard and a ranger do.
     | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
     | Fight room -> guardIntent view atlas fighting creep room |> Option.toList
+    | Defend _ -> defendIntent view atlas threats creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
     // medic's act is the heal reflex's.
     | Assault room ->

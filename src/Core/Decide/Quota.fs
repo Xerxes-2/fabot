@@ -281,13 +281,10 @@ let private upgradeDrainOf body =
 /// `isGuardParts` asked of a living body.
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
-/// Whether a name is a squad cast's, which no other row's census counts.
-let private isSquadCast (name: string) = Option.isSome (squadRoleByName name)
-
-/// The guard row's own cut, over a name and parts: an ATTACK body that is no
-/// squad cast.
+/// The guard row's own cut, over a name and parts: an ATTACK body that
+/// answers to no row of its own (`ownRowOnly`).
 let internal isGuardRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isGuardParts parts && not (isSquadCast name)
+    isGuardParts parts && not (ownRowOnly name)
 
 let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.Body
 
@@ -302,9 +299,10 @@ let internal isRangerParts (parts: Map<BodyPart, int>) =
 
 let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
 
-/// The ranger row's own cut: a ranger body that is no kiter cast.
+/// The ranger row's own cut: a ranger body that is no kiter cast
+/// (`ownRowOnly`).
 let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isRangerParts parts && not (isSquadCast name)
+    isRangerParts parts && not (ownRowOnly name)
 
 let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
 
@@ -910,6 +908,8 @@ type QuotaRows =
         /// One entry per room the reserver row hires for: the length is the
         /// addend, the largest entry prices every cast.
         Reserver: int list
+        /// The home's [[defender]]s (`Threats.defendersWanted`, #504).
+        Defender: int
         Guard: int
         /// One resident ranger per worked errand room, two where one loses (#411).
         Ranger: int
@@ -963,6 +963,7 @@ let internal quotaRowsOf
 
     {
         Reserver = sizing.ReserverClaims
+        Defender = Threats.defendersWanted view threats
         Guard = guardQuota view outposts
         Ranger = rangerQuota view threats outposts
         Squad =

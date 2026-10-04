@@ -103,6 +103,15 @@ let brawlerPattern =
         Block = List.replicate 25 Move @ List.replicate 25 Attack
     }
 
+/// The home's [[defender]] (#504): MOVE and ATTACK one to one, a tile a tick
+/// on plain to its rampart, MOVE first so damage lames it before it disarms
+/// it.
+let defenderPattern =
+    {
+        Name = "defender"
+        Block = [ Move; Attack ]
+    }
+
 /// The squad's healer: one fixed body, MOVE then HEAL, walking behind the
 /// brawler it pre-heals.
 let medicPattern =
@@ -179,6 +188,7 @@ let patternTable =
         upgraderPattern
         guardPattern
         rangerPattern
+        defenderPattern
         brawlerPattern
         sapperPattern
         probePattern
@@ -294,12 +304,13 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
 
 /// The rows whose casts are read back off the name the cascade gives them
 /// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
-/// also a hauler, a kiter's counts are an eight-block ranger's, a brawler is
-/// an ATTACK body as a guard is, a sapper and a probe a dismantler's, and a
-/// medic has no part a row reads.
+/// also a hauler, a kiter's counts are an eight-block ranger's, a brawler and
+/// a defender are ATTACK bodies as a guard is, a sapper and a probe a
+/// dismantler's, and a medic has no part a row reads.
 let private namedRows =
     [
         courierPattern
+        defenderPattern
         brawlerPattern
         sapperPattern
         probePattern
@@ -338,6 +349,16 @@ let squadRoleOfRow (row: string) : SquadRole option =
 let isSquadPattern (pattern: BodyPattern) =
     SquadRole.all
     |> List.exists (fun role -> (squadPatternOf role).Name = pattern.Name)
+
+/// Whether a cast answers to its own row alone: a squad's (#453) or a
+/// [[defender]] (#504), which no other row's census counts and the fleet
+/// the workforce target is a number about leaves out.
+let ownRowOnly (name: string) =
+    Option.isSome (squadRoleByName name) || isNamedFor defenderPattern name
+
+/// The same over a row: the squad's and the defender's.
+let isOwnRowPattern (pattern: BodyPattern) =
+    isSquadPattern pattern || pattern.Name = defenderPattern.Name
 
 /// The slot a body's parts fit, for a body that is no squad cast — a resident
 /// ranger: ATTACK and no HEAL, HEAL and no weapon, or no ATTACK and the
@@ -535,6 +556,11 @@ let private upgraderBodyFor workCap capacity =
 
     List.replicate pairs Work @ [ Carry ] @ List.replicate pairs Move
 
+/// The defender row's body (#504): whole `[Move; Attack]` blocks, as many as
+/// the bank buys up to `blocks`.
+let internal defenderBodyWithin blocks capacity =
+    wholeBlockBodyFor defenderPattern.Block (min capacity (blocks * bodyCost defenderPattern.Block))
+
 /// ADR-0042
 /// The reserver row's body for one outpost: the deficit sizing and the bank
 /// truncation, whichever asks for less, never below one block.
@@ -561,6 +587,8 @@ type BodySizing =
         RangerBlocks: int
         /// `Quota.upgraderWorkOf`'s answer this tick (#483).
         UpgraderWork: int
+        /// `Tuning.DefenderBlocks`, a tunable as the miner's is (#504).
+        DefenderBlocks: int
     }
 
 /// The sizing a caller holding nothing but a capacity can ask for: every row at
@@ -575,6 +603,7 @@ let largestSizing =
         GuardBlocks = guardBlocksMost
         RangerBlocks = rangerBlocksMost
         UpgraderWork = upgraderWorkMost
+        DefenderBlocks = Tuning.defaults.DefenderBlocks
     }
 
 /// Body for a pattern at an energy capacity, under the row's own sizing rule.
@@ -604,6 +633,8 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         minerBodyFor sizing.MinerWorkPerMove capacity
     elif pattern.Name = dismantlerPattern.Name then
         dismantlerBodyFor capacity
+    elif pattern.Name = defenderPattern.Name then
+        defenderBodyWithin sizing.DefenderBlocks capacity
     // The squad's bodies are fixed: the catalogue priced these.
     elif isSquadPattern pattern then
         pattern.Block

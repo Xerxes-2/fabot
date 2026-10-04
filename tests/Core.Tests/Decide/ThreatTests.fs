@@ -498,6 +498,322 @@ let private squad =
         hostileAt "h-3" { X = 26; Y = 28 } (List.replicate 6 Move @ List.replicate 4 Heal)
     ]
 
+/// The declared perimeter at (20, 33..35): it seals the corridor from the
+/// west exits (x 1..19, y 33..35) off the home's inside (x 21..40, y
+/// 20..38), where the spawn stands at (25,25).
+let private lineTiles = [ for y in 33..35 -> { X = 20; Y = y } ]
+
+/// Ramparts of ours on each perimeter tile.
+let private defendedLine =
+    [
+        "ram-a", { X = 20; Y = 33 }
+        "ram-b", { X = 20; Y = 34 }
+        "ram-c", { X = 20; Y = 35 }
+    ]
+
+/// Trepidimous' 18M17A melee, a player's, at a tile of the home.
+let private raidMeleeAt id (pos: Pos) =
+    { hostileIn "W1N1" pos (List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ]) with
+        Id = id
+        Owner = "Trepidimous"
+    }
+
+/// An Independent home at RCL4 on an 800 bank, `lineTiles` its perimeter
+/// with `ramparts` standing, a worker at home so the supply floor keeps off
+/// the spawn, these hostiles in the room and these creeps of ours on these
+/// tiles.
+let private defenderHome ramparts hostiles (creeps: (CreepInfo * Pos) list) =
+    let spawnPos = { X = 25; Y = 25 }
+
+    let room =
+        { SpatialInfo.empty with
+            RoomName = Some "W1N1"
+            TargetKinds = Map.ofList [ "spawn-1", Structure BuiltKind.Spawn ]
+            Borders =
+                Map.ofList [ "W1N1", Map.ofList [ for y in 33..35 -> { X = 0; Y = y }, Plain ] ]
+        }
+        |> withHome (fun layer ->
+            { layer with
+                Terrain =
+                    TerrainGrid.ofList
+                        [
+                            for x in 21..40 do
+                                for y in 20..38 -> { X = x; Y = y }, Plain
+                            for x in 1..20 do
+                                for y in 33..35 -> { X = x; Y = y }, Plain
+                        ]
+                TargetPositions = Map.ofList [ "spawn-1", spawnPos ]
+                Obstacles = Set.singleton spawnPos
+            })
+        |> withTargets [ for id, pos in ramparts -> id, pos, Structure BuiltKind.Rampart ]
+
+    let colony =
+        { atLevel 4 room with
+            Bank = bank 800 800
+            Hostiles = hostiles
+            Perimeter = lineTiles
+            Creeps = worker "w" 0 50 :: List.map fst creeps
+            Spatial =
+                room
+                |> withCreepsAt (
+                    ("w", { X = 25; Y = 27 }) :: [ for creep, pos in creeps -> creep.Name, pos ]
+                )
+        }
+
+    (colony, ramparts |> List.mapi (fun i (id, _) -> id, 90_000 + 5_000 * i))
+    ||> List.fold (fun colony (id, hits) -> colony |> withHits id BuiltKind.Rampart hits 1_000_000)
+
+let private defender name =
+    creepWith name 0 0 (List.replicate 6 Move @ List.replicate 6 Attack)
+
+let private defenderCasts colony =
+    (decideOn colony).Intents
+    |> spawnIntents
+    |> List.filter (fun (_, _, name) -> name.StartsWith "defender-")
+
+let private defendGround colony =
+    Threats.defendGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N1"
+    |> Set.map RoomPos.pos
+
+[<Tests>]
+let rampartDefenderTests =
+    testList
+        "the rampart defender"
+        [
+            test
+                "a melee outside the line casts one defender, MOVE and ATTACK at the bank, ahead of every other row" {
+                let colony = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 10; Y = 34 } ] []
+
+                Expect.equal
+                    (defenderCasts colony |> List.map (fun (_, body, _) -> body))
+                    [ List.replicate 6 Move @ List.replicate 6 Attack ]
+                    "six blocks on 800: 780"
+
+                Expect.equal
+                    ((decideOn colony).Quotas.Rows |> List.map (fun row -> row.Row) |> List.head)
+                    "defender"
+                    "the first row the cascade casts"
+            }
+
+            test
+                "no defender for a scout, a miner off the line, a raid inside it, no perimeter rampart, or a home that keeps none" {
+                let outside = { X = 10; Y = 34 }
+
+                let scout =
+                    { raidMeleeAt "h-1" outside with
+                        Body = [ Move ]
+                    }
+
+                Expect.isEmpty
+                    (defenderCasts (defenderHome defendedLine [ scout ] []))
+                    "a scout hurts nothing"
+
+                let miner =
+                    { raidMeleeAt "h-1" outside with
+                        Body = [ Work; Carry; Move ]
+                    }
+
+                Expect.isEmpty
+                    (defenderCasts (defenderHome defendedLine [ miner ] []))
+                    "a WORK body walking past is no raid"
+
+                Expect.equal
+                    (defenderCasts (
+                        defenderHome
+                            defendedLine
+                            [
+                                { miner with
+                                    Pos = RoomPos.at "W1N1" { X = 19; Y = 34 }
+                                }
+                            ]
+                            []
+                     )
+                     |> List.length)
+                    1
+                    "beside a perimeter rampart it is one"
+
+                Expect.isEmpty
+                    (defenderCasts (
+                        defenderHome defendedLine [ raidMeleeAt "h-1" { X = 30; Y = 34 } ] []
+                    ))
+                    "inside the line, broken through: the towers' and the relief's"
+
+                Expect.isEmpty
+                    (defenderCasts (defenderHome [] [ raidMeleeAt "h-1" outside ] []))
+                    "nothing to stand on"
+
+                Expect.isEmpty
+                    (defenderCasts (
+                        defenderHome defendedLine [ raidMeleeAt "h-1" outside ] [] |> withLevel 2
+                    ))
+                    "below Independent the ramparts decay away (#214)"
+            }
+
+            test "a defender owed holds the economic rows, and never a fighting one" {
+                Expect.isTrue
+                    ([
+                        workerPattern
+                        anchorPattern
+                        haulerPattern
+                        courierPattern
+                        reserverPattern
+                        upgraderPattern
+                        minerPattern
+                        dismantlerPattern
+                     ]
+                     |> List.forall heldForDefender)
+                    "the economy waits"
+
+                Expect.isFalse
+                    ([
+                        guardPattern
+                        rangerPattern
+                        defenderPattern
+                        brawlerPattern
+                        medicPattern
+                        kiterPattern
+                        sapperPattern
+                        probePattern
+                     ]
+                     |> List.exists heldForDefender)
+                    "the fighting rows do not"
+
+                // 300 banked, short of the defender's 780: the worker the
+                // fleet is short of is not bought from it.
+                let short =
+                    { defenderHome defendedLine [ raidMeleeAt "h-1" { X = 10; Y = 34 } ] [] with
+                        Bank = bank 300 800
+                    }
+
+                Expect.isEmpty
+                    (spawnIntents (decideOn short).Intents)
+                    "the bank waits for the defender"
+            }
+
+            test "a ranged raid body outside the line casts one too" {
+                let archer =
+                    { raidMeleeAt "h-1" { X = 10; Y = 34 } with
+                        Body = List.replicate 5 RangedAttack @ List.replicate 5 Move
+                    }
+
+                Expect.equal
+                    (defenderCasts (defenderHome defendedLine [ archer ] []) |> List.length)
+                    1
+                    "armed"
+            }
+
+            test
+                "one defender a raid body at the line, never past the cap, and none while one lives" {
+                let three =
+                    [
+                        raidMeleeAt "h-1" { X = 19; Y = 33 }
+                        raidMeleeAt "h-2" { X = 19; Y = 34 }
+                        raidMeleeAt "h-3" { X = 19; Y = 35 }
+                    ]
+
+                Expect.equal
+                    (rowOf "defender" (defenderHome defendedLine three [])
+                     |> Option.map (fun row -> row.Quota))
+                    (Some Tuning.defaults.DefenderCap)
+                    "three melee, the cap"
+
+                Expect.isEmpty
+                    (defenderCasts (
+                        defenderHome
+                            defendedLine
+                            [ raidMeleeAt "h-1" { X = 19; Y = 34 } ]
+                            [ defender "defender-1-Spawn1", { X = 30; Y = 30 } ]
+                    ))
+                    "the living one is the row's"
+            }
+
+            test
+                "its ground is every free perimeter rampart beside the raid, less a resident's or a lent body's tile, never a Keep's" {
+                let melee = [ raidMeleeAt "h-1" { X = 19; Y = 34 } ]
+
+                // A rampart over the spawn is a Keep's, not the line's.
+                let withKeepRampart = ("ram-spawn", { X = 25; Y = 25 }) :: defendedLine
+
+                Expect.equal
+                    (defendGround (defenderHome withKeepRampart melee []))
+                    (Set.ofList lineTiles)
+                    "all three beside the melee"
+
+                let resident =
+                    creepWith
+                        "ranger-1-Spawn1"
+                        0
+                        0
+                        (List.replicate 3 RangedAttack @ List.replicate 3 Move)
+
+                Expect.equal
+                    (defendGround (defenderHome defendedLine melee [ resident, { X = 20; Y = 33 } ]))
+                    (Set.ofList [ { X = 20; Y = 34 }; { X = 20; Y = 35 } ])
+                    "less the resident's"
+
+                let lent =
+                    { defenderHome defendedLine melee [] with
+                        Foreign = Set.singleton (RoomPos.at "W1N1" { X = 20; Y = 35 })
+                    }
+
+                Expect.equal
+                    (defendGround lent)
+                    (Set.ofList [ { X = 20; Y = 33 }; { X = 20; Y = 34 } ])
+                    "less the mother's lent body's"
+
+                Expect.equal
+                    (defendGround (
+                        defenderHome
+                            defendedLine
+                            melee
+                            [ defender "defender-1-Spawn1", { X = 20; Y = 34 } ]
+                    ))
+                    (Set.ofList lineTiles)
+                    "a defender keeps its own tile in the ground"
+            }
+
+            test
+                "with the raid outside but not yet at the line, its ground is the perimeter rampart nearest it" {
+                Expect.equal
+                    (defendGround (
+                        defenderHome defendedLine [ raidMeleeAt "h-1" { X = 15; Y = 33 } ] []
+                    ))
+                    (Set.ofList lineTiles)
+                    "all three at range 5 from (15,33), none beside it"
+            }
+
+            test "a defender swings at the melee beside it from its rampart, and never off one" {
+                let onRampart =
+                    defenderHome
+                        defendedLine
+                        [ raidMeleeAt "h-1" { X = 19; Y = 34 } ]
+                        [ defender "defender-1-Spawn1", { X = 20; Y = 34 } ]
+
+                Expect.contains
+                    (decideOn onRampart).Intents
+                    (AttackCreep("defender-1-Spawn1", "h-1"))
+                    "on its rampart"
+
+                // One melee at the line pools the Defend; one inside stands
+                // beside the defender walking to it.
+                let offRampart =
+                    defenderHome
+                        defendedLine
+                        [
+                            raidMeleeAt "h-1" { X = 19; Y = 34 }
+                            raidMeleeAt "h-2" { X = 23; Y = 30 }
+                        ]
+                        [ defender "defender-1-Spawn1", { X = 22; Y = 30 } ]
+
+                Expect.isFalse
+                    ((decideOn offRampart).Intents
+                     |> List.exists (function
+                         | AttackCreep("defender-1-Spawn1", _) -> true
+                         | _ -> false))
+                    "off a rampart it does not swing"
+            }
+        ]
+
 [<Tests>]
 let safeModeTests =
     testList
@@ -1344,6 +1660,44 @@ let fireReflexTests =
                     (shots (decideOn besideOurs).Intents)
                     [ "tower-1", "h-1" ]
                     "a raider swinging at our creep is shot though 20 shots cannot kill it"
+            }
+
+            test
+                "a raider beside a defender of ours off a rampart is not urgent: the kill check decides (#504)" {
+                // The defender at 31,40 on open ground; 20 shots × 66 cannot
+                // kill the melee, so nothing is shot from the reserve.
+                let besideDefender =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        trepPair
+                        [ "defender-1-Spawn1", { X = 31; Y = 40 }, 0 ]
+                    |> holdingTower "tower-1" 500
+
+                Expect.isEmpty
+                    (shots (decideOn besideDefender).Intents)
+                    "no shot for the expendable body"
+            }
+
+            test
+                "a raider beside a creep of ours standing on our own rampart is not urgent: the kill check decides" {
+                // The creep at 31,40 on rampart-1: the swing lands on the
+                // rampart. 20 shots × 66 cannot kill the melee, so the
+                // reserve is kept and the rampart repaired.
+                let onRampart =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        trepPair
+                        [ "ours", { X = 31; Y = 40 }, 0 ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    |> holdingTower "tower-1" 500
+
+                let intents = (decideOn onRampart).Intents
+                Expect.isEmpty (shots intents) "no shot from the reserve"
+
+                Expect.equal
+                    (towerRepairs intents)
+                    [ "tower-1", "rampart-1" ]
+                    "the rampart repaired instead"
             }
 
             test

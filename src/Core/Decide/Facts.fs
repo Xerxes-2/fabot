@@ -43,6 +43,7 @@ let taskId =
     // Keyed on the room for the Guard's reason: a squad that loses a member
     // is the same fight.
     | Fight room -> $"fight:{room}"
+    | Defend room -> $"defend:{room}"
     | Assault room -> $"assault:{room}"
 
 /// The target inside a Task id: what `taskId` writes between its first colon
@@ -229,6 +230,94 @@ let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string *
             ->
             Some(id, kind)
         | _ -> None)
+
+/// The standing ramparts of ours on the home's declared perimeter, by id,
+/// tile and hits: never a Keep's or a Post container's.
+let internal perimeterRamparts (view: ColonyView) : (string * RoomPos * int) list =
+    match view.Perimeter with
+    | [] -> []
+    | perimeter ->
+        let line = Set.ofList perimeter
+
+        SpatialInfo.structureHits view.Spatial
+        |> List.choose (fun (id, kind, hits) ->
+            if kind = BuiltKind.Rampart then
+                homeTile view id
+                |> Option.filter (fun tile -> Set.contains (RoomPos.pos tile) line)
+                |> Option.map (fun tile -> id, tile, hits.Hits)
+            else
+                None)
+
+/// The home's tiles outside its line: what a walk in from the exits reaches
+/// over the terrain without crossing a declared perimeter tile. Empty for a
+/// home that declares no perimeter.
+let private outsideLine (view: ColonyView) : Set<Pos> =
+    match view.Perimeter with
+    | [] -> Set.empty
+    | perimeter ->
+        let home = SpatialInfo.homeName view.Spatial
+        let terrain = (SpatialInfo.layerOf view.Spatial home).Terrain
+        let line = Set.ofList perimeter
+
+        let open' (tile: Pos) =
+            not (Set.contains tile line)
+            && (match TerrainGrid.tryFind tile terrain with
+                | Some ground -> ground <> Wall
+                | None -> false)
+
+        let reached = System.Collections.Generic.HashSet<Pos>()
+        let frontier = System.Collections.Generic.Queue<Pos>()
+
+        let visit (tile: Pos) =
+            if open' tile && reached.Add tile then
+                frontier.Enqueue tile
+
+        Map.tryFind home view.Spatial.Borders
+        |> Option.defaultValue Map.empty
+        |> Map.iter (fun exit ground ->
+            if ground <> Wall then
+                tilesWithin 1 exit |> List.iter visit)
+
+        while frontier.Count > 0 do
+            tilesWithin 1 (frontier.Dequeue()) |> List.iter visit
+
+        Set.ofSeq reached
+
+/// The raid bodies at the home's line this tick (#504): a hostile, no
+/// keeper's, standing outside the line (`outsideLine`) with a live ATTACK or
+/// RANGED_ATTACK, or with WORK and beside a perimeter rampart. A body inside
+/// the line — a breach, or at the Keep — is the towers' and the relief's,
+/// never a [[defender]]'s.
+///
+/// Beside it the tiles outside the line, which the defender's walk reads;
+/// both empty on a tick no hostile stands in the home.
+let internal raidAtLine (view: ColonyView) : Set<Pos> * HostileInfo list =
+    let home = SpatialInfo.homeName view.Spatial
+
+    match
+        view.Hostiles
+        |> List.filter (fun hostile ->
+            hostile.Pos.Room = home && not (HostileInfo.isKeeper hostile))
+    with
+    | [] -> Set.empty, []
+    | _ when List.isEmpty view.Perimeter -> Set.empty, []
+    | hostiles ->
+        let outside = outsideLine view
+        let ramparts = perimeterRamparts view |> List.map (fun (_, tile, _) -> tile)
+
+        let besideLine (hostile: HostileInfo) =
+            ramparts
+            |> List.exists (fun tile ->
+                RoomPos.range tile hostile.Pos
+                |> Option.exists (fun r -> r <= Engine.meleeRange))
+
+        outside,
+        hostiles
+        |> List.filter (fun hostile ->
+            Set.contains (RoomPos.pos hostile.Pos) outside
+            && (HostileInfo.activeCount hostile Attack > 0
+                || HostileInfo.activeCount hostile RangedAttack > 0
+                || HostileInfo.activeCount hostile Work > 0 && besideLine hostile))
 
 /// Whether any Keep structure of this colony stands below full hits: the
 /// safe-mode reflex's own question. Its own predicate and not a filter over

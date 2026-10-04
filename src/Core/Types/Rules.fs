@@ -318,6 +318,12 @@ type Tuning =
         /// attack (#477), so a claimer or a dismantler walking in behind a
         /// healed raid can still be shot.
         TowerRepairReserve: int
+        /// The most [[defender]]s a home casts at once, one a raid melee at
+        /// its ramparts (#504).
+        DefenderCap: int
+        /// The most MOVE/ATTACK blocks one [[defender]] carries: the bank
+        /// buys fewer, never more (#504).
+        DefenderBlocks: int
         /// How many ticks a raid healer last seen in a room still counts in
         /// the heal a tower's shot must beat (#480): the t880,341 raid's
         /// healers bounced across the exit every other tick.
@@ -659,6 +665,12 @@ module Tuning =
             // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
             // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
             TowerRepairReserve = 300
+            // Trepidimous' raids bring two melee (squads.md §1.2); a third
+            // body has no rampart tile beside them on a three-tile choke.
+            DefenderCap = 2
+            // Ten blocks, 1,300 (an RCL4 bank): 300 a tick out-swings two
+            // 7-HEAL healers and still walks a tile a tick.
+            DefenderBlocks = 10
             HealMemoryTicks = 5
             AllyPassRange = 3
             // Past the light tick's near rule (5): a hostile closing on an

@@ -556,6 +556,7 @@ let quotasRecordTests =
                 Expect.equal
                     (quotas.Rows |> List.map (fun r -> r.Row))
                     [
+                        "defender"
                         "guard"
                         "ranger"
                         "brawler"

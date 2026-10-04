@@ -486,6 +486,12 @@ let planTasks
         @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
         // And one Assault per assault this colony pools (#490, #491).
         @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)
+        // And the home's Defend while it wants a defender (#504): the row
+        // hires against the same number.
+        @ (if Threats.defendersWanted view threats > 0 then
+               [ Defend(SpatialInfo.homeName view.Spatial) ]
+           else
+               [])
 
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —

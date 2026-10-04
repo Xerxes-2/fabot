@@ -173,6 +173,12 @@ let patternTableTests =
                             Name = "ranger"
                             Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
                         }
+                        // The home's rampart defender (#504): MOVE and ATTACK
+                        // one to one.
+                        {
+                            Name = "defender"
+                            Block = [ Move; Attack ]
+                        }
                         // The squad's four roles, each one fixed body.
                         {
                             Name = "brawler"

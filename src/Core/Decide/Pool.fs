@@ -139,6 +139,7 @@ let internal restockWait (view: ColonyView) task =
     | Dismantle _
     | Guard _
     | Fight _
+    | Defend _
     | Assault _
     | Flee -> 0
 
@@ -188,16 +189,17 @@ let internal outlivesTheStay
         walk.Value |> Option.forall (fun ticks -> creep.TicksToLive >= ticks + stay)
     | _ -> true
 
-/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight and
-/// Assault. A predicate, because the two rules that turn on it (`areaFor`
-/// skipping the Reach subtraction, `threatened` written beneath it) are asked
-/// before `planPool` ranks anything, and `tierOf` ranks exactly these into
-/// `Safety`. Exhaustive on purpose.
+/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight,
+/// Defend and Assault. A predicate, because the two rules that turn on it
+/// (`areaFor` skipping the Reach subtraction, `threatened` written beneath
+/// it) are asked before `planPool` ranks anything, and `tierOf` ranks exactly
+/// these into `Safety`. Exhaustive on purpose.
 let private safetyTier task =
     match task with
     | Flee
     | Guard _
     | Fight _
+    | Defend _
     | Assault _ -> true
     | Harvest _
     | Withdraw _
@@ -231,6 +233,7 @@ let private roomOfWork atlas task =
     | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room
     | Fight room
+    | Defend room
     | Assault room -> Some room
     | Flee -> None
 
@@ -280,6 +283,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             |> Option.defaultWith (fun () -> Atlas.sourceRingIn atlas room)
         // The member's own ground, rally or fight (`Threats.fightGroundIn`).
         | Fight room -> Threats.fightGroundIn threats room creep
+        | Defend room -> Threats.defendGroundIn threats room
         | Assault room -> Threats.assaultGroundIn threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
 
@@ -316,7 +320,8 @@ let private groundRoom (room: string) (area: Set<RoomPos>) =
 let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
-    | Guard room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
+    | Guard room
+    | Defend room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
     | Fight room
     | Assault room ->
         let area = areaFor threats atlas creep task
@@ -334,7 +339,8 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
 /// (`firstStep`).
 let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
-    | Guard room -> Atlas.firstStepToward atlas creep task room area
+    | Guard room
+    | Defend room -> Atlas.firstStepToward atlas creep task room area
     | Fight room
     | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | _ -> Atlas.firstStep atlas creep task area
@@ -793,12 +799,14 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
     let tierOf task =
         match task with
         | Flee -> Safety
-        // The tier holds four Tasks and no ordering between them: Flee is
-        // inapplicable to a Fighter, a Guard, a Fight and an Assault to
-        // nothing else, and a room's Guard and its Fight admit different
-        // bodies until its squad launches.
+        // The tier holds five Tasks and no ordering between them: Flee is
+        // inapplicable to a Fighter, a Guard, a Fight, a Defend and an
+        // Assault to nothing else, and a room's Guard and its Fight admit
+        // different bodies until its squad launches; a Defend admits its
+        // defenders alone.
         | Guard _
         | Fight _
+        | Defend _
         | Assault _ -> Safety
         | Harvest _ -> Feeding
         // A decision made here, because nothing else made it: the ADRs fix the
@@ -1086,6 +1094,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         | Guard room when Set.contains room (Facts.harassRooms view) ->
             Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
         | Guard room -> Capacity.fighters (guardsWanted view room)
+        // The defender row's own count, read a second time as the guard's is.
+        | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)
         // The squad's slots, one cap per role.
         | Fight room ->
             Map.tryFind room threats.Fight

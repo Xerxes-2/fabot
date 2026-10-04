@@ -1,6 +1,8 @@
 # Fire reflex — towers attack only, nearest hostile, no gate
 
-> **Status:** amended by #466, #477, #480, the kill check (2026-10-04)
+> **Status:** amended by #466, #477, #480, the kill check (2026-10-04), #504
+
+> **Amended by #504**: a creep of ours standing on our own rampart is not hurt — the swing lands on the rampart — so a raider beside only such creeps is no urgent target, and the kill check decides its shot. A [[defender]] on the struck rampart otherwise drained the reserve kept for the tapper to 0–110 on the arena.
 
 > **Amended by the kill check (2026-10-04)**: a shot that is not urgent is taken only when it can kill. Each spare tower (one holding more than `Tuning.TowerRepairReserve`) pays for its own shots over its reserve; the target is shot when the towers' damage over those shots, plus our creeps' damage less the heal reaching it for as long as the longest-paid tower fires, reaches its hits — or at once when our creeps alone already out-damage that heal. A shot that cannot kill goes to repairing the struck rampart instead. The heal counted halves for a player's healer standing on the exit ring or remembered off it: the engine carries it out of the room every other tick. An NPC's healer is never carried and counts in full. Measured on the W17S25 arena: a tower with half its energy, plinking a healed melee it could never kill, broke the line 28 ticks sooner than repairing.
 

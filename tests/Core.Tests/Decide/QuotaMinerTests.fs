@@ -368,6 +368,7 @@ let minerCastTests =
                 Expect.equal
                     ((decideOn (richMine 1800)).Quotas.Rows |> List.map (fun row -> row.Row))
                     [
+                        "defender"
                         "guard"
                         "ranger"
                         "brawler"

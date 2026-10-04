@@ -131,6 +131,17 @@ type Threats =
         /// Per room an Assault is pooled for (`ColonyView.Assaults`), its
         /// ground (`threatsOfHeld`); empty off `threatsOf`.
         Assault: Map<string, AssaultGround>
+        /// The raid at the home's line this tick (`Facts.raidAtLine`, #504):
+        /// derived once, read by the Planner, the defender row and the
+        /// Defend's capacity.
+        AtLine: HostileInfo list
+        /// Under the home, the tiles outside its line a raid melee there
+        /// reaches in a step and a swing: what a [[defender]] walks round
+        /// (#504), where every other runner walks round the Reach.
+        DefendAvoid: Map<string, Set<Pos>>
+        /// Under the home, while a raid stands at its line, the
+        /// [[defender]]'s ground (#504, `defendGroundOf`).
+        Defend: Map<string, Set<RoomPos>>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -146,10 +157,39 @@ let noThreats =
         Held = Set.empty
         Fight = Map.empty
         Assault = Map.empty
+        AtLine = []
+        DefendAvoid = Map.empty
+        Defend = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Threats =
+    /// One room's `DefendAvoid`; empty for a room with none.
+    let defendAvoidIn (threats: Threats) (room: string) : Set<Pos> =
+        Map.tryFind room threats.DefendAvoid |> Option.defaultValue Set.empty
+
+    /// The [[defender]]'s ground in one room; empty for a room it holds none
+    /// in (#504).
+    let defendGroundIn (threats: Threats) (room: string) : Set<RoomPos> =
+        Map.tryFind room threats.Defend |> Option.defaultValue Set.empty
+
+    /// How many [[defender]]s the home wants this tick (#504): one a body of
+    /// the raid at its line, at most `Tuning.DefenderCap`; none in a home
+    /// that keeps no ramparts, has no perimeter rampart standing, or runs
+    /// safe mode.
+    let defendersWanted (view: ColonyView) (threats: Threats) : int =
+        let home = SpatialInfo.homeName view.Spatial
+
+        let shielded =
+            Map.tryFind home view.RoomControl
+            |> Option.exists (fun control -> control.SafeMode)
+
+        match threats.AtLine with
+        | [] -> 0
+        | _ when not (keepsRamparts view) || shielded -> 0
+        | _ when List.isEmpty (perimeterRamparts view) -> 0
+        | raid -> min view.Tuning.DefenderCap (List.length raid)
+
     /// One room's Reach; empty for a room no Threat stands in.
     let reachIn (threats: Threats) (room: string) : Set<Pos> =
         Map.tryFind room threats.Reach |> Option.defaultValue Set.empty
@@ -278,6 +318,51 @@ let private kiteGroundIn
         |> Set.ofList
         |> RoomPos.setAt room
 
+/// The [[defender]]'s ground in the home (#504), off this tick's raid at the
+/// line: every perimeter rampart of ours beside a raid body that no other
+/// creep of ours stands on — the mother's lent residents among them
+/// (`ColonyView.Foreign`) — or, with none beside one, those nearest the raid.
+let private defendGroundOf
+    (view: ColonyView)
+    (atLine: HostileInfo list)
+    : Map<string, Set<RoomPos>> =
+    match atLine with
+    | [] -> Map.empty
+    | raid ->
+        let home = SpatialInfo.homeName view.Spatial
+
+        let taken =
+            view.Creeps
+            |> List.filter (fun creep -> not (isNamedFor defenderPattern creep.Name))
+            |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name)
+            |> Set.ofList
+            |> Set.union view.Foreign
+
+        let free =
+            perimeterRamparts view
+            |> List.map (fun (_, tile, _) -> tile)
+            |> List.filter (fun tile -> not (Set.contains tile taken))
+
+        let gapTo (tile: RoomPos) =
+            raid
+            |> List.choose (fun hostile -> RoomPos.range tile hostile.Pos)
+            |> List.fold min System.Int32.MaxValue
+
+        let ground =
+            match free |> List.filter (fun tile -> gapTo tile <= Engine.meleeRange) with
+            | [] ->
+                match free with
+                | [] -> Set.empty
+                | _ ->
+                    let nearest = free |> List.map gapTo |> List.min
+                    free |> List.filter (fun tile -> gapTo tile = nearest) |> Set.ofList
+            | beside -> Set.ofList beside
+
+        if Set.isEmpty ground then
+            Map.empty
+        else
+            Map.ofList [ home, ground ]
+
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room: weapon range plus the margin in Chebyshev tiles, less every tile under
 /// one of our standing ramparts in that room. The held facts say which rangers
@@ -364,6 +449,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 Held = Set.empty
                 Fight = Map.empty
                 Assault = Map.empty
+                AtLine = []
+                DefendAvoid = Map.empty
+                Defend = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -657,7 +745,33 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             ))
         |> List.map (fun core -> ringAround core.RoomName core.Tile)
 
+    let outside, atLine = raidAtLine view
+
+    // The tiles outside the line a raid melee there reaches in a step and a
+    // swing: what a defender's walk keeps off (#504). Inside the line a
+    // melee outside it reaches nothing but the rampart it strikes.
+    let defendAvoid =
+        match
+            atLine
+            |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
+        with
+        | [] -> Map.empty
+        | melee ->
+            let home = SpatialInfo.homeName view.Spatial
+
+            Map.ofList
+                [
+                    home,
+                    outside
+                    |> Set.filter (fun tile ->
+                        melee
+                        |> List.exists (fun m -> range (RoomPos.pos m.Pos) tile <= stepAndSwing))
+                ]
+
     { armed with
+        AtLine = atLine
+        DefendAvoid = defendAvoid
+        Defend = defendGroundOf view atLine
         Ring =
             (armed.Ring, holds @ cores)
             ||> List.fold (fun ring (room, ground) ->

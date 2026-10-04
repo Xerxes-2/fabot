@@ -88,6 +88,7 @@ let private castBodyOf
             GuardBlocks = sizing.GuardBlocks
             RangerBlocks = sizing.RangerBlocks
             UpgraderWork = upgraderWorkCeiling sizing
+            DefenderBlocks = view.Tuning.DefenderBlocks
         }
         pattern
         view.Bank.Capacity
@@ -159,6 +160,14 @@ type private SpecialistRow =
     }
 
 
+/// Whether a row waits while a [[defender]] is owed (#504): an economic row,
+/// and never a fighting one — the guard, the ranger, the squad's — nor the
+/// defender's own.
+let heldForDefender (pattern: BodyPattern) =
+    not (isOwnRowPattern pattern)
+    && pattern.Name <> guardPattern.Name
+    && pattern.Name <> rangerPattern.Name
+
 /// The spawn Intents the Workforce target's rows are owed. The target is the
 /// quota the *generalist* row is hired against; every other row is hired
 /// against its own unfilled quota and can carry the fleet past the target.
@@ -215,8 +224,9 @@ let internal planSpawns
             |> List.length
 
         // The fleet the target is a number about: every body but the squad's
-        // casts, which answer to their own rows alone (`workforceTarget`).
-        let inFleet name = Option.isNone (squadRoleByName name)
+        // casts and the defenders, which answer to their own rows alone
+        // (`workforceTarget`).
+        let inFleet name = not (ownRowOnly name)
 
         let deficit =
             target
@@ -306,6 +316,7 @@ let internal planSpawns
                 GuardBlocks = sizing.GuardBlocks
                 RangerBlocks = sizing.RangerBlocks
                 UpgraderWork = upgraderWorkCeiling sizing
+                DefenderBlocks = view.Tuning.DefenderBlocks
             }
 
         let squadRows: SpecialistRow list =
@@ -322,6 +333,14 @@ let internal planSpawns
 
         let rows: SpecialistRow list =
             [
+                // The home's own rampart defender (#504), ahead of every row:
+                // the line it stands on is what every other row lives behind.
+                {
+                    Name = "defender"
+                    Pattern = defenderPattern
+                    Quota = rows.Defender
+                    Census = fun creep -> isNamedFor defenderPattern creep.Name
+                }
                 // Counted over the fleet against a quota derived per room,
                 // like the reserver row: which room each finished body works
                 // is the Matcher's. A guard that outlived its raid is still an
@@ -421,9 +440,9 @@ let internal planSpawns
                 row, alive, inOven, row.Quota - alive - inOven |> max 0)
 
         // The rows the target and the deficit count: every row but the
-        // squad's.
+        // squad's and the defender's.
         let fleetRows =
-            filled |> List.filter (fun (row, _, _, _) -> not (isSquadPattern row.Pattern))
+            filled |> List.filter (fun (row, _, _, _) -> not (isOwnRowPattern row.Pattern))
 
         // The tick's arithmetic, written down for the `quotas` view.
         let quotas: Quotas =
@@ -510,6 +529,17 @@ let internal planSpawns
         // row's remainder while every specialist row is at or under quota.
         let specialistSeats = fleetRows |> List.sumBy (fun (_, _, _, gap) -> gap)
 
+        // A defender owed holds the economic rows (#504): a seat the bank
+        // cannot pay yet is otherwise passed over for a cheaper one, and a
+        // worker bought while the line falls is the bank the defender waited
+        // on. The fighting rows are never held.
+        let defenderOwed =
+            filled
+            |> List.exists (fun (row, _, _, gap) -> row.Pattern = defenderPattern && gap > 0)
+
+        let owed (row: SpecialistRow) =
+            not defenderOwed || not (heldForDefender row.Pattern)
+
         let seats =
             List.replicate
                 harvestFloor
@@ -521,13 +551,17 @@ let internal planSpawns
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
             @ (filled
+               |> List.filter (fun (row, _, _, _) -> owed row)
                |> List.collect (fun (row, _, _, gap) ->
                    List.replicate
                        gap
                        (castFromBank row.Pattern (fun bank ->
                            sizedBodyFor rowSizing row.Pattern bank.Capacity))))
             @ List.replicate
-                (deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
+                (if defenderOwed then
+                     0
+                 else
+                     deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
 
 
