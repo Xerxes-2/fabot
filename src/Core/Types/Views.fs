@@ -91,6 +91,10 @@ type ColonyView =
         /// `Tuning.AidNeedFloor` energy, the emptiest first: where this
         /// colony's terminal sends while its own Storage can spare it.
         AidRooms: string list
+        /// Every room any colony of ours declares as an outpost: a harassment
+        /// room among them keeps its source's seats for our miners, never
+        /// the ranger's (W17S26, 2026-10-04).
+        MinedRooms: Set<string>
         /// This colony's own controller. Never a child's, which reaches the
         /// pool as a target in a layer she projects.
         Controller: ControllerInfo option
@@ -994,6 +998,10 @@ module ColonyView =
             // with the declared outpost rocks laid in beside them.
             Sources = sourcesWhere (raised >> not) |> Outpost.pooledSources scanned outposts
             BorrowedSources = sourcesWhere raised
+            MinedRooms =
+                colonies
+                |> List.collect (fun other -> other.Outposts |> List.map (fun o -> o.RoomName))
+                |> Fresh.setOfSeq
             AidRooms =
                 colonies
                 |> List.map (fun other -> other.Home)

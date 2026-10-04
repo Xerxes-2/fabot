@@ -580,3 +580,33 @@ let harassContainerTests =
                 Expect.equal naming [ Dismantle id ] "no Withdraw, Refill or Repair of it"
             }
         ]
+
+[<Tests>]
+let minedHarassTests =
+    testList
+        "a harassment room we mine keeps its source's seats for our miners"
+        [
+            test "the ranger stands within reach of the source, never on a seat beside it" {
+                // W17S26, 2026-10-04: its one seat was the ranger's ground, and the
+                // Guard outranked the anchor walking to its Post there.
+                let quiet = bareHome |> harassing
+
+                let ground (colony: ColonyView) =
+                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
+
+                let seats = within 1 standTile Set.empty
+
+                Expect.equal
+                    (ground
+                        { quiet with
+                            MinedRooms = Set.singleton harassRoom
+                        })
+                    (Some(Set.difference (within Engine.rangedRange standTile Set.empty) seats))
+                    "within three of the source, less the seats"
+
+                Expect.equal
+                    (ground quiet)
+                    (Some seats)
+                    "a room nobody of ours mines: the seats, as before"
+            }
+        ]

@@ -32,6 +32,7 @@ let quiet: ColonyView =
         Sources = []
         BorrowedSources = []
         AidRooms = []
+        MinedRooms = Set.empty
         Controller = None
         RoomControl = Map.empty
         HeldOutposts = Set.empty

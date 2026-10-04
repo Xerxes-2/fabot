@@ -422,7 +422,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 |> List.filter (guardShoots view resident Set.empty)
                 |> List.partition isArmed
 
-            let seats = [ 1, RoomPos.pos h.Stand ]
+            // A room we mine keeps its source's seats for our miners: the
+            // ranger stands off them, within reach of every one (W17S26,
+            // 2026-10-04: one seat, which the ranger outranked the anchor on).
+            let mined = Set.contains room view.MinedRooms
+
+            let seats =
+                if mined then
+                    [ Engine.rangedRange, RoomPos.pos h.Stand ]
+                else
+                    [ 1, RoomPos.pos h.Stand ]
+
+            let offTheSeats (tile: Pos) =
+                not mined || range tile (RoomPos.pos h.Stand) > 1
 
             // Our shooters in the room, where they stand.
             let shooters =
@@ -481,7 +493,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             room,
             around
             |> List.collect (fun (radius, pos) -> Atlas.walkableWithinIn atlas room radius pos)
-            |> List.filter (fun tile -> not (Set.contains tile standing))
+            |> List.filter (fun tile -> not (Set.contains tile standing) && offTheSeats tile)
             |> Set.ofList
             |> RoomPos.setAt room)
         |> Map.ofList
