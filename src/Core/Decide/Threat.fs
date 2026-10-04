@@ -424,8 +424,40 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let seats = [ 1, RoomPos.pos h.Stand ]
 
+            // Our shooters in the room, where they stand.
+            let shooters =
+                view.Creeps
+                |> List.filter (fun creep -> partCount creep.Body RangedAttack > 0)
+                |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
+                |> List.filter (fun tile -> tile.Room = room)
+
+            // A body off the work spots is chased when the ranger catches it
+            // (user, 2026-10-04): slower than a ranger's step a tick on plain
+            // (its Carry read empty), or already a step from a shooter's
+            // reach, where a chase at one pace keeps it under fire.
+            let catchable (hostile: HostileInfo) =
+                let moves = hostile.Body |> List.filter ((=) Move) |> List.length
+
+                let weighed =
+                    hostile.Body
+                    |> List.filter (fun part -> part <> Move && part <> Carry)
+                    |> List.length
+
+                weighed > moves
+                || shooters
+                   |> List.exists (fun tile -> within tile (Engine.rangedRange + 1) hostile)
+
+            let chased =
+                unarmedTargets
+                |> List.filter (fun hostile ->
+                    not (within h.Stand 2 hostile)
+                    && not (within h.Controller 3 hostile)
+                    && catchable hostile)
+
             let working =
                 match unarmedTargets |> List.filter (within h.Stand 2) with
+                | [] when not (List.isEmpty chased) ->
+                    chased |> List.map (fun hostile -> Engine.rangedRange, RoomPos.pos hostile.Pos)
                 | [] when
                     unarmedTargets |> List.exists (fun hostile -> List.contains Work hostile.Body)
                     ->

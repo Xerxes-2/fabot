@@ -361,19 +361,42 @@ let harassGuardTests =
                     "a miner at the source and a reserver at the controller: the ground is the miner's alone"
 
                 // The miner stepped just out of reach, off the source, and
-                // back: ground that followed it off the source turned the
-                // ranger to the reserver and back (W18S27, t840,8xx).
+                // back: ground that turned to the reserver as it did turned the
+                // ranger between the two (W18S27, t840,8xx). A miner slower than
+                // the ranger is chased instead (user, 2026-10-04), and the
+                // reserver stays out of the ground.
+                let offSource = { X = 15; Y = 7 }
+
                 Expect.equal
                     (ground
                         { quiet with
                             Hostiles =
                                 [
-                                    miner "miner" { X = 15; Y = 7 }
+                                    miner "miner" offSource
                                     theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
                                 ]
                         })
+                    (Some(within Engine.rangedRange offSource (Set.ofList [ offSource ])))
+                    "a slow miner off the source: the ranger chases it, never the reserver"
+
+                // A worker as fast as the ranger, far from it: not caught, so the
+                // ranger holds the source's seats (W19S26's Convex791, 10M10W10C).
+                Expect.equal
+                    (ground
+                        { quiet with
+                            Hostiles =
+                                [
+                                    theirs
+                                        "worker"
+                                        enemy
+                                        offSource
+                                        (List.replicate 10 Move
+                                         @ List.replicate 10 Work
+                                         @ List.replicate 10 Carry)
+                                ]
+                        })
                     (ground quiet)
-                    "a miner off the source and a reserver at the controller: the ranger holds the source's seats"
+                    "a worker at a ranger's pace and out of reach: the seats"
             }
         ]
 
