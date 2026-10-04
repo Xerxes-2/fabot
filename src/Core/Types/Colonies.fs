@@ -431,6 +431,17 @@ module Outpost =
             Controller = "6a8caa89dd4872bccd318e4c", { Room = "W16S29"; X = 23; Y = 32 }
         }
 
+    /// W17S25's first outpost, declared 2026-10-04 (user): one exit south, a
+    /// single source (28,10), unreserved since our harassment drove
+    /// Trepidimous' miners out; still harassed (the harassment cut lets an
+    /// outpost's declared rock and controller through).
+    let w17s26: Outpost =
+        {
+            RoomName = "W17S26"
+            Sources = [ "6a8caa7ddd4872bccd318c78", { Room = "W17S26"; X = 28; Y = 10 } ]
+            Controller = "6a8caa7ddd4872bccd318c79", { Room = "W17S26"; X = 8; Y = 21 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`: one hop, one source at a 210-tick
     /// round trip, about 6.25 energy a tick net, and the cheapest tick of the
@@ -1309,7 +1320,7 @@ module Colony =
             //   afterwards (#446, #467).
             {
                 Home = "W17S25"
-                Outposts = []
+                Outposts = [ Outpost.w17s26 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"

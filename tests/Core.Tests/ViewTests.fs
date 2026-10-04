@@ -4349,7 +4349,7 @@ let harassViewTests =
             }
 
             test
-                "no harassment room is a declared home, outpost, errand or salvage room, but a Claim" {
+                "no harassment room is a declared home, errand or salvage room, and the outposts among them are a Claim or a room its colony mines whole" {
                 // The branch order in `ColonyView.ofWorld` reads the bootstrap,
                 // errand and salvage kinds ahead of a harassment room. The one
                 // overlap allowed is a Claim (W17S25's, 2026-10-01 and again from
@@ -4367,8 +4367,7 @@ let harassViewTests =
                 let kept =
                     Colony.declared
                     |> List.collect (fun colony ->
-                        colony.Home :: (colony.Outposts |> List.map (fun o -> o.RoomName))
-                        @ (colony.Errands |> List.map (fun e -> e.RoomName))
+                        colony.Home :: (colony.Errands |> List.map (fun e -> e.RoomName))
                         @ colony.Salvage)
                     |> Set.ofList
                     |> fun kept -> Set.difference kept claims
@@ -4378,6 +4377,23 @@ let harassViewTests =
                      |> List.filter (fun h -> Set.contains h.RoomName kept)
                      |> List.map (fun h -> h.RoomName))
                     "no room is harassed by one list and kept by another"
+
+                // User, 2026-10-04: W17S26 is W17S25's outpost and W15S28's
+                // harassment room at once. Its miner's view keeps the room
+                // whole (`ofWorld`), the caster's cuts it to the harassment.
+                let mined =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        colony.Outposts |> List.map (fun o -> o.RoomName))
+                    |> Set.ofList
+                    |> fun mined -> Set.difference mined claims
+
+                Expect.equal
+                    (Colony.harass
+                     |> List.filter (fun h -> Set.contains h.RoomName mined)
+                     |> List.map (fun h -> h.RoomName))
+                    [ "W17S26" ]
+                    "W17S26 is the one room both harassed and mined"
 
                 Expect.equal
                     (Colony.harass

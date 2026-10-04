@@ -894,6 +894,17 @@ module ColonyView =
                     room, salvaging facts, None
                 else
                     match Map.tryFind room harassEnemies with
+                    // A room this colony mines is its outpost whole, harassed
+                    // or not (user, 2026-10-04: W17S26, W17S25's outpost and a
+                    // room W15S28 harasses): its containers, sites and piles
+                    // are ours to work. The harassment is the caster's.
+                    | Some _ when
+                        outposts
+                        |> List.exists (fun outpost ->
+                            outpost.RoomName = room
+                            && not (List.contains room (Colony.homes colonies)))
+                        ->
+                        room, facts, remembered
                     // No memory, as a transit room keeps none. Ahead of the
                     // outposts: a Claim outpost harassed until its Claim lands
                     // (W17S25) works its declared controller and rock, laid in
