@@ -153,6 +153,11 @@ type Threats =
         /// home's safe mode. `Lazy` for `Safe`'s reason: most raid ticks no
         /// body idles at home.
         Shelter: Map<string, Lazy<Set<RoomPos>>>
+        /// The rooms a ranger chases a raid in this tick (#510): each one in
+        /// sight `Facts.chased` answers for, and each outpost shut on a raid
+        /// a ranger kites down (`ColonyView.ChasedOutposts`). Derived once,
+        /// read by the pool, the Emitter, the Matcher, the mover and the rows.
+        Chased: Set<string>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -172,6 +177,7 @@ let noThreats =
         DefendAvoid = Map.empty
         Defend = Map.empty
         Shelter = Map.empty
+        Chased = Set.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -307,8 +313,17 @@ let private killHead (view: ColonyView) (room: string) (targets: HostileInfo lis
 let private stepAndSwing = Engine.meleeRange + 1
 let private swampReach = Engine.meleeRange + 3
 
+/// How far a kite tile's escape room is flooded (#510): the steps a ranger
+/// takes while a melee closes on it from beyond a step and a swing.
+let private escapeDepth = 3
+
 /// The tiles of one room within three of the kill order's head that no melee
-/// body reaches in a step and a swing, less swamp near one: the kite ground.
+/// body reaches in a step and a swing, less swamp near one and the exit
+/// tiles, which carry a body out of the room: the kite ground. Of those, the
+/// ones with escape room (#510): a short flood of the open ground beyond each
+/// — off swamp and the exits, and out of every melee's step and swing — at
+/// least half the widest's, so the retreat never backs into a corridor,
+/// corner or swamp pocket a melee pins it in.
 let private kiteGroundIn
     atlas
     (room: string)
@@ -326,14 +341,46 @@ let private kiteGroundIn
     let clearOfMelee reach (tile: Pos) =
         melee |> List.forall (fun m -> range m tile > reach)
 
+    let isOpen (tile: Pos) =
+        not (Set.contains tile standing)
+        && not (Seam.onRing tile)
+        && clearOfMelee stepAndSwing tile
+        && not (Atlas.isSwampIn atlas room tile)
+
+    let escapeRoom (tile: Pos) =
+        let rec flood depth (seen: Set<Pos>) (front: Pos list) =
+            if depth = 0 || List.isEmpty front then
+                Set.count seen
+            else
+                let next =
+                    front
+                    |> List.collect (Atlas.adjacentWalkableIn atlas room)
+                    |> List.filter (fun step -> isOpen step && not (Set.contains step seen))
+                    |> List.distinct
+
+                flood (depth - 1) (Set.union seen (Set.ofList next)) next
+
+        flood escapeDepth (Set.singleton tile) [ tile ]
+
     match head with
     | None -> Set.empty
     | Some target ->
-        Atlas.walkableWithinIn atlas room Engine.rangedRange (RoomPos.pos target.Pos)
-        |> List.filter (fun tile ->
-            not (Set.contains tile standing)
-            && clearOfMelee stepAndSwing tile
-            && not (Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)))
+        let tiles =
+            Atlas.walkableWithinIn atlas room Engine.rangedRange (RoomPos.pos target.Pos)
+            |> List.filter (fun tile ->
+                not (Set.contains tile standing)
+                && not (Seam.onRing tile)
+                && clearOfMelee stepAndSwing tile
+                && not (Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)))
+
+        match melee, tiles with
+        | [], _
+        | _, [] -> tiles
+        | _ ->
+            let roomOf = tiles |> List.map (fun tile -> tile, escapeRoom tile)
+            let widest = roomOf |> List.map snd |> List.max
+
+            roomOf |> List.filter (fun (_, space) -> 2 * space >= widest) |> List.map fst
         |> Set.ofList
         |> RoomPos.setAt room
 
@@ -460,8 +507,17 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             view.Hostiles
             |> List.filter (fun hostile -> not (shielded hostile.Pos.Room))
             |> List.choose (fun hostile ->
+                // A body that can barely move reaches one past its weapon's
+                // range (#510): with its fatigue spent it steps once, then
+                // waits out the weight of that step.
+                let margin =
+                    if HostileInfo.stationary hostile then
+                        Engine.meleeRange
+                    else
+                        view.Tuning.ReachMargin
+
                 weaponRange hostile
-                |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r))
+                |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r + margin))
         with
         | [] -> noThreats
         | threats ->
@@ -475,8 +531,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             // safe mode, where it could hurt nothing either.
             let reach =
                 threats
-                |> List.collect (fun (room, pos, weapon) ->
-                    let r = weapon + view.Tuning.ReachMargin
+                |> List.collect (fun (room, pos, r) ->
                     (room, tilesWithin r pos) :: reachAcross atlas room pos r)
                 |> List.groupBy fst
                 |> List.filter (fun (room, _) -> not (shielded room))
@@ -533,6 +588,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 DefendAvoid = Map.empty
                 Defend = Map.empty
                 Shelter = Map.empty
+                Chased = Set.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -677,13 +733,25 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let rangers = rangerRooms view
 
-    // The ranger rooms an armed raid, or a rival's claimer, stands in.
-    let contested =
+    // The rooms a ranger chases a raid in (#510): in sight, `chased`'s; out
+    // of it, an outpost shut on a raid a ranger kites down.
+    let chasedRooms =
         view.Hostiles
-        |> List.filter (fun hostile ->
-            Set.contains hostile.Pos.Room rangers
-            && (Map.containsKey hostile.Pos.Room armed.Ring || claimsAFlag resident hostile))
         |> List.map (fun hostile -> hostile.Pos.Room)
+        |> List.distinct
+        |> List.filter (chased view)
+        |> Set.ofList
+        |> Set.union view.ChasedOutposts
+
+    // The ranger rooms an armed raid, or a rival's claimer, stands in, and
+    // the chased rooms a raid stands in.
+    let contested =
+        (view.Hostiles
+         |> List.filter (fun hostile ->
+             Set.contains hostile.Pos.Room rangers
+             && (Map.containsKey hostile.Pos.Room armed.Ring || claimsAFlag resident hostile))
+         |> List.map (fun hostile -> hostile.Pos.Room))
+        @ (chasedRooms |> Set.filter armed.Ring.ContainsKey |> Set.toList)
         |> List.distinct
 
     let kite =
@@ -886,6 +954,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         HarassRing = harassRing
         Kite = kite
         Held = holds |> List.map fst |> Set.ofList
+        Chased = chasedRooms
     }
 
 /// This tick's Threats as a colony holding nothing would see them: no Fight,

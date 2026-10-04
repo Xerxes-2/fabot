@@ -266,9 +266,17 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // is lit and this branch is not taken again.
         //
         // Which ground is the Guard's otherwise is `Threats.guardGroundIn`'s.
+        // A chased room shut on its raid places no source (#510): its
+        // walkable ground off the border gives the walk in a destination.
         | Guard room ->
             Threats.guardGroundIn threats room
-            |> Option.defaultWith (fun () -> Atlas.sourceRingIn atlas room)
+            |> Option.defaultWith (fun () ->
+                match Atlas.sourceRingIn atlas room with
+                | ring when Set.isEmpty ring && Set.contains room threats.Chased ->
+                    Atlas.walkableTilesIn atlas room
+                    |> Set.filter (Seam.onRing >> not)
+                    |> RoomPos.setAt room
+                | ring -> ring)
         // The member's own ground, rally or fight (`Threats.fightGroundIn`).
         | Fight room -> Threats.fightGroundIn threats room creep
         | Defend room -> Threats.defendGroundIn threats room
@@ -1025,6 +1033,9 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
+            // A chase over a quiet ranger's own Guard (#510): its kill is
+            // the room's whole income back, and the ranger is let go for it.
+            | Guard room when Set.contains room threats.Chased -> OneRungUp
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | _ -> OnTheTier
 
@@ -1094,6 +1105,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // (`Capacity.Relieved`).
         | Guard room when Set.contains room (Facts.harassRooms view) ->
             Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
+        // One ranger kites what cannot close on it (#510).
+        | Guard room when Set.contains room threats.Chased -> Capacity.fighters 1
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // The defender row's own count, read a second time as the guard's is.
         | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)

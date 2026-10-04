@@ -447,30 +447,18 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 
 /// The guarded rooms each fighting row serves (#411): the errand rooms and the
 /// harassment rooms (#432) are the ranger's, every other guarded room the
-/// guard's.
-let private guardedSplit (view: ColonyView) (outposts: OutpostFacts) =
+/// guard's — but a chased one (`Threats.Chased`, #510), which neither row
+/// casts for.
+let private guardedSplit (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) =
     let rangers = rangerRooms view
 
-    outposts.Guarded |> List.partition (fun room -> not (Set.contains room rangers))
+    outposts.Guarded
+    |> List.filter (fun room -> not (Set.contains room threats.Chased))
+    |> List.partition (fun room -> not (Set.contains room rangers))
 
 /// The guard row's quota: `guardsWanted` over every guarded outpost, summed.
-let internal guardQuota (view: ColonyView) (outposts: OutpostFacts) : int =
-    fst (guardedSplit view outposts) |> List.sumBy (guardsWanted view)
-
-/// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
-/// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
-/// What the stand-down weighs a raid against. One body and never the row's two
-/// summed: `guardBlocksBeat` grows about as the square of the blocks, and a
-/// raid focuses one body at a time while the second may arrive late, so the
-/// sum would call a fight won that each body loses alone — and each body is
-/// sized to win alone (`guardBlocksFor`).
-let guardBlocksReach (view: ColonyView) : int =
-    min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
-
-/// The ranger's twin of `guardBlocksReach` (#411): the biggest ranger body the
-/// bank buys, what an errand room's raid is weighed against.
-let rangerBlocksReach (view: ColonyView) : int =
-    min rangerBlocksMost (view.Bank.Capacity / bodyCost rangerPattern.Block)
+let internal guardQuota (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : int =
+    fst (guardedSplit view threats outposts) |> List.sumBy (guardsWanted view)
 
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the
@@ -494,8 +482,12 @@ let internal guardBlocksFor (view: ColonyView) (room: string) : int =
 /// outposts' answers, one where none is guarded. Every cast carries it, as the
 /// reserver row's casts carry the largest outstanding claim: the Matcher pairs
 /// a finished body to a room by travel cost.
-let internal guardBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
-    match fst (guardedSplit view outposts) |> List.map (guardBlocksFor view) with
+let internal guardBlocksWanted
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    : int =
+    match fst (guardedSplit view threats outposts) |> List.map (guardBlocksFor view) with
     | [] -> 1
     | blocks -> List.max blocks
 
@@ -548,11 +540,16 @@ let internal rangersWanted (view: ColonyView) (threats: Threats) (room: string) 
 /// The ranger row's quota: `rangersWanted` over every worked errand and
 /// harassment room.
 let internal rangerQuota (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : int =
-    snd (guardedSplit view outposts) |> List.sumBy (rangersWanted view threats)
+    snd (guardedSplit view threats outposts)
+    |> List.sumBy (rangersWanted view threats)
 
 /// The blocks the ranger row casts this tick, the worst room's answer.
-let internal rangerBlocksWanted (view: ColonyView) (outposts: OutpostFacts) : int =
-    match snd (guardedSplit view outposts) |> List.map (rangerBlocksFor view) with
+let internal rangerBlocksWanted
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    : int =
+    match snd (guardedSplit view threats outposts) |> List.map (rangerBlocksFor view) with
     | [] -> view.Tuning.RangerResidentBlocks
     | blocks -> List.max blocks
 
@@ -615,8 +612,8 @@ let private fightingRowStands
     living + inOven >= quota
 
 /// Whether the guard row is filled.
-let internal guardStands (view: ColonyView) (outposts: OutpostFacts) : bool =
-    fightingRowStands view isGuardRowCut (guardQuota view outposts)
+let internal guardStands (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : bool =
+    fightingRowStands view isGuardRowCut (guardQuota view threats outposts)
 
 /// One squad role's row quota: every pooled Fight's slots of the role, less
 /// the residents already filling them, in each room whose Fight is not
@@ -725,10 +722,10 @@ let internal reserverClaimsOf
     // raider is eating. Keyed to the guard gap and not to the spending, so it
     // flips once and not every cast.
     let withheld =
-        let outpostsShort, errandsShort = guardedSplit view outposts
+        let outpostsShort, errandsShort = guardedSplit view threats outposts
 
         Set.union
-            (if guardStands view outposts then
+            (if guardStands view threats outposts then
                  Set.empty
              else
                  Set.ofList outpostsShort)
@@ -844,8 +841,8 @@ let internal rowSizingOf
         AnchorPostCaps = postWorkCapsOf view atlas
         ReserverClaims = reserverClaimsOf view threats outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
-        GuardBlocks = guardBlocksWanted view outposts
-        RangerBlocks = rangerBlocksWanted view outposts
+        GuardBlocks = guardBlocksWanted view threats outposts
+        RangerBlocks = rangerBlocksWanted view threats outposts
         MinerQuota = minerQuota view atlas
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
@@ -1066,7 +1063,7 @@ let internal quotaRowsOf
     {
         Reserver = sizing.ReserverClaims
         Defender = Threats.defendersWanted view threats
-        Guard = guardQuota view outposts
+        Guard = guardQuota view threats outposts
         Ranger = rangerQuota view threats outposts
         Squad =
             SquadRole.all

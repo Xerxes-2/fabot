@@ -301,11 +301,19 @@ let internal applicable
     // Spelled through the row predicate the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree. The room decides which row: an
     // errand room's Guard is the ranger's (#411), and a harassment room's
-    // (#432), every other the melee guard's. The walk to the work area is what
+    // (#432), and a chased room's (#510) to a ranger every raider there falls
+    // behind; every other the melee guard's. The walk to the work area is what
     // travel cost prices.
     | Guard room ->
         if Set.contains room (Facts.rangerRooms view) then
             isRangerRowBody creep
+        elif Set.contains room threats.Chased then
+            // Kited down by this body's own live parts, or out of sight.
+            isRangerRowBody creep
+            && (Facts.kitedDown view (partCount creep.Body) room
+                || not (
+                    view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && Facts.isRaider h)
+                ))
         else
             isGuardRowBody creep
     // A squad cast, or once the squad launches a resident of the room whose

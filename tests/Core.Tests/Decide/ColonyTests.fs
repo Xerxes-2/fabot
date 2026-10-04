@@ -3092,6 +3092,7 @@ let colonyStageTests =
                     ExitWatch.Held
                         {
                             Run = [ { X = 0; Y = 10 } ]
+                            Exit = { X = 0; Y = 10 }
                             Until = filled.Time + 50
                         }
 

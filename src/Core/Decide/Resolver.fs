@@ -36,6 +36,9 @@ let private moveIntentFor
     // The home's shelter for an idle body at home that walks in to it and
     // stays on it (#514); empty for every other.
     (shelter: Set<RoomPos>)
+    // For a kiting ranger, the tiles of its room it walks round in place of
+    // the Reach (#510); None for every other body.
+    (kite: Set<Pos> option)
     (at: RoomPos)
     (task: Task option)
     (crossing: string option)
@@ -216,21 +219,30 @@ let private moveIntentFor
             // round reaches the work. Flee's own walk is the way out of one.
             // A defender walks round the tiles outside its line a raid melee
             // reaches (#504), and waits inside it where no way round reaches
-            // its rampart.
-            let reach =
-                if isNamedFor defenderPattern creep then
-                    Threats.defendAvoidIn threats room
-                else
-                    Threats.reachIn threats room
+            // its rampart. A kiting ranger walks round its own set (#510),
+            // across the border too.
+            let plain () = stepToward atlas creep task area
 
             let step =
-                if runs && task <> Flee then
+                match kite with
+                | Some avoid ->
                     round
-                        reach
-                        (fun () -> Atlas.firstStepAvoiding atlas creep reach area)
-                        (fun () -> stepToward atlas creep task area)
-                else
-                    stepToward atlas creep task area
+                        avoid
+                        (fun () ->
+                            match area |> Seq.tryHead with
+                            | Some tile when tile.Room <> room ->
+                                Atlas.stepTowardRoom atlas creep avoid tile.Room
+                            | _ -> Atlas.firstStepAvoiding atlas creep avoid area)
+                        plain
+                | None when runs && task <> Flee ->
+                    let reach =
+                        if isNamedFor defenderPattern creep then
+                            Threats.defendAvoidIn threats room
+                        else
+                            Threats.reachIn threats room
+
+                    round reach (fun () -> Atlas.firstStepAvoiding atlas creep reach area) plain
+                | None -> plain ()
 
             match step |> Option.map RoomPos.pos with
             | Some step -> travelling (rankOf task) step
@@ -521,6 +533,41 @@ let movementOf
         else
             Set.empty
 
+    // A ranger holding a chased room's Guard kites (#510). It keeps out of
+    // what each melee in its room reaches in a step and a swing rather than
+    // out of the whole Reach, so the ring at three it shoots from stays open
+    // to it; and a step and a swing off the exit a raid left by, where a body
+    // camping across lands beside it. A resident's walk onto its ramparts
+    // under a raid crosses the Reach, and is no kite.
+    let kiters =
+        view.Creeps
+        |> List.filter (fun c ->
+            isRangerBody c
+            && (match Map.tryFind c.Name assigned with
+                | Some(Guard room) -> Set.contains room threats.Chased
+                | _ -> false))
+        |> List.map (fun c -> c.Name)
+        |> Set.ofList
+
+    let stepAndSwing = Engine.meleeRange + 1
+
+    let avoidOf name (at: RoomPos) =
+        if Set.contains name kiters then
+            let camp =
+                match Map.tryFind at.Room view.ExitHolds with
+                | Some hold -> tilesWithin stepAndSwing hold.Exit
+                | None -> []
+
+            let strike =
+                view.Hostiles
+                |> List.filter (fun h ->
+                    h.Pos.Room = at.Room && HostileInfo.activeCount h Attack > 0)
+                |> List.collect (fun h -> tilesWithin stepAndSwing (RoomPos.pos h.Pos))
+
+            Some(Set.ofList (camp @ strike))
+        else
+            None
+
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of
     // ours idles in, and none at all for a tick where every body has a Task,
@@ -606,6 +653,7 @@ let movementOf
                     (match Map.tryFind home threats.Shelter with
                      | Some ground when Set.contains name sheltering -> ground.Force()
                      | _ -> Set.empty)
+                    (avoidOf name at)
                     at
                     (Map.tryFind name assigned)
                     (Map.tryFind name crossings))

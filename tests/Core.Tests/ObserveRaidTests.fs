@@ -963,6 +963,7 @@ let harassStandDownTests =
                                     Stronghold = false
                                     Raiders = Set.empty
                                     PlayerSince = None
+                                    Chased = false
                                 }
                             ]
                     }
@@ -1022,6 +1023,7 @@ let harassStandDownTests =
                         Stronghold = false
                         Raiders = Set.empty
                         PlayerSince = None
+                        Chased = false
                     }
 
                 let state =
@@ -1059,6 +1061,50 @@ let harassStandDownTests =
                 Expect.isEmpty
                     (RaidState.empty |> raidTick 100 colony |> shutAt 101)
                     "three ranger blocks beat a 3M1RA1H"
+            }
+
+            // #510: a ranged body holds the range on any melee-only body slower
+            // than it, so the distance and not the paper decides.
+            test "a melee squad that cannot close on the ranger is kited, not withdrawn from" {
+                let bodies (list: BodyPart list list) =
+                    list
+                    |> List.mapi (raiderIn harassRoom)
+                    |> List.map (fun hostile -> { hostile with Owner = "Trepidimous" })
+
+                let squadOf hostiles =
+                    { (harassing quiet) with
+                        Hostiles = bodies hostiles
+                        Bank = { Available = 800; Capacity = 800 }
+                    }
+
+                // Five on two: behind a ranger on a road as on plain.
+                let heavy = List.replicate 5 [ Attack; Attack; Attack; Attack; Attack; Move; Move ]
+
+                let fleet =
+                    List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
+
+                let shooters = List.replicate 5 [ RangedAttack; RangedAttack; Move ]
+
+                Expect.isEmpty
+                    (RaidState.empty |> raidTick 100 (squadOf heavy) |> shutAt 101)
+                    "five ATTACK on two MOVE out-swing one ranger block and never catch it"
+
+                Expect.contains
+                    (RaidState.empty
+                     |> raidTick 100 (squadOf (heavy @ [ [ Heal; Heal; Move; Move ] ]))
+                     |> shutAt 101)
+                    harassRoom
+                    "a heal that out-runs the ranger's 20 a tick makes the kite endless: weighed on paper"
+
+                Expect.contains
+                    (RaidState.empty |> raidTick 100 (squadOf fleet) |> shutAt 101)
+                    harassRoom
+                    "the same blows on legs as quick as the ranger's still shut the room"
+
+                Expect.contains
+                    (RaidState.empty |> raidTick 100 (squadOf (heavy @ shooters)) |> shutAt 101)
+                    harassRoom
+                    "a squad that shoots back is weighed on paper, slow or not"
             }
 
             test "the enemy's reservation of the room it harasses is no stand-down" {

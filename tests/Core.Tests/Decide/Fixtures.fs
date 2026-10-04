@@ -164,6 +164,7 @@ let bareRespawn =
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
         RaidedOutposts = Set.empty
+        ChasedOutposts = Set.empty
         Fought = Map.empty
         ConstructionSites = []
         Creeps = []

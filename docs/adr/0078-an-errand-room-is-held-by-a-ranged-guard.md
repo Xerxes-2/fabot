@@ -1,6 +1,8 @@
 # An errand room is held by a ranged guard
 
-> **Status:** accepted, amended by 0083
+> **Status:** accepted, amended by 0083, #510
+
+> **Amended by #510** on 2026-10-05: distance and not paper strength decides a melee raid ([[chase]]): one every raider of which shoots nothing and falls behind the ranger, and whose heal the ranger out-damages, is kited — never outmatched, and no stand-down — however it out-swings the ranger on paper. The kite ground keeps off the exit tiles and keeps the tiles with escape room, so the retreat never backs into a dead end; a chasing ranger walks round each melee's step and swing and the exit tile a raid left by, and may cross by any other.
 
 > **Amended by 0083** (#452, #456) on 2026-10-02: a squad's kiter is guns before legs, the resident ranger keeping its interleaved `[M;M;M;R;R;H]` blocks; and "No medic row" is reversed for squads, whose medic body now exists (no row casts it until #453).
 

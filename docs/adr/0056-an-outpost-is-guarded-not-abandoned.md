@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282, #417, #507
+> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510
+
+> **Amended by #510** on 2026-10-05: a hostile that can barely move under its whole weight (destroyed parts included) is *stationary*: it opens no stand-down by itself, and its Reach shrinks to its weapon's range and a step. An outpost whose raid a ranger kites down, and which the biggest guard the bank buys loses, is a [[chase]]: the economy still stands down, but the room stays projected as a transit room with its Guard a ranger's alone, never cast for, no melee guard hired into it, and a quiet ranger within a walk called to it.
 
 > **Amended by #507** on 2026-10-04: the stand-down clocked to the raid's life ends sooner once every body of the raid is seen gone; see ADR 0043's #507 note.
 

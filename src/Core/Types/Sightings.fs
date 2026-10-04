@@ -18,6 +18,49 @@ type ConstructionSiteInfo =
         Begun: bool
     }
 
+/// A body's weight and its live MOVE: what its pace over a tile is read off
+/// (#510), one rule for a hostile and for ours.
+type Gait = { Weight: int; Moves: int }
+
+[<RequireQualifiedAccess>]
+module Gait =
+    /// The fatigue a weighted part pays stepping onto a road, and onto plain.
+    let road = 1
+    let plain = 2
+
+    /// The weight of a body by part counts: every part but MOVE, and CARRY
+    /// read empty, which over-states its pace, the safe direction.
+    let weightOf (parts: BodyPart -> int) : int =
+        [ Work; Attack; RangedAttack; Heal; BodyPart.Claim; Tough ] |> List.sumBy parts
+
+    /// The gait of a body by its live part counts.
+    let ofParts (parts: BodyPart -> int) : Gait =
+        {
+            Weight = weightOf parts
+            Moves = parts Move
+        }
+
+    /// The whole ticks a tile of this fatigue takes, each live MOVE paying
+    /// two a tick; None for no MOVE acting, which never steps of itself.
+    let ticks (fatigue: int) (gait: Gait) : int option =
+        if gait.Moves <= 0 then
+            None
+        else
+            Some(max 1 ((fatigue * gait.Weight + 2 * gait.Moves - 1) / (2 * gait.Moves)))
+
+    /// Whether one gait falls behind another on road and plain alike, roads
+    /// being common ground. A body with no MOVE acting steps nowhere of
+    /// itself: a puller walks it at the puller's pace, which is the puller's
+    /// to answer for.
+    let fallsBehind (ours: Gait) (theirs: Gait) : bool =
+        let slower fatigue =
+            match ticks fatigue theirs, ticks fatigue ours with
+            | None, Some _ -> true
+            | Some t, Some o -> t > o
+            | _, None -> false
+
+        slower road && slower plain
+
 /// What the decision layer knows about one hostile creep in a room the colony
 /// is looking into this tick.
 type HostileInfo =
@@ -85,6 +128,25 @@ module HostileInfo =
     /// How many of one part still act (`Engine.liveParts`).
     let activeCount (hostile: HostileInfo) (part: BodyPart) : int =
         partCountIn (Engine.liveParts hostile.Body hostile.Hits) part
+
+    /// A hostile's gait (#510): every part but MOVE weighs, destroyed ones
+    /// too, since the engine charges fatigue on them, against its live MOVE.
+    let gait (hostile: HostileInfo) : Gait =
+        {
+            Weight = Gait.weightOf (partCountIn hostile.Body)
+            Moves = activeCount hostile Move
+        }
+
+    /// Five ticks a plain tile: a swamp tile's pace for a body at a MOVE a
+    /// part, so whatever walks past it is gone before its next step.
+    let private stationaryTicks = 5
+
+    /// Whether a hostile is as good as rooted (#510): it threatens the tiles
+    /// in its weapon's range and a step past them, not the room. Never one
+    /// with no MOVE acting, which another body may pull.
+    let stationary (hostile: HostileInfo) : bool =
+        Gait.ticks Gait.plain (gait hostile)
+        |> Option.exists (fun ticks -> ticks >= stationaryTicks)
 
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
@@ -396,6 +458,10 @@ type ExitHold =
         /// The walkable exit tiles of one side, contiguous, through the one
         /// nearest where the Threat was last seen.
         Run: Pos list
+        /// The one exit tile of `Run` it stepped out by (#510): a ranged body
+        /// keeps three from it, beyond the step and swing of a body camping
+        /// across.
+        Exit: Pos
         /// The first tick the hold no longer stands: `Tuning.ExitHoldTicks`
         /// after it left, or the tick its remembered `ticksToLive` runs out if
         /// sooner.
@@ -737,6 +803,7 @@ module World =
                 |> Option.map (fun (run, dies) ->
                     {
                         Run = run.Run
+                        Exit = run.Through
                         Until = min dies (world.Time + tuning.ExitHoldTicks)
                     })
                 |> Option.filter (ExitHold.stands world.Time)
@@ -1375,6 +1442,15 @@ module World =
                     if List.exists standing.Contains walk then walk else [])
                 |> List.distinct
 
+        // A shut outpost whose raid a ranger chases (#510), with the walk to
+        // it: projected as a transit room, so the chase is pooled there and
+        // nothing else is.
+        let chasing =
+            shutWalks stages gate.ChasedOutposts colony
+            |> List.collect (fun (room, crossed) ->
+                room :: (crossed |> List.filter (worked.Contains >> not)))
+            |> List.distinct
+
         {
             Outposts = outposts
             Errands = errands
@@ -1386,7 +1462,7 @@ module World =
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
             Assaults = assaults
-            Scanned = scanned @ evacuating |> List.distinct
+            Scanned = scanned @ evacuating @ chasing |> List.distinct
             Worked = worked
             Evacuating = evacuating
         }

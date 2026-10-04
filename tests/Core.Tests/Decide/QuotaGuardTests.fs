@@ -94,7 +94,7 @@ let guardRowTests =
                 // #417: one body and never the row's two summed, capped at the most
                 // blocks one body carries.
                 let reachAt capacity =
-                    Quota.guardBlocksReach
+                    Facts.guardBlocksReach
                         { bareRespawn with
                             Bank = bank capacity capacity
                         }
@@ -165,6 +165,7 @@ let guardRowTests =
                                     "W1N2",
                                     {
                                         Run = [ for y in 38..42 -> { X = 0; Y = y } ]
+                                        Exit = { X = 0; Y = 40 }
                                         Until = colony.Time + 50
                                     }
                                 ]

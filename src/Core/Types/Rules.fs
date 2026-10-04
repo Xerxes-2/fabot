@@ -221,7 +221,7 @@ module Engine =
     /// The most guard **bodies** one guarded room ever buys: where "hire
     /// another" stops. Each is sized to win the exchange alone, up to what the
     /// bank buys, and a raid is withdrawn from where the biggest such body
-    /// loses it (`Quota.guardBlocksReach`, #417). ADR-0056
+    /// loses it (`Facts.guardBlocksReach`, #417). ADR-0056
     let guardCap = 2
 
     /// The regeneration of a source in a room carrying an owner or a

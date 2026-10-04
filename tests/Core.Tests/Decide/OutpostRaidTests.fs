@@ -957,6 +957,7 @@ let private heldWest (colony: ColonyView) =
                     "W1N2",
                     {
                         Run = westRun
+                        Exit = { X = 0; Y = 44 }
                         Until = colony.Time + 50
                     }
                 ]
@@ -1066,6 +1067,7 @@ let exitHoldTests =
                         ExitWatch.Held
                             {
                                 Run = [ for y in 20..24 -> { X = 0; Y = y } ]
+                                Exit = { X = 0; Y = 22 }
                                 Until = 101 + Tuning.defaults.ExitHoldTicks
                             }
                     ))
@@ -1253,5 +1255,427 @@ let exitHoldTests =
                 Expect.isFalse
                     (ground |> Set.exists (fun tile -> tile.X = 0))
                     "and none of it is an exit tile the terrain lays, which would carry the guard across"
+            }
+        ]
+
+/// A ranger body as the ranger row casts it at an 800 bank.
+let private ranger name =
+    creepWith name 0 0 (bodyFor Bodies.rangerPattern 800)
+
+/// Torque404 as W18S25 saw it (#510): 17 MOVE and 3 ATTACK destroyed, 14
+/// ATTACK and one MOVE alive under the whole body's weight.
+let private crippledAt pos =
+    { hostileIn
+          "W1N2"
+          pos
+          (List.replicate 17 Move
+           @ List.replicate 3 Attack
+           @ [ Move ]
+           @ List.replicate 14 Attack) with
+        Hits = 1_454
+    }
+
+/// A heavy melee slower than a ranger on plain and on road alike: twelve
+/// ATTACK on five MOVE, 360 a swing, which the one guard block a 600 bank
+/// cannot even buy loses to. Ten on five would keep a ranger's pace on road.
+let private plodderAt pos =
+    hostileIn "W1N2" pos (List.replicate 5 Move @ List.replicate 12 Attack)
+
+/// The same blows on a MOVE a part: as quick as the ranger.
+let private runnerAt pos =
+    hostileIn "W1N2" pos (List.replicate 10 Move @ List.replicate 10 Attack)
+
+/// The raided field with a one-wide dead end off its east side, (31..36, 44):
+/// a pocket a ranger kited into is pinned in.
+let private withDeadEnd (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 20..30 do
+                                    for y in 41..48 -> { X = x; Y = y }, Plain
+                                for x in 31..36 -> { X = x; Y = 44 }, Plain
+                            ]
+                }
+    }
+
+let private groundOf colony =
+    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+    |> Option.defaultValue Set.empty
+
+let private rangeTo (pos: Pos) (tile: RoomPos) = range pos (RoomPos.pos tile)
+
+[<Tests>]
+let kiteTests =
+    testList
+        "a melee that cannot close on a ranged body (#510)"
+        [
+            test
+                "a crippled melee threatens a step and a swing about it, and the same body on its legs the room's margin" {
+                let at = { X = 25; Y = 44 }
+
+                let reachOf colony =
+                    Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
+                Expect.equal
+                    (reachOf (declaredRaid [ crippledAt at ]))
+                    (set
+                        [
+                            for dx in -2 .. 2 do
+                                for dy in -2 .. 2 -> { X = 25 + dx; Y = 44 + dy }
+                        ])
+                    "with its fatigue spent it steps once and swings, then waits seventeen ticks for the next step"
+
+                Expect.isTrue
+                    (reachOf (declaredRaid [ { crippledAt at with Hits = 3_500 } ])
+                     |> Set.contains { X = 25; Y = 41 })
+                    "the whole body walks, so its Reach keeps the margin"
+            }
+
+            test "a ranger is matched to kill it from range three, and the melee guard is not sent" {
+                let at = { X = 25; Y = 44 }
+
+                let colony =
+                    declaredRaid [ crippledAt at ]
+                    |> withGuards
+                        [ ranger "r-1", { X = 22; Y = 47 }; guard "g-1", { X = 20; Y = 41 } ]
+
+                let result = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the ranger takes the room's Guard"
+
+                Expect.notEqual
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard it out-swings is never walked into its reach"
+
+                Expect.contains
+                    result.Intents
+                    (RangedAttackCreep("r-1", "h-1"))
+                    "and shoots from where it stands"
+
+                Expect.equal
+                    (guardQuotaOf colony)
+                    (Some 0)
+                    "nor does the guard row cast a melee body for it"
+
+                let ground = groundOf colony
+
+                Expect.isNonEmpty ground "the premise: the Guard has ground"
+
+                Expect.isTrue
+                    (ground |> Set.forall (fun tile -> rangeTo at tile >= 3 && rangeTo at tile <= 3))
+                    "its ground is in range of the melee and out of its step and swing"
+            }
+
+            test "the speed and not the paper picks the target" {
+                let withRanger hostile =
+                    declaredRaid [ hostile ] |> withGuards [ ranger "r-1", { X = 22; Y = 48 } ]
+
+                let assigned colony =
+                    (decide colony Map.empty Set.empty None).Assignments |> Map.tryFind "r-1"
+
+                Expect.equal
+                    (assigned (withRanger (plodderAt { X = 25; Y = 44 })))
+                    (Some(taskId (Guard "W1N2")))
+                    "360 a swing, behind the ranger on road and plain, is kited"
+
+                Expect.notEqual
+                    (assigned (withRanger (runnerAt { X = 25; Y = 44 })))
+                    (Some(taskId (Guard "W1N2")))
+                    "the same blows on legs as quick as the ranger's are no chase"
+
+                Expect.notEqual
+                    (assigned (
+                        withRanger (
+                            hostileIn
+                                "W1N2"
+                                { X = 25; Y = 44 }
+                                (List.replicate 5 Move @ List.replicate 10 Attack)
+                        )
+                    ))
+                    (Some(taskId (Guard "W1N2")))
+                    "ten ATTACK on five MOVE is slower on plain but keeps the ranger's pace on a road"
+            }
+
+            test "the kite ground keeps out of a dead end the melee can pin the ranger in" {
+                let at = { X = 28; Y = 44 }
+                let colony = declaredRaid [ plodderAt at ] |> withDeadEnd
+                let ground = groundOf colony
+
+                Expect.isNonEmpty ground "the premise: there is open ground to kite on"
+
+                Expect.isFalse
+                    (ground |> Set.exists (fun tile -> tile.X > 30))
+                    "the corridor's mouth is three from the melee, and a step down it is a step it cannot come back up"
+
+                Expect.isTrue
+                    (ground |> Set.forall (fun tile -> rangeTo at tile >= 3))
+                    "and nothing in it is in the melee's step and swing"
+            }
+
+            test
+                "the chase crosses the border at an exit three or more from the one the target left by" {
+                // The raid left the home by (25,0) and waits across it; the ranger
+                // follows it into W1N2 by another exit tile.
+                let home =
+                    declaredRaid [ plodderAt { X = 25; Y = 44 } ]
+                    |> withBodyAtHome (ranger "r-1") { X = 25; Y = 3 }
+
+                let wide =
+                    { home with
+                        Spatial =
+                            home.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                for x in 15..35 do
+                                                    for y in 1..9 -> { X = x; Y = y }, Plain
+                                            ]
+                                })
+                        ExitHolds =
+                            Map.ofList
+                                [
+                                    "W1N1",
+                                    {
+                                        Run = [ for x in 1..48 -> { X = x; Y = 0 } ]
+                                        Exit = { X = 25; Y = 0 }
+                                        Until = home.Time + 50
+                                    }
+                                ]
+                    }
+
+                let result = decide wide Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the ranger chases the target into the outpost"
+
+                let step =
+                    moveIntents result.Intents |> List.tryFind (fst >> (=) "r-1") |> Option.map snd
+
+                Expect.isSome step "it walks"
+
+                Expect.isFalse
+                    (List.contains step.Value [ TopLeft; Top; TopRight ])
+                    "and never onto a tile within two of the exit the target left by"
+            }
+        ]
+
+/// The raided outpost floored out to its borders, and the colony harassing
+/// W1N3 beyond it, its ranger standing quiet there on the enemy's source.
+let private harassingBeyond hostiles =
+    let colony = declaredRaid hostiles
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Creeps = colony.Creeps @ [ ranger "r-1" ]
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N3" plainRing
+            }
+            |> withNeighbour "W1N2" { outpost with Terrain = floor }
+            |> withNeighbour
+                "W1N3"
+                { RoomLayer.empty with
+                    Terrain = floor
+                    CreepPositions = Map.ofList [ "r-1", { X = 25; Y = 45 } ]
+                }
+    }
+    |> casting
+        {
+            RoomName = "W1N3"
+            Enemy = "Trepidimous"
+            Stand = RoomPos.at "W1N3" { X = 25; Y = 44 }
+            Controller = RoomPos.at "W1N3" { X = 30; Y = 30 }
+            Via = []
+            Blocks = None
+        }
+
+[<Tests>]
+let chaseCallTests =
+    testList
+        "a quiet ranger called to a chase (#510)"
+        [
+            test
+                "a ranger holding a quiet room's Guard is let go for a chase within two rooms, and takes it" {
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
+
+                let quiet = decide (harassingBeyond []) held Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" quiet.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "the premise: with nothing to chase it keeps its own Guard"
+
+                let called =
+                    decide (harassingBeyond [ crippledAt { X = 25; Y = 10 } ]) held Set.empty None
+
+                Expect.contains
+                    called.Verdicts
+                    (Verdict.Released("r-1", taskId (Guard "W1N3"), ReleaseReason.Called))
+                    "a crippled melee a walk away calls it off its quiet ground"
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and it takes the chase"
+            }
+
+            test "a chase already held calls nobody, whichever order the holders are walked in" {
+                // r-1 is walked before r-9, which holds the chase: read against the
+                // ones kept so far, the slot looked free to r-1 every tick, and it
+                // was let go and took its own Guard back, tick after tick.
+                let colony =
+                    harassingBeyond [ crippledAt { X = 25; Y = 10 } ]
+                    |> standingIn "W1N2" ("r-9", { X = 25; Y = 14 })
+
+                let colony =
+                    { colony with
+                        Creeps = colony.Creeps @ [ ranger "r-9" ]
+                    }
+
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N3"); "r-9", taskId (Guard "W1N2") ]
+
+                let result = decide colony held Set.empty None
+
+                Expect.isFalse
+                    (result.Verdicts
+                     |> List.exists (function
+                         | Verdict.Released _ -> true
+                         | _ -> false))
+                    "nobody is released"
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments, Map.tryFind "r-9" result.Assignments)
+                    (Some(taskId (Guard "W1N3")), Some(taskId (Guard "W1N2")))
+                    "and each keeps what it held"
+            }
+        ]
+
+/// The raided field widened to x 15..35, y 35..48, room for a ranger to come
+/// at the melee from the north.
+let private withField (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 15..35 do
+                                    for y in 35..48 -> { X = x; Y = y }, Plain
+                            ]
+                }
+    }
+
+/// Where one step in a direction lands.
+let private stepped (pos: Pos) (direction: Direction) =
+    let dx, dy =
+        match direction with
+        | Top -> 0, -1
+        | TopRight -> 1, -1
+        | Right -> 1, 0
+        | BottomRight -> 1, 1
+        | Bottom -> 0, 1
+        | BottomLeft -> -1, 1
+        | Left -> -1, 0
+        | TopLeft -> -1, -1
+
+    { X = pos.X + dx; Y = pos.Y + dy }
+
+[<Tests>]
+let kiteStepTests =
+    testList
+        "a kiting ranger's step (#510)"
+        [
+            test
+                "it walks onto the ring three from the melee, inside its Reach, and shoots from there" {
+                let melee = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 40 }
+
+                let at pos =
+                    declaredRaid [ plodderAt melee ]
+                    |> withField
+                    |> withGuards [ ranger "r-1", pos ]
+
+                let first = decide (at from) Map.empty Set.empty None
+
+                let step =
+                    moveIntents first.Intents
+                    |> List.tryFind (fst >> (=) "r-1")
+                    |> Option.map (snd >> stepped from)
+
+                Expect.equal
+                    (step |> Option.map (range melee))
+                    (Some 3)
+                    "the Reach reaches the ring; only a step and a swing about the melee is kept off"
+
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N2") ]
+                let second = decide (at step.Value) held Set.empty None
+
+                Expect.contains
+                    second.Intents
+                    (RangedAttackCreep("r-1", "h-1"))
+                    "and from the ring it shoots"
+            }
+        ]
+
+[<Tests>]
+let shutChaseTests =
+    testList
+        "an outpost shut on a raid a ranger kites down (#510)"
+        [
+            test "pools the chase for a ranger and nothing else, dark or seen" {
+                let shut hostiles =
+                    { raidedOutpost hostiles with
+                        ChasedOutposts = Set.singleton "W1N2"
+                    }
+                    |> withGuards
+                        [ ranger "r-1", { X = 22; Y = 47 }; guard "g-1", { X = 20; Y = 41 } ]
+
+                let dark = decide (shut []) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" dark.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "out of sight the ranger takes the chase"
+
+                Expect.isNone
+                    (Map.tryFind "g-1" dark.Assignments)
+                    "and the melee guard is sent nowhere"
+
+                let seen = decide (shut [ plodderAt { X = 25; Y = 44 } ]) Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" seen.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "in sight it holds it"
+
+                Expect.contains seen.Intents (RangedAttackCreep("r-1", "h-1")) "and shoots"
             }
         ]

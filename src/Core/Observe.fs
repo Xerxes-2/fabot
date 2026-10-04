@@ -298,6 +298,10 @@ type OutpostEpisode =
         /// A fact beside the basis, which a later deadline overwrites. None
         /// once an Invader stands among the bodies, and on any other row.
         PlayerSince: int option
+        /// Whether the raid this outpost's row runs on was, at its last
+        /// sighting, one a ranger chases (`Decide.Facts.chased`, #510): the
+        /// room stays projected for the chase while the row stands.
+        Chased: bool
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: the one
@@ -647,13 +651,18 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
     |> List.filter (fun h ->
         h.Pos.Room <> SpatialInfo.homeName view.Spatial
         && HostileInfo.hurtsLive h
-        && not (HostileInfo.isKeeper h))
+        && not (HostileInfo.isKeeper h)
+        // A body that can barely move opens nothing by itself (#510): it
+        // harms only what stands about it, and its tiles are the Reach's.
+        && not (HostileInfo.stationary h))
     |> List.groupBy (fun h -> h.Pos.Room)
     |> List.filter (fun (room, _) ->
         if Set.contains room rangerRooms then
-            not (Decide.Facts.rangerBlocksBeat view room (Decide.Quota.rangerBlocksReach view))
+            not (Decide.Facts.rangerBlocksBeat view room (Decide.Facts.rangerBlocksReach view))
+            // A raid the ranger out-walks is kited, not withdrawn from.
+            && not (Decide.Facts.kitedByRanger view room)
         else if Set.contains room outpostRooms then
-            not (Decide.Facts.guardBlocksBeat view room (Decide.Quota.guardBlocksReach view))
+            not (Decide.Facts.guardBlocksBeat view room (Decide.Facts.guardBlocksReach view))
         else
             false)
     |> List.map (fun (room, raid) ->
@@ -739,6 +748,7 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
                 // `strikeGone`'s to fill, on this same tick.
                 Raiders = Fresh.setOfSeq Seq.empty
                 PlayerSince = None
+                Chased = false
             }
         ]
 
@@ -807,12 +817,17 @@ let private strikeGone
     episodes
     |> List.map (fun episode ->
         if not (standingDown view.Time episode) then
-            if Set.isEmpty episode.Raiders && Option.isNone episode.PlayerSince then
+            if
+                Set.isEmpty episode.Raiders
+                && Option.isNone episode.PlayerSince
+                && not episode.Chased
+            then
                 episode
             else
                 { episode with
                     Raiders = Fresh.setOfSeq Seq.empty
                     PlayerSince = None
+                    Chased = false
                 }
         elif not (raidClocked episode) then
             episode
@@ -879,6 +894,16 @@ let private strikeGone
             let hold = holdPast floor
 
             let cut = hold |> Option.defaultValue floor
+
+            // Read again at each sighting of the raid, and kept through the
+            // ticks nothing of ours sees it (#510).
+            let windowed =
+                match standing with
+                | [] -> windowed
+                | _ ->
+                    { windowed with
+                        Chased = List.contains room declared && Decide.Facts.chased view room
+                    }
 
             if
                 not (Set.isEmpty raiders)
@@ -994,6 +1019,12 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
                     | StandDownBasis.RaidGone
                     | StandDownBasis.HarassSighting -> true
                     | _ -> false))
+            |> List.map (fun episode -> episode.RoomName)
+            |> Set.ofList
+        // A standing raid row a ranger chases (#510).
+        ChasedOutposts =
+            state.Outposts
+            |> List.filter (fun episode -> standingDown tick episode && episode.Chased)
             |> List.map (fun episode -> episode.RoomName)
             |> Set.ofList
         Fought = state.Fought

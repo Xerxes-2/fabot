@@ -461,6 +461,14 @@ let internal guardShoots
     || Set.contains hostile.Pos.Room fighting
        && HostileInfo.activeCount hostile Heal > 0
 
+/// Whether a ranged body of these part counts holds the range on a hostile
+/// for as long as it likes (#510): the hostile shoots nothing, and falls
+/// behind ours on road and plain alike (`Gait.fallsBehind`), ours read off
+/// its live parts. Paper strength is not asked.
+let internal cannotClose (ours: BodyPart -> int) (hostile: HostileInfo) =
+    HostileInfo.activeCount hostile RangedAttack = 0
+    && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait hostile)
+
 /// What a body deals a tick, off its part counts: melee and ranged, unboosted.
 let private damageOf (parts: BodyPart -> int) =
     Engine.attackPower * parts Attack
@@ -682,6 +690,51 @@ let guardBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
 let rangerBlocksBeat (view: ColonyView) (room: string) (blocks: int) : bool =
     blocksBeat rangerPattern.Block 0 view room blocks
 
+/// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
+/// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
+/// What the stand-down weighs a raid against. One body and never the row's two
+/// summed: `guardBlocksBeat` grows about as the square of the blocks, and a
+/// raid focuses one body at a time while the second may arrive late, so the
+/// sum would call a fight won that each body loses alone — and each body is
+/// sized to win alone (`guardBlocksFor`).
+let guardBlocksReach (view: ColonyView) : int =
+    min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
+
+/// The ranger's twin of `guardBlocksReach` (#411): the biggest ranger body the
+/// bank buys, what an errand room's raid is weighed against.
+let rangerBlocksReach (view: ColonyView) : int =
+    min rangerBlocksMost (view.Bank.Capacity / bodyCost rangerPattern.Block)
+
+/// Whether a ranged body of these live parts kites the raid standing in a
+/// room down (#510): every raider there is one it holds the range on
+/// (`cannotClose`), and its damage out-runs every heal acting in the room,
+/// so the kite ends in a kill.
+let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string) : bool =
+    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+    let healing =
+        inRoom
+        |> List.sumBy (fun h -> Engine.healPower * HostileInfo.activeCount h Heal)
+
+    match inRoom |> List.filter isRaider with
+    | [] -> false
+    | raid -> raid |> List.forall (cannotClose parts) && damageOf parts > healing
+
+/// `kitedDown` for the biggest ranger body the bank buys: the room-level
+/// answer the stand-down, `outmatched` and the chase read.
+let internal kitedByRanger (view: ColonyView) (room: string) : bool =
+    let blocks = max 1 (rangerBlocksReach view)
+    kitedDown view (fun part -> blocks * partCountIn rangerPattern.Block part) room
+
+/// Whether a guarded room no ranger row serves is a ranger's chase (#510):
+/// a ranger kites its raid down (`kitedByRanger`), and the biggest melee body
+/// the bank buys loses to it. Read once a tick into `Threats.Chased`.
+let internal chased (view: ColonyView) (room: string) : bool =
+    room <> SpatialInfo.homeName view.Spatial
+    && not (Set.contains room (rangerRooms view))
+    && kitedByRanger view room
+    && not (guardBlocksBeat view room (guardBlocksReach view))
+
 /// What a room's loaded towers land a tick on one target, priced at the
 /// falloff range: a raised home's, beside whatever body of ours fights there.
 let private towerDamageIn (view: ColonyView) (room: string) =
@@ -691,9 +744,11 @@ let private towerDamageIn (view: ColonyView) (room: string) =
 /// Whether no ranger body of any size wins the raid standing in a room alone
 /// (#451): a raid the ranger row casts nobody into, and the residents already
 /// there hold the room's safe ground against. A raised home's loaded towers
-/// fight beside it, priced at the falloff range.
+/// fight beside it, priced at the falloff range. Never a raid the ranger
+/// kites down (`kitedByRanger`, #510), whatever its paper.
 let internal outmatched (view: ColonyView) (room: string) : bool =
-    not (blocksBeat rangerPattern.Block (towerDamageIn view room) view room rangerBlocksMost)
+    not (kitedByRanger view room)
+    && not (blocksBeat rangerPattern.Block (towerDamageIn view room) view room rangerBlocksMost)
 
 /// One body in `squadFight`: its parts, head first, and the hits it has
 /// left, which is the engine's whole account of which parts still act.

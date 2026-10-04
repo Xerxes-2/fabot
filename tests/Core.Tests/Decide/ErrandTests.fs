@@ -171,7 +171,7 @@ let errandStandDownTests =
                     }
 
                 Expect.isTrue
-                    (rangerBlocksBeat colony errandRoom (Quota.rangerBlocksReach colony))
+                    (rangerBlocksBeat colony errandRoom (Facts.rangerBlocksReach colony))
                     "the premise: the row's reach wins the exchange"
 
                 let log =
@@ -212,7 +212,7 @@ let errandStandDownTests =
                     }
 
                 Expect.isFalse
-                    (rangerBlocksBeat colony errandRoom (Quota.rangerBlocksReach colony))
+                    (rangerBlocksBeat colony errandRoom (Facts.rangerBlocksReach colony))
                     "the premise: one block loses to the squad"
 
                 let log =
@@ -660,7 +660,7 @@ let errandStandDownTests =
                     (guardBlocksBeat
                         guardServedRoom
                         errandRoom
-                        (Quota.guardBlocksReach guardServedRoom))
+                        (Facts.guardBlocksReach guardServedRoom))
                     "the premise: the declared Outpost can buy the two blocks that win this exchange"
 
                 Expect.isFalse
@@ -2446,6 +2446,7 @@ let private heldSouth (colony: ColonyView) =
                     errandRoom,
                     {
                         Run = [ for x in 22..28 -> { X = x; Y = 49 } ]
+                        Exit = { X = 25; Y = 49 }
                         Until = colony.Time + 50
                     }
                 ]

@@ -332,6 +332,18 @@ wire("raids: a player's raid tick (#513) round-trips, and a legacy row writes no
   assert.equal(bad.outposts.length, 0, "an off-shape tick costs its row, like every number");
 });
 
+wire("raids: a chased row (#510) round-trips, and a legacy or off-shape flag reads as no chase", async () => {
+  const chased = { ...outpost, chased: true };
+  const written = await raidsThrough({ ...emptyRaids, outposts: [chased, outpost] });
+
+  assert.equal(stable(written.outposts), stable([chased, outpost]));
+  assert.equal(written.outposts[1].chased, undefined, "absent means no chase, as before #510");
+
+  const odd = await raidsThrough({ ...emptyRaids, outposts: [{ ...outpost, chased: "yes" }] });
+  assert.equal(odd.outposts.length, 1, "an odd flag costs nothing but the chase");
+  assert.equal(odd.outposts[0].chased, undefined, "and reads as none");
+});
+
 wire("raids: a legacy stand-down with no stronghold flag reads as no bunker", async () => {
   const written = await raidsThrough({ ...emptyRaids, outposts: [outpost] });
 
@@ -877,6 +889,15 @@ wire("creeps: a release outranked by a struck rampart's Repair round-trips (#481
   };
 
   assert.equal(stable(await creepsThrough({ w1: outranked })), stable({ w1: outranked }));
+});
+
+wire("creeps: a ranger called off a quiet Guard to a chase round-trips (#510)", async () => {
+  const called = {
+    ...creepLog,
+    log: [{ t: 100, v: { kind: "released", task: "guard:W1N3", reason: "called" } }],
+  };
+
+  assert.equal(stable(await creepsThrough({ w1: called })), stable({ w1: called }));
 });
 
 wire("creeps: a creep whose log will not decode costs that creep alone", async () => {

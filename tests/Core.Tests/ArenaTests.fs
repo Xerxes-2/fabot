@@ -767,6 +767,71 @@ let arenaScenarioTests =
                 Expect.isNone (diedOn "guard-1-Spawn1" trace) "the guard lives"
             }
 
+            // #510, the W18S25 shape: Torque404 left at 1,454 hits, 14 ATTACK on
+            // one MOVE under the whole body's weight, against an 800 bank whose
+            // one guard block it out-swings, and one ranger of ours at home.
+            test "a ranger walks out and kills a crippled melee from range, untouched" {
+                let home =
+                    room "W12S28"
+                    |> withController Ownership.Ours None 7 0
+                    |> withSpawn "Spawn1" { X = 12; Y = 38 } 800
+
+                let outpost = room "W12S27"
+
+                let declared =
+                    { colony "W12S28" with
+                        Outposts = [ outpostOf outpost.Capture ]
+                    }
+
+                let ranger =
+                    body
+                        "ranger-1-Spawn1"
+                        Side.Ours
+                        Fabot.Core.Decide.Bodies.rangerPattern.Block
+                        (RoomPos.at "W12S28" { X = 20; Y = 5 })
+                        None
+
+                let hauler =
+                    body
+                        "hauler-1-Spawn1"
+                        Side.Ours
+                        (parts [ Carry, 2; Move, 2 ])
+                        (RoomPos.at "W12S27" { X = 13; Y = 46 })
+                        None
+
+                let torque =
+                    { body
+                          "Torque404"
+                          trep
+                          (parts [ Move, 17; Attack, 3; Move, 1; Attack, 14 ])
+                          (RoomPos.at "W12S27" { X = 8; Y = 48 })
+                          (Some(Chase(Nearest, None))) with
+                        Hits = 1_454
+                    }
+
+                let _, trace =
+                    arena 900_000 [ home; outpost ] [ declared ] [ ranger; hauler; torque ]
+                    |> run 150
+
+                Expect.isSome
+                    (diedOn "Torque404" trace)
+                    $"the crippled melee dies\n{describe trace}"
+
+                Expect.isTrue
+                    (hitsOf "ranger-1-Spawn1" trace
+                     |> List.forall (
+                         (=) (
+                             Engine.partHits
+                             * List.length Fabot.Core.Decide.Bodies.rangerPattern.Block
+                         )
+                     ))
+                    $"and the ranger never takes a swing\n{describe trace}"
+
+                Expect.isEmpty
+                    (caughtBeside [ "Torque404" ] "ranger-1-Spawn1" trace)
+                    "nor ends a tick beside it"
+            }
+
             test
                 "W17S22 replay: two garrisons on Genie669 beside Vibe199 take 188 a tick, the replay's own hits" {
                 // t878,960: Genie669 (6M4H) at 672, healing itself, Vibe199

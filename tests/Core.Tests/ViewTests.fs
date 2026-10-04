@@ -5296,6 +5296,7 @@ let exitHoldViewTests =
                     ExitWatch.Held
                         {
                             Run = [ { X = 0; Y = 20 } ]
+                            Exit = { X = 0; Y = 20 }
                             Until = until
                         }
 

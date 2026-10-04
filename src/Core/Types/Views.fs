@@ -140,6 +140,9 @@ type ColonyView =
         /// (`StandDown.RaidedOutposts`, #514): what lays the home's shelter
         /// while a raid beside it is out of sight.
         RaidedOutposts: Set<string>
+        /// The shut outposts a ranger chases a raid in
+        /// (`StandDown.ChasedOutposts`, #510).
+        ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`StandDown.Fought`).
         Fought: Map<string, FightLatch>
         /// Our construction sites in every room this colony works and has
@@ -1065,6 +1068,7 @@ module ColonyView =
             HeldOutposts = gate.HeldOutposts
             ThreatenedOutposts = gate.ThreatenedOutposts
             RaidedOutposts = gate.RaidedOutposts
+            ChasedOutposts = gate.ChasedOutposts
             Fought = gate.Fought
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)

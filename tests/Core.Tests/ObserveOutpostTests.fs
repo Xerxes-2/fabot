@@ -615,6 +615,80 @@ let outpostTests =
                     "#507's release is the sooner"
             }
 
+            // #510. Live t951,926: Torque404 left in W18S25 at 1,454 of 3,500 hits,
+            // 14 ATTACK and 1 MOVE alive. The destroyed parts still weigh, so it
+            // steps a plain tile every seventeen ticks and harms nothing not beside
+            // it; read on its live ATTACK alone it shut the outpost for its life.
+            test
+                "a melee that can barely move opens no stand-down; the same body with its legs shuts the room" {
+                let torque =
+                    List.replicate 17 Move
+                    @ List.replicate 3 Attack
+                    @ [ Move ]
+                    @ List.replicate 14 Attack
+
+                let raidOf hits moves =
+                    { (quiet |> withDeclaredOutpost outpostRoom) with
+                        Hostiles =
+                            [
+                                { raiderIn outpostRoom 1 (moves @ torque) with
+                                    Hits = hits
+                                }
+                            ]
+                        Bank = { Available = 0; Capacity = 800 }
+                    }
+
+                Expect.isEmpty
+                    (standDowns (RaidState.empty |> raidTick 100 (raidOf 1_454 [])))
+                    "fourteen ATTACK on one MOVE under seventeen parts' weight is stationary: the outpost works round it"
+
+                Expect.equal
+                    (standDowns (RaidState.empty |> raidTick 100 (raidOf 3_500 [])))
+                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
+                    "the whole body walks, and the one block the bank buys loses to it, as before"
+
+                // #510 review: a body with no MOVE acting may yet be pulled.
+                Expect.equal
+                    (standDowns (RaidState.empty |> raidTick 100 (raidOf 1_400 [])))
+                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
+                    "fourteen ATTACK and no MOVE is no stationary body: it is weighed as a raid"
+            }
+
+            // #510: the economy still leaves, but the room stays the ranger's.
+            test "a raid a ranger kites down still shuts the outpost, and the shut row is a chase" {
+                let raidOf body =
+                    { (quiet |> withDeclaredOutpost outpostRoom) with
+                        Hostiles = [ raiderIn outpostRoom 1 body ]
+                        Bank = { Available = 0; Capacity = 800 }
+                    }
+
+                let plodder = List.replicate 5 Move @ List.replicate 12 Attack
+                let runner = List.replicate 10 Move @ List.replicate 10 Attack
+
+                let gate body =
+                    standDown Tuning.defaults 101 (RaidState.empty |> raidTick 100 (raidOf body))
+
+                Expect.equal
+                    ((gate plodder).Shut, (gate plodder).ChasedOutposts)
+                    (Set.singleton outpostRoom, Set.singleton outpostRoom)
+                    "twelve ATTACK on five MOVE shuts the room and is chased in it"
+
+                Expect.equal
+                    ((gate runner).Shut, (gate runner).ChasedOutposts)
+                    (Set.singleton outpostRoom, Set.empty)
+                    "the same blows on a MOVE a part shut it and are no chase"
+
+                let thenDark =
+                    RaidState.empty
+                    |> raidTick 100 (raidOf plodder)
+                    |> raidTick 101 { (raidOf plodder) with Hostiles = [] }
+
+                Expect.equal
+                    (standDown Tuning.defaults 102 thenDark).ChasedOutposts
+                    (Set.singleton outpostRoom)
+                    "and stays a chase through the ticks nothing sees it"
+            }
+
             test "two melee blocks cannot use self-heal to win an equal exchange" {
                 // A two-block body, as above: a reach of two blocks.
                 let raid attacks =

@@ -446,6 +446,10 @@ let private encodeOutpost (episode: OutpostEpisode) =
     | Some since -> o?player <- since
     | None -> ()
 
+    // Written only when true (#510), so a legacy row reads as no chase.
+    if episode.Chased then
+        o?chased <- true
+
     o
 
 let private decodeOutpost (raw: obj) : OutpostEpisode =
@@ -475,6 +479,9 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
                 None
             else
                 Some(numberOf raw "player")
+        // Absent on a legacy row and on one no ranger chases; anything but
+        // `true` reads as no chase, which projects nothing.
+        Chased = (raw?chased: obj) = box true
     }
 
 // One room held by somebody else's reservation on the wire: `{ holder,

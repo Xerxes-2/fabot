@@ -494,6 +494,9 @@ let planTasks
     // And one Fight per room a squad fights in (#453), beside the room's
     // Guard: its residents hold the Guard while the squad musters, and those
     // no slot fits go on holding it once it launches.
+    //
+    // And one per chased room (#510): an outpost shut on a raid a ranger
+    // kites down pools its chase and nothing else.
     let guards =
         let holding =
             threats.Held
@@ -502,7 +505,11 @@ let planTasks
                 && not (List.contains room outposts.Guarded))
             |> Set.toList
 
-        (outposts.Guarded @ holding |> List.map Guard)
+        let chasing =
+            Set.difference threats.Chased (Set.ofList (outposts.Guarded @ holding))
+            |> Set.toList
+
+        (outposts.Guarded @ holding @ chasing |> List.map Guard)
         @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
         // And one Assault per assault this colony pools (#490, #491).
         @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)

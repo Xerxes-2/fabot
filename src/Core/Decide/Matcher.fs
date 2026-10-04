@@ -6,6 +6,11 @@ module Fabot.Core.Decide.Matcher
 open Fabot.Core
 open Fabot.Core.Types
 
+/// How far a quiet ranger walks for a chase (#510), in travel cost (two
+/// units a tick): two rooms' side, where the kill is made and it is home
+/// again inside the time a raid takes to reach the room it left.
+let private chaseWalk = 2 * 2 * Engine.roomSide
+
 /// Keep still-valid assignments (anti-thrash) and greedily assign the rest.
 /// Verdicts out: releases first in memory order, then one status Verdict per
 /// living creep in view order — each preceded, for a creep on the verbose
@@ -359,6 +364,65 @@ let matchCreeps
                     && Result.isOk (gate (lazy false) acc creep repair))
             | None -> false)
 
+    // The rangers let go for a chase this tick (#510), decided once against
+    // the remembered assignments, so the order the fold walks them in moves
+    // nothing. Per chased room's Guard nobody holds: the nearest ranger
+    // within `chaseWalk` holding the Guard of a harassment room or an
+    // outpost with nothing in it the Guard shoots — never a resident room's,
+    // whose garrison stays — for a chase that outranks that Guard and that
+    // the cascade would give it. It is back once the kill is made.
+    let called =
+        if Set.isEmpty threats.Chased then
+            Set.empty
+        else
+            let resident = Facts.residentRooms view
+
+            let quiet room =
+                not (Set.contains room resident)
+                && not (Set.contains room threats.Chased)
+                && view.Hostiles
+                   |> List.forall (fun h ->
+                       h.Pos.Room <> room || not (Facts.guardShoots view resident Set.empty h))
+
+            let donors =
+                assignments
+                |> Map.toList
+                |> List.choose (fun (name, tid) ->
+                    match
+                        Map.tryFind tid byId, view.Creeps |> List.tryFind (fun c -> c.Name = name)
+                    with
+                    | Some({ Task = Guard room } as pooled), Some creep when
+                        isRangerRowBody creep && quiet room
+                        ->
+                        Some(creep, pooled)
+                    | _ -> None)
+
+            pool
+            |> List.filter (fun chase ->
+                match chase.Task with
+                | Guard room ->
+                    Set.contains room threats.Chased
+                    && not (assignments |> Map.exists (fun _ tid -> tid = taskId chase.Task))
+                | _ -> false)
+            |> List.fold
+                (fun (taken: Set<string>) chase ->
+                    donors
+                    |> List.filter (fun (creep, pooled) ->
+                        not (Set.contains creep.Name taken) && chase.Priority < pooled.Priority)
+                    |> List.choose (fun (creep, _) ->
+                        travelCostOf threats atlas creep.Name chase.Task
+                        |> Option.filter (fun cost ->
+                            cost <= chaseWalk
+                            && Result.isOk (
+                                gate (lazy false) (Map.remove creep.Name assignments) creep chase
+                            ))
+                        |> Option.map (fun cost -> (cost, creep.Name), creep.Name))
+                    |> List.sortBy fst
+                    |> List.tryHead
+                    |> Option.map (fun (_, name) -> Set.add name taken)
+                    |> Option.defaultValue taken)
+                Set.empty
+
     // Which holder a cap that has shrunk gives up (#230): the fold below
     // judges each remembered assignment against the ones already kept, so the
     // order it walks one Task's holders in is the rule for who keeps the slot.
@@ -429,6 +493,7 @@ let matchCreeps
                     ->
                     release (ReleaseReason.Rejected RejectReason.Threatened)
                 | Some pooled when outranked acc creep pooled -> release ReleaseReason.Outranked
+                | Some _ when Set.contains creep.Name called -> release ReleaseReason.Called
                 | Some pooled ->
                     let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 

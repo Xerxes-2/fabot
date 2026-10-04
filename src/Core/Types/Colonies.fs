@@ -964,6 +964,10 @@ type StandDown =
         /// a raid nobody can see any more, the last body out having taken our
         /// vision with it, which may walk on to the home beside it.
         RaidedOutposts: Set<string>
+        /// The rooms of `RaidedOutposts` whose raid a ranger kites down
+        /// (`OutpostEpisode.Chased`, #510): projected still as a transit room,
+        /// where a ranger's chase is pooled and nothing else is.
+        ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`RaidState.Fought`): what
         /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
         /// was last seen, and casts nothing for the room as long again.
@@ -994,6 +998,7 @@ module StandDown =
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
             RaidedOutposts = Set.empty
+            ChasedOutposts = Set.empty
             Fought = Map.empty
             Taken = Set.empty
             ReserveShort = false

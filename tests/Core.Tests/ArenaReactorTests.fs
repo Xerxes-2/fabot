@@ -438,7 +438,7 @@ let reactorHoldTests =
 
             // #469's defect, live: `Observe.raidDeadlines` weighs an errand
             // room's raid against the largest single ranger the bank buys
-            // (`Quota.rangerBlocksReach`, 8 blocks), never the two-body
+            // (`Facts.rangerBlocksReach`, 8 blocks), never the two-body
             // garrison standing there (14 blocks). Three longbows lose to the
             // pair (280 a tick and 168 heal against 240 and 72) and beat the
             // one body, so the gate shuts the room on t5, the residents fall
