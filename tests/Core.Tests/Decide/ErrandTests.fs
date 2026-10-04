@@ -726,6 +726,7 @@ let errandStandDownTests =
                         Mother = None
                         Consignee = None
                         Perimeter = []
+                        RampartFloors = Map.empty
                         FirstSpawn = None
                         Assaults = []
                     }

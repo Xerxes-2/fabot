@@ -67,7 +67,7 @@ The Task of spending carried energy into a construction site, surplus work at ho
 The Task of restoring a structure's hits, created below its [[hungry line]] and gone above its [[whole line]]; surplus-tier on the tier's lower rung, and a rescued decaying kind steps up two. ADR-0010, ADR-0034, ADR-0046, ADR-0061.
 
 ### Hungry line
-Where a [[repair]] Task is created: `Tuning.RepairTrigger` of max hits for the decaying kinds, the [[rampart]]'s floor, full hits for the [[keep]]. ADR-0061.
+Where a [[repair]] Task is created: `Tuning.RepairTrigger` of max hits for the decaying kinds, the [[rampart]]'s floor (its tile's declared one, else `Tuning.RampartFloor`), full hits for the [[keep]]. ADR-0061.
 _Avoid_: repair threshold
 
 ### Whole line
@@ -240,7 +240,7 @@ The structures worth defending — the spawn, every tower, the [[storage]] and t
 _Avoid_: base, core
 
 ### Rampart
-The walkable defensive structure the [[layout]] places over every standing [[keep]] structure, every [[post]] a [[container]] stands on and every tile of the colony's declared perimeter (#446), kept above a floor of hits by [[repair]]; a creep on its own rampart is in no [[reach]]. ADR-0034.
+The walkable defensive structure the [[layout]] places over every standing [[keep]] structure, every [[post]] a [[container]] stands on and every tile of the colony's declared perimeter (#446), kept above a floor of hits by [[repair]] — `Tuning.RampartFloor`, or the floor the colony declares for that tile (`Colony.RampartFloors`) where a choke has to outlast a raid its towers cannot hold; a creep on its own rampart is in no [[reach]]. ADR-0034.
 
 ### Link footing
 A tile the [[layout]] reserves for a link beside each planned source [[container]], the controller container and the [[storage]]: off every [[trunk]] and other footing, nearest the spawn, the one structure footing allowed on [[working ground]], and unfilled at RCL5 because the hauler row is already at its floor. A footing the fold finds no tile for is recorded on the [[layout record]]. ADR-0022, ADR-0027, ADR-0035, ADR-0038, ADR-0042, ADR-0049.
@@ -359,7 +359,7 @@ _Avoid_: room sign
 The colony reflex that emits a pickup Intent for every creep with free capacity and no [[thorium]] aboard standing within range 1 of a dropped energy pile (`Atlas.droppedEnergyIn`), paired one room at a time and deduplicated against the [[pickup]] Task's own act. No movement, no matching, no threshold. ADR-0041, ADR-0057.
 
 ### Fire reflex
-The colony reflex that has every tower shoot the [[hostile]] nearest to itself each tick one stands in the [[home room]] — attack only, per tower, no focus fire and no energy floor. ADR-0014.
+The colony reflex that has every tower shoot the [[hostile]] nearest to itself among those worth a shot, each tick one stands in the [[home room]], per tower and with no focus fire. Worth one: an urgent hostile — a claimer, or one whose weapon reaches our [[keep]] or creeps — shot from any energy; or one the towers' energy over `Tuning.TowerRepairReserve` can kill through the heal reaching it (a player's healer on the exit counted at half, as it is carried out every other tick). With none worth a shot, a tower over its reserve repairs the [[rampart]] under attack. ADR-0014.
 
 ### Ally
 A player we have agreed with, by username, declared by hand in `Colony.allies` (#412). Their creeps are no [[hostile]], so nothing fires on them, flees them or stands down for them. On a Reactor they hold with Thorium in it the burn is theirs: no load is drawn and no [[reclaim]] is pooled or cast; the flag is taken only once their store is empty, with no timed handover (#413, #415).

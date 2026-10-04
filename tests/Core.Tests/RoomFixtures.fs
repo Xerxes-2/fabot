@@ -887,6 +887,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Assaults = []
         Consignee = None
         Perimeter = []
+        RampartFloors = Map.empty
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty

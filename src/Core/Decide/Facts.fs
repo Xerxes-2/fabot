@@ -145,10 +145,10 @@ module HeldTaskFacts =
 
 /// Whether a structure of this kind, carrying these hits, is hungry: its
 /// kind's line, and for the decaying kinds the held fact picks which of the
-/// two. A kind with no line is never hungry. The floor is capped at the
-/// structure's own max so a rampart whose max is somehow under it can still
-/// be whole.
-let private isHungry (tuning: Tuning) (held: Set<string>) id kind (hits: HitsInfo) =
+/// two. A kind with no line is never hungry. The floor is the one handed in
+/// (`floorOf`), capped at the structure's own max so a rampart whose max is
+/// somehow under it can still be whole.
+let private isHungry (tuning: Tuning) (floor: int) (held: Set<string>) id kind (hits: HitsInfo) =
     match wholeLine kind with
     | Some WholeLine.Fraction ->
         let line =
@@ -158,7 +158,7 @@ let private isHungry (tuning: Tuning) (held: Set<string>) id kind (hits: HitsInf
                 tuning.RepairTrigger
 
         float hits.Hits < line * float hits.HitsMax
-    | Some WholeLine.Floor -> hits.Hits < min tuning.RampartFloor hits.HitsMax
+    | Some WholeLine.Floor -> hits.Hits < min floor hits.HitsMax
     | Some WholeLine.Full -> hits.Hits < hits.HitsMax
     | None -> false
 
@@ -195,6 +195,16 @@ let internal rampartsUnderAttack (view: ColonyView) : Set<string> =
             | _ -> None)
         |> Set.ofList
 
+/// The floor a structure of the home is whole at: its tile's declared one
+/// (`ColonyView.RampartFloors`), else `Tuning.RampartFloor`.
+let private floorOf (view: ColonyView) (id: string) =
+    if Map.isEmpty view.RampartFloors then
+        view.Tuning.RampartFloor
+    else
+        homeTile view id
+        |> Option.bind (fun tile -> Map.tryFind (RoomPos.pos tile) view.RampartFloors)
+        |> Option.defaultValue view.Tuning.RampartFloor
+
 /// Every structure the projection carries hits for that stands below its kind's
 /// line, with its kind, in id order — the Repair pool's own walk. The
 /// safe-mode reflex's Keep arm asks `keepDamaged` instead.
@@ -214,7 +224,7 @@ let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string *
         | BuiltKind.Rampart when not ramparts -> None
         // Nor is a child's: the mother carries it as ground, not work.
         | _ when
-            isHungry view.Tuning held id kind hits
+            isHungry view.Tuning (floorOf view id) held id kind hits
             && not (kind = BuiltKind.Rampart && SpatialInfo.placedAway view.Spatial id)
             ->
             Some(id, kind)
@@ -416,19 +426,35 @@ let private killTier (target: KillFacts) =
 /// healers, found once.
 let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int =
     // A healer remembered from the last few ticks counts where it was last
-    // seen (#480).
-    let healers =
-        view.Hostiles @ view.RecalledHealers
+    // seen (#480). One bouncing on the exit, standing on it or remembered off
+    // it, is in the room every other tick and heals at half its rate over the
+    // two: two bouncing out of step are one healer's worth, never two
+    // (arena, 2026-10-04: W17S25's east line, where they tipped the tower
+    // into repairing when a shot out-damaged the one healer there). An NPC
+    // on the exit is never carried off it, and heals every tick.
+    let present =
+        view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
+        |> List.map (fun h -> h, Seam.onRing (RoomPos.pos h.Pos) && HostileInfo.crossesExits h)
+
+    let remembered =
+        view.RecalledHealers
+        |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healing h > 0)
+        |> List.map (fun h -> h, true)
+
+    let healers = present @ remembered
 
     fun hostile ->
         healers
-        |> List.sumBy (fun healer ->
-            match RoomPos.range healer.Pos hostile.Pos with
-            | Some r when r <= Engine.meleeRange -> HostileInfo.healing healer
-            | Some r when r <= Engine.rangedRange ->
-                HostileInfo.healing healer * Engine.rangedHealPower / Engine.healPower
-            | _ -> 0)
+        |> List.sumBy (fun (healer, bouncing) ->
+            let rate =
+                match RoomPos.range healer.Pos hostile.Pos with
+                | Some r when r <= Engine.meleeRange -> HostileInfo.healing healer
+                | Some r when r <= Engine.rangedRange ->
+                    HostileInfo.healing healer * Engine.rangedHealPower / Engine.healPower
+                | _ -> 0
+
+            if bouncing then rate / 2 else rate)
 
 /// Our creeps' damage that reaches a hostile this tick: a swing one tile, a
 /// shot three. A closure over our placed creeps, found once.

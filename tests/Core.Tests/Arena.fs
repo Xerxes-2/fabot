@@ -675,6 +675,7 @@ let colony (home: string) : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        RampartFloors = Map.empty
         FirstSpawn = None
         Assaults = []
     }

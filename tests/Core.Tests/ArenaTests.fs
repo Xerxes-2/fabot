@@ -2269,12 +2269,14 @@ let arenaDefenceTests =
                         |> List.filter (fun s -> s.Kind = "tower")
                         |> List.sumBy (fun s -> s.Energy)
 
-                    // #466, measured: 15 shots over the 30 ticks to the
-                    // 10,000 line's breach and 42 over the 61 the thicker
-                    // lines' raid lives, every one at a body our damage
-                    // reaching it out-paces the heal on; on the ticks between
-                    // the tower repairs the struck rampart (#477: 10 and 14
-                    // repairs), and holds 460 (the worker's refill) and 140.
+                    // #466, measured: 6 shots over the 38 ticks to the
+                    // 10,000 line's breach and 7 over the 77 the thicker
+                    // lines' raid lives, every one at a body the energy over
+                    // the reserve can kill through the heal on it; on the
+                    // ticks between the tower repairs the struck rampart
+                    // (#477), and holds 380 and 300. Taking every shot that
+                    // merely out-healed (21 and 40) broke the 10,000 line at
+                    // t25 instead of t37.
                     Expect.isLessThanOrEqual
                         shots
                         (List.length trace * 3 / 4)
@@ -2284,7 +2286,7 @@ let arenaDefenceTests =
 
                     match firstFallen lineIds trace, holds with
                     | Some fell, false ->
-                        // Measured: t29 (t25 unrepaired), one melee on one rampart from the
+                        // Measured: t37, one melee on one rampart from the
                         // walk in, before the garrison has walked to the
                         // line from the controller (#446 measured t105 and
                         // t593 at the two thicker lines, unshot).
@@ -2298,7 +2300,7 @@ let arenaDefenceTests =
                             (hits / swing + 30)
                             $"one melee on it from the walk in\n{failure}"
                     | None, true ->
-                        // Measured: the raid dead by t60 at both thicker lines.
+                        // Measured: the raid dead by t76 at both thicker lines.
                         for id in raid do
                             Expect.isSome (diedOn id trace) $"{id} dies at the line\n{failure}"
 

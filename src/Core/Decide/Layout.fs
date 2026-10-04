@@ -298,7 +298,8 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
 /// hostile worth a shot nearest to itself. Worth one (#466): a hostile our
 /// damage reaching it this tick — every tower's over its reserve at its
 /// range, as if all fired on it, and our creeps' — out-damages the heal
-/// reaching it (`healReaching`, the last few ticks' healers counted, #480);
+/// reaching it (`healReaching`, the last few ticks' healers counted, #480)
+/// by enough that the energy over the reserve kills it before it runs out;
 /// or an urgent one — whose weapon reaches our Keep or creeps, or a
 /// dismantler beside the Keep, hurting something now; or a claimer, whose
 /// whole approach is the window (`claimsAFlag`, #451). Not a rampart: it is
@@ -343,15 +344,33 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                 towerEnergy view towerId - Engine.towerEnergyCost
                 >= view.Tuning.TowerRepairReserve)
 
-        let outDamaged (h: HostileInfo) =
-            let shots =
-                spare
-                |> List.sumBy (fun (_, tile) ->
-                    RoomPos.range tile h.Pos
-                    |> Option.map Engine.towerAttackAt
-                    |> Option.defaultValue 0)
+        // The kill check (2026-10-04 arena, W17S25): a shot that only dents a
+        // healed body before the energy over the reserve runs out was a
+        // repair of the struck rampart thrown away. Each spare tower pays for
+        // its own shots over its reserve; the heal our creeps leave unbeaten
+        // runs for as long as the longest of them fires. Where our creeps
+        // already out-damage the heal, every shot sticks.
+        let killable (h: HostileInfo) =
+            let creepNet = int64 (damageOn h - healOn h)
 
-            shots + damageOn h > healOn h
+            let budgets =
+                spare
+                |> List.choose (fun (towerId, tile) ->
+                    RoomPos.range tile h.Pos
+                    |> Option.map (fun r ->
+                        int64 (Engine.towerAttackAt r),
+                        int64 (
+                            (towerEnergy view towerId - view.Tuning.TowerRepairReserve)
+                            / Engine.towerEnergyCost
+                        )))
+
+            match budgets with
+            | _ when creepNet > 0L -> true
+            | [] -> false
+            | _ ->
+                let towersDeal = budgets |> List.sumBy (fun (damage, shots) -> damage * shots)
+                let longest = budgets |> List.map snd |> List.max
+                towersDeal + creepNet * longest >= int64 h.Hits
 
         let urgent =
             hostiles
@@ -359,7 +378,7 @@ let internal planFire (view: ColonyView) atlas : Intent list =
 
         let worth =
             urgent
-            @ (hostiles |> List.filter (fun h -> not (List.contains h urgent) && outDamaged h))
+            @ (hostiles |> List.filter (fun h -> not (List.contains h urgent) && killable h))
 
         let nearest (tile: RoomPos) (targets: HostileInfo list) =
             targets

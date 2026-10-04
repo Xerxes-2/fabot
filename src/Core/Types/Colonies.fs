@@ -1011,6 +1011,11 @@ type Colony =
         /// human. Each is covered as a Keep structure is, on the same gate and
         /// floor. Empty for a room nobody sealed.
         Perimeter: Pos list
+        /// The hits a rampart on each of these home tiles is whole at, in
+        /// place of `Tuning.RampartFloor`: a choke the towers cannot hold has
+        /// to outlast a raid on its hits alone. Every other tile keeps the
+        /// tuned floor; empty for a home that declares none.
+        RampartFloors: Map<Pos, int>
         /// The home room's first spawn tile (#476), swept offline by a human:
         /// the mother places the site there while the home is her nursery.
         /// `None` for a room nobody swept.
@@ -1164,6 +1169,7 @@ module Colony =
                 // colony that declares the Reactor errand (#349).
                 Consignee = Some "W15S28"
                 Perimeter = []
+                RampartFloors = Map.empty
                 FirstSpawn = None
                 Assaults = []
             }
@@ -1213,6 +1219,7 @@ module Colony =
                 // same reason as W12S28's (#349).
                 Consignee = Some "W15S28"
                 Perimeter = []
+                RampartFloors = Map.empty
                 FirstSpawn = None
                 Assaults = []
             }
@@ -1266,6 +1273,7 @@ module Colony =
                 // The far end of the other two colonies' consignments (#349).
                 Consignee = None
                 Perimeter = []
+                RampartFloors = Map.empty
                 FirstSpawn = None
                 // W18S26's south line, seven crossings out by W18S27 on the
                 // assault's own budget (#494).
@@ -1282,6 +1290,7 @@ module Colony =
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
                 Perimeter = []
+                RampartFloors = Map.empty
                 // Placed by hand at t808,3xx; for the record.
                 FirstSpawn = Some { X = 24; Y = 40 }
                 // Six crossings to W18S26's west line by W19S26, the one
@@ -1305,6 +1314,7 @@ module Colony =
                 // is not the Consignee, as W12S28's own ore is not.
                 Consignee = Some "W15S28"
                 Perimeter = []
+                RampartFloors = Map.empty
                 // Placed by hand; for the record.
                 FirstSpawn = Some { X = 37; Y = 34 }
                 Assaults = []
@@ -1339,6 +1349,11 @@ module Colony =
                         // East, to W16S25.
                         for y in 27..28 -> { X = 47; Y = y }
                     ]
+                // The east pair stands 34 from the tower, which cannot shoot
+                // through the healers there: two melee break 100,000 before
+                // the mother's relief walks in, and 300,000 outlasts them
+                // (arena, 2026-10-04).
+                RampartFloors = Map.ofList [ for y in 27..28 -> { X = 47; Y = y }, 300_000 ]
                 // The 2026-10-01 stride-1 sweep: 17 roads, trips src 8 /
                 // ctrl 5 / T 31, every cluster tile inside the perimeter and
                 // at range 4 or more from it.
@@ -1407,6 +1422,7 @@ module Colony =
                     Mother = None
                     Consignee = None
                     Perimeter = []
+                    RampartFloors = Map.empty
                     FirstSpawn = None
                     Assaults = []
                 })

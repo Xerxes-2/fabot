@@ -213,6 +213,7 @@ let private declared: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }

@@ -196,6 +196,9 @@ type ColonyView =
         /// The home room's declared perimeter (`Colony.Perimeter`, #446): the
         /// chokes the Layout ramparts beside the Keep.
         Perimeter: Pos list
+        /// The hits a rampart on each of these home tiles is whole at, in
+        /// place of `Tuning.RampartFloor` (`Colony.RampartFloors`).
+        RampartFloors: Map<Pos, int>
         /// The armed bodies of ours (an ATTACK or a RANGED_ATTACK part)
         /// standing in each room whose safe mode this colony fires — its home,
         /// and each [[nursery]] it raises (#449) — under that room's name,
@@ -1110,6 +1113,7 @@ module ColonyView =
             // this colony projects (#349).
             Consignee = colony.Consignee
             Perimeter = colony.Perimeter
+            RampartFloors = colony.RampartFloors
             // Off the world's creeps and not `mine` (#448): who holds a body
             // is not whether it defends the room it stands in.
             Defenders =

@@ -49,6 +49,41 @@ let rampartTests =
     testList
         "ramparts"
         [
+            test
+                "a rampart on a tile the colony declares a floor for is whole at that floor; the rest at RampartFloor" {
+                let east = { X = 47; Y = 28 }
+                let west = { X = 2; Y = 24 }
+
+                let at hits =
+                    { bareRespawn with
+                        RampartFloors = Map.ofList [ east, 300_000 ]
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withTargets
+                                [
+                                    "ram-east", east, Structure BuiltKind.Rampart
+                                    "ram-west", west, Structure BuiltKind.Rampart
+                                ]
+                    }
+                    |> withLevel 5
+                    |> withHits "ram-east" BuiltKind.Rampart hits 3_000_000
+                    |> withHits "ram-west" BuiltKind.Rampart hits 3_000_000
+
+                Expect.equal
+                    (repairTasks (planTasksOn (at 150_000) noThreats))
+                    [ "ram-east" ]
+                    "150,000: over RampartFloor, under the declared 300,000"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (at 300_000) noThreats))
+                    "300,000: both whole"
+
+                Expect.equal
+                    (repairTasks (planTasksOn (at 90_000) noThreats) |> List.sort)
+                    [ "ram-east"; "ram-west" ]
+                    "90,000: both hungry"
+            }
+
             test "every standing Keep structure and Post container is covered, and nothing else" {
                 // The rule, whole: the Keep and the Post containers, and the equality
                 // is what says no rampart lands anywhere else.
@@ -1013,6 +1048,17 @@ let private woundedAt towers hostiles (creeps: (string * Pos * int) list) =
             |> withCreepsAt (creeps |> List.map (fun (name, pos, _) -> name, pos))
     }
 
+/// Trepidimous' melee (3,500 hits) at 30,40 and its 7-HEAL healer (84 a
+/// tick) beside it at 30,41, both a player's.
+let private trepPair =
+    [
+        hostileAt
+            "h-1"
+            { X = 30; Y = 40 }
+            (List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ])
+        hostileAt "med-1" { X = 30; Y = 41 } (List.replicate 11 Move @ List.replicate 7 Heal)
+    ]
+
 [<Tests>]
 let fireReflexTests =
     testList
@@ -1213,27 +1259,146 @@ let fireReflexTests =
             }
 
             test
-                "a healer that stepped out across the exit last tick still counts in the heal a shot must beat (#480)" {
+                "a healer that stepped out across the exit last tick counts at half its heal in the heal a shot must beat (#480)" {
                 // The t880,341 raid's healers bounced across the exit: on the
                 // tick one stood out, the melee read unhealed and was shot,
-                // and healed back the next.
+                // and healed back the next. In the room every other tick, a
+                // bouncer heals at half its rate over the two.
                 let raider = hostileAt "h-1" { X = 30; Y = 40 } [ Attack; Move ]
-                let healer = hostileAt "med-1" { X = 31; Y = 40 } (Move :: List.replicate 20 Heal)
+
+                let healerOf heals =
+                    hostileAt "med-1" { X = 31; Y = 40 } (Move :: List.replicate heals Heal)
+
                 let alone = towerColony [ "tower-1", { X = 10; Y = 40 } ] [ raider ]
+
+                let firedWith heals =
+                    shots
+                        (decideOn
+                            { alone with
+                                RecalledHealers = [ healerOf heals ]
+                            })
+                            .Intents
 
                 Expect.equal
                     (shots (decideOn alone).Intents)
                     [ "tower-1", "h-1" ]
                     "the premise: unhealed at range 20, 150 is worth a shot"
 
+                Expect.equal
+                    (firedWith 20)
+                    [ "tower-1", "h-1" ]
+                    "a 240-heal bouncer puts back 120 a tick: the 150 shot gains"
+
                 Expect.isEmpty
-                    (shots
-                        (decideOn
-                            { alone with
-                                RecalledHealers = [ healer ]
-                            })
-                            .Intents)
-                    "its healer of last tick puts back 240: the energy held"
+                    (firedWith 34)
+                    "a 408-heal bouncer puts back 204 a tick: the energy held"
+            }
+
+            test
+                "a shot that is not urgent is taken only when the energy over the reserve sees the kill through; else the struck rampart is repaired" {
+                // Trepidimous' melee, 3,500 hits, at range 20 (150 a shot)
+                // beside one 7-HEAL healer (84): 66 a shot net.
+                let at energy =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        trepPair
+                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    |> holdingTower "tower-1" energy
+
+                let full = (decideOn (at Engine.towerCapacity)).Intents
+
+                Expect.equal
+                    (shots full)
+                    [ "tower-1", "h-1" ]
+                    "70 shots × 66 = 4,620 over 3,500: fire"
+
+                let low = (decideOn (at 500)).Intents
+                Expect.isEmpty (shots low) "20 shots × 66 = 1,320 short of 3,500: no shot"
+
+                Expect.equal
+                    (towerRepairs low)
+                    [ "tower-1", "rampart-1" ]
+                    "the struck rampart repaired instead"
+            }
+
+            test "an urgent shot is taken whatever the energy over the reserve can kill (#480)" {
+                let besideOurs =
+                    woundedAt
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        trepPair
+                        [ "ours", { X = 31; Y = 40 }, 0 ]
+                    |> holdingTower "tower-1" 500
+
+                Expect.equal
+                    (shots (decideOn besideOurs).Intents)
+                    [ "tower-1", "h-1" ]
+                    "a raider swinging at our creep is shot though 20 shots cannot kill it"
+            }
+
+            test
+                "each tower pays for its own shots: one near its reserve does not hold back the other five" {
+                // Six towers at range 20 (150 each): the poorest has one shot
+                // over its reserve, the rest seventy.
+                let towers = [ for y in 35..40 -> $"tower-{y}", { X = 10; Y = y } ]
+
+                let snapshot =
+                    towerColony towers trepPair
+                    |> holdingTower
+                        "tower-35"
+                        (Tuning.defaults.TowerRepairReserve + Engine.towerEnergyCost)
+
+                Expect.equal
+                    (shots (decideOn snapshot).Intents |> List.map fst |> List.sort)
+                    (towers |> List.map fst |> List.sort)
+                    "5 × 150 × 70 + 150 − 84 × 70 is far over 3,500: all six fire"
+            }
+
+            test "a shot is taken whatever the energy when our creeps already out-damage the heal" {
+                // A 14-RANGED_ATTACK resident at range 3 of the melee: 140
+                // against the healer's 84, every shot sticks. The tower's 10
+                // shots over its reserve, at 150 + 140 − 84 = 206 a tick,
+                // would not see 3,500 through.
+                let snapshot =
+                    { towerColony [ "tower-1", { X = 10; Y = 40 } ] trepPair with
+                        Creeps =
+                            [ creepWith "ranger-1" 0 0 (List.replicate 14 RangedAttack @ [ Move ]) ]
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                colony.Spatial |> withCreepsAt [ "ranger-1", { X = 33; Y = 40 } ]
+                        }
+                    |> holdingTower "tower-1" 400
+
+                Expect.equal (shots (decideOn snapshot).Intents) [ "tower-1", "h-1" ] "fire"
+            }
+
+            test
+                "a player's healer on the exit heals at half its rate; an Invader's, never carried off it, in full" {
+                // A raider at 48,40 and a 20-HEAL healer beside it on the
+                // exit at 49,40; the tower at range 19 lands 180.
+                let raider = hostileAt "h-1" { X = 48; Y = 40 } [ Attack; Move ]
+
+                let healerOf owner =
+                    { hostileAt "med-1" { X = 49; Y = 40 } (Move :: List.replicate 20 Heal) with
+                        Owner = owner
+                    }
+
+                let fired owner =
+                    shots
+                        (decideOn (
+                            towerColony [ "tower-1", { X = 29; Y = 40 } ] [ raider; healerOf owner ]
+                        ))
+                            .Intents
+
+                Expect.equal
+                    (fired "raider")
+                    [ "tower-1", "h-1" ]
+                    "a bouncer's 240 reads 120: the 180 shot gains"
+
+                Expect.isEmpty
+                    (fired "Invader")
+                    "an Invader's 240 stays every tick: the energy held"
             }
 
             test
@@ -1249,10 +1414,20 @@ let fireReflexTests =
 
                 Expect.isEmpty (fired (at reserve raider)) "at its reserve: held"
 
+                // One act over the reserve: a 150 shot at range 20 kills a
+                // 100-hit raider, and not a 200-hit one (the kill check).
                 Expect.equal
-                    (fired (at (reserve + Engine.towerEnergyCost) raider))
+                    (fired (
+                        at
+                            (reserve + Engine.towerEnergyCost)
+                            (hostileAt "h-1" { X = 30; Y = 40 } [ Attack ])
+                    ))
                     [ "tower-1", "h-1" ]
-                    "one act over it fires"
+                    "one act over it fires on what one shot kills"
+
+                Expect.isEmpty
+                    (fired (at (reserve + Engine.towerEnergyCost) raider))
+                    "and holds on what it cannot"
 
                 Expect.equal
                     (fired (

@@ -51,6 +51,7 @@ let snapshotWith creeps spatial =
         Assaults = []
         Consignee = None
         Perimeter = []
+        RampartFloors = Map.empty
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty

@@ -63,6 +63,12 @@ module HostileInfo =
     /// Whether a hostile is a Source Keeper: the room's own NPC, never a raid.
     let isKeeper (hostile: HostileInfo) : bool = hostile.Owner = "Source Keeper"
 
+    /// Whether the engine carries this hostile across an exit it ends a tick
+    /// on: a player's creep, never an Invader's or a Source Keeper's
+    /// (`creeps/tick.js` skips users '2' and '3').
+    let crossesExits (hostile: HostileInfo) : bool =
+        hostile.Owner <> "Invader" && not (isKeeper hostile)
+
     /// What a hostile heals a tick, its HEAL parts priced unboosted: the
     /// projection carries no boosts.
     let healing (hostile: HostileInfo) : int =

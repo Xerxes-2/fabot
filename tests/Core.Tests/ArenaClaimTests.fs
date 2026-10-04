@@ -907,6 +907,142 @@ let private remembering (room: string) (ago: int) (a: Arena) =
             }
     }
 
+let private w17s26 (x: int) (y: int) = RoomPos.at "W17S26" { X = x; Y = y }
+let private w16s25 (x: int) (y: int) = RoomPos.at "W16S25" { X = x; Y = y }
+
+/// The declared first spawn, and the one tower and the ten extensions the
+/// Layout places round it at RCL3 (its sites, read with the spawn standing).
+let private firstSpawn = tile 14 28
+let private layoutTower = tile 13 29
+
+let private layoutExtensions =
+    [
+        tile 15 27
+        tile 15 29
+        tile 12 28
+        tile 12 30
+        tile 14 26
+        tile 14 30
+        tile 16 28
+        tile 16 30
+        tile 11 25
+        tile 11 27
+    ]
+
+/// W17S25 at RCL3 once its safe mode has run out (the 2026-10-04 plan): its
+/// spawn at the declared 14,28, the Layout's tower holding `towerEnergy`, its
+/// extensions, the sixteen perimeter ramparts and one on the spawn and on
+/// the tower all at `hits`, the safe mode RCL3 banked under the 30,000 ticks
+/// of cooldown the claim's left, the child's one worker carrying 200; the
+/// mother and the chain as `childWorld` has them, and W16S25 east.
+let private rcl3World (towerEnergy: int) (hits: int) (bodies: Body list) =
+    let mother =
+        room "W15S28"
+        |> withController Ownership.Ours None 7 0
+        |> withSpawn "Spawn3" { X = 18; Y = 30 } 5600
+        |> withSpawn "Spawn8" { X = 17; Y = 35 } 5600
+
+    let child =
+        room "W17S25"
+        |> withController Ownership.Ours None 3 1
+        |> withSafeModeCooldown (921_000 + 30_000)
+        |> withSpawn "Spawn10" firstSpawn 800
+        |> withStructures (
+            towerOf Side.Ours layoutTower towerEnergy
+            :: [
+                for at in layoutExtensions -> structureOf "extension" (Some Side.Ours) 1000 1000 at
+            ]
+        )
+        |> withRamparts Side.Ours hits (perimeter @ [ firstSpawn; layoutTower ])
+
+    let worker =
+        { body
+              "worker-920300-Spawn10"
+              Side.Ours
+              (parts [ Work, 4; Carry, 4; Move, 4 ])
+              (w17s25 15 30)
+              None with
+            Energy = 200
+        }
+
+    arena
+        921_000
+        [
+            mother
+            room "W15S27"
+            room "W16S28"
+            room "W16S27"
+            room "W16S26"
+            room "W17S26"
+            child
+            room "W18S25"
+            room "W16S25"
+        ]
+        afterClaim
+        (worker :: motherStaff @ bodies)
+    |> withCasts claimRows
+
+/// The t880,341 raid breaking in for the controller's ring as `westRaid`
+/// does, from these tiles: melee, melee, healer, healer, tapper.
+let private raidFrom5 (m1, m2, h1, h2, t) =
+    [
+        body "Eternity536" trep trepMelee m1 (Some(Breach(w17s25 16 36)))
+        body "Prime803" trep trepMelee m2 (Some(Breach(w17s25 16 36)))
+        body "Prism305" trep trepHealer h1 (Some(Follow "Eternity536"))
+        body "Paragon722" trep trepHealer h2 (Some(Follow "Prime803"))
+        { body "Rune908" trep trepTapper t (Some(Tap controllerAt)) with
+            TicksToLive = Engine.claimLifetime
+        }
+    ]
+
+/// By the south line from W17S26, the way the earlier pass came in
+/// (t879,264, `docs/research/squads.md` §1.2), and by the east line from
+/// W16S25, 34 tiles from the tower. Outside the east pair only 48,28 and
+/// 48,29 are ground off the exit row: both melee stand on them, and the
+/// healers on the exits, carried across the seam every tick they end there.
+let private southRaid =
+    raidFrom5 (w17s26 17 3, w17s26 19 3, w17s26 17 4, w17s26 19 4, w17s26 18 4)
+
+let private eastRaid =
+    raidFrom5 (w17s25 48 29, w17s25 48 28, w16s25 1 29, w16s25 1 28, w16s25 4 28)
+
+let private fighterIds = [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ]
+
+/// W17S25's declared rampart floors (`Colony.RampartFloors`), as shipped.
+let private declaredFloors =
+    match Colony.declared |> List.tryFind (fun c -> c.Home = "W17S25") with
+    | Some c -> c.RampartFloors
+    | None -> failwith "W17S25 is declared"
+
+/// The arena's W17S25 keeping its declared floors: the colony carries them,
+/// and each declared tile's rampart stands at its floor.
+let private withDeclaredFloors (a: Arena) =
+    let r = a.Rooms["W17S25"]
+
+    { a with
+        Rooms =
+            a.Rooms
+            |> Map.add
+                "W17S25"
+                { r with
+                    Structures =
+                        r.Structures
+                        |> List.map (fun s ->
+                            match Map.tryFind s.At declaredFloors with
+                            | Some floor when s.Kind = "rampart" -> { s with Hits = floor }
+                            | _ -> s)
+                }
+        Colonies =
+            a.Colonies
+            |> List.map (fun c ->
+                if c.Home = "W17S25" then
+                    { c with
+                        RampartFloors = declaredFloors
+                    }
+                else
+                    c)
+    }
+
 [<Tests>]
 let arenaClaimTests =
     testList
@@ -1208,8 +1344,10 @@ let arenaClaimTests =
                 let failure = $"{report}\n{describe trace}"
 
                 // Measured with #477, #479–#481: the relief cast t0, in at
-                // t343; the tower never dry (#480: 9 shots, 65 repairs, 260
+                // t343; the tower never dry (#480: 10 shots, 64 repairs, 260
                 // left; it ran dry at t134 before), the line down at t231
+                // (t203 when every shot that out-healed was taken: the kill
+                // check sends the unkillable ones to repair)
                 // (t215 before #480, t200 before #477), one melee's 510 a tick
                 // on rampart 2,24; the tapper shot dead at t244 from the
                 // reserve, so no tap; all four dead by t530.
@@ -1342,5 +1480,164 @@ let arenaClaimTests =
                     Expect.isTrue
                         (path |> List.forall (fun (_, s) -> s.Hits = 100 * List.length pioneerParts))
                         $"and not one hit lost to a keeper\n{failure}"
+            }
+
+            test
+                "RCL3 at the declared spawn, safe mode run out: the Layout's full tower at 13,29 and the residents on the struck ramparts hold the 100k perimeter against the raid from the west and the south" {
+                for side, raid in [ "west", westRaid; "south", southRaid ] do
+                    let report, _, trace =
+                        rcl3World
+                            Engine.towerCapacity
+                            Tuning.defaults.RampartFloor
+                            (residents @ raid)
+                        |> residentsHold
+                        |> lineReport 600
+
+                    let failure = $"{side}: {report}\n{describe trace}"
+
+                    // Measured: the raid dead by t52 (west) and t34 (south),
+                    // the struck rampart (2,24; 18,44) at 91,420 and 81,490,
+                    // 380 and 310 of the tower's energy spent, all on shots.
+                    // A tower 390 at range 12 and 270 at range 16 beats one
+                    // healer's 84 behind each melee.
+                    Expect.isNone report.Fell $"the line holds\n{failure}"
+                    Expect.isGreaterThan (fst report.Floor) 75_000 failure
+
+                    for id in fighterIds do
+                        Expect.isTrue (report.Died.ContainsKey id) $"{id} dies\n{failure}"
+
+                    for r in residents do
+                        Expect.isFalse (report.Died.ContainsKey r.Id) $"{r.Id} lives\n{failure}"
+
+                    Expect.isEmpty report.Taps "no tap"
+                    Expect.isEmpty report.SafeModeAsks "under the cooldown: no ask"
+            }
+
+            test
+                "RCL3, the tower at its repair reserve and no residents: two melee take a 100k south rampart at 1,020 a tick, well before the mother's relief walks in" {
+                let report, _, trace =
+                    rcl3World
+                        Tuning.defaults.TowerRepairReserve
+                        Tuning.defaults.RampartFloor
+                        southRaid
+                    |> lineReport 600
+
+                let failure = $"{report}\n{describe trace}"
+
+                // Measured: rampart 17,44 down at t106, the relief in at
+                // t336; the tower held its 300 (four urgent shots) and spent
+                // it on the tapper once the line was open: dead at t134, no
+                // tap. At 300k the line fell at t301, still before the relief.
+                match report.Fell, report.ReliefIn with
+                | Some fell, Some relief ->
+                    Expect.isGreaterThanOrEqual
+                        fell
+                        (Tuning.defaults.RampartFloor / (2 * Engine.attackPower * 17))
+                        "no faster than two melee on one rampart"
+
+                    Expect.isLessThan fell relief $"the line falls first\n{failure}"
+                | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
+
+                Expect.equal report.Repairs 0 "under the reserve the tower repairs nothing"
+                Expect.isEmpty report.Taps $"the reserve shoots the tapper\n{failure}"
+            }
+
+            test
+                "RCL3: the east pair stands 34 from the tower, so without residents its 100k falls before the relief; with them it holds" {
+                let run withResidents =
+                    let bodies = if withResidents then residents @ eastRaid else eastRaid
+                    let start = rcl3World Engine.towerCapacity Tuning.defaults.RampartFloor bodies
+
+                    (if withResidents then residentsHold start else start) |> lineReport 600
+
+                // Measured: the two healers bounce on the exits in turn, so one
+                // stands beside both melee every tick; read at half rate (84
+                // under the tower's 150 at range 34) and killable on a full
+                // tower's 70 shots, they are shot (57 shots, 18 repairs once
+                // a kill is out of reach). Alone the line falls at t163 to
+                // 1,020 a tick, the relief in at t480 (t111 when the bouncers
+                // counted in full and the tower only repaired). With the
+                // residents on 47,27 and 47,28 the raid is dead by t92, the
+                // floor 37,730 (t110 and 10,040 then).
+                let alone, _, trace = run false
+                let failure = $"{alone}\n{describe trace}"
+
+                match alone.Fell, alone.ReliefIn with
+                | Some fell, Some relief ->
+                    Expect.isLessThan fell relief $"the line falls first\n{failure}"
+                | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
+
+                let held, _, trace = run true
+                let failure = $"{held}\n{describe trace}"
+                Expect.isNone held.Fell $"the line holds\n{failure}"
+
+                for id in fighterIds do
+                    Expect.isTrue (held.Died.ContainsKey id) $"{id} dies\n{failure}"
+            }
+
+            test "RCL3, the declared floors: the east pair at 300k is not where the raid breaks in" {
+                let pair = [ "rampart-47-27"; "rampart-47-28" ]
+
+                let run towerEnergy withResidents =
+                    let bodies = if withResidents then residents @ eastRaid else eastRaid
+
+                    let start =
+                        rcl3World towerEnergy Tuning.defaults.RampartFloor bodies
+                        |> withDeclaredFloors
+
+                    (if withResidents then residentsHold start else start) |> lineReport 700
+
+                for towerEnergy, withResidents in
+                    [
+                        Engine.towerCapacity, false
+                        Engine.towerCapacity, true
+                        Tuning.defaults.TowerRepairReserve, false
+                    ] do
+                    let report, _, trace = run towerEnergy withResidents
+
+                    let pairFloor =
+                        trace
+                        |> List.collect (fun t ->
+                            pair |> List.choose (fun id -> Map.tryFind id t.Structures))
+                        |> List.min
+
+                    let fallen =
+                        trace
+                        |> List.collect (fun t ->
+                            t.Events
+                            |> List.choose (function
+                                | Destroyed id when id.StartsWith "rampart-" -> Some(id, t.Tick)
+                                | _ -> None))
+
+                    let failure =
+                        $"tower {towerEnergy}, residents {withResidents}: {report}\n{describe trace}"
+
+                    // Measured: the pair never under 298,200. Its cheapest
+                    // breach for the raid is the south trio at 100k, walked
+                    // round to by t189–204. A full tower kills the raid by
+                    // t513 (t237 with residents) and nothing falls; at its
+                    // reserve the south's 18,44 falls at t383, before the
+                    // relief at t486. A raid that kept to the pair instead
+                    // takes 300k at 1,020 a tick in about 294 ticks: with the
+                    // tower drained the pair fell at t293–297 (every rampart
+                    // at 300k), still before the relief.
+                    Expect.isGreaterThan pairFloor 290_000 $"the pair stands\n{failure}"
+                    Expect.isEmpty report.Taps "no tap"
+
+                    if towerEnergy = Engine.towerCapacity then
+                        Expect.isEmpty fallen $"nothing falls\n{failure}"
+
+                        for id in fighterIds do
+                            Expect.isTrue (report.Died.ContainsKey id) $"{id} dies\n{failure}"
+                    else
+                        match fallen, report.ReliefIn with
+                        | (id, fell) :: _, Some relief ->
+                            Expect.equal
+                                id
+                                "rampart-18-44"
+                                $"the south trio is the weak spot now\n{failure}"
+
+                            Expect.isLessThan fell relief $"and falls before the relief\n{failure}"
+                        | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
             }
         ]

@@ -1,6 +1,14 @@
 # Fire reflex — towers attack only, nearest hostile, no gate
 
-> **Status:** accepted
+> **Status:** amended by #466, #477, #480, the kill check (2026-10-04)
+
+> **Amended by the kill check (2026-10-04)**: a shot that is not urgent is taken only when it can kill. Each spare tower (one holding more than `Tuning.TowerRepairReserve`) pays for its own shots over its reserve; the target is shot when the towers' damage over those shots, plus our creeps' damage less the heal reaching it for as long as the longest-paid tower fires, reaches its hits — or at once when our creeps alone already out-damage that heal. A shot that cannot kill goes to repairing the struck rampart instead. The heal counted halves for a player's healer standing on the exit ring or remembered off it: the engine carries it out of the room every other tick. An NPC's healer is never carried and counts in full. Measured on the W17S25 arena: a tower with half its energy, plinking a healed melee it could never kill, broke the line 28 ticks sooner than repairing.
+
+> **Amended by #480**: a tower keeps `Tuning.TowerRepairReserve` back; under it, it shoots only the urgent — a claimer, a hostile whose weapon reaches our Keep or creeps, a dismantler beside the Keep — with no energy gate. Healers seen in the last `Tuning.HealMemoryTicks` count in the heal a shot must beat.
+
+> **Amended by #477**: "no tower repair" is reversed for one case. With no hostile worth a shot, a tower over its reserve repairs the rampart under attack with the fewest hits.
+
+> **Amended by #466**: "no gate" is reversed. A hostile is worth a shot only when our damage reaching it out-damages the heal reaching it, so a heal-tank no longer drains the tower.
 
 At RCL3 the layout's tower stood built and fed (Refill keeps it topped at surplus tier) but the code held no tower action at all — the colony's only defence was the safe-mode reflex, which spends on CLAIM parts alone, so a claw-less hostile could dismantle roads and containers unopposed (issue #49). We decided towers fire through a **colony reflex** in the safe-mode/pickup family — condition→Intent in `Decide.fs`, outside the Task/Matcher pipeline, no Verdict, no chat bubble: every tower, independently, shoots the hostile **nearest to itself**, every tick one is in the room. The rule is deliberately minimal, and the exclusions are the decision:
 

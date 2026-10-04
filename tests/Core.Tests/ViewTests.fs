@@ -235,6 +235,7 @@ let private declared: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -246,6 +247,7 @@ let private declared: Colony list =
             Mother = Some mother
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -3828,6 +3830,7 @@ let private claimingDeclared: Colony list =
                 Mother = Some mother
                 Consignee = None
                 Perimeter = []
+                RampartFloors = Map.empty
                 FirstSpawn = None
                 Assaults = []
             }
@@ -4022,6 +4025,7 @@ let harassViewTests =
                             Mother = None
                             Consignee = None
                             Perimeter = []
+                            RampartFloors = Map.empty
                             FirstSpawn = None
                             Assaults = []
                         }
@@ -4632,6 +4636,7 @@ let private declaringOutpost outpost : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        RampartFloors = Map.empty
         FirstSpawn = None
         Assaults = []
     }
@@ -4645,6 +4650,7 @@ let private declaringErrand errand : Colony =
         Mother = None
         Consignee = None
         Perimeter = []
+        RampartFloors = Map.empty
         FirstSpawn = None
         Assaults = []
     }

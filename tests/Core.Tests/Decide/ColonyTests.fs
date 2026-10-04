@@ -1141,6 +1141,7 @@ let private splitPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1152,6 +1153,7 @@ let private splitPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1179,6 +1181,7 @@ let private nurseryPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1190,6 +1193,7 @@ let private nurseryPair =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1208,6 +1212,7 @@ let private raisedPair =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1219,6 +1224,7 @@ let private raisedPair =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -1794,6 +1800,7 @@ let twoColonyTests =
                             Mother = None
                             Consignee = None
                             Perimeter = []
+                            RampartFloors = Map.empty
                             FirstSpawn = None
                             Assaults = []
                         }
@@ -1805,6 +1812,7 @@ let twoColonyTests =
                             Mother = Some home
                             Consignee = None
                             Perimeter = []
+                            RampartFloors = Map.empty
                             FirstSpawn = None
                             Assaults = []
                         }
@@ -2825,6 +2833,7 @@ let private raisingPair: Colony list =
             Mother = None
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
@@ -2836,6 +2845,7 @@ let private raisingPair: Colony list =
             Mother = Some "W1N1"
             Consignee = None
             Perimeter = []
+            RampartFloors = Map.empty
             FirstSpawn = None
             Assaults = []
         }
