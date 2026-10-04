@@ -1347,8 +1347,8 @@ module Colony =
                 Consignee = Some "W15S28"
                 // Trepidimous next door (#446): an exact vertex min cut over
                 // the terrain, exits as source and the controller, the source
-                // and the Thorium as sink, seals 460 tiles with sixteen
-                // ramparts. North needs none: W17S24 is behind a wall.
+                // as sink, sixteen ramparts. North needs none: W17S24 is
+                // behind a wall.
                 Perimeter =
                     [
                         // West, to W18S25.
@@ -1356,14 +1356,14 @@ module Colony =
                         for y in 23..27 -> { X = 2; Y = y }
                         // South, to W17S26.
                         for x in 16..18 -> { X = x; Y = 44 }
-                        // East, to W16S25.
-                        for y in 27..28 -> { X = 47; Y = y }
+                        // East: the x=32 neck, 19 from the tower where x=47
+                        // stood 34, the Thorium (46,25) left outside until it
+                        // is mined (user, 2026-10-04; a flood from every exit
+                        // reaches none of the controller, the source, the
+                        // spawn or the tower).
+                        for y in 31..32 -> { X = 32; Y = y }
                     ]
-                // The east pair stands 34 from the tower, which cannot shoot
-                // through the healers there: two melee break 100,000 before
-                // the mother's relief walks in, and 300,000 outlasts them
-                // (arena, 2026-10-04).
-                RampartFloors = Map.ofList [ for y in 27..28 -> { X = 47; Y = y }, 300_000 ]
+                RampartFloors = Map.empty
                 // The 2026-10-01 stride-1 sweep: 17 roads, trips src 8 /
                 // ctrl 5 / T 31, every cluster tile inside the perimeter and
                 // at range 4 or more from it.

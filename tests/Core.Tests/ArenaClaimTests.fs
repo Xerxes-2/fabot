@@ -1008,41 +1008,6 @@ let private eastRaid =
 
 let private fighterIds = [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722" ]
 
-/// W17S25's declared rampart floors (`Colony.RampartFloors`), as shipped.
-let private declaredFloors =
-    match Colony.declared |> List.tryFind (fun c -> c.Home = "W17S25") with
-    | Some c -> c.RampartFloors
-    | None -> failwith "W17S25 is declared"
-
-/// The arena's W17S25 keeping its declared floors: the colony carries them,
-/// and each declared tile's rampart stands at its floor.
-let private withDeclaredFloors (a: Arena) =
-    let r = a.Rooms["W17S25"]
-
-    { a with
-        Rooms =
-            a.Rooms
-            |> Map.add
-                "W17S25"
-                { r with
-                    Structures =
-                        r.Structures
-                        |> List.map (fun s ->
-                            match Map.tryFind s.At declaredFloors with
-                            | Some floor when s.Kind = "rampart" -> { s with Hits = floor }
-                            | _ -> s)
-                }
-        Colonies =
-            a.Colonies
-            |> List.map (fun c ->
-                if c.Home = "W17S25" then
-                    { c with
-                        RampartFloors = declaredFloors
-                    }
-                else
-                    c)
-    }
-
 [<Tests>]
 let arenaClaimTests =
     testList
@@ -1575,69 +1540,4 @@ let arenaClaimTests =
                     Expect.isTrue (held.Died.ContainsKey id) $"{id} dies\n{failure}"
             }
 
-            test "RCL3, the declared floors: the east pair at 300k is not where the raid breaks in" {
-                let pair = [ "rampart-47-27"; "rampart-47-28" ]
-
-                let run towerEnergy withResidents =
-                    let bodies = if withResidents then residents @ eastRaid else eastRaid
-
-                    let start =
-                        rcl3World towerEnergy Tuning.defaults.RampartFloor bodies
-                        |> withDeclaredFloors
-
-                    (if withResidents then residentsHold start else start) |> lineReport 700
-
-                for towerEnergy, withResidents in
-                    [
-                        Engine.towerCapacity, false
-                        Engine.towerCapacity, true
-                        Tuning.defaults.TowerRepairReserve, false
-                    ] do
-                    let report, _, trace = run towerEnergy withResidents
-
-                    let pairFloor =
-                        trace
-                        |> List.collect (fun t ->
-                            pair |> List.choose (fun id -> Map.tryFind id t.Structures))
-                        |> List.min
-
-                    let fallen =
-                        trace
-                        |> List.collect (fun t ->
-                            t.Events
-                            |> List.choose (function
-                                | Destroyed id when id.StartsWith "rampart-" -> Some(id, t.Tick)
-                                | _ -> None))
-
-                    let failure =
-                        $"tower {towerEnergy}, residents {withResidents}: {report}\n{describe trace}"
-
-                    // Measured: the pair never under 298,200. Its cheapest
-                    // breach for the raid is the south trio at 100k, walked
-                    // round to by t189–204. A full tower kills the raid by
-                    // t513 (t237 with residents) and nothing falls; at its
-                    // reserve the south's 18,44 falls at t383, before the
-                    // relief at t486. A raid that kept to the pair instead
-                    // takes 300k at 1,020 a tick in about 294 ticks: with the
-                    // tower drained the pair fell at t293–297 (every rampart
-                    // at 300k), still before the relief.
-                    Expect.isGreaterThan pairFloor 290_000 $"the pair stands\n{failure}"
-                    Expect.isEmpty report.Taps "no tap"
-
-                    if towerEnergy = Engine.towerCapacity then
-                        Expect.isEmpty fallen $"nothing falls\n{failure}"
-
-                        for id in fighterIds do
-                            Expect.isTrue (report.Died.ContainsKey id) $"{id} dies\n{failure}"
-                    else
-                        match fallen, report.ReliefIn with
-                        | (id, fell) :: _, Some relief ->
-                            Expect.equal
-                                id
-                                "rampart-18-44"
-                                $"the south trio is the weak spot now\n{failure}"
-
-                            Expect.isLessThan fell relief $"and falls before the relief\n{failure}"
-                        | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
-            }
         ]

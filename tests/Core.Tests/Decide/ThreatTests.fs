@@ -284,11 +284,14 @@ let rampartTests =
                     "the tower stands: all sixteen chokes"
             }
 
-            test "the sixteen chokes seal W17S25's capture from every exit" {
+            test
+                "the sixteen chokes seal W17S25's capture from every exit, the Thorium left outside" {
                 // The declared tiles are the real room's, not a pattern: on the
                 // committed capture each is open ground, and a walk from every
-                // exit that may not cross them reaches neither the controller,
-                // the source nor the Thorium.
+                // exit that may not cross them reaches neither the controller
+                // nor the source. The east line at the x=32
+                // neck leaves the Thorium (46,25) outside until it is mined
+                // (user, 2026-10-04).
                 let room = RoomFixtures.load "W17S25"
                 let walls = Set.ofList w17s25Perimeter
 
@@ -340,11 +343,12 @@ let rampartTests =
                     |> Set.exists (fun tile ->
                         abs (tile.X - target.X) <= 1 && abs (tile.Y - target.Y) <= 1)
 
+                let thorium = { X = 46; Y = 25 }
+
                 let targets =
                     [
                         "the controller", room.Controller |> Option.map snd |> Option.toList
                         "the source", room.Sources |> List.map snd
-                        "the Thorium", room.Minerals |> List.map snd
                     ]
 
                 for name, tiles in targets do
@@ -352,6 +356,13 @@ let rampartTests =
 
                     for target in tiles do
                         Expect.isFalse (near target) $"no walk from an exit reaches beside {name}"
+
+                Expect.contains
+                    (room.Minerals |> List.map snd)
+                    thorium
+                    "the premise: the Thorium is there"
+
+                Expect.isTrue (near thorium) "and outside the line, by choice"
             }
 
             test
