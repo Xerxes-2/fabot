@@ -1919,7 +1919,7 @@ let cornerTests =
                 // but the walk into it is terrain, so the grace's mover takes
                 // the corner the price takes.
                 Expect.equal
-                    (stepTowardRoom bothCorners "w" "W2N2")
+                    (stepTowardRoom bothCorners "w" Set.empty "W2N2")
                     (Some(at "W1N1" { X = 24; Y = 25 }))
                     "west, the cheaper corner, as `firstStepFor` above steps"
             }

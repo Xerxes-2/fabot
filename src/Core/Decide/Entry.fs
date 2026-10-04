@@ -427,13 +427,15 @@ let decideUnarbitrated
 
         let home = SpatialInfo.homeName view.Spatial
 
+        // So does any idle body standing in an evacuating room (#512): there
+        // is no work there for it to wait for.
         let homeward =
             view.Creeps
-            |> List.filter (fun creep ->
-                isFighterBody creep && not (Map.containsKey creep.Name assigned))
+            |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
             |> List.choose (fun creep ->
                 Atlas.creepRoom atlas creep.Name
-                |> Option.filter (fun room -> room <> home)
+                |> Option.filter (fun room ->
+                    room <> home && (isFighterBody creep || Set.contains room view.Evacuating))
                 |> Option.map (fun _ -> creep.Name, home))
 
         // Graced last: `Map.ofList` keeps the later entry, so a guard walking a

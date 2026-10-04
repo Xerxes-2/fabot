@@ -816,10 +816,141 @@ let standDownGateTests =
                     ((Option.defaultValue "" rematched).Contains "W1N2")
                     "to a Task of a room the colony is still working"
 
-            // The walk back is not pinned because it does not happen: a withheld
-            // room is not projected, so the creep standing in it has no tile, the
-            // rematch is priced on the unplaced creep's 0 and `Decide.resolve`
-            // builds moves only over the creeps the Atlas places. The journey home
-            // is carried out of this ticket as a finding of its own.
+            // The walk back is pinned below (#512): `gatedColony` places no
+            // body in a withheld room, the view's transit projection does.
+            }
+        ]
+
+/// A stood-down outpost the view still projects because bodies of ours
+/// stand in it (#512): W1N2 north of a home whose top ten columns are open
+/// ground, as a transit room — field and border, nothing to work — and the
+/// bodies on the caller's tiles. `evacuating` false is the same room
+/// projected without the mark, the premise every case is read against.
+let private evacuatingOutpost
+    evacuating
+    (placed: (CreepInfo * Pos) list)
+    (hostiles: HostileInfo list)
+    =
+    let field x0 x1 y0 y1 =
+        TerrainGrid.ofList
+            [
+                for x in x0..x1 do
+                    for y in y0..y1 -> { X = x; Y = y }, Plain
+            ]
+
+    { haulHome with
+        Sources = []
+        Creeps = placed |> List.map fst
+        Hostiles = hostiles
+        Crossed = Set.singleton "W1N2"
+        Evacuating = if evacuating then Set.singleton "W1N2" else Set.empty
+        Spatial =
+            haulHome.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = field 20 30 1 48
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = field 20 30 41 48
+                    CreepPositions =
+                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
+    }
+
+let private movesOf name (decision: Decision) =
+    decision.Intents
+    |> List.choose (function
+        | MoveCreep(creep, direction) when creep = name -> Some direction
+        | _ -> None)
+
+[<Tests>]
+let evacuatingTests =
+    testList
+        "bodies caught in a stood-down outpost"
+        [
+            test "an idle anchor and an idle worker standing there walk home" {
+                // #512, live t951,982: anchor-951209 and worker-951115 stood idle in
+                // W18S25 while the raid's melee crept toward them. Any class walks,
+                // a Work-heavy body included.
+                let placed =
+                    [
+                        anchor "a-out" 0 50, { X = 25; Y = 45 }
+                        worker "w-out" 0 50, { X = 22; Y = 46 }
+                    ]
+
+                let unmarked = decideOn (evacuatingOutpost false placed [])
+                let marked = decideOn (evacuatingOutpost true placed [])
+
+                Expect.isEmpty
+                    (movesOf "a-out" unmarked @ movesOf "w-out" unmarked)
+                    "the premise: idle in a room it merely crosses, a body stands"
+
+                // South is where home lies; which of the three steps a tie takes
+                // is the flood's.
+                let southward name =
+                    match movesOf name marked with
+                    | [ Bottom ]
+                    | [ BottomLeft ]
+                    | [ BottomRight ] -> true
+                    | _ -> false
+
+                let anchorMoves = movesOf "a-out" marked
+                let workerMoves = movesOf "w-out" marked
+
+                Expect.isTrue
+                    (southward "a-out")
+                    $"the anchor steps toward the border home lies behind: {anchorMoves}"
+
+                Expect.isTrue (southward "w-out") $"and so does the worker: {workerMoves}"
+            }
+
+            test "a body inside the Reach takes Flee; one outside it walks home round it" {
+                // A raid at (30,48) reaches x 25 and up from row 43 down. The
+                // worker at (27,45) stands in it and runs, as anywhere (ADR 0033);
+                // the hauler at (28,42) stands outside it, and its shortest walk
+                // home cuts the corner through it, so it walks round (#472).
+                let raid = [ hostileIn "W1N2" { X = 30; Y = 48 } smallMelee ]
+
+                let placed =
+                    [
+                        worker "w-in" 0 50, { X = 27; Y = 45 }
+                        hauler "h-out" 0 100, { X = 28; Y = 42 }
+                    ]
+
+                let decision = decideOn (evacuatingOutpost true placed raid)
+
+                Expect.equal
+                    (Map.tryFind "w-in" decision.Assignments)
+                    (Some(taskId Flee))
+                    "the body in the Reach runs first"
+
+                Expect.isNone
+                    (Map.tryFind "h-out" decision.Assignments)
+                    "the one outside holds nothing"
+
+                let step = movesOf "h-out" decision
+
+                Expect.isNonEmpty step "and still walks"
+
+                Expect.isTrue
+                    (step |> List.forall (fun d -> d = Left || d = TopLeft))
+                    $"along the Reach's edge, never into it: {step}"
+            }
+
+            test "a Work-heavy body walks round the Reach too, having no Flee to fall back on" {
+                let raid = [ hostileIn "W1N2" { X = 30; Y = 48 } smallMelee ]
+
+                let step =
+                    movesOf
+                        "a-out"
+                        (decideOn (
+                            evacuatingOutpost true [ anchor "a-out" 0 50, { X = 28; Y = 42 } ] raid
+                        ))
+
+                Expect.isTrue
+                    (step = [ Left ] || step = [ TopLeft ])
+                    $"the anchor along the Reach's edge, never into it: {step}"
             }
         ]

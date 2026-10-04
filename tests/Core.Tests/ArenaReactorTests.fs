@@ -383,7 +383,7 @@ let reactorHoldTests =
             }
 
             test
-                "scenario 3, today: three longbows outmatch the largest ranger, the stand-down shuts the errand room, and the idle garrison dies in it" {
+                "scenario 3, today: three longbows outmatch the largest ranger, the stand-down shuts the errand room, and the idle garrison walks home out of it" {
                 let final, trace =
                     reactorWorld (Some Side.Ours) 500 (residents @ stealSquad 3 2) |> run 600
 
@@ -401,8 +401,10 @@ let reactorHoldTests =
                 // no squad is cast for it.
                 Expect.isEmpty (squadCasts trace) "no squad"
 
-                // Unassigned (`NoneApplicable`) from the shut on: no shot, no
-                // step, only the heal reflex. Measured: both die, t39 and t65.
+                // Unassigned (`NoneApplicable`) from the shut on: no shot, only
+                // the heal reflex. Until #512 the shut room left the projection
+                // and both stood there till they died (t39, t65); now it stays
+                // a transit room while they stand in it, and they walk home.
                 let afterShut = trace |> List.filter (fun t -> t.Tick >= 6)
 
                 for id in residentIds do
@@ -412,7 +414,11 @@ let reactorHoldTests =
                          || shotBy [ id ] "Longbow3" afterShut)
                         $"{id} never shoots after the shut\n{failure}"
 
-                    Expect.isSome (diedOn id trace) $"{id} dies in the room\n{failure}"
+                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+
+                    Expect.isFalse
+                        (pathOf id trace |> List.last |> (fun (_, body) -> body.At.Room = "W15S25"))
+                        $"{id} has left the room\n{failure}"
 
                 // The claim lands on t11 and every T after it is theirs.
                 match claimsIn trace with

@@ -82,6 +82,7 @@ let quiet: ColonyView =
         RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
+        Evacuating = Set.empty
         Reactors = []
         Sightings = Map.empty
         Seen = Map.empty

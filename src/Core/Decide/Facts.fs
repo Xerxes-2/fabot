@@ -1186,7 +1186,9 @@ let private oursToSweep (view: ColonyView) (id: string) : bool =
            // room can be in a scan set without being on a chain, and its floor
            // is not ours to walk onto. `ColonyView.transiting` admits exactly
            // two kinds out of a crossed room — a pile and a tombstone.
-           || Set.contains room view.Crossed)
+           || Set.contains room view.Crossed
+              // Never in an evacuating room: no sweep may walk a body in (#512).
+              && not (Set.contains room view.Evacuating))
 
 /// The Thorium on the ground in a room this colony sweeps, in id order (#311):
 /// the dig that landed on the floor because the container was at its 2,000

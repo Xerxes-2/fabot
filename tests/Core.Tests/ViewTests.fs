@@ -1095,17 +1095,14 @@ let colonyViewTests =
                     "and the colony that has withdrawn remembers nothing of it"
             }
 
-            test "a body standing in a stood-down outpost is named unplaced" {
-                // The anchor row reads this to count out an Anchor the mover
-                // cannot step (#506): the shut room has no layer to place it in.
+            test
+                "a body of hers standing in a stood-down outpost keeps it projected as a transit room" {
+                // #512: an anchor left idle in a shut outpost stood still until
+                // the raid walked onto it. While a body of hers stands there the
+                // room is ground, hostiles and Reach, and still no work.
                 let colony = declared |> List.find (fun colony -> colony.Home = mother)
 
-                let world =
-                    { pairWorld with
-                        Creeps = creep "anchor-900-Spawn1" outpost :: pairWorld.Creeps
-                    }
-
-                let shutView =
+                let shutUnder world =
                     ColonyView.ofWorld
                         Tuning.defaults
                         declared
@@ -1121,18 +1118,138 @@ let colonyViewTests =
                         world
                         colony
 
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.change
+                                outpost
+                                (Option.map (fun facts ->
+                                    snd (
+                                        withCreeps
+                                            [ "anchor-900-Spawn1", { X = 25; Y = 25 } ]
+                                            (outpost, facts)
+                                    )))
+                        Creeps = creep "anchor-900-Spawn1" outpost :: pairWorld.Creeps
+                    }
+
+                let shutView = shutUnder world
+
                 Expect.isTrue
-                    (shutView.Creeps |> List.exists (fun creep -> creep.Name = "anchor-900-Spawn1"))
-                    "the body is still hers"
+                    (Map.containsKey outpost shutView.Spatial.Rooms)
+                    "the room is projected while her body stands in it"
 
                 Expect.equal
-                    shutView.Unprojected
+                    (Map.tryFind
+                        "anchor-900-Spawn1"
+                        (SpatialInfo.layerOf shutView.Spatial outpost).CreepPositions)
+                    (Some { X = 25; Y = 25 })
+                    "and the body is placed on its tile"
+
+                Expect.isEmpty shutView.Unprojected "so nobody is unplaced"
+
+                Expect.isFalse (List.contains "src-out" (idsOf shutView)) "its rock is not pooled"
+
+                Expect.isTrue (Set.contains outpost shutView.Crossed) "it is a room she crosses"
+
+                Expect.isTrue
+                    (Set.contains outpost shutView.Evacuating)
+                    "and one her bodies walk home from"
+
+                Expect.isFalse
+                    (Map.containsKey outpost shutView.Sightings)
+                    "remembering nothing of it, as a transit room keeps nothing"
+
+                let emptied = shutUnder pairWorld
+
+                Expect.isFalse
+                    (Map.containsKey outpost emptied.Spatial.Rooms)
+                    "with no body of hers in it, the room leaves the projection"
+
+                Expect.isEmpty emptied.Evacuating "and evacuates nothing"
+
+                let foreign =
+                    { pairWorld with
+                        Creeps = creep "hauler-951-Spawn2" outpost :: pairWorld.Creeps
+                    }
+
+                Expect.isFalse
+                    (Map.containsKey outpost (shutUnder foreign).Spatial.Rooms)
+                    "the child's body standing there keeps nothing of hers projected"
+            }
+
+            test "a body of hers in her shut outpost stays hers when the child works that room" {
+                // #512: the child alone projecting the room would adopt the body
+                // and leave it idle in a room of hers it was never cast for. The
+                // mother, whose stand-down shut it, walks it home.
+                let both =
+                    declared
+                    |> List.map (fun colony ->
+                        if colony.Home = child then
+                            { colony with
+                                Outposts =
+                                    (declared |> List.find (fun c -> c.Home = mother)).Outposts
+                            }
+                        else
+                            colony)
+
+                let world =
+                    { pairWorld with
+                        Creeps = creep "anchor-900-Spawn1" outpost :: pairWorld.Creeps
+                    }
+
+                let shut = Map.ofList [ mother, Set.singleton outpost ]
+
+                let holdersUnder shut =
+                    World.creepColonies Tuning.defaults both (World.living both world) shut world
+
+                Expect.isTrue
+                    (World.roomsProjectedRecalling
+                        (JoinTable())
+                        Tuning.defaults
+                        both
+                        HarassCasting.none
+                        StandDown.none
+                        world
+                        (both |> List.find (fun colony -> colony.Home = child))
+                     |> List.contains outpost)
+                    "the premise: the child projects the room, as her outpost"
+
+                Expect.equal
+                    (Map.tryFind "anchor-900-Spawn1" (holdersUnder shut))
+                    (Some mother)
+                    "shut for the mother, her body is still hers"
+
+                let view =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        both
+                        { StandDown.none with
+                            Shut = Set.singleton outpost
+                        }
+                        (holdersUnder shut)
+                        world
+                        (both |> List.find (fun colony -> colony.Home = mother))
+
+                Expect.isTrue (Set.contains outpost view.Evacuating) "and she walks it home"
+            }
+
+            test "a body standing in a room no colony projects is named unplaced" {
+                // The anchor row reads this to count out an Anchor the mover
+                // cannot step (#506): the room has no layer to place it in.
+                let world =
+                    { pairWorld with
+                        Creeps = creep "anchor-900-Spawn1" "W20S20" :: pairWorld.Creeps
+                    }
+
+                Expect.equal
+                    (viewOf world mother).Unprojected
                     (Set.singleton "anchor-900-Spawn1")
-                    "and the one standing outside every room she projects is named, the home worker not"
+                    "the one standing outside every room she projects is named, the home worker not"
 
                 Expect.isEmpty
-                    (viewOf world mother).Unprojected
-                    "with the outpost worked, nobody is unplaced"
+                    (viewOf pairWorld mother).Unprojected
+                    "with every body placed, nobody"
             }
 
             test "a re-checked room is looked into and worked no more than before" {
@@ -2414,6 +2531,56 @@ let transitTests =
                     ((viewWith Set.empty).Sightings |> Map.tryFind crossed)
                     (Map.tryFind crossed walked.Sightings)
                     "open, it is an outpost she works and she remembers what stood in it"
+            }
+
+            test
+                "a shut outpost a chain to another crosses is evacuating while a body of hers stands in it" {
+                // #512: already in the scan set for the chain to `twoHop`, the room
+                // is evacuating all the same — the body in it walks home.
+                let gate =
+                    { StandDown.none with
+                        Shut = Set.singleton crossed
+                    }
+
+                let viewIn world =
+                    ColonyView.ofWorld
+                        Tuning.defaults
+                        chainDeclaration
+                        gate
+                        (World.creepColonies
+                            Tuning.defaults
+                            chainDeclaration
+                            (World.living chainDeclaration world)
+                            (Map.ofList [ mother, gate.Shut ])
+                            world)
+                        world
+                        (chainDeclaration |> List.find (fun colony -> colony.Home = mother))
+
+                let occupied =
+                    { twoHopWorld with
+                        Rooms =
+                            twoHopWorld.Rooms
+                            |> Map.change
+                                crossed
+                                (Option.map (fun facts ->
+                                    snd (
+                                        withCreeps
+                                            [ "anchor-900-Spawn1", { X = 25; Y = 25 } ]
+                                            (crossed, facts)
+                                    )))
+                        Creeps = creep "anchor-900-Spawn1" crossed :: twoHopWorld.Creeps
+                    }
+
+                Expect.isTrue
+                    (Map.containsKey crossed (viewIn twoHopWorld).Spatial.Rooms)
+                    "the premise: with nobody of hers in it, the chain keeps it projected"
+
+                Expect.isEmpty (viewIn twoHopWorld).Evacuating "and merely crossed"
+
+                Expect.equal
+                    (viewIn occupied).Evacuating
+                    (Set.singleton crossed)
+                    "with her body in it, it is evacuating"
             }
 
             test "a declaration whose every chain crosses a rival's room is refused" {

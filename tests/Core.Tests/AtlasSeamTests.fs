@@ -1293,7 +1293,7 @@ let keeperSeamTests =
                          |> List.exists (fun (_, there) -> there = { X = x; Y = 0 }))
                         $"so the band does not carry the crossing at x = {x}: a landing with no ground beside it is no crossing"
 
-                let step = stepTowardRoom atlas "w" "W15S27"
+                let step = stepTowardRoom atlas "w" Set.empty "W15S27"
 
                 Expect.isSome
                     step
@@ -1312,7 +1312,7 @@ let keeperSeamTests =
                 for x in 31..45 do
                     let atlas = walkingSouthFrom { X = x; Y = 48 }
 
-                    match stepTowardRoom atlas "w" "W15S27" with
+                    match stepTowardRoom atlas "w" Set.empty "W15S27" with
                     | Some step when step.Y = Seam.exitEdge ->
                         Expect.isNonEmpty
                             (adjacentWalkableIn atlas "W15S26" { X = step.X; Y = 0 })
@@ -1369,7 +1369,7 @@ let landingTests =
                     "and yet nothing walkable lies beside that landing, the three tiles behind it being built over"
 
                 Expect.equal
-                    (stepTowardRoom atlas "w" "W12S27")
+                    (stepTowardRoom atlas "w" Set.empty "W12S27")
                     (Some(RoomPos.at "W12S28" { X = 11; Y = 1 }))
                     "so the mover walks toward the other crossing, though the body is standing beside this one"
             }

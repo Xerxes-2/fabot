@@ -31,6 +31,8 @@ let private moveIntentFor
     atlas
     (creep: string)
     (runs: bool)
+    // A body walking home out of an evacuating room, round its Reach (#512).
+    (walksRound: bool)
     (at: RoomPos)
     (task: Task option)
     (crossing: string option)
@@ -89,13 +91,39 @@ let private moveIntentFor
         else
             intent rank (step :: detour step) Set.empty
 
+    // A body standing outside its room's `reach` walks round it (#472): the
+    // step that never enters it, else the plain one where that stays out of
+    // it, else none — it waits at the edge. Inside it, or with none, the
+    // plain step.
+    let round (reach: Set<Pos>) (avoiding: unit -> RoomPos option) (plain: unit -> RoomPos option) =
+        if Set.isEmpty reach || Set.contains pos reach then
+            plain ()
+        else
+            match avoiding () with
+            | Some step -> Some step
+            | None ->
+                plain ()
+                |> Option.filter (fun tile ->
+                    not (tile.Room = room && Set.contains (RoomPos.pos tile) reach))
+
     // The graced holder's crossing (#151), asked before the Task branches
     // because it is the one body with neither. No Seam to that room — it is
     // not next door — and it falls through to the idle rule below. It crosses
-    // on the cheapest chain, as the price does (#297, #485).
+    // on the cheapest chain, as the price does (#297, #485). A body walking
+    // home out of an evacuating room walks round its Reach, a Work-heavy one
+    // too (#512).
     let crossingStep =
         match task, crossing with
-        | None, Some room -> Atlas.stepTowardRoom atlas creep room |> Option.map RoomPos.pos
+        | None, Some target ->
+            let reach =
+                if walksRound then
+                    Threats.reachIn threats room
+                else
+                    Set.empty
+
+            round reach (fun () -> Atlas.stepTowardRoom atlas creep reach target) (fun () ->
+                Atlas.stepTowardRoom atlas creep Set.empty target)
+            |> Option.map RoomPos.pos
         | _ -> None
 
     match crossingStep, task with
@@ -169,16 +197,12 @@ let private moveIntentFor
                 else
                     Threats.reachIn threats room
 
-            let hot (tile: RoomPos) =
-                tile.Room = room && Set.contains (RoomPos.pos tile) reach
-
             let step =
-                if
-                    runs && task <> Flee && not (Set.isEmpty reach) && not (Set.contains pos reach)
-                then
-                    match Atlas.firstStepAvoiding atlas creep reach area with
-                    | Some step -> Some step
-                    | None -> stepToward atlas creep task area |> Option.filter (hot >> not)
+                if runs && task <> Flee then
+                    round
+                        reach
+                        (fun () -> Atlas.firstStepAvoiding atlas creep reach area)
+                        (fun () -> stepToward atlas creep task area)
                 else
                     stepToward atlas creep task area
 
@@ -438,6 +462,20 @@ let movementOf
             |> List.map (fun c -> c.Name)
             |> Set.ofList
 
+    // The bodies walking home out of an evacuating room, which walk round its
+    // Reach (#512): asked, as the runners are, only on a tick with one.
+    let home = SpatialInfo.homeName view.Spatial
+
+    let roundWalkers =
+        if Map.isEmpty threats.Reach || Set.isEmpty view.Evacuating then
+            Set.empty
+        else
+            placed
+            |> List.filter (fun (name, at) ->
+                Map.tryFind name crossings = Some home && Set.contains at.Room view.Evacuating)
+            |> List.map fst
+            |> Set.ofList
+
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of
     // ours idles in, and none at all for a tick where every body has a Task,
@@ -519,6 +557,7 @@ let movementOf
                     atlas
                     name
                     (Set.contains name runners)
+                    (Set.contains name roundWalkers)
                     at
                     (Map.tryFind name assigned)
                     (Map.tryFind name crossings))

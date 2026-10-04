@@ -1212,7 +1212,33 @@ module World =
             /// stand-down shuts stays in it, as a transit room: a ranger
             /// standing there is still placed, and walks home.
             Scanned: string list
+            /// The rooms of `Scanned` this colony works — home, its worked
+            /// declarations, its borrowed and garrisoned homes, the harassment
+            /// rooms and assaults it runs. Every other scanned room is a
+            /// [[transit room]].
+            Worked: Set<string>
+            /// The [[evacuating room]]s, in `Scanned` (#512): each outpost,
+            /// errand or salvage room its stand-down shuts, with the transit
+            /// rooms of the walk home from it, while a body this colony holds
+            /// stands on that walk.
+            Evacuating: string list
         }
+
+    /// Each outpost, errand or salvage room of this colony's its stand-down
+    /// shuts, with the rooms a walk home from it crosses — the rectangle the
+    /// room was projected through while open (`Outpost.roomsProjected`),
+    /// and the only rooms outside the rest of the scan set a chain home can
+    /// cross, since `Atlas.routes` joins projected rooms alone (#512).
+    let private shutWalks (stages: Map<string, ColonyStage>) (shut: Set<string>) (colony: Colony) =
+        if Set.isEmpty shut then
+            []
+        else
+            (Colony.outpostsWorked stages colony
+             |> List.map (fun outpost -> outpost.RoomName))
+            @ (colony.Errands |> List.map (fun errand -> errand.RoomName))
+            @ colony.Salvage
+            |> List.filter shut.Contains
+            |> List.map (fun room -> room, RoomName.transitBetween colony.Home room)
 
     /// The declaration's narrowings and the union they make, for one colony.
     /// The two outpost narrowings answer different questions: the
@@ -1244,6 +1270,10 @@ module World =
         // asks which rooms are withheld from work, and which of those cannot
         // be crossed either.
         (gate: StandDown)
+        // The rooms a body this colony holds stands in (`creepColoniesRecalling`'s
+        // answer). Empty for the adoption itself, which reads the set without
+        // the evacuating rooms: a body is adopted off the declaration's rooms.
+        (standing: Set<string>)
         (world: World)
         (colony: Colony)
         : ScanSet =
@@ -1292,6 +1322,46 @@ module World =
 
         let assaults = Assault.worked colony.Assaults
 
+        let scanned =
+            Colony.roomsProjected
+                outposts
+                errands
+                salvage
+                borrowed
+                (defended @ garrisoned)
+                colony.Home
+            @ Harass.roomsProjected cast colony.Home
+            @ Assault.roomsProjected assaults colony.Home
+            |> List.distinct
+
+        let harass = Harass.worked gate.Shut cast
+
+        let worked =
+            colony.Home :: (outposts |> List.map (fun outpost -> outpost.RoomName))
+            @ (errands |> List.map (fun errand -> errand.RoomName))
+            @ salvage
+            @ borrowed
+            @ garrisoned
+            @ (harass |> List.map (fun h -> h.RoomName))
+            @ (assaults |> List.map (fun assault -> assault.RoomName))
+            |> Set.ofList
+
+        // A shut room with a body of ours on its walk home, the room itself or
+        // a transit room of the walk, already scanned or not (#512): kept while
+        // one stands there, so the body is placed, Reach and Flee answer for
+        // it, and it walks home. No chain filter: the body is there whatever
+        // the budget says.
+        let evacuating =
+            if Set.isEmpty standing then
+                []
+            else
+                shutWalks stages gate.Shut colony
+                |> List.collect (fun (room, crossed) ->
+                    let walk = room :: (crossed |> List.filter (worked.Contains >> not))
+
+                    if List.exists standing.Contains walk then walk else [])
+                |> List.distinct
+
         {
             Outposts = outposts
             Errands = errands
@@ -1299,21 +1369,13 @@ module World =
             Borrowed = borrowed
             Defended = defended
             Garrisoned = garrisoned
-            Harass = Harass.worked gate.Shut cast
+            Harass = harass
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
             Assaults = assaults
-            Scanned =
-                Colony.roomsProjected
-                    outposts
-                    errands
-                    salvage
-                    borrowed
-                    (defended @ garrisoned)
-                    colony.Home
-                @ Harass.roomsProjected cast colony.Home
-                @ Assault.roomsProjected assaults colony.Home
-                |> List.distinct
+            Scanned = scanned @ evacuating |> List.distinct
+            Worked = worked
+            Evacuating = evacuating
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).
@@ -1336,6 +1398,7 @@ module World =
             colonies
             HarassCasting.none
             gate
+            Set.empty
             world
             colony
 
@@ -1371,6 +1434,7 @@ module World =
                 colonies
                 casting
                 gate
+                Set.empty
                 world
                 colony
 
@@ -1409,10 +1473,43 @@ module World =
                     world
                     colony)
 
-        Colony.creepColonies
-            projections
-            (spawnHomes world)
-            (world.Creeps |> List.map (fun creep -> creep.Info.Name, Some creep.Room))
+        let spawns = spawnHomes world
+
+        let adopted =
+            Colony.creepColonies
+                projections
+                spawns
+                (world.Creeps |> List.map (fun creep -> creep.Info.Name, Some creep.Room))
+
+        // A body standing on the walk home from a room its own colony's
+        // stand-down shuts stays that colony's, whoever else projects the
+        // room: the caster is the one that walks it home (#512).
+        let walks =
+            if Map.isEmpty shut then
+                Map.empty
+            else
+                let stages = stages tuning colonies world
+
+                running
+                |> List.map (fun colony ->
+                    colony.Home,
+                    shutWalks
+                        stages
+                        (Map.tryFind colony.Home shut |> Option.defaultValue Set.empty)
+                        colony
+                    |> List.collect (fun (room, crossed) -> room :: crossed)
+                    |> Set.ofList)
+                |> Map.ofList
+
+        if Map.isEmpty walks then
+            adopted
+        else
+            (adopted, world.Creeps)
+            ||> List.fold (fun held creep ->
+                match Colony.castBy spawns creep.Info.Name with
+                | Some home when Map.tryFind home walks |> Option.exists (Set.contains creep.Room) ->
+                    Map.add creep.Info.Name home held
+                | _ -> held)
 
     /// `creepColoniesRecalling` over a table of this call's own (`linkedBy`).
     let creepColonies

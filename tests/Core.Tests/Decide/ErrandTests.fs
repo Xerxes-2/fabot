@@ -821,7 +821,9 @@ let errandStandDownTests =
                                     Layer =
                                         { room.Layer with
                                             CreepPositions =
-                                                Map.ofList [ reclaimerName, { X = 29; Y = 29 } ]
+                                                // South-east of the target, so a step
+                                                // toward it and a step home part.
+                                                Map.ofList [ reclaimerName, { X = 29; Y = 47 } ]
                                         }
                                 }
                         Creeps =
@@ -852,9 +854,27 @@ let errandStandDownTests =
                     (Map.containsKey reclaimerName decision.Assignments)
                     "anti-thrash cannot retain the Reclaim after the declaration leaves the view"
 
-                Expect.isEmpty
-                    (moveIntents decision.Intents |> List.filter (fst >> (=) reclaimerName))
-                    "and the released re-claimer is not moved toward the shut target"
+                let moves = moveIntents decision.Intents |> List.filter (fst >> (=) reclaimerName)
+
+                Expect.isFalse
+                    (moves
+                     |> List.exists (fun (_, d) ->
+                         d = Top || d = TopLeft || d = TopRight || d = Left))
+                    $"and the released re-claimer is not moved toward the shut target: {moves}"
+
+                // #512: the shut room it stands in stays projected as a transit
+                // room while it does, and the idle body walks home — south, the
+                // border W1N1 lies behind — instead of standing where the raid is.
+                Expect.isTrue
+                    (Set.contains errandRoom withdrawnWithHolder.Evacuating)
+                    "the body keeps the shut room projected, evacuating"
+
+                Expect.isNonEmpty moves "and the released re-claimer walks"
+
+                Expect.isTrue
+                    (moves
+                     |> List.forall (fun (_, d) -> d = Bottom || d = BottomLeft || d = BottomRight))
+                    $"home: {moves}"
             }
         ]
 

@@ -1698,7 +1698,9 @@ let armedRoomTests =
                     if Seam.onRing at || steps = 0 then
                         at
                     else
-                        match stepTowardRoom (claimAtlas avoided "W15S27" at) "w" "W17S25" with
+                        match
+                            stepTowardRoom (claimAtlas avoided "W15S27" at) "w" Set.empty "W17S25"
+                        with
                         | Some step -> walk avoided (RoomPos.pos step) (steps - 1)
                         | None -> at
 

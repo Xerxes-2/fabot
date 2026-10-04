@@ -726,6 +726,22 @@ let strandedAnchorTests =
                     "the row casts for the empty home Post"
             }
 
+            test "an anchor walking out of an evacuating room fills no seat of the row" {
+                // #512: placed, and with the life to reach the home Post, but the
+                // room it stands in is one it is leaving for home, not a Post.
+                let leaving =
+                    { strandedAnchorColony 1000 true with
+                        Evacuating = Set.singleton "W1N2"
+                    }
+
+                Expect.equal (anchorRow leaving) (Some(2, 1, 0)) "the leaving anchor is counted out"
+
+                Expect.equal
+                    (anchorCastsBy leaving)
+                    [ sixWork ]
+                    "the row casts for the empty home Post"
+            }
+
             test "two anchors walking to one vacancy fill one seat" {
                 let colony = strandedAnchorColony 1000 true
                 let outpost = Map.find "W1N2" colony.Spatial.Rooms

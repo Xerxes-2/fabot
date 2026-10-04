@@ -118,7 +118,7 @@ A tile on a room's border and the tile it lands you on in the neighbouring room 
 A [[seam]] crossing whose landing tile has no ground of the far room's beside it, and therefore not a crossing; what makes a band directed. ADR-0062.
 
 ### Transit room
-A room a [[colony]] projects only because a [[walk]] to one of its [[outpost]]s crosses it: terrain, a border ring and the bodies vision finds there, but no work pooled and no `InvaderRaid` [[stand-down]] opened. ADR-0058, ADR-0065, ADR-0066.
+A room a [[colony]] projects only because a [[walk]] to one of its [[outpost]]s crosses it, or because it is an [[evacuating room]]: terrain, a border ring and the bodies vision finds there, but no work pooled and no `InvaderRaid` [[stand-down]] opened. ADR-0058, ADR-0065, ADR-0066.
 
 ### Move Intent
 A creep's movement desire for one tick: a head-and-tail list of candidate standing tiles in preference order, a priority, and the tiles it counts as still working from. Input to the [[resolver]], whose single-step output is what becomes an Intent. ADR-0001, ADR-0008, ADR-0033, ADR-0041.
@@ -299,6 +299,10 @@ _Avoid_: remote, franchise, territory
 A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its garrison of [[ranger]]s, kept while there is ore to burn in it (#420), which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
 _Avoid_: goal, mission, remote target
 
+### Evacuating room
+A [[stand-down]] room of a [[colony]]'s — outpost, errand or salvage — or a [[transit room]] of the walk home from it, projected as a transit room only while a body of that colony stands on that walk (#512): every idle body standing in it walks home round the [[reach]], nothing is pooled there (not even ore to sweep), and an anchor in it is out of the anchor row's census. A body standing there stays its caster's whoever else projects the room. Not the **stranded** anchor of #506, which is one off every Post that cannot reach a vacant one in time, or one the projection places nowhere. A shut [[harassment room]] is no evacuating room: it stays projected for its ranger regardless. ADR-0043.
+_Avoid_: stranded room
+
 ### Salvage
 A room a [[colony]] declares to take down the structures of ours still standing there (spawn, extension, tower, storage, terminal, extractor, link, rampart), with a Work-and-Move dismantler and no Carry. Its targets are whatever vision shows standing, so the declaration goes inert when the last one falls. ADR-0079.
 _Avoid_: demolition, cleanup
@@ -392,7 +396,7 @@ _Avoid_: keeper radius, SK exclusion
 The hard floor on the controller's downgrade timer, half the level's full timer, inside which Upgrade outranks even the feeding tier so the [[safe-mode reflex]] stays fireable. ADR-0007.
 
 ### Stand-down
-An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there — until a tick read off the threat: a [[stronghold]]'s core's collapse (a level-0 core opens none: a guard kills it, #487), a rival reservation's end, an armed raid's longest remaining life (in a [[harassment room]], fifty ticks past the squad's last sighting) or, sooner, the tick every body of the raid is seen gone — dead, or a player's in another room the colony projects (#507), or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
+An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there, except that while a body of the colony stands in it the room is an [[evacuating room]] its bodies walk home from — until a tick read off the threat: a [[stronghold]]'s core's collapse (a level-0 core opens none: a guard kills it, #487), a rival reservation's end, an armed raid's longest remaining life (in a [[harassment room]], fifty ticks past the squad's last sighting) or, sooner, the tick every body of the raid is seen gone — dead, or a player's in another room the colony projects (#507), or 2,500 ticks where none can be read; a rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[raid log]], not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077.
 
 ### Stronghold
 An invader core of level 1 or more — towers under ramparts and a garrison — whose room is `StandDown.Impassable` and taken out of every chain until its collapse timer runs out. ADR-0074.

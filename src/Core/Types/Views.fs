@@ -248,6 +248,10 @@ type ColonyView =
         /// `transiting` lets through. **Not** "rooms we may act in": a rival's
         /// room can sit on a chain.
         Crossed: Set<string>
+        /// The [[evacuating room]]s (`World.ScanSet.Evacuating`, #512): rooms
+        /// of `Crossed` every idle body of this colony standing in walks home
+        /// from, and which pool nothing, not even ore to sweep.
+        Evacuating: Set<string>
         /// The declared sector Reactors this colony can see (#354), narrowed
         /// as the errand's other facts are. The one fact about a Reactor a
         /// *decision* reads: its store is deliberately absent from
@@ -824,8 +828,15 @@ module ColonyView =
         let home = colony.Home
         let stages = World.stages tuning colonies world
 
+        // This colony's bodies, and the names to cut its geometry by, so the
+        // fleet and the layers' occupants cannot disagree.
+        let mine =
+            world.Creeps
+            |> List.filter (fun creep -> Map.tryFind creep.Info.Name holders = Some home)
+
         // The declaration's narrowings and their union, off the one
-        // derivation the creep adoption reads too (`World.scanRecalling`).
+        // derivation the creep adoption reads too (`World.scanRecalling`),
+        // and the shut rooms a body of ours still stands in (#512).
         let scan =
             World.scanRecalling
                 joins
@@ -835,6 +846,7 @@ module ColonyView =
                 colonies
                 casting
                 gate
+                (mine |> List.map (fun creep -> creep.Room) |> Set.ofList)
                 world
                 colony
 
@@ -865,18 +877,7 @@ module ColonyView =
         // The rooms in the set for the walk alone, derived by subtraction
         // because the union (`Colony.roomsProjected`) is the one place that
         // rule is spelled.
-        let transit =
-            scanned
-            |> List.filter (fun room ->
-                room <> home
-                && not (List.contains room bootstrap)
-                && not (List.contains room scan.Garrisoned)
-                && not (Set.contains room errandRooms)
-                && not (Set.contains room salvageRooms)
-                && not (Map.containsKey room harassEnemies)
-                && not (Set.contains room assaultRooms)
-                && not (outposts |> List.exists (fun outpost -> outpost.RoomName = room)))
-            |> Set.ofList
+        let transit = scanned |> List.filter (scan.Worked.Contains >> not) |> Set.ofList
 
         // Each scanned room's facts and its memory (#151), in scan order. A
         // room the colony only **crosses** keeps neither, one rule and not
@@ -940,12 +941,6 @@ module ColonyView =
                     | None -> room, facts, remembered)
 
         let worked = narrowed |> List.map (fun (room, facts, _) -> room, facts)
-
-        // This colony's bodies, and the names to cut its geometry by, so the
-        // fleet and the layers' occupants cannot disagree.
-        let mine =
-            world.Creeps
-            |> List.filter (fun creep -> Map.tryFind creep.Info.Name holders = Some home)
 
         let names = mine |> List.map (fun creep -> creep.Info.Name) |> Set.ofList
 
@@ -1200,6 +1195,7 @@ module ColonyView =
                 |> List.map (fun seen -> seen.Healer)
             SafeModeRunning = World.safeModeRunning world
             Crossed = transit
+            Evacuating = Set.ofList scan.Evacuating
             // The declared Reactors' own rows (#354): the store here is what
             // meters a delivery. A room without vision contributes no row, and
             // no row reads as "no room for a load", which keeps a load banked

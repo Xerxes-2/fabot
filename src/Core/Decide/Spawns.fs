@@ -172,7 +172,7 @@ let heldForDefender (pattern: BodyPattern) =
 /// one on no Post that does not live to walk to a vacant one — the Pool's
 /// in-time sum, `childStay` included — and one standing in a room the colony
 /// does not project (`Unprojected`), which the mover never steps whatever its
-/// life. A relief walking to its expiring incumbent's Post reaches a vacancy
+/// life, or in an [[evacuating room]], which it is walking out of. A relief walking to its expiring incumbent's Post reaches a vacancy
 /// and counts. With no vacancy the garrison fills the row without them, so
 /// nobody is stranded; with some, at most one placed walker per vacancy
 /// counts, since two bodies walking to one Post fill one seat.
@@ -192,7 +192,11 @@ let internal strandedAnchors
                 match Atlas.creepTile atlas creep.Name with
                 | Some tile -> not (Map.containsKey tile posts)
                 | None -> Set.contains creep.Name view.Unprojected)
-            |> List.partition (fun creep -> Atlas.creepTile atlas creep.Name |> Option.isNone)
+            // One in an evacuating room (#512) is leaving, not reaching a Post.
+            |> List.partition (fun creep ->
+                match Atlas.creepTile atlas creep.Name with
+                | Some tile -> Set.contains tile.Room view.Evacuating
+                | None -> true)
 
         let rocks =
             vacant

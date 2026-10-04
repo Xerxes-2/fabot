@@ -2794,7 +2794,18 @@ let firstStepAvoiding
 /// where the creep stands carried along each chain into the room, the room
 /// itself unseen being terrain all the same. Chains that agree on the next
 /// room ask no price.
-let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos option =
+///
+/// `avoid`, tiles of the creep's own room, is a Reach the walk goes round
+/// (#472, #512): an exit in it is no exit, the walk to the others never
+/// enters it, and where no exit of the cheapest next room is left the next
+/// cheapest is tried. None where every one lies in it or behind it. Empty, it
+/// is no constraint at all.
+let stepTowardRoom
+    (atlas: Atlas)
+    (creep: string)
+    (avoid: Set<Pos>)
+    (room: string)
+    : RoomPos option =
     match creepAt atlas creep with
     | Some(creepRoom, from) when creepRoom <> room ->
         // The **next** room of the chain and not the goal: what a creep crossing
@@ -2803,10 +2814,11 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
         // it lands in.
         let chains = routes atlas creepRoom room
 
-        let nextRoom =
+        // Cheapest first; with nothing to avoid only the first is ever asked.
+        let nextRooms =
             match chains |> List.choose (List.tryItem 1) |> List.distinct with
             | []
-            | [ _ ] -> chains |> List.tryHead |> Option.bind (List.tryItem 1)
+            | [ _ ] -> chains |> List.tryHead |> Option.bind (List.tryItem 1) |> Option.toList
             | _ ->
                 let factor = factorOf atlas creep
                 let near = fst (walkFloodFrom (weightsOf atlas creepRoom) factor from)
@@ -2819,12 +2831,12 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
                     chain)
                 |> List.filter (fun (arrival, _) -> arrival < unreached)
                 |> List.sortBy fst
-                |> List.tryHead
-                |> Option.bind (snd >> List.tryItem 1)
+                |> List.choose (snd >> List.tryItem 1)
+                |> List.distinct
+                |> if Set.isEmpty avoid then List.truncate 1 else id
 
-        match nextRoom with
-        | None -> None
-        | Some next ->
+        nextRooms
+        |> List.tryPick (fun next ->
 
             // The band already drops a crossing whose landing has no *terrain* beside
             // it — the [[keeper margin]]'s artefact #317 found here: a rock six tiles
@@ -2845,7 +2857,9 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
             | [] -> None
             | band ->
                 let ground = weightsOf atlas creepRoom
-                let exits = band |> List.map fst
+
+                let exits =
+                    band |> List.map fst |> List.filter (fun exit -> not (Set.contains exit avoid))
 
                 // Standing on a crossing, hold it as `stepOnto` does (#436);
                 // beside one, step onto it, exactly as `stepAcross` does for the
@@ -2862,11 +2876,16 @@ let stepTowardRoom (atlas: Atlas) (creep: string) (room: string) : RoomPos optio
                 match beside with
                 | Some exit -> Some(RoomPos.at creepRoom exit)
                 | None ->
-                    exits
-                    |> List.collect (besideExit ground)
-                    |> Set.ofList
-                    |> RoomPos.setAt creepRoom
-                    |> firstStepVia atlas TravelCost creep
+                    let goals =
+                        exits
+                        |> List.collect (besideExit ground)
+                        |> Set.ofList
+                        |> RoomPos.setAt creepRoom
+
+                    if Set.isEmpty avoid then
+                        firstStepVia atlas TravelCost creep goals
+                    else
+                        firstStepAvoiding atlas creep avoid goals)
     | _ -> None
 
 /// The first step toward an explicit set of tiles that names its own room:

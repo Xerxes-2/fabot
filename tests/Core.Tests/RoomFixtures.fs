@@ -899,6 +899,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         RecalledHealers = []
         SafeModeRunning = false
         Crossed = Set.empty
+        Evacuating = Set.empty
         Reactors = []
         // These captures are ticks with vision in every room they carry.
         Sightings = Map.empty
