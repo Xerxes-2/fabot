@@ -308,6 +308,12 @@ type Tuning =
         /// whole at it — the ticks the room must hold times the damage per
         /// tick. No hysteresis, one Repair visit clearing the line. ADR-0034
         RampartFloor: int
+        /// The hits under which a rampart of ours is **dying**: two of the
+        /// engine's decays (300 a 100 ticks) from gone. A fresh rampart is
+        /// built at 1 hit, so a dying one is repaired before every site, by
+        /// a body or a tower with energy to spare. Hits, so stage- and
+        /// bank-free.
+        RampartDying: int
         /// The energy a tower keeps back from repairing a rampart under
         /// attack (#477), so a claimer or a dismantler walking in behind a
         /// healed raid can still be shot.
@@ -648,6 +654,8 @@ module Tuning =
             RepairRescueLine = 0.25
             RepairRescues = 2
             RampartFloor = 100_000
+            // Live 2026-10-04: W17S25's 13 fresh ramparts decayed away at 1 hit.
+            RampartDying = 600
             // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
             // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
             TowerRepairReserve = 300

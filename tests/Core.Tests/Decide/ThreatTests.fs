@@ -3427,3 +3427,64 @@ let observerAimTests =
                 Expect.isFalse (List.contains "W17S22" watched) "an ally's room is not watched"
             }
         ]
+
+[<Tests>]
+let dyingRampartTests =
+    testList
+        "a dying rampart is kept"
+        [
+            test "in peace a tower repairs a rampart of ours under the dying line, and no other" {
+                // Live 2026-10-04: W17S25's thirteen fresh ramparts sat at 1 hit and
+                // decayed away with the tower full and every worker on a site.
+                let peace hits =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 12; Y = 40 } ]
+                        []
+                    |> withHits "rampart-1" BuiltKind.Rampart hits 1_000_000
+                    |> holdingTower "tower-1" 1000
+
+                Expect.equal
+                    (towerRepairs (decideOn (peace 1)).Intents)
+                    [ "tower-1", "rampart-1" ]
+                    "a fresh rampart at 1 hit: the tower keeps it"
+
+                Expect.isEmpty
+                    (towerRepairs (decideOn (peace 50_000)).Intents)
+                    "a rampart over the dying line is the workers' Repair, never the tower's in peace"
+            }
+
+            test "a loaded worker repairs a dying rampart before the surplus work beside it" {
+                let colony =
+                    towerColony [ "rampart-1", { X = 12; Y = 40 } ] []
+                    |> withHits "rampart-1" BuiltKind.Rampart 1 1_000_000
+                    |> fun c ->
+                        { c with
+                            Creeps = [ worker "w" 50 0 ]
+                            Stages = Map.ofList [ SpatialInfo.homeName c.Spatial, Independent ]
+                            Spatial = c.Spatial |> withCreepsAt [ "w", { X = 14; Y = 40 } ]
+                        }
+
+                Expect.contains
+                    (planTasksOn colony noThreats)
+                    (Repair "rampart-1")
+                    "the premise: a colony that keeps ramparts pools it"
+
+                let rankOf task =
+                    poolOn colony
+                    |> List.tryFind (fun p -> p.Task = task)
+                    |> Option.map (fun p -> p.Priority)
+
+                Expect.isTrue
+                    (Option.map2 (<) (rankOf (Repair "rampart-1")) (rankOf (Upgrade "ctrl-1")) = Some
+                        true)
+                    "lifted to the feeding tier, over the surplus Upgrade beside it"
+
+                let whole = colony |> withHits "rampart-1" BuiltKind.Rampart 50_000 1_000_000
+
+                Expect.isTrue
+                    (poolOn whole
+                     |> List.exists (fun p ->
+                         p.Task = Repair "rampart-1" && p.Priority >= priorityOfTier Surplus))
+                    "over the dying line its Repair is surplus again"
+            }
+        ]

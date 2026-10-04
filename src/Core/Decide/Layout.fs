@@ -266,19 +266,28 @@ let private towerEnergy (view: ColonyView) (towerId: string) =
 /// then the nearest, then by id. A repair lands 800 near the tower and 200
 /// from range 20, against the 510 one 17-ATTACK melee strikes.
 let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list) : Intent list =
-    match rampartsUnderAttack view with
-    | struck when Set.isEmpty struck -> []
-    | struck ->
-        let home = SpatialInfo.homeName view.Spatial
-        let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+    let home = SpatialInfo.homeName view.Spatial
+    let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
 
-        let ramparts =
-            SpatialInfo.structureHits view.Spatial
-            |> List.choose (fun (id, _, hits) ->
-                match Map.tryFind id tiles with
-                | Some tile when Set.contains id struck && hits.Hits < hits.HitsMax ->
-                    Some(id, RoomPos.at home tile, hits.Hits)
-                | _ -> None)
+    // The struck ramparts (#477), else with none struck the dying ones
+    // (`Tuning.RampartDying`): a fresh rampart decays away at 1 hit before a
+    // body comes to it (live 2026-10-04, W17S25).
+    let wanted =
+        match rampartsUnderAttack view with
+        | struck when Set.isEmpty struck ->
+            fun _ kind (hits: HitsInfo) ->
+                kind = BuiltKind.Rampart && hits.Hits < view.Tuning.RampartDying
+        | struck -> fun id _ (hits: HitsInfo) -> Set.contains id struck && hits.Hits < hits.HitsMax
+
+    match
+        SpatialInfo.structureHits view.Spatial
+        |> List.choose (fun (id, kind, hits) ->
+            match Map.tryFind id tiles with
+            | Some tile when wanted id kind hits -> Some(id, RoomPos.at home tile, hits.Hits)
+            | _ -> None)
+    with
+    | [] -> []
+    | ramparts ->
 
         towers
         |> List.filter (fun (towerId, _) ->
@@ -311,7 +320,8 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
 /// `RoomPos.range` answers None across a border.
 let internal planFire (view: ColonyView) atlas : Intent list =
     match hostilesAtHome view with
-    | [] -> []
+    // In peace the towers still keep a dying rampart (`planTowerRepair`).
+    | [] -> planTowerRepair view (Atlas.placedTowers atlas)
     | hostiles ->
         let home = SpatialInfo.homeName view.Spatial
         let towers = Atlas.placedTowers atlas

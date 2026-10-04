@@ -699,6 +699,23 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         |> List.map snd
         |> Set.ofList
 
+    // A dying rampart (`Tuning.RampartDying`) is repaired ahead of every site
+    // on the feeding tier: built at 1 hit, it decays away within a hundred
+    // ticks, and its site comes back to be built again (live 2026-10-04,
+    // W17S25's thirteen fresh ramparts at 1 hit, every worker on a site).
+    let dying =
+        tasks
+        |> List.choose (function
+            | Repair id ->
+                match Map.tryFind id view.Spatial.TargetKinds, Map.tryFind id view.Spatial.Hits with
+                | Some(Structure BuiltKind.Rampart), Some hits when
+                    hits.Hits < view.Tuning.RampartDying
+                    ->
+                    Some id
+                | _ -> None
+            | _ -> None)
+        |> Set.ofList
+
     let underAttack = Facts.rampartsUnderAttack view
 
     // The queue the builders' budget rations: every site the pool holds in a
@@ -856,6 +873,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
                 // The flow; the refill cluster is keyed on a spawn and arrives
                 // through the same door.
                 Feeding
+        | Repair id when Set.contains id dying -> Feeding
         | Build siteId when isFeedingSite view atlas fedSiteIds siteId -> Feeding
         // The claim party's: RCL2 before the tap is what the claim is worth.
         | Upgrade controllerId when Set.contains controllerId partyControllers -> Feeding
@@ -990,7 +1008,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
             // Over the home site as well (#284): a structure a quarter from
             // destruction is work the colony has already paid for.
-            | Repair id when Set.contains id rescued -> TwoRungsUp
+            | Repair id when Set.contains id rescued || Set.contains id dying -> TwoRungsUp
             // A rampart under attack (#467) over a tower's Refill: the
             // rampart is the room's defence while it stands, and the tower's
             // energy is no use once the raid is through it.
@@ -1175,7 +1193,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // A rescue is one body's trip (`rescued`). Every other Repair is
         // uncapped: a road under the spawn is worked by whoever is standing
         // over it.
-        | Repair id when Set.contains id rescued -> Capacity.total 1
+        | Repair id when Set.contains id rescued || Set.contains id dying -> Capacity.total 1
         | _ -> Capacity.unbounded
 
     tasks
