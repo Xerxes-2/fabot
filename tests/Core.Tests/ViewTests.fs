@@ -4395,6 +4395,31 @@ let harassViewTests =
                     Expect.isEmpty (dismantlesUnder held) $"{label}: nothing to take down"
             }
 
+            test
+                "a harassment room that is also our outpost yields no container, though nobody reserves it" {
+                // W17S26 on 2026-10-04: shut for a raid, its reservation lapsed,
+                // and the harassment's dismantler walked to our own Post container.
+                let remoteOnly =
+                    claimingDeclared |> List.filter (fun colony -> colony.Home <> harassRoom)
+
+                let view =
+                    harassViewOver
+                        remoteOnly
+                        StandDown.none
+                        harassDeclared
+                        (harassWorld (control Ownership.Unowned) 300)
+                        mother
+
+                Expect.equal
+                    (view.Harass |> List.map (fun h -> h.RoomName))
+                    [ harassRoom ]
+                    "she still harasses the room"
+
+                Expect.isEmpty
+                    view.Dismantles
+                    "the outpost's reservation lapsed: its container is still ours"
+            }
+
             test "a harassment room no colony reaches is refused once, by the largest bank" {
                 let far =
                     [

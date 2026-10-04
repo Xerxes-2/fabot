@@ -600,15 +600,21 @@ module ColonyView =
     /// The containers one harassment room's dismantler takes down: every
     /// one vision places there, and none in a room anybody owns or anybody
     /// but the declared enemy reserves — an ally's hold or ours is never
-    /// the enemy's remote.
-    let private harassTargets (enemy: string) (facts: RoomFacts) : Set<string> =
+    /// the enemy's remote. A room nobody reserves counts only when it is not
+    /// also one of our outposts: there a lapsed reservation means our own
+    /// reserver stood down, and the containers are ours.
+    let private harassTargets (ourOutpost: bool) (enemy: string) (facts: RoomFacts) : Set<string> =
+        let enemyHolds (held: ReservationInfo) =
+            held.Holder = ReservationHolder.Rival && held.Username = enemy
+
         let enemyRemote =
             facts.Control
             |> Option.exists (fun control ->
                 control.Owner = Ownership.Unowned
-                && control.Reservation
-                   |> Option.forall (fun held ->
-                       held.Holder = ReservationHolder.Rival && held.Username = enemy))
+                && (if ourOutpost then
+                        Option.exists enemyHolds control.Reservation
+                    else
+                        Option.forall enemyHolds control.Reservation))
 
         if not enemyRemote then
             Set.empty
@@ -626,7 +632,7 @@ module ColonyView =
     /// or Repairs it.
     let private harassing (enemy: string) (facts: RoomFacts) : RoomFacts =
         let crossed = transiting facts
-        let targets = harassTargets enemy facts
+        let targets = harassTargets false enemy facts
 
         { crossed with
             Layer =
@@ -1111,7 +1117,17 @@ module ColonyView =
                      World.roomOf world room |> salvageTargets |> Set.toList))
                 @ (scan.Harass
                    |> List.collect (fun h ->
-                       World.roomOf world h.RoomName |> harassTargets h.Enemy |> Set.toList))
+                       // A remote of ours, not a room we are claiming: a claim
+                       // target's containers are the enemy's leftovers.
+                       let ourOutpost =
+                           colonies
+                           |> List.exists (fun c ->
+                               c.Outposts |> List.exists (fun o -> o.RoomName = h.RoomName))
+                           && not (List.contains h.RoomName (Colony.homes colonies))
+
+                       World.roomOf world h.RoomName
+                       |> harassTargets ourOutpost h.Enemy
+                       |> Set.toList))
             Harass = scan.Harass
             Assaults = scan.Assaults |> List.map (assaultFacts tuning gate.Taken world)
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
