@@ -74,6 +74,8 @@ const emptyRaids = {
   probes: {},
   taken: {},
   reserveShort: false,
+  haulFill: 0,
+  haulOwed: false,
   living: [],
   placed: {},
   hits: {},
@@ -120,6 +122,8 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     probes: { W18S26: probeOut, W17S24: probeProbing },
     taken: { W18S26: 930_120 },
     reserveShort: true,
+    haulFill: 0.8125,
+    haulOwed: true,
     living: ["w1", "w2"],
     placed: { w1: { room: "W1N2", x: 8, y: 49 } },
     hits: { "struct-1": 3000 },
@@ -202,6 +206,30 @@ wire("raids: the reserve latch (#505) is true only as a boolean, and a legacy le
 
   const { reserveShort, ...legacy } = emptyRaids;
   assert.equal((await raidsThrough(legacy)).reserveShort, false);
+});
+
+wire("raids: the haul overflow (#508) owes only as a boolean, its fill reads 0 off a number and clamps into 0..1, and a legacy leaf reads empty", async () => {
+  for (const value of [1, "true", {}, null]) {
+    const written = await raidsThrough({ ...emptyRaids, haulOwed: value });
+    assert.equal(written.haulOwed, false, `haulOwed ${JSON.stringify(value)}`);
+  }
+
+  for (const [value, read] of [
+    ["0.9", 0],
+    [null, 0],
+    [{}, 0],
+    [true, 0],
+    [-0.5, 0],
+    [3, 1],
+  ]) {
+    const written = await raidsThrough({ ...emptyRaids, haulFill: value });
+    assert.equal(written.haulFill, read, `haulFill ${JSON.stringify(value)}`);
+  }
+
+  const { haulFill, haulOwed, ...legacy } = emptyRaids;
+  const written = await raidsThrough(legacy);
+  assert.equal(written.haulFill, 0);
+  assert.equal(written.haulOwed, false);
 });
 
 wire("raids: a stand-down with no expiry costs its row and no other", async () => {
@@ -1105,7 +1133,41 @@ wire("quotas: silence writes the shape observe.mjs destructures", async () => {
 
   assert.equal(
     stable(globalThis.Memory.fabot.observe.colonies[home].quotas),
-    stable({ target: 0, living: 0, casting: 0, rows: [], load: 0, haul: [], fights: [] }),
+    stable({
+      target: 0,
+      living: 0,
+      casting: 0,
+      rows: [],
+      load: 0,
+      haul: [],
+      overflow: { fill: 0, owed: false },
+      fights: [],
+    }),
+  );
+});
+
+wire("quotas: the haul overflow (#508) writes its fill and whether the extra body is owed", async () => {
+  const { saveQuotas } = await import(MODULE);
+  const { QuotasModule_silent, Quotas } = await import("../build/fable/Core/Types/Verdicts.js");
+  const { HaulOverflow } = await import("../build/fable/Core/Types/Colonies.js");
+  const s = QuotasModule_silent;
+  const quotas = new Quotas(
+    s.Target,
+    s.Living,
+    s.Casting,
+    s.Rows,
+    s.HaulerLoad,
+    s.HaulerDemand,
+    new HaulOverflow(0.8125, true),
+    s.Fights,
+  );
+
+  globalThis.Memory = memoryWith("quotas", undefined);
+  saveQuotas(home, quotas);
+
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.colonies[home].quotas.overflow),
+    stable({ fill: 0.8125, owed: true }),
   );
 });
 
@@ -1128,6 +1190,7 @@ wire("quotas: a fight row writes the room, the ranger answer and each squad's pr
     s.Rows,
     s.HaulerLoad,
     s.HaulerDemand,
+    s.Overflow,
     ofArray([fight]),
   );
 

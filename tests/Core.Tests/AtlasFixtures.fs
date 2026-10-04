@@ -19,6 +19,7 @@ let snapshotWith creeps spatial =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller = None
         // Everything below the projection and the creeps is empty: the

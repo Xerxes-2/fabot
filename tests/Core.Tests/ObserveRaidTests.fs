@@ -1399,3 +1399,29 @@ let reserveLatchTests =
                 Expect.isFalse (latch 10_100 false) "unlatched, the line is the reserve itself"
             }
         ]
+
+[<Tests>]
+let haulOverflowLatchTests =
+    testList
+        "the haul overflow reading"
+        [
+            test
+                "the raid log carries the last decided tick's haul overflow reading to the next tick's gate (#508)" {
+                let overflow = { Fill = 0.8; Owed = true }
+
+                let logged =
+                    { RaidState.empty with
+                        HaulOverflow = overflow
+                    }
+
+                Expect.equal
+                    (raidTick 100 quiet logged).HaulOverflow
+                    overflow
+                    "the raid fold leaves it as the decision wrote it"
+
+                Expect.equal
+                    (standDown Tuning.defaults 100 logged).HaulOverflow
+                    overflow
+                    "and the gate hands it to the view"
+            }
+        ]

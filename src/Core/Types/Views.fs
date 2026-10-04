@@ -94,6 +94,9 @@ type ColonyView =
         /// `StandDown.ReserveShort`: whether the last decided tick read this
         /// colony's stock under its [[emergency reserve]].
         ReserveShort: bool
+        /// `StandDown.HaulOverflow`: the haul overflow reading the last
+        /// decided tick left (#508).
+        HaulOverflow: HaulOverflow
         /// Every room any colony of ours declares as an outpost: a harassment
         /// room among them keeps its source's seats for our miners, never
         /// the ranger's (W17S26, 2026-10-04).
@@ -1052,6 +1055,7 @@ module ColonyView =
                 |> List.sort
                 |> List.map snd
             ReserveShort = gate.ReserveShort
+            HaulOverflow = gate.HaulOverflow
             Controller = homeFacts.Controller
             RoomControl = control
             // The gate's third and fourth sets, verbatim (#333, #366). Not

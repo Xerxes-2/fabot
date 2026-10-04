@@ -83,6 +83,18 @@ let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int opt
 
         min rate dug)
 
+/// The colony's source containers, each with its id, its placement and the
+/// rock it serves: never a controller buffer or a mine's container
+/// (`Atlas.sourceOfPost`), and never a stood-down room's, which is not
+/// projected. One the projection places in no room leaves the list.
+let private sourceContainersOf (view: ColonyView) atlas : (string * RoomPos * string) list =
+    Atlas.idsOfKind atlas (Structure BuiltKind.Container)
+    |> List.choose (fun id ->
+        SpatialInfo.placementOf view.Spatial id
+        |> Option.bind (fun container ->
+            Atlas.sourceOfPost atlas container.Room (RoomPos.pos container)
+            |> Option.map (fun source -> id, container, source)))
+
 /// ADR-0012
 /// The hauler row's quota: the sum over source containers of round-trip ticks
 /// to the colony's sinks times that source's output, over the cast body's
@@ -94,16 +106,12 @@ let private sourceOutputOf (view: ColonyView) atlas (sourceId: string) : int opt
 /// capacity and not an order — `tierOf` files every source container's
 /// Withdraw on the feeding tier alike and travel cost ranks inside it.
 let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list * int =
-    // Each source container beside its room and the output of the rock it
-    // serves; one the projection places in no room, or that resolves to no
-    // priceable source, leaves the list rather than entering at a default.
+    // Each beside the output of the rock it serves; one that resolves to no
+    // priceable source leaves the list rather than entering at a default.
     let sourceContainers =
-        Atlas.idsOfKind atlas (Structure BuiltKind.Container)
-        |> List.choose (SpatialInfo.placementOf view.Spatial)
-        |> List.choose (fun container ->
-            Atlas.sourceOfPost atlas container.Room (RoomPos.pos container)
-            |> Option.bind (sourceOutputOf view atlas)
-            |> Option.map (fun output -> container, output))
+        sourceContainersOf view atlas
+        |> List.choose (fun (_, container, source) ->
+            sourceOutputOf view atlas source |> Option.map (fun output -> container, output))
 
     // One load for the whole colony: the sum is of fractions of the *same*
     // body, or the one rounding at the end counts nothing.
@@ -268,6 +276,97 @@ let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list 
     + ferry,
     rows @ mineRows,
     capacity
+
+/// The hauler row's **haul overflow** term (#508): the flow number above is
+/// exact arithmetic and leaves nothing for the trips a hauler spends refilling
+/// the cluster after casts, topping towers or crawling through swamp. Its
+/// feedback is the stock it failed to move: the fill of the **fullest**
+/// source container the colony can see this tick — the energy piled at its
+/// rock's Seats counted in, capped at full — smoothed over
+/// `Tuning.HaulFillWindow` decided ticks (a container stands full for a tick
+/// before every haul), owes the row one body at `Tuning.HaulFullPercent` and
+/// stops owing it under `Tuning.HaulDrainedPercent`. The fullest and not the
+/// mean: one far container overflowing beside drained home ones is the
+/// shape that loses energy, and the mean never latched on it.
+///
+/// Read only where hauling helps: a container whose flow row prices no trip
+/// (`demandRows` from `haulerDemandOf`) is left out, and nothing is owed
+/// unless a home Storage stands with a hauler load of room — without one the
+/// extra body has nowhere to put what it moves. A tick with no container in
+/// view reads nothing and keeps the prior reading. One body and not
+/// one per far row: the latch reads again once it has landed, and a second
+/// number would want a derivation the stock cannot give.
+let internal haulOverflowOf
+    (view: ColonyView)
+    atlas
+    (demandRows: HaulDemandRow list)
+    : HaulOverflow =
+    let prior = view.HaulOverflow
+    let load = carryCapacityOf (bodyFor haulerPattern view.Bank.Capacity)
+
+    let storageRoom =
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Storage)
+        |> List.filter (SpatialInfo.placedAway view.Spatial >> not)
+        |> List.exists (fun id ->
+            Engine.storageCapacity
+            - SpatialInfo.storedIn view.Spatial id
+            - SpatialInfo.heldIn view.Spatial Thorium id
+            >= load)
+
+    let priced =
+        demandRows
+        |> List.filter (fun row -> row.Demand > 0)
+        |> List.map (fun row -> row.Container)
+        |> Set.ofList
+
+    let piles =
+        Atlas.idsOfKind atlas (Dropped Energy)
+        |> List.choose (fun id ->
+            SpatialInfo.placementOf view.Spatial id
+            |> Option.map (fun tile -> tile, SpatialInfo.storedIn view.Spatial id))
+
+    let fills =
+        sourceContainersOf view atlas
+        |> List.filter (fun (_, container, _) -> Set.contains container priced)
+        |> List.choose (fun (id, _, source) ->
+            Map.tryFind id view.Spatial.Stores
+            |> Option.map (fun stored ->
+                let seats = Atlas.seatTilesOf atlas source
+
+                let piled =
+                    piles
+                    |> List.sumBy (fun (tile, amount) ->
+                        if Set.contains tile seats then amount else 0)
+
+                min 1.0 (float (stored + piled) / float Engine.containerCapacity)))
+
+    match fills with
+    | [] ->
+        { prior with
+            Owed = prior.Owed && storageRoom
+        }
+    | fills ->
+        let fill =
+            prior.Fill + (List.max fills - prior.Fill) / float view.Tuning.HaulFillWindow
+
+        {
+            Fill = fill
+            Owed =
+                if not storageRoom then
+                    false
+                elif fill * 100.0 >= float view.Tuning.HaulFullPercent then
+                    true
+                elif fill * 100.0 < float view.Tuning.HaulDrainedPercent then
+                    false
+                else
+                    prior.Owed
+        }
+
+/// The hauler row's quota: the flow number, and one body more while the haul
+/// overflows — never over a flow of zero, where there is no haul to help.
+/// The extra body is in the quota the worker row's amortisation charges too.
+let internal withOverflow (flow: int) (overflow: HaulOverflow) : int =
+    if overflow.Owed && flow > 0 then flow + 1 else flow
 
 /// What one body of this shape drinks a tick standing at a controller.
 let private upgradeDrainOf body =

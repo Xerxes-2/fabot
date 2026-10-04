@@ -152,6 +152,7 @@ let internal colonyOf (room: LoadedRoom) level =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller =
             room.ControllerId

@@ -157,6 +157,7 @@ let bareRespawn =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller = Some(controllerAt 1)
         RoomControl = homeControl

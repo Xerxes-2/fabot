@@ -399,8 +399,12 @@ let decideUnarbitrated
     // this list; a graced crossing (#151) prices none.
     Atlas.evictFarFieldsExcept atlas (Set.ofList tasks)
 
+    // The overflow term rides beside the memoised flow number and never
+    // inside it: it reads the containers' stock, which moves every tick.
+    let overflow = haulOverflowOf view atlas plan.HaulerDemand
+
     let spawnIntents, quotas =
-        planSpawns view atlas outposts sizing threats tasks plan.HaulerQuota
+        planSpawns view atlas outposts sizing threats tasks (withOverflow plan.HaulerQuota overflow)
 
     let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next
@@ -553,8 +557,10 @@ let decideUnarbitrated
             { quotas with
                 HaulerLoad = plan.HaulerLoad
                 HaulerDemand = plan.HaulerDemand
+                Overflow = overflow
                 Fights = fightReports view threats
             }
+        HaulOverflow = overflow
         OutpostRooms = outposts.Declared
         Steps = steps
         Next = nextPours

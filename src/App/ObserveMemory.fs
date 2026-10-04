@@ -946,6 +946,18 @@ let loadRaids (home: string) : RaidState =
             // non-boolean would latch a colony under its reserve (#505).
             ReserveShort =
                 jsTypeof raids?reserveShort = "boolean" && unbox<bool> raids?reserveShort
+            // The haul overflow reading (#508), on the same terms: a
+            // non-number fill reads empty, and one off 0..1 is clamped into
+            // it, so a hand-edit cannot hold the extra body for good.
+            HaulOverflow =
+                {
+                    Fill =
+                        if jsTypeof raids?haulFill = "number" then
+                            unbox<float> raids?haulFill |> max 0.0 |> min 1.0
+                        else
+                            0.0
+                    Owed = jsTypeof raids?haulOwed = "boolean" && unbox<bool> raids?haulOwed
+                }
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -998,6 +1010,9 @@ let saveRaids (home: string) (state: RaidState) =
     raids?taken <- state.Taken |> Map.toSeq |> hashOf box
     // The emergency reserve's latch (#505).
     raids?reserveShort <- state.ReserveShort
+    // The haul overflow reading (#508).
+    raids?haulFill <- state.HaulOverflow.Fill
+    raids?haulOwed <- state.HaulOverflow.Owed
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)
@@ -1015,9 +1030,9 @@ let private tileObject (tile: RoomPos) =
 
 /// The cascade's workforce arithmetic this tick, one leaf per colony
 /// beside the Layout record: `{ target, living, casting, rows: [{ row,
-/// quota, living, casting }], load, haul, fights: [{ room, ranger, squads:
-/// [{ squad, cost, stand, kite }] }] }`, `kite` null for a squad with a
-/// melee member. Written every tick and read by
+/// quota, living, casting }], load, haul, overflow: { fill, owed }, fights:
+/// [{ room, ranger, squads: [{ squad, cost, stand, kite }] }] }`, `kite` null
+/// for a squad with a melee member. Written every tick and read by
 /// `observe.mjs quotas`; silence writes `rows: []` and `target 0`.
 let saveQuotas (home: string) (quotas: Quotas) =
     let o = createEmpty<obj>
@@ -1064,6 +1079,12 @@ let saveQuotas (home: string) (quotas: Quotas) =
 
             r)
         |> List.toArray
+
+    // The haul overflow reading beside the haul lines (#508).
+    let overflow = createEmpty<obj>
+    overflow?fill <- quotas.Overflow.Fill
+    overflow?owed <- quotas.Overflow.Owed
+    o?overflow <- overflow
 
     o?fights <-
         quotas.Fights

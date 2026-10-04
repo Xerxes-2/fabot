@@ -718,6 +718,11 @@ let private fullTick
         |> Option.defaultValue Observe.RaidState.empty
         |> Observe.foldRaids Observe.capEpisodes living view decision.OutpostRooms
         |> Observe.foldProbes view decision.Intents
+        // The haul overflow reading the decision smoothed (#508).
+        |> fun state ->
+            { state with
+                HaulOverflow = decision.HaulOverflow
+            }
         |> ObserveMemory.saveRaids colony.Home
 
         // The Layout's channel, written every tick, empty or not. The refused

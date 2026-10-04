@@ -1089,3 +1089,213 @@ let backlogWorkforceTests =
                     "a colony with nothing standing hires nothing for it, and the bodies it hired are simply not replaced as they die"
             }
         ]
+
+/// The buffer colony's room — two source containers and the controller's
+/// buffer — with a home Storage standing at (22,9) where `storage` says so.
+let private overflowRoom storage =
+    let room = withBuffer (Structure BuiltKind.Container)
+
+    if storage then
+        room
+        |> withTargets [ "storage-1", { X = 22; Y = 9 }, Structure BuiltKind.Storage ]
+    else
+        room
+
+/// That room's colony with its stores holding what is named and the haul
+/// overflow reading as the last decided tick left it.
+let private overflowColonyIn room stores fill owed =
+    { upgraderColony { room with Stores = Map.ofList stores } with
+        HaulOverflow = { Fill = fill; Owed = owed }
+    }
+
+let private overflowColony stores fill owed =
+    overflowColonyIn (overflowRoom true) stores fill owed
+
+let private haulerQuotaOf colony =
+    rowOf "hauler" colony |> Option.map (fun row -> row.Quota)
+
+let private overflowOf colony = (decideOn colony).HaulOverflow
+
+/// What the flow arithmetic alone hires in a room, nothing owed.
+let private flowIn room =
+    haulerQuotaOf (overflowColonyIn room [] 0.0 false)
+
+let private flowQuota () = flowIn (overflowRoom true)
+
+let private oneMore = Option.map ((+) 1)
+
+let private full = Engine.containerCapacity
+
+[<Tests>]
+let haulOverflowTests =
+    testList
+        "the hauler row's haul overflow term"
+        [
+            test "source containers latched full owe the hauler row one body over its flow" {
+                let colony = overflowColony [ "can-a", full; "can-b", full ] 0.9 false
+
+                Expect.equal
+                    (haulerQuotaOf colony)
+                    (oneMore (flowQuota ()))
+                    "the smoothed fill stands over the high line: one more body"
+
+                Expect.isTrue (overflowOf colony).Owed "and the latch is what the decision carries"
+
+                Expect.equal
+                    (decideOn colony).Quotas.Overflow
+                    (overflowOf colony)
+                    "with a printed copy in the quotas"
+            }
+
+            test "drained under the low line, the row is back to its flow number" {
+                // 0.41 smoothed toward an empty reading lands under 0.40.
+                let colony = overflowColony [ "can-a", 0; "can-b", 0 ] 0.41 true
+
+                Expect.equal (haulerQuotaOf colony) (flowQuota ()) "the extra is no longer owed"
+                Expect.isFalse (overflowOf colony).Owed "the latch drops"
+            }
+
+            test "between the lines the row keeps what it owed the tick before" {
+                let half = full / 2
+
+                let between owed =
+                    overflowColony [ "can-a", half; "can-b", half ] 0.6 owed
+
+                Expect.equal
+                    (haulerQuotaOf (between true))
+                    (oneMore (flowQuota ()))
+                    "latched: still owed"
+
+                Expect.equal (haulerQuotaOf (between false)) (flowQuota ()) "unlatched: still not"
+            }
+
+            test "one tick of full containers does not latch from a cold reading" {
+                // A container stands full for a tick before every haul: the
+                // reading is smoothed, never read off one tick.
+                let colony = overflowColony [ "can-a", full; "can-b", full ] 0.0 false
+                let overflow = overflowOf colony
+
+                Expect.isFalse overflow.Owed "one full tick owes nothing"
+
+                Expect.floatClose
+                    Accuracy.veryHigh
+                    overflow.Fill
+                    (1.0 / float colony.Tuning.HaulFillWindow)
+                    "it moves the smoothed fill one window's share toward full"
+
+                Expect.equal (haulerQuotaOf colony) (flowQuota ()) "and the row hires the flow"
+            }
+
+            test "the fullest container is the reading, never the mean" {
+                // W13S28 (#508): a far container full beside a drained home one.
+                // From 0.75 the fullest (100%) lifts the smoothed fill over the
+                // line; the mean (50%) would pull it under.
+                let colony = overflowColony [ "can-a", 0; "can-b", full ] 0.75 false
+
+                Expect.isTrue (overflowOf colony).Owed "one overflowing container latches"
+                Expect.equal (haulerQuotaOf colony) (oneMore (flowQuota ())) "one more body"
+            }
+
+            test "energy piled at a container's Seats counts toward its fill" {
+                // 1,400 stored is 70%, which pulls 0.75 under the line; the 600
+                // lying at src-a's Seat (10,9) makes it full.
+                let room =
+                    overflowRoom true |> withTargets [ "pile-1", { X = 10; Y = 9 }, Dropped Energy ]
+
+                let colony =
+                    overflowColonyIn room [ "can-a", 1_400; "can-b", 0; "pile-1", 600 ] 0.75 false
+
+                Expect.isTrue (overflowOf colony).Owed "the floor is overflow too"
+            }
+
+            test "a full controller buffer adds nothing to the reading" {
+                // The sources at 70% pull 0.75 just under the line; the full
+                // buffer counted as a container would hold it over.
+                let colony =
+                    overflowColony [ "can-a", 1_400; "can-b", 1_400; "can-buf", full ] 0.75 false
+
+                Expect.isFalse (overflowOf colony).Owed "the buffer is a sink, not a source"
+                Expect.equal (haulerQuotaOf colony) (flowQuota ()) "the row hires the flow"
+            }
+
+            test
+                "no Storage with room, nothing is owed: the extra body would have nowhere to put it" {
+                let bare = overflowRoom false
+
+                let colony = overflowColonyIn bare [ "can-a", full; "can-b", full ] 0.9 true
+
+                Expect.isFalse (overflowOf colony).Owed "no Storage: released"
+                Expect.equal (haulerQuotaOf colony) (flowIn bare) "the row hires the flow"
+
+                let stuffed =
+                    overflowColony
+                        [ "can-a", full; "can-b", full; "storage-1", Engine.storageCapacity ]
+                        0.9
+                        true
+
+                Expect.isFalse (overflowOf stuffed).Owed "a full Storage: released"
+            }
+
+            test "a container whose haul prices no trip is left out of the reading" {
+                // A wall across x = 28 cuts can-b and its rock off the spawn:
+                // its flow row prices nothing, so its 100% is no reading.
+                let walled =
+                    overflowRoom true
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain =
+                                TerrainGrid.ofList
+                                    [
+                                        for x in 8..32 do
+                                            for y in 9..11 ->
+                                                { X = x; Y = y },
+                                                (if x = 28 || ((x = 10 || x = 30) && y = 10) then
+                                                     Wall
+                                                 else
+                                                     Plain)
+                                    ]
+                        })
+
+                let colony = overflowColonyIn walled [ "can-a", 0; "can-b", full ] 0.75 false
+
+                Expect.equal
+                    ((decideOn colony).Quotas.HaulerDemand
+                     |> List.filter (fun row -> row.Container.X = 29)
+                     |> List.map (fun row -> row.Demand))
+                    [ 0 ]
+                    "premise: can-b's row prices no trip"
+
+                Expect.isFalse (overflowOf colony).Owed "the cut-off container is not read"
+            }
+
+            test "a tick with no source container in view keeps the prior reading" {
+                // No store entry for either container: nothing seen this tick.
+                let colony = overflowColony [] 0.6 true
+
+                Expect.equal (overflowOf colony) { Fill = 0.6; Owed = true } "fill and latch kept"
+
+                Expect.equal
+                    (haulerQuotaOf colony)
+                    (oneMore (flowQuota ()))
+                    "and the body still owed"
+            }
+
+            test "a flow of zero owes no extra body" {
+                let room = overflowRoom true
+
+                let bare =
+                    { room with
+                        TargetKinds = room.TargetKinds |> Map.remove "can-a" |> Map.remove "can-b"
+                    }
+                    |> withHome (fun layer ->
+                        { layer with
+                            TargetPositions =
+                                layer.TargetPositions |> Map.remove "can-a" |> Map.remove "can-b"
+                        })
+
+                let colony = overflowColonyIn bare [] 0.9 true
+
+                Expect.isTrue (overflowOf colony).Owed "premise: the latch stands"
+                Expect.equal (haulerQuotaOf colony) (Some 0) "no haul to help, no body"
+            }
+        ]

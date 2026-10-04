@@ -440,6 +440,10 @@ type Quotas =
         HaulerLoad: int
         /// The hauler quota's own arithmetic, per source container.
         HaulerDemand: HaulDemandRow list
+        /// The haul overflow reading this tick (#508), printed beside the
+        /// haul lines: a copy of `Decision.HaulOverflow`, which is the one the
+        /// loop carries on.
+        Overflow: HaulOverflow
         /// The squad exchange, per raided resident room (#452).
         Fights: FightReport list
     }
@@ -454,6 +458,7 @@ module Quotas =
             Rows = []
             HaulerLoad = 0
             HaulerDemand = []
+            Overflow = HaulOverflow.none
             Fights = []
         }
 
@@ -475,6 +480,9 @@ type Decision =
         /// The cascade's own reading of the workforce this tick, for the
         /// `quotas` view; nothing downstream reads it.
         Quotas: Quotas
+        /// The haul overflow reading this tick smoothed and latched (#508):
+        /// what the loop writes into the [[raid log]] for the next tick.
+        HaulOverflow: HaulOverflow
         /// The outpost rooms this colony works, as the outpost chain derived
         /// them for this tick's decision: the Raid-log fold reads them after
         /// it rather than deriving the chain a second time.

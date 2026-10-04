@@ -888,6 +888,27 @@ type FightLatch =
         Squad: string option
     }
 
+/// The hauler row's **haul overflow** reading (#508): the colony's fullest
+/// source container, smoothed and latched. Written by the decided tick
+/// (`Quota.haulOverflowOf`, `Decision.HaulOverflow`), carried to the next in
+/// the [[raid log]].
+type HaulOverflow =
+    {
+        /// The fill of the fullest source container the colony can see, its
+        /// Seats' energy piles counted in, 0 to 1, smoothed over
+        /// `Tuning.HaulFillWindow` decided ticks.
+        Fill: float
+        /// Whether the hauler row is owed one body past its flow number:
+        /// latched at `Tuning.HaulFullPercent`, dropped under
+        /// `Tuning.HaulDrainedPercent`.
+        Owed: bool
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module HaulOverflow =
+    /// Nothing read yet: empty containers, nothing owed.
+    let none = { Fill = 0.0; Owed = false }
+
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
 /// handed to `ColonyView.ofWorld`: one record and not five derivations, so
@@ -952,6 +973,9 @@ type StandDown =
         /// that holds the colony under it until it banks one hauler load
         /// past the line.
         ReserveShort: bool
+        /// The last decided tick's haul overflow reading
+        /// (`RaidState.HaulOverflow`, #508): what this tick smooths on from.
+        HaulOverflow: HaulOverflow
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -968,6 +992,7 @@ module StandDown =
             Fought = Map.empty
             Taken = Set.empty
             ReserveShort = false
+            HaulOverflow = HaulOverflow.none
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

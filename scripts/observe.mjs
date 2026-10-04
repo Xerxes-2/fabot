@@ -1619,7 +1619,8 @@ if (command === "console") {
 } else if (command === "quotas") {
   // ---- quotas: the cascade's workforce arithmetic ------------------------
   // Wire shape written by ObserveMemory.saveQuotas:
-  //   { target, living, casting, rows: [{ row, quota, living, casting }] }
+  //   { target, living, casting, rows: [{ row, quota, living, casting }],
+  //     load, haul: [...], overflow: { fill, owed }, fights: [...] }
   // One tick's reading, no history. rows: [] with target 0 is the cascade's
   // silence — a spawn's doorstep stood inside a Reach — and is said as such
   // rather than as "nothing to hire".
@@ -1664,6 +1665,21 @@ if (command === "console") {
             .join(", ");
           console.log(`    ${r.room} (${r.x},${r.y}) output ${r.output}/t → ${sinks}: demand ${r.demand}`);
         }
+      }
+      // The haul overflow term (#508): the fullest source container's
+      // smoothed fill, piles at its Seats counted in, and whether it owes the
+      // hauler row one body past the flow number (latched at 75%, dropped
+      // under 40% — Tuning's lines; never without a Storage with room, never
+      // over a flow of zero). Already inside the quota printed above. A
+      // bundle older than it writes no `overflow`.
+      if (stored.overflow && typeof stored.overflow.fill === "number") {
+        const pct = Math.round(stored.overflow.fill * 100);
+        console.log(
+          `  overflow: fullest source container ${pct}% (smoothed); ` +
+            (stored.overflow.owed ? "+1 hauler owed" : "no extra hauler"),
+        );
+      } else {
+        console.log("  overflow: not recorded (a bundle older than #508)");
       }
     }
     // The squad exchange (#452, ADR 0083), report-only: per resident room a

@@ -506,6 +506,7 @@ let internal planSpawns
                 Casting = List.length casting
                 HaulerLoad = 0
                 HaulerDemand = []
+                Overflow = HaulOverflow.none
                 Fights = []
                 Rows =
                     (filled

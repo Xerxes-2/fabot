@@ -436,6 +436,10 @@ type RaidState =
         /// Whether this tick read the stock under its [[emergency reserve]]
         /// (`Facts.belowReserve`, #505): next tick's latch.
         ReserveShort: bool
+        /// The haul overflow reading the last decided tick wrote
+        /// (`Decision.HaulOverflow`, #508): next tick's base to smooth on
+        /// from. Set by the loop off the decision; the fold leaves it alone.
+        HaulOverflow: HaulOverflow
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -470,6 +474,7 @@ module RaidState =
             Probes = Map.empty
             Taken = Map.empty
             ReserveShort = false
+            HaulOverflow = HaulOverflow.none
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -921,6 +926,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         Fought = state.Fought
         Taken = state.Taken |> Map.keys |> Set.ofSeq
         ReserveShort = state.ReserveShort
+        HaulOverflow = state.HaulOverflow
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened,
@@ -1235,6 +1241,7 @@ let foldRaids
         Probes = prior.Probes
         Taken = foldTaken view prior.Taken
         ReserveShort = Decide.Facts.belowReserve view
+        HaulOverflow = prior.HaulOverflow
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged

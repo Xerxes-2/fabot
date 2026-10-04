@@ -787,6 +787,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller =
             Some

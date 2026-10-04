@@ -505,6 +505,17 @@ type Tuning =
         /// while the stock stands under its [[emergency reserve]]: the rest
         /// banks.
         ReserveIncomeShare: int
+        /// The **decided** ticks the hauler row's **haul overflow** reading —
+        /// the colony's fullest source container — is smoothed over (#508):
+        /// each one moves it this share of the way to its reading. Light ticks
+        /// read nothing, so its length in game ticks moves with their share.
+        HaulFillWindow: int
+        /// The smoothed fill, in percent, at or over which the hauler row is
+        /// owed one body past its flow number.
+        HaulFullPercent: int
+        /// The smoothed fill, in percent, under which that body is no longer
+        /// owed; between the two lines the row keeps what it owed.
+        HaulDrainedPercent: int
         /// **Energy aid** by terminal: a colony whose Storage holds this much
         /// over its own [[emergency reserve]] sends to the colonies under
         /// theirs.
@@ -731,6 +742,12 @@ module Tuning =
             EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]
             // Half: a 20-40 e/t surplus refills a 10-20k reserve inside about a creep's life.
             ReserveIncomeShare = 50
+            // Decided ticks, not game ticks (~64 at today's half light share): one full tick before a pickup moves it 3%.
+            HaulFillWindow = 32
+            // #508: W15S28's outpost stood full with 165 on the floor, W13S28's at 96%; a hauled container sawtooths under it.
+            HaulFullPercent = 75
+            // Far enough under the high line that one haul's dip cannot flap the extra body.
+            HaulDrainedPercent = 40
             // Over one send's `AidTerminalEnergy`, so stocking the terminal never dips the reserve.
             AidDonorMargin = 20_000
             // A 10,000 send plus its fee over the shard's few-room ranges.
