@@ -108,14 +108,6 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
                 |> List.map (fun tile -> $"Rival@{room}:{tile.X},{tile.Y}")
                 |> String.concat ";"
 
-            // The rate this room's sources are priced at, and the empty rate
-            // for a room vision answered for not at all — a third answer,
-            // different from either rate.
-            let held =
-                Map.tryFind room view.RoomControl
-                |> Option.map (heldRateOf >> string)
-                |> Option.defaultValue ""
-
             let stage =
                 Map.tryFind room view.Stages |> Option.map string |> Option.defaultValue ""
 
@@ -123,11 +115,22 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             // changing moves every route the walk tables were priced along.
             let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
 
-            $"{home}|{level}|{stage}|{held}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
+            $"{home}|{level}|{stage}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
         |> Fresh.mapOfList
 
-    // A room the colony only crosses or harasses (#463) signs its census and
-    // its rate per room, for the walk tables, and in the flat signature only
+    // The rate a room's sources are priced at, and the empty rate for a room
+    // vision answered for not at all — a third answer, different from either
+    // rate. In the flat signature alone: the hauler quota reads it, no walk
+    // table does, and in the per-room half a crossed room's vision coming and
+    // going evicted W15S28's spawn walks every tick (82% of its pops,
+    // 2026-10-05).
+    let held room =
+        Map.tryFind room view.RoomControl
+        |> Option.map (heldRateOf >> string)
+        |> Option.defaultValue ""
+
+    // A room the colony only crosses or harasses (#463) signs its census per
+    // room, for the walk tables, and in the flat signature only
     // whether a rival holds it, the one thing of it the plan reads: its
     // narrowing leaves no structure or site in the census, so its rate would
     // move with vision alone, and a rival creep's coming and going replanned
@@ -153,7 +156,7 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
                 let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
                 $"\n{room}={taken}"
             else
-                $"\n{room}={signature}")
+                $"\n{room}={held room}|{signature}")
         |> String.concat ""
 
     rooms, $"{home}|{level}|{stages}{flat}"

@@ -64,6 +64,29 @@ let private borderedColony (control: RoomControlInfo option) =
                 })
     }
 
+/// `borderedColony` under its hold with a road built in the outpost: a census
+/// change in W1N2 alone, the thing that moves its walk tables. Vision of it
+/// no longer does (the per-room half carries no rate, 2026-10-05).
+let private roadedColony () =
+    let colony = borderedColony (Some(reservedRoom true 4000))
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    Map.add "road-out" (Structure BuiltKind.Road) colony.Spatial.TargetKinds
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.change
+                        "W1N2"
+                        (Option.map (fun layer ->
+                            { layer with
+                                TargetPositions =
+                                    Map.add "road-out" { X = 12; Y = 40 } layer.TargetPositions
+                            }))
+            }
+    }
+
 /// The north-border colony with W1N2 beside it and no rock of ours in it,
 /// `control` its entry in `RoomControl`: the room a transit or harassment
 /// narrowing leaves (`ColonyView.ofWorld`).
@@ -672,8 +695,9 @@ let censusSignatureTests =
 
             // A room the colony only crosses or harasses plans nothing (#463):
             // vision coming and going there is what replanned W17S29 live.
-            test
-                "a transit room's sighting leaves the flat signature alone and still evicts its walks" {
+            // And no walk table reads a room's rate: W15S28's spawn walks were
+            // evicted every tick by its transit rooms' vision (2026-10-05).
+            test "a transit room's sighting leaves the flat signature and its walks alone" {
                 let crossing control =
                     { crossedColony control with
                         Crossed = Set.ofList [ "W1N2" ]
@@ -684,10 +708,10 @@ let censusSignatureTests =
                     (censusSignature (crossing None))
                     "vision of a transit room is no plan input"
 
-                Expect.notEqual
+                Expect.equal
                     (roomSignatures (crossing (Some neutralRoom)))
                     (roomSignatures (crossing None))
-                    "its walk tables are still evicted on the per-room half"
+                    "nor of its walk tables: the per-room half carries no rate"
             }
 
             test "a harassment room's sighting leaves the flat signature alone" {
@@ -1070,12 +1094,12 @@ let planMemoTests =
                 // 1` ran 109,258 heap pops a tick against 9,554 quiet
                 // (2026-09-20, #388).
                 let held = borderedColony (Some(reservedRoom true 4000))
-                let dark = borderedColony None
+                let dark = roadedColony ()
 
                 Expect.notEqual
                     (Map.find "W1N2" (roomSignatures dark))
                     (Map.find "W1N2" (roomSignatures held))
-                    "the premise: vision leaving the outpost moves its room's signature"
+                    "the premise: a road built in the outpost moves its room's signature"
 
                 Expect.equal
                     (Map.find "W1N1" (roomSignatures dark))
@@ -1235,8 +1259,10 @@ let planMemoTests =
                 // Stamped with the plan's signature, a census that moved and
                 // moved back would recall the plan *and* the tables the dark
                 // tick flooded over a grid missing that room's roads (#372).
+                // The moved census here is a road in the outpost: vision alone
+                // no longer moves the per-room half.
                 let held = borderedColony (Some(reservedRoom true 4000))
-                let dark = borderedColony None
+                let dark = roadedColony ()
 
                 let planned = decideOn held
 
