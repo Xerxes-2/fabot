@@ -141,4 +141,29 @@ let tests =
                     actions
                     "the plan checks creep channels, not names from other actor kinds"
             }
+            test "replayed acts stand beside decided ones only on the channels those leave free" {
+                // #549: a forced tick's replay of the colonies it does not
+                // decide; a deciding colony's push or adoption wins the body.
+                let decided = [ MoveCreep("hauler", Top); HarvestSource("miner", "source") ]
+
+                let replayed =
+                    [
+                        MoveCreep("hauler", Left)
+                        TransferEnergyToStructure("hauler", "store", Energy)
+                        UpgradeController("miner", "controller")
+                        BuildSite("miner", "site")
+                        ObserveRoom("observer", "W2N2")
+                    ]
+
+                Expect.equal
+                    (beside decided replayed)
+                    [
+                        TransferEnergyToStructure("hauler", "store", Energy)
+                        UpgradeController("miner", "controller")
+                        ObserveRoom("observer", "W2N2")
+                    ]
+                    "the pushed hauler's own step and the miner's build on the harvest's channel are dropped"
+
+                Expect.isOk (create (decided @ beside decided replayed)) "executable beside them"
+            }
         ]

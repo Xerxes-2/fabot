@@ -1955,10 +1955,20 @@ let loadCpu () : CpuState =
                                 // Absent on a full tick's row and on every
                                 // row written before light ticks: a full tick.
                                 Light = jsTypeof raw?light = "boolean" && unbox<bool> raw?light
-                                // Absent on every row but a forced full tick's.
+                                // Absent on every row but a forced full tick's;
+                                // `facts` and `replayed` absent on a row
+                                // forced by one fact that replayed nobody, and
+                                // on every row written before #549.
                                 Forced =
                                     if jsTypeof raw?forced = "string" then
-                                        Some(unbox<string> raw?forced)
+                                        Some(
+                                            {
+                                                Reason = unbox<string> raw?forced
+                                                Facts = max 1 (numberOrZero raw "facts")
+                                                Replayed = numberOrZero raw "replayed"
+                                            }
+                                            : Forcing
+                                        )
                                     else
                                         None
                                 // Absent on every row but a replan's.
@@ -2088,7 +2098,14 @@ let private encodeCpuSample (sample: CpuSample) : obj =
         o?light <- true
 
     match sample.Forced with
-    | Some reason -> o?forced <- reason
+    | Some forcing ->
+        o?forced <- forcing.Reason
+
+        if forcing.Facts > 1 then
+            o?facts <- forcing.Facts
+
+        if forcing.Replayed > 0 then
+            o?replayed <- forcing.Replayed
     | None -> ()
 
     // Written only on a replan's row, as the floods are: one array per home.

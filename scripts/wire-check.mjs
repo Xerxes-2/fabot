@@ -507,13 +507,24 @@ wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one
 
   const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
   const forced = { ...full, t: 12, forced: "border" };
+  // #549: a partial forced tick says how many facts forced it and how many
+  // colonies replayed; one fact and nobody replayed writes neither key.
+  const partial = { ...full, t: 14, forced: "home W1N1 Invader", facts: 3, replayed: 5 };
 
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced], spans: [] });
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced, partial], spans: [] });
   saveCpu(loadCpu());
   assert.equal(
     stable(globalThis.Memory.fabot.observe.cpu.ticks),
-    stable([full, forced]),
-    "the forced row keeps its reason, the plain full row stays without the key",
+    stable([full, forced, partial]),
+    "the forced rows keep their reason, facts and replayed count; the plain full row stays without the keys",
+  );
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...full, forced: "border", facts: 1, replayed: 0 }], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.ticks),
+    stable([forced].map((row) => ({ ...row, t: 10 }))),
+    "one fact and nothing replayed re-encodes without the keys",
   );
 
   for (const reason of [null, 3, true, {}]) {

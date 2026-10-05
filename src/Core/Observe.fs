@@ -1875,6 +1875,17 @@ module FloodCounts =
         |> fst
         |> List.rev
 
+/// Why a would-be light tick ran full, and how much of it (#549): the first
+/// fact as `LightTick.tag` spells it, how many facts forced it, and how many
+/// colonies replayed their plans instead of deciding — a partial tick's mean
+/// is not a whole one's.
+type Forcing =
+    {
+        Reason: string
+        Facts: int
+        Replayed: int
+    }
+
 /// What `Game.cpu.getUsed()` answered at each of the loop's phase boundaries,
 /// plus the intents the engine accepted. Cumulative, every one of them; the
 /// differencing happens once, here. `AtEntry` is what the engine had already
@@ -1929,10 +1940,10 @@ type CpuReadings =
         /// Whether this was a light tick, one that replayed the last full
         /// tick's decision. Its phases that did not run read zero-width.
         Light: bool
-        /// Why a tick that could have been light was full, as
-        /// `LightTick.tag` spells the reason; None for a light tick, and for a
-        /// full tick the cadence made full (after a light tick, or a reset).
-        Forced: string option
+        /// Why a tick that could have been light was full (`Forcing`); None
+        /// for a light tick, and for a full tick the cadence made full (after
+        /// a light tick, or a reset).
+        Forced: Forcing option
         /// Each colony that re-planned this tick and what moved its signature
         /// (#463, `signatureMoves`): rooms by name, the head's parts as
         /// `home`, `level` or `stages`, and `reset` for a plan paid with no
@@ -1995,8 +2006,8 @@ type CpuSample =
         /// A light tick's row; `false` for a full tick and a legacy row. Kept
         /// off `CpuPhases` for `Colonies`' reason.
         Light: bool
-        /// The reason a would-be light tick ran full (`CpuReadings.Forced`).
-        Forced: string option
+        /// Why a would-be light tick ran full (`CpuReadings.Forced`).
+        Forced: Forcing option
         /// `CpuReadings.Moved`; empty on every row but a replan's.
         Moved: (string * string list) list
     }

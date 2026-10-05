@@ -406,6 +406,7 @@ let fullMineContainerTests =
                                             Tile = RoomPos.at "" minePost
                                             Hits = 300
                                             Inward = None
+                                            Heals = 0
                                         }
                                     ]
                             Hostiles = []

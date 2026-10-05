@@ -14,6 +14,8 @@ type GlanceCreep =
         Tile: RoomPos
         Hits: int
         Inward: Direction option
+        /// Its HEAL parts with hits left: what it heals a tick.
+        Heals: int
     }
 
 /// One hostile creep in a visible room, asked `HostileInfo`'s questions
@@ -61,10 +63,8 @@ type Glance =
         Hostiles: GlanceHostile list
         Structures: RoomPos list
         Controllers: Map<string, int * bool>
-        /// The CPU bucket is low (2026-10-05: twice emptied by full ticks a
-        /// raid forced): the near rule then reads only the rooms we own a
-        /// structure in, so a hostile loitering in an outpost no longer
-        /// holds every tick full while the bucket drains.
+        /// The CPU bucket is low: a second light tick may follow the first
+        /// (`Main.loop`).
         Lean: bool
         /// The power creeps not ours to strike anywhere
         /// (`Colony.strikesAnywhere`) standing in the rooms of
@@ -78,35 +78,34 @@ type Glance =
         Objects: Set<string>
     }
 
-/// What the last full tick left for the light tick after it.
-type LastFull =
+/// Something of ours a hostile can strike from where it stands (`now`) or
+/// after one step: a body stepping into its weapon's range is a new fact.
+[<RequireQualifiedAccess>]
+type Reached =
+    /// A creep of ours, by name.
+    | Creep of name: string * now: bool
+    /// A structure of ours, by tile.
+    | Structure of tile: RoomPos * now: bool
+
+/// One colony's part of the last plan (#549): what its last decide issued and
+/// laid, kept apart from the other colonies' so a forced tick that decides
+/// some colonies carries the rest whole.
+type Plan =
     {
-        /// Each creep's tile at the start of the full tick: where a drop, the
+        /// The bodies the colony held when it decided: whom the plan speaks
+        /// for.
+        Creeps: Set<string>
+        /// Each of them's tile at the start of that tick: where a drop, the
         /// one act with no target, was decided to land.
         Standing: Map<string, RoomPos>
-        /// Each walking creep's step plan, every colony's merged.
+        /// Each walking creep's step plan.
         Steps: Map<string, RoomPos * RoomPos>
-        /// The full tick's acts a light tick issues again (`replayed`), in its
+        /// The acts a light tick issues again (`replayed`), in the decide's
         /// own order, its planned next acts (`Decision.Next`) among them.
         Acts: Intent list
-        /// Whether a structure of ours fought on the full tick (`fights`).
+        /// Whether a structure of the colony's fought (`fights`): an act no
+        /// replay repeats.
         Fought: bool
-        /// The creeps of ours that swung or shot on the full tick: a hostile
-        /// still near one of them is the near rule's whatever it carries, a
-        /// swing being one-shot and the fight not over.
-        Shooters: Set<string>
-        Hits: Map<string, int>
-        Controllers: Map<string, int * bool>
-        Creeps: Set<string>
-        /// The colonies a cold reset left undecided (`resetSplit`): the tick
-        /// after it is full and decides them.
-        Deferred: Set<string>
-        /// The harassment rooms no colony works for anything else (`loose`):
-        /// a light tick passes the near rule over in one while every body of
-        /// ours standing there is one of `Rangers`.
-        Loose: Set<string>
-        /// The harass rangers (`harassRangers`).
-        Rangers: Set<string>
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`), which a light tick issues again while the target
         /// is in sight (#528): a swing lands the tick a body steps beside it.
@@ -115,88 +114,59 @@ type LastFull =
         Volleys: Map<string, Volley>
     }
 
-/// One colony's rooms as `loose` reads them: the rooms it works (its scan set
-/// less the ones it only crosses), every room any colony declares as an
-/// outpost, the harassment rooms it casts, its evacuating rooms, and its
-/// bodies' Tasks.
-type RoomRoles =
+/// What the last full tick left for the ticks after it: every colony's plan,
+/// and the facts the plans were made against.
+type LastFull =
     {
-        Worked: Set<string>
-        Mined: Set<string>
-        Harassed: Set<string>
-        Evacuating: Set<string>
-        Assignments: Assignments
+        /// By home: a colony's plan from the last tick it decided on.
+        Plans: Map<string, Plan>
+        Hits: Map<string, int>
+        Controllers: Map<string, int * bool>
+        Creeps: Set<string>
+        /// Who could hurt what of ours as the plans were made (`reached`):
+        /// a threat the plans already saw, by hostile id.
+        Hurting: Set<string * Reached>
+        /// The colonies a cold reset left undecided (`resetSplit`): the tick
+        /// after it is full and decides them.
+        Deferred: Set<string>
     }
 
-/// The harassment rooms no colony works for anything else (#520): not a home,
-/// a declared outpost (shut or not, and so a child's outpost a mother watches,
-/// #517), a resident or assault room, nor an evacuating room. Only a harass
-/// ranger is meant to stand there, beside enemy bodies by its job; `forced`
-/// checks that no other body of ours does.
-let loose (colonies: RoomRoles list) : Set<string> =
-    let kept =
-        colonies
-        |> List.map (fun roles ->
-            Set.unionMany [ roles.Worked - roles.Harassed; roles.Mined; roles.Evacuating ])
-        |> Set.unionMany
-
-    // Kept on `LastFull`, so built by `Fresh` (#401).
-    (colonies |> List.map (fun roles -> roles.Harassed) |> Set.unionMany) - kept
-    |> Fresh.setOfSeq
-
-/// The bodies holding a harassment room's Guard: the harass rangers.
-let harassRangers (colonies: RoomRoles list) : Set<string> =
-    colonies
-    |> Seq.collect (fun roles ->
-        let guards = roles.Harassed |> Set.map (Guard >> Decide.Facts.taskId)
-
-        roles.Assignments
-        |> Map.toSeq
-        |> Seq.filter (fun (_, task) -> Set.contains task guards)
-        |> Seq.map fst)
-    |> Fresh.setOfSeq
-
-/// The loose rooms that still hold no body of ours but a harass ranger.
-let private looseNow (last: LastFull) (now: Glance) : Set<string> =
-    if Set.isEmpty last.Loose then
-        last.Loose
-    else
-        let mixed =
-            now.Creeps
-            |> Map.toSeq
-            |> Seq.filter (fun (name, _) -> not (Set.contains name last.Rangers))
-            |> Seq.map (fun (_, creep) -> creep.Tile.Room)
-            |> Set.ofSeq
-
-        last.Loose - mixed
-
-/// The first reason a light tick hands over to a full one.
+/// Why a light tick hands over to a full one, and whose replay it breaks
+/// (`deciders`).
 [<RequireQualifiedAccess>]
 type LightForce =
-    | ArmedHostile of room: string * owner: string
-    | HostileNear of room: string * owner: string
-    | Fought
-    | CreepsChanged
+    /// A raider (a live weapon or heal, no keeper) in a room we own: a home
+    /// is decided every tick it stands there, by its own colony.
+    | Home of room: string * owner: string
+    /// A body that can strike something of ours, now or after a step, that
+    /// it could not as the plans were made, and that is not fighting a creep
+    /// of ours that strikes it.
+    | Hostile of room: string * owner: string
+    /// A colony's structure fought: a tower's act no replay repeats.
+    | Fought of home: string
+    /// Creeps of ours born or gone since the plans.
+    | CreepsChanged of creeps: string list
     /// A creep of ours on its room's border ring with no ground to step onto
     /// (`inward`): the engine carries a body that ends a tick there into the
     /// neighbour, so one that crossed on the full tick and stood still on the
     /// light one would be carried straight back.
     | OnBorder of creep: string
+    /// A creep of ours that lost hits to a body no plan strikes, or to
+    /// nothing in sight.
     | HitsLost of creep: string
     | ControllerChanged of room: string
     /// The reset tick before left colonies undecided (`resetSplit`).
     | Deferred
 
-/// The reason on the CPU line: the rule's word first (`armed` is a home room's
-/// armed hostile, `near` one within reach anywhere but a `loose` room), then where it fired —
-/// the room and the hostile's owner, or the creep — since a reason read back
-/// after the hostile has left has nothing else to be traced by.
+/// The reason on the CPU line: the rule's word first, then where it fired —
+/// the room and the hostile's owner, the colony, or the creep — since a reason
+/// read back after the hostile has left has nothing else to be traced by.
 let tag (reason: LightForce) : string =
     match reason with
-    | LightForce.ArmedHostile(room, owner) -> $"armed {room} {owner}"
-    | LightForce.HostileNear(room, owner) -> $"near {room} {owner}"
-    | LightForce.Fought -> "fought"
-    | LightForce.CreepsChanged -> "creeps"
+    | LightForce.Home(room, owner) -> $"home {room} {owner}"
+    | LightForce.Hostile(room, owner) -> $"hostile {room} {owner}"
+    | LightForce.Fought home -> $"fought {home}"
+    | LightForce.CreepsChanged _ -> "creeps"
     | LightForce.OnBorder creep -> $"border {creep}"
     | LightForce.HitsLost creep -> $"hurt {creep}"
     | LightForce.ControllerChanged room -> $"controller {room}"
@@ -318,12 +288,11 @@ let private actsOf (next: Intent list) (intents: Intent list) : Intent list =
     @ planned
 
 /// Whether an intent is a structure's fight — a tower's shot, heal or repair
-/// of a struck rampart, or safe mode raised: a tick that holds one is followed by a full tick, never a
-/// light one. A creep's own shot or heal is not: a body it could still reach
-/// is within `nearRange` and forces the tick full on that rule, and one that
-/// died or ran leaves nothing to decide (live 2026-09-30, 40 of 83 full ticks
-/// were forced by a harassing ranger's shot at a target already gone). Every
-/// case named, so a new shot is a compile error here and not a silent "no".
+/// of a struck rampart, or safe mode raised: its colony decides the next
+/// tick, never replays it. A creep's own shot or heal is not: it is replayed
+/// while its target stands (live 2026-09-30, 40 of 83 full ticks were forced
+/// by a harassing ranger's shot at a target already gone). Every case named,
+/// so a new shot is a compile error here and not a silent "no".
 let private fights (intent: Intent) : bool =
     match intent with
     | FireTower _
@@ -359,103 +328,83 @@ let private fights (intent: Intent) : bool =
     | ObserveRoom _
     | SendFromTerminal _ -> false
 
-/// The full tick's record, off the glance taken at its start, its step plans
-/// and every intent it issued. It outlives the tick, so every collection in
-/// it is built by `Fresh` (#401).
-let rec lastFull
+/// One colony's plan, off the glance taken at the start of the tick it
+/// decided on: the bodies it held, their step plans, every intent it issued
+/// and its planned **next** acts (`Decision.Next`) — a refiller's pour into
+/// the next hungry member it stands beside, a hauler's act on the tile it
+/// steps onto, which a replay issues and the full tick never — and its aims
+/// and volleys. It outlives the tick, so every collection in it is built by
+/// `Fresh` (#401).
+let plan
     (glance: Glance)
-    (steps: Map<string, RoomPos * RoomPos>)
-    (intents: Intent list)
-    : LastFull =
-    lastFullWith glance steps [] intents
-
-/// `lastFull` with the full tick's planned **next** acts beside its own
-/// (`Decision.Next`): a refiller's pour into the next hungry member it stands
-/// beside, and a hauler's act on the tile it steps onto. The light tick
-/// issues them, the full tick never.
-and lastFullWith
-    (glance: Glance)
+    (creeps: Set<string>)
     (steps: Map<string, RoomPos * RoomPos>)
     (next: Intent list)
     (intents: Intent list)
-    : LastFull =
+    (aims: Intent list)
+    (volleys: Map<string, Volley>)
+    : Plan =
     {
+        Creeps = Fresh.setOfSeq creeps
         Standing =
             glance.Creeps
             |> Map.toSeq
+            |> Seq.filter (fun (name, _) -> Set.contains name creeps)
             |> Seq.map (fun (name, creep) -> name, creep.Tile)
             |> Fresh.mapOfSeq
-        Steps = steps
+        Steps = steps |> Map.toSeq |> Fresh.mapOfSeq
         Acts = actsOf next intents
         Fought = intents |> List.exists fights
-        Shooters =
-            intents
-            |> List.choose (function
-                | AttackCreep(creep, _)
-                | RangedAttackCreep(creep, _)
-                | RangedMassAttack creep -> Some creep
-                | _ -> None)
-            |> Fresh.setOfSeq
-        Hits =
-            glance.Creeps
-            |> Map.toSeq
-            |> Seq.map (fun (name, creep) -> name, creep.Hits)
-            |> Fresh.mapOfSeq
-        Controllers = glance.Controllers
-        Creeps = glance.Creeps |> Map.keys |> Fresh.setOfSeq
-        Deferred = Fresh.setOfSeq Seq.empty
-        Loose = Fresh.setOfSeq Seq.empty
-        Rangers = Fresh.setOfSeq Seq.empty
-        Aims = []
-        Volleys = Fresh.mapOfSeq Seq.empty
+        Aims = aims
+        Volleys = volleys |> Map.toSeq |> Fresh.mapOfSeq
     }
 
-/// How close a hostile of any kind may come to a creep or structure of ours
-/// before a tick is decided.
-let private nearRange = Engine.rangedRange + 2
+/// Whether a hostile strikes a tile at `range` now (`Some true`), after one
+/// step (`Some false`), or not by then (`None`): its weapon's range, one step
+/// more unless it is as good as rooted (`Gait.stationary`, #521).
+let private strikes (hostile: GlanceHostile) (range: int) (tile: RoomPos) : bool option =
+    match RoomPos.range hostile.Tile tile with
+    | Some r when r <= range -> Some true
+    | Some r when r <= range + 1 && not (Gait.stationary hostile.Gait) -> Some false
+    | _ -> None
 
-/// How close a hostile may come before a tick is decided: a rooted one
-/// (`Gait.stationary`) reaches a step past its weapon's range, a swing being
-/// adjacent for a body that only dismantles or claims (#521), as Threat's
-/// Reach reads it; any other `nearRange`.
-let private reachOf (hostile: GlanceHostile) : int =
-    if Gait.stationary hostile.Gait then
-        defaultArg hostile.Weapon Engine.meleeRange + Engine.meleeRange
-    else
-        nearRange
+/// Whether a hostile's weapon strikes a tile now or after one step.
+let private reaches (hostile: GlanceHostile) (tile: RoomPos) : bool =
+    hostile.Weapon
+    |> Option.exists (fun range -> Option.isSome (strikes hostile range tile))
 
-/// The tiles of ours the near rule measures from: our creeps' and our
-/// structures', apart, for a body may threaten one and not the other.
-type private Ours =
-    {
-        CreepTiles: RoomPos list
-        StructureTiles: RoomPos list
-    }
-
-let private oursOf (now: Glance) : Ours =
-    {
-        CreepTiles = now.Creeps |> Map.values |> Seq.map (fun creep -> creep.Tile) |> List.ofSeq
-        StructureTiles = now.Structures
-    }
-
-/// The near rule: a hostile within its reach (`reachOf`) of something of ours
-/// it can hurt — a creep or a structure for a body that hurts creeps, a
-/// structure for one that can dismantle or claim. A scout, a hauler or a
-/// healer near our creeps changes no decision (#462; user, 2026-10-04: a
+/// What of ours a hostile can strike now or after one step, each creep and
+/// structure apart: a creep or a structure for a body with a weapon, a
+/// structure beside one that dismantles or claims. A scout, a hauler or a
+/// healer near our creeps reaches nothing (#462; user, 2026-10-04: a
 /// Trepidimous worker beside a harassing ranger held every tick full).
-let private within (ours: Ours) (hostile: GlanceHostile) : bool =
-    let reach = reachOf hostile
+let private reached (now: Glance) (hostile: GlanceHostile) : Reached list =
+    let onStructures =
+        match hostile.Weapon with
+        | Some range -> Some range
+        | None when hostile.Breaks -> Some Engine.meleeRange
+        | None -> None
 
-    let near (tiles: RoomPos list) =
-        tiles
-        |> List.exists (fun tile ->
-            match RoomPos.range hostile.Tile tile with
-            | Some r -> r <= reach
-            | None -> false)
+    [
+        match hostile.Weapon with
+        | Some range ->
+            for KeyValue(name, creep) in now.Creeps do
+                match strikes hostile range creep.Tile with
+                | Some soon -> yield Reached.Creep(name, soon)
+                | None -> ()
+        | None -> ()
 
-    (Option.isSome hostile.Weapon
-     && (near ours.CreepTiles || near ours.StructureTiles))
-    || (hostile.Breaks && near ours.StructureTiles)
+        match onStructures with
+        | Some range ->
+            for tile in now.Structures do
+                match strikes hostile range tile with
+                | Some soon -> yield Reached.Structure(tile, soon)
+                | None -> ()
+        | None -> ()
+    ]
+
+let private within (now: Glance) (hostile: GlanceHostile) : bool =
+    not (List.isEmpty (reached now hostile))
 
 /// Whether a body can act on nothing of ours: an ally fights beside us, and a
 /// body in a room under our safe mode is held off (live t931,466, W17S25's
@@ -465,13 +414,157 @@ let private harmless (now: Glance) (hostile: GlanceHostile) =
     || Map.tryFind hostile.Tile.Room now.Controllers |> Option.exists snd
 
 /// Who can hurt us this tick, read once off the glance: every hostile that is
-/// not `harmless` with something of ours it can hurt in its reach (`within`).
-/// The one reading the light tick's forcing rules are to stand on (#549).
+/// not `harmless` with something of ours it can hurt in its reach (`within`),
+/// its live parts read (`glanceOf`), so a disarmed cripple hurts nothing.
 let hurting (now: Glance) : GlanceHostile list =
-    let ours = oursOf now
-
     now.Hostiles
-    |> List.filter (fun hostile -> not (harmless now hostile) && within ours hostile)
+    |> List.filter (fun hostile -> not (harmless now hostile) && within now hostile)
+
+/// A plan less the bodies `claimed` by a plan before it.
+let private without (claimed: Set<string>) (plan: Plan) : Plan =
+    if Set.isEmpty (Set.intersect claimed plan.Creeps) then
+        plan
+    else
+        let mine name = not (Set.contains name claimed)
+
+        let acting act =
+            match replayed act with
+            | Some(Some name, _) -> mine name
+            | _ -> true
+
+        let striking aim =
+            match aim with
+            | AttackCreep(name, _)
+            | RangedAttackCreep(name, _)
+            | RangedMassAttack name -> mine name
+            | _ -> true
+
+        {
+            Creeps = Fresh.setOfSeq (plan.Creeps - claimed)
+            Standing = plan.Standing |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+            Steps = plan.Steps |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+            Acts = plan.Acts |> List.filter acting
+            Fought = plan.Fought
+            Aims = plan.Aims |> List.filter striking
+            Volleys = plan.Volleys |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+        }
+
+/// The record of the plans by home, each body claimed by the first plan that
+/// holds it — a forced tick's fresh plans before the ones it carried, so a body
+/// a deciding colony adopted is that colony's alone (#549) — and the facts
+/// they were made against, off this tick's glance. `deferred`: the colonies a
+/// cold reset left undecided.
+let ofPlans (glance: Glance) (deferred: Set<string>) (plans: (string * Plan) list) : LastFull =
+    let kept, _ =
+        ((Fresh.mapOfSeq Seq.empty, Set.empty), plans)
+        ||> List.fold (fun (kept, claimed) (home, plan) ->
+            Map.add home (without claimed plan) kept, Set.union claimed plan.Creeps)
+
+    {
+        Plans = kept |> Map.toSeq |> Fresh.mapOfSeq
+        Hits =
+            glance.Creeps
+            |> Map.toSeq
+            |> Seq.map (fun (name, creep) -> name, creep.Hits)
+            |> Fresh.mapOfSeq
+        Controllers = glance.Controllers
+        Creeps = glance.Creeps |> Map.keys |> Fresh.setOfSeq
+        Hurting =
+            glance.Hostiles
+            |> Seq.filter (harmless glance >> not)
+            |> Seq.collect (fun hostile ->
+                reached glance hostile |> Seq.map (fun r -> hostile.Id, r))
+            |> Fresh.setOfSeq
+        Deferred = Fresh.setOfSeq deferred
+    }
+
+/// One colony's full tick, holding every creep the glance sees, as a
+/// single-colony shard reads it: its step plans and every intent it issued.
+let rec lastFull
+    (glance: Glance)
+    (steps: Map<string, RoomPos * RoomPos>)
+    (intents: Intent list)
+    : LastFull =
+    lastFullWith glance steps [] intents
+
+/// `lastFull` with its planned next acts (`Decision.Next`, `plan`).
+and lastFullWith
+    (glance: Glance)
+    (steps: Map<string, RoomPos * RoomPos>)
+    (next: Intent list)
+    (intents: Intent list)
+    : LastFull =
+    let creeps = glance.Creeps |> Map.keys |> Set.ofSeq
+
+    ofPlans glance Set.empty [ "", plan glance creeps steps next intents [] Map.empty ]
+
+/// The record with only these colonies' plans.
+let only (homes: Set<string>) (last: LastFull) : LastFull =
+    { last with
+        Plans = last.Plans |> Map.filter (fun home _ -> Set.contains home homes)
+    }
+
+/// Every plan as one: the bodies are disjoint (`ofPlans`), so nothing is
+/// overwritten. Read within the tick.
+let private merged (last: LastFull) : Plan =
+    match Map.toList last.Plans with
+    | [ _, plan ] -> plan
+    | plans ->
+        let plans = List.map snd plans
+
+        let mapOf part =
+            plans |> Seq.collect (part >> Map.toSeq) |> Map.ofSeq
+
+        {
+            Creeps = plans |> List.map _.Creeps |> Set.unionMany
+            Standing = mapOf _.Standing
+            Steps = mapOf _.Steps
+            Acts = plans |> List.collect _.Acts
+            Fought = plans |> List.exists _.Fought
+            Aims = plans |> List.collect _.Aims
+            Volleys = mapOf _.Volleys
+        }
+
+/// The rooms the plans' volleys stand in (`Glance.PowerCreeps`).
+let volleyRooms (last: LastFull) : string list =
+    last.Plans
+    |> Map.values
+    |> Seq.collect (fun plan -> plan.Volleys |> Map.values |> Seq.map (fun volley -> volley.Room))
+    |> Seq.distinct
+    |> List.ofSeq
+
+/// The hostiles the plans strike at, each with the creeps of ours that aim or
+/// shoot at it and the range they strike from.
+let private strikers (last: LastFull) : Map<string, (string * int) list> =
+    last.Plans
+    |> Map.values
+    |> Seq.collect (fun plan -> Seq.append plan.Aims plan.Acts)
+    |> Seq.choose (function
+        | AttackCreep(creep, target) -> Some(target, (creep, Engine.meleeRange))
+        | RangedAttackCreep(creep, target) -> Some(target, (creep, Engine.rangedRange))
+        | _ -> None)
+    |> Seq.groupBy fst
+    |> Seq.map (fun (target, pairs) -> target, pairs |> Seq.map snd |> Seq.distinct |> List.ofSeq)
+    |> Map.ofSeq
+
+/// What the plans heal each creep of ours with a tick: every heal aimed at
+/// it whose healer still stands, at its live HEAL parts.
+let private healing (last: LastFull) (now: Glance) : Map<string, int> =
+    let power healer perPart =
+        Map.tryFind healer now.Creeps
+        |> Option.map (fun creep -> creep.Heals * perPart)
+        |> Option.defaultValue 0
+
+    last.Plans
+    |> Map.values
+    |> Seq.collect _.Acts
+    |> Seq.choose (function
+        | HealCreep(healer, target) -> Some(target, power healer Engine.healPower)
+        | RangedHealCreep(healer, target) -> Some(target, power healer Engine.rangedHealPower)
+        | _ -> None)
+    |> Seq.groupBy fst
+    |> Seq.map (fun (target, heals) -> target, heals |> Seq.sumBy snd)
+    |> Map.ofSeq
 
 /// The colonies a cold reset decides on its own tick and the ones it leaves
 /// to the next (#488), each in the order given: every colony with a threat in
@@ -487,14 +580,12 @@ let resetSplit
     (danger: Set<string>)
     (colonies: (string * Set<string>) list)
     : string list * string list =
-    let ours = oursOf now
-
     let threats =
         now.Hostiles
         |> List.filter (fun hostile ->
             not (HostileInfo.isKeeperOwner hostile.Owner)
             && not (Colony.isAlly hostile.Owner)
-            && (hostile.Armed || within ours hostile))
+            && (hostile.Armed || within now hostile))
         |> List.map (fun hostile -> hostile.Tile.Room)
         |> Set.ofList
         |> Set.union danger
@@ -508,130 +599,220 @@ let resetSplit
 
     threatened @ List.take spare quiet |> List.map fst, List.skip spare quiet |> List.map fst
 
-/// The first fact that makes replaying the last full tick wrong, in the
-/// ADR's order; `None` when the light tick may run.
-let forced (last: LastFull) (now: Glance) : LightForce option =
+/// Every fact the plans did not account for, in the ADR's order (#549): a
+/// replay is wrong only where the world moved off what a plan was made
+/// against — a raider in a home room, every tick (a home is never a tick
+/// late); a body that can strike something of ours now or after one step
+/// that it could not as the plans were made, unless that is a creep of ours
+/// that strikes it (a cripple whose live parts hurt nothing, or one out of
+/// reach, reaches nothing); a creep of ours that lost hits, unless every body
+/// that could have struck it is one a striker of ours aims at and reaches,
+/// and the loss is within the healing the plans give it; a creep born or
+/// gone; one on the border ring with no step in; a controller changed — or
+/// where a plan holds an act no replay repeats (a structure's fight), or a
+/// colony has no plan (a cold reset's deferred).
+let forcing (last: LastFull) (now: Glance) : LightForce list =
+    let strikers = strikers last
+
+    // The creeps of ours striking the hostile from where they stand: in its
+    // room, and with `reach`, within their own range of it.
+    let fighting (hostile: GlanceHostile) (reach: bool) (by: string -> bool) =
+        Map.tryFind hostile.Id strikers
+        |> Option.exists (
+            List.exists (fun (name, range) ->
+                by name
+                && Map.tryFind name now.Creeps
+                   |> Option.exists (fun creep ->
+                       match RoomPos.range creep.Tile hostile.Tile with
+                       | Some r -> not reach || r <= range
+                       | None -> false))
+        )
+
     let hostiles = now.Hostiles |> List.filter (harmless now >> not)
-
-    // Only in a room where we own a structure: an armed body standing off in
-    // a remote or harassment room is the near rule's to answer (#461), and in
-    // a `loose` room the lost-hits rule's. A healer counts: one alone at home
-    // between its pair's swaps on the exit healed back what the light ticks'
-    // silent towers let it (live t981,05x, W17S25).
-    let armed =
-        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
-
-        hostiles
-        |> List.tryFind (fun hostile ->
-            (hostile.Armed || hostile.Heals)
-            && not (HostileInfo.isKeeperOwner hostile.Owner)
-            && Set.contains hostile.Tile.Room homes)
-        |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
-
-    let near () =
-        let hurt = hurting now |> List.map _.Id |> Set.ofList
-
-        // The full tick's shooters, where they stand now: any hostile near
-        // one is the fight going on.
-        let shooting =
-            now.Creeps
-            |> Map.toList
-            |> List.filter (fun (name, _) -> Set.contains name last.Shooters)
-            |> List.map (fun (_, creep) -> creep.Tile)
-
-        // Our shooters' reach, not the hostile's: a rooted body is still
-        // within their shot.
-        let besideAShooter (hostile: GlanceHostile) =
-            shooting
-            |> List.exists (fun tile ->
-                match RoomPos.range hostile.Tile tile with
-                | Some r -> r <= nearRange
-                | None -> false)
-
-        let loose = looseNow last now
-        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
-
-        hostiles
-        |> List.tryFind (fun hostile ->
-            not (Set.contains hostile.Tile.Room loose)
-            && (not now.Lean || Set.contains hostile.Tile.Room homes)
-            && (hurt.Contains hostile.Id || besideAShooter hostile))
-        |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
-
-    let fought () =
-        if last.Fought then Some LightForce.Fought else None
-
-    let creepsChanged () =
-        if (now.Creeps |> Map.keys |> Set.ofSeq) <> last.Creeps then
-            Some LightForce.CreepsChanged
-        else
-            None
-
-    let onBorder () =
-        now.Creeps
-        |> Map.tryPick (fun name creep ->
-            if Seam.onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward then
-                Some(LightForce.OnBorder name)
-            else
-                None)
-
-    // Lean (bucket short): a body hurt away from the rooms we hold structures
-    // in forces nothing — a ranger chipped in a fight off home kept every tick
-    // full and emptied the bucket (live t979,7xx). #549 replaces this rule.
-    let hitsLost () =
-        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
-
-        now.Creeps
-        |> Map.tryPick (fun name creep ->
-            match Map.tryFind name last.Hits with
-            | Some before when
-                creep.Hits < before && (not now.Lean || Set.contains creep.Tile.Room homes)
-                ->
-                Some(LightForce.HitsLost name)
-            | _ -> None)
-
-    let controllerChanged () =
-        Seq.append (Map.keys last.Controllers) (Map.keys now.Controllers)
-        |> Seq.distinct
-        |> Seq.sort
-        |> Seq.tryFind (fun room ->
-            Map.tryFind room last.Controllers <> Map.tryFind room now.Controllers)
-        |> Option.map LightForce.ControllerChanged
 
     let deferred =
         if Set.isEmpty last.Deferred then
-            None
+            []
         else
-            Some LightForce.Deferred
+            [ LightForce.Deferred ]
 
-    deferred
-    |> Option.orElse armed
-    |> Option.orElseWith near
-    |> Option.orElseWith fought
-    |> Option.orElseWith creepsChanged
-    |> Option.orElseWith onBorder
-    |> Option.orElseWith hitsLost
-    |> Option.orElseWith controllerChanged
+    // A healer counts: one alone at home between its pair's swaps on the exit
+    // healed back what the light ticks' silent towers let it (live t981,05x,
+    // W17S25).
+    let home =
+        hostiles
+        |> List.filter (fun hostile ->
+            (hostile.Armed || hostile.Heals)
+            && not (HostileInfo.isKeeperOwner hostile.Owner)
+            && Map.containsKey hostile.Tile.Room now.Controllers)
+        |> List.distinctBy (fun hostile -> hostile.Tile.Room)
+        |> List.map (fun hostile -> LightForce.Home(hostile.Tile.Room, hostile.Owner))
+
+    let unforeseen =
+        hostiles
+        |> List.filter (fun hostile ->
+            reached now hostile
+            |> List.exists (fun r ->
+                not (Set.contains (hostile.Id, r) last.Hurting)
+                && match r with
+                   | Reached.Creep(name, _) -> not (fighting hostile false ((=) name))
+                   | Reached.Structure _ -> not (fighting hostile false (fun _ -> true))))
+        |> List.distinctBy (fun hostile -> hostile.Tile.Room)
+        |> List.map (fun hostile -> LightForce.Hostile(hostile.Tile.Room, hostile.Owner))
+
+    let fought =
+        last.Plans
+        |> Map.toList
+        |> List.filter (fun (_, plan) -> plan.Fought)
+        |> List.map (fst >> LightForce.Fought)
+
+    let creepsChanged =
+        let standing = now.Creeps |> Map.keys |> Set.ofSeq
+        let changed = (standing - last.Creeps) + (last.Creeps - standing)
+
+        if Set.isEmpty changed then
+            []
+        else
+            [ LightForce.CreepsChanged(Set.toList changed) ]
+
+    let onBorder =
+        now.Creeps
+        |> Map.toList
+        |> List.filter (fun (_, creep) ->
+            Seam.onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward)
+        |> List.map (fst >> LightForce.OnBorder)
+
+    // Who could have struck the creep where it stands: a body whose weapon
+    // reaches it now or after a step. None means a cause out of sight (a
+    // tower, a body gone). Excused only where the plans fight every one of
+    // them from in reach and heal what it lost (#533's out-damaged reading).
+    let hitsLost =
+        let healed = healing last now
+
+        now.Creeps
+        |> Map.toList
+        |> List.filter (fun (name, creep) ->
+            match Map.tryFind name last.Hits with
+            | Some before when creep.Hits < before ->
+                match hostiles |> List.filter (fun hostile -> reaches hostile creep.Tile) with
+                | [] -> true
+                | near ->
+                    near
+                    |> List.exists (fun hostile -> not (fighting hostile true (fun _ -> true)))
+                    || before - creep.Hits > (Map.tryFind name healed |> Option.defaultValue 0)
+            | _ -> false)
+        |> List.map (fst >> LightForce.HitsLost)
+
+    let controllerChanged =
+        Seq.append (Map.keys last.Controllers) (Map.keys now.Controllers)
+        |> Seq.distinct
+        |> Seq.sort
+        |> Seq.filter (fun room ->
+            Map.tryFind room last.Controllers <> Map.tryFind room now.Controllers)
+        |> Seq.map LightForce.ControllerChanged
+        |> List.ofSeq
+
+    List.concat
+        [
+            deferred
+            home
+            unforeseen
+            fought
+            creepsChanged
+            onBorder
+            hitsLost
+            controllerChanged
+        ]
+
+/// The first fact that makes replaying the plans wrong (`forcing`); `None`
+/// when the light tick may run.
+let forced (last: LastFull) (now: Glance) : LightForce option = forcing last now |> List.tryHead
+
+/// The colonies a forced tick decides (#549), of `colonies` (each home with
+/// the rooms it answers for): each fact's own — a raided home's own colony,
+/// a hostile's or a controller's room's colonies and the holders of our
+/// bodies standing there, a creep's holder, a fighting structure's colony,
+/// the deferred — and every colony with no plan. A fact no colony owns is
+/// everyone's. `holders`: each creep's colony this tick; a body gone is read
+/// off the plan that held it.
+let deciders
+    (colonies: (string * Set<string>) list)
+    (holders: Map<string, string>)
+    (last: LastFull)
+    (now: Glance)
+    (reasons: LightForce list)
+    : Set<string> =
+    let homes = colonies |> List.map fst |> Set.ofList
+
+    let answering room =
+        colonies
+        |> List.filter (fun (_, rooms) -> Set.contains room rooms)
+        |> List.map fst
+        |> Set.ofList
+
+    let standingIn room =
+        now.Creeps
+        |> Map.toSeq
+        |> Seq.filter (fun (_, creep) -> creep.Tile.Room = room)
+        |> Seq.choose (fun (name, _) -> Map.tryFind name holders)
+        |> Set.ofSeq
+
+    let holderOf name =
+        match Map.tryFind name holders with
+        | Some home -> Set.singleton home
+        | None ->
+            last.Plans
+            |> Map.tryFindKey (fun _ plan -> Set.contains name plan.Creeps)
+            |> Option.toList
+            |> Set.ofList
+
+    let scope reason =
+        let own =
+            match reason with
+            | LightForce.Home(room, _) when Set.contains room homes -> Set.singleton room
+            | LightForce.Home(room, _) -> answering room
+            | LightForce.Hostile(room, _) -> answering room + standingIn room
+            | LightForce.Fought home -> Set.singleton home
+            | LightForce.CreepsChanged names -> names |> List.map holderOf |> Set.unionMany
+            | LightForce.OnBorder name -> holderOf name
+            | LightForce.HitsLost name -> holderOf name
+            | LightForce.ControllerChanged room -> answering room
+            | LightForce.Deferred -> last.Deferred
+
+        if Set.isEmpty own then homes else own
+
+    let planless =
+        homes |> Set.filter (fun home -> not (Map.containsKey home last.Plans))
+
+    reasons
+    |> List.map scope
+    |> Set.unionMany
+    |> Set.union planless
+    |> Set.intersect homes
 
 /// The ids the last full tick's acts name, for the glance to look up
 /// (`Glance.Objects`): each act's object and each look's observer. A
 /// creep's or a hostile's stands in the glance already.
 let lookups (last: LastFull) : string list =
-    last.Acts
-    |> List.choose (fun act ->
+    last.Plans
+    |> Map.values
+    |> Seq.collect _.Acts
+    |> Seq.choose (fun act ->
         match replayed act with
         | Some(_, Stands.Object id) -> Some id
         | _ -> None)
-    |> List.distinct
+    |> Seq.distinct
+    |> List.ofSeq
 
 /// The light tick's intents (#529), in creep-name order and the looks after
-/// them: every act the full tick issued or planned (`LastFull.Acts`) whose
+/// them: every act the plans issued or planned (`Plan.Acts`) whose
 /// actor and target still stand in the glance, wherever the body stands —
 /// the engine checks range, store and cooldown, and a refused act costs no
 /// CPU; a drop only from the tile it was decided on. A fighter strikes at
 /// its aim again the same way (#528), on a channel no act of its holds. A
 /// creep standing on its step plan's first tile steps toward the second.
-let intents (last: LastFull) (now: Glance) : Intent list =
+let intents (record: LastFull) (now: Glance) : Intent list =
+    let last = merged record
     let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
 
     let stands (actor: string option) (target: Stands) =
@@ -814,3 +995,22 @@ let intents (last: LastFull) (now: Glance) : Intent list =
             standing
             |> List.choose (fun (actor, act) -> if Option.isNone actor then Some act else None)
     ]
+
+/// A forced tick's replay of the colonies it does not decide (#549): their
+/// plans exactly as a light tick replays them (`intents`), for the bodies
+/// each holds this tick (`holders`) — a body a deciding colony holds is that
+/// colony's to decide, and one whose plan another colony made stands.
+let replay
+    (homes: Set<string>)
+    (holders: Map<string, string>)
+    (last: LastFull)
+    (now: Glance)
+    : Intent list =
+    let held name =
+        Map.tryFind name holders |> Option.exists (fun home -> Set.contains home homes)
+
+    intents
+        (only homes last)
+        { now with
+            Creeps = now.Creeps |> Map.filter (fun name _ -> held name)
+        }

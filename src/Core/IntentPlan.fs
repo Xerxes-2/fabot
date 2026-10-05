@@ -124,6 +124,15 @@ let create (intents: Intent list) : Result<Plan, Conflict> =
 
     collect Map.empty intents
 
+/// Each of `extra` whose every channel `decided` leaves free: a forced tick's
+/// replayed acts beside the acts its deciding colonies chose (#549), which
+/// win a body both name (a push, an adoption).
+let beside (decided: Intent list) (extra: Intent list) : Intent list =
+    let taken = decided |> List.collect channels |> Set.ofList
+
+    extra
+    |> List.filter (fun intent -> channels intent |> List.forall (taken.Contains >> not))
+
 /// Whether two acts may stand in one plan: never two on one creep's channel,
 /// nor an engine suppression pair.
 let compatible (first: Intent) (second: Intent) : bool =

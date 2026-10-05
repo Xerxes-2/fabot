@@ -15,7 +15,12 @@ let private creepAt x y hits : GlanceCreep =
         Tile = tile x y
         Hits = hits
         Inward = None
+        Heals = 0
     }
+
+/// The room our controller stands in: not `room`, whose forcing rules are the
+/// reach rules (a raider in a home forces every tick, `homeTests`).
+let private homeRoom = "W9N9"
 
 /// A quiet world: two creeps of ours, a spawn, one controller at level 5, and
 /// nobody else. Every object an act below names still stands, as the glance
@@ -25,7 +30,7 @@ let private quiet: Glance =
         Creeps = Map.ofList [ "digger", creepAt 10 10 1000; "hauler", creepAt 20 20 500 ]
         Hostiles = []
         Structures = [ tile 30 30 ]
-        Controllers = Map.ofList [ room, (5, false) ]
+        Controllers = Map.ofList [ homeRoom, (5, false) ]
         Lean = false
         PowerCreeps = []
         Objects =
@@ -61,6 +66,27 @@ let private last: LastFull =
             SpawnCreep("Spawn1", [ Work; Carry; Move ], "next")
         ]
 
+/// A one-colony record's plan.
+let private solo (record: LastFull) : Plan =
+    record.Plans |> Map.values |> Seq.exactlyOne
+
+/// The record with its plan's aims and volleys, as a fighter's full tick
+/// lays them.
+let private aiming
+    (aims: Intent list)
+    (volleys: Map<string, Volley>)
+    (record: LastFull)
+    : LastFull =
+    { record with
+        Plans =
+            record.Plans
+            |> Map.map (fun _ plan ->
+                { plan with
+                    Aims = aims
+                    Volleys = volleys
+                })
+    }
+
 /// A hostile at a MOVE a part: never stationary.
 let private mobile: Gait = { Weight = 1; Moves = 1 }
 
@@ -70,10 +96,10 @@ let private hostile x y owner armed : GlanceHostile =
         Tile = tile x y
         Owner = owner
         Armed = armed
+        Heals = false
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
-        Heals = false
         Hits = 1000
     }
 
@@ -160,7 +186,7 @@ let replayTests =
                 for oneShot in oneShots do
                     let full = LightTick.lastFull quiet Map.empty [ oneShot ]
 
-                    Expect.isEmpty full.Acts $"%A{oneShot} is not kept"
+                    Expect.isEmpty (solo full).Acts $"%A{oneShot} is not kept"
                     Expect.isEmpty (LightTick.intents full quiet) $"%A{oneShot} is never replayed"
             }
 
@@ -231,9 +257,7 @@ let replayTests =
                     }
 
                 let preHealed heal aim =
-                    { LightTick.lastFull guarded Map.empty [ heal ] with
-                        Aims = [ aim ]
-                    }
+                    LightTick.lastFull guarded Map.empty [ heal ] |> aiming [ aim ] Map.empty
 
                 let ofGuard record =
                     LightTick.intents record guarded
@@ -288,17 +312,13 @@ let replayTests =
                     }
 
                 let full volleys =
-                    { LightTick.lastFull
-                          (shooting [])
-                          Map.empty
-                          [ RangedAttackCreep("ranger", "h-1") ] with
-                        Aims =
-                            [
-                                RangedAttackCreep("ranger", "h-1")
-                                RangedAttackCreep("ranger", "h-2")
-                            ]
-                        Volleys = volleys
-                    }
+                    LightTick.lastFull
+                        (shooting [])
+                        Map.empty
+                        [ RangedAttackCreep("ranger", "h-1") ]
+                    |> aiming
+                        [ RangedAttackCreep("ranger", "h-1"); RangedAttackCreep("ranger", "h-2") ]
+                        volleys
 
                 let gunned =
                     Map.ofList
@@ -384,12 +404,13 @@ let replayTests =
                     }
 
                 let full =
-                    { LightTick.lastFull
-                          guarded
-                          (Map.ofList [ "guard", (tile 12 10, tile 13 10) ])
-                          [ AttackCreep("guard", "h-head") ] with
-                        Aims = [ AttackCreep("guard", "h-head"); AttackCreep("guard", "h-near") ]
-                    }
+                    LightTick.lastFull
+                        guarded
+                        (Map.ofList [ "guard", (tile 12 10, tile 13 10) ])
+                        [ AttackCreep("guard", "h-head") ]
+                    |> aiming
+                        [ AttackCreep("guard", "h-head"); AttackCreep("guard", "h-near") ]
+                        Map.empty
 
                 let ofGuard =
                     LightTick.intents full guarded
@@ -454,9 +475,8 @@ let replayTests =
                     let now = glanced name
 
                     let full =
-                        { LightTick.lastFull now Map.empty [] with
-                            Aims = [ AttackCreep(name, "h-1") ]
-                        }
+                        LightTick.lastFull now Map.empty []
+                        |> aiming [ AttackCreep(name, "h-1") ] Map.empty
 
                     LightTick.intents full now
                     |> List.filter (function
@@ -484,17 +504,18 @@ let replayTests =
                     }
 
                 let full =
-                    { LightTick.lastFullWith
-                          guarded
-                          Map.empty
-                          [ TransferEnergyToStructure("digger", "ext-9", Energy) ]
-                          [
-                              HarvestSource("digger", "src-a")
-                              TransferEnergyToStructure("digger", "link-1", Energy)
-                              RepairStructure("guard", "road")
-                          ] with
-                        Aims = [ AttackCreep("guard", "h-1"); RangedAttackCreep("hauler", "h-1") ]
-                    }
+                    LightTick.lastFullWith
+                        guarded
+                        Map.empty
+                        [ TransferEnergyToStructure("digger", "ext-9", Energy) ]
+                        [
+                            HarvestSource("digger", "src-a")
+                            TransferEnergyToStructure("digger", "link-1", Energy)
+                            RepairStructure("guard", "road")
+                        ]
+                    |> aiming
+                        [ AttackCreep("guard", "h-1"); RangedAttackCreep("hauler", "h-1") ]
+                        Map.empty
 
                 let replayed = LightTick.intents full guarded
 
@@ -546,8 +567,8 @@ let replayTests =
 
                 let full = LightTick.lastFull quiet Map.empty acts
 
-                Expect.equal full.Acts acts "each, in order"
-                Expect.isFalse full.Fought "none of them a structure's fight"
+                Expect.equal (solo full).Acts acts "each, in order"
+                Expect.isFalse (solo full).Fought "none of them a structure's fight"
             }
 
             test "a standing upgrader's draw is replayed with its upgrade, a step off or not" {
@@ -639,9 +660,8 @@ let replayTests =
                     }
 
                 let aimed =
-                    { LightTick.lastFull guarded Map.empty [] with
-                        Aims = [ AttackCreep("guard", "h-1") ]
-                    }
+                    LightTick.lastFull guarded Map.empty []
+                    |> aiming [ AttackCreep("guard", "h-1") ] Map.empty
 
                 let beside =
                     { guarded with
@@ -681,16 +701,21 @@ let forcedTests =
                 Expect.equal (LightTick.forced last stepped) None "the light tick runs"
             }
 
-            test "an armed hostile in a home room, far from everything, forces a full tick" {
-                let raided =
+            test
+                "an armed hostile in a home room out of reach of everything of ours forces nothing; within reach of a creep, a full tick" {
+                // #549: armed on paper is no fact a replay misses; a body
+                // that can hurt something of ours this tick is.
+                let raided x y =
                     { stepped with
-                        Hostiles = [ hostile 45 45 "Invader" true ]
+                        Hostiles = [ hostile x y "Invader" true ]
                     }
 
+                Expect.equal (LightTick.forced last (raided 45 45)) None "far off at home"
+
                 Expect.equal
-                    (LightTick.forced last raided)
-                    (Some(LightForce.ArmedHostile(room, "Invader")))
-                    "combat at home is decided"
+                    (LightTick.forced last (raided 12 10))
+                    (Some(LightForce.Hostile(room, "Invader")))
+                    "beside the digger"
             }
 
             // Moved 2026-10-06 (live t981,05x, W17S25): the Brief's S7 rule 3
@@ -702,7 +727,7 @@ let forcedTests =
                     {
                         Id = "medic"
                         Owner = "Trepidimous"
-                        Pos = tile 45 45
+                        Pos = tile 33 33
                         Body = [ Move; Move; Heal; Heal ]
                         Hits = 400
                         TicksToLive = 1000
@@ -711,25 +736,30 @@ let forcedTests =
                 let shooter =
                     { medic with
                         Id = "shooter"
-                        Pos = tile 46 45
+                        Pos = tile 34 33
                         Body = [ Move; RangedAttack ]
                         Hits = 200
                     }
 
                 let glanced side =
                     { stepped with
+                        Controllers = Map.ofList [ room, (5, false) ]
                         Hostiles = side |> List.map (LightTick.glanceOf side)
                     }
 
-                Expect.equal
-                    (LightTick.forced last (glanced [ medic ]))
-                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
-                    "the healer alone"
+                let home = Some(LightForce.Home(room, "Trepidimous"))
+
+                Expect.equal (LightTick.forced last (glanced [ medic ])) home "the healer alone"
 
                 Expect.equal
                     (LightTick.forced last (glanced [ medic; shooter ]))
-                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    home
                     "the shooter beside it is decided"
+
+                Expect.contains
+                    (LightTick.forcing last (glanced [ medic; shooter ]))
+                    (LightForce.Hostile(room, "Trepidimous"))
+                    "and reaches the spawn"
             }
 
             test "an armed hostile beside ours in a room under our safe mode forces nothing" {
@@ -778,6 +808,7 @@ let forcedTests =
                                     Tile = RoomPos.at harassed { X = 10; Y = 10 }
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                     }
 
@@ -792,10 +823,10 @@ let forcedTests =
                                     Tile = RoomPos.at harassed { X = x; Y = 10 }
                                     Owner = "Trepidimous"
                                     Armed = true
+                                    Heals = false
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
-                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -807,20 +838,28 @@ let forcedTests =
                     "standing off: the tick may be light"
 
                 Expect.equal
-                    (LightTick.forced full (defenderAt (10 + Engine.rangedRange)))
-                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
-                    "trading shots with our ranger at range 3: the near rule"
+                    (LightTick.forced full (defenderAt 13))
+                    None
+                    "a melee three off: not a swing after one step"
 
                 Expect.equal
-                    (LightTick.forced full (defenderAt (10 + Engine.rangedRange + 2)))
-                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
-                    "at the near rule's edge: still full"
+                    (LightTick.forced full (defenderAt 12))
+                    (Some(LightForce.Hostile(harassed, "Trepidimous")))
+                    "a step and a swing off our ranger: full"
+
+                Expect.equal
+                    (LightTick.forced full (defenderAt 11))
+                    (Some(LightForce.Hostile(harassed, "Trepidimous")))
+                    "beside it: full"
             }
 
             test
-                "a hostile near our ranger in a loose room forces no full tick; near our anchor or at home it does" {
+                "a hostile our ranger shoots, beside it, forces no full tick; beside our anchor, our digger or a hauler crossing it does" {
                 // #520: live t963,4xx, 98% of ticks forced full by harass
-                // rangers standing by Trepidimous' creeps in W19S25 and W18S27.
+                // rangers standing by Trepidimous' creeps in W19S25 and W18S27;
+                // #549 reads it as the one invariant, in any room: a body our
+                // plan fights where it fights it is accounted for, one that
+                // reaches anything else of ours is not.
                 let harassed = "W3N1"
                 let outpost = "W2N1"
                 let at roomName x = RoomPos.at roomName { X = x; Y = 10 }
@@ -835,6 +874,7 @@ let forcedTests =
                                     Tile = at harassed 10
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                             |> Map.add
                                 "anchor"
@@ -842,16 +882,13 @@ let forcedTests =
                                     Tile = at outpost 10
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                     }
 
                 // The ranger shot on the full tick: its target still beside it
                 // is no fight to decide there either.
-                let full =
-                    { LightTick.lastFull ours Map.empty [ RangedAttackCreep("ranger", "trep") ] with
-                        Loose = Set.ofList [ harassed ]
-                        Rangers = Set.ofList [ "ranger" ]
-                    }
+                let full = LightTick.lastFull ours Map.empty [ RangedAttackCreep("ranger", "trep") ]
 
                 let trepAt tile =
                     { ours with
@@ -862,10 +899,10 @@ let forcedTests =
                                     Tile = tile
                                     Owner = "Trepidimous"
                                     Armed = true
+                                    Heals = false
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = true
-                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -878,39 +915,24 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced full (trepAt (at outpost 12)))
-                    (Some(LightForce.HostileNear(outpost, "Trepidimous")))
-                    "the same body beside our anchor in an outpost"
+                    (Some(LightForce.Hostile(outpost, "Trepidimous")))
+                    "the same body beside our anchor in an outpost, its shooter rooms away"
 
-                // A lean bucket (2026-10-05): an outpost's loiterer stops
-                // holding every tick full; home keeps every rule.
+                Expect.equal
+                    (LightTick.forced full (trepAt (tile 12 10)))
+                    (Some(LightForce.Hostile(room, "Trepidimous")))
+                    "the same body beside our digger at home"
+
+                // The lean stop-gaps (2026-10-05) are gone: a lean bucket
+                // reads the same invariant.
                 Expect.equal
                     (LightTick.forced
                         full
                         { trepAt (at outpost 12) with
                             Lean = true
                         })
-                    None
-                    "on a lean bucket the outpost's body forces nothing"
-
-                Expect.equal
-                    (LightTick.forced full { trepAt (tile 12 10) with Lean = true })
-                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
-                    "and home still decides"
-
-                // The armed rule reads home first; the room stays a full tick's.
-                Expect.equal
-                    (LightTick.forced full (trepAt (tile 12 10)))
-                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
-                    "the same body beside our digger at home"
-
-                Expect.equal
-                    (LightTick.forced
-                        { full with
-                            Loose = Set.ofList [ harassed; room ]
-                        }
-                        (trepAt (tile 12 10)))
-                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
-                    "a loose room passes the near rule over, never the armed one"
+                    (Some(LightForce.Hostile(outpost, "Trepidimous")))
+                    "a lean bucket alike"
 
                 let crossing =
                     { trepAt (at harassed 12) with
@@ -922,6 +944,7 @@ let forcedTests =
                                     Tile = at harassed 30
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                             |> Map.add
                                 "ranger"
@@ -929,6 +952,7 @@ let forcedTests =
                                     Tile = at harassed 32
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                     }
 
@@ -945,12 +969,12 @@ let forcedTests =
                                     }
                                 ]
                         })
-                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
-                    "a hauler crossing the harassment room beside a Trepidimous melee: our bodies there are not rangers alone"
+                    (Some(LightForce.Hostile(harassed, "Trepidimous")))
+                    "a hauler crossing the harassment room beside the Trepidimous melee our ranger shoots: it reaches a body that does not fight it"
             }
 
             test
-                "a harass ranger in a loose room shoots and heals itself again on a light tick, wherever it stepped" {
+                "a harass ranger shoots and heals itself again on a light tick, wherever it stepped" {
                 let harassed = "W3N1"
                 let at x = RoomPos.at harassed { X = x; Y = 10 }
 
@@ -964,22 +988,20 @@ let forcedTests =
                                     Tile = at x
                                     Hits = 500
                                     Inward = None
+                                    Heals = 0
                                 }
                     }
 
                 let full =
-                    { LightTick.lastFull
-                          (withRanger 10)
-                          Map.empty
-                          [
-                              RangedAttackCreep("ranger", "trep")
-                              HealCreep("ranger", "ranger")
-                              RangedAttackCreep("digger", "h")
-                              HealCreep("digger", "hauler")
-                          ] with
-                        Loose = Set.ofList [ harassed ]
-                        Rangers = Set.ofList [ "ranger" ]
-                    }
+                    LightTick.lastFull
+                        (withRanger 10)
+                        Map.empty
+                        [
+                            RangedAttackCreep("ranger", "trep")
+                            HealCreep("ranger", "ranger")
+                            RangedAttackCreep("digger", "h")
+                            HealCreep("digger", "hauler")
+                        ]
 
                 let replayed (glance: Glance) (record: LastFull) =
                     LightTick.intents record glance
@@ -1000,7 +1022,7 @@ let forcedTests =
                     }
 
                 // #529 took #520's replay into the one rule: every shot and
-                // heal whose target still stands, a loose room or not.
+                // heal whose target still stands.
                 Expect.equal
                     (replayed trepSeen full)
                     [
@@ -1009,87 +1031,6 @@ let forcedTests =
                         HealCreep("ranger", "ranger")
                     ]
                     "the shot and the self-heal a step off the tile they were decided on; the digger's heal on a hauler still standing, its shot at a body out of sight never"
-
-                Expect.equal
-                    (replayed trepSeen { full with Loose = Set.empty })
-                    (replayed trepSeen full)
-                    "outside a loose room alike"
-            }
-
-            test "the harass rangers are the bodies holding a harassment room's Guard" {
-                let roles: LightTick.RoomRoles =
-                    {
-                        Worked = Set.ofList [ "W1N1"; "W3N1"; "W4N1" ]
-                        Mined = Set.empty
-                        Harassed = Set.ofList [ "W3N1" ]
-                        Evacuating = Set.empty
-                        Assignments =
-                            Map.ofList
-                                [
-                                    "ranger", Decide.Facts.taskId (Guard "W3N1")
-                                    "guard", Decide.Facts.taskId (Guard "W4N1")
-                                    "digger", Decide.Facts.taskId (Harvest "src-a")
-                                ]
-                    }
-
-                Expect.equal
-                    (LightTick.harassRangers [ roles ])
-                    (Set.ofList [ "ranger" ])
-                    "the ranger alone"
-            }
-
-            test "a loose room is a harassment room no colony works for anything else" {
-                let roles home worked harassed : LightTick.RoomRoles =
-                    {
-                        Worked = Set.ofList (home :: worked @ harassed)
-                        Mined = Set.ofList worked
-                        Harassed = Set.ofList harassed
-                        Evacuating = Set.empty
-                        Assignments = Map.empty
-                    }
-
-                Expect.equal
-                    (LightTick.loose [ roles "W1N1" [ "W2N1" ] [ "W3N1" ] ])
-                    (Set.ofList [ "W3N1" ])
-                    "a room only harassed is loose"
-
-                Expect.isEmpty
-                    (LightTick.loose [ roles "W1N1" [ "W3N1" ] [ "W3N1" ] ])
-                    "a harassment room the colony also mines keeps the near rule"
-
-                Expect.isEmpty
-                    (LightTick.loose
-                        [
-                            roles "W1N1" [] [ "W3N1" ]
-                            { roles "W5N1" [] [] with
-                                Worked = Set.ofList [ "W5N1"; "W3N1" ]
-                            }
-                        ])
-                    "a harassment room another colony works (an errand there) keeps the near rule"
-
-                Expect.isEmpty
-                    (LightTick.loose
-                        [
-                            roles "W1N1" [] [ "W3N1" ]
-                            // W5N1's outpost, shut: out of its scan set.
-                            { roles "W5N1" [] [] with
-                                Mined = Set.ofList [ "W3N1" ]
-                            }
-                        ])
-                    "a harassment room any colony declares as an outpost keeps the near rule, shut or not"
-
-                Expect.isEmpty
-                    (LightTick.loose
-                        [
-                            { roles "W1N1" [] [ "W3N1" ] with
-                                Evacuating = Set.ofList [ "W3N1" ]
-                            }
-                        ])
-                    "an evacuating room keeps the near rule"
-
-                Expect.isEmpty
-                    (LightTick.loose [ roles "W1N1" [] [ "W3N1" ]; roles "W3N1" [] [] ])
-                    "a colony's home keeps the near rule"
             }
 
             test "an armed Source Keeper far from us forces nothing" {
@@ -1113,25 +1054,61 @@ let forcedTests =
                     "the harassment rooms hold one nearly every tick"
             }
 
-            test "any hostile within ranged range plus two of a creep of ours forces a full tick" {
-                let edge = Engine.rangedRange + 2
-
-                let near =
+            test
+                "a keeper a step and a swing off a creep of ours forces a full tick; one further, nothing" {
+                let keeperAt x =
                     { stepped with
-                        Hostiles = [ hostile (10 + edge) 10 "Source Keeper" true ]
-                    }
-
-                let far =
-                    { stepped with
-                        Hostiles = [ hostile (10 + edge + 1) 10 "Rival" false ]
+                        Hostiles = [ hostile x 10 "Source Keeper" true ]
                     }
 
                 Expect.equal
-                    (LightTick.forced last near)
-                    (Some(LightForce.HostileNear(room, "Source Keeper")))
+                    (LightTick.forced last (keeperAt 12))
+                    (Some(LightForce.Hostile(room, "Source Keeper")))
                     "a keeper that comes near"
 
-                Expect.equal (LightTick.forced last far) None "one tile further is not near"
+                Expect.equal
+                    (LightTick.forced last (keeperAt 13))
+                    None
+                    "one tile further is not near"
+            }
+
+            test
+                "a ranged body walking in forces on the tick it can shoot after a step, and again on the tick it can shoot, a lean bucket alike (#549 review)" {
+                // A flat ring keyed once per room read 5, 4 and 3 as one fact:
+                // the plan made at 5 never saw the shot at 3.
+                let shooterAt lean x =
+                    { stepped with
+                        Lean = lean
+                        Hostiles =
+                            [
+                                { hostile x 10 "Trepidimous" true with
+                                    Weapon = Some Engine.rangedRange
+                                }
+                            ]
+                    }
+
+                for lean in [ false; true ] do
+                    let at5 = shooterAt lean 15
+                    let at4 = shooterAt lean 14
+                    let at3 = shooterAt lean 13
+
+                    Expect.isEmpty
+                        (LightTick.forcing (LightTick.lastFull at5 Map.empty []) at5)
+                        $"lean {lean}: five off, out of a shot after a step"
+
+                    Expect.equal
+                        (LightTick.forced (LightTick.lastFull at5 Map.empty []) at4)
+                        (Some(LightForce.Hostile(room, "Trepidimous")))
+                        $"lean {lean}: four off, a shot after one step"
+
+                    Expect.equal
+                        (LightTick.forced (LightTick.lastFull at4 Map.empty []) at3)
+                        (Some(LightForce.Hostile(room, "Trepidimous")))
+                        $"lean {lean}: three off, a shot now, though the plan saw it a step away"
+
+                    Expect.isEmpty
+                        (LightTick.forcing (LightTick.lastFull at3 Map.empty []) at3)
+                        $"lean {lean}: the plan made at three accounts for it"
             }
 
             test
@@ -1140,7 +1117,7 @@ let forcedTests =
                     { stepped with
                         Hostiles =
                             [
-                                { hostile 33 33 "Rival" false with
+                                { hostile 32 32 "Rival" false with
                                     Breaks = breaks
                                 }
                             ]
@@ -1148,7 +1125,7 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.forced last (atTheSpawn true))
-                    (Some(LightForce.HostileNear(room, "Rival")))
+                    (Some(LightForce.Hostile(room, "Rival")))
                     "a WORK or CLAIM body at the gate"
 
                 Expect.equal
@@ -1157,10 +1134,11 @@ let forcedTests =
                     "a hauler at the gate takes nothing down"
             }
 
-            test "a stationary hostile is near within a step past its weapon's range" {
+            test
+                "a stationary hostile is near only within its weapon's range; a mobile one a step past it" {
                 // Live t964,5xx: Trepidimous' 14A1M sat 4 tiles from our hauler in
-                // W18S25 and held ~31% of ticks full (#521). No structure of ours
-                // in the room, so it is the near rule's and not the armed rule's.
+                // W18S25 and held ~31% of ticks full (#521). #549: a body as good
+                // as rooted strikes from where it stands, not after a step.
                 let bodyAt (weapons, part, moves) r =
                     let body = List.replicate weapons part @ List.replicate moves Move
 
@@ -1177,20 +1155,21 @@ let forcedTests =
 
                 let nearAt body r =
                     let forced = LightTick.forced last (bodyAt body r)
-                    forced = Some(LightForce.HostileNear(room, "Trepidimous"))
+                    forced = Some(LightForce.Hostile(room, "Trepidimous"))
 
                 let rootedSwing = 14, Attack, 1
                 let rootedShot = 14, RangedAttack, 1
 
-                Expect.isFalse (nearAt rootedSwing 3) "a rooted swing three tiles off"
-                Expect.isFalse (nearAt rootedSwing 4) "a rooted swing four tiles off"
-                Expect.isTrue (nearAt rootedSwing 2) "a rooted swing a step and a swing off"
-                Expect.isTrue (nearAt rootedShot 4) "a rooted shot a step and a shot off"
-                Expect.isFalse (nearAt rootedShot 5) "a rooted shot five tiles off"
+                Expect.isFalse (nearAt rootedSwing 2) "a rooted swing a step and a swing off"
+                Expect.isTrue (nearAt rootedSwing 1) "a rooted swing beside it"
+                Expect.isFalse (nearAt rootedShot 4) "a rooted shot a step and a shot off"
+                Expect.isTrue (nearAt rootedShot 3) "a rooted shot in range"
 
                 Expect.isTrue
-                    (nearAt (10, Attack, 10) 4)
-                    "a body at a MOVE a part keeps the usual reach"
+                    (nearAt (10, Attack, 10) 2)
+                    "a body at a MOVE a part: a step and a swing"
+
+                Expect.isFalse (nearAt (10, Attack, 10) 3) "and no further"
             }
 
             test "a MOVE-only hostile within range of our creep forces nothing" {
@@ -1229,7 +1208,7 @@ let forcedTests =
                     Expect.equal
                         (LightTick.forced last body)
                         (if hurts then
-                             Some(LightForce.HostileNear(room, "Mirroar"))
+                             Some(LightForce.Hostile(room, "Mirroar"))
                          else
                              None)
                         $"one %A{part} part beside a creep of ours"
@@ -1245,10 +1224,10 @@ let forcedTests =
                                     Tile = RoomPos.at "W2N1" { X = 10; Y = 10 }
                                     Owner = "Rival"
                                     Armed = true
+                                    Heals = false
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
-                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -1267,19 +1246,19 @@ let forcedTests =
                     ] do
                     let fought = LightTick.lastFull quiet Map.empty [ fight ]
 
-                    Expect.isTrue fought.Fought $"%A{fight} is a fight"
+                    Expect.isTrue (solo fought).Fought $"%A{fight} is a fight"
                     Expect.isEmpty (LightTick.intents fought quiet) $"%A{fight} is never replayed"
 
                     Expect.equal
                         (LightTick.forced fought quiet)
-                        (Some LightForce.Fought)
-                        $"%A{fight} forces the next tick full"
+                        (Some(LightForce.Fought ""))
+                        $"%A{fight} forces the next tick full, its colony's"
             }
 
             test
                 "a creep's shot or heal forces nothing on its own, and is replayed while its target stands" {
-                // A target still in reach forces the tick on the near rule;
-                // one dead or gone leaves nothing to decide.
+                // A target still in reach is the plan's fight; one dead or gone
+                // leaves nothing to decide.
                 let seen =
                     { quiet with
                         Hostiles =
@@ -1299,7 +1278,7 @@ let forcedTests =
                     ] do
                     let full = LightTick.lastFull quiet Map.empty [ shot ]
 
-                    Expect.isFalse full.Fought $"%A{shot} is no structure's fight"
+                    Expect.isFalse (solo full).Fought $"%A{shot} is no structure's fight"
                     Expect.equal (LightTick.forced full quiet) None $"%A{shot} forces nothing"
                     Expect.equal (LightTick.intents full seen) [ shot ] $"%A{shot} is replayed"
 
@@ -1312,19 +1291,32 @@ let forcedTests =
 
                     Expect.isEmpty (LightTick.intents full gone) $"%A{shot}: its target gone, never"
 
-                // And a hostile still within reach forces the tick all the same.
+                // #549: an armed target still beside its shooter is the plan's
+                // fight; an armed body the plan does not shoot, new beside it,
+                // is not.
                 let shooting =
-                    LightTick.lastFull quiet Map.empty [ RangedAttackCreep("digger", "h") ]
+                    LightTick.lastFull quiet Map.empty [ RangedAttackCreep("digger", "h-1") ]
 
                 let stillThere =
                     { quiet with
-                        Hostiles = [ hostile 12 12 "Enemy" false ]
+                        Hostiles = [ hostile 12 12 "Enemy" true ]
                     }
 
+                Expect.equal (LightTick.forced shooting stillThere) None "the target still near"
+
                 Expect.equal
-                    (LightTick.forced shooting stillThere)
-                    (Some(LightForce.HostileNear(room, "Enemy")))
-                    "the target still near is the near rule's"
+                    (LightTick.forced
+                        shooting
+                        { stillThere with
+                            Hostiles =
+                                [
+                                    { hostile 12 12 "Enemy" true with
+                                        Id = "h-2"
+                                    }
+                                ]
+                        })
+                    (Some(LightForce.Hostile(room, "Enemy")))
+                    "another body beside the shooter"
             }
 
             test "a creep born or gone since the full tick forces a full tick" {
@@ -1338,8 +1330,15 @@ let forcedTests =
                         Creeps = stepped.Creeps |> Map.remove "digger"
                     }
 
-                Expect.equal (LightTick.forced last born) (Some LightForce.CreepsChanged) "born"
-                Expect.equal (LightTick.forced last gone) (Some LightForce.CreepsChanged) "gone"
+                Expect.equal
+                    (LightTick.forced last born)
+                    (Some(LightForce.CreepsChanged [ "next" ]))
+                    "born"
+
+                Expect.equal
+                    (LightTick.forced last gone)
+                    (Some(LightForce.CreepsChanged [ "digger" ]))
+                    "gone"
             }
 
             test
@@ -1358,6 +1357,7 @@ let forcedTests =
                                         Tile = RoomPos.at "W2N1" { X = x; Y = y }
                                         Hits = 500
                                         Inward = None
+                                        Heals = 0
                                     }
                         }
 
@@ -1380,6 +1380,7 @@ let forcedTests =
                                     Tile = RoomPos.at "W2N1" { X = 0; Y = 20 }
                                     Hits = 500
                                     Inward = Some Right
+                                    Heals = 0
                                 }
                     }
 
@@ -1433,14 +1434,9 @@ let forcedTests =
 
             test "the CPU line's reason names the rule first, then where it fired" {
                 Expect.equal
-                    (LightTick.tag (LightForce.ArmedHostile("W17S26", "Trepidimous")))
-                    "armed W17S26 Trepidimous"
-                    "an armed hostile: the room and its owner"
-
-                Expect.equal
-                    (LightTick.tag (LightForce.HostileNear("W1N1", "Invader")))
-                    "near W1N1 Invader"
-                    "near"
+                    (LightTick.tag (LightForce.Hostile("W17S26", "Trepidimous")))
+                    "hostile W17S26 Trepidimous"
+                    "a hostile: the room and its owner"
 
                 Expect.equal
                     (LightTick.tag (LightForce.OnBorder "hauler"))
@@ -1457,15 +1453,19 @@ let forcedTests =
                     "controller W1N1"
                     "the room"
 
-                Expect.equal (LightTick.tag LightForce.Fought) "fought" "a fight names nobody"
+                Expect.equal
+                    (LightTick.tag (LightForce.Fought "W1N1"))
+                    "fought W1N1"
+                    "a fight names its colony"
 
                 Expect.equal
-                    (LightTick.tag LightForce.CreepsChanged)
+                    (LightTick.tag (LightForce.CreepsChanged [ "hauler" ]))
                     "creeps"
-                    "nor does the creep census"
+                    "the creep census names nobody"
             }
 
-            test "a creep that lost hits forces a full tick, and one healed does not" {
+            test
+                "a creep that lost hits to nothing in sight forces a full tick, and one healed does not" {
                 let hurt =
                     { stepped with
                         Creeps = stepped.Creeps |> Map.add "hauler" (creepAt 21 20 499)
@@ -1479,37 +1479,177 @@ let forcedTests =
                 Expect.equal
                     (LightTick.forced last hurt)
                     (Some(LightForce.HitsLost "hauler"))
-                    "hurt"
+                    "hurt by a tower or a body gone"
 
                 Expect.equal (LightTick.forced last healed) None "healed"
+            }
+
+            test
+                "a creep hurt by a body a striker of ours aims at and reaches, within the healing it gets, forces nothing; else a full tick" {
+                // #549 review: the plan's fight is accounted for only while it
+                // is fought from in reach and healed (#533's out-damaged test).
+                let medic = { creepAt 11 11 1000 with Heals = 2 }
+
+                let fighting =
+                    { quiet with
+                        Creeps =
+                            quiet.Creeps
+                            |> Map.add "guard" (creepAt 12 10 1000)
+                            |> Map.add "medic" medic
+                        Hostiles = [ hostile 13 10 "Trepidimous" true ]
+                    }
+
+                let full =
+                    LightTick.lastFull
+                        fighting
+                        Map.empty
+                        [ AttackCreep("guard", "h-1"); HealCreep("medic", "guard") ]
+
+                let lost hits =
+                    { fighting with
+                        Creeps = fighting.Creeps |> Map.add "guard" (creepAt 12 10 (1000 - hits))
+                    }
+
+                Expect.equal
+                    (LightTick.forced full (lost (2 * Engine.healPower)))
+                    None
+                    "struck back by its target, within the medic's heal"
+
+                Expect.equal
+                    (LightTick.forced full (lost (2 * Engine.healPower + 1)))
+                    (Some(LightForce.HitsLost "guard"))
+                    "out-damaged: a flight to decide"
+
+                Expect.equal
+                    (LightTick.forced
+                        full
+                        { lost 10 with
+                            Creeps = (lost 10).Creeps |> Map.add "guard" (creepAt 15 10 990)
+                        })
+                    (Some(LightForce.HitsLost "guard"))
+                    "its striker stepped out of reach of the target"
+
+                Expect.equal
+                    (LightTick.forced
+                        (LightTick.lastFull fighting Map.empty [ HealCreep("medic", "guard") ])
+                        (lost 10))
+                    (Some(LightForce.HitsLost "guard"))
+                    "struck by a body the plan only saw"
+            }
+
+            test
+                "a crippled melee our guard strikes forces nothing, its blows on the guard included (#549)" {
+                // User, 2026-10-06: W18S25's paralysed melee kept forcing full
+                // ticks while our guard beat it.
+                let cripple =
+                    { hostile 13 10 "Trepidimous" true with
+                        Gait = { Weight = 10; Moves = 0 }
+                    }
+
+                let beating =
+                    { quiet with
+                        Creeps =
+                            quiet.Creeps |> Map.add "guard" { creepAt 12 10 1000 with Heals = 1 }
+                        Hostiles = [ cripple ]
+                    }
+
+                let full =
+                    LightTick.lastFull
+                        beating
+                        Map.empty
+                        [ AttackCreep("guard", "h-1"); HealCreep("guard", "guard") ]
+                    |> aiming [ AttackCreep("guard", "h-1") ] Map.empty
+
+                let struck hits =
+                    { beating with
+                        Creeps =
+                            beating.Creeps
+                            |> Map.add
+                                "guard"
+                                { creepAt 12 10 (1000 - hits) with
+                                    Heals = 1
+                                }
+                    }
+
+                Expect.isEmpty
+                    (LightTick.forcing full (struck Engine.healPower))
+                    "the light tick swings again, its blows within the guard's heal"
+
+                Expect.equal
+                    (LightTick.forced full (struck 100))
+                    (Some(LightForce.HitsLost "guard"))
+                    "blows past the heal: the guard's colony decides"
+
+                let struck = struck Engine.healPower
+
+                Expect.contains
+                    (LightTick.intents full struck)
+                    (AttackCreep("guard", "h-1"))
+                    "and does"
+
+                Expect.isEmpty
+                    (LightTick.forcing
+                        (LightTick.lastFull { beating with Hostiles = [] } Map.empty [])
+                        { beating with
+                            Hostiles =
+                                [
+                                    { cripple with
+                                        Weapon = None
+                                        Armed = false
+                                    }
+                                ]
+                        })
+                    "disarmed, new beside the guard and struck by nothing, it reaches nothing at all"
+            }
+
+            test
+                "an armed raider the plan already saw in reach of a creep forces nothing the tick after" {
+                // Its reach unchanged since the plan: the plan accounted for it.
+                let raided =
+                    { stepped with
+                        Hostiles = [ hostile 23 20 "Invader" true ]
+                    }
+
+                let full = LightTick.lastFull raided Map.empty []
+
+                Expect.equal (LightTick.forced full raided) None "the same reach"
+
+                Expect.equal
+                    (LightTick.forced
+                        full
+                        { raided with
+                            Hostiles = [ hostile 12 10 "Invader" true ]
+                        })
+                    (Some(LightForce.Hostile(room, "Invader")))
+                    "come within a step and a swing of the digger it could not reach"
             }
 
             test "a controller whose level or safe mode changed forces a full tick" {
                 let levelled =
                     { stepped with
-                        Controllers = Map.ofList [ room, (6, false) ]
+                        Controllers = Map.ofList [ homeRoom, (6, false) ]
                     }
 
                 let safe =
                     { stepped with
-                        Controllers = Map.ofList [ room, (5, true) ]
+                        Controllers = Map.ofList [ homeRoom, (5, true) ]
                     }
 
                 let lost = { stepped with Controllers = Map.empty }
 
                 Expect.equal
                     (LightTick.forced last levelled)
-                    (Some(LightForce.ControllerChanged room))
+                    (Some(LightForce.ControllerChanged homeRoom))
                     "level"
 
                 Expect.equal
                     (LightTick.forced last safe)
-                    (Some(LightForce.ControllerChanged room))
+                    (Some(LightForce.ControllerChanged homeRoom))
                     "safe mode"
 
                 Expect.equal
                     (LightTick.forced last lost)
-                    (Some(LightForce.ControllerChanged room))
+                    (Some(LightForce.ControllerChanged homeRoom))
                     "lost"
             }
 
@@ -1522,9 +1662,14 @@ let forcedTests =
                     }
 
                 Expect.equal
-                    (LightTick.forced last everything)
-                    (Some(LightForce.ArmedHostile(room, "Invader")))
-                    "the armed hostile comes first"
+                    (LightTick.forcing last everything)
+                    [
+                        LightForce.Hostile(room, "Invader")
+                        LightForce.CreepsChanged [ "hauler" ]
+                        LightForce.HitsLost "digger"
+                        LightForce.ControllerChanged homeRoom
+                    ]
+                    "every fact, the hostile first"
             }
 
             test "a guard holding the exit a raid left by, with no hostile in reach, stays light" {
@@ -1557,10 +1702,10 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
         Tile = RoomPos.at roomName { X = x; Y = y }
         Owner = owner
         Armed = armed
+        Heals = false
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
-        Heals = false
         Hits = 1000
     }
 
@@ -1743,5 +1888,304 @@ let resetSplitTests =
                     (LightTick.forced deferring quiet)
                     (Some LightForce.Deferred)
                     "a quiet world still decides the deferred colonies"
+            }
+        ]
+
+/// Two colonies: W1N1 (and its outpost W2N1) holding the digger and the
+/// hauler, W3N1 (and W4N1) holding a miner standing in W4N1 and a ranger
+/// standing in W5N1, a room neither answers for.
+let private pair =
+    [ "W1N1", Set.ofList [ "W1N1"; "W2N1" ]; "W3N1", Set.ofList [ "W3N1"; "W4N1" ] ]
+
+let private split: Glance =
+    { quiet with
+        Objects = Set.add "src-b" quiet.Objects
+        Creeps =
+            quiet.Creeps
+            |> Map.add
+                "miner"
+                {
+                    Tile = RoomPos.at "W4N1" { X = 10; Y = 10 }
+                    Hits = 1000
+                    Inward = None
+                    Heals = 0
+                }
+            |> Map.add
+                "ranger"
+                {
+                    Tile = RoomPos.at "W5N1" { X = 10; Y = 10 }
+                    Hits = 500
+                    Inward = None
+                    Heals = 0
+                }
+    }
+
+let private holders =
+    Map.ofList [ "digger", "W1N1"; "hauler", "W1N1"; "miner", "W3N1"; "ranger", "W3N1" ]
+
+/// Each colony's plan off `split`: the digger harvesting and the hauler a
+/// step into a walk; the miner harvesting, the observer looking.
+let private planned: LastFull =
+    let planOf creeps steps intents =
+        LightTick.plan split (Set.ofList creeps) steps [] intents [] Map.empty
+
+    LightTick.ofPlans
+        split
+        Set.empty
+        [
+            "W1N1",
+            planOf
+                [ "digger"; "hauler" ]
+                (Map.ofList [ "hauler", (tile 20 20, tile 21 20) ])
+                [ HarvestSource("digger", "src-a") ]
+            "W3N1",
+            planOf
+                [ "miner"; "ranger" ]
+                Map.empty
+                [ HarvestSource("miner", "src-b"); ObserveRoom("obs-1", "W6N1") ]
+        ]
+
+[<Tests>]
+let decidersTests =
+    testList
+        "forced tick decides by colony"
+        [
+            test
+                "a hostile decides the colonies answering its room and those whose bodies stand there" {
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        split
+                        [ LightForce.Hostile("W2N1", "Invader") ])
+                    (Set.ofList [ "W1N1" ])
+                    "W1N1's outpost: W1N1 alone"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        split
+                        [ LightForce.Hostile("W5N1", "Invader") ])
+                    (Set.ofList [ "W3N1" ])
+                    "a room nobody answers for, where W3N1's ranger stands"
+            }
+
+            test "a creep's fact decides its holder, wherever it stands" {
+                Expect.equal
+                    (LightTick.deciders pair holders planned split [ LightForce.OnBorder "miner" ])
+                    (Set.ofList [ "W3N1" ])
+                    "the miner's colony"
+
+                let crossing =
+                    { split with
+                        Creeps =
+                            split.Creeps
+                            |> Map.add
+                                "miner"
+                                {
+                                    Tile = tile 15 15
+                                    Hits = 900
+                                    Inward = None
+                                    Heals = 0
+                                }
+                    }
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        crossing
+                        [ LightForce.HitsLost "miner" ])
+                    (Set.ofList [ "W3N1" ])
+                    "hurt crossing W1N1: its own colony decides its flight"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        (Map.remove "hauler" holders |> Map.add "next" "W3N1")
+                        planned
+                        split
+                        [ LightForce.CreepsChanged [ "hauler" ] ])
+                    (Set.ofList [ "W1N1" ])
+                    "a body gone: the colony whose plan held it"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        (Map.add "next" "W3N1" holders)
+                        planned
+                        split
+                        [ LightForce.CreepsChanged [ "next" ] ])
+                    (Set.ofList [ "W3N1" ])
+                    "a body born: its holder"
+            }
+
+            test
+                "a fight decides its colony; a fact no colony owns, everyone; a colony with no plan always decides" {
+                Expect.equal
+                    (LightTick.deciders pair holders planned split [ LightForce.Fought "W3N1" ])
+                    (Set.ofList [ "W3N1" ])
+                    "the colony whose tower fought"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        split
+                        [ LightForce.ControllerChanged "W9N9" ])
+                    (Set.ofList [ "W1N1"; "W3N1" ])
+                    "nobody's room: everyone"
+
+                Expect.equal
+                    (LightTick.deciders
+                        (pair @ [ "W7N1", Set.ofList [ "W7N1" ] ])
+                        holders
+                        planned
+                        split
+                        [ LightForce.Fought "W3N1" ])
+                    (Set.ofList [ "W3N1"; "W7N1" ])
+                    "W7N1 holds no plan"
+            }
+
+            test "a replayed colony issues its own plan for its own bodies, and its looks" {
+                Expect.equal
+                    (LightTick.replay (Set.ofList [ "W3N1" ]) holders planned split)
+                    [ HarvestSource("miner", "src-b"); ObserveRoom("obs-1", "W6N1") ]
+                    "the miner and the observer; nothing of W1N1's"
+
+                Expect.equal
+                    (LightTick.replay (Set.ofList [ "W1N1" ]) holders planned split)
+                    [ HarvestSource("digger", "src-a"); MoveCreep("hauler", Right) ]
+                    "W1N1's harvest and step"
+
+                Expect.equal
+                    (LightTick.replay
+                        (Set.ofList [ "W3N1" ])
+                        (Map.add "hauler" "W3N1" holders)
+                        planned
+                        split)
+                    [ HarvestSource("miner", "src-b"); ObserveRoom("obs-1", "W6N1") ]
+                    "a body W3N1 adopted whose plan was W1N1's stands"
+
+                Expect.equal
+                    (LightTick.intents planned split)
+                    [
+                        HarvestSource("digger", "src-a")
+                        MoveCreep("hauler", Right)
+                        HarvestSource("miner", "src-b")
+                        ObserveRoom("obs-1", "W6N1")
+                    ]
+                    "a light tick replays every plan"
+            }
+
+            test "a forced tick's fresh plan claims a body before the plan it carried" {
+                // A body a deciding colony adopted is that colony's alone: two
+                // plans replaying one body would lay two acts on its channels.
+                let fresh =
+                    LightTick.plan
+                        split
+                        (Set.ofList [ "hauler" ])
+                        Map.empty
+                        []
+                        [ PickupPile("hauler", "pile") ]
+                        []
+                        Map.empty
+
+                let carried = planned.Plans["W1N1"]
+                let record = LightTick.ofPlans split Set.empty [ "W3N1", fresh; "W1N1", carried ]
+
+                Expect.equal
+                    record.Plans["W1N1"].Creeps
+                    (Set.ofList [ "digger" ])
+                    "the carried plan less the hauler"
+
+                Expect.isEmpty record.Plans["W1N1"].Steps "and its step plan"
+
+                Expect.equal
+                    (LightTick.intents record split)
+                    [ HarvestSource("digger", "src-a"); PickupPile("hauler", "pile") ]
+                    "the hauler's pickup alone"
+            }
+        ]
+
+/// `stepped` with our controller in `room`: a home.
+let private atHome (hostiles: GlanceHostile list) : Glance =
+    { stepped with
+        Controllers = Map.ofList [ room, (5, false) ]
+        Hostiles = hostiles
+    }
+
+[<Tests>]
+let homeTests =
+    testList
+        "a raided home is never a tick late"
+        [
+            test
+                "a raider anywhere in a home forces every tick, the plan having seen it or not; its colony alone decides" {
+                // #549 review: a drain then a raze (Meow) and #545's razed
+                // economy are read on the tick they happen, at home.
+                let far = atHome [ hostile 45 45 "Trepidimous" true ]
+                let seen = LightTick.lastFull far Map.empty []
+
+                Expect.equal
+                    (LightTick.forced seen far)
+                    (Some(LightForce.Home(room, "Trepidimous")))
+                    "far across the home, already seen"
+
+                Expect.equal
+                    (LightTick.deciders
+                        [ room, Set.ofList [ room ]; "W3N1", Set.ofList [ "W3N1"; room ] ]
+                        Map.empty
+                        (LightTick.ofPlans
+                            far
+                            Set.empty
+                            [
+                                for home in [ room; "W3N1" ] ->
+                                    home, LightTick.plan far Set.empty Map.empty [] [] [] Map.empty
+                            ])
+                        far
+                        [ LightForce.Home(room, "Trepidimous") ])
+                    (Set.ofList [ room ])
+                    "the home's own colony, not a mother answering it too"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.Home(room, "Trepidimous")))
+                    "home W1N1 Trepidimous"
+                    "tagged"
+            }
+
+            test
+                "a healer forces at home; a keeper, an ally, a scout or a body under our safe mode does not" {
+                let healer =
+                    { hostile 45 45 "Trepidimous" false with
+                        Heals = true
+                    }
+
+                let quietHome glance =
+                    LightTick.forcing (LightTick.lastFull glance Map.empty []) glance
+                    |> List.filter (function
+                        | LightForce.Home _ -> true
+                        | _ -> false)
+
+                Expect.isNonEmpty (quietHome (atHome [ healer ])) "a raid's sustain"
+
+                Expect.isEmpty
+                    (quietHome (atHome [ hostile 45 45 "Source Keeper" true ]))
+                    "a keeper"
+
+                Expect.isEmpty (quietHome (atHome [ hostile 45 45 "Odiodin" true ])) "an ally"
+                Expect.isEmpty (quietHome (atHome [ hostile 45 45 "Mirroar" false ])) "a scout"
+
+                Expect.isEmpty
+                    (quietHome
+                        { atHome [ hostile 45 45 "Trepidimous" true ] with
+                            Controllers = Map.ofList [ room, (5, true) ]
+                        })
+                    "held off by our safe mode"
             }
         ]

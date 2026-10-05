@@ -4292,7 +4292,7 @@ function printCensusKeyed(classes) {
 // measurement: what a reader compares it against is the tick, and the gap
 // between the two is the projection, the Memory writes and the intents —
 // everything `decide` is not.
-function printDecideByColony(classes, decideMs, tickMs, lightMs, stages) {
+function printDecideByColony(classes, decideMs, tickMs, lightMs, stages, forcing) {
   const mean = (rows) =>
     rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0;
   console.log(
@@ -4341,6 +4341,15 @@ function printDecideByColony(classes, decideMs, tickMs, lightMs, stages) {
   console.log(
     `  light ticks: ${lightMs.length} of ${lightMs.length + tickMs.all.length}, ` +
       `mean ${mean(lightMs).toFixed(2)} ms (replayed, nothing decided)`,
+  );
+  // A forced full tick decides only the colonies its facts are theirs (#549)
+  // and replays the rest: the colony decides out of every full tick's whole.
+  console.log(
+    `  forced full ticks: ${forcing.forced} of ${tickMs.all.length} (${forcing.partial} partial); colony decides ` +
+      `${forcing.decides} of ${forcing.possible} (the rest replayed)` +
+      (forcing.reasons.size > 0
+        ? `; forced by ${[...forcing.reasons].map(([rule, n]) => `${rule} ${n}`).join(", ")}`
+        : ""),
   );
 }
 
@@ -5443,11 +5452,18 @@ const ticks = { all: [], perturbed: [], quiet: [] };
 // was is the bundle's own answer, off the row it wrote to its CPU line.
 const fullMs = { all: [], perturbed: [], quiet: [] };
 const lightMs = [];
-const wroteLight = () => {
+const wroteRow = () => {
   const rows = globalThis.Memory?.fabot?.observe?.cpu?.ticks;
   const last = Array.isArray(rows) ? rows[rows.length - 1] : undefined;
-  return last?.t === game.time && last.light === true;
+  return last?.t === game.time ? last : undefined;
 };
+const wroteLight = () => wroteRow()?.light === true;
+// The reason a forced full tick names (`LightTick.tag`), or undefined.
+const wroteForced = () => {
+  const forced = wroteRow()?.forced;
+  return typeof forced === "string" ? forced : undefined;
+};
+const forcing = { forced: 0, partial: 0, decides: 0, possible: 0, reasons: new Map() };
 for (let i = 0; i < TICKS; i++) {
   const moved = movesCensus();
   if (moved) world.perturb();
@@ -5470,11 +5486,27 @@ for (let i = 0; i < TICKS; i++) {
   // room this scenario furnished as an outpost and never as a colony, and
   // the two-colony mean under it would be over the wrong two colonies.
   const light = wroteLight();
+  const forced = light ? undefined : wroteForced();
   const decided = calls.map((call) => call.home).sort();
   const declared = light ? [] : [...world.colonies].sort();
+  // A forced full tick decides a subset of the declared colonies (#549); any
+  // other full tick decides every one.
+  const partialOk =
+    forced !== undefined && decided.every((home) => declared.includes(home));
+  if (!light) {
+    forcing.decides += decided.length;
+    forcing.possible += declared.length;
+    if (forced !== undefined) {
+      forcing.forced++;
+      if ((wroteRow()?.replayed ?? 0) > 0) forcing.partial++;
+      const rule = forced.split(" ")[0];
+      forcing.reasons.set(rule, (forcing.reasons.get(rule) ?? 0) + 1);
+    }
+  }
   if (
-    decided.length !== declared.length ||
-    decided.some((home, i) => home !== declared[i])
+    !partialOk &&
+    (decided.length !== declared.length ||
+      decided.some((home, i) => home !== declared[i]))
   ) {
     if (light) {
       throw new Error(
@@ -5529,7 +5561,7 @@ const classes = CENSUS_EVERY
   : [{ label: "all", ms: ticks.all.map((row) => row.ms), summary: pooled }];
 
 printReport(classes, pooled, world, ticks.all);
-printDecideByColony(classes, decideMs, fullMs, lightMs, stages);
+printDecideByColony(classes, decideMs, fullMs, lightMs, stages, forcing);
 printRaid(world);
 printSiege(world);
 printHeldRepair(heldRepair);

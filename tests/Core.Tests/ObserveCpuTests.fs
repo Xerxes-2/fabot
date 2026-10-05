@@ -78,15 +78,24 @@ let cpuSpanTests =
                         [
                             1,
                             { costing 30.0 with
-                                Forced = Some "border"
+                                Forced =
+                                    Some
+                                        {
+                                            Reason = "border"
+                                            Facts = 2
+                                            Replayed = 3
+                                        }
                             }
                             2, costing 30.0
                         ]
 
                 Expect.equal
-                    (state.Ticks |> List.map (fun sample -> sample.Tick, sample.Forced))
-                    [ 1, Some "border"; 2, None ]
-                    "the reason rides the row it forced"
+                    (state.Ticks
+                     |> List.map (fun sample ->
+                         sample.Tick,
+                         sample.Forced |> Option.map (fun f -> f.Reason, f.Facts, f.Replayed)))
+                    [ 1, Some("border", 2, 3); 2, None ]
+                    "the reason, its fact count and the colonies replayed ride the row it forced"
             }
 
             test "a span carries the worst tick of its window, not its mean" {

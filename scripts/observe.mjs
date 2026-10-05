@@ -328,6 +328,11 @@ const cadence = (ticks) => {
   const mean = (rows) => rows.reduce((sum, row) => sum + row.ms, 0) / rows.length;
   const lights = ticks.filter((row) => row.light === true);
   const fulls = ticks.filter((row) => row.light !== true);
+  // A forced tick that replayed colonies decided only some (#549): its own
+  // population, so the whole full tick's mean is not diluted by it.
+  const isPartial = (row) => typeof row.replayed === "number" && row.replayed > 0;
+  const partials = fulls.filter(isPartial);
+  const wholes = fulls.filter((row) => !isPartial(row));
   // A reason is the rule's word, then where it fired ("armed W17S26
   // Trepidimous", "border hauler-…"); rows written before the detail carry
   // the word alone. Tallied per rule, with its three commonest places.
@@ -337,6 +342,11 @@ const cadence = (ticks) => {
     const [rule, ...rest] = row.forced.split(" ");
     const entry = (reasons[rule] ??= { n: 0, where: {} });
     entry.n++;
+    // The facts beyond the first (`facts`), tallied apart: the row names one.
+    if (typeof row.facts === "number" && row.facts > 1) {
+      const more = (reasons["+facts"] ??= { n: 0, where: {} });
+      more.n += row.facts - 1;
+    }
     if (rest.length > 0) entry.where[rest.join(" ")] = (entry.where[rest.join(" ")] ?? 0) + 1;
   }
   const ranked = Object.entries(reasons)
@@ -352,7 +362,9 @@ const cadence = (ticks) => {
     max: ticks.length > 0 ? Math.max(...ticks.map((row) => row.ms)) : NaN,
     fulls: fulls.length,
     lights: lights.length,
-    fullMean: fulls.length > 0 ? `${mean(fulls).toFixed(2)} ms` : "—",
+    fullMean: wholes.length > 0 ? `${mean(wholes).toFixed(2)} ms` : "—",
+    partials: partials.length,
+    partialMean: partials.length > 0 ? `${mean(partials).toFixed(2)} ms` : "—",
     lightMean: lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—",
     forced: ranked.join("; "),
   };
@@ -655,7 +667,8 @@ if (command === "console") {
     const flag = c.mean > MEAN_MS || c.max > TICK_MS ? "  !" : "";
     console.log(
       `cpu      mean ${c.mean.toFixed(1)} ms over ${cpuRows.length} ticks, max ${c.max.toFixed(1)}` +
-        ` · full ${c.fulls} at ${c.fullMean} · light ${c.lights} at ${c.lightMean}` +
+        ` · full ${c.fulls - c.partials} at ${c.fullMean} · partial ${c.partials} at ${c.partialMean}` +
+        ` · light ${c.lights} at ${c.lightMean}` +
         (typeof lastRow.bucket === "number" ? ` · bucket ${lastRow.bucket}` : "") +
         flag,
     );
@@ -2629,9 +2642,10 @@ if (command === "console") {
     // The cadence's two halves; the trigger line below still reads every
     // tick, because the mean is what the bucket pays.
     {
-      const { fulls, lights, fullMean, lightMean, forced } = cadence(ticks);
+      const { fulls, partials, lights, fullMean, partialMean, lightMean, forced } = cadence(ticks);
       console.log(
-        `full ticks: ${fulls}, mean ${fullMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
+        `full ticks: ${fulls - partials}, mean ${fullMean}  ·  partial (forced, some colonies replayed): ` +
+          `${partials}, mean ${partialMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
       if (forced) console.log(`  forced full: ${forced}`);
       console.log("");

@@ -167,11 +167,12 @@ do
                         ]
             ]
 
-// The last full tick's record and the tick it was taken on, on the heap: a
-// reset empties it and the next tick is full.
+// The plans' record and the tick every colony last decided on together (the
+// cadence's), on the heap: a reset empties it and the next tick is full.
 let mutable private lastFull: (int * LightTick.LastFull) option = None
 
-// Light ticks since the last full one (0 on a full tick).
+// Ticks since the cadence's full one that replayed a plan (0 on it): light
+// ticks, and forced ticks that carried a colony (#549).
 let mutable private lightRun = 0
 
 // Full ticks run since the reset: the replan turn counts these, not
@@ -204,6 +205,10 @@ let private glance () : LightTick.Glance =
                         LightTick.inward
                             (World.groundWalkableAt c.room.name)
                             { X = c.pos.x; Y = c.pos.y }
+                    Heals =
+                        c.body
+                        |> Array.sumBy (fun part ->
+                            if part.``type`` = "heal" && part.hits > 0 then 1 else 0)
                 }
                 : LightTick.GlanceCreep))
             |> Fresh.mapOfArray
@@ -260,8 +265,7 @@ let private glance () : LightTick.Glance =
             | None -> []
             | Some(_, last) ->
                 [
-                    for room in
-                        last.Volleys |> Map.values |> Seq.map (fun v -> v.Room) |> Seq.distinct do
+                    for room in LightTick.volleyRooms last do
                         let seen = objectItem<IRoom> Game.rooms room
 
                         if not (isNull (box seen)) then
@@ -390,12 +394,14 @@ let private harassment: Harassment =
 
 /// The full tick: the World, every colony's view and decision, the observe
 /// folds and every Memory leaf, and the record the light tick after it
-/// replays.
+/// replays. `forcedBy`, a would-be light tick's cadence tick, record and the
+/// facts that forced it: only their colonies decide, the rest replay
+/// (`LightTick.deciders`). True when a colony was replayed.
 let private fullTick
     (atEntry: float)
     (seen: LightTick.Glance option)
-    (forced: LightTick.LightForce option)
-    =
+    (forcedBy: (int * LightTick.LastFull * LightTick.LightForce list) option)
+    : bool =
     // The world danger log's rooms, read once a tick off Memory as each
     // colony's own log is: every colony's gate stands on them. Absent, the
     // load migrates the colonies' legacy keys, which this tick's writes drop.
@@ -561,15 +567,42 @@ let private fullTick
     // asks this shell for a census signature that is the decision layer's own.
     // A colony that needs no re-plan passes its turn; one colony alone is
     // always its own turn, so a one-colony world is unchanged. The count is
-    // of full ticks (`fullTicks`): a light tick decides nothing.
+    // of full ticks the turn's colony decided on (`fullTicks`): a light tick
+    // decides nothing, and a colony a forced tick replays keeps its turn.
     //
     // The reset tick itself is nobody's turn (#442): every memo is empty, every
     // colony prices from empty tables under a cold bundle, and the one
     // re-plan on top of that read 496 ms. Each colony serves
     // `PlanMemo.deferred` for that tick, and the turns start on the next.
     let resetTick = Map.isEmpty planMemos
+
+    // Each colony with the rooms it answers for, as the reset split and the
+    // forced tick's deciders read them.
+    let answering () =
+        views
+        |> List.map (fun (colony, view) ->
+            colony.Home,
+            view.Spatial.Rooms
+            |> Map.keys
+            |> Set.ofSeq
+            |> Set.union (Colony.declaredRooms colony))
+
+    // A forced tick decides the colonies its facts are theirs (#549); the
+    // others replay their plans as a light tick would, issue nothing else and
+    // keep every Memory leaf they own as written. The cadence bounds them: a
+    // colony is replayed only on a tick the light cadence would replay it.
+    let replaying =
+        match forcedBy, seen with
+        | Some(_, last, reasons), Some seen when not resetTick ->
+            let deciding = LightTick.deciders (answering ()) holders last seen reasons
+
+            views
+            |> List.map (fun (colony, _) -> colony.Home)
+            |> List.filter (fun home -> not (Set.contains home deciding))
+            |> Set.ofList
+        | _ -> Set.empty
+
     let counted = fullTicks
-    fullTicks <- fullTicks + 1
 
     let turn =
         if List.isEmpty views || resetTick then
@@ -577,19 +610,23 @@ let private fullTick
         else
             counted % List.length views
 
+    let turnWaits =
+        views
+        |> List.tryItem turn
+        |> Option.exists (fun (colony, _) -> Set.contains colony.Home replaying)
+
+    if not turnWaits then
+        fullTicks <- fullTicks + 1
+
+    let turn = if turnWaits then -1 else turn
+
     // Nor does the reset tick decide every colony (#488): the threatened ones
     // and the rest up to `ResetFirstShare` decide, and the others issue
     // nothing, keep every Memory leaf they own as written, and decide on the
     // next tick, which `LastFull.Deferred` makes full.
     let waiting =
         if resetTick then
-            views
-            |> List.map (fun (colony, view) ->
-                colony.Home,
-                view.Spatial.Rooms
-                |> Map.keys
-                |> Set.ofSeq
-                |> Set.union (Colony.declaredRooms colony))
+            answering ()
             |> LightTick.resetSplit
                 Tuning.defaults.ResetFirstShare
                 (seen |> Option.defaultWith glance)
@@ -598,6 +635,9 @@ let private fullTick
             |> Set.ofList
         else
             Set.empty
+
+    // Every colony that does not decide this tick.
+    let idle = Set.union waiting replaying
 
     // The decision is bound and then tupled, and the turn is a DU
     // (`ReplanTurn`), because the first shape shipped broken: as an expression
@@ -609,7 +649,7 @@ let private fullTick
     let decisions =
         views
         |> List.indexed
-        |> List.filter (fun (_, (colony, _)) -> not (Set.contains colony.Home waiting))
+        |> List.filter (fun (_, (colony, _)) -> not (Set.contains colony.Home idle))
         |> List.map (fun (index, (colony, view)) ->
             let memo = Map.tryFind colony.Home planMemos
 
@@ -632,6 +672,20 @@ let private fullTick
     // arbitrated once per room.
     let moveIntents, moveVerdicts =
         resolveRooms (decisions |> List.map (fun (_, _, decision, _, _) -> decision.Movement))
+
+    // The replayed colonies' acts and steps, off the glance as a light tick
+    // reads it, the objects their acts name looked up.
+    let replayed =
+        match forcedBy, seen with
+        | Some(_, last, _), Some seen when not (Set.isEmpty replaying) ->
+            LightTick.replay
+                replaying
+                holders
+                last
+                { seen with
+                    Objects = standingOf (LightTick.only replaying last)
+                }
+        | _ -> []
 
     // The decision boundary; the two Memory reads above are inside it, being
     // `decide`'s arguments.
@@ -674,9 +728,13 @@ let private fullTick
 
     let replans = List.length moved
 
+    // A replayed colony keeps its memo for the tick it decides on.
     planMemos <-
-        decisions
-        |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo)
+        (planMemos
+         |> Map.filter (fun home _ -> Set.contains home replaying)
+         |> Map.toList)
+        @ (decisions
+           |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo))
         // Not `Map.ofList` here (#401): its comparer would keep this tick's
         // `decisions`, views and Atlases alive until the next tick's memos.
         |> Fresh.mapOfList
@@ -726,11 +784,11 @@ let private fullTick
 
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state. The colonies' answers are
-    // disjoint, so the union is the whole map; a waiting colony's creeps keep
+    // disjoint, so the union is the whole map; an idle colony's creeps keep
     // the Tasks they were read with.
     let kept =
         views
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home waiting)
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
         |> List.collect (fun (_, view) ->
             view.Creeps
             |> List.choose (fun creep ->
@@ -744,11 +802,11 @@ let private fullTick
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
     )
 
-    // The draw record (#530) on the same terms: a waiting colony's creeps keep
+    // The draw record (#530) on the same terms: an idle colony's creeps keep
     // what they were read with.
     let keptDrawn =
         views
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home waiting)
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
         |> List.collect (fun (_, view) ->
             view.Creeps
             |> List.choose (fun creep ->
@@ -879,64 +937,59 @@ let private fullTick
     // the `Game.creeps` sweep as well as the writes.
     let atSave = Game.cpu.getUsed ()
 
-    let executionPlan =
-        (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
-        @ moveIntents
-        |> firstActivationOnly
+    let planOf intents =
+        intents
         |> Fabot.Core.IntentPlan.create
         |> function
             | Ok plan -> plan
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
-    let accepted = Executor.run executionPlan |> acceptedOf
+    let decided =
+        (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
+        @ moveIntents
+        |> firstActivationOnly
 
-    // The record the next tick replays if it is light: where each creep stood
-    // as this tick began, what every colony issued, and the step plans.
-    // None with the cadence off (`Tuning.LightTicks`): no glance was taken.
+    // The replayed colonies' acts on the channels the deciding ones leave
+    // free, run as a light tick runs them: a refusal the replay expects is
+    // not news.
+    let accepted =
+        (Executor.run (planOf decided) |> acceptedOf)
+        + (Executor.runQuiet (planOf (Fabot.Core.IntentPlan.beside decided replayed))
+           |> acceptedOf)
+
+    // The record the next tick replays: each deciding colony's plan off the
+    // glance this tick began with, then each replayed colony's carried
+    // whole. None with the cadence off (`Tuning.LightTicks`): no glance was
+    // taken.
     lastFull <-
         seen
         |> Option.map (fun seen ->
-            let record =
-                LightTick.lastFullWith
-                    seen
-                    (decisions
-                     |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Steps)
-                     |> Fresh.mapOfSeq)
-                    (decisions
-                     |> Seq.collect (fun (_, _, decision, _, _) -> decision.Next)
-                     |> List.ofSeq)
-                    (executionPlan |> Fabot.Core.IntentPlan.intents)
-
-            // A colony the reset tick deferred holds no Assignments this tick.
-            let assigned =
+            let fresh =
                 decisions
-                |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Assignments)
-                |> Map.ofList
+                |> List.map (fun (colony, view, decision, _, _) ->
+                    colony.Home,
+                    LightTick.plan
+                        seen
+                        (view.Creeps |> List.map _.Name |> Set.ofList)
+                        decision.Steps
+                        decision.Next
+                        decision.Intents
+                        decision.Aims
+                        decision.Volleys)
 
-            let roles =
-                views
-                |> List.map (fun (colony, view) ->
-                    ({
-                        Worked = (view.Spatial.Rooms |> Map.keys |> Set.ofSeq) - view.Crossed
-                        Mined = view.MinedRooms
-                        Harassed = view.HarassCast
-                        Evacuating = view.Evacuating
-                        Assignments =
-                            Map.tryFind colony.Home assigned |> Option.defaultValue Map.empty
-                    }
-                    : LightTick.RoomRoles))
+            // A forced tick that replayed colonies leaves the cadence where
+            // it was: the next full tick on it decides them.
+            let cadence, carried =
+                match forcedBy with
+                | Some(tick, last, _) when not (Set.isEmpty replaying) ->
+                    tick,
+                    replaying
+                    |> Set.toList
+                    |> List.choose (fun home ->
+                        Map.tryFind home last.Plans |> Option.map (fun plan -> home, plan))
+                | _ -> Game.time, []
 
-            Game.time,
-            { record with
-                Deferred = Fresh.setOfSeq waiting
-                Loose = LightTick.loose roles
-                Rangers = LightTick.harassRangers roles
-                Aims = decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Aims)
-                Volleys =
-                    decisions
-                    |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Volleys)
-                    |> Fresh.mapOfSeq
-            })
+            cadence, LightTick.ofPlans seen waiting (fresh @ carried))
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it
     // back. The tick's total is the last reading, after the Executor, because
@@ -966,9 +1019,21 @@ let private fullTick
             AtProjects = atProjects
             ColonyProjects = List.rev projectedAt
             Light = false
-            Forced = forced |> Option.map LightTick.tag
+            Forced =
+                forcedBy
+                |> Option.bind (fun (_, _, reasons) ->
+                    List.tryHead reasons
+                    |> Option.map (fun first ->
+                        ({
+                            Reason = LightTick.tag first
+                            Facts = List.length reasons
+                            Replayed = Set.count replaying
+                        }
+                        : Observe.Forcing)))
             Moved = moved
         }
+
+    not (Set.isEmpty replaying)
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every tick.
 let loop () =
@@ -988,7 +1053,7 @@ let loop () =
     // the replay would be wrong. With the cadence off no glance is taken at
     // all, so the flag gives back today's tick and its cost exactly.
     if not Tuning.defaults.LightTicks then
-        fullTick atEntry None None
+        fullTick atEntry None None |> ignore
     else
         let seen = glance ()
 
@@ -998,15 +1063,20 @@ let loop () =
         let replayable tick =
             tick = Game.time - 1 || (seen.Lean && tick = Game.time - 2 && lightRun = 1)
 
+        // A forced tick that replayed colonies counts toward the cadence as a
+        // light one: the full tick after it decides every colony (#549).
         match lastFull with
         | Some(tick, last) when replayable tick ->
-            match LightTick.forced last seen with
-            | None ->
+            match LightTick.forcing last seen with
+            | [] ->
                 lightRun <- lightRun + 1
                 lightTick atEntry last { seen with Objects = standingOf last }
-            | forced ->
-                lightRun <- 0
-                fullTick atEntry (Some seen) forced
+            | reasons ->
+                lightRun <-
+                    if fullTick atEntry (Some seen) (Some(tick, last, reasons)) then
+                        lightRun + 1
+                    else
+                        0
         | _ ->
             lightRun <- 0
-            fullTick atEntry (Some seen) None
+            fullTick atEntry (Some seen) None |> ignore
