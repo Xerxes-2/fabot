@@ -1211,21 +1211,278 @@ let private allowanceCeiling =
 /// roads and nobody upgrades.
 let private placesRoads (view: ColonyView) = isIndependent view
 
+/// What one outpost road tile is worth over `Tuning.RoadPayback`, in energy:
+/// the loaded hauler ticks it saves at the source's rate, each worth the
+/// hauler block's cost over its life per unit it carries, less the tile's
+/// upkeep and, unbuilt, its build. Plain saves the `[C, C, M]` block one tick
+/// loaded and swamp nine. The upkeep is the decay timer running down by
+/// itself and the haul's wear on it: two passes a trip (loaded and back)
+/// at the rate over one body's load, each `Engine.roadWearout` timer ticks a
+/// part. Per block the parts and the load scale together, so the wear is the
+/// same whatever size of hauler is cast.
+let private roadTileWorth (tuning: Tuning) (rate: int) (swamp: bool) (built: bool) : float =
+    let block = haulerPattern.Block
+    let moves = partCountIn block Move
+
+    let loaded: Gait =
+        {
+            Weight = List.length block - moves
+            Moves = moves
+        }
+
+    let ground = if swamp then Engine.swampWeight else Gait.plain
+
+    let saved =
+        match Gait.ticks ground loaded, Gait.ticks Gait.road loaded with
+        | Some bare, Some paved -> bare - paved
+        | _ -> 0
+
+    let tickValue =
+        float (bodyCost block) / float (Engine.creepLifetime * carryCapacityOf block)
+
+    let ratio = if swamp then Engine.roadSwampRatio else 1
+
+    // Timer ticks the tile loses a tick: its own one, and the haul's.
+    let wear =
+        2.0 * float rate / float (carryCapacityOf block)
+        * float (List.length block * Engine.roadWearout)
+
+    let decay =
+        (1.0 + wear) * float (Engine.roadDecayAmount * ratio)
+        / float (Engine.roadDecayTime * Engine.repairHitsPerEnergy)
+
+    let build = if built then 0 else Engine.roadBuildCost * ratio
+
+    (float rate * float saved * tickValue - decay) * float tuning.RoadPayback
+    - float build
+
+/// ADR-0087
+/// Each outpost source's road: from `drops` to a tile beside the source's
+/// container, the cheapest of the fighter chains (`Atlas.roadAlong`) priced
+/// around `avoid` with every road already standing, pending or planned at a
+/// road's 1, so a hand road is followed and two outposts share. Kept where it
+/// pays (`roadTileWorth` summed over the tiles in rooms the colony works, at
+/// the rate the reserver row holds), placed there from home outward up to
+/// `Tuning.OutpostRoadSites` pending while the home is not `building`, never
+/// on a tile `homeRoads` (the home's own rule) or `homeTaken` holds.
+let private planOutpostRoads
+    (view: ColonyView)
+    atlas
+    (home: string)
+    (avoid: Set<RoomPos>)
+    (homeRoads: Set<Pos>)
+    (homeTaken: Set<Pos>)
+    (building: bool)
+    (drops: RoomPos list)
+    : Intent list * OutpostRoad list * Set<RoomPos> =
+    let outposts =
+        view.Sources
+        |> List.sortBy (fun s -> s.Id)
+        |> List.choose (fun s ->
+            match Atlas.positionOf atlas s.Id with
+            | Some tile when
+                tile.Room <> home
+                && not (List.contains tile.Room view.Borrowed.Rooms)
+                && not (Set.contains tile.Room view.Crossed)
+                ->
+                Some(s.Id, tile)
+            | _ -> None)
+
+    let mined = outposts |> List.map (fun (_, tile) -> tile.Room) |> Set.ofList
+
+    // A room whose sites and hits the colony carries this tick, and whose
+    // controller nobody else holds: the engine refuses a site under another's
+    // reservation (#334).
+    let worked room =
+        room = home
+        || Set.contains room mined
+           && Map.tryFind room view.RoomControl
+              |> Option.exists (RoomControlInfo.heldByOther >> Option.isNone)
+
+    // The rate the reserver row holds a room at (#515), not this tick's.
+    let reservable = reservableRoomsOf view
+
+    // A census of one room read once, however many tiles ask it.
+    let perRoom (census: string -> Set<Pos>) =
+        let byRoom = System.Collections.Generic.Dictionary<string, Set<Pos>>()
+
+        fun room ->
+            match byRoom.TryGetValue room with
+            | true, tiles -> tiles
+            | _ ->
+                let tiles = census room
+                byRoom.[room] <- tiles
+                tiles
+
+    let pendingIn = perRoom (Atlas.pendingRoadTilesIn atlas)
+
+    // A site of another kind, ours or a rival's, or a container's.
+    let collidingIn =
+        perRoom (fun room ->
+            Set.union
+                (Atlas.collidingSiteTilesIn atlas room)
+                (Atlas.pendingContainerTilesIn atlas room))
+
+    let standing (tile: RoomPos) =
+        Set.contains (RoomPos.pos tile) (Atlas.roadTilesIn atlas tile.Room)
+
+    let pending (tile: RoomPos) =
+        Set.contains (RoomPos.pos tile) (pendingIn tile.Room)
+
+    let record sourceId room state (path: RoomPos list) =
+        {
+            Source = sourceId
+            Room = room
+            State = state
+            Tiles = List.length path
+            Standing = path |> List.filter standing |> List.length
+            Pending = path |> List.filter pending |> List.length
+            Skipped = path |> List.filter (fun tile -> not (worked tile.Room)) |> List.length
+        }
+
+    // Every road already standing or pending on the chains' rooms prices as
+    // paved; what each planned road adds is paved for the next.
+    let alreadyPaved =
+        outposts
+        |> List.collect (fun (_, tile) -> Atlas.routesFor atlas Atlas.Walker.Bold home tile.Room)
+        |> List.concat
+        |> List.distinct
+        |> List.collect (fun room ->
+            Set.union (Atlas.roadTilesIn atlas room) (pendingIn room)
+            |> Set.toList
+            |> List.map (RoomPos.at room))
+        |> Set.ofList
+        |> Set.union (RoomPos.setAt home homeRoads)
+
+    let _, records, planned =
+        ((alreadyPaved, [], []), outposts)
+        ||> List.fold (fun (paved, records, planned) (sourceId, source) ->
+            let room = source.Room
+
+            let container =
+                Atlas.containerCensusIn atlas room
+                |> Set.filter (servesSource (RoomPos.pos source))
+                |> Set.toList
+                |> cheapest (fun _ -> 0) id
+
+            match container, sourceRateOf view atlas sourceId with
+            | None, _ ->
+                paved, record sourceId room OutpostRoadState.NoContainer [] :: records, planned
+            | Some _, None ->
+                paved, record sourceId room OutpostRoadState.Dark [] :: records, planned
+            | Some container, Some seen ->
+                let rate =
+                    reservableRateOf view atlas reservable sourceId |> Option.defaultValue seen
+
+                let goals =
+                    Atlas.adjacentWalkableIn atlas room container
+                    |> List.map (RoomPos.at room)
+                    |> Set.ofList
+
+                // The cheapest chain, the first on a tie.
+                let best =
+                    Atlas.routesFor atlas Atlas.Walker.Bold home room
+                    |> List.choose (fun chain ->
+                        Atlas.roadAlong atlas avoid paved drops chain goals)
+                    |> List.fold
+                        (fun best (cost, path) ->
+                            match best with
+                            | Some(least, _) when least <= cost -> best
+                            | _ -> Some(cost, path))
+                        None
+
+                match best with
+                | None ->
+                    paved, record sourceId room OutpostRoadState.Unrouted [] :: records, planned
+                | Some(_, path) ->
+                    let worth =
+                        path
+                        |> List.filter (fun tile -> worked tile.Room)
+                        |> List.sumBy (fun tile ->
+                            roadTileWorth
+                                view.Tuning
+                                rate
+                                (Atlas.isSwampIn atlas tile.Room (RoomPos.pos tile))
+                                (standing tile))
+
+                    if worth >= 0.0 then
+                        Set.union paved (Set.ofList path),
+                        record sourceId room OutpostRoadState.Planned path :: records,
+                        path :: planned
+                    else
+                        paved,
+                        record sourceId room OutpostRoadState.Unpaid path :: records,
+                        planned)
+
+    let records = List.rev records
+    let tiles = planned |> List.rev |> List.concat |> List.distinct
+
+    // The tiles a site of this rule would go down on, in walking order from
+    // home outward.
+    let ours =
+        tiles
+        |> List.filter (fun tile ->
+            worked tile.Room
+            && not (
+                tile.Room = home
+                && (Set.contains (RoomPos.pos tile) homeRoads
+                    || Set.contains (RoomPos.pos tile) homeTaken)
+            ))
+
+    // Every flood the plan asked for is in the table now; the rest go.
+    Atlas.sweepRoadFloods atlas
+
+    // The home's build first (#526): no new outpost road site while an
+    // extension, the Storage or a tower stands as a site at home or goes down
+    // this tick. And never past the player's ceiling: every colony's sites
+    // share the engine's one cap, and a level-up asks for a dozen at once.
+    let sites =
+        if placesRoads view && not building then
+            // Off `tiles` and not `ours`: a pending road site is in
+            // `homeTaken`, so the home stretch's own would drop out of `ours`.
+            let held =
+                tiles
+                |> List.filter (fun tile ->
+                    worked tile.Room
+                    && pending tile
+                    && not (tile.Room = home && Set.contains (RoomPos.pos tile) homeRoads))
+                |> List.length
+
+            let room =
+                min
+                    (view.Tuning.OutpostRoadSites - held)
+                    (view.Tuning.OutpostRoadSiteCeiling - view.PlayerSites)
+
+            ours
+            |> List.filter (fun tile ->
+                not (standing tile)
+                && not (pending tile)
+                && not (Set.contains (RoomPos.pos tile) (collidingIn tile.Room)))
+            |> List.truncate (max 0 room)
+            |> List.map (fun tile -> PlaceConstructionSite(tile, Road))
+        else
+            []
+
+    sites, records, Set.ofList tiles
+
 /// Colony-level planning step beside the Planner/Matcher pipeline: the
 /// deterministic Layout (ADR-0011), computed whole from the Atlas every tick
 /// and placed all at once — no persisted plan, no pacing. One ordering rule
 /// seats every clustered structure, the working ground excluded (ADR-0022);
 /// trunk roads route around the reservation, which the Link footing count
 /// widens (ADR-0027); a rampart covers every standing Keep structure and Post
-/// container (ADR-0034), a rampart being no footprint at all.
-let internal planLayout
+/// container (ADR-0034), a rampart being no footprint at all. The last item,
+/// the outpost roads' planned tiles, is the tests' alone: the memo keeps none.
+let planLayout
     (view: ColonyView)
     atlas
     : Intent list *
       ServedFooting list *
       UnservedFooting list *
       UnroutedTrunk list *
-      DeferredContainer list
+      DeferredContainer list *
+      OutpostRoad list *
+      Set<RoomPos>
     =
     let home = Atlas.homeRoom atlas
 
@@ -1785,32 +2042,73 @@ let internal planLayout
                 covered
                 (Set.union (Atlas.rampartTilesIn atlas room) (Atlas.collidingSiteTilesIn atlas room))
 
+        // The outpost roads leave from the Storage, standing, pending or
+        // picked (held from level 0), or the oldest spawn beside it, whichever
+        // the line leaves more cheaply: a Storage boxed in by extensions would
+        // leave none. They dodge the reservation and the footings, and give
+        // way to every other home site this tick.
+        let drops =
+            (Set.union (Atlas.storageTilesIn atlas room) (Atlas.pendingStorageTilesIn atlas room)
+             |> Set.toList
+             |> List.truncate 1)
+            @ storagePick
+            @ [ spawnPos ]
+            |> List.truncate 2
+            |> List.map (RoomPos.at room)
+
+        let storageSites =
+            storagePick |> List.truncate (gapAt BuiltKind.Storage controller.Level)
+
+        let towerSites =
+            towerTiles |> List.truncate (gapAt BuiltKind.Tower controller.Level)
+
+        let extensionSites =
+            extensionTiles |> List.truncate (gapAt BuiltKind.Extension controller.Level)
+
+        let outpostRoadSites, outpostRoads, plannedRoads =
+            planOutpostRoads
+                view
+                atlas
+                room
+                (Set.union reservedTiles (RoomPos.setAt room footingTiles))
+                roadPlan
+                (Set.unionMany
+                    [ takenTiles; Set.ofList containerGap; Set.ofList extractorGap; rampartGap ])
+                (Facts.homeBuilding view
+                 || not (
+                     List.isEmpty storageSites
+                     && List.isEmpty towerSites
+                     && List.isEmpty extensionSites
+                 ))
+                drops
+
         let place kind tiles =
             tiles
             |> List.map (fun tile -> PlaceConstructionSite(RoomPos.at room tile, kind))
 
-        place Storage (storagePick |> List.truncate (gapAt BuiltKind.Storage controller.Level))
+        place Storage storageSites
         @ place Terminal (terminalPick |> List.truncate (gapAt BuiltKind.Terminal controller.Level))
         @ place Spawn (spawnTiles |> List.truncate (gapAt BuiltKind.Spawn controller.Level))
-        @ place Tower (towerTiles |> List.truncate (gapAt BuiltKind.Tower controller.Level))
-        @ place
-            Extension
-            (extensionTiles |> List.truncate (gapAt BuiltKind.Extension controller.Level))
+        @ place Tower towerSites
+        @ place Extension extensionSites
         @ place
             Observer
             (observerTiles |> List.truncate (gapAt BuiltKind.Observer controller.Level))
         @ place Road (Set.toList placedRoads)
         @ place Container containerGap
         @ place Extractor extractorGap
-        @ place Rampart (Set.toList rampartGap),
+        @ place Rampart (Set.toList rampartGap)
+        @ outpostRoadSites,
         List.rev servedFootings,
         List.rev unservedFootings,
         unroutedTrunks,
-        deferredContainers
+        deferredContainers,
+        outpostRoads,
+        plannedRoads
     // A room the Layout cannot even orient itself in plans nothing and loses
     // nothing: there are no targets to serve and no trunk was ever asked for,
     // so every record is empty rather than any of them being a shortfall.
-    | _ -> [], [], [], [], []
+    | _ -> [], [], [], [], [], [], Set.empty
 
 /// The outpost's source containers — the colony's one placement rule that is
 /// not the Layout's: one container per outpost source, on the Seat whose walk

@@ -750,6 +750,7 @@ let errandStandDownTests =
                     {
                         Time = 101
                         Rooms = Map.ofList [ colony.Home, home; errandRoom, room ]
+                        Sites = 0
                         Creeps =
                             [
                                 {

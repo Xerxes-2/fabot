@@ -223,6 +223,7 @@ let private world: World =
     {
         Time = 1_000
         Rooms = Map.ofList [ homeFacts; outpostFacts; errandFacts ]
+        Sites = 0
         Creeps = []
         Sightings = Map.empty
         Towered = Set.empty

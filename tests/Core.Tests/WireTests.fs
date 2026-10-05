@@ -86,6 +86,13 @@ let wireVocabularyTests =
                 // The Layout channel's own vocabulary: not a Verdict, same subtree.
                 roundTrips "FootingKind" (casesOf<FootingKind> ()) footingKindName footingKindOf
 
+                // What the plan made of each outpost road (#548).
+                roundTrips
+                    "OutpostRoadState"
+                    (casesOf<OutpostRoadState> ())
+                    outpostRoadStateName
+                    outpostRoadStateOf
+
                 // The Layout channel's fourth vocabulary: which kind of declaration.
                 roundTrips
                     "DeclarationKind"

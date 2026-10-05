@@ -708,18 +708,17 @@ let outpostTests =
                     "the colony's own container site is surplus work, and the flow outranks it"
             }
 
-            test "an ordinary outpost site keeps its travel cost: #234's rung stops at home" {
-                // The other half of #234's rung, and why it reads the site's room
-                // (`isHomeSite`). Out here the rung would walk the whole worker row
-                // over the Seam at once; it is `Tuning.OutpostBuilders` and never the
-                // rung that answers whether a body crosses (#266), and everything
-                // behind the lifted sites stays surplus, priced against an Upgrade the
-                // body is already standing in the Work Area of.
+            test
+                "once the home is built, one outpost road site outranks the controller, for one worker" {
+                // #548: on the tier alone a road site out there loses every
+                // travel-cost comparison to an Upgrade the worker stands in the
+                // Work Area of, and is never built. Past the home's build phase the
+                // colony's lead road site, the nearest the crossing, is a rung over
+                // the controller and takes one body; the rest stay on the tier, so
+                // the roads never take the row the controller and repairs are owed.
                 //
-                // So the queue is one site longer than the budget, and the third is
-                // the one this case is about. Roads on purpose, so the container rule
-                // cannot be what answers, and the whole row is loaded inside the home
-                // controller's Work Area.
+                // Roads alone, so the container rule cannot be what answers, two of
+                // them for three loaded workers inside the controller's Work Area.
                 let crowd =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -727,34 +726,22 @@ let outpostTests =
                         [
                             "site-near", BuiltKind.Road, { X = 10; Y = 47 }
                             "site-mid", BuiltKind.Road, { X = 10; Y = 45 }
-                            "site-far", BuiltKind.Road, { X = 10; Y = 41 }
                         ]
                     |> withHomeController { X = 10; Y = 5 }
                     |> threeLoadedAtHome
 
                 Expect.equal
                     (heldBy crowd)
-                    [
-                        taskId (Build "site-mid"), 1
-                        taskId (Build "site-near"), 1
-                        taskId (Upgrade "ctrl-1"), 1
-                    ]
-                    "the site the budget did not reach is priced, not ranked: the body left over upgrades"
+                    [ taskId (Build "site-near"), 1; taskId (Upgrade "ctrl-1"), 2 ]
+                    "one worker crosses for the road site nearest the crossing, and two upgrade"
             }
 
-            test "the trunk is paved from the Seam outward, and the container jumps the queue" {
-                // #266, as W13S29 reported it: two containers standing, 45 hand-laid
-                // road sites at 0/300, and the whole worker row at home. A road in an
-                // outpost was a plain surplus Build, so travel cost answered 120
-                // against an Upgrade underfoot costing nothing and nobody ever
-                // crossed, and the trunk is what the hauler's round trip is priced on.
-                //
-                // The first `Tuning.OutpostBuilders` sites in the queue are
-                // feeding-tier and the rest are not. The queue is the container first
-                // (here deliberately the **farthest** site of the six, so nothing but
-                // the kind can put it in front) and then the walk out to the Seam
-                // (`Atlas.seamWalkTicks`), nearest first, because the paved tiles
-                // beside the crossing are the ones every haul walks over.
+            test "the container takes the builders' budget, and the roads beside it wait" {
+                // #266 lifted W13S29's 45 hand-laid road sites into the builders'
+                // queue; #548 takes them back out. A road only cheapens the haul,
+                // and the container is the switch: the budget's two go to it,
+                // here deliberately the **farthest** site of the six, so nothing
+                // but the kind can put it in front.
                 let trunk =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
@@ -772,31 +759,86 @@ let outpostTests =
 
                 Expect.equal
                     (heldBy trunk)
-                    [
-                        taskId (Build "site-can"), 1
-                        taskId (Build "site-r1"), 1
-                        taskId (Upgrade "ctrl-1"), 1
-                    ]
-                    "the switch and the site beside the crossing take one builder each, and the third stays home"
+                    [ taskId (Build "site-can"), 2; taskId (Build "site-r1"), 1 ]
+                    "the switch takes both builders, and the third crosses for one road, not the budget"
 
-                // And the queue moves: nothing schedules it, the pool is recomputed
-                // from the sites that are left and the head of it is the answer.
-                let paved =
+                // The container built, five roads are left and still one body
+                // crosses for them, to the one nearest the crossing.
+                let built =
                     { trunk with
                         ConstructionSites =
                             trunk.ConstructionSites
-                            |> List.filter (fun site ->
-                                site.Id <> "site-can" && site.Id <> "site-r1")
+                            |> List.filter (fun site -> site.Id <> "site-can")
                     }
 
                 Expect.equal
-                    (heldBy paved)
-                    [
-                        taskId (Build "site-r2"), 1
-                        taskId (Build "site-r3"), 1
-                        taskId (Upgrade "ctrl-1"), 1
-                    ]
-                    "two finished and the next two out take their places: the trunk grows from the Seam"
+                    (heldBy built)
+                    [ taskId (Build "site-r1"), 1; taskId (Upgrade "ctrl-1"), 2 ]
+                    "the colony's one road body, and the row upgrades"
+            }
+
+            test
+                "an outpost's road site ranks under every home Build, the Storage held down beside an extension too" {
+                // #526 holds the home Storage on the tier while an extension site
+                // stands; an outpost road there would tie it. While the home builds
+                // the road steps a rung under it (#548).
+                let homeSite id kind (tile: Pos) (colony: ColonyView) =
+                    { colony with
+                        ConstructionSites =
+                            colony.ConstructionSites
+                            @ [
+                                {
+                                    Id = id
+                                    Left = siteOwes
+                                    Begun = false
+                                }
+                            ]
+                    }
+                    |> withTarget id tile (Site kind)
+
+                let building =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withNorthOutpost None
+                    |> withOutpostTrunk [ "site-r1", BuiltKind.Road, { X = 10; Y = 47 } ]
+                    |> withHomeController { X = 10; Y = 5 }
+                    |> homeSite "site-store" BuiltKind.Storage { X = 10; Y = 20 }
+                    |> homeSite "site-ext" BuiltKind.Extension { X = 10; Y = 22 }
+                    |> loaded
+
+                let pool = pooledOf building
+
+                let rank task =
+                    entryFor task pool |> Option.map (fun entry -> entry.Priority)
+
+                Expect.isLessThan
+                    (rank (Build "site-store"))
+                    (rank (Build "site-r1"))
+                    "the Storage held on its tier still outranks the outpost's road"
+
+                Expect.isLessThan
+                    (rank (Build "site-ext"))
+                    (rank (Build "site-store"))
+                    "the premise: the extension outranks the Storage (#526)"
+
+                Expect.equal
+                    (rank (Build "site-r1"))
+                    (Some(priorityOfTier Surplus + rankOfRung OneRungDown))
+                    "while the home builds, the lead road site too steps a rung under the tier"
+
+                // The home's sites gone, the build phase ends and the same site
+                // leads a rung over the controller.
+                let built =
+                    { building with
+                        ConstructionSites =
+                            building.ConstructionSites
+                            |> List.filter (fun site -> site.Id = "site-r1")
+                    }
+
+                Expect.equal
+                    (entryFor (Build "site-r1") (pooledOf built)
+                     |> Option.map (fun entry -> entry.Priority))
+                    (Some(priorityOfTier Surplus + rankOfRung OneRungUp))
+                    "past the build phase it leads, a rung over the tier"
             }
 
             test "two builders cross for the site, and the third stays home" {

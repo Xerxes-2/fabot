@@ -706,6 +706,10 @@ type World =
         /// the engine answered `Game.rooms` with. A room absent here reads
         /// `RoomFacts.empty`.
         Rooms: Map<string, RoomFacts>
+        /// How many construction sites the player holds across every room,
+        /// dark ones included (`Game.constructionSites`): the engine's cap
+        /// (`Engine.maxConstructionSites`) is the player's, not a room's.
+        Sites: int
         /// Every creep we own that is not still gestating, in the engine's
         /// own order. Whose each one is this tick is `World.creepColonies`'
         /// answer: the rule needs the [[stand-down]] gate, read out of
@@ -753,6 +757,7 @@ module World =
         {
             Time = 0
             Rooms = Map.empty
+            Sites = 0
             Creeps = []
             Sightings = Map.empty
             Towered = Set.empty

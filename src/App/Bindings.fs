@@ -383,6 +383,9 @@ type IGame =
     abstract creeps: obj
     /// Hash of id -> every structure of ours, in every room.
     abstract structures: obj
+    /// Hash of id -> every construction site of ours, in every room, seen or
+    /// not.
+    abstract constructionSites: obj
     /// Null when no object with that id exists (or it is out of sight).
     abstract getObjectById: id: string -> obj
 

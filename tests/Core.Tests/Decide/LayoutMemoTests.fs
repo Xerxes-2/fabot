@@ -1403,3 +1403,229 @@ let planMemoTests =
                 Expect.isNonEmpty paid.Memo.SiteIntents "placing what the deferred tick did not"
             }
         ]
+
+/// A plain home with its spawn and controller, and W1N2 north of it reserved
+/// by us, its rock walled in at (25,10) and the rock's container standing at
+/// (25,11): the smallest colony an outpost road is planned for (#548).
+let private outpostRoadColony () =
+    let plain =
+        [
+            for x in 1..48 do
+                for y in 1..48 -> { X = x; Y = y }, Plain
+        ]
+
+    let rock = { X = 25; Y = 10 }
+    let spawnPos = { X = 25; Y = 25 }
+    let controllerPos = { X = 35; Y = 25 }
+
+    let spatial =
+        { SpatialInfo.empty with
+            RoomName = Some "W1N1"
+            Borders = Map.ofList [ "W1N1", plainRing; "W1N2", plainRing ]
+            TargetKinds =
+                Map.ofList
+                    [
+                        "spawn-1", Structure BuiltKind.Spawn
+                        "ctrl-1", Controller
+                        "src-out", Source
+                        "can-out", Structure BuiltKind.Container
+                    ]
+        }
+        |> withHome (fun layer ->
+            { layer with
+                Terrain = TerrainGrid.ofList plain
+                TargetPositions = Map.ofList [ "spawn-1", spawnPos; "ctrl-1", controllerPos ]
+                Obstacles = Set.ofList [ spawnPos; controllerPos ]
+            })
+        |> withNeighbour
+            "W1N2"
+            { RoomLayer.empty with
+                Terrain =
+                    plain
+                    |> List.map (fun (tile, ground) -> tile, (if tile = rock then Wall else ground))
+                    |> TerrainGrid.ofList
+                TargetPositions = Map.ofList [ "src-out", rock; "can-out", { X = 25; Y = 11 } ]
+            }
+
+    { atLevel 4 spatial with
+        Sources = [ source "src-out" ]
+        RoomControl = Map.add "W1N2" (reservedRoom true 4000) homeControl
+    }
+
+/// A structure of ours standing, or a site of ours pending, on a tile of one
+/// room.
+let private stoodIn
+    (room: string)
+    (id: string)
+    (tile: Pos)
+    (kind: TargetKind)
+    (colony: ColonyView)
+    =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id kind colony.Spatial.TargetKinds
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.change
+                        room
+                        (Option.map (fun layer ->
+                            { layer with
+                                TargetPositions = Map.add id tile layer.TargetPositions
+                            }))
+            }
+    }
+
+/// The outpost road floods a memo holds for one room, by key.
+let private roadFloodsIn (room: string) (memo: PlanMemo) =
+    [
+        for KeyValue(key, flood) in memo.RoadFloods do
+            if key.StartsWith(room + "|") then
+                key, flood
+    ]
+
+[<Tests>]
+let outpostRoadMemoTests =
+    testList
+        "outpost road memo"
+        [
+            test "a quiet tick recalls the outpost roads with the plan, a placed site replans them" {
+                let colony = outpostRoadColony ()
+                let first = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (first.Memo.OutpostRoads |> List.map (fun road -> road.Room, road.State))
+                    [ "W1N2", OutpostRoadState.Planned ]
+                    "the premise: the reserved rock's road is planned"
+
+                let sentinel = { first.Memo with OutpostRoads = [] }
+                let quiet = decide colony Map.empty Set.empty (Some sentinel)
+
+                Expect.isEmpty
+                    quiet.Memo.OutpostRoads
+                    "the memo's record rides out: nothing replanned"
+
+                // A site on the line moves the census, and the plan with it.
+                let _, _, _, _, _, _, planned = planLayout colony (Atlas.ofView colony)
+
+                let tile = planned |> Set.filter (fun tile -> tile.Room = "W1N2") |> Set.minElement
+
+                let placed =
+                    { colony with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "road-site-1"
+                                    Left = 300
+                                    Begun = false
+                                }
+                            ]
+                    }
+                    |> stoodIn "W1N2" "road-site-1" (RoomPos.pos tile) (Site BuiltKind.Road)
+
+                let replanned = decide placed Map.empty Set.empty (Some sentinel)
+
+                Expect.equal
+                    (replanned.Memo.OutpostRoads |> List.sumBy (fun road -> road.Pending))
+                    1
+                    "a moved census replans the roads and counts the site as pending"
+
+                Expect.isFalse
+                    (placementIntents replanned.Intents
+                     |> List.exists (fun (room, at, _) -> room = "W1N2" && at = RoomPos.pos tile))
+                    "and asks for no second site on its tile"
+            }
+
+            test
+                "a census move at home hands the outpost room's road flood on, where its seeds stand" {
+                // The CPU half (#548): a replan re-floods only the rooms whose
+                // grid or seeds moved. A road standing far off the line at home
+                // moves the home's grid and so its flood, and leaves where the
+                // line crosses into W1N2 and at what cost alone.
+                let colony = outpostRoadColony ()
+                let first = decide colony Map.empty Set.empty None
+                let before = roadFloodsIn "W1N2" first.Memo
+                let homeBefore = roadFloodsIn "W1N1" first.Memo |> List.map fst
+
+                Expect.isNonEmpty before "the premise: the plan flooded W1N2"
+
+                let far = { X = 45; Y = 45 }
+
+                let moved =
+                    colony
+                    |> stoodIn "W1N1" "road-far" far (Structure BuiltKind.Road)
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        Roads = Set.add far layer.Roads
+                                    })
+                        }
+
+                let second = decide moved Map.empty Set.empty (Some first.Memo)
+
+                Expect.notEqual
+                    second.Memo.Signature
+                    first.Memo.Signature
+                    "the premise: the census moved and the colony replanned"
+
+                Expect.notEqual
+                    (roadFloodsIn "W1N1" second.Memo |> List.map fst)
+                    homeBefore
+                    "the home's flood was asked again on its new grid"
+
+                let after = roadFloodsIn "W1N2" second.Memo
+
+                Expect.equal
+                    (List.map fst after)
+                    (List.map fst before)
+                    "W1N2's flood is asked under the same key"
+
+                Expect.isTrue
+                    (List.forall2
+                        (fun (_, (dist, _)) (_, (dist', _)) -> obj.ReferenceEquals(dist, dist'))
+                        before
+                        after)
+                    "and handed on by reference, not re-run"
+            }
+
+            test
+                "the player's sites reaching the outpost roads' ceiling replans, a count below it does not" {
+                // The count moves with every colony's sites; which side of
+                // `Tuning.OutpostRoadSiteCeiling` it stands on is what the plan
+                // reads, and all the signature carries.
+                let colony = outpostRoadColony ()
+                let ceiling = Tuning.defaults.OutpostRoadSiteCeiling
+
+                let below =
+                    decide
+                        { colony with
+                            PlayerSites = ceiling - 20
+                        }
+                        Map.empty
+                        Set.empty
+                        None
+
+                let sentinel = { below.Memo with OutpostRoads = [] }
+
+                let moved =
+                    decide
+                        { colony with
+                            PlayerSites = ceiling - 1
+                        }
+                        Map.empty
+                        Set.empty
+                        (Some sentinel)
+
+                Expect.isEmpty
+                    moved.Memo.OutpostRoads
+                    "a count still under the ceiling recalls the plan"
+
+                let full =
+                    decide { colony with PlayerSites = ceiling } Map.empty Set.empty (Some sentinel)
+
+                Expect.isNonEmpty full.Memo.OutpostRoads "reaching the ceiling replans"
+            }
+        ]

@@ -819,6 +819,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                     }
                 ]
         ConstructionSites = []
+        PlayerSites = 0
         Creeps = fleet |> List.map fst
         Unprojected = Set.empty
         Hostiles = []

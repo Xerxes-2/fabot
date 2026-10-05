@@ -1,6 +1,8 @@
 # One declarative Layout, computed whole, truncated at RCL4
 
-> **Status:** amended by 0022, 0039, 0055, 0063, #209, #211
+> **Status:** amended by 0022, 0039, 0055, 0063, #209, #211, 0087
+
+> **Amended by ADR 0087**: the plan reaches past the home for one kind, the outpost road, and those sites are capped (`Tuning.OutpostRoadSites`), not placed all at once. The home's own sites still go down whole.
 
 > **Revised by ADR 0063**: the horizon is no longer a level at all. It is `controller.Level + 1`, derived on the tick from the room's own controller (`Tuning.horizonOf`), so it arrives *with* the room instead of ahead of it and there is no constant left to move. "Truncated at RCL4" in the title and "the horizon truncates at RCL4" in the body are history a third time, and now in a second sense: it truncates at no fixed level. Everything else this ADR decided stands — one ordering rule for every clustered kind, the plan computed whole every tick from the Atlas, sized at the horizon and filtered at the current level. What the derivation costs is the road plan's level-invariance: the router dodges a reservation that now moves with the level, so a level-up re-routes trunks a built-out room has already paved — 589 tiles across the sweep's 684 level-ups, up to 60 in one room in one tick. ADR 0063 measures it and takes the trade.
 

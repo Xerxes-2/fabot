@@ -139,9 +139,11 @@ module BriefKind =
 /// The rungs a Task may be stepped by inside its tier, a union rather than an
 /// int for the reason `Tier` is one (#237): the Resolver's `weightOfRank` has
 /// to round every one of them back onto the tier's own push weight, and the
-/// test that checks that walks the cases off the union. A rung always steps a
-/// Task up, so the ranks below are negative.
+/// test that checks that walks the cases off the union. Every rung but one
+/// steps a Task up; `OneRungDown` holds an outpost's road site under its tier
+/// while the home builds (#548).
 type Rung =
+    | OneRungDown
     | OnTheTier
     | OneRungUp
     | TwoRungsUp

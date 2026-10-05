@@ -292,6 +292,7 @@ let sentinelMemo snapshot =
         ServedFootings = []
         UnroutedTrunks = []
         DeferredContainers = []
+        OutpostRoads = []
         HaulerQuota = 0
         HaulerDemand = []
         HaulerLoad = 0
@@ -300,6 +301,7 @@ let sentinelMemo snapshot =
         FarFields = FarFieldTable()
         Narrowed = NarrowedFieldTable()
         Lines = LineTable()
+        RoadFloods = RoadFloodTable()
     }
 
 /// Two rooms whose coordinates collide on purpose. At home:

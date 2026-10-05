@@ -81,6 +81,7 @@ let invaderCoreTests =
                                     FarFields = untroubled.Memo.FarFields
                                     Narrowed = untroubled.Memo.Narrowed
                                     Lines = untroubled.Memo.Lines
+                                    RoadFloods = untroubled.Memo.RoadFloods
                                 }
                         }
                         untroubled

@@ -275,6 +275,13 @@ let internal homeSiteStands (view: ColonyView) (kind: BuiltKind) =
     homeSites view
     |> List.exists (fun site -> Map.tryFind site.Id view.Spatial.TargetKinds = Some(Site kind))
 
+/// Whether the home is in its build phase (#526): an extension, Storage or
+/// tower site stands there. An outpost road waits on it (#548).
+let internal homeBuilding (view: ColonyView) =
+    homeSiteStands view BuiltKind.Extension
+    || homeSiteStands view BuiltKind.Storage
+    || homeSiteStands view BuiltKind.Tower
+
 /// Whether a raider stands in a room (`HostileInfo.raider`).
 let internal raided (view: ColonyView) (room: string) : bool =
     view.Hostiles

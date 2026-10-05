@@ -320,6 +320,9 @@ type ColonyView =
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one.
         ConstructionSites: ConstructionSiteInfo list
+        /// Every construction site the player holds, every colony's and in
+        /// every room (`World.Sites`): what the engine's cap counts.
+        PlayerSites: int
         /// The creeps this colony holds this tick (`World.creepColonies`), in
         /// the world's own order, so who holds a body does not move the
         /// Matcher's order.
@@ -1289,6 +1292,7 @@ module ColonyView =
             Fought = gate.Fought
             HomeRaided = gate.HomeRaided
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
+            PlayerSites = world.Sites
             Creeps = mine |> List.map (fun creep -> creep.Info)
             Unprojected =
                 mine

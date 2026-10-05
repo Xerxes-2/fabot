@@ -26,7 +26,7 @@
 //                                  the Layout's losses, the declared outposts
 //                                  that do not border this home, and the
 //                                  outpost sources waiting on sites over
-//                                  every Seat
+//                                  every Seat, and each outpost road's state
 //   observe.mjs breaches           what is broken right now: one row per live
 //                                  invariant violation, oldest first, each with
 //                                  how long it has stood
@@ -1736,8 +1736,9 @@ if (command === "console") {
   //     unrouted: [{ source, goal, spawn? }],
   //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }],
   //     refused: [{ room, kind }],
-  //     waiting: [{ source, room, ours: [{ x, y }], rival: [{ x, y }] }] }
-  // Five lists in one leaf, the colony's losses of this tick: the footing
+  //     waiting: [{ source, room, ours: [{ x, y }], rival: [{ x, y }] }],
+  //     roads: [{ source, room, state, tiles, standing, pending, skipped }] }
+  // Six lists in one leaf (the sixth, `roads`, is each outpost road's state), the colony's losses of this tick: the footing
   // targets the fold found no tile for (#77), the trunks the router found
   // no path for (#107), the container picks the plan gave up because
   // something already serves their target (ADR 0040), and the declarations
@@ -1781,6 +1782,7 @@ if (command === "console") {
   const deferred = listOrFail("deferred");
   const refused = listOrFail("refused");
   const waiting = listOrFail("waiting");
+  const roads = listOrFail("roads");
   // A refusal used to be a bare room name and is now `{ room, kind }` (ADR
   // 0060 decision 1). A bundle that predates the kind writes strings here,
   // and printing one as "(no kind)" beside a room would be this channel
@@ -1835,7 +1837,7 @@ if (command === "console") {
   // `unserved` array, back when the leaf held one list; a reader of the
   // old shape wants `.unserved`.
   if (json) {
-    console.log(JSON.stringify({ unserved, unrouted, deferred, refused, waiting }, null, 2));
+    console.log(JSON.stringify({ unserved, unrouted, deferred, refused, waiting, roads }, null, 2));
   } else {
     console.log(`colony ${home}`);
     console.log("");
@@ -1919,6 +1921,24 @@ if (command === "console") {
             `rival ${tiles(w.rival) || "none"} — ` +
             (ours > 0 ? "clears when the builders reach ours" : "a rival's sites: never clears on its own"),
         );
+      }
+    }
+
+    // One row per outpost source (#548): what the plan made of its road from
+    // home, and the path's tiles by what stands on them. `skipped` tiles lie
+    // in a room this colony only crosses or another player holds, where
+    // nothing is placed.
+    if (roads.length === 0) {
+      console.log("no outpost source to road");
+    } else {
+      console.log(`${roads.length} outpost road${roads.length === 1 ? "" : "s"}:`);
+      for (const r of roads) {
+        const counts =
+          r.tiles > 0
+            ? `  ${r.tiles} tiles: ${r.standing} standing, ${r.pending} pending` +
+              (r.skipped > 0 ? `, ${r.skipped} skipped (crossed or held)` : "")
+            : "";
+        console.log(`  ${r.source} in ${r.room ?? "(no room)"}  ${r.state ?? "(no state)"}${counts}`);
       }
     }
   }

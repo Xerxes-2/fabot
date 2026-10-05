@@ -395,10 +395,8 @@ let private siteRoomIs atlas (rule: string -> bool) siteId =
     Atlas.targetRoom atlas siteId |> Option.exists rule
 
 /// Whether a construction site stands in a room this colony mines — one the
-/// outpost builders' budget may ration. The room half alone (#266): out there
-/// a human paves too, and 45 hand-laid road sites in W13S29 stood at 0/300 for
-/// as long as they were surplus. The kind survives as the order the budget is
-/// spent in. A claimed room a human still names in the outpost list is not
+/// outpost builders' budget may ration. The room half alone: the kind half,
+/// no road (#548), is `planPool`'s. A claimed room a human still names in the outpost list is not
 /// `Borrowed` and answers true here; `planPool` narrows it again.
 let private isOutpostSite (view: ColonyView) atlas siteId =
     siteRoomIs
@@ -539,13 +537,14 @@ let priorityStep = 1
 /// What a rung is worth on the ladder, exhaustive over `Rung` on purpose.
 let rankOfRung =
     function
+    | OneRungDown -> priorityStep
     | OnTheTier -> 0
     | OneRungUp -> -priorityStep
     | TwoRungsUp -> -2 * priorityStep
 
-/// The rungs a rank stands above its own tier: a rung only ever steps a Task
-/// up, and by less than half a tier, so the distance down to the next tier is
-/// the lift.
+/// The rungs a rank stands above its own tier: a rung steps a Task up by less
+/// than half a tier, so the distance down to the next tier is the lift. The
+/// one rung down lifts nothing and reads 0.
 let private rungsAboveTier rank =
     let aboveLower = ((rank % tierRungs) + tierRungs) % tierRungs
 
@@ -846,21 +845,33 @@ let planPoolHolding
             | Repair id when Set.contains id dying || Set.contains id underAttack -> 1
             | _ -> 0)
 
-    // The queue the builders' budget rations: every site the pool holds in a
-    // room this colony merely mines and that no other rule already feeds. A
-    // nursery's site and a bootstrapping child's are feeding-tier outright
-    // and capped by nothing, and neither room is always `Borrowed`; left in
-    // the queue they would take places the lift buys them nothing with.
+    // A site in a room this colony merely mines and that no other rule
+    // already feeds. A nursery's site and a bootstrapping child's are
+    // feeding-tier outright and capped by nothing, and neither room is always
+    // `Borrowed`.
+    let isMinedSite siteId =
+        isOutpostSite view atlas siteId && not (isFeedingByRoom view atlas siteId)
+
+    let siteKind siteId =
+        Map.tryFind siteId view.Spatial.TargetKinds
+
+    // The queue the builders' budget rations: every such site but a road
+    // (#548). A road out there, hand-laid or the Layout's, is a surplus Build
+    // with a rung of its own (below): the switch is income, the road only a
+    // cheaper haul.
     let outpostSites =
         tasks
         |> List.choose (function
-            | Build siteId when
-                isOutpostSite view atlas siteId && not (isFeedingByRoom view atlas siteId)
-                ->
+            | Build siteId when isMinedSite siteId && siteKind siteId <> Some(Site BuiltKind.Road) ->
                 Some siteId
             | _ -> None)
 
-    // ADR-0042. The order the budget is spent in: the container sites first,
+    let homeBuilding = lazy (Facts.homeBuilding view)
+
+    let isOutpostRoadSite siteId =
+        siteKind siteId = Some(Site BuiltKind.Road) && isMinedSite siteId
+
+    // The order the budget is spent in: the container sites first,
     // then the nearest to the crossing, ties by id. One queue over every
     // outpost and not one apiece: two rooms' sites are ordered on a walk that
     // leaves the home-side leg off both, so the comparison says "nearer its
@@ -868,7 +879,7 @@ let planPoolHolding
     // priced sorts last rather than out of the list.
     let siteOrder siteId =
         let container =
-            if Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Container) then
+            if siteKind siteId = Some(Site BuiltKind.Container) then
                 0
             else
                 1
@@ -899,6 +910,21 @@ let planPoolHolding
             |> List.truncate view.Tuning.OutpostBuilders
 
     let fedSiteIds = Set.ofList fedOutpostSites
+
+    // The one outpost road site a colony crosses for at a time (#548), in the
+    // budget's order: one body across the Seam for roads, never the row the
+    // controller and the repairs are owed. Ordered only when there is a choice.
+    let leadRoadSite =
+        lazy
+            (match
+                tasks
+                |> List.choose (function
+                    | Build siteId when isOutpostRoadSite siteId -> Some siteId
+                    | _ -> None)
+             with
+             | [] -> None
+             | [ only ] -> Some only
+             | sites -> Some(List.minBy siteOrder sites))
 
     // A budget and not a per-site number: `planOutpostContainers` places a
     // site for every unserved outpost source on the same tick, so a per-site
@@ -1166,6 +1192,16 @@ let planPoolHolding
             // controller's Work Area, so Upgrade costs it nothing and never
             // goes task-gone.
             | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
+            // An outpost's road site (#548). While the home builds, a rung
+            // under the tier, below the home Storage held down above. After
+            // it, the colony's lead road site a rung over the controller: on
+            // the tier no loaded worker standing in its Work Area ever crosses
+            // for one. Every other stays on the tier, where travel decides: a
+            // body already out there builds the next.
+            | Build siteId when isOutpostRoadSite siteId ->
+                if homeBuilding.Force() then OneRungDown
+                elif leadRoadSite.Force() = Some siteId then OneRungUp
+                else OnTheTier
             // Over the home site as well (#284): a structure a quarter from
             // destruction is work the colony has already paid for.
             | Repair id when Set.contains id rescued || Set.contains id dying -> TwoRungsUp
@@ -1405,6 +1441,9 @@ let planPoolHolding
             let total =
                 if isBorrowedSite siteId then Some view.Tuning.PioneerCount
                 elif Set.contains siteId fedSiteIds then Some builderShare
+                // One body: the rung would otherwise send the whole loaded
+                // row over the Seam for a 300-point site.
+                elif leadRoadSite.Force() = Some siteId then Some 1
                 else None
 
             Capacity.unbounded

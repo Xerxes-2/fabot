@@ -300,6 +300,11 @@ let private reservableControllersOf (view: ColonyView) (controllers: string list
 let private reservableOutpostsOf (view: ColonyView) (reservable: string list) : string list =
     reservable |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
 
+/// `OutpostFacts.ReservableRooms` on its own, for a reader off the chain:
+/// the outpost road's payback (#548).
+let internal reservableRoomsOf (view: ColonyView) : string list =
+    reservableOutpostsOf view (reservableControllersOf view (outpostControllers view))
+
 /// The outpost chain's answers for this tick, derived once and carried (#383):
 /// re-entered per reader, the `Controller` census was walked nineteen times a
 /// tick on `--scenario reactor --level 7`. The shape is `RowSizing`'s and

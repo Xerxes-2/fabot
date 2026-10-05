@@ -45,6 +45,23 @@ let internal sourceRateOf (view: ColonyView) atlas (sourceId: string) : int opti
 let private isPosted atlas (s: SourceInfo) =
     Atlas.standingPostsOf atlas s.Id |> Set.isEmpty |> not
 
+/// A source's rate as the reserver row will hold it (#515): the held rate in a
+/// room it can reserve, whatever the reservation reads this tick, while the
+/// bank can buy a reserver; `sourceRateOf` everywhere else.
+let internal reservableRateOf
+    (view: ColonyView)
+    atlas
+    (reservable: string list)
+    (sourceId: string)
+    =
+    match Atlas.targetRoom atlas sourceId with
+    | Some room when
+        List.contains room reservable
+        && view.Bank.Capacity >= bodyCost reserverPattern.Block
+        ->
+        Some Engine.heldOutputPerTick
+    | _ -> sourceRateOf view atlas sourceId
+
 /// ADR-0053
 /// Every Post's own Work ceiling: the saturation of the rock it seats plus one
 /// spare, per Post and never a colony-wide max. Richest first, and every
@@ -56,21 +73,12 @@ let private isPosted atlas (s: SourceInfo) =
 /// body cast in a lapse lives 1,500 ticks, and the reserver restores the rate
 /// in far fewer. A bank that cannot buy a reserver restores nothing.
 let internal postWorkCapsOf (view: ColonyView) atlas (reservable: string list) : Map<RoomPos, int> =
-    let reserved =
-        if view.Bank.Capacity < bodyCost reserverPattern.Block then
-            []
-        else
-            reservable
-
     view.Sources
     |> List.collect (fun s ->
         let cap =
-            match Atlas.targetRoom atlas s.Id with
-            | Some room when List.contains room reserved -> heldWorkCap
-            | _ ->
-                sourceRateOf view atlas s.Id
-                |> Option.map workCapOf
-                |> Option.defaultValue heldWorkCap
+            reservableRateOf view atlas reservable s.Id
+            |> Option.map workCapOf
+            |> Option.defaultValue heldWorkCap
 
         Atlas.postsOf atlas s.Id |> Set.toList |> List.map (fun tile -> tile, cap))
     |> List.fold

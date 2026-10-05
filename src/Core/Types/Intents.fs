@@ -232,6 +232,13 @@ type HomeLine =
 /// other than the entry's replaces it.
 type LineTable = System.Collections.Generic.Dictionary<string, HomeLine>
 
+/// One room's flood under an outpost road (`Atlas.roadAlong`, #548), its
+/// distances and parents, keyed by everything the flood reads: the room, the
+/// grid it was priced on and its seeds. A key that names its inputs needs no
+/// eviction by census; the table keeps the floods the last plan asked for
+/// (`Atlas.sweepRoadFloods`).
+type RoadFloodTable = System.Collections.Generic.Dictionary<string, int[] * int[]>
+
 /// The tables an Atlas prices its cross-room legs out of and the census memo
 /// recalls: the far fields, and beside them the Seam walks — and the home's
 /// line, which rides with them for their lifetime, the census's. A record,
@@ -253,6 +260,8 @@ type FarFieldMemo =
         Narrowed: NarrowedFieldTable
         /// The home's line (#519), on the census's terms.
         Lines: LineTable
+        /// The outpost roads' floods, on their own key's terms.
+        RoadFloods: RoadFloodTable
     }
 
 [<RequireQualifiedAccess>]
@@ -273,6 +282,7 @@ module FarFieldMemo =
             PerCensus = FarFieldTable()
             Narrowed = NarrowedFieldTable()
             Lines = LineTable()
+            RoadFloods = RoadFloodTable()
         }
 
 /// What a Link footing is held beside: each planned source container, the
@@ -353,6 +363,35 @@ type WaitingContainer =
         Rival: Pos list
     }
 
+/// What the plan made of one outpost source's road (`Layout.planOutpostRoads`).
+[<RequireQualifiedAccess>]
+type OutpostRoadState =
+    /// The haul pays for it: planned, and placed where the colony works.
+    | Planned
+    /// The road was routed and does not repay its build in time.
+    | Unpaid
+    /// No chain reaches the room, or no path runs along one.
+    | Unrouted
+    /// No container stands or is pending beside the source yet.
+    | NoContainer
+    /// The room is not seen this tick, so its rate is unknown.
+    | Dark
+
+/// One outpost source's road on the layout record: its state, the path's
+/// tiles, and how many of them stand paved, hold a pending road site, or lie
+/// in a room the colony only crosses or another player holds, where nothing
+/// is placed.
+type OutpostRoad =
+    {
+        Source: string
+        Room: string
+        State: OutpostRoadState
+        Tiles: int
+        Standing: int
+        Pending: int
+        Skipped: int
+    }
+
 /// One sink group the hauler quota priced a container's flow to: the
 /// spawn cluster, an upgrade buffer or the Storage, and the round trip in
 /// ticks — None where no place of that group was reachable, which is a
@@ -417,6 +456,8 @@ type PlanMemo =
         /// The container picks this plan deferred to a container already
         /// serving their targets. Empty rides here all the same.
         DeferredContainers: DeferredContainer list
+        /// Each outpost source's road, on the layout record.
+        OutpostRoads: OutpostRoad list
         HaulerQuota: int
         /// The quota's per-container arithmetic, kept beside it for the
         /// `quotas` view.
@@ -435,6 +476,8 @@ type PlanMemo =
         Narrowed: NarrowedFieldTable
         /// The home's line (#519), on the same terms.
         Lines: LineTable
+        /// The outpost roads' floods (#548), on their own key's terms.
+        RoadFloods: RoadFloodTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -466,7 +509,7 @@ module PlanMemo =
     /// stamped with the signature it declined to plan against would be served
     /// forever.
     ///
-    /// The five tables are handed in and not defaulted: a deferred colony
+    /// The six tables are handed in and not defaulted: a deferred colony
     /// declines to plan, not to price. The per-room signatures come with them
     /// because they say which census the tables were filled under, and that
     /// is this tick's, whatever the plan's is (#372).
@@ -477,6 +520,7 @@ module PlanMemo =
         (farFields: FarFieldTable)
         (narrowed: NarrowedFieldTable)
         (lines: LineTable)
+        (roadFloods: RoadFloodTable)
         : PlanMemo =
         {
             Signature = ""
@@ -489,6 +533,7 @@ module PlanMemo =
             ServedFootings = []
             UnroutedTrunks = []
             DeferredContainers = []
+            OutpostRoads = []
             HaulerQuota = 0
             HaulerDemand = []
             HaulerLoad = 0
@@ -497,4 +542,5 @@ module PlanMemo =
             FarFields = farFields
             Narrowed = narrowed
             Lines = lines
+            RoadFloods = roadFloods
         }

@@ -927,6 +927,7 @@ let ofGame
     {
         Time = Game.time
         Rooms = Fresh.mapOfList rooms
+        Sites = (objectValues<obj> Game.constructionSites).Length
         // A sighting for every room seen this tick, carrying the census's ids
         // and not the kinds; the rest `World.recalling` fills from last tick.
         Sightings =

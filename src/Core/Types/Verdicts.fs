@@ -224,6 +224,29 @@ let declarationKindOf =
             DeclarationKind.Harass
         ]
 
+/// The wire spelling of each OutpostRoadState, on the Layout channel's
+/// Memory leaf.
+let outpostRoadStateName =
+    function
+    | OutpostRoadState.Planned -> "planned"
+    | OutpostRoadState.Unpaid -> "unpaid"
+    | OutpostRoadState.Unrouted -> "unrouted"
+    | OutpostRoadState.NoContainer -> "no-container"
+    | OutpostRoadState.Dark -> "dark"
+
+/// The OutpostRoadState a wire name spells, or None for a name this
+/// vocabulary does not have.
+let outpostRoadStateOf =
+    reverseOf
+        outpostRoadStateName
+        [
+            OutpostRoadState.Planned
+            OutpostRoadState.Unpaid
+            OutpostRoadState.Unrouted
+            OutpostRoadState.NoContainer
+            OutpostRoadState.Dark
+        ]
+
 /// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf.
 /// A carrying vocabulary: the spawn's id rides beside the name.
 let trunkGoalName =

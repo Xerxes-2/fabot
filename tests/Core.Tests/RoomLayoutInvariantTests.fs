@@ -896,4 +896,684 @@ let extractorTests =
             }
         ]
 
+// ---- the outpost roads, on the rooms the haul crosses (#548) ------------
+
+/// One room's layer, changed.
+let private inRoom (room: string) (change: RoomLayer -> RoomLayer) (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Rooms =
+                    Map.add
+                        room
+                        (change (SpatialInfo.layerOf colony.Spatial room))
+                        colony.Spatial.Rooms
+            }
+    }
+
+/// A structure of ours standing on a tile of one room.
+let private standing
+    (room: string)
+    (id: string)
+    (tile: Pos)
+    (kind: BuiltKind)
+    (colony: ColonyView)
+    =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.add id (Structure kind) colony.Spatial.TargetKinds
+            }
+    }
+    |> inRoom room (fun layer ->
+        { layer with
+            TargetPositions = Map.add id tile layer.TargetPositions
+        })
+
+/// Roads standing on tiles of one room at `hits` of 5,000, as a human laid
+/// them: in the census, on the layer's road set, and repairable.
+let private roadsStanding (room: string) (hits: int) (tiles: Pos list) (colony: ColonyView) =
+    let ids = tiles |> List.map (fun tile -> $"road-{room}-{tile.X}-{tile.Y}", tile)
+
+    (colony, ids)
+    ||> List.fold (fun colony (id, tile) -> standing room id tile BuiltKind.Road colony)
+    |> inRoom room (fun layer ->
+        { layer with
+            Roads = Set.union layer.Roads (Set.ofList tiles)
+        })
+    |> fun colony ->
+        { colony with
+            Spatial =
+                { colony.Spatial with
+                    Hits =
+                        (colony.Spatial.Hits, ids)
+                        ||> List.fold (fun hitsOf (id, _) ->
+                            Map.add id { Hits = hits; HitsMax = 5000 } hitsOf)
+                }
+        }
+
+/// Every extension, Storage and tower the home's plan asks for, standing: a
+/// home past its build phase (#526), where an outpost road's sites go down.
+let private homeBuilt (home: string) (colony: ColonyView) =
+    decide colony Map.empty Set.empty None
+    |> fun decision -> Fixtures.placementIntents decision.Intents
+    |> List.filter (fun (room, _, kind) ->
+        room = home && List.contains kind [ Extension; Storage; Tower ])
+    |> List.indexed
+    |> List.fold
+        (fun colony (index, (room, tile, kind)) ->
+            let built =
+                match kind with
+                | Extension -> BuiltKind.Extension
+                | Storage -> BuiltKind.Storage
+                | _ -> BuiltKind.Tower
+
+            standing room $"home-{index}" tile built colony)
+        colony
+
+/// A colony at `home` from `spawn` mining `outposts`, each seen and reserved
+/// by us, with a container standing on the Seat `planOutpostContainers`
+/// picks, and `crossed` rooms carried for their ground alone, as
+/// `transiting` leaves a room the colony only crosses, its home past its
+/// build phase (`homeBuilt`). The declarations are laid in by
+/// `Outpost.place`, the production rule.
+let private miningColony
+    (home: string)
+    (spawn: Pos)
+    (outposts: Outpost list)
+    (crossed: string list)
+    =
+    let loaded = project (load home) spawn None
+
+    let spatial =
+        (loaded.Spatial, (outposts |> List.map (fun o -> o.RoomName)) @ crossed)
+        ||> List.fold (fun spatial room ->
+            let capture = load room
+
+            { spatial with
+                Rooms =
+                    Map.add
+                        room
+                        { RoomLayer.empty with
+                            Terrain = capture.Terrain
+                        }
+                        spatial.Rooms
+                Borders = Map.add room capture.Border spatial.Borders
+            })
+        |> Outpost.place outposts
+
+    let reserved =
+        {
+            Owner = Ownership.Unowned
+            Reservation =
+                Some
+                    {
+                        Holder = ReservationHolder.Ours
+                        TicksToEnd = 4000
+                        Username = "Xerxes_2"
+                    }
+            SafeMode = false
+            SafeModeCooldownUntil = 0
+            Sign = None
+        }
+
+    let colony = colonyOf loaded 5
+
+    let colony =
+        { colony with
+            Spatial = spatial
+            RoomControl =
+                (colony.RoomControl, outposts)
+                ||> List.fold (fun control outpost -> Map.add outpost.RoomName reserved control)
+            Sources =
+                colony.Sources
+                |> Outpost.pooledSources (Outpost.roomsProjected outposts home) outposts
+            Crossed = Set.ofList crossed
+        }
+
+    // The containers, on the tiles the production rule asks for; a rock two
+    // crossings out, which that rule seats against a Seam toward home it
+    // does not border, on its lowest Seat.
+    let asked =
+        decide colony Map.empty Set.empty None
+        |> fun decision -> Fixtures.placementIntents decision.Intents
+        |> List.filter (fun (room, _, kind) -> room <> home && kind = Container)
+        |> List.map (fun (room, tile, _) -> RoomPos.at room tile)
+
+    let atlas = ofView colony
+
+    outposts
+    |> List.collect (fun outpost -> outpost.Sources)
+    |> List.map (fun (id, rock) ->
+        let seats = seatTilesOf atlas id
+
+        asked
+        |> List.tryFind (fun tile -> Set.contains tile seats)
+        |> Option.defaultWith (fun () -> Set.minElement seats)
+        |> fun tile -> rock.Room, RoomPos.pos tile)
+    |> List.indexed
+    |> List.fold
+        (fun colony (index, (room, tile)) ->
+            standing room $"container-{index}" tile BuiltKind.Container colony)
+        colony
+    |> homeBuilt home
+
+/// W12S28 from its first spawn, mining W12S27 one crossing north and W12S26
+/// two crossings out through it: the seventh colony's room, worked as an
+/// outpost before its claim.
+let private twoHops () =
+    let w12s27 = Outpost.adr0042 |> List.find (fun o -> o.RoomName = "W12S27")
+    miningColony "W12S28" { X = 12; Y = 40 } [ w12s27; Outpost.w12s26 ] []
+
+/// A tick's decision beside the outpost roads' planned tiles, which the memo
+/// does not keep: `planLayout` run again over the same view.
+type private Planned =
+    {
+        Decision: Decision
+        Tiles: Set<RoomPos>
+    }
+
+/// `Entry.decide`, with the planned tiles beside it.
+let private decide colony assignments verbose memo =
+    let _, _, _, _, _, _, tiles = planLayout colony (ofView colony)
+
+    {
+        Decision = Entry.decide colony assignments verbose memo
+        Tiles = tiles
+    }
+
+let private roadsOf (planned: Planned) = planned.Decision.Memo.OutpostRoads
+
+let private roadIn (room: string) (planned: Planned) =
+    roadsOf planned |> List.find (fun road -> road.Room = room)
+
+/// The outpost roads' sites this tick: the road sites on a planned tile, the
+/// home's own trunks being the home rule's.
+let private roadSites (planned: Planned) =
+    Fixtures.placementIntents planned.Decision.Intents
+    |> List.filter (fun (room, tile, kind) ->
+        kind = Road && Set.contains (RoomPos.at room tile) planned.Tiles)
+
+/// `twoHops`' outpost road sites alone: its road sites less the trunk sites
+/// W12S28 places with no outpost at all, which the line shares.
+let private twoHopSites (planned: Planned) =
+    let trunks =
+        miningColony "W12S28" { X = 12; Y = 40 } [] []
+        |> fun home -> Entry.decide home Map.empty Set.empty None
+        |> fun d -> Fixtures.placementIntents d.Intents
+
+    roadSites planned |> List.filter (fun site -> not (List.contains site trunks))
+
+/// Road sites of ours pending on tiles of any rooms: in the census, on each
+/// room's layer, and in `ConstructionSites`.
+let private roadSitesPending (tiles: (string * Pos) list) (colony: ColonyView) =
+    let ids =
+        tiles
+        |> List.map (fun (room, tile) -> $"site-{room}-{tile.X}-{tile.Y}", room, tile)
+
+    (colony, ids)
+    ||> List.fold (fun colony (id, room, tile) ->
+        { colony with
+            ConstructionSites =
+                colony.ConstructionSites @ [ { Id = id; Left = 300; Begun = false } ]
+            Spatial =
+                { colony.Spatial with
+                    TargetKinds = Map.add id (Site BuiltKind.Road) colony.Spatial.TargetKinds
+                }
+        }
+        |> inRoom room (fun layer ->
+            { layer with
+                TargetPositions = Map.add id tile layer.TargetPositions
+            }))
+
+let private plannedIn (room: string) (planned: Planned) =
+    planned.Tiles
+    |> Set.filter (fun tile -> tile.Room = room)
+    |> Set.map RoomPos.pos
+
+/// Whether `tiles` hold one line from a tile beside `from` to a tile on the
+/// room's edge rows: a road a hauler can walk to the Seam.
+let private joinsToEdge (from: Pos) (tiles: Set<Pos>) =
+    let edge (tile: Pos) =
+        tile.X = 1 || tile.X = 48 || tile.Y = 1 || tile.Y = 48
+
+    let rec spread (reached: Set<Pos>) =
+        let next =
+            tiles
+            |> Set.filter (fun tile ->
+                not (Set.contains tile reached)
+                && reached |> Set.exists (fun r -> range r tile = 1))
+
+        if Set.isEmpty next then
+            reached
+        else
+            spread (Set.union reached next)
+
+    let start = tiles |> Set.filter (fun tile -> range tile from = 1)
+    spread start |> Set.exists edge
+
+let private containerIn (room: string) (colony: ColonyView) =
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    layer.TargetPositions
+    |> Map.toList
+    |> List.pick (fun (id, tile) ->
+        match Map.tryFind id colony.Spatial.TargetKinds with
+        | Some(Structure BuiltKind.Container) -> Some tile
+        | _ -> None)
+
+[<Tests>]
+let outpostRoadTests =
+    testList
+        "outpost roads on real terrain"
+        [
+            test "an outpost two rooms off gets a road along the haul route" {
+                let colony = twoHops ()
+                let decision = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (roadsOf decision |> List.map (fun road -> road.Room, road.State))
+                    [ "W12S26", OutpostRoadState.Planned; "W12S27", OutpostRoadState.Planned ]
+                    "both reserved outposts' roads pay, in source-id order"
+
+                let far = plannedIn "W12S26" decision
+                let through = plannedIn "W12S27" decision
+
+                Expect.isTrue
+                    (joinsToEdge (containerIn "W12S26" colony) far)
+                    $"W12S26's road is one line from its container to the Seam: {far}"
+
+                Expect.isNonEmpty
+                    through
+                    "and it crosses W12S27, the room between, which this colony works"
+
+                Expect.isTrue
+                    (decision.Tiles
+                     |> Set.forall (fun tile ->
+                         List.contains tile.Room [ "W12S28"; "W12S27"; "W12S26" ]))
+                    "every planned tile lies on the haul's chain"
+
+                // Less the home's own trunk sites, which the line shares.
+                let trunks =
+                    miningColony "W12S28" { X = 12; Y = 40 } [] []
+                    |> fun home -> decide home Map.empty Set.empty None
+                    |> fun d -> Fixtures.placementIntents d.Decision.Intents
+
+                let sites =
+                    roadSites decision |> List.filter (fun site -> not (List.contains site trunks))
+
+                Expect.equal
+                    (List.length sites)
+                    Tuning.defaults.OutpostRoadSites
+                    "the cap of the outpost roads' sites goes down, and no more"
+
+                // From home outward: the first site is the line's nearest to
+                // the drop point.
+                Expect.equal
+                    (sites |> List.head |> (fun (room, _, _) -> room))
+                    "W12S28"
+                    "the first site is at home, where the road leaves"
+            }
+
+            test
+                "W12S26's and W17S25's declared outposts each get one road from home to their container" {
+                for home, outposts in
+                    [
+                        "W12S26", [ Outpost.w13s26; Outpost.w12s25 ]
+                        "W17S25", [ Outpost.w17s26; Outpost.w18s25 ]
+                    ] do
+                    let spawn =
+                        colonySpawnIn home
+                        |> Option.defaultWith (fun () ->
+                            failwith $"{home} has a live spawn on record")
+
+                    let colony = miningColony home spawn outposts []
+                    let decision = decide colony Map.empty Set.empty None
+
+                    for outpost in outposts do
+                        let room = outpost.RoomName
+
+                        Expect.equal
+                            (roadIn room decision).State
+                            OutpostRoadState.Planned
+                            $"{home}'s road to {room} pays"
+
+                        Expect.isTrue
+                            (joinsToEdge (containerIn room colony) (plannedIn room decision))
+                            $"{home}'s road in {room} is one line from the container to the Seam"
+
+                        Expect.isNonEmpty
+                            (plannedIn home decision)
+                            $"and it leaves {home} on a planned line"
+            }
+
+            test "a hand road along the line is followed, and paved over by no site" {
+                let colony = twoHops ()
+                let before = decide colony Map.empty Set.empty None
+                let line = plannedIn "W12S26" before
+
+                // A road a human laid beside ours: the line the router would
+                // take were our tiles in W12S26 walled off. Real, contiguous,
+                // and sharing no tile with the plan's.
+                let atlas = ofView colony
+                let container = containerIn "W12S26" colony
+
+                let hand =
+                    roadAlong
+                        atlas
+                        (line |> Set.map (RoomPos.at "W12S26"))
+                        Set.empty
+                        [ RoomPos.at "W12S27" (Set.minElement (plannedIn "W12S27" before)) ]
+                        [ "W12S27"; "W12S26" ]
+                        (adjacentWalkableIn atlas "W12S26" container
+                         |> List.map (RoomPos.at "W12S26")
+                         |> Set.ofList)
+                    |> Option.map (
+                        snd
+                        >> List.filter (fun tile -> tile.Room = "W12S26")
+                        >> List.map RoomPos.pos
+                    )
+                    |> Option.defaultValue []
+
+                Expect.isNonEmpty hand "the capture has a second line to the container"
+
+                let paved = colony |> roadsStanding "W12S26" 5000 hand
+                let after = decide paved Map.empty Set.empty None
+                let followed = plannedIn "W12S26" after
+                let off = Set.difference followed (Set.ofList hand)
+
+                Expect.isLessThanOrEqual
+                    (Set.count off)
+                    (Set.count followed / 5)
+                    $"the road follows the hand road: {Set.count off} of {Set.count followed} tiles off it"
+
+                Expect.isEmpty
+                    (roadSites after
+                     |> List.filter (fun (room, tile, _) ->
+                         room = "W12S26" && List.contains tile hand))
+                    "no site goes down on a tile a road already stands on"
+
+                Expect.equal
+                    (roadIn "W12S26" after).Standing
+                    (Set.count (Set.intersect followed (Set.ofList hand)))
+                    "the record counts the hand road's tiles the line takes as standing"
+            }
+
+            test "a room the colony only crosses is planned, counted and never paved" {
+                let colony =
+                    miningColony "W12S28" { X = 12; Y = 40 } [ Outpost.w12s26 ] [ "W12S27" ]
+
+                let decision = decide colony Map.empty Set.empty None
+                let road = roadIn "W12S26" decision
+
+                Expect.equal road.State OutpostRoadState.Planned "W12S26's road still pays"
+
+                Expect.isGreaterThan
+                    road.Skipped
+                    0
+                    "its stretch through W12S27 is counted as skipped"
+
+                Expect.isEmpty
+                    (roadSites decision |> List.filter (fun (room, _, _) -> room = "W12S27"))
+                    "and no site goes down in a room whose sites the colony cannot see"
+            }
+
+            test
+                "an outpost whose road no longer pays gets no new site, and its standing roads keep their Repair" {
+                let colony = twoHops ()
+                let line = plannedIn "W12S26" (decide colony Map.empty Set.empty None)
+
+                let unpaid =
+                    { (colony |> roadsStanding "W12S26" 1000 (Set.toList line |> List.truncate 5)) with
+                        Tuning = { Tuning.defaults with RoadPayback = 1 }
+                    }
+
+                let decision = decide unpaid Map.empty Set.empty None
+
+                Expect.equal
+                    (roadIn "W12S26" decision).State
+                    OutpostRoadState.Unpaid
+                    "a road that does not repay its build within a tick is not planned"
+
+                Expect.isEmpty
+                    (Fixtures.placementIntents decision.Decision.Intents
+                     |> List.filter (fun (room, _, kind) -> room = "W12S26" && kind = Road))
+                    "nothing new is placed in its room"
+
+                let ids =
+                    line
+                    |> Set.toList
+                    |> List.truncate 5
+                    |> List.map (fun tile -> Repair $"road-W12S26-{tile.X}-{tile.Y}")
+
+                Expect.containsAll
+                    (Fixtures.planTasksOn unpaid noThreats)
+                    ids
+                    "the roads already standing are still repaired: payback gates new sites only"
+            }
+
+            test "a hand road off the planned line in a judged outpost keeps its Repair" {
+                let colony = twoHops ()
+                let line = plannedIn "W12S26" (decide colony Map.empty Set.empty None)
+
+                // A tile of ground nowhere near the line: a road the user laid
+                // to somewhere the plan does not go.
+                let hand =
+                    walkableTilesIn (ofView colony) "W12S26"
+                    |> Set.filter (fun tile -> line |> Set.forall (fun t -> range t tile > 3))
+                    |> Set.minElement
+
+                let paved = colony |> roadsStanding "W12S26" 1000 [ hand ]
+                let decision = decide paved Map.empty Set.empty None
+
+                Expect.equal
+                    (roadIn "W12S26" decision).State
+                    OutpostRoadState.Planned
+                    "the outpost's road was judged and planned"
+
+                Expect.contains
+                    (Fixtures.planTasksOn paved noThreats)
+                    (Repair $"road-W12S26-{hand.X}-{hand.Y}")
+                    "the hand road off the line is the user's, and stays repaired"
+            }
+
+            test
+                "a colony holds three outpost road sites, and places the next only as one completes" {
+                let colony = twoHops ()
+                let first = twoHopSites (decide colony Map.empty Set.empty None)
+
+                Expect.equal (List.length first) 3 "the premise: three sites, nearest home first"
+
+                let held = first |> List.map (fun (room, tile, _) -> room, tile)
+                let pending = colony |> roadSitesPending held
+
+                Expect.isEmpty
+                    (twoHopSites (decide pending Map.empty Set.empty None)
+                     |> List.filter (fun site -> not (List.contains site first)))
+                    "three held, no fourth goes down"
+
+                // The first one built: a road stands where its site was.
+                let room, tile = List.head held
+
+                let completed =
+                    colony |> roadSitesPending (List.tail held) |> roadsStanding room 5000 [ tile ]
+
+                Expect.equal
+                    (twoHopSites (decide completed Map.empty Set.empty None)
+                     |> List.filter (fun site -> not (List.contains site first))
+                     |> List.length)
+                    1
+                    "one built, and one more goes down in its place"
+            }
+
+            test "no outpost road site goes down while the player's sites stand at the ceiling" {
+                // Every colony's sites share the engine's 100, and a level-up asks
+                // for a dozen at once.
+                let colony = twoHops ()
+                let ceiling = Tuning.defaults.OutpostRoadSiteCeiling
+
+                Expect.isEmpty
+                    (twoHopSites (
+                        decide { colony with PlayerSites = ceiling } Map.empty Set.empty None
+                    ))
+                    "at the ceiling, none"
+
+                Expect.equal
+                    (twoHopSites (
+                        decide
+                            { colony with
+                                PlayerSites = ceiling - 2
+                            }
+                            Map.empty
+                            Set.empty
+                            None
+                     )
+                     |> List.length)
+                    2
+                    "two below it, two"
+            }
+
+            test "while the home builds, the outpost road is planned and no site of it goes down" {
+                // #526's build phase: an extension site standing at home holds
+                // every new outpost road site back; the plan and its record go
+                // on.
+                let building =
+                    { twoHops () with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "ext-site"
+                                    Left = 3000
+                                    Begun = false
+                                }
+                            ]
+                    }
+                    |> standing "W12S28" "ext-site" { X = 20; Y = 20 } BuiltKind.Extension
+                    |> fun colony ->
+                        { colony with
+                            Spatial =
+                                { colony.Spatial with
+                                    TargetKinds =
+                                        Map.add
+                                            "ext-site"
+                                            (Site BuiltKind.Extension)
+                                            colony.Spatial.TargetKinds
+                                }
+                        }
+
+                let decision = decide building Map.empty Set.empty None
+
+                Expect.equal
+                    (roadIn "W12S26" decision).State
+                    OutpostRoadState.Planned
+                    "the road is still planned"
+
+                Expect.isEmpty
+                    (roadSites decision |> List.filter (fun (room, _, _) -> room <> "W12S28"))
+                    "and no outpost room gets a site"
+            }
+
+            test "a room another player reserves is planned through and never paved" {
+                // The engine refuses a site under another's reservation (#334).
+                let colony = twoHops ()
+
+                let held =
+                    { colony with
+                        RoomControl =
+                            Map.add
+                                "W12S27"
+                                { (Map.find "W12S27" colony.RoomControl) with
+                                    Reservation =
+                                        Some
+                                            {
+                                                Holder = ReservationHolder.Rival
+                                                TicksToEnd = 3000
+                                                Username = "rival"
+                                            }
+                                }
+                                colony.RoomControl
+                    }
+
+                let decision = decide held Map.empty Set.empty None
+
+                Expect.isGreaterThan
+                    (roadIn "W12S26" decision).Skipped
+                    0
+                    "W12S26's stretch through the held room is counted as skipped"
+
+                Expect.isEmpty
+                    (roadSites decision |> List.filter (fun (room, _, _) -> room = "W12S27"))
+                    "and no site goes down under the rival's reservation"
+            }
+
+            test "a lapsed reservation is priced at the rate the reserver row holds" {
+                // #515's reading: the reserver restores the rate long before
+                // a road repays its build, so a lapse this tick changes no
+                // verdict. At 38,000 ticks every unbuilt tile pays at ten
+                // (plain repays in 35,700, swamp in 18,300) and none at five
+                // (81,100 and 39,000), whatever the line's ground.
+                let colony = twoHops ()
+
+                let lapsed =
+                    { colony with
+                        Tuning =
+                            { colony.Tuning with
+                                RoadPayback = 38_000
+                            }
+                        Bank = { colony.Bank with Capacity = 1300 }
+                        RoomControl =
+                            Map.add
+                                "W12S27"
+                                { (Map.find "W12S27" colony.RoomControl) with
+                                    Reservation = None
+                                }
+                                colony.RoomControl
+                    }
+
+                Expect.equal
+                    (roadIn "W12S27" (decide lapsed Map.empty Set.empty None)).State
+                    OutpostRoadState.Planned
+                    "a lapse the reserver row can restore keeps the road planned"
+
+                let noReserver =
+                    { lapsed with
+                        Bank = { lapsed.Bank with Capacity = 300 }
+                    }
+
+                Expect.equal
+                    (roadIn "W12S27" (decide noReserver Map.empty Set.empty None)).State
+                    OutpostRoadState.Unpaid
+                    "and a bank that cannot buy a reserver prices it at five, where it does not pay"
+            }
+
+            test "an undeclared or shut outpost's road is placed no more" {
+                // Undeclared: the room leaves the projection with the
+                // declaration. Shut: a stood-down room stays in the scan set
+                // as a room the colony crosses, its rock cut out. What stops
+                // is the plan and its sites; a road standing in a room the
+                // colony still works keeps the ordinary repair rules (the
+                // unpaid case above), and a room it only crosses carries no
+                // hits to repair (`transiting`).
+                let w12s27 = Outpost.adr0042 |> List.find (fun o -> o.RoomName = "W12S27")
+
+                for colony in
+                    [
+                        miningColony "W12S28" { X = 12; Y = 40 } [ w12s27 ] []
+                        miningColony "W12S28" { X = 12; Y = 40 } [ w12s27 ] [ "W12S26" ]
+                    ] do
+                    let decision = decide colony Map.empty Set.empty None
+
+                    Expect.equal
+                        (roadsOf decision |> List.map (fun road -> road.Room))
+                        [ "W12S27" ]
+                        "W12S26 has no road record"
+
+                    Expect.isEmpty (plannedIn "W12S26" decision) "and no planned tile"
+
+                    Expect.isEmpty
+                        (roadSites decision |> List.filter (fun (room, _, _) -> room = "W12S26"))
+                        "and no site is placed there"
+            }
+        ]
+
 // ---- the Seam bands the captured rooms hold -----------------------------

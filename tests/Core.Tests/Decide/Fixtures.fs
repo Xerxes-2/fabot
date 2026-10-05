@@ -168,6 +168,7 @@ let bareRespawn =
         Fought = Map.empty
         HomeRaided = None
         ConstructionSites = []
+        PlayerSites = 0
         Creeps = []
         Unprojected = Set.empty
         Hostiles = []

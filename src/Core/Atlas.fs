@@ -104,6 +104,9 @@ type Atlas =
             /// census (`FarFieldMemo`, `docs/research/cpu-headroom.md` §5.1). Handed
             /// back by `Decide.decideUnarbitrated` while the census signature stands.
             FarFields: FarFieldMemo
+            /// The keys of `FarFields.RoadFloods` this Atlas asked for: what
+            /// `sweepRoadFloods` keeps.
+            RoadFloodsAsked: System.Collections.Generic.HashSet<string>
             /// Memoised room chains per ordered room pair — every chain of the fewest
             /// crossings a walk between them could take, ends included. Answered off
             /// the border rings and the raw ground behind them and off no walking grid
@@ -397,6 +400,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
                 facts.Assault.MaxHops |> Option.map (fun hops -> facts.Assault.RoomName, hops))
             |> Map.ofList
         FarFields = farFields
+        RoadFloodsAsked = System.Collections.Generic.HashSet()
         Walks = walks
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
@@ -3308,6 +3312,49 @@ let walkTicksFrom
                 (reachedIn table)
                 (adjacentWalkableIn atlas target.Room (RoomPos.pos target)))
 
+/// The grid a planned road is priced on (`trunkPath`, `roadAlong`): raw
+/// terrain is the *price*, never what blocks. It starts from the ground grid
+/// — plain 2, swamp `Tuning.TrunkSwampWeight`, wall -1, and no road discount,
+/// the walking grid's one disqualifying difference — then prices the `paved`
+/// tiles at a road's 1, then takes the obstacle pass back off the layer,
+/// because a rampart or a spawn standing in the line is as impassable to a
+/// planned road as a wall, and last the `avoid` tiles.
+let private trunkWeights (atlas: Atlas) (room: string) (avoid: Pos list) (paved: Pos list) : int[] =
+    let weights = Array.copy (groundOf atlas room)
+
+    // The swamp repriced for a road before the obstacle pass, so a swamp under
+    // an obstacle still reads -1 after it. Held at `Engine.swampWeight` where
+    // the tunable is read past it: `stepTable` is sized to that weight, so a
+    // heavier one would index off its end — an exception on .NET and an
+    // `undefined` price through `at`'s `[<Emit>]` accessor on the deployed
+    // bundle.
+    let trunkSwamp = min Engine.swampWeight atlas.Tuning.TrunkSwampWeight
+
+    for index in 0 .. weights.Length - 1 do
+        if weights.[index] = Engine.swampWeight then
+            weights.[index] <- trunkSwamp
+
+    // Ground only: a road the engine tunnelled through a wall stays a wall
+    // to the plan.
+    paved
+    |> List.iter (fun tile ->
+        if inGrid tile && weights.[indexOf tile] >= 0 then
+            weights.[indexOf tile] <- Gait.road)
+
+    (layerOf atlas room).Obstacles
+    |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
+
+    // Through the grid's guard, unlike the pass above: `avoid` is the Layout's
+    // own reservation set rather than the projection's geometry, and `indexOf`
+    // checks nothing (#173) — so a tile off the fifty-by-fifty reserves
+    // nothing instead of indexing off the array.
+    avoid
+    |> List.iter (fun tile ->
+        if inGrid tile then
+            weights.[indexOf tile] <- -1)
+
+    weights
+
 /// Cheapest raw-terrain path for a trunk road: plain 2, swamp
 /// `Tuning.TrunkSwampWeight` — no road discount and no occupancy surcharge, so
 /// the line neither shifts as its own roads get built nor bends around today's
@@ -3330,38 +3377,8 @@ let trunkPath
     // source per goal on a census tick, and a room's share taken as a fresh
     // `Set<Pos>` at each ask is a copy of the reservation per line
     // (`RoomPos.tilesIn`). Only the room's own tiles are taken.
-    let avoid = RoomPos.tilesIn room avoidTiles
     let goals = RoomPos.tilesIn room goalTiles
-    // Raw terrain is the *price*, never what blocks: the trunk starts from the
-    // ground grid — plain 2, swamp `Tuning.TrunkSwampWeight`, wall -1, and no
-    // road discount, the walking grid's one disqualifying difference — and then
-    // takes the obstacle pass back off the layer, because a rampart or a spawn
-    // standing in the line is as impassable to a planned road as a wall.
-    let weights = Array.copy (groundOf atlas room)
-
-    // The swamp repriced for a road before the obstacle pass, so a swamp under
-    // an obstacle still reads -1 after it. Held at `Engine.swampWeight` where
-    // the tunable is read past it: `stepTable` is sized to that weight, so a
-    // heavier one would index off its end — an exception on .NET and an
-    // `undefined` price through `at`'s `[<Emit>]` accessor on the deployed
-    // bundle.
-    let trunkSwamp = min Engine.swampWeight atlas.Tuning.TrunkSwampWeight
-
-    for index in 0 .. weights.Length - 1 do
-        if weights.[index] = Engine.swampWeight then
-            weights.[index] <- trunkSwamp
-
-    (layerOf atlas room).Obstacles
-    |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
-
-    // Through the grid's guard, unlike the pass above: `avoid` is the Layout's
-    // own reservation set rather than the projection's geometry, and `indexOf`
-    // checks nothing (#173) — so a tile off the fifty-by-fifty reserves
-    // nothing instead of indexing off the array.
-    avoid
-    |> List.iter (fun tile ->
-        if inGrid tile then
-            weights.[indexOf tile] <- -1)
+    let weights = trunkWeights atlas room (RoomPos.tilesIn room avoidTiles) []
 
     let dist, parents =
         floodFrom weights noTraffic (stepTable (stepUnits planningFactor)) origin
@@ -3378,3 +3395,136 @@ let trunkPath
                 walk parents.[index] (RoomPos.at room (posAt index) :: acc)
 
         walk (indexOf goal) []
+
+/// The cheapest planned road from any of `starts` along one chain of rooms to the
+/// nearest of `goals` in the chain's last room, priced on `trunkWeights` with
+/// `paved` at a road's 1. One flood a room, each seeded on the landing tiles
+/// of the Seam band it is entered by, at what the room before charged to
+/// stand beside that band's exit tile: the line is the chain's cheapest, not
+/// a room-by-room greedy one. Answers the price and the tiles from the first
+/// step beside the origin to the goal in walking order, the border ring left
+/// out (nothing is built on an exit); None where the chain does not start in
+/// the starts' room, a Seam is not crossed, or no goal is reached.
+let roadAlong
+    (atlas: Atlas)
+    (avoid: Set<RoomPos>)
+    (paved: Set<RoomPos>)
+    (starts: RoomPos list)
+    (chain: string list)
+    (goals: Set<RoomPos>)
+    : (int * RoomPos list) option =
+    let stepPrices = stepTable (stepUnits planningFactor)
+
+    // Recalled whole where the grid and the seeds are the last plan's (#548):
+    // a census move elsewhere replans the colony and leaves this room's
+    // flood as it was. The key spells the grid a character a tile.
+    let floodIn room (seeds: (Pos * int) list) =
+        let weights =
+            trunkWeights atlas room (RoomPos.tilesIn room avoid) (RoomPos.tilesIn room paved)
+
+        let grid =
+            weights |> Array.map (fun w -> string (char (w + 66))) |> String.concat ""
+
+        let seeded =
+            seeds
+            |> List.map (fun (tile, cost) -> $"{tile.X},{tile.Y},{cost}")
+            |> String.concat ";"
+
+        let key = $"{room}|{seeded}|{grid}"
+        atlas.RoadFloodsAsked.Add key |> ignore
+
+        match atlas.FarFields.RoadFloods.TryGetValue key with
+        | true, flood -> flood
+        | _ ->
+            let flood = floodFromAllSeeded weights noTraffic stepPrices seeds |> drained
+            atlas.FarFields.RoadFloods.[key] <- flood
+            flood
+
+    // The cheapest tile beside one exit the room's flood reached, ties to the
+    // lowest (X, Y): where a body steps off onto the exit.
+    let besideExit (dist: int[]) (exit: Pos) =
+        let mutable best = unreached
+        let mutable from = exit
+
+        for dx in -1 .. 1 do
+            for dy in -1 .. 1 do
+                let tile = { X = exit.X + dx; Y = exit.Y + dy }
+
+                if inGrid tile && not (Seam.onRing tile) then
+                    let d = reachedIn dist tile
+
+                    if
+                        d <> unreached
+                        && (d < best
+                            || d = best && (tile.X < from.X || tile.X = from.X && tile.Y < from.Y))
+                    then
+                        best <- d
+                        from <- tile
+
+        if best = unreached then None else Some(best, from)
+
+    match chain with
+    | first :: _ when
+        not (List.isEmpty starts)
+        && starts |> List.forall (fun start -> start.Room = first)
+        ->
+        let dist, parents = floodIn first [ for start in starts -> RoomPos.pos start, 0 ]
+
+        // Each room's flood, newest first, beside the tile of the room before
+        // that each of its landing seeds was stepped off from.
+        let legs =
+            (Some [ first, dist, parents, Map.empty ], List.pairwise chain)
+            ||> List.fold (fun legs (here, there) ->
+                match legs with
+                | Some((_, dist, _, _) :: _ as built) ->
+                    let entries =
+                        seams atlas here there
+                        |> List.choose (fun (exit, landing) ->
+                            besideExit dist exit
+                            |> Option.map (fun (cost, from) ->
+                                landing, cost, RoomPos.at here from))
+
+                    match entries with
+                    | [] -> None
+                    | _ ->
+                        let dist, parents =
+                            floodIn
+                                there
+                                (entries |> List.map (fun (landing, cost, _) -> landing, cost))
+
+                        let cameFrom =
+                            entries
+                            |> List.map (fun (landing, _, from) -> indexOf landing, from)
+                            |> Map.ofList
+
+                        Some((there, dist, parents, cameFrom) :: built)
+                | _ -> None)
+
+        match legs with
+        | Some((last, dist, _, _) :: _ as built) ->
+            cheapestReached (reachedIn dist) (RoomPos.tilesIn last goals)
+            |> Option.map (fun (cost, goal) ->
+                // Back from the goal: a tile with no parent is a seed, the
+                // origin or a landing on the ring, and neither is paved; a
+                // landing hands the walk to the tile it was stepped off from.
+                let rec back legs (index: int) acc =
+                    match legs with
+                    | (room, _, (parents: int[]), (cameFrom: Map<int, RoomPos>)) :: earlier ->
+                        let parent = parents.[index]
+
+                        if parent < 0 then
+                            match Map.tryFind index cameFrom with
+                            | Some from -> back earlier (indexOf (RoomPos.pos from)) acc
+                            | None -> acc
+                        else
+                            back legs parent (RoomPos.at room (posAt index) :: acc)
+                    | [] -> acc
+
+                cost, back built (indexOf goal) [])
+        | _ -> None
+    | _ -> None
+
+/// Keep, of the outpost roads' floods, those this Atlas asked for: called once
+/// the plan has routed every road, so the table holds one plan's floods.
+let sweepRoadFloods (atlas: Atlas) : unit =
+    retain atlas.FarFields.RoadFloods atlas.RoadFloodsAsked.Contains

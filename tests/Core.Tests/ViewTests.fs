@@ -309,6 +309,7 @@ let private pairWorld: World =
     {
         Time = 1000
         Rooms = pairRooms
+        Sites = 0
         Creeps =
             [
                 creep "worker-900-Spawn1" mother

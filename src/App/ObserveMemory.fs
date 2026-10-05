@@ -1329,7 +1329,7 @@ let saveQuotas (home: string) (quotas: Quotas) =
     writeColonyLeaf home "quotas" o
 
 /// Write one colony's losses this tick under `observe.colonies.<home>.layout`:
-/// five lists in one leaf, written every tick, empty lists included, so
+/// six lists in one leaf, written every tick, empty lists included, so
 /// `observe.mjs layout` can tell "nothing is lost" from "not recorded".
 let saveLayout
     (home: string)
@@ -1338,6 +1338,7 @@ let saveLayout
     (deferred: DeferredContainer list)
     (refused: RefusedDeclaration list)
     (waiting: WaitingContainer list)
+    (roads: OutpostRoad list)
     =
     let layout = createEmpty<obj>
 
@@ -1414,6 +1415,22 @@ let saveLayout
             o?room <- entry.Room
             o?ours <- entry.Ours |> List.map seatObject |> List.toArray
             o?rival <- entry.Rival |> List.map seatObject |> List.toArray
+            o)
+        |> List.toArray
+
+    // Each outpost source's road: its state, and the path's tiles counted by
+    // what stands on them.
+    layout?roads <-
+        roads
+        |> List.map (fun road ->
+            let o = createEmpty<obj>
+            o?source <- road.Source
+            o?room <- road.Room
+            o?state <- outpostRoadStateName road.State
+            o?tiles <- road.Tiles
+            o?standing <- road.Standing
+            o?pending <- road.Pending
+            o?skipped <- road.Skipped
             o)
         |> List.toArray
 

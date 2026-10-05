@@ -281,6 +281,29 @@ module Engine =
     /// sized by.
     let swampWeight = 10
 
+    /// CONSTRUCTION_COST road: a plain road's build.
+    let roadBuildCost = 300
+
+    /// CONSTRUCTION_COST_ROAD_SWAMP_RATIO: a swamp road's build and its
+    /// decay, against a plain one's.
+    let roadSwampRatio = 5
+
+    /// ROAD_DECAY_AMOUNT every ROAD_DECAY_TIME ticks, on plain.
+    let roadDecayAmount = 100
+
+    let roadDecayTime = 1000
+
+    /// ROAD_WEAROUT: the decay-timer ticks a creep's step onto a road brings
+    /// the next decay forward by, per body part (the engine's move
+    /// processor: `road.nextDecayTime -= ROAD_WEAROUT * body.length`).
+    let roadWearout = 1
+
+    /// The hits one energy repairs (REPAIR_COST 0.01 energy a hit).
+    let repairHitsPerEnergy = 100
+
+    /// MAX_CONSTRUCTION_SITES: a player's sites across every room.
+    let maxConstructionSites = 100
+
     /// The side of a Screeps room in tiles, and so the stride of every
     /// flat `x * 50 + y` grid the Atlas lays.
     let roomSide = 50
@@ -631,6 +654,20 @@ type Tuning =
         /// swamp costs a road is a one-off construction, and three amortizes
         /// it. ADR-0010
         TrunkSwampWeight: int
+        /// The ticks an outpost road must repay its build within, out of the
+        /// hauler ticks it saves net of its decay. 50,000, about two days of
+        /// the season's clock: a reserved source pays for plain ground, an
+        /// unreserved one only where swamp carries it.
+        RoadPayback: int
+        /// The pending road sites a colony's outpost roads may hold at once.
+        /// Three: one worker at a time crosses for them, and six
+        /// colonies at ten held 60 of the player's 100 sites, leaving an
+        /// RCL-up's extensions `ERR_FULL`.
+        OutpostRoadSites: int
+        /// The player's sites across every room past which no outpost road
+        /// site is placed: the rest of `Engine.maxConstructionSites` is
+        /// headroom for the sites a level-up asks for at once.
+        OutpostRoadSiteCeiling: int
         /// The [[stand-down]] a threat gave no readable deadline for: 2,500
         /// ticks, the stronghold expansion period.
         StandDownFallback: int
@@ -831,6 +868,9 @@ module Tuning =
             GarrisonTowers = 2
             MaxHops = 6
             TrunkSwampWeight = 3
+            RoadPayback = 50_000
+            OutpostRoadSites = 3
+            OutpostRoadSiteCeiling = 70
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
             ExitHoldTicks = 100

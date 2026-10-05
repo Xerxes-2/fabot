@@ -440,9 +440,8 @@ let tuningTests =
                     [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
                     "a budget of one and two of the three stay home"
 
-                // The other half, where the queue is longer than the budget:
-                // the sites it names are the nearest the Seam, so what moves
-                // between the two readings is which site, not only how many.
+                // The other half: road sites beside it join no queue (#548),
+                // so the budget is the container's whatever roads stand.
                 let trunk =
                     crowd
                     |> withOutpostTrunk
@@ -455,17 +454,17 @@ let tuningTests =
 
                 Expect.equal
                     (tally trunk)
+                    [ taskId (Build "site-out"), 2; taskId (Build "site-r1"), 1 ]
+                    "two builders on the container, and the colony's one road body takes the third"
+
+                Expect.equal
+                    (tally (trunk |> tunedBy (fun t -> { t with OutpostBuilders = 1 })))
                     [
                         taskId (Build "site-out"), 1
                         taskId (Build "site-r1"), 1
                         taskId (Upgrade "ctrl-1"), 1
                     ]
-                    "two lifts the container and the road beside the crossing; the other three roads wait"
-
-                Expect.equal
-                    (tally (trunk |> tunedBy (fun t -> { t with OutpostBuilders = 1 })))
-                    [ taskId (Build "site-out"), 1; taskId (Upgrade "ctrl-1"), 2 ]
-                    "one lifts the container alone — the switch is never queued behind a road"
+                    "one on the container, one road body, and the third upgrades: four roads take one"
             }
 
             test "BootstrapLevel is the line a stage is cut at, and the one place it is read" {

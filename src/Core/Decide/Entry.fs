@@ -124,9 +124,17 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // table does, and in the per-room half a crossed room's vision coming and
     // going evicted W15S28's spawn walks every tick (82% of its pops,
     // 2026-10-05).
+    // Beside it, whether somebody else holds the controller, which an outpost
+    // road's sites wait on (#548) and its payback reads (who holds it).
     let held room =
         Map.tryFind room view.RoomControl
-        |> Option.map (heldRateOf >> string)
+        |> Option.map (fun control ->
+            let other =
+                RoomControlInfo.heldByOther control
+                |> Option.map (fun hold -> $"/{hold.Holder}")
+                |> Option.defaultValue ""
+
+            $"{heldRateOf control}{other}")
         |> Option.defaultValue ""
 
     // A room the colony only crosses or harasses (#463) signs its census per
@@ -159,7 +167,11 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
                 $"\n{room}={held room}|{signature}")
         |> String.concat ""
 
-    rooms, $"{home}|{level}|{stages}{flat}"
+    // Whether the player's sites stand at the outpost roads' ceiling (#548):
+    // the count moves with every colony's sites, the side of the line rarely.
+    let full = view.PlayerSites >= view.Tuning.OutpostRoadSiteCeiling
+
+    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}"
 
 let censusSignature (view: ColonyView) : string = snd (signaturesOf view)
 
@@ -256,6 +268,7 @@ let decideUnarbitrated
                 PerCensus = m.FarFields
                 Narrowed = m.Narrowed
                 Lines = m.Lines
+                RoadFloods = m.RoadFloods
             }
         | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
@@ -321,6 +334,7 @@ let decideUnarbitrated
                     FarFields = farFields.PerCensus
                     Narrowed = farFields.Narrowed
                     Lines = farFields.Lines
+                    RoadFloods = farFields.RoadFloods
                 }
             | None ->
                 let deferred =
@@ -331,13 +345,20 @@ let decideUnarbitrated
                         farFields.PerCensus
                         farFields.Narrowed
                         farFields.Lines
+                        farFields.RoadFloods
 
                 { deferred with
                     RivalRooms = rivals
                     AvoidRooms = avoided
                 }
         | None ->
-            let siteIntents, servedFootings, unservedFootings, unroutedTrunks, deferredContainers =
+            let (siteIntents,
+                 servedFootings,
+                 unservedFootings,
+                 unroutedTrunks,
+                 deferredContainers,
+                 outpostRoads,
+                 _) =
                 planLayout view atlas
 
             let quota, demandRows, load = haulerDemandOf view atlas
@@ -352,6 +373,7 @@ let decideUnarbitrated
                 ServedFootings = servedFootings
                 UnroutedTrunks = unroutedTrunks
                 DeferredContainers = deferredContainers
+                OutpostRoads = outpostRoads
                 HaulerQuota = quota
                 HaulerDemand = demandRows
                 HaulerLoad = load
@@ -360,6 +382,7 @@ let decideUnarbitrated
                 FarFields = farFields.PerCensus
                 Narrowed = farFields.Narrowed
                 Lines = farFields.Lines
+                RoadFloods = farFields.RoadFloods
             }
 
     // The narrow facts the Planner reads about the colony's own decisions:

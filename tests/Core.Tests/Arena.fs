@@ -1209,6 +1209,7 @@ let worldOf (a: Arena) : World =
     {
         Time = a.Time
         Rooms = rooms
+        Sites = 0
         Creeps =
             a.Bodies
             |> List.filter (fun b -> b.Side = Side.Ours)

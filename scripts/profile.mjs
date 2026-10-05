@@ -529,6 +529,16 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
       }
       return structuresNow;
     },
+    // Every construction site of ours, world-wide (#548): counted by the
+    // projection against the engine's cap. Off each visible room's
+    // `FIND_MY_CONSTRUCTION_SITES`; the stub has no site in a dark room.
+    get constructionSites() {
+      const sites = {};
+      for (const room of Object.values(this.rooms)) {
+        for (const s of room.find(114)) sites[s.id] = s; // FIND_MY_CONSTRUCTION_SITES
+      }
+      return sites;
+    },
     getObjectById: (id) => byId.get(id) ?? null,
   };
   let structuresAt = null;

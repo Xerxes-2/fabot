@@ -1682,8 +1682,8 @@ let pushWeightTests =
             test "#237 the boundary the ladder's rule is stated against" {
                 // Where the window ends, pinned from both sides: half a tier
                 // up is still the tier's own push, and one rung beyond it is
-                // the tier above's. Every rung steps a Task up, so this is the
-                // bound a rule may take.
+                // the tier above's. Every rung but `OneRungDown` steps a Task
+                // up, so this is the bound a rule may take.
                 let half = tierRungs / 2
 
                 for (shallower, above), (name, at) in List.pairwise ladderRanks do
