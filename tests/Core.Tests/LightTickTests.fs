@@ -25,6 +25,7 @@ let private quiet: Glance =
         Hostiles = []
         Structures = [ tile 30 30 ]
         Controllers = Map.ofList [ room, (5, false) ]
+        Lean = false
     }
 
 /// The full tick that saw `quiet`: the digger harvesting where it stands and
@@ -366,6 +367,22 @@ let forcedTests =
                     (LightTick.forced full (trepAt (at outpost 12)))
                     (Some(LightForce.HostileNear(outpost, "Trepidimous")))
                     "the same body beside our anchor in an outpost"
+
+                // A lean bucket (2026-10-05): an outpost's loiterer stops
+                // holding every tick full; home keeps every rule.
+                Expect.equal
+                    (LightTick.forced
+                        full
+                        { trepAt (at outpost 12) with
+                            Lean = true
+                        })
+                    None
+                    "on a lean bucket the outpost's body forces nothing"
+
+                Expect.equal
+                    (LightTick.forced full { trepAt (tile 12 10) with Lean = true })
+                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    "and home still decides"
 
                 // The armed rule reads home first; the room stays a full tick's.
                 Expect.equal

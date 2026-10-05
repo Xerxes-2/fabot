@@ -40,6 +40,11 @@ type Glance =
         Hostiles: GlanceHostile list
         Structures: RoomPos list
         Controllers: Map<string, int * bool>
+        /// The CPU bucket is low (2026-10-05: twice emptied by full ticks a
+        /// raid forced): the near rule then reads only the rooms we own a
+        /// structure in, so a hostile loitering in an outpost no longer
+        /// holds every tick full while the bucket drains.
+        Lean: bool
     }
 
 /// What the last full tick left for the light tick after it.
@@ -484,10 +489,12 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
                 | None -> false)
 
         let loose = looseNow last now
+        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
 
         hostiles
         |> List.tryFind (fun hostile ->
             not (Set.contains hostile.Tile.Room loose)
+            && (not now.Lean || Set.contains hostile.Tile.Room homes)
             && (within ours hostile || besideAShooter hostile))
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 

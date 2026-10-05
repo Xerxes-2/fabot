@@ -411,6 +411,7 @@ let fullMineContainerTests =
                             Hostiles = []
                             Structures = []
                             Controllers = Map.empty
+                            Lean = false
                         }
 
                     LightTick.intents (LightTick.lastFull glance Map.empty intents) glance

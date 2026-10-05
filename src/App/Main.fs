@@ -254,6 +254,8 @@ let private glance () : LightTick.Glance =
                 else
                     None)
             |> Fresh.mapOfArray
+        // Half a bucket: past it a raid's forced full ticks are what empties it.
+        Lean = Game.cpu.bucket < 5000
     }
 
 /// The CPU line's write, the same on both kinds of tick: nothing in the bot
