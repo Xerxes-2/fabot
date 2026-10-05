@@ -1106,6 +1106,14 @@ module Colony =
     /// Whether the engine's username is one of `allies`.
     let isAlly (username: string) = Set.contains username allies
 
+    /// The players we have declared enemies, by the username the engine
+    /// spells them: the only ones whose unarmed bodies in a room we mine are
+    /// [[trespasser]]s (#516, user, 2026-10-05). A neutral player's never is.
+    let enemies: Set<string> = Set.ofList [ "Trepidimous"; "Shibdib" ]
+
+    /// Whether the engine's username is one of `enemies`.
+    let isEnemy (username: string) = Set.contains username enemies
+
     /// The rooms another player, not an ally, owns the controller of, as a
     /// human surveyed them (#459): `World.rivalHeld` treats each as rival
     /// until a sighting says otherwise, so an unseen tower room is never

@@ -364,52 +364,48 @@ let matchCreeps
                     && Result.isOk (gate (lazy false) acc creep repair))
             | None -> false)
 
-    // The rangers let go for a chase this tick (#510), decided once against
-    // the remembered assignments, so the order the fold walks them in moves
-    // nothing. Per chased room's Guard nobody holds: the nearest ranger
-    // within `chaseWalk` holding the Guard of a harassment room or an
-    // outpost with nothing in it the Guard shoots — never a resident room's,
-    // whose garrison stays — for a chase that outranks that Guard and that
-    // the cascade would give it. It is back once the kill is made.
+    // The holders let go for a kill this tick (#510, #516), decided once
+    // against the remembered assignments, so the order the fold walks them in
+    // moves nothing. Per kill nobody holds (`Threats.isKill`): the nearest
+    // holder within `chaseWalk` of a Guard it may be called off
+    // (`Facts.mayBeCalled`), for a kill that outranks that Guard and that the
+    // cascade would give it (the gate says which bodies a kill admits). It
+    // is back once the kill is made.
     let called =
-        if Set.isEmpty threats.Chased then
+        if Set.isEmpty threats.Chased && Map.isEmpty threats.Trespass then
             Set.empty
         else
-            let resident = Facts.residentRooms view
+            let kills = threats.Trespass |> Map.keys |> Set.ofSeq |> Set.union threats.Chased
 
-            let quiet room =
-                not (Set.contains room resident)
-                && not (Set.contains room threats.Chased)
-                && view.Hostiles
-                   |> List.forall (fun h ->
-                       h.Pos.Room <> room || not (Facts.guardShoots view resident Set.empty h))
-
-            let donors =
+            // Each holder of a Guard, beside the room it holds.
+            let holders =
                 assignments
                 |> Map.toList
                 |> List.choose (fun (name, tid) ->
                     match
                         Map.tryFind tid byId, view.Creeps |> List.tryFind (fun c -> c.Name = name)
                     with
-                    | Some({ Task = Guard room } as pooled), Some creep when
-                        isRangerRowBody creep && quiet room
-                        ->
-                        Some(creep, pooled)
+                    | Some({ Task = Guard room } as pooled), Some creep ->
+                        Some(creep, pooled, room)
                     | _ -> None)
 
             pool
-            |> List.filter (fun chase ->
-                match chase.Task with
-                | Guard room ->
-                    Set.contains room threats.Chased
-                    && not (assignments |> Map.exists (fun _ tid -> tid = taskId chase.Task))
-                | _ -> false)
+            |> List.choose (fun kill ->
+                match kill.Task with
+                | Guard room when
+                    Set.contains room kills
+                    && not (assignments |> Map.exists (fun _ tid -> tid = taskId kill.Task))
+                    ->
+                    Some(kill, room)
+                | _ -> None)
             |> List.fold
-                (fun (taken: Set<string>) chase ->
-                    donors
-                    |> List.filter (fun (creep, pooled) ->
-                        not (Set.contains creep.Name taken) && chase.Priority < pooled.Priority)
-                    |> List.choose (fun (creep, _) ->
+                (fun (taken: Set<string>) (chase, killRoom) ->
+                    holders
+                    |> List.filter (fun (creep, pooled, held) ->
+                        not (Set.contains creep.Name taken)
+                        && chase.Priority < pooled.Priority
+                        && Facts.mayBeCalled view kills held killRoom)
+                    |> List.choose (fun (creep, _, _) ->
                         travelCostOf threats atlas creep.Name chase.Task
                         |> Option.filter (fun cost ->
                             cost <= chaseWalk

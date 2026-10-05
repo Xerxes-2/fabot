@@ -313,12 +313,21 @@ let internal applicable
         if Set.contains room (Facts.rangerRooms view) then
             isRangerRowBody creep
         elif Set.contains room threats.Chased then
-            // Kited down by this body's own live parts, or out of sight.
+            // Kited down by this body's own live parts, or out of sight; and a
+            // ranger the resident rule lends (#516).
             isRangerRowBody creep
             && (Facts.kitedDown view (partCount creep.Body) room
                 || not (
                     view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && Facts.isRaider h)
                 ))
+            && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
+        elif Threats.isTrespassed threats room then
+            // A trespass's kill (#516), defence first: the guard row's body,
+            // or a ranger the resident rule lends.
+            not (Facts.underRaid view)
+            && (isGuardRowBody creep
+                || isRangerRowBody creep
+                   && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
         else
             isGuardRowBody creep
     // A squad cast, or once the squad launches a resident of the room whose

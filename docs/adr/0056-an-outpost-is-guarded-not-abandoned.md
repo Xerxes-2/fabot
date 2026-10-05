@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510
+> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510, #516
+
+> **Amended by #516** on 2026-10-05: "on contact and never before" stays a rule of the guard *row*. A [[trespasser]] — an unarmed WORK, CARRY or CLAIM body of a declared enemy (`Colony.enemies`, the user's call of 2026-10-05; a neutral player's never) in a room the colony mines — pools the room's Guard as a kill no row casts for, taken by a guard or a ranger already standing, a quiet resident of a bordering home included, and never while a defended room is raided; a hauler is waited for at its store, never chased out of the room. A #510 chase lends the same quiet residents.
 
 > **Amended by #510** on 2026-10-05: a hostile that can barely move under its whole weight (destroyed parts included) is *stationary*: it opens no stand-down by itself, and its Reach shrinks to its weapon's range and a step. An outpost whose raid a ranger kites down, and which the biggest guard the bank buys loses, is a [[chase]]: the economy still stands down, but the room stays projected as a transit room with its Guard a ranger's alone, never cast for, no melee guard hired into it, and a quiet ranger within a walk called to it.
 

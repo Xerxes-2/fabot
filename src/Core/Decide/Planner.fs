@@ -497,6 +497,9 @@ let planTasks
     //
     // And one per chased room (#510): an outpost shut on a raid a ranger
     // kites down pools its chase and nothing else.
+    //
+    // And one per room a trespasser stands in (#516): its kill, for a body
+    // no row casts.
     let guards =
         let holding =
             threats.Held
@@ -509,7 +512,14 @@ let planTasks
             Set.difference threats.Chased (Set.ofList (outposts.Guarded @ holding))
             |> Set.toList
 
-        (outposts.Guarded @ holding @ chasing |> List.map Guard)
+        let trespassed =
+            threats.Trespass
+            |> Map.keys
+            |> Seq.filter (fun room ->
+                not (List.contains room outposts.Guarded || List.contains room holding))
+            |> List.ofSeq
+
+        (outposts.Guarded @ holding @ chasing @ trespassed |> List.map Guard)
         @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
         // And one Assault per assault this colony pools (#490, #491).
         @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)

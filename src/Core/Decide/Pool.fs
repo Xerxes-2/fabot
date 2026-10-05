@@ -1035,7 +1035,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
             // A chase over a quiet ranger's own Guard (#510): its kill is
             // the room's whole income back, and the ranger is let go for it.
-            | Guard room when Set.contains room threats.Chased -> OneRungUp
+            // A trespass's likewise (#516), a quiet resident's ring too.
+            | Guard room when Threats.isKill threats room -> OneRungUp
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | _ -> OnTheTier
 
@@ -1107,6 +1108,10 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
         // One ranger kites what cannot close on it (#510).
         | Guard room when Set.contains room threats.Chased -> Capacity.fighters 1
+        // One body kills a trespasser, which strikes nothing back (#516),
+        // and never fewer than the room's own guards.
+        | Guard room when Threats.isTrespassed threats room ->
+            Capacity.fighters (max 1 (guardsWanted view room))
         | Guard room -> Capacity.fighters (guardsWanted view room)
         // The defender row's own count, read a second time as the guard's is.
         | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)

@@ -569,7 +569,12 @@ let movementOf
 
             Some(Set.ofList (camp @ strike))
         else
-            None
+            // A trespass's killer walks round every Reach on the way (#516):
+            // its target strikes nothing back, and no Threat may.
+            match Map.tryFind name assigned with
+            | Some(Guard room) when Threats.isTrespassed threats room ->
+                Some(Threats.reachIn threats at.Room)
+            | _ -> None
 
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of

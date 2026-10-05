@@ -1679,3 +1679,473 @@ let shutChaseTests =
                 Expect.contains seen.Intents (RangedAttackCreep("r-1", "h-1")) "and shoots"
             }
         ]
+
+/// Raptor865 as W17S26 saw it (#516): five WORK on three MOVE, no weapon,
+/// a player's body digging our outpost.
+let private diggerAt room pos =
+    { hostileIn room pos (List.replicate 5 Work @ List.replicate 3 Move) with
+        Owner = "Trepidimous"
+    }
+
+/// The outpost floored out to its borders, and beyond it W1N3, the home of
+/// a child this colony raises, its controller at (25,25) and its resident
+/// ranger `r-1` on the ring: the home borders the outpost and not ours.
+let private raisingBeyond hostiles =
+    let colony = declaredRaid hostiles
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Creeps = colony.Creeps @ [ ranger "r-1" ]
+        RoomControl = Map.add "W1N3" ownedRoom colony.RoomControl
+        Declared = [ "W1N1"; "W1N3" ]
+        Borrowed =
+            {
+                Rooms = [ "W1N3" ]
+                Defended = []
+                Garrisoned = []
+            }
+        Stages = Map.add "W1N3" Nursery colony.Stages
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N3" plainRing
+                TargetKinds = colony.Spatial.TargetKinds |> Map.add "ctl-child" Controller
+            }
+            |> withNeighbour "W1N2" { outpost with Terrain = floor }
+            |> withNeighbour
+                "W1N3"
+                { RoomLayer.empty with
+                    Terrain = floor
+                    TargetPositions = Map.ofList [ "ctl-child", { X = 25; Y = 25 } ]
+                    Obstacles = Set.singleton { X = 25; Y = 25 }
+                    CreepPositions = Map.ofList [ "r-1", { X = 25; Y = 26 } ]
+                }
+    }
+
+let private residentHeld = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
+
+[<Tests>]
+let trespassTests =
+    testList
+        "a player's unarmed worker in a room we mine (#516)"
+        [
+            test "an unarmed 5W3M player body in our outpost pools one kill Task, one rung up" {
+                let pool = pooledOf (declaredRaid [ diggerAt "W1N2" { X = 25; Y = 44 } ])
+
+                let entry = entryFor (Guard "W1N2") pool
+
+                Expect.isSome entry "the outpost's Guard is pooled for it"
+
+                Expect.equal
+                    (entry |> Option.map (fun e -> e.Capacity))
+                    (Some(Capacity.fighters 1))
+                    "for one body"
+
+                let quietGuard =
+                    pooledOf (declaredRaid [ hostileIn "W1N2" { X = 25; Y = 42 } smallMelee ])
+                    |> entryFor (Guard "W1N2")
+
+                Expect.isLessThan
+                    (entry |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0)
+                    (quietGuard |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0)
+                    "a rung over a raided outpost's Guard"
+
+                Expect.isSome
+                    (pooledOf (declaredRaid [ diggerAt "W1N1" { X = 25; Y = 5 } ])
+                     |> entryFor (Guard "W1N1"))
+                    "and in the home"
+            }
+
+            test "a 23C23M player hauler in our outpost pools it too: it carries our energy off" {
+                let hauler =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Owner = "Trepidimous"
+                    }
+
+                Expect.isSome
+                    (pooledOf (declaredRaid [ hauler ]) |> entryFor (Guard "W1N2"))
+                    "the outpost's Guard is pooled for it"
+            }
+
+            test
+                "a hauler two from our container is waited for at the container, shot in range, and never followed out" {
+                let container = { X = 25; Y = 41 }
+
+                let haulerIn room pos =
+                    { hostileIn room pos (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Owner = "Trepidimous"
+                    }
+
+                let waiting =
+                    declaredRaid [ haulerIn "W1N2" { X = 27; Y = 43 } ]
+                    |> withGuards [ ranger "r-9", { X = 25; Y = 47 } ]
+
+                let ground = groundOf waiting
+
+                Expect.isNonEmpty ground "the premise: the kill has ground"
+
+                Expect.isTrue
+                    (ground
+                     |> Set.forall (fun tile ->
+                         rangeTo container tile <= 2 && rangeTo container tile > 0))
+                    "its ground is about the container, off it, and not on the hauler's heels"
+
+                Expect.equal
+                    (Map.tryFind "r-9" (decideOn waiting).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the ranger takes it"
+
+                let inRange =
+                    declaredRaid [ haulerIn "W1N2" { X = 27; Y = 43 } ]
+                    |> withGuards [ ranger "r-9", { X = 26; Y = 45 } ]
+
+                Expect.contains
+                    (decideOn inRange).Intents
+                    (RangedAttackCreep("r-9", "h-1"))
+                    "and shoots it within three"
+
+                let gone =
+                    decide
+                        (declaredRaid [ haulerIn "W1N3" { X = 25; Y = 48 } ]
+                         |> withGuards [ ranger "r-9", { X = 25; Y = 47 } ])
+                        (Map.ofList [ "r-9", taskId (Guard "W1N2") ])
+                        Set.empty
+                        None
+
+                Expect.notEqual
+                    (Map.tryFind "r-9" gone.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "out of the room it is no kill of ours"
+            }
+
+            test
+                "a hauler is waited for at the store nearest it, and beside itself away from every store" {
+                let haulerAt pos =
+                    { hostileIn "W1N2" pos (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Owner = "Trepidimous"
+                    }
+
+                let withSecond colony =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    colony.Spatial.TargetKinds
+                                    |> Map.add "can-two" (Structure BuiltKind.Container)
+                            }
+                    }
+                    |> withOutpostLayer "W1N2" (fun layer ->
+                        { layer with
+                            TargetPositions =
+                                Map.add "can-two" { X = 29; Y = 47 } layer.TargetPositions
+                        })
+
+                let near = groundOf (declaredRaid [ haulerAt { X = 27; Y = 43 } ] |> withSecond)
+
+                Expect.isNonEmpty near "the premise: the kill has ground"
+
+                Expect.isTrue
+                    (near |> Set.forall (fun tile -> rangeTo { X = 25; Y = 41 } tile <= 2))
+                    "about the container two from it, and not the one four off"
+
+                let away = { X = 21; Y = 48 }
+                let far = groundOf (declaredRaid [ haulerAt away ])
+
+                Expect.isNonEmpty far "the premise: the kill has ground"
+
+                Expect.isTrue
+                    (far |> Set.forall (fun tile -> rangeTo away tile = 1))
+                    "seven from the one store it draws from none, and is the ground's own"
+            }
+
+            test "a body on the exit row of the room beyond keeps the kill across the bounce" {
+                let colony = raisingBeyond [ diggerAt "W1N3" { X = 25; Y = 49 } ]
+                let ground = groundOf colony
+
+                Expect.isSome
+                    (pooledOf colony |> entryFor (Guard "W1N2"))
+                    "the outpost's Guard is pooled for the body the exit carries in"
+
+                Expect.isTrue
+                    (not (Set.isEmpty ground)
+                     && ground |> Set.forall (fun tile -> tile.Y = 1 && abs (tile.X - 25) <= 1))
+                    "beside where it lands, off the exit"
+            }
+
+            test
+                "defence first: a fresh ranger takes the raided child's Guard, not a trespass at home" {
+                let raid =
+                    { hostileIn "W1N3" { X = 40; Y = 40 } smallMelee with
+                        Id = "h-2"
+                    }
+
+                let colony =
+                    raisingBeyond [ diggerAt "W1N1" { X = 25; Y = 5 }; raid ]
+                    |> withBodyAtHome (ranger "r-5") atSpawn
+
+                let result = decide colony residentHeld Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-5" result.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "the raid is answered first"
+
+                let quiet =
+                    decide
+                        (raisingBeyond [ diggerAt "W1N1" { X = 25; Y = 5 } ]
+                         |> withBodyAtHome (ranger "r-5") atSpawn)
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r-5" quiet.Assignments)
+                    (Some(taskId (Guard "W1N1")))
+                    "the premise: with no raid it takes the trespass"
+            }
+
+            test "a neutral player's hauler in our outpost pools nothing" {
+                let giaco =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 10 Carry @ List.replicate 10 Move) with
+                        Owner = "giaco"
+                    }
+
+                Expect.isNone
+                    (pooledOf (declaredRaid [ giaco ]) |> entryFor (Guard "W1N2"))
+                    "only a declared enemy trespasses"
+            }
+
+            test "an ally's body, a scout and an Invader's digger pool none" {
+                let guardIn colony =
+                    pooledOf colony
+                    |> List.exists (fun e ->
+                        match e.Task with
+                        | Guard _ -> true
+                        | _ -> false)
+
+                Expect.isFalse
+                    (guardIn
+                        { declaredRaid [] with
+                            Allies = [ diggerAt "W1N2" { X = 25; Y = 44 } ]
+                        })
+                    "an ally's digger is no hostile"
+
+                Expect.isFalse
+                    (guardIn (declaredRaid [ hostileIn "W1N2" { X = 25; Y = 44 } [ Move ] ]))
+                    "a scout digs nothing"
+
+                Expect.isFalse
+                    (guardIn (
+                        declaredRaid
+                            [
+                                { diggerAt "W1N2" { X = 25; Y = 44 } with
+                                    Owner = "Invader"
+                                }
+                            ]
+                    ))
+                    "an Invader's body is the NPC's, no player's"
+            }
+
+            test "a melee guard may take it and swings from beside it, and no row casts for it" {
+                let at = { X = 25; Y = 44 }
+
+                let colony =
+                    declaredRaid [ diggerAt "W1N2" at ]
+                    |> withGuards [ guard "g-1", { X = 24; Y = 45 } ]
+
+                let result = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard takes the kill"
+
+                Expect.contains (attacksOf result.Intents) ("g-1", "h-1") "and swings"
+
+                Expect.equal (guardQuotaOf colony) (Some 0) "no guard is cast for it"
+
+                Expect.equal
+                    (rowOf "ranger" colony |> Option.map (fun row -> row.Quota))
+                    (Some 0)
+                    "nor a ranger"
+            }
+
+            test "nobody qualifying, nothing takes it" {
+                let colony = declaredRaid [ diggerAt "W1N2" { X = 25; Y = 44 } ]
+
+                Expect.isFalse
+                    ((decideOn colony).Assignments
+                     |> Map.exists (fun _ tid -> tid = taskId (Guard "W1N2")))
+                    "the anchor and the haulers are no fighters"
+            }
+
+            test "a ranger shoots it from three" {
+                let colony =
+                    declaredRaid [ diggerAt "W1N2" { X = 25; Y = 44 } ]
+                    |> withGuards [ ranger "r-9", { X = 25; Y = 47 } ]
+
+                let result = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "r-9" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the ranger takes the kill"
+
+                Expect.contains result.Intents (RangedAttackCreep("r-9", "h-1")) "and shoots"
+            }
+
+            test
+                "a resident of the bordering home takes it while home is quiet, and walks back once it dies" {
+                let called =
+                    decide
+                        (raisingBeyond [ diggerAt "W1N2" { X = 25; Y = 10 } ])
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.contains
+                    called.Verdicts
+                    (Verdict.Released("r-1", taskId (Guard "W1N3"), ReleaseReason.Called))
+                    "the resident is let go of its quiet ring"
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and takes the kill"
+
+                let after =
+                    raisingBeyond []
+                    |> standingIn "W1N2" ("r-1", { X = 25; Y = 12 })
+                    |> withOutpostLayer "W1N3" (fun layer ->
+                        { layer with
+                            CreepPositions = Map.empty
+                        })
+
+                let back = decide after (Map.ofList [ "r-1", taskId (Guard "W1N2") ]) Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" back.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "with the trespasser dead it holds its home's ring again"
+            }
+
+            test "a resident is not sent to a room beside our home and not its own" {
+                let result =
+                    decide
+                        (raisingBeyond [ diggerAt "W1N1" { X = 25; Y = 5 } ])
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "W1N1 does not border W1N3"
+            }
+
+            test
+                "an armed body at home keeps the resident home, and recalls it from the kill at once" {
+                let raid =
+                    { hostileIn "W1N3" { X = 40; Y = 40 } smallMelee with
+                        Id = "h-2"
+                    }
+
+                let kept =
+                    decide
+                        (raisingBeyond [ diggerAt "W1N2" { X = 25; Y = 10 }; raid ])
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r-1" kept.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "a raid in its home keeps it there"
+
+                let recalled =
+                    decide
+                        (raisingBeyond [ diggerAt "W1N2" { X = 25; Y = 10 }; raid ]
+                         |> standingIn "W1N2" ("r-1", { X = 25; Y = 12 })
+                         |> withOutpostLayer "W1N3" (fun layer ->
+                             { layer with
+                                 CreepPositions = Map.empty
+                             }))
+                        (Map.ofList [ "r-1", taskId (Guard "W1N2") ])
+                        Set.empty
+                        None
+
+                Expect.contains
+                    recalled.Verdicts
+                    (Verdict.Released(
+                        "r-1",
+                        taskId (Guard "W1N2"),
+                        ReleaseReason.Rejected RejectReason.Inapplicable
+                    ))
+                    "a raid arriving there lets it go of the kill, still pooled"
+
+                Expect.equal
+                    (Map.tryFind "r-1" recalled.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "and it holds its home again"
+            }
+        ]
+
+[<Tests>]
+let residentChaseTests =
+    testList
+        "a resident lent to a chase beside its home (#516)"
+        [
+            test
+                "the W18S25 shape: a crippled melee next door calls the quiet resident, and a raid at home recalls it" {
+                let called =
+                    decide
+                        (raisingBeyond [ crippledAt { X = 25; Y = 10 } ])
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.contains
+                    called.Verdicts
+                    (Verdict.Released("r-1", taskId (Guard "W1N3"), ReleaseReason.Called))
+                    "the resident is let go of its quiet ring"
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and takes the chase"
+
+                let raid =
+                    { hostileIn "W1N3" { X = 40; Y = 40 } smallMelee with
+                        Id = "h-2"
+                    }
+
+                let recalled =
+                    decide
+                        (raisingBeyond [ crippledAt { X = 25; Y = 10 }; raid ]
+                         |> standingIn "W1N2" ("r-1", { X = 25; Y = 14 })
+                         |> withOutpostLayer "W1N3" (fun layer ->
+                             { layer with
+                                 CreepPositions = Map.empty
+                             }))
+                        (Map.ofList [ "r-1", taskId (Guard "W1N2") ])
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r-1" recalled.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "a raid at home calls it back off the chase"
+            }
+        ]

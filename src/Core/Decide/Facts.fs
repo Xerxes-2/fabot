@@ -443,11 +443,38 @@ let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
        |> List.exists (fun other ->
            isArmed other && within Engine.rangedRange other.Pos hostile.Pos)
 
+/// Whether a hostile's body trespasses wherever it stands (#516): a declared
+/// enemy's (`Colony.enemies`) with a live WORK, CARRY or CLAIM and no live
+/// weapon. A hauler carries our dug energy off; a bare scout takes nothing.
+let internal trespassingBody (hostile: HostileInfo) =
+    let takes part =
+        part = Work || part = Carry || part = BodyPart.Claim
+
+    List.exists takes hostile.Body
+    && Colony.isEnemy hostile.Owner
+    && (let live = Engine.liveParts hostile.Body hostile.Hits
+
+        List.exists takes live
+        && not (List.contains Attack live || List.contains RangedAttack live))
+
+/// Whether this colony mines a room: its home, or a room of its sources.
+let internal minesRoom (view: ColonyView) (room: string) =
+    room = SpatialInfo.homeName view.Spatial
+    || view.Sources
+       |> List.exists (fun source -> SpatialInfo.roomOf view.Spatial source.Id = Some room)
+
+/// Whether a hostile is a [[trespasser]] (#516): its body trespasses, in a
+/// room this colony mines. The body is asked first, so a tick with no such
+/// body walks no source.
+let internal trespasser (view: ColonyView) (hostile: HostileInfo) =
+    trespassingBody hostile && minesRoom view hostile.Pos.Room
+
 /// What a Guard in its room may shoot: an armed hostile, a rival's claimer or
 /// a raid's healer (#451) in a resident room, and the declared enemy's creep
 /// in a harassment room. In a room a Fight is pooled for, any healer: one
-/// whose raid is dead is still the raid's. `Emitter.guardTarget` and the
-/// harassment ring read this one predicate.
+/// whose raid is dead is still the raid's. And a trespasser (#516), last in
+/// the kill order. `Emitter.guardTarget` and the harassment ring read this
+/// one predicate.
 let internal guardShoots
     (view: ColonyView)
     (residentRooms: Set<string>)
@@ -460,6 +487,70 @@ let internal guardShoots
     || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
     || Set.contains hostile.Pos.Room fighting
        && HostileInfo.activeCount hostile Heal > 0
+    || trespasser view hostile
+
+/// Whether a resident room is quiet enough to lend its garrison to a kill
+/// in `kill` (#516): nothing its Guard shoots stands in it, and no armed
+/// hostile next door but the kill's own target.
+let internal residentQuiet
+    (view: ColonyView)
+    (resident: Set<string>)
+    (kill: string)
+    (home: string)
+    =
+    view.Hostiles
+    |> List.forall (fun h ->
+        if h.Pos.Room = home then
+            not (guardShoots view resident Set.empty h)
+        else
+            h.Pos.Room = kill || not (RoomName.neighbouring home h.Pos.Room && isRaider h))
+
+/// Whether a ranger standing in a room may hold a kill in `room`, a chase's
+/// or a trespass's (#510, #516). Nothing a ranger carries says whose
+/// resident it is, so every resident room beside the kill is quiet, or no
+/// ranger may — a harassment ranger or a fresh cast as much as the
+/// garrison: a raid arriving there calls its garrison back off the kill at
+/// once. And one standing in a resident room is its garrison, lent only to
+/// a room beside it.
+let internal rangerMayKill (view: ColonyView) (room: string) (standing: string option) =
+    let resident = residentRooms view
+
+    resident
+    |> Set.forall (fun home ->
+        not (RoomName.neighbouring home room) || residentQuiet view resident room home)
+    && standing
+       |> Option.forall (fun here ->
+           not (Set.contains here resident) || RoomName.neighbouring here room)
+
+/// Whether an armed raid stands in a room this colony defends (#516): its
+/// home, a resident room, a defended child's home or a room it mines.
+/// Defence first: no trespass's kill is held meanwhile, so no fresh or
+/// passing body is spent on one while a raid wants it.
+let internal underRaid (view: ColonyView) =
+    view.Hostiles
+    |> List.exists (fun h ->
+        isRaider h
+        && (let room = h.Pos.Room
+
+            Set.contains room (residentRooms view)
+            || List.contains room view.Borrowed.Defended
+            || minesRoom view room))
+
+/// Whether the holder of a room's Guard may be called off it for a kill in
+/// another (#510, #516), the bodies the kill admits being the gate's to say.
+/// A resident only for a kill in a room beside its home, while that home is
+/// quiet (`residentQuiet`); any other holder while nothing its Guard shoots
+/// stands in its room, and never off another kill.
+let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) (kill: string) =
+    let resident = residentRooms view
+
+    if Set.contains held resident then
+        RoomName.neighbouring held kill && residentQuiet view resident kill held
+    else
+        not (Set.contains held kills)
+        && view.Hostiles
+           |> List.forall (fun h ->
+               h.Pos.Room <> held || not (guardShoots view resident Set.empty h))
 
 /// Whether a ranged body of these part counts holds the range on a hostile
 /// for as long as it likes (#510): the hostile shoots nothing, and falls

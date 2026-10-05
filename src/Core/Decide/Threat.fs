@@ -158,6 +158,11 @@ type Threats =
         /// a ranger kites down (`ColonyView.ChasedOutposts`). Derived once,
         /// read by the pool, the Emitter, the Matcher, the mover and the rows.
         Chased: Set<string>
+        /// Per room a trespasser stands in (`Facts.trespasser`, #516) with no
+        /// Threat beside it and no ranger row serving it, the tiles beside
+        /// each trespasser off the exits: the ground of the one kill Task the
+        /// Planner pools there, which no row casts for.
+        Trespass: Map<string, Set<RoomPos>>
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -178,6 +183,7 @@ let noThreats =
         Defend = Map.empty
         Shelter = Map.empty
         Chased = Set.empty
+        Trespass = Map.empty
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -231,6 +237,16 @@ module Threats =
     let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
         Map.tryFind room threats.Ring |> Option.defaultValue Set.empty
 
+    /// Whether a room's Guard is a trespass's kill Task (#516).
+    let isTrespassed (threats: Threats) (room: string) : bool =
+        Map.containsKey room threats.Trespass
+
+    /// Whether a room's Guard is a kill (#510, #516): a chase or a trespass,
+    /// one body, a rung up, cast for by no row, and a quiet holder called to
+    /// it. Which bodies each admits is the Emitter's gate.
+    let isKill (threats: Threats) (room: string) : bool =
+        Set.contains room threats.Chased || isTrespassed threats room
+
     /// The garrison's Work Area in one resident room, or None for any other
     /// room (#414, #447).
     let residentRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
@@ -243,13 +259,14 @@ module Threats =
 
     /// A Guard's ground in one room, or None where the room has none and the
     /// pool falls back to the source ring (#366): the ranger's kite ground
-    /// (#451), else the resident or harassment ground, else the threats' ring.
-    /// A ranger room's Guard is a ranger's alone, so its kite ground is never
-    /// handed to a melee guard.
+    /// (#451), else the resident or harassment ground, else a trespass's
+    /// (#516), else the threats' ring. A ranger room's Guard is a ranger's
+    /// alone, so its kite ground is never handed to a melee guard.
     let guardGroundIn (threats: Threats) (room: string) : Set<RoomPos> option =
         Map.tryFind room threats.Kite
         |> Option.orElse (residentRingIn threats room)
         |> Option.orElse (harassRingIn threats room)
+        |> Option.orElse (Map.tryFind room threats.Trespass)
         |> Option.orElse (Some(ringIn threats room) |> Option.filter (Set.isEmpty >> not))
 
     /// The role a body holds a room's Fight in, or None where the Fight does
@@ -589,6 +606,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 Defend = Map.empty
                 Shelter = Map.empty
                 Chased = Set.empty
+                Trespass = Map.empty
             }
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
@@ -938,6 +956,94 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         else
             Map.empty
 
+    // The trespassers' ground (#516), off the exits, in a room whose Guard no
+    // Threat, ranger row, chase, held exit or core answers for first.
+    //
+    // A digger or a claimer stands at its work: the tiles beside it. A hauler
+    // keeps a ranger's pace, so it is waited for, not chased: within
+    // `haulGround` of the store nearest it, which it comes within a ranger's
+    // shot of to draw at all; one `storeReach` or more from every store is
+    // drawing from none, and gets the tiles beside it, a melee guard's chance.
+    //
+    // A trespasser on the exit row of a room beside one we mine is carried
+    // into it next tick, and back if it is bouncing: keyed to that room, the
+    // tiles beside where it lands, so the kill holds across the bounce.
+    let trespass =
+        let answered = holds @ cores |> List.map fst |> Set.ofList
+
+        let open' room =
+            not (Map.containsKey room armed.Ring)
+            && not (Set.contains room rangers)
+            && not (Set.contains room chasedRooms)
+            && not (Set.contains room answered)
+
+        let haulGround = 2
+        let storeReach = 5
+
+        let hauls (hostile: HostileInfo) =
+            HostileInfo.activeCount hostile Work = 0
+            && HostileInfo.activeCount hostile BodyPart.Claim = 0
+
+        let storesIn room =
+            [ Structure BuiltKind.Container; Dropped Energy; Dropped Thorium; Tombstone ]
+            |> List.collect (Atlas.idsOfKind atlas)
+            |> List.choose (Atlas.positionOf atlas)
+            |> List.filter (fun tile -> tile.Room = room)
+            |> List.map RoomPos.pos
+
+        let around (hostile: HostileInfo) : (string * Pos list) list =
+            let room = hostile.Pos.Room
+            let at = RoomPos.pos hostile.Pos
+
+            if trespasser view hostile then
+                let beside () = Atlas.adjacentWalkableIn atlas room at
+
+                let tiles =
+                    if hauls hostile then
+                        match
+                            storesIn room |> List.filter (fun store -> range store at < storeReach)
+                        with
+                        | [] -> beside ()
+                        | near ->
+                            let store = near |> List.minBy (fun store -> range store at, store)
+
+                            Atlas.walkableWithinIn atlas room haulGround store
+                            |> List.filter ((<>) store)
+                    else
+                        beside ()
+
+                [ room, tiles ]
+            elif Seam.onRing at && trespassingBody hostile then
+                reachAcross atlas room at 1
+                |> List.filter (fst >> minesRoom view)
+                |> List.map (fun (next, landings) ->
+                    next, landings |> List.collect (Atlas.adjacentWalkableIn atlas next))
+            else
+                []
+
+        view.Hostiles
+        |> List.collect around
+        |> List.filter (fst >> open')
+        |> List.groupBy fst
+        |> List.choose (fun (room, tiles) ->
+            let standing =
+                view.Hostiles
+                |> List.filter (fun hostile -> hostile.Pos.Room = room)
+                |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+                |> Set.ofList
+
+            let ground =
+                tiles
+                |> List.collect snd
+                |> List.filter (fun tile -> not (Seam.onRing tile || Set.contains tile standing))
+                |> Set.ofList
+
+            if Set.isEmpty ground then
+                None
+            else
+                Some(room, RoomPos.setAt room ground))
+        |> Map.ofList
+
     { armed with
         AtLine = atLine
         Shelter = shelter
@@ -955,6 +1061,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Kite = kite
         Held = holds |> List.map fst |> Set.ofList
         Chased = chasedRooms
+        Trespass = trespass
     }
 
 /// This tick's Threats as a colony holding nothing would see them: no Fight,
