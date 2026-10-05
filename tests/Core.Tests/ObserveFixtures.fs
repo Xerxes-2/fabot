@@ -86,6 +86,7 @@ let quiet: ColonyView =
         Sightings = Map.empty
         Seen = Map.empty
         ExitHolds = Map.empty
+        World = WorldView.empty
         // A test that is about a tunable moves the one field it is about.
         Tuning = Tuning.defaults
         Casting = []

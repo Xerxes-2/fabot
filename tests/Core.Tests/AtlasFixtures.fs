@@ -67,6 +67,7 @@ let snapshotWith creeps spatial =
         Sightings = Map.empty
         Seen = Map.empty
         ExitHolds = Map.empty
+        World = WorldView.empty
         Tuning = Tuning.defaults
         Casting = []
     }

@@ -4016,6 +4016,7 @@ let rangerGroundTests =
 /// One room of each tier around W13S28, none of them seen.
 let private tiers: ObserverTiers =
     {
+        Danger = []
         Claims = [ "W17S25" ]
         Watched = [ "W18S26" ]
         Harassed = [ "W17S26" ]
@@ -4058,6 +4059,46 @@ let observerAimTests =
                     "all three seen: the box, never-seen rooms by name"
             }
 
+            // Live t973,5xx: W13S28's observer kept a stale fixed room in its
+            // round while W18S25, shut on a raid, wanted eyes.
+            test
+                "a room some colony stands down from on a raid outranks every other tier, one look in five, and the others keep their turns (#534)" {
+                let wanting = { tiers with Danger = [ "W18S25" ] }
+
+                Expect.equal (aimAt [] wanting) (Some "W18S25") "the room that wants eyes first"
+
+                for ago in 0..4 do
+                    Expect.equal
+                        (aimAt [ "W18S25", 1_000 - ago ] wanting)
+                        (Some "W17S25")
+                        $"seen {ago} ticks ago by anyone: the claim keeps its turn"
+
+                Expect.equal
+                    (aimAt [ "W18S25", 995 ] wanting)
+                    (Some "W18S25")
+                    "five ticks on, the room again"
+            }
+
+            test
+                "a room that wants eyes is one observer's look, the nearest's, so two never pile onto it (#534)" {
+                let watch =
+                    { WorldView.empty with
+                        Observers = [ "W13S28"; "W15S28"; "W40N40" ]
+                    }
+
+                Expect.equal
+                    (WorldView.lookerOf watch "W17S25")
+                    (Some "W15S28")
+                    "the nearer of the two in reach"
+
+                Expect.equal
+                    (WorldView.lookerOf watch "W14S27")
+                    (Some "W13S28")
+                    "a tie goes by name"
+
+                Expect.isNone (WorldView.lookerOf watch "W30S10") "none in reach, nobody's"
+            }
+
             test "a watched room is aimed at only once its sighting is N ticks old (#484)" {
                 let n = Tuning.defaults.ObserveStaleTicks
 
@@ -4084,6 +4125,7 @@ let observerAimTests =
             test "the box is a round robin: the room longest unseen first (#484)" {
                 let box =
                     {
+                        Danger = []
                         Claims = []
                         Watched = []
                         Harassed = []
@@ -4110,6 +4152,7 @@ let observerAimTests =
                 // ten rows south.
                 let far =
                     {
+                        Danger = []
                         Claims = [ "W24S28"; "W13S28" ]
                         Watched = []
                         Harassed = []

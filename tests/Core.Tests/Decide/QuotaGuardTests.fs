@@ -278,6 +278,7 @@ let guardRowTests =
                     "a look that finds the room clear hires nobody, memory or no memory"
             }
 
+
             test "a hostile that reaches nothing is no reason to hire" {
                 // The gate is the threat and never "a hostile": a `smallHealer`
                 // carries neither ATTACK nor RANGED_ATTACK, so it takes no ground,

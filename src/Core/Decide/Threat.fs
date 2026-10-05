@@ -1585,7 +1585,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let safeGround =
         reach
-        |> Map.map (fun room tiles -> lazy (Atlas.walkableTilesExcept atlas room tiles))
+        |> Map.map (fun room tiles ->
+            lazy (Atlas.walkableTilesExceptIn view.World atlas room tiles))
 
     // The errand rooms' ranger ground (#414, #411): the Reactor's own ring,
     // raid or none. The ranger holding it shoots out to three, which covers a
@@ -1758,7 +1759,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // The rooms a ranger chases a raid in (#510): in sight, `chased`'s; out
     // of it, an outpost shut on a raid a ranger kites down, while no raid
-    // is seen there that its own row answers.
+    // is seen there that its own row answers. The row is the gate: a look
+    // that finds the room empty ends the chase there (`Observe.strikeGone`).
     let chasedRooms =
         let kept room =
             let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList

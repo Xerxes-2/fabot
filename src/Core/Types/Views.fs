@@ -71,6 +71,160 @@ type AssaultFacts =
         BarredUntil: int option
     }
 
+/// One room as this tick's vision answered for it, to every colony: a creep's
+/// look, a structure's or an observer's.
+type WorldRoom =
+    {
+        /// Every creep not ours standing there, allies included.
+        Hostiles: HostileInfo list
+        InvaderCores: InvaderCoreInfo list
+        /// The ids of the creeps not ours whose tombstones lie there.
+        Fallen: string list
+        Control: RoomControlInfo
+    }
+
+/// The world layer's read of this tick, built once off the `World` and handed
+/// to every colony (ADR-0086).
+type WorldView =
+    {
+        /// Every room vision answered for this tick, by name.
+        Rooms: Map<string, WorldRoom>
+        /// Every room some colony declares, raises or garrisons, and every
+        /// harassment room, shut or not: a stand-down withholds a colony's
+        /// economy from a room and never takes it out of here.
+        Watched: Set<string>
+        /// The watched rooms some colony's raid log holds a raid on or
+        /// remembers an armed threat in (`StandDown.RaidedOutposts`,
+        /// `ChasedOutposts`, `ThreatenedOutposts`): the rooms that want eyes.
+        Danger: Set<string>
+        /// The rooms of ours an observer stands in: whose look each room of
+        /// `Danger` is (`lookerOf`).
+        Observers: string list
+        /// The tick's shared safe ground (`sharingSafeGround`): given a room,
+        /// the Reach and the walking grid, the set an earlier colony built off
+        /// the same two, else what the builder answers, kept. None builds
+        /// each set alone, which is every fixture's.
+        SafeGround: (string -> Set<Pos> -> int[] -> (unit -> Set<RoomPos>) -> Set<RoomPos>) option
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module WorldView =
+    /// A world nothing was seen in.
+    let empty =
+        {
+            Rooms = Map.empty
+            Watched = Set.empty
+            Danger = Set.empty
+            Observers = []
+            SafeGround = None
+        }
+
+    /// The one observer whose look a room of `Danger` is: the nearest in
+    /// `Engine.observerRange`, ties by room name. One and not every observer
+    /// in reach, so two colonies' observers never spend one tick on one room
+    /// and both leave their other rooms unlooked.
+    let lookerOf (watch: WorldView) (room: string) : string option =
+        watch.Observers
+        |> List.choose (fun from ->
+            RoomName.offsetOf from room
+            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy), from))
+        |> List.filter (fun (reach, from) -> reach <= Engine.observerRange && from <> room)
+        |> List.sort
+        |> List.tryHead
+        |> Option.map snd
+
+    /// The read with a safe-ground table of its own laid on (#534): two
+    /// colonies seeing one raided room under one walking grid and one Reach
+    /// share one set of two thousand tiles. Compared by content, so a colony
+    /// whose projection walks the room differently (a transit room's
+    /// furniture is not placed) builds its own. Mutable and heap-only, like
+    /// `JoinTable`: the shell lays a fresh one each tick.
+    let sharingSafeGround (watch: WorldView) : WorldView =
+        let built =
+            System.Collections.Generic.Dictionary<string, (int[] * Set<Pos> * Set<RoomPos>) list>()
+
+        let sameGrid (grid: int[]) (other: int[]) =
+            obj.ReferenceEquals(other, grid)
+            || other.Length = grid.Length
+               && (let mutable same = true
+                   let mutable index = 0
+
+                   while same && index < grid.Length do
+                       same <- other.[index] = grid.[index]
+                       index <- index + 1
+
+                   same)
+
+        let share (room: string) (reach: Set<Pos>) (grid: int[]) (build: unit -> Set<RoomPos>) =
+            let entries =
+                match built.TryGetValue room with
+                | true, entries -> entries
+                | _ -> []
+
+            match
+                entries
+                |> List.tryFind (fun (other, except, _) -> sameGrid grid other && except = reach)
+            with
+            | Some(_, _, tiles) -> tiles
+            | None ->
+                let tiles = build ()
+                built.[room] <- (grid, reach, tiles) :: entries
+                tiles
+
+        { watch with SafeGround = Some share }
+
+    /// Whether vision answers for a room this tick, whoever's.
+    let sees (watch: WorldView) (room: string) : bool = Map.containsKey room watch.Rooms
+
+    /// The world's read off this tick's `World` and every colony's
+    /// stand-down gate. A room with a `Control` entry is one something of ours
+    /// looked into (`World.ofGame`). No shared safe ground: the shell lays its
+    /// table on.
+    let ofWorld (colonies: Colony list) (gates: StandDown list) (world: World) : WorldView =
+        let watched =
+            (colonies
+             |> List.collect (fun colony ->
+                 colony.Home :: (colony.Outposts |> List.map (fun outpost -> outpost.RoomName))
+                 @ (colony.Errands |> List.map (fun errand -> errand.RoomName))
+                 @ colony.Salvage
+                 @ (colony.Assaults |> List.map (fun assault -> assault.RoomName))))
+            @ (Colony.harass |> List.map (fun h -> h.RoomName))
+            |> Set.ofList
+
+        {
+            Rooms =
+                world.Rooms
+                |> Map.toList
+                |> List.choose (fun (room, facts) ->
+                    facts.Control
+                    |> Option.map (fun control ->
+                        room,
+                        {
+                            Hostiles = facts.Hostiles
+                            InvaderCores = facts.InvaderCores
+                            Fallen = facts.Fallen
+                            Control = control
+                        }))
+                |> Map.ofList
+            Watched = watched
+            Danger =
+                gates
+                |> List.map (fun gate ->
+                    Set.unionMany
+                        [ gate.RaidedOutposts; gate.ChasedOutposts; gate.ThreatenedOutposts ])
+                |> Set.unionMany
+                |> Set.intersect watched
+            Observers =
+                world.Rooms
+                |> Map.toList
+                |> List.filter (fun (_, facts) ->
+                    Option.isSome facts.Controller
+                    && facts.TargetKinds
+                       |> Map.exists (fun _ kind -> kind = Structure BuiltKind.Observer))
+                |> List.map fst
+            SafeGround = None
+        }
+
 /// One colony's whole reading of this tick: its home room's projection, the
 /// rooms it works beside it, the bodies it holds, the bank it casts from and
 /// the explicit little it may take of its neighbours'. ADR-0052
@@ -327,10 +481,46 @@ type ColonyView =
         /// (`World.watchExits`). What `Threat.threatsOf` lays the Guard's
         /// ground on while the room is empty of them.
         ExitHolds: Map<string, ExitHold>
+        /// The world layer's read of this tick, the same one handed to every
+        /// colony: what the [[raid log]] reads a room it stands down from off
+        /// (`lookingInto`).
+        World: WorldView
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module ColonyView =
+    /// The view with the world's vision of these rooms laid in, for each one
+    /// it does not project (#534): their hostiles, allies, cores, tombstones
+    /// and control, as the cut would have filed them. What the [[raid log]]
+    /// folds a room it stands down from off: vision is vision, whoever's.
+    let lookingInto (rooms: string list) (view: ColonyView) : ColonyView =
+        let seen =
+            rooms
+            |> List.distinct
+            |> List.filter (fun room -> not (Map.containsKey room view.Spatial.Rooms))
+            |> List.choose (fun room ->
+                Map.tryFind room view.World.Rooms |> Option.map (fun r -> room, r))
+
+        match seen with
+        | [] -> view
+        | seen ->
+            let bodies = seen |> List.collect (fun (_, r) -> r.Hostiles)
+
+            { view with
+                Hostiles =
+                    view.Hostiles
+                    @ (bodies |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner)))
+                Allies =
+                    view.Allies
+                    @ (bodies |> List.filter (fun hostile -> Colony.isAlly hostile.Owner))
+                InvaderCores =
+                    view.InvaderCores @ (seen |> List.collect (fun (_, r) -> r.InvaderCores))
+                Fallen = view.Fallen @ (seen |> List.collect (fun (_, r) -> r.Fallen))
+                RoomControl =
+                    (view.RoomControl, seen)
+                    ||> List.fold (fun control (room, r) -> Map.add room r.Control control)
+            }
+
     /// What a colony may see of a room it carries for a child of its own: the
     /// controller its workers upgrade — or, where the child has been lost,
     /// [[claim]] — the sites they build, and the spawn, the tile her
@@ -840,10 +1030,11 @@ module ColonyView =
     /// of it**: the shell reads the engine once (`World.ofGame`) and every
     /// rule about which rooms a colony works, which creeps are its own and
     /// what it may borrow is here, where a test can hand it a two-colony
-    /// world. Five facts are handed in and none is decided here: the
+    /// world. Six facts are handed in and none is decided here: the
     /// tunables, the declaration, the [[stand-down]] gate (Memory's answer,
     /// not the world's), the holders `World.creepColonies` cut over every
-    /// living colony at once, and the world. The join table is the shell's,
+    /// living colony at once, the world layer's read (`WorldView`, carried
+    /// whole) and the world. The join table is the shell's,
     /// handed in for the life of the process (`JoinTable`).
     let ofWorldRecalling
         (joins: JoinTable)
@@ -851,10 +1042,9 @@ module ColonyView =
         (colonies: Colony list)
         (casting: HarassCasting)
         (gate: StandDown)
-        // Every colony's shut rooms by home, the map the holders were cut
-        // under: a child's outposts are narrowed by its own (#517).
-        (shut: Map<string, Set<string>>)
         (holders: Map<string, string>)
+        // The world layer's read, built once a tick for every colony.
+        (watch: WorldView)
         (world: World)
         (colony: Colony)
         : ColonyView =
@@ -879,7 +1069,6 @@ module ColonyView =
                 colonies
                 casting
                 gate
-                shut
                 (mine |> List.map (fun creep -> creep.Room) |> Set.ofList)
                 world
                 colony
@@ -1313,6 +1502,7 @@ module ColonyView =
                         Some(room, hold)
                     | _ -> None)
                 |> Map.ofList
+            World = watch
         }
 
     /// `ofWorldRecalling` over a table of this call's own — the shape a test
@@ -1331,7 +1521,7 @@ module ColonyView =
             colonies
             HarassCasting.none
             gate
-            Map.empty
             holders
+            (WorldView.ofWorld colonies [ gate ] world)
             world
             colony

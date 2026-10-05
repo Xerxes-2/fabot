@@ -905,6 +905,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Sightings = Map.empty
         Seen = Map.empty
         ExitHolds = Map.empty
+        World = WorldView.empty
         // A test that is about a tunable moves the one field it is about.
         Tuning = Tuning.defaults
         // Nothing in the oven: a fixture's rows count what is alive.

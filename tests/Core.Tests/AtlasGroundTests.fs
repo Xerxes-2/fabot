@@ -960,7 +960,7 @@ let keeperMaskTests =
                 Expect.equal
                     (seats (masked ()) "sk-src-0")
                     (Some 0)
-                    "and a declared rock inside the mask counts no Seat, a Seat being counted off terrain alone (ADR 0001)"
+                    "and a declared rock inside the mask counts no Seat, a Seat being counted off terrain alone"
 
                 Expect.isTrue
                     (Keepers.masked margin "W15S26" ringTile)

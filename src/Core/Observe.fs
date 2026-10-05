@@ -272,9 +272,9 @@ type OutpostEpisode =
         /// The tick this stand-down opened.
         Opened: int
         /// The last tick the thing that opened this row was actually read in
-        /// the room. A record for the reader and never the openness test: the
-        /// colony stops looking the moment it withdraws, so silence here says
-        /// nobody is there to look and never that the room is clear.
+        /// the room, by any vision of ours, an observer's included (#534). A
+        /// record for the reader and never the openness test: silence here
+        /// says nothing of ours looked and never that the room is clear.
         LastSeen: int
         /// The absolute tick the stand-down runs to.
         Expiry: int
@@ -675,7 +675,10 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
 
             room, (view.Time + life, StandDownBasis.InvaderRaid))
 
-let private deadlines (view: ColonyView) (declared: string list) =
+/// `looking` is the view the raid rows are re-read off (`foldRaids`), the
+/// world's vision of their shut rooms laid in; cores and reservations are read
+/// off the colony's own.
+let private deadlines (view: ColonyView) (looking: ColonyView) (declared: string list) =
     // The stronghold bit is or-ed over a room's sightings where the clock is
     // maxed: a room seen once with a bunker and once with a raider is a room
     // with a bunker in it, whichever deadline is longer. A level-0 core opens
@@ -687,7 +690,7 @@ let private deadlines (view: ColonyView) (declared: string list) =
          core.RoomName, (expiry, basis, true)))
     @ (rivalDeadlines view
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
-    @ (raidDeadlines view declared
+    @ (raidDeadlines looking declared
        |> List.map (fun (room, (expiry, basis)) -> room, (expiry, basis, false)))
     |> List.groupBy fst
     |> List.map (fun (room, seen) ->
@@ -910,12 +913,18 @@ let private strikeGone
             let cut = hold |> Option.defaultValue floor
 
             // Read again at each sighting of the raid, and kept through the
-            // ticks nothing of ours sees it (#510).
+            // ticks nothing of ours sees it (#510). A sighting is the row's
+            // last, whatever the verdict (#534); one that finds the room
+            // empty of the raid ends the chase in the row, which is what the
+            // chase out of sight is gated on, so a look every other tick
+            // cannot toggle it.
             let windowed =
                 match standing with
+                | [] when Map.containsKey room view.RoomControl -> { windowed with Chased = false }
                 | [] -> windowed
                 | _ ->
                     { windowed with
+                        LastSeen = view.Time
                         Chased =
                             List.contains room declared
                             && Decide.Facts.chased
@@ -1152,6 +1161,23 @@ let foldRaids
     (declared: string list)
     (prior: RaidState)
     : RaidState =
+    // The rooms this log stands down from on a raid, read off the world's
+    // vision, an observer's included, where the view no longer projects them
+    // (#534): shut is not forgotten. The raid rows' re-read alone takes it —
+    // their clock, last sighting and chase. The episode roster, the losses,
+    // the cores and the reservations stay the colony's own vision's, or a
+    // shut room's loiterer would grow the log every look. An outpost shut on
+    // a raid is priced as the outpost it is.
+    let raidRows =
+        prior.Outposts
+        |> List.filter (fun episode -> standingDown view.Time episode && raidClocked episode)
+        |> List.map (fun episode -> episode.RoomName)
+
+    let looking = ColonyView.lookingInto raidRows view
+
+    let priced =
+        declared @ (raidRows |> List.filter view.MinedRooms.Contains) |> List.distinct
+
     let gap = view.Tuning.QuietGap
 
     // The baseline the next tick reads its losses against: this tick's names,
@@ -1315,9 +1341,9 @@ let foldRaids
         // A tick that sees nothing (no vision, or a clear room) leaves every
         // stand-down exactly as it found it, clock included.
         Outposts =
-            (prior.Outposts, deadlines view declared)
+            (prior.Outposts, deadlines view looking priced)
             ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
-            |> strikeGone view declared rivalHolds
+            |> strikeGone looking priced rivalHolds
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
         // alone: a room with no `RoomControl` entry keeps whatever the last

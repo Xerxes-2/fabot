@@ -2794,6 +2794,8 @@ let private shutOutpostCripple () : Arena =
     let a = arena 973_321 [ w18s25; w17s25; w15s28; w17s26 ] colonies bodies
 
     { a with
+        // W13S28's observer, which the arena does not hold, on W18S25 as live.
+        Lookout = set [ "W18S25" ]
         Carried =
             { a.Carried with
                 Assignments =
@@ -3426,33 +3428,41 @@ let arenaBorderTests =
                 Expect.isSome (diedOn "Crunchy047" trace) $"and kills Crunchy047\n{failure}"
             }
 
-            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
-            // pre-world-layer behaviour, flips at S1 (#534). As live
-            // (t973,321-973,405): the room W17S25's stand-down holds is in no
-            // view, so the cripple standing in it alone, in sight (the arena
-            // sees every room, as W13S28's observer did), is answered by nobody
-            // and the log's last sighting stays the one that shut it.
+            // The world layer's S1 (#534) flipped the S0 pin here, which read
+            // as live (t973,321-973,405): nobody answered the cripple, and the
+            // log's last sighting stayed the one that shut it. Now the
+            // observer's look reaches the mother's watch of the shut room and
+            // W17S25's log: the resident next door is called while the room is
+            // still shut, and kills it.
             test
-                "#534 capture t973,320: a cripple alone in the child's shut outpost is answered by nobody, as live" {
-                let final, trace = shutOutpostCripple () |> run 85
-                let failure = describe trace
+                "#534 capture t973,320: a cripple alone in the child's shut outpost is answered by the mother's resident while the room is shut" {
+                let resident = "ranger-972663-Spawn3"
 
-                Expect.isNone (diedOn "Idol768" trace) $"Idol768 lives\n{failure}"
+                let rowOf (a: Arena) =
+                    Map.tryFind "W17S25" a.Carried.Raids
+                    |> Option.bind (fun raids ->
+                        raids.Outposts |> List.tryFind (fun row -> row.RoomName = "W18S25"))
 
-                Expect.isFalse
-                    (trace
-                     |> List.exists (fun t ->
-                         t.Bodies
-                         |> List.exists (fun s -> s.Side = Side.Ours && s.At.Room = "W18S25")))
-                    $"no body of ours enters W18S25, the resident included\n{failure}"
+                let inside (a: Arena) =
+                    a.Bodies |> List.exists (fun b -> b.Id = resident && b.At.Room = "W18S25")
 
-                Expect.equal
-                    (Map.tryFind "W17S25" final.Carried.Raids
-                     |> Option.bind (fun raids ->
-                         raids.Outposts |> List.tryFind (fun row -> row.RoomName = "W18S25"))
-                     |> Option.map (fun row -> row.LastSeen, row.Expiry))
-                    (Some(973_265, 973_465))
-                    "the stand-down stands, last seen the tick it shut"
+                let entered, toEntry = shutOutpostCripple () |> runUntil inside 85
+                let failure = describe toEntry
+
+                Expect.isTrue (inside entered) $"the resident enters W18S25\n{failure}"
+
+                Expect.isTrue
+                    (rowOf entered
+                     |> Option.exists (fun row -> Fabot.Core.Observe.standingDown entered.Time row))
+                    $"while W17S25's stand-down still shuts it\n{failure}"
+
+                Expect.isTrue
+                    (rowOf entered |> Option.exists (fun row -> row.LastSeen > 973_265))
+                    $"and the log has read the observer's look\n{failure}"
+
+                let _, trace = shutOutpostCripple () |> run 85
+
+                Expect.isSome (diedOn "Idol768" trace) $"Idol768 dies\n{describe trace}"
             }
 
             // Live (t974,722-974,950) the anchor stepped onto the invader's

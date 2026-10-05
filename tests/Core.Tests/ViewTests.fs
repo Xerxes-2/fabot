@@ -1258,7 +1258,6 @@ let colonyViewTests =
                         both
                         HarassCasting.none
                         StandDown.none
-                        noneShut
                         world
                         (both |> List.find (fun colony -> colony.Home = child))
                      |> List.contains outpost)
@@ -2272,28 +2271,46 @@ let childOutpostTests =
                     "with the child's stand-down shutting the room, its anchor stays the child's to walk home"
             }
 
+            // Until S1 of the world layer (#534) the child's stand-down took the
+            // room out of the mother's projection too, and the raid there turned
+            // Kite was answered by nobody.
             test
-                "a room the child's stand-down shuts leaves her projection, so she never projects it alone" {
-                let projected shut =
+                "a room the child's stand-down shuts stays in the mother's projection: shut withholds the child's economy, never the residents' watch" {
+                let projected gate home =
                     World.roomsProjectedRecalling
                         (JoinTable())
                         Tuning.defaults
                         childMining
                         HarassCasting.none
-                        StandDown.none
-                        shut
+                        gate
                         (withChildOutposts pairWorld)
-                        (childMining |> List.find (fun colony -> colony.Home = mother))
+                        (childMining |> List.find (fun colony -> colony.Home = home))
+
+                let shut =
+                    { StandDown.none with
+                        Shut = Set.singleton childOutpost
+                    }
 
                 Expect.contains
-                    (projected noneShut)
+                    (projected StandDown.none mother)
                     childOutpost
-                    "the premise: open, she projects it"
+                    "open or shut, she projects it"
+
+                let world = withChildOutposts pairWorld
+
+                let childScan =
+                    World.scanOf
+                        Tuning.defaults
+                        (World.stages Tuning.defaults childMining world)
+                        (World.unownedHomes childMining world)
+                        childMining
+                        shut
+                        world
+                        (childMining |> List.find (fun colony -> colony.Home = child))
 
                 Expect.isFalse
-                    (projected (Map.ofList [ child, Set.singleton childOutpost ])
-                     |> List.contains childOutpost)
-                    "shut by the child, it is not hers to project"
+                    (Set.contains childOutpost childScan.Worked)
+                    "while the child, who shut it, works it no more"
             }
 
             test "decaying ore in the child's outpost is no sweep of hers" {
@@ -2357,8 +2374,8 @@ let private viewShutUnder colonies (shut: Map<string, Set<string>>) world home =
         { StandDown.none with
             Shut = Map.tryFind home shut |> Option.defaultValue Set.empty
         }
-        shut
         holders
+        (WorldView.ofWorld colonies [] world)
         world
         colony
 
@@ -2411,19 +2428,20 @@ let private standing (bodies: (WorldCreep * Pos) list) (world: World) : World =
     }
 
 /// The world layer's S0 (`docs/adr/0086`): each case pins a seam where one
-/// world fact is held or concluded per colony. Every one pins pre-world-layer
-/// behaviour, and its comment names the stage that flips it.
+/// world fact is held or concluded per colony, and its comment names the
+/// stage that flips it, or flipped it.
 [<Tests>]
 let worldSeamTests =
     testList
         "pre-world-layer seams: a world fact cut or concluded per colony"
         [
-            // Characterisation (the world layer's S0): pins pre-world-layer
-            // behaviour, flips at S1 (#534). Live t973,5xx: W13S28's observer
-            // looked into W18S25 while W17S25's stand-down held it shut; the
-            // look reached `World.Rooms` and no view.
+            // Flipped at the world layer's S1 (#534). Live t973,5xx: W13S28's
+            // observer looked into W18S25 while W17S25's stand-down held it
+            // shut; the look reached `World.Rooms` and no view, and the log
+            // still read "last seen t973,265". The view still does not
+            // project the room; the log reads the world's look.
             test
-                "a stood-down outpost's hostiles, seen with no body of ours there, reach the world and no view" {
+                "a stood-down outpost's hostiles, seen with no body of ours there, reach the owner's raid log through the world" {
                 let raider =
                     { harasserIn outpost with
                         Id = "seen-by-observer"
@@ -2457,23 +2475,45 @@ let worldSeamTests =
                          |> List.exists (fun h -> h.Id = raider.Id)))
                     "and no colony's view carries it"
 
+                // The row that shut it, opened ten ticks back on this raid.
+                let shutOn: Observe.OutpostEpisode =
+                    {
+                        RoomName = outpost
+                        Opened = world.Time - 10
+                        LastSeen = world.Time - 10
+                        Expiry = world.Time + 500
+                        Basis = StandDownBasis.InvaderRaid
+                        Stronghold = false
+                        Raiders = set [ raider.Id ]
+                        PlayerSince = None
+                        Chased = false
+                    }
+
                 let log =
-                    Observe.RaidState.empty
+                    { Observe.RaidState.empty with
+                        Outposts = [ shutOn ]
+                    }
                     |> Observe.foldRaids
                         Observe.capEpisodes
                         Set.empty
                         motherView
                         (Planner.outpostFactsOf motherView).Declared
 
-                Expect.isEmpty log.Episodes "so the owner's raid log records nothing of it"
+                Expect.equal
+                    (log.Outposts |> List.map (fun row -> row.RoomName, row.LastSeen))
+                    [ outpost, world.Time ]
+                    "the owner's stand-down is last seen this tick"
+
+                Expect.isEmpty
+                    log.Episodes
+                    "while its episode roster, the colony's own vision's, grows nothing"
             }
 
-            // Characterisation (the world layer's S0): pins pre-world-layer
-            // behaviour, flips at S1 (#534). Live: W17S25's stand-down shut
-            // W18S25, and the mother W15S28's `ChildOutposts` dropped it, so the
-            // trespasser there stood in no view at all.
+            // Flipped at the world layer's S1 (#534). Live: W17S25's
+            // stand-down shut W18S25, and the mother W15S28's `ChildOutposts`
+            // dropped it, so the trespasser there stood in no view at all.
             test
-                "a child's shut outpost leaves the mother's ChildOutposts, and its hostile stands in no view" {
+                "a child's shut outpost stays in the mother's ChildOutposts, and its hostile in her view" {
                 let world = withChildOutposts pairWorld
                 let trespasser = $"raptor-{childOutpost}"
 
@@ -2500,18 +2540,14 @@ let worldSeamTests =
 
                 let shut = Map.ofList [ child, Set.singleton childOutpost ]
 
-                Expect.isEmpty
+                Expect.equal
                     (viewShutUnder colonies shut world mother).Borrowed.ChildOutposts
-                    "shut by the child, it leaves the mother's ChildOutposts"
+                    [ childOutpost ]
+                    "shut by the child, it stays in the mother's ChildOutposts"
 
-                Expect.contains
-                    ((World.roomOf world childOutpost).Hostiles |> List.map (fun h -> h.Id))
-                    trespasser
-                    "while the world still holds the trespasser"
+                Expect.isTrue (seenBy shut mother) "so the mother's view carries the trespasser"
 
-                Expect.isFalse
-                    (seenBy shut mother || seenBy shut child)
-                    "and neither colony's view carries it"
+                Expect.isFalse (seenBy shut child) "and the child, who shut it, works it no more"
             }
 
             // Characterisation (the world layer's S0): pins pre-world-layer
@@ -4566,8 +4602,8 @@ let private harassViewOver
         declared
         casting
         gate
-        noneShut
         holders
+        (WorldView.ofWorld declared [ gate ] world)
         world
         colony
 
@@ -6445,5 +6481,59 @@ let assaultViewTests =
 
                 let open' = factsUnder (remembering [ assaultRoom, trep ])
                 Expect.isNone open'.BarredUntil "it can raise one: no window"
+            }
+        ]
+
+[<Tests>]
+let worldViewTests =
+    testList
+        "the world layer's read, once a tick for every colony (#534)"
+        [
+            test
+                "a raided room's safe ground is built once a tick off one grid and one Reach, and again off any other" {
+                let share = (WorldView.sharingSafeGround WorldView.empty).SafeGround.Value
+                let mutable built = 0
+                let tiles = Set.singleton (RoomPos.at "W1N1" { X = 5; Y = 5 })
+
+                let build () =
+                    built <- built + 1
+                    tiles
+
+                let grid = Array.create 2500 1
+                let reach = Set.singleton { X = 1; Y = 1 }
+
+                Expect.equal (share "W1N1" reach grid build) tiles "the first colony builds it"
+
+                Expect.equal
+                    (share "W1N1" reach (Array.copy grid) build)
+                    tiles
+                    "the second reads it"
+
+                Expect.equal built 1 "built once"
+
+                share "W1N1" (Set.singleton { X = 2; Y = 2 }) grid build |> ignore
+                share "W1N1" reach (Array.create 2500 2) build |> ignore
+                share "W1N2" reach grid build |> ignore
+                Expect.equal built 4 "another Reach, another grid, another room: each its own"
+            }
+
+            test
+                "the watched set keeps every declared room, shut or not, and the danger is the watched rooms a log holds a raid on" {
+                let gate =
+                    { StandDown.none with
+                        Shut = Set.ofList [ outpost; "W40N40" ]
+                        RaidedOutposts = Set.ofList [ outpost; "W40N40" ]
+                    }
+
+                let watch = WorldView.ofWorld declared [ gate ] pairWorld
+
+                Expect.isTrue (Set.contains outpost watch.Watched) "the shut outpost is watched"
+
+                Expect.equal
+                    watch.Danger
+                    (Set.singleton outpost)
+                    "and wants eyes; an undeclared room does not"
+
+                Expect.isTrue (WorldView.sees watch mother) "a room seen this tick is the world's"
             }
         ]

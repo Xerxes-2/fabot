@@ -470,6 +470,12 @@ let private fullTick
     let atProjects = Game.cpu.getUsed ()
     let mutable projectedAt = []
 
+    // The world layer's read, once for every colony (`WorldView`), with this
+    // tick's safe-ground table: fresh each tick, so no tick's sets outlive it.
+    let watch =
+        WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
+        |> WorldView.sharingSafeGround
+
     let views =
         colonies
         |> List.map (fun colony ->
@@ -480,8 +486,8 @@ let private fullTick
                     Colony.declared
                     casting
                     (gateOf colony.Home)
-                    shut
                     holders
+                    watch
                     world
                     colony
 

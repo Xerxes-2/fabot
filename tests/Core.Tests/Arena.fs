@@ -317,6 +317,9 @@ type Arena =
         /// tick alone (`processor.js` writes `observeRoom` on the observer,
         /// `driver/lib/runtime/data.js` adds the room to the next tick's).
         Observed: Set<string>
+        /// The rooms an observer of ours the arena does not hold looks at
+        /// every tick: a capture's W13S28 on W18S25 (#534). Vision only.
+        Lookout: Set<string>
     }
 
 /// What happened in a tick beyond positions and hits.
@@ -757,6 +760,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
         Ovens = []
         Casts = Set.empty
         Observed = Set.empty
+        Lookout = Set.empty
     }
 
 /// Our spawns cast these rows, by pattern name, and only these.
@@ -897,6 +901,7 @@ let private within (reach: int) (a: RoomPos) (b: RoomPos) =
 /// structure stands in it, or an observer of ours looked at it last tick.
 let private seen (a: Arena) (name: string) (r: ArenaRoom) =
     Set.contains name a.Observed
+    || Set.contains name a.Lookout
     || a.Bodies |> List.exists (fun b -> b.Side = Side.Ours && b.At.Room = name)
     || r.Structures |> List.exists (fun s -> s.Owner = Some Side.Ours)
     || r.Controller |> Option.exists (fun c -> c.Owner = Ownership.Ours)
@@ -1218,16 +1223,35 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
     let joins = JoinTable()
     let casting = HarassCasting.none
 
+    let gates =
+        living
+        |> List.map (fun c -> c.Home, Observe.standDown tuning a.Time (raidsOf a c.Home))
+        |> Map.ofList
+
+    // Every colony's shut rooms, as `Main` hands the adoption them.
+    let shut = gates |> Map.map (fun _ gate -> gate.Shut)
+
     let holders =
-        World.creepColoniesRecalling joins tuning a.Colonies casting living Map.empty world
+        World.creepColoniesRecalling joins tuning a.Colonies casting living shut world
+
+    let watch =
+        WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
+        |> WorldView.sharingSafeGround
 
     world,
     living
     |> List.map (fun c ->
-        let gate = Observe.standDown tuning a.Time (raidsOf a c.Home)
-
         c,
-        ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate Map.empty holders world c)
+        ColonyView.ofWorldRecalling
+            joins
+            tuning
+            a.Colonies
+            casting
+            gates.[c.Home]
+            holders
+            watch
+            world
+            c)
 
 /// The view one living colony decides this tick off.
 let viewOf (a: Arena) (home: string) : ColonyView =

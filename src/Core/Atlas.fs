@@ -859,6 +859,20 @@ let walkableTilesExcept (atlas: Atlas) (room: string) (except: Set<Pos>) : Set<R
                     RoomPos.at room (posAt index)
         ]
 
+/// `walkableTilesExcept` through the tick's shared safe ground where one is
+/// laid (`WorldView.sharingSafeGround`, #534): two thousand tiles a raided
+/// room, once a tick and not once a colony.
+let walkableTilesExceptIn
+    (watch: WorldView)
+    (atlas: Atlas)
+    (room: string)
+    (except: Set<Pos>)
+    : Set<RoomPos> =
+    match watch.SafeGround with
+    | None -> walkableTilesExcept atlas room except
+    | Some share ->
+        share room except (weightsOf atlas room) (fun () -> walkableTilesExcept atlas room except)
+
 /// The home's line entry for `perimeter` (#519): the memo's while it was laid
 /// for that perimeter, else a fresh one in its place.
 let private homeLine (atlas: Atlas) (perimeter: Pos list) : HomeLine =

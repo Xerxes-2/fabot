@@ -2006,3 +2006,136 @@ let gateTests =
                 Expect.isEmpty (shutAt 100 RaidState.empty) "nothing is recorded, nothing is shut"
             }
         ]
+
+/// A colony that has withdrawn from `outpostRoom` (no layer of it), which the
+/// world sees holding these hostiles: an observer's look, nothing of ours
+/// standing there.
+let private observedShut (hostiles: HostileInfo list) =
+    { quiet with
+        MinedRooms = Set.singleton outpostRoom
+        Bank = { Available = 0; Capacity = 1_500 }
+        World =
+            { WorldView.empty with
+                Rooms =
+                    Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Hostiles = hostiles
+                                InvaderCores = []
+                                Fallen = []
+                                Control =
+                                    {
+                                        Owner = Ownership.Unowned
+                                        Reservation = None
+                                        SafeMode = false
+                                        SafeModeCooldownUntil = 0
+                                        Sign = None
+                                    }
+                            }
+                        ]
+            }
+    }
+
+/// The row a raid shut `outpostRoom` on at tick 100, running to 600.
+let private shutOnRaid: RaidState =
+    { RaidState.empty with
+        Outposts =
+            [
+                {
+                    RoomName = outpostRoom
+                    Opened = 100
+                    LastSeen = 100
+                    Expiry = 600
+                    Basis = StandDownBasis.InvaderRaid
+                    Stronghold = false
+                    Raiders = set [ "raid-0" ]
+                    PlayerSince = None
+                    Chased = false
+                }
+            ]
+    }
+
+[<Tests>]
+let watchedShutTests =
+    testList
+        "a shut outpost is re-read off any vision of ours (#534)"
+        [
+            test
+                "an observer's look at a raid nothing wins is a sighting: last seen now, the clock re-read" {
+                let raid =
+                    List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+                    |> List.mapi (raiderIn outpostRoom)
+
+                Expect.equal
+                    (standDowns (raidTick 150 (observedShut raid) shutOnRaid))
+                    [
+                        outpostRoom,
+                        100,
+                        150,
+                        150 + Engine.creepLifetime,
+                        StandDownBasis.InvaderRaid
+                    ]
+                    "seen at 150, held to the raid's life"
+            }
+
+            test
+                "a look that finds the raid one we win is a sighting too, and the stand-down stands" {
+                let lone = [ raiderIn outpostRoom 0 [ Attack; Move ] ]
+
+                Expect.equal
+                    (standDowns (raidTick 150 (observedShut lone) shutOnRaid))
+                    [ outpostRoom, 100, 150, 600, StandDownBasis.InvaderRaid ]
+                    "last seen at 150, the clock its own"
+            }
+
+            test "with no vision of the room at all, the row is left as it stood" {
+                Expect.equal
+                    (standDowns (raidTick 150 quiet shutOnRaid))
+                    [ outpostRoom, 100, 100, 600, StandDownBasis.InvaderRaid ]
+                    "nothing seen, nothing moved"
+            }
+
+            test
+                "an observer's look at a loitering raider moves the row's last sighting and enrols nothing in the episode" {
+                let loiterer = [ raiderIn outpostRoom 0 [ Attack; Move ] ]
+                let state = raidTick 150 (observedShut loiterer) shutOnRaid
+
+                Expect.equal
+                    (state.Outposts |> List.map (fun row -> row.LastSeen))
+                    [ 150 ]
+                    "the row is last seen at 150"
+
+                Expect.isEmpty
+                    state.Episodes
+                    "and the colony's raid log grows nothing off a room it shut"
+            }
+
+            test
+                "a look that finds the room empty ends the chase in the row, and a blind tick after leaves it ended" {
+                let chasing =
+                    { shutOnRaid with
+                        Outposts =
+                            shutOnRaid.Outposts |> List.map (fun row -> { row with Chased = true })
+                    }
+
+                let chasedAt tick state =
+                    (standDown Tuning.defaults tick state).ChasedOutposts
+
+                let blind = raidTick 150 quiet chasing
+
+                Expect.equal
+                    (chasedAt 151 blind)
+                    (Set.singleton outpostRoom)
+                    "blind, the chase stands"
+
+                let seenEmpty = raidTick 151 (observedShut []) blind
+                Expect.isEmpty (chasedAt 152 seenEmpty) "seen empty, it ends"
+
+                let blindAgain = raidTick 152 quiet seenEmpty
+
+                Expect.isEmpty
+                    (chasedAt 153 blindAgain)
+                    "and an observer looking every other tick cannot bring it back"
+            }
+        ]

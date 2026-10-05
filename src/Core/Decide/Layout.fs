@@ -459,6 +459,11 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
 /// The rooms an observer may look at, by tier, highest first (#484).
 type ObserverTiers =
     {
+        /// The rooms that want eyes (`WorldView.Danger`, #534) whose look is
+        /// this observer's (`WorldView.lookerOf`): a room some colony stands
+        /// down from on a raid, or remembers an armed threat in, looked at
+        /// once its last sighting is `dangerStride` old.
+        Danger: string list
         /// Declared colony rooms not yet ours, and our nurseries: looked at
         /// while nothing of ours sees them.
         Claims: string list
@@ -471,6 +476,12 @@ type ObserverTiers =
         /// of the observer's ticks.
         Box: string list
     }
+
+/// How old a room of `ObserverTiers.Danger`'s last sighting is before the
+/// observer looks again (#534): one look in five re-reads a raid row's clock
+/// and chase well inside a melee's walk across a room (~50 ticks), and leaves
+/// four ticks in five to the claims, the safe-mode clocks and the box.
+let private dangerStride = 5
 
 /// Where an observer in `from` looks this tick (#484): the first tier with a
 /// room in `Engine.observerRange` that wants a look, and in it the room
@@ -491,10 +502,13 @@ let aimObserver
 
     let unseen room = lastSeen room <> Some time
 
-    let stale room =
-        lastSeen room |> Option.forall (fun tick -> time - tick >= staleAfter)
+    let olderThan stride room =
+        lastSeen room |> Option.forall (fun tick -> time - tick >= stride)
+
+    let stale = olderThan staleAfter
 
     [
+        tiers.Danger, olderThan dangerStride
         tiers.Claims, unseen
         tiers.Watched, stale
         tiers.Harassed, unseen
@@ -519,8 +533,9 @@ let watchedRooms (seen: Map<string, RoomSighting>) (crossed: Set<string>) : stri
 
     (Colony.rivals |> List.map fst) @ sighted @ Set.toList crossed |> List.distinct
 
-/// The observer at home spends its tick (#484): `aimObserver` over the
-/// declared rooms not yet colonies of ours or still nurseries, the watched
+/// The observer at home spends its tick (#484): `aimObserver` over the rooms
+/// that want eyes, the declared rooms not yet colonies of ours or still
+/// nurseries, the watched
 /// rooms, `Colony.harass`, and the scan set.
 let internal planObserver (view: ColonyView) : Intent list =
     let home = SpatialInfo.homeName view.Spatial
@@ -534,6 +549,10 @@ let internal planObserver (view: ColonyView) : Intent list =
     | observer :: _ ->
         let tiers =
             {
+                Danger =
+                    view.World.Danger
+                    |> Set.filter (fun room -> WorldView.lookerOf view.World room = Some home)
+                    |> Set.toList
                 Claims =
                     view.Declared
                     |> List.filter (fun room ->

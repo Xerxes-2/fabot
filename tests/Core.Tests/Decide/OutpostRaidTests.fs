@@ -1841,6 +1841,46 @@ let shutChaseTests =
 
                 Expect.contains seen.Intents (RangedAttackCreep("r-1", "h-1")) "and shoots"
             }
+
+            test
+                "the chase out of sight is the row's: this tick's look elsewhere in the world does not drop it (#534)" {
+                let shut =
+                    { raidedOutpost [] with
+                        ChasedOutposts = Set.singleton "W1N2"
+                    }
+                    |> withGuards [ ranger "r-1", { X = 22; Y = 47 } ]
+
+                let observed =
+                    { shut with
+                        World =
+                            { WorldView.empty with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            "W1N2",
+                                            {
+                                                Hostiles = []
+                                                InvaderCores = []
+                                                Fallen = []
+                                                Control = neutralRoom
+                                            }
+                                        ]
+                            }
+                    }
+
+                Expect.equal
+                    (Map.tryFind "r-1" (decide shut Map.empty Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: out of sight the ranger takes the chase"
+
+                // An observer every other tick would otherwise toggle the Task:
+                // the look that finds it empty ends the chase in the row
+                // (`ObserveOutpostTests`), and the gate reads only the row.
+                Expect.equal
+                    (Map.tryFind "r-1" (decide observed Map.empty Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "with the world looking in, the row still says chase, and the ranger keeps it"
+            }
         ]
 
 /// Raptor865 as W17S26 saw it (#516): five WORK on three MOVE, no weapon,

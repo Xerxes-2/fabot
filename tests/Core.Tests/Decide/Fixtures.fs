@@ -212,6 +212,7 @@ let bareRespawn =
         Sightings = Map.empty
         Seen = Map.empty
         ExitHolds = Map.empty
+        World = WorldView.empty
         // The tests that are *about* a tunable move the one field they are
         // about.
         Tuning = Tuning.defaults
