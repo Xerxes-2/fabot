@@ -71,6 +71,49 @@ type AssaultFacts =
         BarredUntil: int option
     }
 
+/// How the raid standing in a room is answered: one verdict a room a tick,
+/// which the stand-down, the rows, the chase and the call all read.
+[<RequireQualifiedAccess>]
+type Answer =
+    /// The bodies that could answer it win: a row's biggest cast, or the
+    /// rangers standing in it or called to it (`Facts.rangersWin`). A room
+    /// with no raider in it.
+    | Win
+    /// A ranger kites it down (`Facts.kitedByRanger`, #510): it cannot close.
+    | Kite
+    /// Nothing of ours wins it: the [[stand-down]]'s.
+    | Lose
+
+/// A room's own row in one colony (#535): whether it is the ranger's, and
+/// whether its biggest cast wins the room alone (`Facts.rowAnswer`).
+type RowAnswer = { Ranger: bool; Wins: bool }
+
+/// One raided room's verdict, priced once a tick over every colony's bodies
+/// (`Facts.judge`) and read by every colony alike.
+type RoomVerdict =
+    {
+        Answer: Answer
+        /// The row answer of each colony whose row the verdict weighed, by
+        /// home (`Own`'s casters), priced once for the verdict and the
+        /// colony's Brief alike.
+        Rows: Map<string, RowAnswer>
+        /// The colonies whose own row gives it: whose row's biggest cast wins
+        /// the room alone, among the colonies whose row casts for it, or,
+        /// where none does and it is no home of ours, every colony that sees
+        /// it (`Facts.rowAnswer`).
+        Own: Set<string>
+        /// The fewest rangers that win the raid together, of every colony
+        /// that sees it and would send them, standing in the room or lent to
+        /// it by their own colony's rule; None where all of them lose.
+        Rangers: Lazy<int option>
+        /// The one colony that answers the room: among the colonies whose
+        /// row wins it, else those of them whose biggest ranger kites it,
+        /// else whose rangers are among the fewest that win it, the fewest
+        /// crossings from it, then the largest bank, then by home name. None
+        /// on a Lose.
+        Answerer: string option
+    }
+
 /// One room as this tick's vision answered for it, to every colony: a creep's
 /// look, a structure's or an observer's.
 type WorldRoom =
@@ -100,6 +143,14 @@ type WorldView =
         /// The rooms of ours an observer stands in: whose look each room of
         /// `Danger` is (`lookerOf`).
         Observers: string list
+        /// Every body of ours by the room it stands in, and its tile there,
+        /// whoever holds it. Read on first use: one reader, a home's Defend.
+        Bodies: Lazy<Map<string, (CreepInfo * Pos) list>>
+        /// Each room a raider stands in, its one verdict, priced on first
+        /// read over every colony's view (`Facts.judge`). Empty until the
+        /// views are cut, and in every fixture of one colony, which prices
+        /// a room over its own view alone.
+        Answers: Map<string, Lazy<RoomVerdict>>
         /// The tick's shared safe ground (`sharingSafeGround`): given a room,
         /// the Reach and the walking grid, the set an earlier colony built off
         /// the same two, else what the builder answers, kept. None builds
@@ -116,6 +167,8 @@ module WorldView =
             Watched = Set.empty
             Danger = Set.empty
             Observers = []
+            Bodies = lazy Map.empty
+            Answers = Map.empty
             SafeGround = None
         }
 
@@ -222,6 +275,18 @@ module WorldView =
                     && facts.TargetKinds
                        |> Map.exists (fun _ kind -> kind = Structure BuiltKind.Observer))
                 |> List.map fst
+            Bodies =
+                lazy
+                    (world.Creeps
+                     |> List.choose (fun creep ->
+                         Map.tryFind creep.Room world.Rooms
+                         |> Option.bind (fun facts ->
+                             Map.tryFind creep.Info.Name facts.Layer.CreepPositions)
+                         |> Option.map (fun tile -> creep.Room, (creep.Info, tile)))
+                     |> List.groupBy fst
+                     |> List.map (fun (room, placed) -> room, List.map snd placed)
+                     |> Map.ofList)
+            Answers = Map.empty
             SafeGround = None
         }
 
@@ -455,10 +520,6 @@ type ColonyView =
         /// The hostiles in sight standing on the tile they stood on the full
         /// tick before (`HostileStep.Since`, #552): parked, not walking in.
         Parked: Set<string>
-        /// For a child, its mother's bodies standing in its home, and where:
-        /// the residents she keeps there (#447), whom a raid beside the home
-        /// calls as its own (`Facts.rangersWin`). Priced, never moved.
-        Lendable: (CreepInfo * RoomPos) list
         /// What this colony may take of a neighbour's, explicitly and
         /// bounded.
         Borrowed: BorrowedWork
@@ -1469,22 +1530,6 @@ module ColonyView =
                     |> Option.exists (fun step -> step.At = h.Pos && step.Since < world.Time))
                 |> List.map (fun h -> h.Id)
                 |> Set.ofList
-            Lendable =
-                match colony.Mother with
-                | None -> []
-                | Some _ ->
-                    let standing =
-                        worked
-                        |> List.tryFind (fst >> (=) home)
-                        |> Option.map (fun (_, facts) -> facts.Layer.CreepPositions)
-                        |> Option.defaultValue Map.empty
-
-                    world.Creeps
-                    |> List.filter (fun creep ->
-                        creep.Room = home && not (Set.contains creep.Info.Name names))
-                    |> List.choose (fun creep ->
-                        Map.tryFind creep.Info.Name standing
-                        |> Option.map (fun tile -> creep.Info, RoomPos.at home tile))
             Borrowed =
                 {
                     Rooms = bootstrap

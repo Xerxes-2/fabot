@@ -1421,7 +1421,7 @@ let kiteTests =
                             { X = 22; Y = 44 }
                         ]
 
-                Expect.equal (Facts.answer colony "W1N2") Facts.Answer.Kite "a ranger kites it down"
+                Expect.equal (Facts.answer colony "W1N2") Answer.Kite "a ranger kites it down"
 
                 let result = decide colony Map.empty Set.empty None
 
@@ -2769,6 +2769,86 @@ let private guardedBeyond hostiles =
         })
     |> withGuards [ guard "g-1", { X = 25; Y = 44 } ]
 
+/// The child herself in `watchingBeyond`'s frame (the world layer's S3): her
+/// home W1N3, her outpost W1N4 beside it with its controller in her
+/// projection, a bank of `energy`, and her own bodies standing at home. The
+/// view the room's one verdict is priced over beside the mother's.
+let private childBeside (mother: ColonyView) energy (ours: (CreepInfo * Pos) list) =
+    let home = SpatialInfo.layerOf mother.Spatial "W1N3"
+    let outpost = SpatialInfo.layerOf mother.Spatial "W1N4"
+
+    { mother with
+        Creeps = List.map fst ours
+        Bank = bank energy energy
+        Borrowed = BorrowedWork.empty
+        Crossed = Set.empty
+        Spatial =
+            { mother.Spatial with
+                RoomName = Some "W1N3"
+                TargetKinds = mother.Spatial.TargetKinds |> Map.add "ctl-W1N4" Controller
+            }
+            |> withNeighbour
+                "W1N3"
+                { home with
+                    CreepPositions =
+                        (home.CreepPositions, ours)
+                        ||> List.fold (fun tiles (creep, pos) -> Map.add creep.Name pos tiles)
+                }
+            |> withNeighbour
+                "W1N4"
+                { outpost with
+                    TargetPositions =
+                        outpost.TargetPositions |> Map.add "ctl-W1N4" { X = 40; Y = 40 }
+                }
+    }
+
+/// Synapse673 (#518): 13 RANGED_ATTACK, 7 MOVE, no heal, standing in a room.
+let private synapse room =
+    { hostileIn room { X = 25; Y = 20 } (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+        Id = "Synapse673"
+        Owner = "Trepidimous"
+    }
+
+/// A 10M7R3H ranger-row body: one loses Synapse673, two win it.
+let private smallResident name =
+    creepWith
+        name
+        0
+        0
+        (List.replicate 10 Move @ List.replicate 7 RangedAttack @ List.replicate 3 Heal)
+
+/// The mother's view and the child's with the world's verdicts priced over
+/// both (`Facts.judge`), a crossing a room apart.
+let private judgedBoth (mother: ColonyView) (child: ColonyView) =
+    let crossings (home: string) (room: string) =
+        RoomName.offsetOf home room
+        |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+    let deciding view : Facts.Judged =
+        {
+            Cut = view
+            OutOfSight = []
+            Decides = true
+        }
+
+    match Facts.judge crossings Map.empty [ deciding mother; deciding child ] with
+    | [ mother; child ] -> mother, child
+    | _ -> failwith "two views in, two out"
+
+/// The child's view of `judgedBoth`.
+let private judgedBeside (mother: ColonyView) (child: ColonyView) = snd (judgedBoth mother child)
+
+/// The rooms a colony's stand-down shuts off this tick's sightings alone.
+let private shutOf (colony: ColonyView) =
+    Observe.RaidState.empty
+    |> Observe.foldRaids
+        Observe.capEpisodes
+        Set.empty
+        colony
+        (Planner.outpostFactsOf colony).Declared
+    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+    |> fun gate -> gate.Shut
+
 [<Tests>]
 let childOutpostTests =
     testList
@@ -2888,10 +2968,7 @@ let childOutpostTests =
                     (guardBlocksBeat mother "W1N4" (guardBlocksReach mother))
                     "the premise: the mother's guard row would win it, were the room hers"
 
-                Expect.equal
-                    (Facts.answer mother "W1N4")
-                    Facts.Answer.Win
-                    "answered by the residents"
+                Expect.equal (Facts.answer mother "W1N4") Answer.Win "answered by the residents"
 
                 let held = Map.ofList [ "r-1", taskId (Guard "W1N3"); "r-2", taskId (Guard "W1N3") ]
 
@@ -2903,36 +2980,34 @@ let childOutpostTests =
                          Map.tryFind name called.Assignments = Some(taskId (Guard "W1N4"))))
                     "a resident takes the harasser"
 
-                // The child's view: her home W1N1, her outpost W1N2, the
-                // mother's residents standing at home (`ColonyView.Lendable`).
-                let child lendable =
-                    { declaredRaid [ harasser "W1N2" ] with
-                        Bank = bank 850 850
-                        Lendable =
-                            if lendable then
-                                [
-                                    resident "r-1", RoomPos.at "W1N1" { X = 25; Y = 26 }
-                                    resident "r-2", RoomPos.at "W1N1" { X = 27; Y = 26 }
-                                ]
-                            else
-                                []
-                    }
+                // The child's view beside her mother's (the world layer's S3):
+                // her bank 850 and no body of her own; the room's one verdict
+                // priced over both.
+                let child (mother: ColonyView) =
+                    judgedBeside mother (childBeside mother 850 [])
 
                 Expect.isFalse
-                    (guardBlocksBeat (child true) "W1N2" (guardBlocksReach (child true)))
+                    (guardBlocksBeat (child mother) "W1N4" (guardBlocksReach (child mother)))
                     "the premise: the child's guard row loses it"
 
                 Expect.equal
-                    (Facts.answer (child true) "W1N2")
-                    Facts.Answer.Win
-                    "the child counts her mother's residents"
+                    (Facts.answer (child mother) "W1N4")
+                    Answer.Win
+                    "the one verdict counts the mother's residents"
 
-                Expect.isEmpty (shut (child true)) "and does not stand the outpost down"
-                Expect.equal (guardQuotaOf (child true)) (Some 0) "nor casts a guard for it"
+                Expect.isEmpty (shut (child mother)) "so the child does not stand the outpost down"
+                Expect.equal (guardQuotaOf (child mother)) (Some 0) "nor casts a guard for it"
+
+                let away =
+                    { mother with
+                        Creeps =
+                            mother.Creeps
+                            |> List.filter (fun creep -> creep.Name <> "r-1" && creep.Name <> "r-2")
+                    }
 
                 Expect.equal
-                    (shut (child false))
-                    (Set.singleton "W1N2")
+                    (shut (child away))
+                    (Set.singleton "W1N4")
                     "with no resident at home it is stood down"
             }
 
@@ -2942,11 +3017,11 @@ let childOutpostTests =
             // Lose, and nobody covered the outpost. The child now prices the
             // residents lent from next door as the mother does, apart from her
             // own: the mother calls, or the child shuts, never neither.
-            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
-            // pre-world-layer behaviour, flips at S3, where the room's one
-            // verdict prices both colonies' bodies and the raid is a Win.
+            // Flipped at the world layer's S3 (`docs/adr/0086`): the room's one
+            // verdict prices both colonies' bodies, each lent by its own
+            // colony's rule, and the raid is a Win.
             test
-                "a raid only the child's ranger and the mother's resident win together: the mother calls nobody, and the child stands it down" {
+                "a raid only the child's ranger and the mother's resident win together is one Win, answered by one colony, and nothing stands down" {
                 let harasser room =
                     { hostileIn
                           room
@@ -2989,57 +3064,51 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer mother "W1N4")
-                    Facts.Answer.Lose
-                    "the mother's resident loses it alone: she calls nobody"
+                    Answer.Lose
+                    "the premise: the mother's resident loses it alone"
 
-                // The child's view: her own ranger at home W1N1, beside her
-                // outpost W1N2, and the mother's resident standing there too.
-                let child (theirs: (CreepInfo * Pos) list) =
-                    let colony =
-                        { declaredRaid [ harasser "W1N2" ] with
-                            Bank = bank 850 850
-                            Lendable =
-                                theirs
-                                |> List.map (fun (creep, pos) -> creep, RoomPos.at "W1N1" pos)
-                        }
-
-                    { colony with
-                        Creeps = colony.Creeps @ [ ranger "r-own" ]
-                    }
-                    |> standingIn "W1N1" ("r-own", { X = 24; Y = 26 })
-
-                let both = child [ resident "r-1", { X = 25; Y = 26 } ]
+                // The child's view: her own ranger at home W1N3, beside her
+                // outpost W1N4, where the mother's resident stands too.
+                let child = childBeside mother 850 [ ranger "r-own", { X = 24; Y = 26 } ]
 
                 Expect.equal
-                    (Facts.answer (child []) "W1N2")
-                    Facts.Answer.Lose
+                    (Facts.answer child "W1N4")
+                    Answer.Lose
                     "the premise: the child's ranger loses it alone"
 
                 let hers =
-                    { child [] with
-                        Creeps = (child []).Creeps @ [ resident "r-1" ]
+                    { child with
+                        Creeps = child.Creeps @ [ resident "r-1" ]
                     }
-                    |> standingIn "W1N1" ("r-1", { X = 25; Y = 26 })
 
                 Expect.equal
-                    (Facts.answer hers "W1N2")
-                    Facts.Answer.Win
+                    (Facts.answer hers "W1N4")
+                    Answer.Win
                     "the premise: the two together win it, were both hers"
 
-                Expect.equal
-                    (Facts.answer both "W1N2")
-                    Facts.Answer.Lose
-                    "the child prices the lent resident apart from her ranger"
+                let judged = judgedBeside mother child
 
-                Expect.equal (shut both) (Set.singleton "W1N2") "and stands the outpost down"
+                Expect.equal
+                    (Facts.answer judged "W1N4")
+                    Answer.Win
+                    "priced once over both colonies' bodies, the raid is a Win"
+
+                Expect.equal
+                    (Facts.verdictOf judged "W1N4").Answerer
+                    (Some "W1N3")
+                    "answered by one colony: the child, a crossing from it where the mother is three"
+
+                Expect.isEmpty (shut judged) "and the child stands nothing down"
             }
 
             // The Brief's S8 (#518): whether a resident may be lent to a kill is
-            // its lender's rule whichever colony asks (`Facts.mayLend`). Raids
-            // in two rooms beside the child's home: to the mother each breaks
-            // the home's quiet for the other, so she calls nobody; the child,
-            // whose own resident rooms leave her home out, read it quiet, called
-            // the residents a Win and stood nothing down.
+            // its lender's rule whichever colony asks. Raids in two rooms
+            // beside the child's home: to the mother each breaks the home's
+            // quiet for the other, so she calls nobody; the child, whose own
+            // resident rooms leave her home out, read it quiet, called the
+            // residents a Win and stood nothing down. Since the world layer's
+            // S3 the residents are priced in the mother's view alone, by her
+            // rule (`Facts.judge`).
             test
                 "raids beside the child's home on two sides: the mother lends nobody, and the child stands her outpost down" {
                 let harasser room id =
@@ -3086,39 +3155,354 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer (mother [ harasser "W1N4" "h-a" ]) "W1N4")
-                    Facts.Answer.Win
+                    Answer.Win
                     "the premise: one raid, and the residents answer it"
 
                 Expect.equal
                     (Facts.answer (mother [ harasser "W1N4" "h-a"; harasser "W2N3" "h-b" ]) "W1N4")
-                    Facts.Answer.Lose
+                    Answer.Lose
                     "two, and the mother lends nobody to either"
 
-                // The child's view: her home W1N1 between W1N2, her outpost,
-                // and W2N1; the mother's residents standing at home.
+                // The child's view beside the mother's: her home W1N3 between
+                // W1N4, her outpost, and W2N3; the room's one verdict priced
+                // over both.
                 let child hostiles =
-                    { declaredRaid hostiles with
+                    let mother = mother hostiles
+                    judgedBeside mother (childBeside mother 850 [])
+
+                Expect.equal
+                    (Facts.answer (child [ harasser "W1N4" "h-a" ]) "W1N4")
+                    Answer.Win
+                    "the premise: one raid, and the one verdict counts the residents"
+
+                let both = child [ harasser "W1N4" "h-a"; harasser "W2N3" "h-b" ]
+
+                Expect.equal
+                    (Facts.answer both "W1N4")
+                    Answer.Lose
+                    "two, and the mother's rule lends nobody, whoever reads the room"
+
+                Expect.contains (shut both) "W1N4" "and the child stands her outpost down"
+            }
+
+            // The world layer's S3: the room's own answer, its row's cast or
+            // its ranger's kite, is the colony's whose rows cast for it; a
+            // colony that only crosses it casts nothing there.
+            test
+                "a child's outpost the mother only crosses is the child's row's: the mother's bank wins nothing there" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let mother =
+                    { watchingBeyond [ harasser ] with
+                        Bank = bank 5600 5600
+                        Borrowed = (raisingBeyond []).Borrowed
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps = colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1")
+                        }
+
+                let child = childBeside mother 850 []
+
+                Expect.equal
+                    (Facts.answer mother "W1N4")
+                    Answer.Win
+                    "the premise: alone, the mother prices her own row's cast a Win"
+
+                Expect.equal (Facts.answer child "W1N4") Answer.Lose "and the child hers a Lose"
+
+                let judged = judgedBeside mother child
+
+                Expect.equal
+                    (Facts.answer judged "W1N4")
+                    Answer.Lose
+                    "the one verdict is the child's row's"
+
+                Expect.isNone (Facts.verdictOf judged "W1N4").Answerer "answered by nobody"
+
+                Expect.equal (shutOf judged) (Set.singleton "W1N4") "so the child stands it down"
+            }
+
+            // The world layer's S3: a raid the room's own row answers is no
+            // other colony's chase.
+            test
+                "a raid the child's row wins is no chase of the mother's, whose residents would win it beside" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                // The mother crossing the child's outpost, a bank too small
+                // for any row of hers to win it, and two residents beside it.
+                let mother =
+                    { watchingBeyond [ harasser ] with
                         Bank = bank 850 850
-                        Lendable =
-                            [
-                                resident "r-1", RoomPos.at "W1N1" { X = 25; Y = 26 }
-                                resident "r-2", RoomPos.at "W1N1" { X = 27; Y = 26 }
-                            ]
+                        Borrowed = (raisingBeyond []).Borrowed
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                let child = childBeside mother 5600 []
+
+                Expect.isSome
+                    (pooledOf mother |> entryFor (Guard "W1N4"))
+                    "the premise: alone, the mother chases it with her residents"
+
+                Expect.equal
+                    (Facts.verdictOf (judgedBeside mother child) "W1N4").Own
+                    (Set.singleton "W1N3")
+                    "the child's row wins it"
+
+                Expect.isNone
+                    (pooledOf (fst (judgedBoth mother child)) |> entryFor (Guard "W1N4"))
+                    "under the one verdict the mother pools no chase there"
+            }
+
+            // The world layer's S3 review: a body counts toward a room's
+            // verdict only where its own colony would send it — a colony that
+            // sees the raid in a room it works or crosses, deciding this tick
+            // or already holding the room's Guard.
+            test
+                "a raid only the child's ranger and a resident beside wins is Lose where the mother works no room of the raid" {
+                let mother =
+                    (raisingBeyond [])
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ smallResident "r-1" ]
+                        }
+
+                let child =
+                    { childBeside mother 850 [ ranger "r-own", { X = 24; Y = 26 } ] with
+                        Hostiles = [ synapse "W1N4" ]
+                    }
+
+                Expect.isFalse
+                    (Map.containsKey "W1N4" mother.Spatial.Rooms)
+                    "the premise: the mother neither works nor crosses W1N4"
+
+                Expect.equal
+                    (Facts.answer
+                        { child with
+                            Creeps = child.Creeps @ [ smallResident "r-1" ]
+                        }
+                        "W1N4")
+                    Answer.Win
+                    "and the two together win it, were both hers"
+
+                let judged = judgedBeside mother child
+
+                Expect.equal
+                    (Facts.answer judged "W1N4")
+                    Answer.Lose
+                    "the resident, whom nobody would send, is no body of the verdict"
+
+                Expect.equal (shutOf judged) (Set.singleton "W1N4") "so the child stands it down"
+            }
+
+            test
+                "a neighbour's ranger beside a child's home it does not work leaves the mother's resident outmatched" {
+                let mother =
+                    { raisingBeyond [ synapse "W1N3" ] with
+                        Bank = bank 850 850
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ smallResident "r-1" ]
+                        }
+
+                let neighbour =
+                    { raisingBeyond [] with
+                        Creeps = [ smallResident "n-1" ]
+                        Hostiles = []
+                        Borrowed = BorrowedWork.empty
+                        Spatial =
+                            { SpatialInfo.empty with
+                                RoomName = Some "W2N3"
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            "W2N3",
+                                            { RoomLayer.empty with
+                                                CreepPositions =
+                                                    Map.ofList [ "n-1", { X = 2; Y = 26 } ]
+                                            }
+                                        ]
+                            }
                     }
 
                 Expect.equal
-                    (Facts.answer (child [ harasser "W1N2" "h-a" ]) "W1N2")
-                    Facts.Answer.Win
-                    "the premise: one raid, and the child counts the residents"
-
-                let both = child [ harasser "W1N2" "h-a"; harasser "W2N1" "h-b" ]
+                    (Facts.answer mother "W1N3")
+                    Answer.Lose
+                    "the premise: the resident loses it alone"
 
                 Expect.equal
-                    (Facts.answer both "W1N2")
-                    Facts.Answer.Lose
-                    "two, and the child reads the mother's rule: nobody is lent"
+                    (Facts.answer
+                        ({ mother with
+                            Creeps = mother.Creeps @ [ smallResident "r-2" ]
+                         }
+                         |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 }))
+                        "W1N3")
+                    Answer.Win
+                    "and two such bodies win it"
 
-                Expect.contains (shut both) "W1N2" "and she stands her outpost down"
+                let judged =
+                    Facts.judge
+                        (fun _ _ -> None)
+                        Map.empty
+                        [
+                            {
+                                Cut = mother
+                                OutOfSight = []
+                                Decides = true
+                            }
+                            {
+                                Cut = neighbour
+                                OutOfSight = []
+                                Decides = true
+                            }
+                        ]
+
+                Expect.equal
+                    (judged |> List.map (fun view -> Facts.answer view "W1N3"))
+                    [ Answer.Lose; Answer.Lose ]
+                    "the neighbour, who sees no raid there, lends nobody: still outmatched"
+            }
+
+            test
+                "a colony replaying its plan lends only the bodies already holding the room's Guard" {
+                let mother =
+                    { watchingBeyond [ synapse "W1N4" ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ smallResident "r-1" ]
+                        }
+
+                let child = childBeside mother 850 [ ranger "r-own", { X = 24; Y = 26 } ]
+
+                let answerHeld held =
+                    Facts.judge
+                        (fun _ _ -> None)
+                        held
+                        [
+                            {
+                                Cut = mother
+                                OutOfSight = []
+                                Decides = false
+                            }
+                            {
+                                Cut = child
+                                OutOfSight = []
+                                Decides = true
+                            }
+                        ]
+                    |> List.map (fun view -> Facts.answer view "W1N4")
+
+                Expect.equal
+                    (answerHeld (Map.ofList [ "r-1", taskId (Guard "W1N3") ]))
+                    [ Answer.Lose; Answer.Lose ]
+                    "a resident its replayed plan keeps at home is lent to nobody"
+
+                Expect.equal
+                    (answerHeld (Map.ofList [ "r-1", taskId (Guard "W1N4") ]))
+                    [ Answer.Win; Answer.Win ]
+                    "one its plan already sent there counts"
+            }
+
+            // The world layer's S3 review: a home is priced by its own colony
+            // and the mother's resident row alone.
+            // The S3 re-review: the child pools no Guard at her own home (her
+            // line is her Defend's), so her row's biggest cast answers nothing
+            // there; a raised child's home is the mother's resident row's.
+            test
+                "a raised child's home is the mother's resident row's: the child's bank wins nothing at her own home" {
+                let mother =
+                    { raisingBeyond [ synapse "W1N3" ] with
+                        Bank = bank 850 850
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ smallResident "r-1" ]
+                        }
+
+                Expect.equal
+                    (Facts.answer mother "W1N3")
+                    Answer.Lose
+                    "the premise: the resident loses it alone"
+
+                Expect.equal
+                    (Facts.answer (childBeside mother 5600 []) "W1N3")
+                    Answer.Win
+                    "and, alone, the child prices her own row's cast a Win"
+
+                for energy in [ 2300; 5600 ] do
+                    let mother, child = judgedBoth mother (childBeside mother energy [])
+
+                    Expect.equal
+                        [ Facts.answer mother "W1N3"; Facts.answer child "W1N3" ]
+                        [ Answer.Lose; Answer.Lose ]
+                        $"under one verdict, at a child's bank of {energy}, the raid is still outmatched"
+            }
+
+            test
+                "a child's home a neighbour only crosses is the child's to price: the neighbour's bank wins nothing there" {
+                let neighbour =
+                    { raisingBeyond [ synapse "W1N3" ] with
+                        Bank = bank 5600 5600
+                        Borrowed = BorrowedWork.empty
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps = colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1")
+                        }
+
+                let child = childBeside neighbour 850 []
+
+                Expect.equal
+                    (Facts.answer neighbour "W1N3")
+                    Answer.Win
+                    "the premise: alone, the neighbour prices its own row's cast a Win"
+
+                Expect.equal (Facts.answer child "W1N3") Answer.Lose "and the child hers a Lose"
+
+                Expect.equal
+                    (Facts.answer (judgedBeside neighbour child) "W1N3")
+                    Answer.Lose
+                    "the one verdict is the home's own colony's"
             }
 
             // A home is quiet for a lend while no hostile can reach striking
@@ -3174,7 +3558,7 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer (mother [ slow; disarmed ]) "W1N4")
-                    Facts.Answer.Win
+                    Answer.Win
                     "seventeen ticks a step and no weapon reach no home in the window: the residents are lent"
 
                 // Two rooms west of the home, a tile a tick: 77 tiles to the
@@ -3190,7 +3574,7 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer (mother [ fast ]) "W1N4")
-                    Facts.Answer.Lose
+                    Answer.Lose
                     "a fast armed raider that reaches the home before the residents are back keeps them home"
             }
 
@@ -3239,12 +3623,12 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer (mother 0 [ wraith ]) "W1N4")
-                    Facts.Answer.Lose
+                    Answer.Lose
                     "with no tower it reaches a home nothing holds: nobody is lent"
 
                 Expect.equal
                     (Facts.answer (mother 1 [ wraith ]) "W1N4")
-                    Facts.Answer.Win
+                    Answer.Win
                     "one loaded tower beats it, so the home is quiet and the residents are lent"
             }
 
@@ -3309,7 +3693,7 @@ let childOutpostTests =
 
                 Expect.equal
                     (Facts.answer (mother [ mending ]) "W1N4")
-                    Facts.Answer.Lose
+                    Answer.Lose
                     "so it keeps the residents home"
             }
         ]
@@ -4433,7 +4817,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Verdict.Value)
-                    Facts.Answer.Win
+                    Answer.Win
                     "and the ranger wins it: the room stays open"
 
                 Expect.isTrue
@@ -4657,7 +5041,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Duty, brief.Verdict.Value)
-                    (Duty.Guard BriefKind.Chase, Facts.Answer.Win)
+                    (Duty.Guard BriefKind.Chase, Answer.Win)
                     "the premise: a chase the residents win"
 
                 Expect.equal

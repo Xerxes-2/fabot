@@ -1275,20 +1275,37 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
         WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
         |> WorldView.sharingSafeGround
 
+    // Each raided room's one verdict, as `Main` lays them (`Facts.judge`):
+    // every colony decides every arena tick.
     world,
     living
     |> List.map (fun c ->
-        c,
-        ColonyView.ofWorldRecalling
-            joins
-            tuning
-            a.Colonies
-            casting
-            gates.[c.Home]
-            holders
-            watch
-            world
-            c)
+        let view =
+            ColonyView.ofWorldRecalling
+                joins
+                tuning
+                a.Colonies
+                casting
+                gates.[c.Home]
+                holders
+                watch
+                world
+                c
+
+        ({
+            Cut = view
+            OutOfSight =
+                Observe.Danger.outOfSight
+                    (Colony.declaredRooms c)
+                    view
+                    (Observe.Danger.into danger (raidsOf a c.Home))
+            Decides = true
+        }
+        : Facts.Judged))
+    |> Facts.judge
+        (fun home room -> World.hopsUnder StandDown.none joins tuning world home room)
+        a.Carried.Assignments
+    |> List.zip living
 
 /// The view one living colony decides this tick off.
 let viewOf (a: Arena) (home: string) : ColonyView =

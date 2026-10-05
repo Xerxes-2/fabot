@@ -671,7 +671,7 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
     |> List.groupBy (fun h -> h.Pos.Room)
     |> List.filter (fun (room, _) ->
         (Set.contains room rangerRooms || Set.contains room outpostRooms)
-        && Decide.Facts.answer view room = Decide.Facts.Answer.Lose)
+        && Decide.Facts.answer view room = Answer.Lose)
     |> List.map (fun (room, raid) ->
         if Set.contains room view.HarassCast then
             room, (view.Time + view.Tuning.HarassClearTicks, StandDownBasis.HarassSighting)
@@ -780,6 +780,16 @@ let private raidClocked (episode: OutpostEpisode) =
     && (episode.Basis = StandDownBasis.InvaderRaid
         || episode.Basis = StandDownBasis.PlayerRaidHold
         || episode.Basis = StandDownBasis.RaidGone)
+
+/// The rooms of a log's standing raid rows (`raidClocked`) among `prices`:
+/// the stand-down rows a colony prices out of sight with the world's look
+/// laid in, one reading for its raid log's fold (`foldRaids`) and the world's
+/// verdicts (`Facts.judge`).
+let pricedRaidRows (prices: string -> bool) (tick: int) (outposts: OutpostEpisode list) =
+    outposts
+    |> List.filter (fun episode ->
+        standingDown tick episode && raidClocked episode && prices episode.RoomName)
+    |> List.map (fun episode -> episode.RoomName)
 
 /// The least tick a raid's row may end on once its bodies are gone: now, or,
 /// where the row reopened inside `Tuning.RaidBounceTicks` of an earlier one
@@ -1172,10 +1182,7 @@ let foldRaids
     // the cores and the reservations stay the colony's own vision's, or a
     // shut room's loiterer would grow the log every look. An outpost shut on
     // a raid is priced as the outpost it is.
-    let raidRows =
-        prior.Outposts
-        |> List.filter (fun episode -> standingDown view.Time episode && raidClocked episode)
-        |> List.map (fun episode -> episode.RoomName)
+    let raidRows = pricedRaidRows (fun _ -> true) view.Time prior.Outposts
 
     let looking = ColonyView.lookingInto raidRows view
 
@@ -1700,10 +1707,21 @@ module Danger =
             Rivals = logs |> List.map _.RivalHeld |> mergeRivals
         }
 
+    /// The rooms of the standing raid rows a colony prices (`Facts.pricedRooms`
+    /// over the rooms it declares, `owned`), off its own log with the world's
+    /// laid in (`into`): the rows its fold re-reads off the world's look
+    /// (`foldColony`), and the world's verdicts (`Facts.judge`) price beside
+    /// its view. The priced set is read only where a raid row stands.
+    let outOfSight (owned: Set<string>) (view: ColonyView) (laid: RaidState) =
+        match pricedRaidRows (fun _ -> true) view.Time laid.Outposts with
+        | [] -> []
+        | rows ->
+            let prices = Decide.Facts.pricedRooms owned view
+            rows |> List.filter prices.Contains
+
     /// One colony's Raid-log fold over the world log: its own log with the
     /// world's laid in, less the standing raid rows of rooms it does not price
-    /// — those it declares (`owned`), works (`declared`), or sends a ranger to
-    /// (`Facts.rangerRooms`, `HarassCast`) —, folded as its own (`foldRaids`)
+    /// (`Facts.pricedRooms` over the rooms it declares, `owned`), folded as its own (`foldRaids`)
     /// and written back. A row it opens in a room whose row it was not handed
     /// (a core or a reservation it saw there) merges with the world's
     /// (`mergeDown`); the holds, threats and latches come back whole, each
@@ -1719,18 +1737,15 @@ module Danger =
         (own: RaidState)
         (danger: Danger)
         : RaidState * Danger =
-        let prices =
-            Set.unionMany
-                [ owned; Set.ofList declared; Decide.Facts.rangerRooms view; view.HarassCast ]
-
         let laid = into danger own
+        let priced = outOfSight owned view laid |> Set.ofList
 
         let prior =
             { laid with
                 Outposts =
                     laid.Outposts
                     |> List.filter (fun row ->
-                        prices.Contains row.RoomName
+                        priced.Contains row.RoomName
                         || not (standingDown view.Time row && raidClocked row))
             }
 

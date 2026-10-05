@@ -190,7 +190,6 @@ let bareRespawn =
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
         Parked = Set.empty
-        Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []

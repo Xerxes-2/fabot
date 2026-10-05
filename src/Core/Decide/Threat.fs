@@ -408,7 +408,7 @@ let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : in
 module Brief =
     /// How far a quiet ranger walks for a kill (#510), in travel cost (two
     /// units a tick): the reaction window of a lend, inside which no raid
-    /// reaches the home it left (`Facts.mayLend`).
+    /// reaches the home it left (`Facts.rangerMayKill`).
     let private killWalk = 2 * Reaction.lend
 
     let private bare =
@@ -824,16 +824,21 @@ module Brief =
         | _ when List.isEmpty (perimeterRamparts view) -> 0
         | raid -> min view.Tuning.DefenderCap (List.length raid)
 
-    /// The mother's ranger-row residents holding the home's ground (#552,
-    /// `ColonyView.Lendable`): standing in the home with its Guard or its
-    /// Defend held (`holders`, the shard's table), not passing through. They
-    /// answer its raid from its ramparts, and the home casts none for them.
+    /// Another colony's ranger-row bodies holding the home's ground (#552),
+    /// the mother's residents: standing in the home (`WorldView.Bodies`) with
+    /// its Guard or its Defend held (`holders`, the shard's table), not
+    /// passing through. They answer its raid from its ramparts, and the home
+    /// casts none for them.
     let internal lentRangers (view: ColonyView) (holders: Set<string>) : int =
         let home = SpatialInfo.homeName view.Spatial
+        let mine = view.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
 
-        view.Lendable
-        |> List.filter (fun (creep, at) ->
-            at.Room = home && isRangerRowBody creep && Set.contains creep.Name holders)
+        Map.tryFind home view.World.Bodies.Value
+        |> Option.defaultValue []
+        |> List.filter (fun (creep, _) ->
+            not (Set.contains creep.Name mine)
+            && isRangerRowBody creep
+            && Set.contains creep.Name holders)
         |> List.length
 
     /// The rows the home's Defend asks (#546), each with the bodies of the
@@ -1924,20 +1929,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room)))))
         |> Set.ofList
 
-    // Each room a hostile stands in: its own row (`Facts.rowAnswer`, #535),
-    // its verdict (`Facts.answeredBy`) off that row and the rangers that win
-    // it, each priced on first read and at most once this tick. Any other
+    // Each room a hostile stands in: this colony's own row there
+    // (`Facts.rowAnswer`, #535), as the room's verdict priced it where it
+    // weighed this colony's row, the room's one verdict (`Facts.answered`, the
+    // world's) and the rangers that win it, each read on first use. Any other
     // room has no raider, and is `Win`.
     let rows =
+        let home = SpatialInfo.homeName view.Spatial
+
         view.Hostiles
         |> List.map (fun hostile -> hostile.Pos.Room)
         |> List.distinct
-        |> List.map (fun room -> room, lazy (rowAnswer view room))
+        |> List.map (fun room ->
+            room,
+            lazy
+                (match Map.tryFind home (verdictOf view room).Rows with
+                 | Some row -> row
+                 | None -> rowAnswer view room))
         |> Map.ofList
 
     let verdicts =
         rows
-        |> Map.map (fun room row -> lazy (answeredBy view room row), lazy (rangersWin view room))
+        |> Map.map (fun room _ -> lazy (answered view room), lazy (rangersWin view room))
 
     let verdictOf room =
         Map.tryFind room verdicts

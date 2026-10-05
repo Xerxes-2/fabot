@@ -880,7 +880,6 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // borrowed, and every hand-declared outpost borders its home.
         Foreign = Set.empty
         Parked = Set.empty
-        Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []
         // No errand, so no Reclaim is pooled and no reserver seat is the

@@ -675,7 +675,7 @@ let errandStandDownTests =
 
                 Expect.isTrue
                     (Facts.rangerAnswers guardServedRoom errandRoom
-                     && Facts.answer guardServedRoom errandRoom = Facts.Answer.Win)
+                     && Facts.answer guardServedRoom errandRoom = Answer.Win)
                     "the premise: the declared Outpost's own row, the ranger's, wins this exchange"
 
                 Expect.isFalse

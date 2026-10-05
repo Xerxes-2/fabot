@@ -840,9 +840,13 @@ let rampartDefenderTests =
                 "the mother's resident holding the home's Guard answers the ranger row: the home casts no ranger for it, whatever its bank" {
                 // #552: W15S28's residents stood in W17S25 while the child
                 // was asked for a ranger of her own.
-                let lent colony =
+                let lent (colony: ColonyView) =
                     { colony with
-                        Lendable = [ homeRanger, RoomPos.at "W1N1" { X = 25; Y = 30 } ]
+                        World =
+                            { colony.World with
+                                Bodies =
+                                    lazy (Map.ofList [ "W1N1", [ homeRanger, { X = 25; Y = 30 } ] ])
+                            }
                     }
 
                 let asksHeld (holders: string list) colony =

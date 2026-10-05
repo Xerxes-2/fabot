@@ -490,10 +490,10 @@ let private fullTick
     // The gate's answer per colony, derived once: a second derivation would
     // be a second answer free to disagree. Each the colony's projection of
     // the one world danger log.
+    let laid = raids |> Map.map (fun _ log -> Observe.Danger.into danger log)
+
     let gates =
-        raids
-        |> Map.map (fun _ log ->
-            Observe.standDown Tuning.defaults world.Time (Observe.Danger.into danger log))
+        laid |> Map.map (fun _ log -> Observe.standDown Tuning.defaults world.Time log)
 
     let gateOf home =
         gates |> Map.tryFind home |> Option.defaultValue StandDown.none
@@ -649,6 +649,33 @@ let private fullTick
 
     // Every colony that does not decide this tick.
     let idle = Set.union waiting replaying
+
+    // Each raided room's one verdict, priced once over every colony's view and
+    // laid in each (`Facts.judge`): a colony that does not decide sends only
+    // the bodies its plan already holds there; the answerer is ranked by
+    // crossings as a harassment room's caster is, the table built only where
+    // two colonies answer one room.
+    let views =
+        let hops = lazy (World.hopsUnder StandDown.none joins Tuning.defaults world)
+
+        views
+        |> List.map (fun (colony, view) ->
+            let owned = Colony.declaredRooms colony
+
+            ({
+                Cut = view
+                OutOfSight =
+                    Observe.Danger.outOfSight
+                        owned
+                        view
+                        (laid
+                         |> Map.tryFind colony.Home
+                         |> Option.defaultValue Observe.RaidState.empty)
+                Decides = not (Set.contains colony.Home idle)
+            }
+            : Decide.Facts.Judged))
+        |> Decide.Facts.judge (fun home room -> hops.Value home room) assignments
+        |> List.zip (views |> List.map fst)
 
     // The decision is bound and then tupled, and the turn is a DU
     // (`ReplanTurn`), because the first shape shipped broken: as an expression

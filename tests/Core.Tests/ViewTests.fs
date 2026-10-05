@@ -1135,15 +1135,29 @@ let colonyViewTests =
                     "first seen, each on its own tile"
             }
 
-            // The Brief's S7: what a raid beside the child's home may call.
-            test "a child carries her mother's bodies at home as lendable, a mother none" {
-                Expect.equal
-                    ((viewOf pairWorld child).Lendable
-                     |> List.map (fun (creep, at) -> creep.Name, at))
-                    [ "pioneer-900-Spawn1", RoomPos.at child pioneerTile ]
-                    "the mother's pioneer in the child's home, priced and never moved"
+            // The world layer's S3: every body of ours by the room it stands
+            // in, whoever holds it, the one read every colony shares.
+            test "every view reads every body of ours by the room it stands in, whoever holds it" {
+                let placed home =
+                    (viewOf pairWorld home).World.Bodies.Value
+                    |> Map.toList
+                    |> List.collect (fun (room, bodies) ->
+                        bodies |> List.map (fun (creep, at) -> room, creep.Name, at))
+                    |> List.sort
 
-                Expect.isEmpty (viewOf pairWorld mother).Lendable "the mother has no mother"
+                let expected =
+                    [
+                        mother, "worker-900-Spawn1", { X = 2; Y = 3 }
+                        child, "hauler-950-Spawn2", haulerTile
+                        child, "pioneer-900-Spawn1", pioneerTile
+                    ]
+
+                Expect.equal
+                    (placed child)
+                    expected
+                    "the mother's pioneer in the child's home among them"
+
+                Expect.equal (placed mother) expected "the same read in the mother's view"
             }
 
             test "a colony alone in its rooms carries no foreign body" {
@@ -2606,11 +2620,12 @@ let worldSeamTests =
                 Expect.isFalse (seenBy shut child) "and the child, who shut it, works it no more"
             }
 
-            // Characterisation (the world layer's S0): pins pre-world-layer
-            // behaviour, flips at S3 (one verdict per room). The live shape:
-            // W18S25, priced by W17S25 and by its mother W15S28 apart.
+            // Flipped at the world layer's S3. The live shape: W18S25, priced
+            // by W17S25 and by its mother W15S28 apart, the child a Win (her
+            // rangers and the mother's beside them) and the mother a Lose
+            // (hers alone).
             test
-                "one world, one room, two verdicts: the child's rangers win it, the mother's resident loses it" {
+                "one world, one room, one verdict: the rangers at the child's home win it, and both colonies read the Win" {
                 let ranger name room =
                     bodied name room [ Move, 21; RangedAttack, 14; Heal, 7 ]
 
@@ -2646,14 +2661,39 @@ let worldSeamTests =
                     "and sees its harasser"
 
                 Expect.equal
-                    (Facts.answer childView childOutpost)
-                    Facts.Answer.Win
-                    "the child prices her own rangers a Win"
+                    (Facts.answer motherView childOutpost)
+                    Answer.Lose
+                    "the premise: alone, the mother's bodies lose it"
+
+                let crossings (home: string) (room: string) =
+                    RoomName.offsetOf home room
+                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+                let deciding view : Facts.Judged =
+                    {
+                        Cut = view
+                        OutOfSight = []
+                        Decides = true
+                    }
+
+                let judged =
+                    Facts.judge crossings Map.empty [ deciding motherView; deciding childView ]
 
                 Expect.equal
-                    (Facts.answer motherView childOutpost)
-                    Facts.Answer.Lose
-                    "and the mother, who cannot see them, prices the same room a Lose"
+                    (judged |> List.map (fun view -> Facts.answer view childOutpost))
+                    [ Answer.Win; Answer.Win ]
+                    "priced once over both colonies' bodies, both read one Win"
+
+                Expect.equal
+                    (judged
+                     |> List.map (fun view -> (Facts.verdictOf view childOutpost).Rangers.Value))
+                    [ Some 2; Some 2 ]
+                    "by two rangers: the mother's at the child's home and one of the child's"
+
+                Expect.equal
+                    (judged |> List.map (fun view -> (Facts.verdictOf view childOutpost).Answerer))
+                    [ Some child; Some child ]
+                    "answered by one colony, the child, a crossing from the room where the mother is two"
             }
         ]
 

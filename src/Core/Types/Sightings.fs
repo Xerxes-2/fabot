@@ -250,7 +250,7 @@ module HostileInfo =
     /// The parts a hostile fights with among `side`: `partsWithin` the
     /// window our answering body needs to close and strike (`Reaction.strike`).
     /// Every part-question below reads it, and so at that window; a lend's
-    /// quiet reads `partsWithin Reaction.lend` (`Facts.mayLend`). Its hits stay
+    /// quiet reads `partsWithin Reaction.lend` (`Facts.rangerMayKill`). Its hits stay
     /// what it has: a reader pricing an exchange prices the healing as a rate.
     let effectiveParts (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
         partsWithin Reaction.strike side hostile
