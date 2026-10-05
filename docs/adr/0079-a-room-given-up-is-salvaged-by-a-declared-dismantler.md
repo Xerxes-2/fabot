@@ -17,7 +17,7 @@ The work is one `Dismantle` Task per target, in the Surplus tier with no cap, he
 ## Consequences
 
 - The dismantler has no Carry, so it is applicable to no energy Task; the energy a dismantle yields drops on the floor. The miner's deposit Harvest now also asks for a Work-heavy body, or an idle dismantler would take the mine Post.
-- The census reads any Work body with no Carry that is not Work-heavy as the dismantler, ahead of the upgrader arm that would otherwise claim it.
+- The census reads the dismantler off its cast name, as the sapper and the probe are read: a miner that damage has stripped to Work = Move has its parts (#426). Its Dismantle applicability reads the same name.
 - The declaring colony projects the salvage room and its crossing while it stands, which costs its own CPU until the room is dark.
 - What a storage or terminal still holds becomes a ruin; W11S29's are empty.
 - The Task and intent are named for the act (`Dismantle`, `DismantleStructure`). No siege is designed here.

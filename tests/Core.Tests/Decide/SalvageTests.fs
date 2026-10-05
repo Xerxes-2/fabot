@@ -84,7 +84,10 @@ let private standingThere (ours: (CreepInfo * Pos) list) (colony: ColonyView) =
                 }
     }
 
-/// The row's body, two blocks of it.
+/// The row's cast, two blocks of it, under the name the cascade gives it: the
+/// row is read off the name (#426).
+let private d = "dismantler-1-Spawn1"
+
 let private dismantler name =
     creepWith name 0 0 [ Work; Work; Move; Move ]
 
@@ -124,7 +127,7 @@ let salvagePoolTests =
                             worker "w" 50 0, besideTheSpawn
                             creepWith "h" 0 100 [ Carry; Carry; Move ], { X = 20; Y = 21 }
                             miner "m", { X = 19; Y = 21 }
-                            dismantler "d", { X = 21; Y = 19 }
+                            dismantler d, { X = 21; Y = 19 }
                             // An assault's sapper: the dismantler's parts, its
                             // own name (#490).
                             creepWith "sapper-1-Spawn1" 0 0 sapperPattern.Block, { X = 22; Y = 21 }
@@ -133,12 +136,36 @@ let salvagePoolTests =
                 let dismantling name =
                     heldBy name colony |> Option.exists (fun held -> held.StartsWith "dismantle:")
 
-                Expect.isTrue (dismantling "d") "the dismantler takes one"
+                Expect.isTrue (dismantling d) "the dismantler takes one"
 
                 for name in [ "w"; "h"; "m"; "sapper-1-Spawn1" ] do
                     Expect.isFalse
                         (dismantling name)
                         $"{name} is never sent to take a structure down"
+            }
+
+            test "a miner stripped of its Work by damage is not the dismantler (#426)" {
+                // A `[20W;4M]` miner that has lost sixteen Work stands `[4W;4M]`:
+                // no longer heavy, no Carry, and Work = Move as the dismantler's
+                // own blocks are. Only its name says what it was cast as.
+                let stripped =
+                    creepWith
+                        "miner-1-Spawn1"
+                        0
+                        0
+                        [ Work; Work; Work; Work; Move; Move; Move; Move ]
+
+                let colony = bareHome |> salvaging |> standingThere [ stripped, besideTheSpawn ]
+
+                Expect.isFalse
+                    (heldBy "miner-1-Spawn1" colony
+                     |> Option.exists (fun held -> held.StartsWith "dismantle:"))
+                    "it is never sent to take a structure down"
+
+                Expect.equal
+                    (dismantlerRow colony |> Option.map (fun row -> row.Living))
+                    (Some 0)
+                    "and it fills no dismantler seat, so the row still casts its body"
             }
         ]
 
@@ -148,8 +175,7 @@ let salvageActTests =
         "the dismantle act"
         [
             test "a dismantler within range 1 of its target dismantles it" {
-                let colony =
-                    bareHome |> salvaging |> standingThere [ dismantler "d", besideTheSpawn ]
+                let colony = bareHome |> salvaging |> standingThere [ dismantler d, besideTheSpawn ]
 
                 let { Intents = intents } = decideOn colony
 
@@ -160,7 +186,7 @@ let salvageActTests =
                         | _ -> None)
 
                 match acts with
-                | [ "d", id ] ->
+                | [ name, id ] when name = d ->
                     let tile = targets |> List.find (fun (target, _) -> target = id) |> snd
 
                     Expect.isLessThanOrEqual
@@ -171,7 +197,7 @@ let salvageActTests =
             }
 
             test "a dismantler two tiles off walks and does not act" {
-                let colony = bareHome |> salvaging |> standingThere [ dismantler "d", twoOff ]
+                let colony = bareHome |> salvaging |> standingThere [ dismantler d, twoOff ]
 
                 let { Intents = intents } = decideOn colony
 
@@ -182,7 +208,7 @@ let salvageActTests =
                          | _ -> false))
                     "range 1 is the act's reach, as the engine's `dismantle` checks it"
 
-                Expect.isNonEmpty (moveIntentsFor "d" intents) "it walks instead"
+                Expect.isNonEmpty (moveIntentsFor d intents) "it walks instead"
             }
         ]
 

@@ -640,13 +640,13 @@ let patternTableTests =
             }
         ]
 
-/// The rows' living counts off one tick with the given bodies standing, by
-/// row name.
-let private livingByRow (bodies: BodyPart list list) =
+/// The rows' living counts off one tick with the given named bodies standing,
+/// by row name.
+let private livingByName (creeps: (string * BodyPart list) list) =
     let colony =
         { bareRespawn with
             Bank = bank 2300 2300
-            Creeps = bodies |> List.mapi (fun i body -> creepWith $"c{i}" 0 0 body)
+            Creeps = creeps |> List.map (fun (name, body) -> creepWith name 0 0 body)
         }
 
     (decideOn colony).Quotas.Rows
@@ -658,14 +658,14 @@ let dismantlerCensusTests =
     testList
         "the dismantler's census"
         [
-            test "a Work/Move body with no Carry reads back as the dismantler, whatever its size" {
-                // Without its own arm it is a standing body — no Carry per Work —
+            test "the row's cast reads back as the dismantler off its name, whatever its size" {
+                // Read off its parts it is a standing body — no Carry per Work —
                 // and filled the upgrader row for its whole life.
                 let rows =
-                    livingByRow
+                    livingByName
                         [
                             for capacity in [ 150; 1000; 3750 ] ->
-                                bodyFor dismantlerPattern capacity
+                                $"dismantler-{capacity}-Spawn1", bodyFor dismantlerPattern capacity
                         ]
 
                 Expect.equal
@@ -678,28 +678,30 @@ let dismantlerCensusTests =
 
             test "no other row's body reads back as the dismantler" {
                 // Every row the table holds, cast at every bank the colonies stand
-                // at, plus the Anchor and the miner at their smallest: the arm sits
-                // between the miner's and the upgrader's and must take none of them.
-                // A sapper and a probe are the dismantler's parts, read back by
-                // their names (`patternByName`) and never by them.
+                // at under the name the cascade gives it, plus the Anchor and the
+                // miner at their smallest and a miner stripped to the dismantler's
+                // own Work = Move (#426). A sapper and a probe are the dismantler's
+                // parts too, each under its own name.
                 let others =
                     patternTable
-                    |> List.filter (fun row ->
-                        row.Name <> dismantlerPattern.Name
-                        && row.Name <> sapperPattern.Name
-                        && row.Name <> probePattern.Name)
+                    |> List.filter (fun row -> row.Name <> dismantlerPattern.Name)
                     |> List.collect (fun row ->
                         [
                             for capacity in [ 300; 550; 800; 1300; 1800; 2300; 5600 ] ->
-                                bodyFor row capacity
+                                $"{row.Name}-{capacity}-Spawn1", bodyFor row capacity
                         ])
 
-                let smallest = [ [ Work; Work; Carry; Move ]; [ Work; Work; Move ] ]
+                let smallest =
+                    [
+                        "anchor-1-Spawn1", [ Work; Work; Carry; Move ]
+                        "miner-1-Spawn1", [ Work; Work; Move ]
+                        "miner-2-Spawn1", [ Work; Work; Work; Work; Move; Move; Move; Move ]
+                    ]
 
                 Expect.equal
-                    (livingByRow (others @ smallest) |> Map.tryFind "dismantler")
+                    (livingByName (others @ smallest) |> Map.tryFind "dismantler")
                     (Some 0)
-                    "the Carry-less miner is Work-heavy, and every other row carries a Carry or no Work"
+                    "no body without the row's name is the dismantler's"
             }
         ]
 

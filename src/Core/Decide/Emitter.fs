@@ -368,10 +368,11 @@ let internal applicable
     // Ownership is read at `intentFor`, not here: read here, a body whose flag
     // was safe would be released the tick it took it and walk three rooms home.
     | Reclaim _ -> has BodyPart.Claim
-    // The row's own body and no other: a generalist walked two crossings out
-    // for it is a generalist lost to the colony for the walk, and a sapper
-    // an assault lost.
-    | Dismantle _ -> isDismantlerParts heavy creep.Body && not (isSapperBody creep)
+    // The row's own cast and no other, read off its name (#426): a generalist
+    // walked two crossings out for it is a generalist lost to the colony for
+    // the walk, a sapper an assault lost, and a miner stripped to Work = Move
+    // by damage has the dismantler's parts and is not one.
+    | Dismantle _ -> isNamedFor dismantlerPattern creep.Name
     // Spelled through the row predicates the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree; which row is the Brief's.
     // A Fight admits a squad cast, or once the squad launches a resident of
