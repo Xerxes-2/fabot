@@ -63,7 +63,71 @@ type LastFull =
         /// The colonies a cold reset left undecided (`resetSplit`): the tick
         /// after it is full and decides them.
         Deferred: Set<string>
+        /// The harassment rooms no colony works for anything else (`loose`):
+        /// a light tick passes the near rule over in one while every body of
+        /// ours standing there is one of `Rangers`.
+        Loose: Set<string>
+        /// The harass rangers (`harassRangers`).
+        Rangers: Set<string>
+        /// The full tick's ranged shots and self-heals, which a ranger standing
+        /// in a loose room issues again (`intents`).
+        Shots: Intent list
     }
+
+/// One colony's rooms as `loose` reads them: the rooms it works (its scan set
+/// less the ones it only crosses), every room any colony declares as an
+/// outpost, the harassment rooms it casts, its evacuating rooms, and its
+/// bodies' Tasks.
+type RoomRoles =
+    {
+        Worked: Set<string>
+        Mined: Set<string>
+        Harassed: Set<string>
+        Evacuating: Set<string>
+        Assignments: Assignments
+    }
+
+/// The harassment rooms no colony works for anything else (#520): not a home,
+/// a declared outpost (shut or not, and so a child's outpost a mother watches,
+/// #517), a resident or assault room, nor an evacuating room. Only a harass
+/// ranger is meant to stand there, beside enemy bodies by its job; `forced`
+/// checks that no other body of ours does.
+let loose (colonies: RoomRoles list) : Set<string> =
+    let kept =
+        colonies
+        |> List.map (fun roles ->
+            Set.unionMany [ roles.Worked - roles.Harassed; roles.Mined; roles.Evacuating ])
+        |> Set.unionMany
+
+    // Kept on `LastFull`, so built by `Fresh` (#401).
+    (colonies |> List.map (fun roles -> roles.Harassed) |> Set.unionMany) - kept
+    |> Fresh.setOfSeq
+
+/// The bodies holding a harassment room's Guard: the harass rangers.
+let harassRangers (colonies: RoomRoles list) : Set<string> =
+    colonies
+    |> Seq.collect (fun roles ->
+        let guards = roles.Harassed |> Set.map (Guard >> Decide.Facts.taskId)
+
+        roles.Assignments
+        |> Map.toSeq
+        |> Seq.filter (fun (_, task) -> Set.contains task guards)
+        |> Seq.map fst)
+    |> Fresh.setOfSeq
+
+/// The loose rooms that still hold no body of ours but a harass ranger.
+let private looseNow (last: LastFull) (now: Glance) : Set<string> =
+    if Set.isEmpty last.Loose then
+        last.Loose
+    else
+        let mixed =
+            now.Creeps
+            |> Map.toSeq
+            |> Seq.filter (fun (name, _) -> not (Set.contains name last.Rangers))
+            |> Seq.map (fun (_, creep) -> creep.Tile.Room)
+            |> Set.ofSeq
+
+        last.Loose - mixed
 
 /// The first reason a light tick hands over to a full one.
 [<RequireQualifiedAccess>]
@@ -83,7 +147,7 @@ type LightForce =
     | Deferred
 
 /// The reason on the CPU line: the rule's word first (`armed` is a home room's
-/// armed hostile, `near` one within reach anywhere), then where it fired —
+/// armed hostile, `near` one within reach anywhere but a `loose` room), then where it fired —
 /// the room and the hostile's owner, or the creep — since a reason read back
 /// after the hostile has left has nothing else to be traced by.
 let tag (reason: LightForce) : string =
@@ -284,6 +348,14 @@ and lastFullWith
         Controllers = glance.Controllers
         Creeps = glance.Creeps |> Map.keys |> Fresh.setOfSeq
         Deferred = Fresh.setOfSeq Seq.empty
+        Loose = Fresh.setOfSeq Seq.empty
+        Rangers = Fresh.setOfSeq Seq.empty
+        Shots =
+            intents
+            |> List.filter (function
+                | RangedAttackCreep _ -> true
+                | HealCreep(creep, target) -> creep = target
+                | _ -> false)
     }
 
 /// A Source Keeper's owner, as the engine spells it.
@@ -366,7 +438,8 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
             && not (Map.tryFind hostile.Tile.Room now.Controllers |> Option.exists snd))
 
     // Only in a room where we own a structure: an armed body standing off in
-    // a remote or harassment room is the near rule's to answer (#461).
+    // a remote or harassment room is the near rule's to answer (#461), and in
+    // a `loose` room the lost-hits rule's.
     let armed =
         let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
 
@@ -393,8 +466,12 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
                 | Some r -> r <= nearRange
                 | None -> false)
 
+        let loose = looseNow last now
+
         hostiles
-        |> List.tryFind (fun hostile -> within ours hostile || besideAShooter hostile)
+        |> List.tryFind (fun hostile ->
+            not (Set.contains hostile.Tile.Room loose)
+            && (within ours hostile || besideAShooter hostile))
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
     let fought () =
@@ -446,12 +523,31 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
 
 /// The light tick's intents, in creep-name order: a creep standing where it
 /// stood at the full tick re-issues that tick's repeatable work, and a creep
-/// standing on its step plan's first tile steps toward the second. Nothing
-/// else, ever: a one-shot act waits for the next full tick.
+/// standing on its step plan's first tile steps toward the second. A harass
+/// ranger standing in a loose room shoots and heals itself again from wherever
+/// it stands: the engine checks the range, and a target gone is a harmless
+/// refusal. Nothing else, ever: a one-shot act waits for the next full tick.
 let intents (last: LastFull) (now: Glance) : Intent list =
     let work =
         last.Work
         |> List.choose (fun intent -> workActor intent |> Option.map (fun creep -> creep, intent))
+        |> List.groupBy fst
+        |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
+        |> Map.ofList
+
+    let shots =
+        let loose = looseNow last now
+
+        last.Shots
+        |> List.choose (fun intent ->
+            match intent with
+            | RangedAttackCreep(creep, _)
+            | HealCreep(creep, _) when
+                Map.tryFind creep now.Creeps
+                |> Option.exists (fun body -> Set.contains body.Tile.Room loose)
+                ->
+                Some(creep, intent)
+            | _ -> None)
         |> List.groupBy fst
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
@@ -465,6 +561,8 @@ let intents (last: LastFull) (now: Glance) : Intent list =
 
             if Map.tryFind name last.Standing = Some creep.Tile then
                 yield! Map.tryFind name work |> Option.defaultValue []
+
+            yield! Map.tryFind name shots |> Option.defaultValue []
 
             match Map.tryFind name last.Steps with
             | Some(first, second) when first = creep.Tile ->

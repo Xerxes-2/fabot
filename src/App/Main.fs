@@ -790,9 +790,30 @@ let private fullTick
                      |> List.ofSeq)
                     (executionPlan |> Fabot.Core.IntentPlan.intents)
 
+            // A colony the reset tick deferred holds no Assignments this tick.
+            let assigned =
+                decisions
+                |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Assignments)
+                |> Map.ofList
+
+            let roles =
+                views
+                |> List.map (fun (colony, view) ->
+                    ({
+                        Worked = (view.Spatial.Rooms |> Map.keys |> Set.ofSeq) - view.Crossed
+                        Mined = view.MinedRooms
+                        Harassed = view.HarassCast
+                        Evacuating = view.Evacuating
+                        Assignments =
+                            Map.tryFind colony.Home assigned |> Option.defaultValue Map.empty
+                    }
+                    : LightTick.RoomRoles))
+
             Game.time,
             { record with
                 Deferred = Fresh.setOfSeq waiting
+                Loose = LightTick.loose roles
+                Rangers = LightTick.harassRangers roles
             })
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it

@@ -301,6 +301,260 @@ let forcedTests =
                     "at the near rule's edge: still full"
             }
 
+            test
+                "a hostile near our ranger in a loose room forces no full tick; near our anchor or at home it does" {
+                // #520: live t963,4xx, 98% of ticks forced full by harass
+                // rangers standing by Trepidimous' creeps in W19S25 and W18S27.
+                let harassed = "W3N1"
+                let outpost = "W2N1"
+                let at roomName x = RoomPos.at roomName { X = x; Y = 10 }
+
+                let ours =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add
+                                "ranger"
+                                {
+                                    Tile = at harassed 10
+                                    Hits = 500
+                                    Inward = None
+                                }
+                            |> Map.add
+                                "anchor"
+                                {
+                                    Tile = at outpost 10
+                                    Hits = 500
+                                    Inward = None
+                                }
+                    }
+
+                // The ranger shot on the full tick: its target still beside it
+                // is no fight to decide there either.
+                let full =
+                    { LightTick.lastFull ours Map.empty [ RangedAttackCreep("ranger", "trep") ] with
+                        Loose = Set.ofList [ harassed ]
+                        Rangers = Set.ofList [ "ranger" ]
+                    }
+
+                let trepAt tile =
+                    { ours with
+                        Hostiles =
+                            [
+                                {
+                                    Tile = tile
+                                    Owner = "Trepidimous"
+                                    Armed = true
+                                    Hurts = true
+                                    Breaks = true
+                                }
+                            ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced full (trepAt (at harassed 12)))
+                    None
+                    "beside our harass ranger: the light tick replays its shot"
+
+                Expect.equal
+                    (LightTick.forced full (trepAt (at outpost 12)))
+                    (Some(LightForce.HostileNear(outpost, "Trepidimous")))
+                    "the same body beside our anchor in an outpost"
+
+                // The armed rule reads home first; the room stays a full tick's.
+                Expect.equal
+                    (LightTick.forced full (trepAt (tile 12 10)))
+                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    "the same body beside our digger at home"
+
+                Expect.equal
+                    (LightTick.forced
+                        { full with
+                            Loose = Set.ofList [ harassed; room ]
+                        }
+                        (trepAt (tile 12 10)))
+                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    "a loose room passes the near rule over, never the armed one"
+
+                let crossing =
+                    { trepAt (at harassed 12) with
+                        Creeps =
+                            ours.Creeps
+                            |> Map.add
+                                "hauler"
+                                {
+                                    Tile = at harassed 30
+                                    Hits = 500
+                                    Inward = None
+                                }
+                            |> Map.add
+                                "ranger"
+                                {
+                                    Tile = at harassed 32
+                                    Hits = 500
+                                    Inward = None
+                                }
+                    }
+
+                Expect.equal
+                    (LightTick.forced
+                        { full with
+                            Creeps = Set.add "hauler" full.Creeps
+                        }
+                        { crossing with
+                            Hostiles =
+                                [
+                                    { (List.head crossing.Hostiles) with
+                                        Tile = at harassed 31
+                                    }
+                                ]
+                        })
+                    (Some(LightForce.HostileNear(harassed, "Trepidimous")))
+                    "a hauler crossing the harassment room beside a Trepidimous melee: our bodies there are not rangers alone"
+            }
+
+            test
+                "a harass ranger in a loose room shoots and heals itself again on a light tick, wherever it stepped" {
+                let harassed = "W3N1"
+                let at x = RoomPos.at harassed { X = x; Y = 10 }
+
+                let withRanger (x: int) =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add
+                                "ranger"
+                                {
+                                    Tile = at x
+                                    Hits = 500
+                                    Inward = None
+                                }
+                    }
+
+                let full =
+                    { LightTick.lastFull
+                          (withRanger 10)
+                          Map.empty
+                          [
+                              RangedAttackCreep("ranger", "trep")
+                              HealCreep("ranger", "ranger")
+                              RangedAttackCreep("digger", "h")
+                              HealCreep("digger", "hauler")
+                          ] with
+                        Loose = Set.ofList [ harassed ]
+                        Rangers = Set.ofList [ "ranger" ]
+                    }
+
+                let replayed (glance: Glance) (record: LastFull) =
+                    LightTick.intents record glance
+                    |> List.filter (function
+                        | RangedAttackCreep _
+                        | HealCreep _ -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (replayed (withRanger 11) full)
+                    [ RangedAttackCreep("ranger", "trep"); HealCreep("ranger", "ranger") ]
+                    "the shot and the self-heal, a step off the tile they were decided on; never the digger's at home"
+
+                Expect.isEmpty
+                    (replayed (withRanger 11) { full with Loose = Set.empty })
+                    "outside a loose room a shot waits for the next full tick"
+
+                let crossed =
+                    { withRanger 11 with
+                        Creeps =
+                            (withRanger 11).Creeps
+                            |> Map.add
+                                "hauler"
+                                {
+                                    Tile = at 30
+                                    Hits = 500
+                                    Inward = None
+                                }
+                    }
+
+                Expect.isEmpty
+                    (replayed crossed full)
+                    "a room with a body of ours beside the rangers is not loose"
+            }
+
+            test "the harass rangers are the bodies holding a harassment room's Guard" {
+                let roles: LightTick.RoomRoles =
+                    {
+                        Worked = Set.ofList [ "W1N1"; "W3N1"; "W4N1" ]
+                        Mined = Set.empty
+                        Harassed = Set.ofList [ "W3N1" ]
+                        Evacuating = Set.empty
+                        Assignments =
+                            Map.ofList
+                                [
+                                    "ranger", Decide.Facts.taskId (Guard "W3N1")
+                                    "guard", Decide.Facts.taskId (Guard "W4N1")
+                                    "digger", Decide.Facts.taskId (Harvest "src-a")
+                                ]
+                    }
+
+                Expect.equal
+                    (LightTick.harassRangers [ roles ])
+                    (Set.ofList [ "ranger" ])
+                    "the ranger alone"
+            }
+
+            test "a loose room is a harassment room no colony works for anything else" {
+                let roles home worked harassed : LightTick.RoomRoles =
+                    {
+                        Worked = Set.ofList (home :: worked @ harassed)
+                        Mined = Set.ofList worked
+                        Harassed = Set.ofList harassed
+                        Evacuating = Set.empty
+                        Assignments = Map.empty
+                    }
+
+                Expect.equal
+                    (LightTick.loose [ roles "W1N1" [ "W2N1" ] [ "W3N1" ] ])
+                    (Set.ofList [ "W3N1" ])
+                    "a room only harassed is loose"
+
+                Expect.isEmpty
+                    (LightTick.loose [ roles "W1N1" [ "W3N1" ] [ "W3N1" ] ])
+                    "a harassment room the colony also mines keeps the near rule"
+
+                Expect.isEmpty
+                    (LightTick.loose
+                        [
+                            roles "W1N1" [] [ "W3N1" ]
+                            { roles "W5N1" [] [] with
+                                Worked = Set.ofList [ "W5N1"; "W3N1" ]
+                            }
+                        ])
+                    "a harassment room another colony works (an errand there) keeps the near rule"
+
+                Expect.isEmpty
+                    (LightTick.loose
+                        [
+                            roles "W1N1" [] [ "W3N1" ]
+                            // W5N1's outpost, shut: out of its scan set.
+                            { roles "W5N1" [] [] with
+                                Mined = Set.ofList [ "W3N1" ]
+                            }
+                        ])
+                    "a harassment room any colony declares as an outpost keeps the near rule, shut or not"
+
+                Expect.isEmpty
+                    (LightTick.loose
+                        [
+                            { roles "W1N1" [] [ "W3N1" ] with
+                                Evacuating = Set.ofList [ "W3N1" ]
+                            }
+                        ])
+                    "an evacuating room keeps the near rule"
+
+                Expect.isEmpty
+                    (LightTick.loose [ roles "W1N1" [] [ "W3N1" ]; roles "W3N1" [] [] ])
+                    "a colony's home keeps the near rule"
+            }
+
             test "an armed Source Keeper far from us forces nothing" {
                 let keeper =
                     { stepped with
