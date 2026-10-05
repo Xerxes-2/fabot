@@ -123,7 +123,7 @@ Each S stage keeps behaviour. Its gate is `npm test`, `profile.mjs` Memory finge
 | # | Stage | Size |
 |---|---|---|
 | S0 | Characterisation: one Decide test per Kind pinning pooled id, capacity, ground, applicability and rung, in the domain files that own them; the flavour precedence table; record the fingerprint and arena baseline (below) | tests only, ~800 |
-| S1 | Name the hostile predicates (`armedByParts`, `hurtsLive`, `isRaider`, `shootable`) and route each of the ~15 sites through the name it already uses; no semantic change | XS, ~60 |
+| S1 | Name the hostile predicates in `HostileInfo` (`Sightings.fs`), each saying whether it reads the parts **on paper** (every part in `Body`, shot off or not) or **live** (`Engine.liveParts`): `armedOnPaper`, `raiderOnPaper`, `weaponRangeOnPaper`, `worksOnPaper`, `claimsOnPaper`, `healsOnPaper`, `healingOnPaper`; `armedLive`, `meleeLive`, `shootsLive`, `worksLive`, `breaksLive`, `hurtsLive`, `healsLive`, `healingLive`; the owner questions `isKeeper`, `crossesExits`; and, over a part list for the light tick's glance, `weaponRangeOf`, `breaksOf`, `armedOrHealsOf`. About 48 sites read them; `Facts`' aliases and LightTick's own keeper string go. Each site keeps the semantics it had (the disagreements are listed under *S7's input* below); no semantic change | XS, ~60 |
 | S2 | `BriefKind` computed once per Guard room (`Brief.kindOf`), replacing the room-class dispatch in `applicable`, `capacityOf`, the rung, `areaFor`, `guardGroundIn`, `guardedSplit`, `kiters` and the trespass avoid. Each room's flavour is computed once, so an inactive assault declaration claims no room: W19S26, a harassment room and the entry room of the parked W18S26 assault, is today read as kept by #520's near-rule exemption and forces ~12% full ticks (t964,5xx) | S, ~200 |
 | S3 | One ordered source list in `threatsHeldBy` replacing the holds, cores and trespass exclusions and the `guardGroundIn` chain, keeping today's exact precedence (the chased-room exit hold included) | S, ~150 |
 | S4 | The `Brief` record. Planner, Pool, Emitter and Resolver read it; the `Threats` fields `Ring`, `ResidentRing`, `HarassRing`, `Kite`, `Held`, `Chased`, `Trespass`, `Defend`, `DefendAvoid` and `AtLine` move behind it; the quiet-tick shortcut and the lazy safe set are kept, and nothing enters a memo key | M, ~450 |
@@ -150,6 +150,21 @@ Each S stage keeps behaviour. Its gate is `npm test`, `profile.mjs` Memory finge
 | siege --raided | c6aa0a873b6c7647 | 97c157120c87e278 | bbbdf98060c8598f | 9aebc0614deba6bc | 1f090c8adb0147df | 8a8b027f8f147d8e |
 
 The arena suites: 101 cases, 100 pass and 1 is skipped ("scenario 3 … as it should be").
+
+**S7's input: where callers read a hostile on paper and where live** (found by S1, each kept as it was):
+1. "Is a raid here?": `armedOnPaper`/`raiderOnPaper` in `threatsHeldBy` (Reach, shelter, harassment split), `guardedOutpostsOf`, `defendedHomesOf`, `residentQuiet`, `underRaid`, the `Emitter` chase arm, `fightConfirmed`, `fightSquadIn`, `fightReports`, `killRank`, `approachAt`, `foldFights`, Observe's threatened latch, `safeModeIn`, `recallArmed`, `homeBeaten` and the exit watch; `hurtsLive` in `raidDeadlines` and `strikeGone`; `armedLive` in `raidAtLine` and `trespassingBody`.
+2. The kite, defend and assault avoid sets and the chase's melee list read `meleeLive`; the Reach beside them reads the paper weapon range.
+3. The light tick's `Armed` is `armedOrHealsOf` on paper, a HEAL included, where the full tick's `armedOnPaper` counts none: a lone healer in a home forces a full tick that then calls it unarmed.
+4. The light tick's near rule reads the live weapon range and live WORK/CLAIM (`Breaks`); the full tick's Reach reads the paper range.
+5. "Does it strike our structure?": `rampartsUnderAttack` and `planFire`'s `hurting` read the paper weapon range and paper WORK; `raidAtLine` reads live ATTACK/RANGED_ATTACK and live WORK.
+6. Healing: `healReaching`, `exchangeWon` and `homeBeaten` price `healingOnPaper` (their healer filters `healsOnPaper`); `kitedDown` prices `healingLive`; `raidHealer` and `guardShoots`' fight-room healer ask `healsLive`.
+7. `raidHealer` mixes them: unarmed on paper, healing live, beside a body armed on paper.
+8. Trespass: WORK, CARRY or CLAIM on paper and live, no live weapon; its store ground's `hauls` reads live WORK/CLAIM, while the harassment ground's `digs` reads paper WORK.
+9. The harassment ground's `catchable` builds its own gait off paper MOVE and paper weight, apart from `HostileInfo.gait` (live MOVE).
+10. CLAIM is asked on paper (`claimsAFlag`, the safe-mode claimer) and live elsewhere (`breaksLive`, `trespassingBody`).
+11. Pricing: `exchangeWon` counts the raid's damage and hits off paper parts; `kitedDown` and `cannotClose` read live parts.
+
+For S2/S3: `catchable`'s own gait rule (item 9) belongs with the harassment ground's target order, which those stages make one source.
 
 **Deleted at the end:**
 - the 12 per-behaviour `Threats` fields and their accessors (`isKill`, `isTrespassed`, `guardGroundIn`, `residentRingIn`, `harassRingIn`, `defendGroundIn`, `defendersWanted` as public reads)

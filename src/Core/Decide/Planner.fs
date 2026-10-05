@@ -354,7 +354,7 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
         |> List.filter (fun room ->
             let seenArmed =
                 view.Hostiles
-                |> List.exists (fun h -> h.Pos.Room = room && (weaponRange h |> Option.isSome))
+                |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armedOnPaper h)
 
             // The union of the two halves and not a two-armed test on vision,
             // so the blind half can never take a room the tick's own hostiles
@@ -392,7 +392,8 @@ let private guardedErrandsOf (fuelled: Errand list) : string list =
 let private defendedHomesOf (view: ColonyView) : string list =
     view.Borrowed.Defended
     |> List.filter (fun room ->
-        view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && isArmed h))
+        view.Hostiles
+        |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armedOnPaper h))
 
 /// The outpost chain's answers for this tick, derived once and carried (#383):
 /// re-entered per reader, the `Controller` census was walked nineteen times a

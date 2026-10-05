@@ -318,7 +318,8 @@ let internal applicable
             isRangerRowBody creep
             && (Facts.kitedDown view (partCount creep.Body) room
                 || not (
-                    view.Hostiles |> List.exists (fun h -> h.Pos.Room = room && Facts.isRaider h)
+                    view.Hostiles
+                    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raiderOnPaper h)
                 ))
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
         elif Threats.isTrespassed threats room then

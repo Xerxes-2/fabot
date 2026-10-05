@@ -16,11 +16,10 @@ type GlanceCreep =
         Inward: Direction option
     }
 
-/// One hostile creep in a visible room. `Armed` is any Attack, RangedAttack
-/// or Heal part in its body; `Weapon`, the range of its Attack and
-/// RangedAttack parts with hits left (`weaponRangeOf`: what can hurt a creep);
-/// `Breaks`, a Work or Claim part with hits left (what can take down a
-/// structure or a controller); `Gait`, its pace (`Gait.ofBody`).
+/// One hostile creep in a visible room, asked `HostileInfo`'s questions off
+/// the engine's body: `Armed`, `armedOrHealsOf` on paper, a healer included
+/// where the full tick's `armedOnPaper` counts none; `Weapon`,
+/// `weaponRangeOf` live; `Breaks`, `breaksOf` live; `Gait`, `Gait.ofBody`.
 type GlanceHostile =
     {
         Tile: RoomPos
@@ -365,9 +364,6 @@ and lastFullWith
                 | _ -> false)
     }
 
-/// A Source Keeper's owner, as the engine spells it.
-let private keeper = "Source Keeper"
-
 /// How close a hostile of any kind may come to a creep or structure of ours
 /// before a tick is decided.
 let private nearRange = Engine.rangedRange + 2
@@ -430,7 +426,7 @@ let resetSplit
     let threats =
         now.Hostiles
         |> List.filter (fun hostile ->
-            hostile.Owner <> keeper
+            not (HostileInfo.isKeeperOwner hostile.Owner)
             && not (Colony.isAlly hostile.Owner)
             && (hostile.Armed || within ours hostile))
         |> List.map (fun hostile -> hostile.Tile.Room)
@@ -465,7 +461,9 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
 
         hostiles
         |> List.tryFind (fun hostile ->
-            hostile.Armed && hostile.Owner <> keeper && Set.contains hostile.Tile.Room homes)
+            hostile.Armed
+            && not (HostileInfo.isKeeperOwner hostile.Owner)
+            && Set.contains hostile.Tile.Room homes)
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
 
     let near () =

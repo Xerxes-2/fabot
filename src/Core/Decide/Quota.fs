@@ -581,7 +581,8 @@ let internal fightReports (view: ColonyView) (threats: Threats) : FightReport li
     let rooms = residentRooms view
 
     view.Hostiles
-    |> List.filter (fun hostile -> Set.contains hostile.Pos.Room rooms && isRaider hostile)
+    |> List.filter (fun hostile ->
+        Set.contains hostile.Pos.Room rooms && HostileInfo.raiderOnPaper hostile)
     |> List.map (fun hostile -> hostile.Pos.Room)
     |> List.distinct
     |> List.sort

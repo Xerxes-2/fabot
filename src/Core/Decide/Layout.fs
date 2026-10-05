@@ -65,7 +65,7 @@ let private safeModeIn
         let here = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
 
         let withinReach (h: HostileInfo) =
-            List.contains BodyPart.Claim h.Body
+            HostileInfo.claimsOnPaper h
             && match Atlas.positionOf atlas controller.Id with
                // Across a border there is no range to measure, so None here is
                // "not in reach", where an unplaced controller below is still
@@ -84,7 +84,7 @@ let private safeModeIn
         let undefended =
             guarded
             && Atlas.builtIn atlas room BuiltKind.Tower = 0
-            && here |> List.exists isArmed
+            && here |> List.exists HostileInfo.armedOnPaper
             && not (Quota.homeHolds view room)
 
         if claimerInReach || dentedKeepUnderHostiles || undefended then
@@ -349,9 +349,9 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                 RoomPos.range (RoomPos.at home at) h.Pos |> Option.exists (fun r -> r <= reach))
 
         let hurting (h: HostileInfo) =
-            match HostileInfo.weaponRange h with
+            match HostileInfo.weaponRangeOnPaper h with
             | Some reach -> within ours reach h
-            | None -> List.contains Work h.Body && within keep Engine.meleeRange h
+            | None -> HostileInfo.worksOnPaper h && within keep Engine.meleeRange h
 
         // A tower over its reserve (#480): only these take a shot that is
         // not urgent, so only these are counted in the damage it must beat.
@@ -432,7 +432,7 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
         Map.tryFind home view.Fought
         |> Option.exists (fun latch -> view.Time - latch.Seen <= view.Tuning.FightHoldTicks)
 
-    let guards = view.Hostiles |> List.filter (isKeeper >> not)
+    let guards = view.Hostiles |> List.filter (HostileInfo.isKeeper >> not)
 
     let within reach (tile: RoomPos) (creeps: HostileInfo list) =
         creeps

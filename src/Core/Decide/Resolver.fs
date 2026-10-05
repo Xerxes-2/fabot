@@ -569,8 +569,7 @@ let movementOf
 
             let strike =
                 view.Hostiles
-                |> List.filter (fun h ->
-                    h.Pos.Room = at.Room && HostileInfo.activeCount h Attack > 0)
+                |> List.filter (fun h -> h.Pos.Room = at.Room && HostileInfo.meleeLive h)
                 |> List.collect (fun h -> tilesWithin stepAndSwing (RoomPos.pos h.Pos))
 
             Some(Set.ofList (camp @ strike))

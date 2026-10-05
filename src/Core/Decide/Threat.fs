@@ -349,7 +349,7 @@ let private kiteGroundIn
     =
     let melee =
         inRoom
-        |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
+        |> List.filter HostileInfo.meleeLive
         |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
 
     let standing =
@@ -522,7 +522,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     else
                         view.Tuning.ReachMargin
 
-                weaponRange hostile
+                HostileInfo.weaponRangeOnPaper hostile
                 |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r + margin))
         with
         | [] -> noThreats
@@ -652,7 +652,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let armedTargets, unarmedTargets =
                 inRoom
                 |> List.filter (guardShoots view resident Set.empty)
-                |> List.partition isArmed
+                |> List.partition HostileInfo.armedOnPaper
 
             // A room we mine keeps its source's seats for our miners: the
             // ranger stands off them, within reach of every one (W17S26,
@@ -704,7 +704,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             // the room's other source every few ticks, the ranger caught
             // between the two (W19S25, t943,777).
             let atSource = unarmedTargets |> List.filter (within h.Stand 2)
-            let digs (hostile: HostileInfo) = List.contains Work hostile.Body
+            let digs = HostileInfo.worksOnPaper
 
             let reachOf targets =
                 targets
@@ -768,7 +768,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let melee =
                 inRoom
-                |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
+                |> List.filter HostileInfo.meleeLive
                 |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
 
             let standing =
@@ -907,10 +907,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // swing: what a defender's walk keeps off (#504). Inside the line a
     // melee outside it reaches nothing but the rampart it strikes.
     let defendAvoid =
-        match
-            atLine
-            |> List.filter (fun hostile -> HostileInfo.activeCount hostile Attack > 0)
-        with
+        match atLine |> List.filter HostileInfo.meleeLive with
         | [] -> Map.empty
         | melee ->
             let home = SpatialInfo.homeName view.Spatial
@@ -936,7 +933,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             |> List.exists (fun hostile ->
                 beside hostile.Pos.Room
                 && not (shielded hostile.Pos.Room)
-                && (weaponRange hostile).IsSome)
+                && HostileInfo.armedOnPaper hostile)
             || Set.exists beside view.RaidedOutposts
 
         if nextDoor && not (shielded home) then
@@ -969,9 +966,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         let haulGround = 2
         let storeReach = 5
 
-        let hauls (hostile: HostileInfo) =
-            HostileInfo.activeCount hostile Work = 0
-            && HostileInfo.activeCount hostile BodyPart.Claim = 0
+        let hauls (hostile: HostileInfo) = not (HostileInfo.breaksLive hostile)
 
         let storesIn room =
             [ Structure BuiltKind.Container; Dropped Energy; Dropped Thorium; Tombstone ]
@@ -1412,7 +1407,7 @@ let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: 
                     let clearBy reach (pos: RoomPos) =
                         view.Hostiles
                         |> List.forall (fun h ->
-                            HostileInfo.activeCount h Attack = 0
+                            not (HostileInfo.meleeLive h)
                             || RoomPos.range pos h.Pos |> Option.forall (fun r -> r > reach))
 
                     let around = besideIn tile

@@ -526,7 +526,7 @@ let private approachAt (view: ColonyView) : Approach option =
     let armed =
         view.Hostiles
         |> List.filter (fun hostile ->
-            Decide.Facts.isArmed hostile
+            HostileInfo.armedOnPaper hostile
             && not (Set.contains hostile.Pos.Room view.HarassCast)
             && not (Set.contains hostile.Pos.Room assaulted))
 
@@ -1057,7 +1057,7 @@ let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string,
     let seen squad = { Seen = view.Time; Squad = squad }
 
     view.Hostiles
-    |> List.filter Decide.Facts.isRaider
+    |> List.filter HostileInfo.raiderOnPaper
     |> List.map (fun hostile -> hostile.Pos.Room)
     |> List.distinct
     |> List.filter (fun room -> Set.contains room (Decide.Facts.residentRooms view))
@@ -1325,7 +1325,7 @@ let foldRaids
             let armedIn room =
                 view.Hostiles
                 |> List.exists (fun hostile ->
-                    hostile.Pos.Room = room && Decide.Facts.isArmed hostile)
+                    hostile.Pos.Room = room && HostileInfo.armedOnPaper hostile)
 
             (standing, view.RoomControl)
             ||> Map.fold (fun rooms room _ ->

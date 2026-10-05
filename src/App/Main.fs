@@ -171,14 +171,6 @@ let mutable private lastFull: (int * LightTick.LastFull) option = None
 // colonies half the turns and the other half none.
 let mutable private fullTicks = 0
 
-/// A part of the three that make a hostile armed, destroyed or not, as
-/// `World` reads a hostile's body: a wrong "armed" costs a full tick, a wrong
-/// "unarmed" a shot undecided.
-let private armedPart (part: IBodyPartDef) =
-    part.``type`` = "attack"
-    || part.``type`` = "ranged_attack"
-    || part.``type`` = "heal"
-
 /// What this tick sees of `Game` without a World: our creeps, every hostile
 /// in a visible room, our structures' tiles and our controllers. Built with
 /// `Fresh`, because the full tick keeps it as the last full tick's record.
@@ -230,12 +222,11 @@ let private glance () : LightTick.Glance =
                                         ""
                                     else
                                         hostile.owner.username
-                                Armed = hostile.body |> Array.exists armedPart
+                                // A wrong "armed" costs a full tick, a wrong
+                                // "unarmed" a shot undecided.
+                                Armed = HostileInfo.armedOrHealsOf body
                                 Weapon = HostileInfo.weaponRangeOf live
-                                Breaks =
-                                    live
-                                    |> List.exists (fun part ->
-                                        part = Work || part = BodyPart.Claim)
+                                Breaks = HostileInfo.breaksOf live
                                 Gait = Gait.ofBody body live
                             }
                             : LightTick.GlanceHostile)
