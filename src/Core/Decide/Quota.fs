@@ -464,20 +464,20 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
     else
         Engine.guardCap
 
-/// The guarded rooms each fighting row serves (#411): the errand rooms and the
-/// harassment rooms (#432) are the ranger's, every other guarded room the
-/// guard's — but a chased one (`Threats.Chased`, #510), which neither row
-/// casts for.
-let private guardedSplit (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) =
-    let rangers = rangerRooms view
-
+/// The guarded rooms each fighting row serves (#411), by each room's kind:
+/// the resident rooms and the harassment rooms (#432) are the ranger's, every
+/// other guarded room the guard's — but a chased one (#510), which neither
+/// row casts for.
+let private guardedSplit (threats: Threats) (outposts: OutpostFacts) =
     outposts.Guarded
-    |> List.filter (fun room -> not (Set.contains room threats.Chased))
-    |> List.partition (fun room -> not (Set.contains room rangers))
+    |> List.map (fun room -> room, Threats.kindOf threats room)
+    |> List.filter (fun (_, kind) -> kind <> BriefKind.Chase)
+    |> List.partition (fun (_, kind) -> not (BriefKind.isRangers kind))
+    |> fun (guards, rangers) -> List.map fst guards, List.map fst rangers
 
 /// The guard row's quota: `guardsWanted` over every guarded outpost, summed.
 let internal guardQuota (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : int =
-    fst (guardedSplit view threats outposts) |> List.sumBy (guardsWanted view)
+    fst (guardedSplit threats outposts) |> List.sumBy (guardsWanted view)
 
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the
@@ -506,7 +506,7 @@ let internal guardBlocksWanted
     (threats: Threats)
     (outposts: OutpostFacts)
     : int =
-    match fst (guardedSplit view threats outposts) |> List.map (guardBlocksFor view) with
+    match fst (guardedSplit threats outposts) |> List.map (guardBlocksFor view) with
     | [] -> 1
     | blocks -> List.max blocks
 
@@ -559,8 +559,7 @@ let internal rangersWanted (view: ColonyView) (threats: Threats) (room: string) 
 /// The ranger row's quota: `rangersWanted` over every worked errand and
 /// harassment room.
 let internal rangerQuota (view: ColonyView) (threats: Threats) (outposts: OutpostFacts) : int =
-    snd (guardedSplit view threats outposts)
-    |> List.sumBy (rangersWanted view threats)
+    snd (guardedSplit threats outposts) |> List.sumBy (rangersWanted view threats)
 
 /// The blocks the ranger row casts this tick, the worst room's answer.
 let internal rangerBlocksWanted
@@ -568,7 +567,7 @@ let internal rangerBlocksWanted
     (threats: Threats)
     (outposts: OutpostFacts)
     : int =
-    match snd (guardedSplit view threats outposts) |> List.map (rangerBlocksFor view) with
+    match snd (guardedSplit threats outposts) |> List.map (rangerBlocksFor view) with
     | [] -> view.Tuning.RangerResidentBlocks
     | blocks -> List.max blocks
 
@@ -742,7 +741,7 @@ let internal reserverClaimsOf
     // raider is eating. Keyed to the guard gap and not to the spending, so it
     // flips once and not every cast.
     let withheld =
-        let outpostsShort, errandsShort = guardedSplit view threats outposts
+        let outpostsShort, errandsShort = guardedSplit threats outposts
 
         Set.union
             (if guardStands view threats outposts then

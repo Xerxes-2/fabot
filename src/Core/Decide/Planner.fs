@@ -509,18 +509,15 @@ let planTasks
                 && not (List.contains room outposts.Guarded))
             |> Set.toList
 
-        let chasing =
-            Set.difference threats.Chased (Set.ofList (outposts.Guarded @ holding))
-            |> Set.toList
+        let killing =
+            [ BriefKind.Chase; BriefKind.Trespass ]
+            |> List.collect (fun kind ->
+                Set.difference
+                    (Threats.roomsOf threats ((=) kind))
+                    (Set.ofList (outposts.Guarded @ holding))
+                |> Set.toList)
 
-        let trespassed =
-            threats.Trespass
-            |> Map.keys
-            |> Seq.filter (fun room ->
-                not (List.contains room outposts.Guarded || List.contains room holding))
-            |> List.ofSeq
-
-        (outposts.Guarded @ holding @ chasing @ trespassed |> List.map Guard)
+        (outposts.Guarded @ holding @ killing |> List.map Guard)
         @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
         // And one Assault per assault this colony pools (#490, #491).
         @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)

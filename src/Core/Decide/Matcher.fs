@@ -372,10 +372,11 @@ let matchCreeps
     // cascade would give it (the gate says which bodies a kill admits). It
     // is back once the kill is made.
     let called =
-        if Set.isEmpty threats.Chased && Map.isEmpty threats.Trespass then
+        let kills = Threats.roomsOf threats BriefKind.isKill
+
+        if Set.isEmpty kills then
             Set.empty
         else
-            let kills = threats.Trespass |> Map.keys |> Set.ofSeq |> Set.union threats.Chased
 
             // Each holder of a Guard, beside the room it holds.
             let holders =

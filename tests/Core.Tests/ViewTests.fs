@@ -5854,6 +5854,67 @@ let assaultViewTests =
                     "a probe's Provoke on W18S26"
             }
 
+            // The Brief's S2 (#518): W19S26, a harassment room and the
+            // entry of the parked W18S26 probe, was read live as kept by the
+            // assault. An assault switched off claims no room, and one switched
+            // on works its own room alone: its entry and the rooms beside it
+            // are crossed, so a harassment room there stays loose (#520).
+            test
+                "an assault switched off claims no room; one switched on works its own room and crosses its entry" {
+                let entry = "W12S29"
+
+                let viewOf active =
+                    let colonies =
+                        assaultDeclared Provoke active
+                        |> List.map (fun colony ->
+                            { colony with
+                                Assaults =
+                                    colony.Assaults
+                                    |> List.map (fun assault ->
+                                        { assault with Entry = Some entry })
+                            })
+
+                    viewUnder colonies assaultWorld mother
+
+                let worked (view: ColonyView) =
+                    (view.Spatial.Rooms |> Map.keys |> Set.ofSeq) - view.Crossed
+
+                let off = viewOf false
+                let bare = viewUnder declared assaultWorld mother
+
+                Expect.isEmpty off.Assaults "nothing is pooled or cast for it"
+
+                Expect.equal
+                    (worked off, off.Crossed)
+                    (worked bare, bare.Crossed)
+                    "its room, its entry and the rooms beside it are neither worked nor crossed"
+
+                let on = viewOf true
+
+                Expect.isTrue
+                    (Set.contains assaultRoom (worked on))
+                    "switched on, its room is worked"
+
+                Expect.equal
+                    (Set.contains entry on.Crossed, Set.contains entry (worked on))
+                    (true, false)
+                    "and its entry crossed, never worked"
+
+                let roles (view: ColonyView) : LightTick.RoomRoles =
+                    {
+                        Worked = worked view
+                        Mined = view.MinedRooms
+                        Harassed = Set.singleton entry
+                        Evacuating = view.Evacuating
+                        Assignments = Map.empty
+                    }
+
+                Expect.equal
+                    (LightTick.loose [ roles off ], LightTick.loose [ roles on ])
+                    (Set.singleton entry, Set.singleton entry)
+                    "a harassment room at its entry stays loose, the assault on or off"
+            }
+
             test
                 "W18S26's link is declared from W15S28 off its south line, in by W18S27 on a budget of seven crossings (#494)" {
                 let declaring =

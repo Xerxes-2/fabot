@@ -2754,6 +2754,46 @@ let guardPrecedenceTests =
                     (Some(taskId (Guard "W1N2")))
                     "and the ranger takes it"
             }
+
+            // The Brief's S2: each room's flavour is classified once, and every
+            // Guard reader dispatches on it. The mixes the table above pins,
+            // by the one kind each is read as.
+            test "each mix of flavours is read as one kind" {
+                let kindOf flavours =
+                    let colony = List.fold withFlavour precedenceBasis flavours
+                    Threats.kindOf (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
+                let rows =
+                    [
+                        [ Raid ], BriefKind.Outpost
+                        [ Core ], BriefKind.Core
+                        [ Hold ], BriefKind.ExitHold
+                        [ Trespasser ], BriefKind.Trespass
+                        [ Resident ], BriefKind.Resident
+                        [ Harassed ], BriefKind.Harass
+                        [ ChaseSeen ], BriefKind.Chase
+                        [ ChaseDark ], BriefKind.Chase
+                        [ Raid; Hold ], BriefKind.Outpost
+                        [ Raid; Core ], BriefKind.Outpost
+                        [ Raid; Trespasser ], BriefKind.Outpost
+                        [ Raid; Resident ], BriefKind.Resident
+                        [ Raid; Harassed ], BriefKind.Harass
+                        [ Hold; Core; Trespasser ], BriefKind.ExitHold
+                        [ Core; Trespasser ], BriefKind.Core
+                        [ Resident; Core ], BriefKind.Resident
+                        [ Harassed; Trespasser ], BriefKind.Harass
+                        [ Resident; Harassed ], BriefKind.Resident
+                        [ ChaseSeen; Core ], BriefKind.Chase
+                        [ ChaseSeen; Raid ], BriefKind.Outpost
+                        [ ChaseDark; Hold ], BriefKind.Chase
+                        [ ChaseDark; Trespasser ], BriefKind.Chase
+                    ]
+
+                Expect.equal
+                    (rows |> List.map (fun (flavours, _) -> flavours, kindOf flavours))
+                    rows
+                    "each mix's kind"
+            }
         ]
 
 /// The raided outpost floored out to its borders, and W1N3 beyond it, a room

@@ -304,15 +304,16 @@ let internal applicable
     // an assault lost.
     | Dismantle _ -> isDismantlerParts heavy creep.Body && not (isSapperBody creep)
     // Spelled through the row predicate the body-class ladder reads, so the
-    // gate and `bodyClassOf` cannot disagree. The room decides which row: an
-    // errand room's Guard is the ranger's (#411), and a harassment room's
-    // (#432), and a chased room's (#510) to a ranger every raider there falls
-    // behind; every other the melee guard's. The walk to the work area is what
-    // travel cost prices.
+    // gate and `bodyClassOf` cannot disagree. The room's kind decides which
+    // row: a resident room's Guard is the ranger's (#411), and a harassment
+    // room's (#432), and a chased room's (#510) to a ranger every raider there
+    // falls behind; every other the melee guard's. The walk to the work area
+    // is what travel cost prices.
     | Guard room ->
-        if Set.contains room (Facts.rangerRooms view) then
-            isRangerRowBody creep
-        elif Set.contains room threats.Chased then
+        match Threats.kindOf threats room with
+        | BriefKind.Resident
+        | BriefKind.Harass -> isRangerRowBody creep
+        | BriefKind.Chase ->
             // Kited down by this body's own live parts, or out of sight; and a
             // ranger the resident rule lends (#516).
             isRangerRowBody creep
@@ -322,7 +323,7 @@ let internal applicable
                     |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raiderOnPaper h)
                 ))
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
-        elif Threats.isTrespassed threats room then
+        | BriefKind.Trespass ->
             // A trespass's kill (#516), defence first: the guard row's body,
             // or a ranger the resident rule lends. A child's outpost is the
             // child's guard's, and the residents' beside it (#517).
@@ -330,8 +331,9 @@ let internal applicable
             && (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
                 || isRangerRowBody creep
                    && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
-        else
-            isGuardRowBody creep
+        | BriefKind.Outpost
+        | BriefKind.Core
+        | BriefKind.ExitHold -> isGuardRowBody creep
     // A squad cast, or once the squad launches a resident of the room whose
     // parts fit a slot (`FightGround.Roles`); how many of each role is the
     // capacity's.

@@ -553,7 +553,7 @@ let movementOf
         |> List.filter (fun c ->
             isRangerBody c
             && (match Map.tryFind c.Name assigned with
-                | Some(Guard room) -> Set.contains room threats.Chased
+                | Some(Guard room) -> Threats.kindOf threats room = BriefKind.Chase
                 | _ -> false))
         |> List.map (fun c -> c.Name)
         |> Set.ofList
@@ -577,7 +577,7 @@ let movementOf
             // A trespass's killer walks round every Reach on the way (#516):
             // its target strikes nothing back, and no Threat may.
             match Map.tryFind name assigned with
-            | Some(Guard room) when Threats.isTrespassed threats room ->
+            | Some(Guard room) when Threats.kindOf threats room = BriefKind.Trespass ->
                 Some(Threats.reachIn threats at.Room)
             | _ -> None
 

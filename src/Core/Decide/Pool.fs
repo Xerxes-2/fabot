@@ -272,7 +272,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             Threats.guardGroundIn threats room
             |> Option.defaultWith (fun () ->
                 match Atlas.sourceRingIn atlas room with
-                | ring when Set.isEmpty ring && Set.contains room threats.Chased ->
+                | ring when Set.isEmpty ring && Threats.kindOf threats room = BriefKind.Chase ->
                     Atlas.walkableTilesIn atlas room
                     |> Set.filter (Seam.onRing >> not)
                     |> RoomPos.setAt room
@@ -1141,19 +1141,22 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
         // the ring. A Guard has
         // no arrival price for a handover window to be read against, and the
         // row's count, not this cap, is what buys bodies.
-        | Guard room when Set.contains room (Facts.residentRooms view) ->
-            Capacity.fighters (rangersWanted view threats room + view.Tuning.RangerResidents)
-        // One ranger per harassment room (#439), and its relief beside it
-        // (`Capacity.Relieved`).
-        | Guard room when Set.contains room (Facts.harassRooms view) ->
-            Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
-        // One ranger kites what cannot close on it (#510).
-        | Guard room when Set.contains room threats.Chased -> Capacity.fighters 1
-        // One body kills a trespasser, which strikes nothing back (#516),
-        // and never fewer than the room's own guards.
-        | Guard room when Threats.isTrespassed threats room ->
-            Capacity.fighters (max 1 (guardsWanted view room))
-        | Guard room -> Capacity.fighters (guardsWanted view room)
+        | Guard room ->
+            match Threats.kindOf threats room with
+            | BriefKind.Resident ->
+                Capacity.fighters (rangersWanted view threats room + view.Tuning.RangerResidents)
+            // One ranger per harassment room (#439), and its relief beside it
+            // (`Capacity.Relieved`).
+            | BriefKind.Harass ->
+                Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
+            // One ranger kites what cannot close on it (#510).
+            | BriefKind.Chase -> Capacity.fighters 1
+            // One body kills a trespasser, which strikes nothing back (#516),
+            // and never fewer than the room's own guards.
+            | BriefKind.Trespass -> Capacity.fighters (max 1 (guardsWanted view room))
+            | BriefKind.Outpost
+            | BriefKind.Core
+            | BriefKind.ExitHold -> Capacity.fighters (guardsWanted view room)
         // The defender row's own count, read a second time as the guard's is.
         | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)
         // The squad's slots, one cap per role.
