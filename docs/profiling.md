@@ -17,6 +17,8 @@ npm run profile -- --scenario outpost --raided # one raider in the first outpost
 npm run profile -- --scenario reactor          # the season's programme: a mine and an errand
 npm run profile -- --scenario siege            # pair, with t880,341's raid on the child's controller
 npm run profile -- --level 4                   # build the colony at another RCL
+npm run profile -- --level 7 --short 7         # 7 of its extensions unbuilt (#341's room)
+npm run profile -- --stock 0                   # its Storage empty (up to 1000000, full)
 ```
 
 Current numbers, the live CPU history and the per-hotspot attribution are
@@ -103,7 +105,12 @@ by two rooms rather than one. Each room in it is read off its committed capture
 blaming the stub world for holding no terrain.
 
 `--level N` moves the scenario's colony (`pair` moves the child; the mother
-stays at RCL5). `--scenario pair --level 3` is a reading, not a mistake:
+stays at RCL5). `--short N` and `--stock N` (#343) move the same colony: N of
+the level's extensions neither built nor sited, so the Layout has a gap to plan
+into, and the energy its Storage holds. Without them the room is full but for
+three extension sites and its Storage holds 200,000 — the room every number
+recorded before #343 was taken in. `--stock` is refused at a level with no
+Storage (the `pair` child at its default RCL2). `--scenario pair --level 3` is a reading, not a mistake:
 at `Colony.bootstrapLevel` the mother stops projecting the child's room
 and the two run side by side sharing nothing. `--scenario reactor --level 5`
 is the same kind of reading: below `Tuning.ExtractorLevel` the Layout plans

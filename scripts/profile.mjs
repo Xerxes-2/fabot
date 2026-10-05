@@ -97,6 +97,10 @@
 //                  container, because the Layout plans neither there, and
 //                  says so in its report rather than measuring a mine the
 //                  colony would not have built.
+//
+// The same colony takes `--short N` (N of the level's extensions unbuilt, an
+// under-built room like #341's) and `--stock N` (its Storage's energy, empty
+// to full, default 200,000). Without either, every run is the one it was.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -116,6 +120,7 @@ const RAIDABLE = ["outpost", "pair", "siege"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
   " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided] [--resets N]" +
+  " [--short N] [--stock N]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -164,12 +169,19 @@ let raided = false;
 // How many cold resets the run ends on (#486): each loads a fresh copy of
 // the bundle over the run's last Memory and times its first tick.
 let resets = 5;
+// The under-built room and the thin (or over-banked) Storage (#343): how many
+// of the level's extensions the flagged colony has not built, and the energy
+// its Storage holds. Raw tokens, checked once the level table is in scope.
+let shortArg = "0";
+let stockArg = null;
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === "--census-every")
     censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
   else if (process.argv[i] === "--raided") raided = true;
   else if (process.argv[i] === "--resets") resets = Number(process.argv[++i]);
+  else if (process.argv[i] === "--short") shortArg = process.argv[++i];
+  else if (process.argv[i] === "--stock") stockArg = process.argv[++i];
   else if (process.argv[i] === "--level") {
     levelArg = process.argv[++i];
     level = Number(levelArg);
@@ -273,14 +285,55 @@ const CREEP_LIFE_TIME = 1500;
 // body ADR 0006 casts is sized against that (#144, recorded in the README).
 const EXTENSION_SITES = 3;
 
+// `--short N`: N of the level's extensions neither built nor sited, so the
+// flagged colony stands under its entitlement and its Layout has a real gap
+// to plan into — #341's W12S28, 40 built against 50. The pending sites stay,
+// so the Build family is measured either way. `--stock N`: the energy in that
+// colony's Storage, from empty to full. The defaults are the room every
+// recorded number was taken in; the `pair` mother is never moved by either,
+// for the reason `--level` leaves her alone.
+const SHORT = Number(shortArg);
+const shortMost =
+  CONTROLLER_STRUCTURES.extension[LEVEL] -
+  Math.min(EXTENSION_SITES, CONTROLLER_STRUCTURES.extension[LEVEL]);
+if (!Number.isInteger(SHORT) || SHORT < 0 || SHORT > shortMost) {
+  console.error(
+    `--short must be a count of unbuilt extensions, 0 to ${shortMost} at RCL${LEVEL}; ` +
+      `got "${shortArg}"\n${USAGE}`,
+  );
+  process.exit(1);
+}
+// A stock for a room the level gives no Storage would print a run identical to
+// the one without it, so it is refused the way `--raided` is off an outpost.
+if (stockArg !== null && CONTROLLER_STRUCTURES.storage[LEVEL] === 0) {
+  console.error(
+    `--stock fills the Storage and RCL${LEVEL} stands none; Storage is RCL4 and up\n${USAGE}`,
+  );
+  process.exit(1);
+}
+const DEFAULT_STOCK = STORAGE_CAPACITY / 5;
+const STOCK = stockArg === null ? DEFAULT_STOCK : Number(stockArg);
+if (!Number.isInteger(STOCK) || STOCK < 0 || STOCK > STORAGE_CAPACITY) {
+  console.error(
+    `--stock must be the Storage's energy, 0 to ${STORAGE_CAPACITY}; got "${stockArg}"\n${USAGE}`,
+  );
+  process.exit(1);
+}
+// The flagged colony's shape, and the shape of a room at rest that no flag
+// moves (the `pair` and `siege` mother).
+const FLAGGED_SHAPE = { short: SHORT, stock: STOCK };
+const REST_SHAPE = { short: 0, stock: DEFAULT_STOCK };
+
 // What a level lets the home room hold, and the bank that follows from it.
 // Every count a scenario furnishes comes from here.
-function furnitureFor(rcl) {
+function furnitureFor(rcl, shape = REST_SHAPE) {
   const allowed = CONTROLLER_STRUCTURES.extension[rcl];
   const pending = Math.min(EXTENSION_SITES, allowed);
-  const built = allowed - pending;
+  const built = allowed - pending - shape.short;
   return {
     extensions: built,
+    short: shape.short,
+    stock: shape.stock,
     extensionSites: pending,
     towers: CONTROLLER_STRUCTURES.tower[rcl],
     storages: CONTROLLER_STRUCTURES.storage[rcl],
@@ -289,7 +342,7 @@ function furnitureFor(rcl) {
   };
 }
 
-const FURNITURE = furnitureFor(LEVEL);
+const FURNITURE = furnitureFor(LEVEL, FLAGGED_SHAPE);
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -301,7 +354,11 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const furnitureLine = (furniture = FURNITURE) =>
   `${plural(furniture.extensions, "extension")}, ${plural(furniture.towers, "tower")}, ` +
   `${furniture.storages} storage, ${plural(furniture.terminals ?? 0, "terminal")}, ` +
-  `${furniture.bank} energy bank`;
+  `${furniture.bank} energy bank` +
+  (furniture.short ? ` (${furniture.short} extensions short of the level)` : "") +
+  (furniture.storages && furniture.stock !== DEFAULT_STOCK
+    ? ` (Storage holding ${furniture.stock})`
+    : "");
 
 // ---------------------------------------------------------------------------
 // Stub engine surface shared by every scenario.
@@ -863,13 +920,15 @@ function placeCluster({
   // levels since ADR 0052's `pair` scenario: the flag's level is the
   // default and the mother passes her own.
   rcl = LEVEL,
+  // The `--short`/`--stock` shape this room is furnished in.
+  shape = FLAGGED_SHAPE,
   // What every id this cluster registers is prefixed with. One world can
   // now furnish two rooms, and an object id is unique across the world —
   // a second room's `ext-0` would land on the first room's in
   // `getObjectById` and the projection would key one structure twice.
   prefix = "",
 }) {
-  const furniture = furnitureFor(rcl);
+  const furniture = furnitureFor(rcl, shape);
   const { extensions, extensionSites, towers, storages, terminals } = furniture;
   const wanted = extensions + towers + storages + terminals + extensionSites;
   const reserved = workingGround(
@@ -915,7 +974,7 @@ function placeCluster({
     built.push(
       structure(`${prefix}storage-${i}`, "storage", take(), {
         store: store({
-          used: STORAGE_CAPACITY / 5,
+          used: furniture.stock,
           capacity: STORAGE_CAPACITY,
         }),
         hits: 10000,
@@ -1963,8 +2022,11 @@ function furnishHome({
   // furniture is already written down (the stub's own constants, a live
   // room's containers) is not a room this should be guessing about.
   bufferAt = "derive",
+  // The `--short`/`--stock` shape: the flagged colony's unless the caller is
+  // a room no flag moves.
+  shape = FLAGGED_SHAPE,
 }) {
-  const furniture = furnitureFor(rcl);
+  const furniture = furnitureFor(rcl, shape);
   const taken = new Set([keyOf(spawnPos)]);
   const claim = (pos) => {
     taken.add(keyOf(pos));
@@ -2081,6 +2143,7 @@ function furnishHome({
     structure,
     register,
     rcl,
+    shape,
     prefix,
   });
 
@@ -2928,6 +2991,7 @@ function buildPairWorld({ siege = false } = {}) {
     spawnPos: HOME_SPAWN,
     spawnName: "Spawn1",
     rcl: MOTHER_LEVEL,
+    shape: REST_SHAPE,
     prefix: "",
     register,
     structure,

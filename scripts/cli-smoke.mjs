@@ -444,6 +444,26 @@ smoke("arena-skeleton banks active extensions, suffixes a clashing site, clamps 
   assert.ok(!text.includes("let at roomName"), "no unused position helper when no body is placed");
 });
 
+// ---- profile.mjs, flags -------------------------------------------------
+// The flags are read before the bundle loads, so a refusal needs no build.
+
+const profileRefuses = (args, says) =>
+  smoke(`profile ${args.join(" ")} refuses`, () => {
+    const { code, err } = run("profile.mjs", args);
+    assert.equal(code, 1, `exit ${code}; stderr: ${err}`);
+    assert.ok(!crashed(err), `crashed: ${err}`);
+    assert.ok(err.includes(says), `stderr does not say "${says}": ${err}`);
+  });
+
+profileRefuses(["--short", "-1"], "--short must be");
+profileRefuses(["--short", "x"], "--short must be");
+// RCL5 allows 30 extensions and holds 3 back as sites: 27 can go unbuilt, 28 cannot.
+profileRefuses(["--level", "5", "--short", "28"], "--short must be");
+profileRefuses(["--stock", "-5"], "--stock must be");
+profileRefuses(["--stock", "1000001"], "--stock must be");
+// The `pair` child is the flagged colony and stands no Storage at RCL2.
+profileRefuses(["--scenario", "pair", "--stock", "0"], "stands none");
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;
