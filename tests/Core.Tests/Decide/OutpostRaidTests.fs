@@ -1706,10 +1706,8 @@ let private raisingBeyond hostiles =
         RoomControl = Map.add "W1N3" ownedRoom colony.RoomControl
         Declared = [ "W1N1"; "W1N3" ]
         Borrowed =
-            {
+            { BorrowedWork.empty with
                 Rooms = [ "W1N3" ]
-                Defended = []
-                Garrisoned = []
             }
         Stages = Map.add "W1N3" Nursery colony.Stages
         Spatial =
@@ -2147,5 +2145,107 @@ let residentChaseTests =
                     (Map.tryFind "r-1" recalled.Assignments)
                     (Some(taskId (Guard "W1N3")))
                     "a raid at home calls it back off the chase"
+            }
+        ]
+
+/// `raisingBeyond` with W1N4 beyond the child's home: the child's outpost,
+/// projected by this colony as a transit room for its resident (#517) — no
+/// furniture of it, its ground and bodies alone.
+let private watchingBeyond hostiles =
+    let colony = raisingBeyond hostiles
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Borrowed =
+            { colony.Borrowed with
+                ChildOutposts = [ "W1N4" ]
+            }
+        Crossed = Set.add "W1N4" colony.Crossed
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N4" plainRing
+            }
+            |> withNeighbour "W1N4" { RoomLayer.empty with Terrain = floor }
+    }
+
+/// The same with the resident gone and a melee guard of ours standing in
+/// the outpost instead.
+let private guardedBeyond hostiles =
+    { watchingBeyond hostiles with
+        Creeps = (watchingBeyond hostiles).Creeps |> List.filter (fun c -> c.Name <> "r-1")
+    }
+    |> withOutpostLayer "W1N3" (fun layer ->
+        { layer with
+            CreepPositions = Map.empty
+        })
+    |> withGuards [ guard "g-1", { X = 25; Y = 44 } ]
+
+[<Tests>]
+let childOutpostTests =
+    testList
+        "a resident sees into its raised home's outposts (#517)"
+        [
+            test "a trespasser in the child's outpost beside the home calls the quiet resident" {
+                let colony = watchingBeyond [ diggerAt "W1N4" { X = 25; Y = 42 } ]
+
+                Expect.isSome
+                    (pooledOf colony |> entryFor (Guard "W1N4"))
+                    "the kill is pooled there"
+
+                let called = decide colony residentHeld Set.empty None
+
+                Expect.contains
+                    called.Verdicts
+                    (Verdict.Released("r-1", taskId (Guard "W1N3"), ReleaseReason.Called))
+                    "the resident is let go of its quiet ring"
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "and takes the kill"
+            }
+
+            test "the W18S25 shape: a crippled melee in the child's outpost is the resident's chase" {
+                let crippled =
+                    { crippledAt { X = 25; Y = 42 } with
+                        Pos = { Room = "W1N4"; X = 25; Y = 42 }
+                    }
+
+                let called = decide (watchingBeyond [ crippled ]) residentHeld Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "the resident takes the chase"
+            }
+
+            test "a melee guard of ours is not sent across the child's border for it" {
+                let colony = guardedBeyond [ diggerAt "W1N4" { X = 25; Y = 42 } ]
+
+                Expect.isSome
+                    (pooledOf colony |> entryFor (Guard "W1N4"))
+                    "the premise: the kill is pooled"
+
+                Expect.notEqual
+                    (Map.tryFind "g-1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "the child's outpost is the child's guard's, and her resident's"
+            }
+
+            test "a transit room that is no child's outpost pools no kill" {
+                let colony =
+                    { watchingBeyond [ diggerAt "W1N4" { X = 25; Y = 42 } ] with
+                        Borrowed = (raisingBeyond []).Borrowed
+                    }
+
+                Expect.isNone
+                    (pooledOf colony |> entryFor (Guard "W1N4"))
+                    "a room crossed is mined by nobody of ours"
             }
         ]

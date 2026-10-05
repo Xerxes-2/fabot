@@ -323,9 +323,10 @@ let internal applicable
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
         elif Threats.isTrespassed threats room then
             // A trespass's kill (#516), defence first: the guard row's body,
-            // or a ranger the resident rule lends.
+            // or a ranger the resident rule lends. A child's outpost is the
+            // child's guard's, and the residents' beside it (#517).
             not (Facts.underRaid view)
-            && (isGuardRowBody creep
+            && (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
                 || isRangerRowBody creep
                    && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
         else

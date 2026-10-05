@@ -623,10 +623,9 @@ let residentTests =
                           (meleeIn 12)
                           [ ranger "ranger-1" 8, child 20 30; brawler "brawler-1", home 10 8 ] with
                         Borrowed =
-                            {
+                            { BorrowedWork.empty with
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
-                                Garrisoned = []
                             }
                     }
 
@@ -674,10 +673,9 @@ let residentTests =
                               medic "medic-1", home 11 8
                           ] with
                         Borrowed =
-                            {
+                            { BorrowedWork.empty with
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
-                                Garrisoned = []
                             }
                     }
 

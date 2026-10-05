@@ -663,8 +663,8 @@ let planTasks
 
     // No store of a child's is hers to draw, at any stage: what one colony may
     // take of another is the explicit list `BorrowedWork` carries, and no store
-    // is on it.
-    let borrowedRooms = Set.ofList view.Borrowed.Rooms
+    // is on it, nor one in a child's outpost (#517).
+    let borrowedRooms = Set.ofList (view.Borrowed.Rooms @ view.Borrowed.ChildOutposts)
 
     let inABorrowedRoom id =
         SpatialInfo.roomOf view.Spatial id

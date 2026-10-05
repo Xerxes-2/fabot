@@ -463,11 +463,17 @@ let internal minesRoom (view: ColonyView) (room: string) =
     || view.Sources
        |> List.exists (fun source -> SpatialInfo.roomOf view.Spatial source.Id = Some room)
 
+/// Whether a trespasser in a room is this colony's to kill: a room it mines
+/// (#516), or a child's outpost it watches for the residents next door
+/// (`BorrowedWork.ChildOutposts`, #517).
+let internal trespassRooms (view: ColonyView) (room: string) =
+    minesRoom view room || List.contains room view.Borrowed.ChildOutposts
+
 /// Whether a hostile is a [[trespasser]] (#516): its body trespasses, in a
-/// room this colony mines. The body is asked first, so a tick with no such
-/// body walks no source.
+/// room this colony kills trespassers in. The body is asked first, so a
+/// tick with no such body walks no source.
 let internal trespasser (view: ColonyView) (hostile: HostileInfo) =
-    trespassingBody hostile && minesRoom view hostile.Pos.Room
+    trespassingBody hostile && trespassRooms view hostile.Pos.Room
 
 /// What a Guard in its room may shoot: an armed hostile, a rival's claimer or
 /// a raid's healer (#451) in a resident room, and the declared enemy's creep
@@ -1334,7 +1340,9 @@ let private oursToSweep (view: ColonyView) (id: string) : bool =
            // two kinds out of a crossed room — a pile and a tombstone.
            || Set.contains room view.Crossed
               // Never in an evacuating room: no sweep may walk a body in (#512).
-              && not (Set.contains room view.Evacuating))
+              && not (Set.contains room view.Evacuating)
+              // Nor in a child's outpost: its floor is the child's (#517).
+              && not (List.contains room view.Borrowed.ChildOutposts))
 
 /// The Thorium on the ground in a room this colony sweeps, in id order (#311):
 /// the dig that landed on the floor because the container was at its 2,000

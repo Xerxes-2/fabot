@@ -1,6 +1,8 @@
 # A walk crosses a chain of Seams, and no flood leaves its room
 
-> **Status:** amended by 0059, 0060, 0070, 0081, #326
+> **Status:** amended by 0059, 0060, 0070, 0081, #326, #517
+
+> **Amended by #517** on 2026-10-05: a transit room is no longer only a room a walk crosses. A mother projects a raised child's outpost beside its home as one, and a [[trespasser]]'s or [[chase]]'s kill is pooled there for her residents; nothing else is (ADR 0047's #517 note).
 
 > **Amended by ADR 0081** on 2026-09-29: the hop budget is **six**, not three — four on #432 for W17S26, six on #437 for W15S28's walk to W18S27, which dips south round a wall. The search still stops at the first layer that reaches the goal, so no declaration reached in three takes a different chain. And a harassment room may name the rooms of a detour (`Harass.Via`), which its caster projects beside the rectangle `transitBetween` gives: the widening the Consequences below say a detour would need, made by hand for one room.
 

@@ -437,6 +437,8 @@ let private fullTick
     // not a field of the World because the rule needs the stand-down gate,
     // which is Memory's answer. Keyed on the rooms withdrawn from, not the
     // rooms looked into: a latched room is projected by nobody this tick.
+    let shut = gates |> Map.map (fun _ gate -> gate.Shut)
+
     let holders =
         World.creepColoniesRecalling
             joins
@@ -444,7 +446,7 @@ let private fullTick
             Colony.declared
             casting
             colonies
-            (gates |> Map.map (fun _ gate -> gate.Shut))
+            shut
             world
 
     // One view per living colony, cut from the one world by `ColonyView.ofWorld`
@@ -464,6 +466,7 @@ let private fullTick
                     Colony.declared
                     casting
                     (gateOf colony.Home)
+                    shut
                     holders
                     world
                     colony

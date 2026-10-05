@@ -1015,7 +1015,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 [ room, tiles ]
             elif Seam.onRing at && trespassingBody hostile then
                 reachAcross atlas room at 1
-                |> List.filter (fst >> minesRoom view)
+                |> List.filter (fst >> trespassRooms view)
                 |> List.map (fun (next, landings) ->
                     next, landings |> List.collect (Atlas.adjacentWalkableIn atlas next))
             else

@@ -759,10 +759,8 @@ let outpostTests =
                             (raidedAs
                                 { quiet with
                                     Borrowed =
-                                        {
-                                            Rooms = []
+                                        { BorrowedWork.empty with
                                             Defended = [ defended ]
-                                            Garrisoned = []
                                         }
                                 })
                     ))
@@ -778,10 +776,9 @@ let outpostTests =
                             (raidedAs
                                 { quiet with
                                     Borrowed =
-                                        {
+                                        { BorrowedWork.empty with
                                             Rooms = [ defended ]
                                             Defended = [ defended ]
-                                            Garrisoned = []
                                         }
                                     Stages = Map.add defended Bootstrapping quiet.Stages
                                 })

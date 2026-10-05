@@ -834,10 +834,8 @@ let private nurseryIntake (rock: SourceInfo) =
         Declared = [ "W1N1"; "W1N2" ]
         Stages = Map.ofList [ "W1N1", Independent; "W1N2", Nursery ]
         Borrowed =
-            {
+            { BorrowedWork.empty with
                 Rooms = [ "W1N2" ]
-                Defended = []
-                Garrisoned = []
             }
         Spatial =
             { SpatialInfo.empty with

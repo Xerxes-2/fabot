@@ -1302,6 +1302,11 @@ module World =
             /// rooms of the walk home from it, while a body this colony holds
             /// stands on that walk.
             Evacuating: string list
+            /// The outposts of the children whose homes this colony keeps
+            /// residents in — `Borrowed`'s raised half and `Garrisoned` —
+            /// that border those homes and that the child's own scan works
+            /// (#517), in `Scanned` as transit rooms.
+            ChildOutposts: string list
         }
 
     /// Each outpost, errand or salvage room of this colony's its stand-down
@@ -1350,6 +1355,10 @@ module World =
         // asks which rooms are withheld from work, and which of those cannot
         // be crossed either.
         (gate: StandDown)
+        // Every colony's shut rooms by home, the map the adoption reads: a
+        // child's outpost is projected for her residents only where the
+        // child's own scan works it (#517).
+        (shut: Map<string, Set<string>>)
         // The rooms a body this colony holds stands in (`creepColoniesRecalling`'s
         // answer). Empty for the adoption itself, which reads the set without
         // the evacuating rooms: a body is adopted off the declaration's rooms.
@@ -1382,9 +1391,9 @@ module World =
         // The two halves of what a mother projects for a child of hers,
         // disjoint by construction: a room she is raising is one we own, and
         // a room she may take back is one we do not (#221).
-        let borrowed =
-            Colony.bootstrapping stages colonies colony
-            @ Colony.reclaiming stages unowned colonies colony
+        let raising = Colony.bootstrapping stages colonies colony
+
+        let borrowed = raising @ Colony.reclaiming stages unowned colonies colony
 
         let garrisoned =
             Colony.garrisoning
@@ -1451,6 +1460,32 @@ module World =
                 room :: (crossed |> List.filter (worked.Contains >> not)))
             |> List.distinct
 
+        // The outposts of a child its residents hold, beside its home (#517):
+        // projected as transit rooms, so a resident sees the trespasser or
+        // the chase next door. Narrowed as the child's own adoption scan
+        // narrows them — its stand-down and its chain — so the child projects
+        // each one too: every body there stays its caster's, her resident
+        // hers and the child's own the child's.
+        let childOutposts =
+            match raising @ garrisoned with
+            | [] -> []
+            | homes ->
+                colonies
+                |> List.filter (fun child -> List.contains child.Home homes)
+                |> List.collect (fun child ->
+                    let childShut = Map.tryFind child.Home shut |> Option.defaultValue Set.empty
+
+                    let hops =
+                        hopsUnder { StandDown.none with Shut = childShut } joins tuning world
+
+                    Outpost.worked childShut (Colony.outpostsWorked stages child)
+                    |> List.map (fun outpost -> outpost.RoomName)
+                    |> List.filter (fun room ->
+                        RoomName.neighbouring child.Home room
+                        && Option.isSome (hops child.Home room)))
+                |> List.filter (worked.Contains >> not)
+                |> List.distinct
+
         {
             Outposts = outposts
             Errands = errands
@@ -1462,9 +1497,10 @@ module World =
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
             Assaults = assaults
-            Scanned = scanned @ evacuating @ chasing |> List.distinct
+            Scanned = scanned @ evacuating @ chasing @ childOutposts |> List.distinct
             Worked = worked
             Evacuating = evacuating
+            ChildOutposts = childOutposts
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).
@@ -1487,6 +1523,7 @@ module World =
             colonies
             HarassCasting.none
             gate
+            Map.empty
             Set.empty
             world
             colony
@@ -1511,6 +1548,8 @@ module World =
         (colonies: Colony list)
         (casting: HarassCasting)
         (gate: StandDown)
+        // Every colony's shut rooms by home (`scanRecalling`).
+        (shut: Map<string, Set<string>>)
         (world: World)
         (colony: Colony)
         : string list =
@@ -1523,6 +1562,7 @@ module World =
                 colonies
                 casting
                 gate
+                shut
                 Set.empty
                 world
                 colony
@@ -1559,6 +1599,7 @@ module World =
                         // was written for. `Impassable` stays empty.
                         Shut = Map.tryFind colony.Home shut |> Option.defaultValue Set.empty
                     }
+                    shut
                     world
                     colony)
 

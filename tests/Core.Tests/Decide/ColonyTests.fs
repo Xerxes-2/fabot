@@ -2231,10 +2231,8 @@ let private defendingMother raid =
         Bank = bank 5_600 5_600
         Hostiles = raid
         Borrowed =
-            {
-                Rooms = []
+            { BorrowedWork.empty with
                 Defended = [ "W1N2" ]
-                Garrisoned = []
             }
     }
 
@@ -2694,10 +2692,9 @@ let raisedHomeGarrisonTests =
                     { garrisonMother Bootstrapping with
                         Hostiles = raid
                         Borrowed =
-                            {
+                            { BorrowedWork.empty with
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
-                                Garrisoned = []
                             }
                     }
 
@@ -2734,10 +2731,9 @@ let raisedHomeGarrisonTests =
                 let beaten =
                     { openGarrison [] [ ranger, { X = 30; Y = 10 } ] homeRaid with
                         Borrowed =
-                            {
+                            { BorrowedWork.empty with
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
-                                Garrisoned = []
                             }
                     }
 
@@ -2782,10 +2778,9 @@ let raisedHomeGarrisonTests =
                     { garrison with
                         Creeps = ranger :: garrison.Creeps
                         Borrowed =
-                            {
+                            { BorrowedWork.empty with
                                 Rooms = [ "W1N2" ]
                                 Defended = [ "W1N2" ]
-                                Garrisoned = []
                             }
                     }
 

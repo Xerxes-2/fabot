@@ -1210,6 +1210,7 @@ let colonyViewTests =
                         both
                         HarassCasting.none
                         StandDown.none
+                        noneShut
                         world
                         (both |> List.find (fun colony -> colony.Home = child))
                      |> List.contains outpost)
@@ -2072,6 +2073,222 @@ let garrisonedHomeTests =
                     (viewUnder contestedDeclared (independentChild [ 1000 ]) child)
                         .Borrowed.Garrisoned
                     "a colony garrisons no home of its own"
+            }
+        ]
+
+/// The child's outpost beside its home, and one two rooms out (#517).
+let private childOutpost = "W14S28"
+let private childFar = "W15S28"
+
+let private outpostAt room : Outpost =
+    {
+        RoomName = room
+        Sources = [ $"src-{room}", { Room = room; X = 5; Y = 5 } ]
+        Controller = $"ctrl-{room}", { Room = room; X = 7; Y = 7 }
+    }
+
+/// The pair with the child mining both rooms.
+let private childMining: Colony list =
+    declared
+    |> List.map (fun colony ->
+        if colony.Home = child then
+            { colony with
+                Outposts = [ outpostAt childOutpost; outpostAt childFar ]
+            }
+        else
+            colony)
+
+/// Raptor865's shape (#516): a declared enemy's 5W3M digging the room.
+let private raptorIn room : HostileInfo =
+    {
+        Id = $"raptor-{room}"
+        Owner = "Trepidimous"
+        Pos = { Room = room; X = 5; Y = 6 }
+        Body = List.replicate 5 Work @ List.replicate 3 Move
+        Hits = 8 * Engine.partHits
+        TicksToLive = 1000
+    }
+
+/// A world with both of the child's outposts standing, a trespasser in each.
+let private withChildOutposts (world: World) : World =
+    let mined room =
+        let name, facts =
+            roomOf room Ownership.Unowned [ $"src-{room}", { X = 5; Y = 5 }, Source ]
+            |> withSources [ $"src-{room}" ]
+
+        name,
+        { facts with
+            Hostiles = [ raptorIn room ]
+        }
+
+    { world with
+        Rooms =
+            [ mined childOutpost; mined childFar ]
+            |> List.fold (fun rooms (k, v) -> Map.add k v rooms) world.Rooms
+    }
+
+[<Tests>]
+let childOutpostTests =
+    testList
+        "a mother projects her raised child's outposts for her residents (#517)"
+        [
+            test
+                "the outpost beside the child's home is a transit room of hers, its trespasser in sight" {
+                let view = viewUnder childMining (withChildOutposts pairWorld) mother
+
+                Expect.equal
+                    view.Borrowed.ChildOutposts
+                    [ childOutpost ]
+                    "the bordering outpost alone"
+
+                Expect.isTrue
+                    (Map.containsKey childOutpost view.Spatial.Rooms
+                     && Set.contains childOutpost view.Crossed)
+                    "projected as a transit room"
+
+                Expect.isFalse
+                    (Map.containsKey childFar view.Spatial.Rooms)
+                    "and not the one two rooms out, which no resident borders"
+
+                Expect.isTrue
+                    (view.Hostiles |> List.exists (fun h -> h.Id = $"raptor-{childOutpost}"))
+                    "its trespasser is in her sight"
+
+                Expect.isFalse
+                    (view.Spatial.TargetKinds
+                     |> Map.exists (fun id _ ->
+                         SpatialInfo.roomOf view.Spatial id = Some childOutpost))
+                    "and nothing of the room is hers to work"
+
+                Expect.isFalse
+                    (view.Sources |> List.exists (fun source -> source.Id = $"src-{childOutpost}"))
+                    "not even its rock"
+            }
+
+            test "the child's own view works its outpost as before" {
+                let view = viewUnder childMining (withChildOutposts pairWorld) child
+
+                Expect.isEmpty view.Borrowed.ChildOutposts "a colony is no child of its own"
+                Expect.isFalse (Set.contains childOutpost view.Crossed) "it is worked, not crossed"
+            }
+
+            test "an Independent child she keeps no residents in is none of hers to project" {
+                let view =
+                    viewUnder childMining (withChildOutposts (independentChild [ 1000 ])) mother
+
+                Expect.isEmpty view.Borrowed.ChildOutposts "no resident, no outpost of the child's"
+
+                Expect.isFalse
+                    (Map.containsKey childOutpost view.Spatial.Rooms)
+                    "and the room is not projected"
+            }
+
+            test
+                "a body standing in the child's outpost stays its caster's, the child's own as hers" {
+                let world =
+                    { withChildOutposts pairWorld with
+                        Creeps =
+                            pairWorld.Creeps
+                            @ [
+                                creep "anchor-960-Spawn2" childOutpost
+                                creep "ranger-960-Spawn1" childOutpost
+                            ]
+                    }
+
+                let holdersUnder shut =
+                    World.creepColonies
+                        Tuning.defaults
+                        childMining
+                        (World.living childMining world)
+                        shut
+                        world
+
+                let open' = holdersUnder noneShut
+
+                Expect.equal
+                    (Map.tryFind "anchor-960-Spawn2" open')
+                    (Some child)
+                    "the child's anchor is the child's"
+
+                Expect.equal
+                    (Map.tryFind "ranger-960-Spawn1" open')
+                    (Some mother)
+                    "and her resident is hers, never adopted by the child mid-kill"
+
+                Expect.equal
+                    (Map.tryFind
+                        "anchor-960-Spawn2"
+                        (holdersUnder (Map.ofList [ child, Set.singleton childOutpost ])))
+                    (Some child)
+                    "with the child's stand-down shutting the room, its anchor stays the child's to walk home"
+            }
+
+            test
+                "a room the child's stand-down shuts leaves her projection, so she never projects it alone" {
+                let projected shut =
+                    World.roomsProjectedRecalling
+                        (JoinTable())
+                        Tuning.defaults
+                        childMining
+                        HarassCasting.none
+                        StandDown.none
+                        shut
+                        (withChildOutposts pairWorld)
+                        (childMining |> List.find (fun colony -> colony.Home = mother))
+
+                Expect.contains
+                    (projected noneShut)
+                    childOutpost
+                    "the premise: open, she projects it"
+
+                Expect.isFalse
+                    (projected (Map.ofList [ child, Set.singleton childOutpost ])
+                     |> List.contains childOutpost)
+                    "shut by the child, it is not hers to project"
+            }
+
+            test "decaying ore in the child's outpost is no sweep of hers" {
+                let pile = "ore-child-out"
+
+                let world =
+                    let world = withChildOutposts pairWorld
+                    let facts = World.roomOf world childOutpost
+
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.add
+                                childOutpost
+                                { facts with
+                                    TargetKinds = Map.add pile (Dropped Thorium) facts.TargetKinds
+                                    Thorium = Map.add pile 900 facts.Thorium
+                                    Layer =
+                                        { facts.Layer with
+                                            TargetPositions =
+                                                Map.add
+                                                    pile
+                                                    { X = 6; Y = 6 }
+                                                    facts.Layer.TargetPositions
+                                        }
+                                }
+                    }
+
+                let view = viewUnder childMining world mother
+                let atlas = Atlas.ofView view
+
+                Expect.isFalse
+                    (Planner.planTasks
+                        view
+                        atlas
+                        (threatsOf view atlas)
+                        HeldTaskFacts.empty
+                        (Planner.outpostFactsOf view)
+                     |> List.exists (fun task ->
+                         match task with
+                         | Pickup(id, _)
+                         | Withdraw(id, _) -> id = pile
+                         | _ -> false))
+                    "the child's floor is the child's"
             }
         ]
 
@@ -4070,7 +4287,16 @@ let private harassViewOver
             noneShut
             world
 
-    ColonyView.ofWorldRecalling joins Tuning.defaults declared casting gate holders world colony
+    ColonyView.ofWorldRecalling
+        joins
+        Tuning.defaults
+        declared
+        casting
+        gate
+        noneShut
+        holders
+        world
+        colony
 
 /// The same under the fixture's own declaration.
 let private harassViewUnder (gate: StandDown) (rooms: Harass list) world home =

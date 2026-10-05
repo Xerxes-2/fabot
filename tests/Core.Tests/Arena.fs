@@ -1199,7 +1199,8 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
     |> List.map (fun c ->
         let gate = Observe.standDown tuning a.Time (raidsOf a c.Home)
 
-        c, ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate holders world c)
+        c,
+        ColonyView.ofWorldRecalling joins tuning a.Colonies casting gate Map.empty holders world c)
 
 /// The view one living colony decides this tick off.
 let viewOf (a: Arena) (home: string) : ColonyView =

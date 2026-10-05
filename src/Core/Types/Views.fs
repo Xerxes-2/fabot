@@ -24,7 +24,23 @@ type BorrowedWork =
         /// the garrison's ground alone — the controller its ring is read
         /// off and the ramparts it fights from — and no Upgrade or Build.
         Garrisoned: string list
+        /// The outposts of the children it keeps residents in that border
+        /// those homes (`World.ScanSet.ChildOutposts`, #517): projected as
+        /// transit rooms, where a [[trespasser]]'s kill is pooled for the
+        /// residents next door, as a [[chase]]'s is, and nothing else.
+        ChildOutposts: string list
     }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module BorrowedWork =
+    /// Nothing borrowed: no child raised, lost, defended or garrisoned.
+    let empty =
+        {
+            Rooms = []
+            Defended = []
+            Garrisoned = []
+            ChildOutposts = []
+        }
 
 /// A [[nursery]]'s declared first spawn (`Colony.FirstSpawn`, #476) and the
 /// name the site goes down under.
@@ -828,6 +844,9 @@ module ColonyView =
         (colonies: Colony list)
         (casting: HarassCasting)
         (gate: StandDown)
+        // Every colony's shut rooms by home, the map the holders were cut
+        // under: a child's outposts are narrowed by its own (#517).
+        (shut: Map<string, Set<string>>)
         (holders: Map<string, string>)
         (world: World)
         (colony: Colony)
@@ -853,6 +872,7 @@ module ColonyView =
                 colonies
                 casting
                 gate
+                shut
                 (mine |> List.map (fun creep -> creep.Room) |> Set.ofList)
                 world
                 colony
@@ -1224,6 +1244,7 @@ module ColonyView =
                     Rooms = bootstrap
                     Defended = scan.Defended
                     Garrisoned = scan.Garrisoned
+                    ChildOutposts = scan.ChildOutposts
                 }
             // Read off the whole declaration and not off `scanned`, where these
             // rooms have just been subtracted (#243); asked over the **masked**
@@ -1275,4 +1296,13 @@ module ColonyView =
         (world: World)
         (colony: Colony)
         : ColonyView =
-        ofWorldRecalling (JoinTable()) tuning colonies HarassCasting.none gate holders world colony
+        ofWorldRecalling
+            (JoinTable())
+            tuning
+            colonies
+            HarassCasting.none
+            gate
+            Map.empty
+            holders
+            world
+            colony

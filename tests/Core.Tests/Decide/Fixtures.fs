@@ -187,12 +187,7 @@ let bareRespawn =
         // child, declares no errand, and every tick has vision. "W1N2"
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
-        Borrowed =
-            {
-                Rooms = []
-                Defended = []
-                Garrisoned = []
-            }
+        Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []
         Dismantles = []
@@ -1756,10 +1751,8 @@ let asNursery (colony: ColonyView) =
         // The shell borrows a nursery for the mother the tick it is
         // claimed; the pool's budget reads that field.
         Borrowed =
-            {
+            { BorrowedWork.empty with
                 Rooms = [ "W1N2" ]
-                Defended = []
-                Garrisoned = []
             }
         // Declared and owned with no spawn of ours standing in it is the
         // whole of `Nursery`, so the shell would derive exactly this entry.
@@ -2176,10 +2169,8 @@ let ferryMother stage =
         Declared = [ "W1N1"; "W1N2" ]
         Stages = Map.ofList [ "W1N1", Independent; "W1N2", stage ]
         Borrowed =
-            {
+            { BorrowedWork.empty with
                 Rooms = [ "W1N2" ]
-                Defended = []
-                Garrisoned = []
             }
         Spatial =
             { SpatialInfo.empty with
