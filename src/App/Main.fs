@@ -211,6 +211,17 @@ let private glance () : LightTick.Glance =
             [
                 for room in rooms do
                     for hostile in room.find findHostileCreeps |> Array.map unbox<ICreep> do
+                        let body =
+                            hostile.body
+                            |> Array.map (fun part -> World.bodyPartOf part.``type``)
+                            |> List.ofArray
+
+                        let live =
+                            hostile.body
+                            |> Array.filter (fun part -> part.hits > 0)
+                            |> Array.map (fun part -> World.bodyPartOf part.``type``)
+                            |> List.ofArray
+
                         yield
                             ({
                                 Tile = tileOf room.name hostile.pos
@@ -220,17 +231,12 @@ let private glance () : LightTick.Glance =
                                     else
                                         hostile.owner.username
                                 Armed = hostile.body |> Array.exists armedPart
-                                Hurts =
-                                    hostile.body
-                                    |> Array.exists (fun part ->
-                                        part.hits > 0
-                                        && (part.``type`` = "attack"
-                                            || part.``type`` = "ranged_attack"))
+                                Weapon = HostileInfo.weaponRangeOf live
                                 Breaks =
-                                    hostile.body
-                                    |> Array.exists (fun part ->
-                                        part.hits > 0
-                                        && (part.``type`` = "work" || part.``type`` = "claim"))
+                                    live
+                                    |> List.exists (fun part ->
+                                        part = Work || part = BodyPart.Claim)
+                                Gait = Gait.ofBody body live
                             }
                             : LightTick.GlanceHostile)
             ]

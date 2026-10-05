@@ -40,6 +40,15 @@ module Gait =
             Moves = parts Move
         }
 
+    /// The gait of a body by its parts and the ones still acting: every part
+    /// but MOVE weighs, destroyed ones too, since the engine charges fatigue
+    /// on them, against its live MOVE.
+    let ofBody (body: BodyPart list) (live: BodyPart list) : Gait =
+        {
+            Weight = weightOf (partCountIn body)
+            Moves = partCountIn live Move
+        }
+
     /// The whole ticks a tile of this fatigue takes, each live MOVE paying
     /// two a tick; None for no MOVE acting, which never steps of itself.
     let ticks (fatigue: int) (gait: Gait) : int option =
@@ -60,6 +69,16 @@ module Gait =
             | _, None -> false
 
         slower road && slower plain
+
+    /// Five ticks a plain tile: a swamp tile's pace for a body at a MOVE a
+    /// part, so whatever walks past it is gone before its next step.
+    let private stationaryTicks = 5
+
+    /// Whether a body is as good as rooted (#510): it threatens the tiles in
+    /// its weapon's range and a step past them, not the room. Never one with
+    /// no MOVE acting, which another body may pull.
+    let stationary (gait: Gait) : bool =
+        ticks plain gait |> Option.exists (fun ticks -> ticks >= stationaryTicks)
 
 /// What the decision layer knows about one hostile creep in a room the colony
 /// is looking into this tick.
@@ -86,18 +105,21 @@ type HostileInfo =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module HostileInfo =
-    /// ADR-0033. The range a hostile can hurt a creep from, or None for one
+    /// ADR-0033. The range a body can hurt a creep from, or None for one
     /// that cannot.
-    let weaponRange (hostile: HostileInfo) : int option =
+    let weaponRangeOf (body: BodyPart list) : int option =
         [
-            if List.contains Attack hostile.Body then
+            if List.contains Attack body then
                 Engine.meleeRange
-            if List.contains RangedAttack hostile.Body then
+            if List.contains RangedAttack body then
                 Engine.rangedRange
         ]
         |> function
             | [] -> None
             | ranges -> Some(List.max ranges)
+
+    /// `weaponRangeOf` its body, live parts or shot off.
+    let weaponRange (hostile: HostileInfo) : int option = weaponRangeOf hostile.Body
 
     /// Whether a hostile's body carries an ATTACK or RANGED_ATTACK part, live
     /// or shot off: `weaponRange` asked as a yes/no, written once because many
@@ -129,24 +151,12 @@ module HostileInfo =
     let activeCount (hostile: HostileInfo) (part: BodyPart) : int =
         partCountIn (Engine.liveParts hostile.Body hostile.Hits) part
 
-    /// A hostile's gait (#510): every part but MOVE weighs, destroyed ones
-    /// too, since the engine charges fatigue on them, against its live MOVE.
+    /// A hostile's gait (#510).
     let gait (hostile: HostileInfo) : Gait =
-        {
-            Weight = Gait.weightOf (partCountIn hostile.Body)
-            Moves = activeCount hostile Move
-        }
+        Gait.ofBody hostile.Body (Engine.liveParts hostile.Body hostile.Hits)
 
-    /// Five ticks a plain tile: a swamp tile's pace for a body at a MOVE a
-    /// part, so whatever walks past it is gone before its next step.
-    let private stationaryTicks = 5
-
-    /// Whether a hostile is as good as rooted (#510): it threatens the tiles
-    /// in its weapon's range and a step past them, not the room. Never one
-    /// with no MOVE acting, which another body may pull.
-    let stationary (hostile: HostileInfo) : bool =
-        Gait.ticks Gait.plain (gait hostile)
-        |> Option.exists (fun ticks -> ticks >= stationaryTicks)
+    /// Whether a hostile is as good as rooted (`Gait.stationary`).
+    let stationary (hostile: HostileInfo) : bool = Gait.stationary (gait hostile)
 
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither

@@ -29,8 +29,7 @@ let private targetsOf (kinds: Map<string, TargetKind>) : Lazy<Set<string>> =
 /// Classify an engine part-type string into the Core's body vocabulary:
 /// the reverse of the Core's one part-name table. The engine's part set is
 /// closed, so Tough is an unreachable fallback that keeps it total.
-let private bodyPartOf =
-    reverseOf partName allBodyParts >> Option.defaultValue Tough
+let bodyPartOf = reverseOf partName allBodyParts >> Option.defaultValue Tough
 
 /// Classify an engine STRUCTURE_* string into the Core's built kinds; a
 /// string the table lacks is Other. Classified once so the rules stay in Core.

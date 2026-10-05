@@ -17,16 +17,18 @@ type GlanceCreep =
     }
 
 /// One hostile creep in a visible room. `Armed` is any Attack, RangedAttack
-/// or Heal part in its body; `Hurts`, an Attack or RangedAttack part with hits
-/// left (what can hurt a creep); `Breaks`, a Work or Claim part with hits left
-/// (what can take down a structure or a controller).
+/// or Heal part in its body; `Weapon`, the range of its Attack and
+/// RangedAttack parts with hits left (`weaponRangeOf`: what can hurt a creep);
+/// `Breaks`, a Work or Claim part with hits left (what can take down a
+/// structure or a controller); `Gait`, its pace (`Gait.ofBody`).
 type GlanceHostile =
     {
         Tile: RoomPos
         Owner: string
         Armed: bool
-        Hurts: bool
+        Weapon: int option
         Breaks: bool
+        Gait: Gait
     }
 
 /// What a tick reads off `Game` directly, before any World is built: our
@@ -365,6 +367,16 @@ let private keeper = "Source Keeper"
 /// before a tick is decided.
 let private nearRange = Engine.rangedRange + 2
 
+/// How close a hostile may come before a tick is decided: a rooted one
+/// (`Gait.stationary`) reaches a step past its weapon's range, a swing being
+/// adjacent for a body that only dismantles or claims (#521), as Threat's
+/// Reach reads it; any other `nearRange`.
+let private reachOf (hostile: GlanceHostile) : int =
+    if Gait.stationary hostile.Gait then
+        defaultArg hostile.Weapon Engine.meleeRange + Engine.meleeRange
+    else
+        nearRange
+
 /// The tiles of ours the near rule measures from: our creeps' and our
 /// structures', apart, for a body may threaten one and not the other.
 type private Ours =
@@ -379,20 +391,23 @@ let private oursOf (now: Glance) : Ours =
         StructureTiles = now.Structures
     }
 
-/// The near rule: a hostile within `nearRange` of something of ours it can
-/// hurt — a creep or a structure for a body that hurts creeps, a structure
-/// for one that can dismantle or claim. A scout, a hauler or a healer near
-/// our creeps changes no decision (#462; user, 2026-10-04: a Trepidimous
-/// worker beside a harassing ranger held every tick full).
+/// The near rule: a hostile within its reach (`reachOf`) of something of ours
+/// it can hurt — a creep or a structure for a body that hurts creeps, a
+/// structure for one that can dismantle or claim. A scout, a hauler or a
+/// healer near our creeps changes no decision (#462; user, 2026-10-04: a
+/// Trepidimous worker beside a harassing ranger held every tick full).
 let private within (ours: Ours) (hostile: GlanceHostile) : bool =
+    let reach = reachOf hostile
+
     let near (tiles: RoomPos list) =
         tiles
         |> List.exists (fun tile ->
             match RoomPos.range hostile.Tile tile with
-            | Some r -> r <= nearRange
+            | Some r -> r <= reach
             | None -> false)
 
-    (hostile.Hurts && (near ours.CreepTiles || near ours.StructureTiles))
+    (Option.isSome hostile.Weapon
+     && (near ours.CreepTiles || near ours.StructureTiles))
     || (hostile.Breaks && near ours.StructureTiles)
 
 /// The colonies a cold reset decides on its own tick and the ones it leaves
@@ -459,6 +474,8 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
             |> List.filter (fun (name, _) -> Set.contains name last.Shooters)
             |> List.map (fun (_, creep) -> creep.Tile)
 
+        // Our shooters' reach, not the hostile's: a rooted body is still
+        // within their shot.
         let besideAShooter (hostile: GlanceHostile) =
             shooting
             |> List.exists (fun tile ->

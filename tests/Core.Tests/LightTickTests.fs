@@ -40,12 +40,16 @@ let private last: LastFull =
             SpawnCreep("Spawn1", [ Work; Carry; Move ], "next")
         ]
 
+/// A hostile at a MOVE a part: never stationary.
+let private mobile: Gait = { Weight = 1; Moves = 1 }
+
 let private hostile x y owner armed : GlanceHostile =
     {
         Tile = tile x y
         Owner = owner
         Armed = armed
-        Hurts = armed
+        Weapon = if armed then Some Engine.meleeRange else None
+        Gait = mobile
         Breaks = false
     }
 
@@ -279,7 +283,8 @@ let forcedTests =
                                     Tile = RoomPos.at harassed { X = x; Y = 10 }
                                     Owner = "Trepidimous"
                                     Armed = true
-                                    Hurts = true
+                                    Weapon = Some Engine.meleeRange
+                                    Gait = mobile
                                     Breaks = false
                                 }
                             ]
@@ -345,7 +350,8 @@ let forcedTests =
                                     Tile = tile
                                     Owner = "Trepidimous"
                                     Armed = true
-                                    Hurts = true
+                                    Weapon = Some Engine.meleeRange
+                                    Gait = mobile
                                     Breaks = true
                                 }
                             ]
@@ -620,6 +626,42 @@ let forcedTests =
                     "a hauler at the gate takes nothing down"
             }
 
+            test "a stationary hostile is near within a step past its weapon's range" {
+                // Live t964,5xx: Trepidimous' 14A1M sat 4 tiles from our hauler in
+                // W18S25 and held ~31% of ticks full (#521). No structure of ours
+                // in the room, so it is the near rule's and not the armed rule's.
+                let bodyAt (weapons, part, moves) r =
+                    let body = List.replicate weapons part @ List.replicate moves Move
+
+                    { stepped with
+                        Structures = []
+                        Hostiles =
+                            [
+                                { hostile (10 + r) 10 "Trepidimous" true with
+                                    Weapon = HostileInfo.weaponRangeOf body
+                                    Gait = Gait.ofBody body body
+                                }
+                            ]
+                    }
+
+                let nearAt body r =
+                    let forced = LightTick.forced last (bodyAt body r)
+                    forced = Some(LightForce.HostileNear(room, "Trepidimous"))
+
+                let rootedSwing = 14, Attack, 1
+                let rootedShot = 14, RangedAttack, 1
+
+                Expect.isFalse (nearAt rootedSwing 3) "a rooted swing three tiles off"
+                Expect.isFalse (nearAt rootedSwing 4) "a rooted swing four tiles off"
+                Expect.isTrue (nearAt rootedSwing 2) "a rooted swing a step and a swing off"
+                Expect.isTrue (nearAt rootedShot 4) "a rooted shot a step and a shot off"
+                Expect.isFalse (nearAt rootedShot 5) "a rooted shot five tiles off"
+
+                Expect.isTrue
+                    (nearAt (10, Attack, 10) 4)
+                    "a body at a MOVE a part keeps the usual reach"
+            }
+
             test "a MOVE-only hostile within range of our creep forces nothing" {
                 let scout =
                     { stepped with
@@ -671,7 +713,8 @@ let forcedTests =
                                     Tile = RoomPos.at "W2N1" { X = 10; Y = 10 }
                                     Owner = "Rival"
                                     Armed = true
-                                    Hurts = true
+                                    Weapon = Some Engine.meleeRange
+                                    Gait = mobile
                                     Breaks = false
                                 }
                             ]
@@ -959,7 +1002,8 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
         Tile = RoomPos.at roomName { X = x; Y = y }
         Owner = owner
         Armed = armed
-        Hurts = armed
+        Weapon = if armed then Some Engine.meleeRange else None
+        Gait = mobile
         Breaks = false
     }
 
