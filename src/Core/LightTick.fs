@@ -556,11 +556,19 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
             else
                 None)
 
+    // Lean (bucket short): a body hurt away from the rooms we hold structures
+    // in forces nothing — a ranger chipped in a fight off home kept every tick
+    // full and emptied the bucket (live t979,7xx). #549 replaces this rule.
     let hitsLost () =
+        let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
+
         now.Creeps
         |> Map.tryPick (fun name creep ->
             match Map.tryFind name last.Hits with
-            | Some before when creep.Hits < before -> Some(LightForce.HitsLost name)
+            | Some before when
+                creep.Hits < before && (not now.Lean || Set.contains creep.Tile.Room homes)
+                ->
+                Some(LightForce.HitsLost name)
             | _ -> None)
 
     let controllerChanged () =
