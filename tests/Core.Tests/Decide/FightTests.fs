@@ -853,20 +853,25 @@ let targetTests =
                         Fought = if held then foughtAt (time - 10) else Map.empty
                     }
 
-                let swings colony =
-                    (decide
-                        colony
-                        (Map.ofList [ "brawler-1", taskId (Fight "W1N2") ])
-                        Set.empty
-                        None)
-                        .Intents
-                    |> List.contains (AttackCreep("brawler-1", "Prism305"))
+                let decided colony =
+                    decide colony (Map.ofList [ "brawler-1", taskId (Fight "W1N2") ]) Set.empty None
 
-                Expect.isTrue (swings (colony true)) "the brawler beside it swings"
+                Expect.contains
+                    (decided (colony true)).Intents
+                    (AttackCreep("brawler-1", "Prism305"))
+                    "the brawler beside it swings"
 
-                Expect.isFalse
-                    (swings (colony false))
-                    "the premise: with no Fight it is no raid's healer"
+                Expect.equal
+                    (Map.tryFind "brawler-1" (decided (colony true)).Assignments)
+                    (Some(taskId (Fight "W1N2")))
+                    "holding the Fight"
+
+                // With no Fight it is no Fight's target; a declared enemy's body
+                // beside it is still struck, by the weapon reflex (#535).
+                Expect.notEqual
+                    (Map.tryFind "brawler-1" (decided (colony false)).Assignments)
+                    (Some(taskId (Fight "W1N2")))
+                    "the premise: with no Fight there is none to hold"
             }
         ]
 

@@ -629,40 +629,98 @@ let intents (last: LastFull) (now: Glance) : Intent list =
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
 
+    let tiles =
+        now.Hostiles |> List.map (fun hostile -> hostile.Id, hostile.Tile) |> Map.ofList
+
+    // The aim's target's tile and the body's reach, for an aim it holds.
+    let aimed (aim: Intent) =
+        match aim with
+        | AttackCreep(_, target) ->
+            Map.tryFind target tiles |> Option.map (fun tile -> tile, Engine.meleeRange)
+        | RangedAttackCreep(_, target) ->
+            Map.tryFind target tiles |> Option.map (fun tile -> tile, Engine.rangedRange)
+        | _ -> None
+
+    let strikes (act: Intent) =
+        match act with
+        | AttackCreep _
+        | RangedAttackCreep _ -> true
+        | _ -> false
+
     [
         for KeyValue(name, creep) in now.Creeps do
-            match creep.Inward with
-            | Some direction when Seam.onRing (RoomPos.pos creep.Tile) ->
-                yield MoveCreep(name, direction)
-            | _ -> ()
+            let inward =
+                match creep.Inward with
+                | Some direction when Seam.onRing (RoomPos.pos creep.Tile) -> Some direction
+                | _ -> None
+
+            match inward with
+            | Some direction -> yield MoveCreep(name, direction)
+            | None -> ()
+
+            // The full tick's target choice again off the glance (#535): the
+            // first aim in reach, else the head (`Emitter.pickStrike`). It
+            // replaces the full tick's own strike, which named the target in
+            // reach where the bodies stood then.
+            let pick =
+                Map.tryFind name aims
+                |> Option.bind (
+                    Decide.Emitter.pickStrike (fun aim ->
+                        aimed aim
+                        |> Option.bind (fun (tile, reach) ->
+                            RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
+                        |> Option.defaultValue false)
+                )
 
             // The full tick's own priority (`IntentPlan.arbitrate`): its
-            // chosen acts, an aim on a channel none of them holds, then a
+            // chosen acts, the aim on a channel none of them holds, then a
             // replayed heal on what is left — a swing beats a pre-heal.
             let reflexes, chosen =
                 Map.tryFind name acts
                 |> Option.defaultValue []
+                |> List.filter (fun act -> Option.isNone pick || not (strikes act))
                 |> List.partition IntentPlan.isReflex
 
-            let aimed =
-                Map.tryFind name aims
-                |> Option.defaultValue []
-                |> List.fold
-                    (fun taken aim ->
-                        if taken |> List.forall (IntentPlan.compatible aim) then
-                            taken @ [ aim ]
-                        else
-                            taken)
-                    chosen
+            let issued =
+                match pick with
+                | Some(aim, reaches) when chosen |> List.forall (IntentPlan.compatible aim) ->
+                    Some(aim, reaches)
+                | _ -> None
 
-            yield! IntentPlan.arbitrate aimed reflexes
+            yield!
+                IntentPlan.arbitrate (chosen @ (issued |> Option.map fst |> Option.toList)) reflexes
 
-            match Map.tryFind name last.Steps with
-            | Some(first, second) when first = creep.Tile ->
-                match directionTo (RoomPos.pos first) (RoomPos.pos second) with
-                | Some direction -> yield MoveCreep(name, direction)
-                | None -> ()
-            | _ -> ()
+            // A melee body steps onto the target it swings at, as on the full
+            // tick (`Emitter.glueStep`), in place of its step plan's step:
+            // never a squad's cast, whose movement is its Formation's, nor
+            // off our structure's tile (a rampart), and never onto a tile
+            // another melee body of theirs swings at.
+            let glued =
+                match issued with
+                | Some(AttackCreep _ as aim, true) when
+                    Option.isNone (Decide.Bodies.squadRoleByName name)
+                    ->
+                    let melee =
+                        now.Hostiles
+                        |> List.filter (fun h -> h.Armed && h.Weapon = Some Engine.meleeRange)
+                        |> List.map (fun h -> h.Tile)
+
+                    let onRampart = List.contains creep.Tile now.Structures
+
+                    aimed aim
+                    |> Option.bind (fun (tile, _) ->
+                        Decide.Emitter.glueStep creep.Tile tile onRampart melee)
+                | _ -> None
+
+            match inward, glued with
+            | None, Some direction -> yield MoveCreep(name, direction)
+            | _ ->
+                match Map.tryFind name last.Steps with
+                | Some(first, second) when first = creep.Tile ->
+                    match directionTo (RoomPos.pos first) (RoomPos.pos second) with
+                    | Some direction -> yield MoveCreep(name, direction)
+                    | None -> ()
+                | _ -> ()
 
         yield!
             standing

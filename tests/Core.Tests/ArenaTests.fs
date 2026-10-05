@@ -944,6 +944,134 @@ let private pouredBack (trace: TickTrace list) =
                 Some(creep, drawn, tick)
             | _ -> None))
 
+// ---- arena capture w11s28-invasion (#535) -----------------------------------
+// `npm run capture -- W11S28 973670 --rooms W12S28 --name w11s28Invasion`.
+// The room-history replay at t973,670, the state after that tick ran: arena
+// tick 0 runs as t973,671.
+//   W11S28  https://screeps.com/room-history/shardSeason/W11S28/973600.json
+//   W12S28  https://screeps.com/room-history/shardSeason/W12S28/973600.json
+// Left out, as the capture says: Healers, ExitWatches and Sightings start
+// empty; W11S28's reservation, roads and drops are not placed; two invaders'
+// boosts are not modelled. W12S28 is cut to what the fight reads: its
+// spawns, towers and storage. The two guards hold no verdict that early in
+// the Transition log, so they start unassigned.
+
+/// W11S28 at t973,670 (#535's "Why"): an NPC invasion — two 2T5M3R shooters,
+/// each followed by a 5M5H healer, and a small mixed body — answered by two
+/// 30-part melee guards cast at W12S28, one at the east exit and one by the
+/// spawns. Live, the first fought alone, had its MOVE shot off and sat rooted.
+/// The shooters keep range (`Kite`), the healers follow them, the small one
+/// walks in (`Invade`).
+let private w11s28Invasion () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let w11s28 =
+        room "W11S28"
+        |> withStructures [ structureOf "container" None 120_100 250_000 { X = 32; Y = 14 } ]
+
+    let w12s28 =
+        room "W12S28"
+        |> withController Ownership.Ours None 7 6
+        |> withControllerClocks 0 0 149_922 10_730_254
+        |> withSpawn "Spawn1" { X = 12; Y = 40 } 5_600
+        |> withSpawn "Spawn6" { X = 18; Y = 34 } 5_600
+        |> withStructures
+            [
+                for x, y in [ 10, 36; 10, 40; 16, 46 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 14; Y = 42 } with
+                    Energy = 29_037
+                }
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W12S28" ])
+
+    let invader = Side.Npc "Invader"
+    let shooter = parts [ Tough, 2; Move, 4; RangedAttack, 3; Move, 1 ]
+    let healer = parts [ Move, 4; Heal, 5; Move, 1 ]
+    let guard = parts [ Tough, 3; Move, 15; Attack, 9; Heal, 3 ]
+
+    let bodies: Body list =
+        [
+            // live: healed→12,19; then closes and dies to the first guard.
+            { body
+                  "invader_W11S28_735"
+                  invader
+                  (parts [ Tough, 2; Move, 4; RangedAttack, 1; Work, 1; Attack, 1; Move, 1 ])
+                  (at "W11S28" 10 22)
+                  (Some Invade) with
+                TicksToLive = 1_373
+            }
+            { body "invader_W11S28_768" invader shooter (at "W11S28" 11 19) (Some(Kite(Nearest, 3))) with
+                TicksToLive = 1_373
+            }
+            { body "invader_W11S28_779" invader shooter (at "W11S28" 10 19) (Some(Kite(Nearest, 3))) with
+                TicksToLive = 1_373
+            }
+            { body
+                  "invader_W11S28_495"
+                  invader
+                  healer
+                  (at "W11S28" 12 18)
+                  (Some(Follow "invader_W11S28_768")) with
+                TicksToLive = 1_373
+            }
+            { body
+                  "invader_W11S28_657"
+                  invader
+                  healer
+                  (at "W11S28" 12 19)
+                  (Some(Follow "invader_W11S28_779")) with
+                TicksToLive = 1_373
+            }
+            { body "guard-973545-Spawn1" Side.Ours guard (at "W12S28" 47 33) None with
+                TicksToLive = 1_463
+            }
+            { body "guard-973545-Spawn6" Side.Ours guard (at "W12S28" 19 39) None with
+                TicksToLive = 1_463
+            }
+            // The economy is staffed live; one hauler of the capture's stands
+            // for it, so no supply floor jumps the fighting rows' queue.
+            { body
+                  "hauler-972391-Spawn1"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W12S28" 17 34)
+                  None with
+                TicksToLive = 363
+            }
+        ]
+
+    let a = arena 973_671 [ w11s28; w12s28 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                Towered = Set.ofList [ "W12S28" ]
+                // Nothing of ours stands in W11S28 at the tick: live, the
+                // raid was remembered (the threatened latch the guards were
+                // cast on at t973,545), not seen.
+                Raids =
+                    Map.ofList
+                        [
+                            "W12S28",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Threatened =
+                                    Map.ofList
+                                        [
+                                            "W11S28",
+                                            {
+                                                Until = 973_545 + Engine.creepLifetime
+                                            }
+                                        ]
+                            }
+                        ]
+            }
+    }
+
 [<Tests>]
 let arenaScenarioTests =
     testList
@@ -960,11 +1088,122 @@ let arenaScenarioTests =
                     $"a load goes on to a sink, never back where it came from\n{describe trace}"
             }
 
+            // Reproduced live before #535 (main feaee027, no casts): both guards
+            // took the Guard and the first went in alone at t6, swung the
+            // small mixed body down and stood kept off by the shooters, the
+            // second in at t32. Now: these are Invaders, penned in their room,
+            // so a guard's swing reaches them as `canStrike` reads them (the
+            // review's decision): the room stays the guard row's. The nearer
+            // guard walks in (#366) and, stepping onto each target it swings
+            // at, runs the shooters into the room's edges; with the second it
+            // kills the whole invasion, neither shot rooted, and no ranger is
+            // cast. A player's shooters as quick as the guard are the ranger
+            // row's (`engagementTests`).
+            test
+                "#535 capture t973,670: the W11S28 invasion is run down by the two guards, penned Invaders being in a melee's reach" {
+                let _, trace = w11s28Invasion () |> withCasts [ "guard"; "ranger" ] |> run 300
+                let failure = describe trace
+
+                let born =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | Born id -> Some id
+                            | _ -> None))
+
+                Expect.isEmpty born $"nothing more is cast\n{failure}"
+
+                for invader in
+                    [
+                        "invader_W11S28_735"
+                        "invader_W11S28_768"
+                        "invader_W11S28_779"
+                        "invader_W11S28_495"
+                        "invader_W11S28_657"
+                    ] do
+                    Expect.isSome (diedOn invader trace) $"{invader} dies\n{failure}"
+
+                for guard in [ "guard-973545-Spawn1"; "guard-973545-Spawn6" ] do
+                    Expect.isNone (diedOn guard trace) $"{guard} lives\n{failure}"
+            }
+
+            // #535 invariant 3, the melee's rule: attacks resolve before moves,
+            // so a guard swinging at the body beside it steps onto that body's
+            // tile too. The move lands when the body steps away and fails
+            // harmlessly when it stays.
+            test
+                "a melee guard beside a raider that steps away ends each tick beside it, and beside one that stays it stands and swings" {
+                let world (behaviour: Behaviour) =
+                    let home =
+                        room "W12S28"
+                        |> withController Ownership.Ours None 7 0
+                        |> withSpawn "Spawn1" { X = 12; Y = 38 } 5600
+
+                    let outpost = room "W12S27"
+
+                    let declared =
+                        { colony "W12S28" with
+                            Outposts = [ outpostOf outpost.Capture ]
+                        }
+
+                    let guard =
+                        body
+                            "guard-1-Spawn1"
+                            Side.Ours
+                            (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                            (RoomPos.at "W12S27" { X = 19; Y = 25 })
+                            None
+
+                    let raider =
+                        body
+                            "invader-1"
+                            (Side.Npc "Invader")
+                            Fabot.Core.Tests.Decide.Fixtures.smallMelee
+                            (RoomPos.at "W12S27" { X = 20; Y = 25 })
+                            (Some behaviour)
+
+                    arena 900_000 [ home; outpost ] [ declared ] [ guard; raider ]
+
+                let _, fleeing = world (Do [ Act.Move Right ]) |> run 6
+                let failure = describe fleeing
+
+                for (tick, raider) in pathOf "invader-1" fleeing do
+                    let guard =
+                        pathOf "guard-1-Spawn1" fleeing |> List.find (fst >> (=) tick) |> snd
+
+                    Expect.equal
+                        (RoomPos.range guard.At raider.At)
+                        (Some 1)
+                        $"t{tick}: beside it again\n{failure}"
+
+                Expect.isLessThan
+                    (pathOf "invader-1" fleeing |> List.last |> snd |> (fun s -> s.Hits))
+                    (Engine.partHits * List.length Fabot.Core.Tests.Decide.Fixtures.smallMelee)
+                    $"and struck as it goes\n{failure}"
+
+                let _, staying = world Hold |> run 4
+                let failure = describe staying
+
+                Expect.equal
+                    (pathOf "guard-1-Spawn1" staying
+                     |> List.map (fun (_, s) -> s.At)
+                     |> List.distinct)
+                    [ RoomPos.at "W12S27" { X = 19; Y = 25 } ]
+                    $"beside one that stays the step fails and it stands\n{failure}"
+
+                // Its swing and the strike-back its ATTACK lands on the
+                // raider's own swing, every tick.
+                Expect.equal
+                    (pathOf "invader-1" staying |> List.map (fun (_, s) -> s.Hits))
+                    [ 820; 640; 460; 280 ]
+                    $"and swings every tick\n{failure}"
+            }
             // The Brief's S7, rule 1 (a hostile no heal reaches is read live): the
-            // guard swings the invader down to its last part, a MOVE, and
-            // leaves it there unarmed, its room's Guard gone; it no longer
-            // kills it.
-            test "an outpost guard walks in and disarms a smallMelee invader, as live" {
+            // guard swings the invader down to its last part, a MOVE, unarmed,
+            // and its room's Guard as a raid's goes. #535 flips what S7 left:
+            // the fight it began is fought to the death, so it kills it.
+            test "an outpost guard walks in, disarms a smallMelee invader and fights on to kill it" {
                 let invader =
                     body
                         "invader-1"
@@ -975,10 +1214,7 @@ let arenaScenarioTests =
 
                 let _, trace = outpostRaid invader |> run 40
 
-                Expect.equal
-                    (hitsOf "invader-1" trace |> List.tryLast)
-                    (Some Engine.partHits)
-                    $"the invader is left its last part, a MOVE\n{describe trace}"
+                Expect.isSome (diedOn "invader-1" trace) $"the invader dies\n{describe trace}"
 
                 Expect.isNone (diedOn "guard-1-Spawn1" trace) "the guard lives"
             }
@@ -2938,11 +3174,14 @@ let arenaBorderTests =
             }
 
             test "#450: a guard holds the exit a kiter left by and hits it on re-entry" {
+                // Seven HEAL out-heal the kiter's 80 a tick: a guard the kiter
+                // out-damages, and cannot strike back at range, flees (#533,
+                // #535) instead of holding.
                 let guard =
                     body
                         "guard-1-Spawn8"
                         Side.Ours
-                        (parts [ Tough, 5; Move, 25; Attack, 15; Heal, 5 ])
+                        (parts [ Tough, 3; Move, 25; Attack, 15; Heal, 7 ])
                         (RoomPos.at "W17S25" { X = 14; Y = 17 })
                         None
 
@@ -2961,7 +3200,20 @@ let arenaBorderTests =
                                 ]
                         ))
 
-                let _, trace = westBorder [ guard; kiter ] |> run 45
+                // The guard already holds the outpost's Guard (#535): a kiter as
+                // quick as it is the ranger row's to answer, but the fight the
+                // guard holds is its own while it can strike the kiter.
+                let start =
+                    let a = westBorder [ guard; kiter ]
+
+                    { a with
+                        Carried =
+                            { a.Carried with
+                                Assignments = Map.ofList [ "guard-1-Spawn8", "guard:W17S25" ]
+                            }
+                    }
+
+                let _, trace = start |> run 45
                 let back = crossingsInto "Kiter1" "W17S25" trace
                 Expect.isNonEmpty back $"the kiter came back\n{describe trace}"
 
@@ -3230,6 +3482,346 @@ let arenaBorderTests =
                     Expect.isTrue
                         (pathOf anchor trace |> List.exists (fun (_, s) -> s.At = seat))
                         $"beside the {label}, the anchor reaches its seat\n{failure}"
+            }
+        ]
+
+// ---- arena capture synapse-beside-ranger (#535) ----------------------------
+// `npm run capture -- W17S26 965400 --rooms W17S25,W15S28 --name synapse`.
+// The room-history replay at t965,400: arena tick 0 runs as t965,401.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/965400.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/965400.json
+//   W15S28  https://screeps.com/room-history/shardSeason/W15S28/965400.json
+// Left out: the Raid log, ArmedSeen, Healers and Sightings start empty; roads,
+// a ruin and tombstones are not placed.
+
+/// W17S26 at t965,400 (#535, today's combat stats): Synapse673, 13 RANGED_ATTACK on
+/// 7 MOVE, standing still and shooting ranger-965017 beside it, which had its
+/// MOVE shot off, 4 RANGED_ATTACK and 7 HEAL left, healed itself and never shot
+/// until it died at t965,417; Synapse673 never lost a hit.
+let private synapseBeside () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures [ structureOf "container" None 90_000 250_000 { X = 27; Y = 9 } ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 4 2
+        |> withSafeModeCooldown 981_420
+        |> withControllerClocks 0 0 39_876 32_600
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 800
+        |> withStructures
+            [
+                for x, y in [ 11, 25; 11, 27; 12, 28; 14, 26; 15, 29; 16, 28; 16, 30 ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 66_200 250_000 { X = 16; Y = 34 }
+                { structureOf "container" None 125_200 250_000 { X = 17; Y = 20 } with
+                    Energy = 532
+                }
+                structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 12; Y = 30 }
+                structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 14; Y = 30 }
+                { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 15; Y = 27 } with
+                    Energy = 42
+                }
+                { structureOf "rampart" (Some Side.Ours) 781 3_000_000 { X = 2; Y = 15 } with
+                    NextDecay = 965_403
+                }
+                { structureOf "rampart" (Some Side.Ours) 96_901 3_000_000 { X = 2; Y = 17 } with
+                    NextDecay = 965_486
+                }
+                { structureOf "rampart" (Some Side.Ours) 35_031 3_000_000 { X = 2; Y = 18 } with
+                    NextDecay = 965_491
+                }
+                { structureOf "rampart" (Some Side.Ours) 54_971 3_000_000 { X = 2; Y = 19 } with
+                    NextDecay = 965_463
+                }
+                { structureOf "rampart" (Some Side.Ours) 7_731 3_000_000 { X = 2; Y = 20 } with
+                    NextDecay = 965_465
+                }
+                { structureOf "rampart" (Some Side.Ours) 14_021 3_000_000 { X = 2; Y = 23 } with
+                    NextDecay = 965_490
+                }
+                { structureOf "rampart" (Some Side.Ours) 3_141 3_000_000 { X = 2; Y = 24 } with
+                    NextDecay = 965_452
+                }
+                { structureOf "rampart" (Some Side.Ours) 14_601 3_000_000 { X = 2; Y = 25 } with
+                    NextDecay = 965_469
+                }
+                { structureOf "rampart" (Some Side.Ours) 1_041 3_000_000 { X = 2; Y = 26 } with
+                    NextDecay = 965_484
+                }
+                { structureOf "rampart" (Some Side.Ours) 2_501 3_000_000 { X = 2; Y = 27 } with
+                    NextDecay = 965_433
+                }
+                { structureOf "rampart" (Some Side.Ours) 11_701 3_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 965_468
+                }
+                { structureOf "rampart" (Some Side.Ours) 6_001 3_000_000 { X = 14; Y = 28 } with
+                    NextDecay = 965_444
+                }
+                { structureOf "rampart" (Some Side.Ours) 66_711 3_000_000 { X = 16; Y = 44 } with
+                    NextDecay = 965_432
+                }
+                { structureOf "rampart" (Some Side.Ours) 56_301 3_000_000 { X = 17; Y = 20 } with
+                    NextDecay = 965_489
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_201 3_000_000 { X = 17; Y = 44 } with
+                    NextDecay = 965_434
+                }
+                { structureOf "rampart" (Some Side.Ours) 3_601 3_000_000 { X = 18; Y = 44 } with
+                    NextDecay = 965_430
+                }
+                { structureOf "rampart" (Some Side.Ours) 19_161 3_000_000 { X = 32; Y = 31 } with
+                    NextDecay = 965_443
+                }
+                { structureOf "rampart" (Some Side.Ours) 1_461 3_000_000 { X = 32; Y = 32 } with
+                    NextDecay = 965_461
+                }
+                towerOf Side.Ours { X = 13; Y = 29 } 780
+            ]
+        |> withSite Side.Ours "road" None 0 { X = 21; Y = 32 }
+        |> withSite Side.Ours "road" None 0 { X = 22; Y = 33 }
+        |> withSite Side.Ours "road" None 0 { X = 23; Y = 34 }
+        |> withSite Side.Ours "road" None 0 { X = 22; Y = 35 }
+        |> withSite Side.Ours "road" None 0 { X = 21; Y = 36 }
+        |> withSite Side.Ours "road" None 200 { X = 20; Y = 35 }
+        |> withSite Side.Ours "road" None 200 { X = 17; Y = 36 }
+        |> withSite Side.Ours "road" None 0 { X = 18; Y = 37 }
+        |> withSite Side.Ours "road" None 0 { X = 19; Y = 38 }
+        |> withSite Side.Ours "road" None 0 { X = 18; Y = 39 }
+        |> withSite Side.Ours "road" None 0 { X = 17; Y = 38 }
+        |> withSite Side.Ours "road" None 180 { X = 16; Y = 37 }
+        |> withSite Side.Ours "road" None 988 { X = 17; Y = 40 }
+        |> withSite Side.Ours "road" None 0 { X = 19; Y = 30 }
+        |> withSite Side.Ours "road" None 0 { X = 17; Y = 30 }
+        |> withSite Side.Ours "road" None 0 { X = 18; Y = 29 }
+        |> withSite Side.Ours "storage" None 0 { X = 13; Y = 27 }
+        |> withSite Side.Ours "extension" None 0 { X = 13; Y = 25 }
+        |> withSite Side.Ours "extension" None 0 { X = 13; Y = 31 }
+        |> withSite Side.Ours "extension" None 0 { X = 15; Y = 31 }
+        |> withSite Side.Ours "extension" None 0 { X = 17; Y = 29 }
+        |> withSite Side.Ours "extension" None 750 { X = 17; Y = 31 }
+        |> withSite Side.Ours "extension" None 1_346 { X = 10; Y = 24 }
+        |> withSite Side.Ours "extension" None 0 { X = 10; Y = 26 }
+        |> withSite Side.Ours "extension" None 0 { X = 10; Y = 28 }
+        |> withSite Side.Ours "extension" None 0 { X = 10; Y = 30 }
+        |> withSite Side.Ours "extension" None 1_765 { X = 12; Y = 24 }
+        |> withSite Side.Ours "rampart" None 0 { X = 2; Y = 16 }
+        |> withSite Side.Ours "road" None 0 { X = 10; Y = 29 }
+        |> withSite Side.Ours "road" None 0 { X = 11; Y = 30 }
+        |> withSite Side.Ours "road" None 0 { X = 10; Y = 27 }
+
+    let w15s28 =
+        room "W15S28"
+        |> withController Ownership.Ours None 7 5
+        |> withControllerClocks 0 0 150_000 5_645_583
+        |> withSpawn "Spawn3" { X = 18; Y = 30 } 5_600
+        |> withSpawn "Spawn8" { X = 17; Y = 35 } 5_600
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 24
+                        12, 26
+                        12, 32
+                        12, 34
+                        12, 36
+                        13, 25
+                        13, 27
+                        13, 29
+                        13, 31
+                        13, 33
+                        13, 35
+                        14, 28
+                        14, 32
+                        14, 34
+                        15, 25
+                        15, 31
+                        15, 33
+                        15, 35
+                        16, 26
+                        16, 32
+                        16, 34
+                        17, 25
+                        17, 27
+                        17, 33
+                        18, 26
+                        18, 28
+                        18, 32
+                        18, 34
+                        19, 27
+                        19, 31
+                        19, 33
+                        20, 26
+                        20, 28
+                        20, 30
+                        20, 32
+                        21, 27
+                        21, 29
+                        21, 31
+                        21, 33
+                        21, 35
+                        22, 26
+                        23, 25
+                        23, 27
+                        23, 35
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 12, 30; 14, 26; 14, 30; 15, 27; 15, 29; 16, 30 ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                        Id = $"extension-{x}-{y}-W15S28"
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 17, 31; 19, 29; 20, 34 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 141_100 250_000 { X = 6; Y = 29 } with
+                    Energy = 444
+                }
+                { structureOf "container" None 142_900 250_000 { X = 11; Y = 18 } with
+                    Energy = 228
+                }
+                structureOf "container" None 148_100 250_000 { X = 23; Y = 29 }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 29; Y = 12 }
+                { structureOf "rampart" (Some Side.Ours) 100_401 100_000_000 { X = 6; Y = 29 } with
+                    NextDecay = 965_414
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_101 100_000_000 { X = 11; Y = 18 } with
+                    NextDecay = 965_473
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_101 100_000_000 { X = 16; Y = 28 } with
+                    NextDecay = 965_432
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_201 100_000_000 { X = 17; Y = 29 } with
+                    NextDecay = 965_479
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_801 100_000_000 { X = 17; Y = 31 } with
+                    NextDecay = 965_474
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_301 100_000_000 { X = 17; Y = 35 } with
+                    NextDecay = 965_428
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_401 100_000_000 { X = 18; Y = 30 } with
+                    NextDecay = 965_449
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_401 100_000_000 { X = 19; Y = 29 } with
+                    NextDecay = 965_497
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_201 100_000_000 { X = 20; Y = 34 } with
+                    NextDecay = 965_490
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 17; Y = 29 } with
+                    Energy = 20_281
+                    Thorium = 41_977
+                }
+                structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 }
+            ]
+
+    // Today's declarations, not the tick's: spell them out if the test must outlive a roster change.
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S25"; "W15S28" ])
+
+    let bodies: Body list =
+        [
+            // live: rangedAttack→37,4 every tick, standing still.
+            { body
+                  "Synapse673"
+                  trepidimous
+                  (parts [ Move, 7; RangedAttack, 13 ])
+                  (at "W17S26" 36 3)
+                  (Some(Do [ Act.RangedAttack "ranger-965017-Spawn3" ])) with
+                TicksToLive = 831
+            }
+            // ranger-965017-Spawn3: live: 4 RANGED_ATTACK, 7 HEAL
+            { body
+                  "ranger-965017-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 21; RangedAttack, 14; Heal, 7 ])
+                  (at "W17S26" 37 4)
+                  None with
+                Hits = 1_018
+                TicksToLive = 1_241
+            }
+            // The other resident, at W17S25's controller; the economy of both
+            // homes is left out: it decides nothing of this fight.
+            { body
+                  "ranger-964741-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 21; RangedAttack, 14; Heal, 7 ])
+                  (at "W17S25" 16 36)
+                  None with
+                TicksToLive = 965
+            }
+        ]
+
+    let a = arena 965_401 [ w17s26; w17s25; w15s28 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                // The Transition log holds no verdict that early for any body:
+                // they start unassigned.
+                Assignments = Map.empty
+            }
+    }
+
+[<Tests>]
+let arenaRangerReflexTests =
+    testList
+        "arena capture synapse-beside-ranger"
+        [
+            // #535 (combat stats, 2026-10-06): four 4,900-energy rangers died in
+            // reach of their killer, healing themselves, never shooting.
+            // On main b6c986a1 it never shoots: unassigned (its Task gone) it
+            // strikes nothing, the heal reflex alone acting. Now the weapon
+            // reflex shoots every tick a RANGED_ATTACK still acts; its last
+            // one goes under 700 hits (the seven HEAL at its tail).
+            test
+                "#535 capture t965,400: a rooted ranger beside Synapse673 shoots it every tick a gun of its still acts" {
+                let _, trace = synapseBeside () |> run 12
+                let failure = describe trace
+                let ranger = "ranger-965017-Spawn3"
+                let healTail = 7 * Engine.partHits
+
+                // Each tick with the ranger's hits at its start, the capture's first.
+                let armedTicks =
+                    trace
+                    |> List.scan
+                        (fun _ t ->
+                            Some t,
+                            t.Bodies
+                            |> List.tryFind (fun b -> b.Id = ranger)
+                            |> Option.map (fun b -> b.Hits)
+                            |> Option.defaultValue 0)
+                        (None, 1_018)
+                    |> List.pairwise
+                    |> List.choose (fun ((_, before), (tick, _)) ->
+                        tick |> Option.filter (fun _ -> before > healTail))
+
+                Expect.isNonEmpty armedTicks $"the premise: it is armed a while\n{failure}"
+
+                for t in armedTicks do
+                    Expect.contains
+                        t.Ours
+                        (RangedAttackCreep(ranger, "Synapse673"))
+                        $"t{t.Tick}: it shoots\n{failure}"
             }
         ]
 

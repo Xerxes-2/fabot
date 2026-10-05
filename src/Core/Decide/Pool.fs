@@ -272,7 +272,9 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         | Guard room ->
             let brief = Threats.briefOf threats room
 
-            brief.Ground
+            // A holder mustering waits on its own ground (#535).
+            Map.tryFind creep brief.Stances
+            |> Option.orElse brief.Ground
             |> Option.defaultWith (fun () ->
                 match Atlas.sourceRingIn atlas room with
                 | ring when Set.isEmpty ring && brief.WalksIn ->
@@ -317,9 +319,15 @@ let private groundRoom (room: string) (area: Set<RoomPos>) =
 /// fall back to, and an empty ring is honestly nowhere to stand. It crosses a
 /// border where Flee never has to, so it prices through `travelCostToward`,
 /// the same Seam-band minimum every cross-room Task is ranked by.
+///
+/// A holder mustering for its Guard (#535) is priced toward its rally ground's
+/// room, as a squad's member is toward its own.
 let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
+    | Guard room when Map.containsKey creep (Threats.briefOf threats room).Stances ->
+        let area = areaFor threats atlas creep task
+        Atlas.travelCostToward atlas creep task (groundRoom room area) area
     | Guard room
     | Defend room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
     | Fight room
@@ -340,7 +348,7 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
 let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
     | Guard room
-    | Defend room -> Atlas.firstStepToward atlas creep task room area
+    | Defend room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | Fight room
     | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | _ -> Atlas.firstStep atlas creep task area

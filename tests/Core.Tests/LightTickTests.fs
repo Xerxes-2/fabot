@@ -264,6 +264,115 @@ let replayTests =
                     "a heal on a channel the shot leaves free stands beside it"
             }
 
+            test
+                "a guard with a target beside it and its head three off swings at the one beside it, and steps onto it" {
+                // The full tick's order, head first (`Emitter.aims`); the full
+                // tick swung at the head, then beside it, which has since
+                // stepped three off while another came beside the guard.
+                let guarded =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "guard" (creepAt 12 10 1000)
+                        Hostiles =
+                            [
+                                { hostile 15 10 "Trepidimous" true with
+                                    Id = "h-head"
+                                }
+                                { hostile 12 11 "Trepidimous" true with
+                                    Id = "h-near"
+                                }
+                            ]
+                    }
+
+                let full =
+                    { LightTick.lastFull
+                          guarded
+                          (Map.ofList [ "guard", (tile 12 10, tile 13 10) ])
+                          [ AttackCreep("guard", "h-head") ] with
+                        Aims = [ AttackCreep("guard", "h-head"); AttackCreep("guard", "h-near") ]
+                    }
+
+                let ofGuard =
+                    LightTick.intents full guarded
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | AttackCreep("guard", _)
+                        | MoveCreep("guard", _) -> true
+                        | _ -> false)
+
+                Expect.equal
+                    ofGuard
+                    [ AttackCreep("guard", "h-near"); MoveCreep("guard", Bottom) ]
+                    "the one in reach, not the head, and a step onto its tile in place of the plan's"
+
+                let gone =
+                    { guarded with
+                        Hostiles = [ List.head guarded.Hostiles ]
+                    }
+
+                Expect.equal
+                    (LightTick.intents full gone
+                     |> List.filter (fun intent ->
+                         match intent with
+                         | AttackCreep("guard", _)
+                         | MoveCreep("guard", _) -> true
+                         | _ -> false))
+                    [ AttackCreep("guard", "h-head"); MoveCreep("guard", Right) ]
+                    "with none in reach, the head, and the plan's step toward it"
+            }
+
+            test
+                "the melee's step onto its target never lands on an exit, off our rampart, beside a second melee, nor for a squad's cast" {
+                // `Emitter.glueStep`, the one rule both ticks read (#535).
+                Expect.equal
+                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) false [])
+                    (Some Right)
+                    "the premise: beside its target, it steps onto its tile"
+
+                Expect.isNone
+                    (Decide.Emitter.glueStep (tile 1 10) (tile 0 10) false [])
+                    "never onto an exit tile: the engine carries the body across"
+
+                Expect.isNone
+                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) true [])
+                    "never off our rampart"
+
+                Expect.isNone
+                    (Decide.Emitter.glueStep
+                        (tile 12 10)
+                        (tile 13 10)
+                        false
+                        [ tile 13 10; tile 14 11 ])
+                    "never onto a tile a second melee swings at"
+
+                let glanced name =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add name (creepAt 12 10 1000)
+                        Hostiles = [ hostile 13 10 "Trepidimous" true ]
+                    }
+
+                let stepsOf name =
+                    let now = glanced name
+
+                    let full =
+                        { LightTick.lastFull now Map.empty [] with
+                            Aims = [ AttackCreep(name, "h-1") ]
+                        }
+
+                    LightTick.intents full now
+                    |> List.filter (function
+                        | MoveCreep(who, _) -> who = name
+                        | _ -> false)
+
+                Expect.equal
+                    (stepsOf "guard-1")
+                    [ MoveCreep("guard-1", Right) ]
+                    "a guard steps onto it"
+
+                Expect.isEmpty
+                    (stepsOf "brawler-1-Spawn1")
+                    "a squad's brawler does not: its Formation moves it"
+            }
+
             test "a light tick never lays two acts on one channel of one creep" {
                 // The full tick's acts passed `IntentPlan`; a planned act or an
                 // aim on a channel one of them holds is dropped, and a next pour

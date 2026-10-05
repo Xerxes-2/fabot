@@ -1,5 +1,6 @@
 /// The colony's signature: the one line it writes onto a controller it
-/// stands beside, and the reflex that writes it.
+/// stands beside, and the reflex that writes it; and the weapon reflex (#535),
+/// which strikes beside any Task.
 module Fabot.Core.Tests.Decide.SignatureTests
 
 open Expecto
@@ -8,6 +9,7 @@ open Fabot.Core.Types
 open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
+open Fabot.Core.Tests.Decide.OutpostFixtures
 
 /// The signatures a tick emits, as (creep, controller, text).
 let private signatures intents =
@@ -176,5 +178,79 @@ let signatureTests =
                         Colony.signatures
                         (Colony.signatureFor room)
                         "a line off the list"
+            }
+        ]
+
+/// A ranger body as the ranger row casts it at an 800 bank.
+let private ranger name =
+    creepWith name 0 0 (bodyFor Bodies.rangerPattern 800)
+
+/// The raided outpost field with one hostile of this owner beside the body of
+/// ours standing at `beside`; `transit` takes the room's source away, so it is
+/// a room we neither mine nor hold.
+let private reflexField (transit: bool) (owner: string) (ours: CreepInfo) =
+    let hostile =
+        { hostileIn "W1N2" { X = 25; Y = 42 } smallMelee with
+            Owner = owner
+        }
+
+    let colony = raidedOutpost [ hostile ] |> withGuards [ ours, beside ]
+
+    if transit then { colony with Sources = [] } else colony
+
+[<Tests>]
+let weaponReflexTests =
+    testList
+        "the weapon reflex: every armed body strikes beside any Task, by one diplomacy rule (#535)"
+        [
+            // Live t974,080 (W18S25): ranger-973229 on Flee stood beside Sky320
+            // and only healed itself.
+            test
+                "a fleeing ranger beside a hostile in our outpost shoots it as it steps away; an idle guard swings" {
+                let result =
+                    decideFrom
+                        (Map.ofList [ "r-1", taskId Flee ])
+                        (reflexField false "raider" (ranger "r-1"))
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId Flee))
+                    "the premise: it flees"
+
+                Expect.contains
+                    result.Intents
+                    (RangedAttackCreep("r-1", "h-1"))
+                    "it shoots the hostile beside it"
+
+                Expect.isNonEmpty
+                    (moveIntents result.Intents |> List.filter (fst >> (=) "r-1"))
+                    "while it steps away"
+
+                let swung = decideOn (reflexField false "raider" (guard "g-1"))
+
+                Expect.contains
+                    swung.Intents
+                    (AttackCreep("g-1", "h-1"))
+                    "and an idle guard beside one swings at it"
+            }
+
+            test
+                "beside a neutral's armed creep in a transit room it does not shoot; beside an Invader anywhere it does" {
+                let shoots owner transit =
+                    (decideFrom
+                        (Map.ofList [ "r-1", taskId Flee ])
+                        (reflexField transit owner (ranger "r-1")))
+                        .Intents
+                    |> List.contains (RangedAttackCreep("r-1", "h-1"))
+
+                Expect.isFalse
+                    (shoots "raider" true)
+                    "a neutral's, in a room we neither mine nor hold: never"
+
+                Expect.isTrue (shoots "raider" false) "the same in our outpost: struck"
+                Expect.isTrue (shoots "Invader" true) "an Invader's anywhere"
+                Expect.isTrue (shoots "Trepidimous" true) "a declared enemy's anywhere"
+                Expect.isFalse (shoots "Source Keeper" false) "never a keeper, not provoked"
+                Expect.isFalse (shoots "Odiodin" false) "never an ally"
             }
         ]

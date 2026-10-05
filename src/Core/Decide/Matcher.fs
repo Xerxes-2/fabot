@@ -489,6 +489,27 @@ let matchCreeps
                     release (ReleaseReason.Rejected RejectReason.Threatened)
                 | Some pooled when outranked acc creep pooled -> release ReleaseReason.Outranked
                 | Some _ when Set.contains creep.Name called -> release ReleaseReason.Called
+                // The one hold rule (#535, `Threats.holdsFight`): a fight begun
+                // is kept while its holder can still strike a target there,
+                // whatever the room's kind, capacity or muster.
+                // It ends for a holder #533's flee takes: out-damaged where it
+                // stands and losing its own exchange there (a guard shot
+                // rooted beside shooters it can no longer reach).
+                | Some pooled when
+                    Threats.holdsFight view atlas threats creep pooled.Task
+                    && not (
+                        fleeing
+                        |> Option.exists (fun flee -> applicable view threats atlas creep flee)
+                        && (match pooled.Task with
+                            | Guard room
+                            | Fight room ->
+                                not (
+                                    Facts.bodyWins view room (partCount creep.Body) creep.Hits.Hits
+                                )
+                            | _ -> false)
+                    )
+                    ->
+                    Map.add name tid acc, hold loads tid, released
                 | Some pooled ->
                     let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 

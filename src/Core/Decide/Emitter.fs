@@ -591,26 +591,59 @@ let private glyphFor =
     | Defend _ -> "🧱"
     | Assault _ -> "🏰"
 
-/// The Threat a fighter acts on out of the ones standing in the room its Task
-/// names and passing the caller's own gate: first by the kill order
-/// (`Facts.killRank`, #451), then the one nearest a Post of that room, ties
-/// by id; with no Post standing, the nearest to the fighter. None
-/// where the room holds none, or where the projection places the guard nowhere.
-///
-/// The gate is the caller's and stands *ahead* of the choice, which narrows
+/// The one target choice (#535), every tick's: the first target in the kill
+/// order a body reaches, else the order's head, with whether it reaches it.
+/// The full tick strikes only one it reaches (`strikeOf`); the light tick
+/// picks again off its glance (`LightTick.intents`). In reach first narrows
 /// ADR-0056 decision 2 without overturning it: ordered the other way round, a
 /// guard standing on the ring of the second invader of a two-creep raid is
 /// handed the one nearest the Post, finds it three tiles off, and swings at
-/// nothing while the invader beside it deals 40 a tick. Where the nearest-Post
-/// Threat is in reach the two readings answer alike.
-let private guardTarget
+/// nothing while the invader beside it deals 40 a tick.
+let pickStrike (reaches: 'target -> bool) (order: 'target list) : ('target * bool) option =
+    match List.tryFind reaches order with
+    | Some target -> Some(target, true)
+    | None -> List.tryHead order |> Option.map (fun head -> head, false)
+
+/// A melee fighter's step onto the tile of the target it reaches (#535),
+/// beside its swing: attacks resolve before moves, and a move onto a tile
+/// still held fails harmlessly, so a body steps after a target that leaves and
+/// loses nothing beside one that stays. None off a tile beside it, from our
+/// rampart (`onRampart`: off it the body takes every strike), onto an exit
+/// tile (the engine carries a body ending a tick there across the border),
+/// or onto a tile another melee raider (`melee`, their tiles) swings at.
+let glueStep
+    (from: RoomPos)
+    (target: RoomPos)
+    (onRampart: bool)
+    (melee: RoomPos list)
+    : Direction option =
+    let struck =
+        melee
+        |> List.exists (fun other ->
+            other <> target
+            && RoomPos.range other target |> Option.exists (fun r -> r <= Engine.meleeRange))
+
+    match RoomPos.range from target with
+    | Some r when
+        r = Engine.meleeRange
+        && not onRampart
+        && not (Seam.onRing (RoomPos.pos target))
+        && not struck
+        ->
+        directionTo (RoomPos.pos from) (RoomPos.pos target)
+    | _ -> None
+
+/// The Threats a fighter may strike in a room, in its Selector's kill order
+/// (`Facts.killRank`, #451), then the one nearest a Post of that room, ties by
+/// id; with no Post standing, the nearest to the fighter. Empty where the room
+/// holds none.
+let private strikeOrder
     (view: ColonyView)
     atlas
     (targets: Selector)
     (fighting: Set<string>)
     (creep: CreepInfo)
     (room: string)
-    (among: HostileInfo -> bool)
     =
     let posts = Atlas.postsIn atlas room
 
@@ -636,9 +669,8 @@ let private guardTarget
     // In a harassment room the declared enemy's unarmed creeps are targets
     // too (#432), after its armed ones.
     view.Hostiles
-    |> List.filter (fun h ->
-        h.Pos.Room = room && targets.Shoots view residentRooms fighting h && among h)
-    |> targets.Head view room distance
+    |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots view residentRooms fighting h)
+    |> targets.Order view room distance
 
 /// A fighter's strike at a hostile: a ranger's shot, a guard's swing (#411).
 let private strikeAt (creep: CreepInfo) (hostile: HostileInfo) : Intent =
@@ -647,10 +679,37 @@ let private strikeAt (creep: CreepInfo) (hostile: HostileInfo) : Intent =
     else
         AttackCreep(creep.Name, hostile.Id)
 
-/// A Guard chooses one reachable target, melee for a guard and within three for
-/// a ranger (#411). Self-healing belongs to the
-/// colony-wide reflex, which reads damage and the same compatibility rules as
-/// execution. Movement remains the mover's alone.
+/// How far a body strikes: a ranger shoots within three (#411), a guard
+/// swings at what stands beside it.
+let private reachOf (creep: CreepInfo) =
+    if isRangerBody creep then
+        Engine.rangedRange
+    else
+        Engine.meleeRange
+
+/// What a body strikes in a room off its Selector (`pickStrike` over
+/// `strikeOrder`), and whether it reaches it from where it stands.
+let private strikeOf
+    (view: ColonyView)
+    atlas
+    (targets: Selector)
+    (fighting: Set<string>)
+    (creep: CreepInfo)
+    (room: string)
+    =
+    let reach = reachOf creep
+
+    let inReach (hostile: HostileInfo) =
+        Atlas.creepTile atlas creep.Name
+        |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
+        |> Option.exists (fun r -> r <= reach)
+
+    strikeOrder view atlas targets fighting creep room |> pickStrike inReach
+
+/// A Guard strikes the target `strikeOf` picks while it reaches it. Self-
+/// healing belongs to the colony-wide reflex, which reads damage and the same
+/// compatibility rules as execution. Movement is the mover's, but for the
+/// melee's step onto its target (`glue`).
 let private guardIntent
     (view: ColonyView)
     atlas
@@ -659,16 +718,8 @@ let private guardIntent
     (creep: CreepInfo)
     (room: string)
     : Intent option =
-    // A ranger shoots whatever stands within three (#411); a guard swings at
-    // what stands beside it.
     let ranged = isRangerBody creep
-
-    let reach = if ranged then Engine.rangedRange else Engine.meleeRange
-
-    let inReach (hostile: HostileInfo) =
-        Atlas.creepTile atlas creep.Name
-        |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
-        |> Option.exists (fun r -> r <= reach)
+    let reach = reachOf creep
 
     // With no creep to hit, a guard swings at a level-0 core beside it (#487).
     let coreBeside () =
@@ -683,8 +734,9 @@ let private guardIntent
                    |> Option.exists (fun r -> r <= reach))
             |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
 
-    guardTarget view atlas targets fighting creep room inReach
-    |> Option.map (strikeAt creep)
+    strikeOf view atlas targets fighting creep room
+    |> Option.filter snd
+    |> Option.map (fst >> strikeAt creep)
     |> Option.orElseWith coreBeside
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
@@ -874,7 +926,10 @@ let private defendIntent
             let line = brief.Targets
 
             let pick (targets: HostileInfo list) =
-                targets |> List.filter beside |> line.Head view here.Room (fun _ -> 0)
+                targets
+                |> List.filter beside
+                |> line.Order view here.Room (fun _ -> 0)
+                |> List.tryHead
 
             pick (view.Hostiles |> List.filter (line.Shoots view Set.empty Set.empty))
             |> Option.orElse (pick view.Hostiles))
@@ -924,6 +979,9 @@ let private actionIntents
     let fighting = Threats.fightRooms threats
 
     match task with
+    // A holder mustering (#535) waits out of reach and strikes nothing on its
+    // way there, where a swing at a melee takes its strike-back.
+    | Guard room when Map.containsKey creep.Name (Threats.briefOf threats room).Stances -> []
     | Guard room ->
         guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
         |> Option.toList
@@ -1012,11 +1070,62 @@ let arrival
             | _ -> true)
     | _ -> None
 
-/// Each fighter's aim (#528): its strike at the head of its Guard's or
-/// Fight's targets, in reach or not — the target it walks to. The light
-/// ticks after issue it again (`LightTick.intents`), so a body that steps
-/// beside a target between full ticks swings; out of reach the engine
-/// refuses it, and a refused act costs no CPU. A medic aims at nothing.
+/// How a body strikes this tick (#535): the room and the Selector it picks
+/// its target by, and whether that strike is its Task's own act (a fighter)
+/// or the weapon reflex. A Guard's or a Fight's holder, a medic aside, by its
+/// Task's room; any other body with a weapon — on Flee, idle, at work — by the
+/// room it stands in and that room's Guard's targets, as the heal reflex heals
+/// beside any Task. None for a defender, whose line is its own, a squad's
+/// sapper, and a body with no weapon.
+let private strikesBy
+    (atlas: Atlas.Atlas)
+    (threats: Threats)
+    (assigned: Map<string, Task>)
+    (creep: CreepInfo)
+    =
+    let armed = partCount creep.Body Attack > 0 || partCount creep.Body RangedAttack > 0
+
+    let own room =
+        Some(room, (Threats.briefOf threats room).Targets)
+
+    // The weapon reflex's targets: what the one diplomacy rule lets us strike
+    // (`Facts.mayStrike`), in the Guard's kill order.
+    let reflexTargets room =
+        {
+            Shoots = fun view _ engaged hostile -> Facts.mayStrike view engaged hostile
+            Order = (Threats.briefOf threats room).Targets.Order
+        }
+
+    let reflex () =
+        Atlas.creepRoom atlas creep.Name
+        |> Option.map (fun room -> room, reflexTargets room, false)
+
+    match Map.tryFind creep.Name assigned with
+    // A holder mustering (#535): a ranger fires its reflex — a shot draws no
+    // strike-back —, a melee body swings at nothing.
+    | Some(Guard room) when Map.containsKey creep.Name (Threats.briefOf threats room).Stances ->
+        if isRangerBody creep then reflex () else None
+    | Some(Guard room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
+    | Some(Fight _ as task) when Threats.squadRoleOf threats task creep.Name = Some Medic -> None
+    | Some(Fight room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
+    | Some(Defend _)
+    | Some(Assault _) -> None
+    | _ when armed -> reflex ()
+    | _ -> None
+
+/// Whether a body holds its Guard waiting on the muster ground (#535).
+let private mustering (threats: Threats) (assigned: Map<string, Task>) (creep: CreepInfo) =
+    match Map.tryFind creep.Name assigned with
+    | Some(Guard room) -> Map.containsKey creep.Name (Threats.briefOf threats room).Stances
+    | _ -> false
+
+/// Each fighter's aims (#528, #535): a holder of a Guard or a Fight, not
+/// mustering, aims at every target of its kill order (`strikeOrder`), head
+/// first. The light ticks after pick one of them again off the glance, the
+/// one in reach first, else the head (`pickStrike`, `LightTick.intents`), so a
+/// body that steps beside a target between full ticks swings at it; out of
+/// reach the engine refuses it, and a refused act costs no CPU. A medic aims
+/// at nothing, and nor does a body striking by the reflex alone.
 let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
     match view.Hostiles with
     | [] -> []
@@ -1024,21 +1133,74 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
         let fighting = Threats.fightRooms threats
 
         view.Creeps
+        |> List.collect (fun creep ->
+            match strikesBy atlas threats assigned creep with
+            | Some(room, targets, true) when not (mustering threats assigned creep) ->
+                strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
+            | _ -> [])
+
+/// The weapon reflex beside any Task or none (#535): every body with a weapon
+/// that holds no fight of its own strikes the target `strikeOf` picks in its
+/// room while it reaches it, on a channel the plan leaves free — the heal
+/// reflex's rule (`healReflex`), run before it, so a shot beside a fleeing
+/// step and a swing beat a pre-heal. It never moves for it.
+let strikeReflex
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (assigned: Map<string, Task>)
+    (plan: Fabot.Core.IntentPlan.Plan)
+    =
+    match view.Hostiles with
+    | [] -> plan
+    | _ ->
+        let fighting = Threats.fightRooms threats
+
+        (plan, view.Creeps)
+        ||> List.fold (fun plan creep ->
+            match strikesBy atlas threats assigned creep with
+            | Some(room, targets, false) ->
+                match strikeOf view atlas targets fighting creep room with
+                | Some(target, true) ->
+                    match Fabot.Core.IntentPlan.tryAdd (strikeAt creep target) plan with
+                    | Ok joined -> joined
+                    | Error _ -> plan
+                | _ -> plan
+            | _ -> plan)
+
+/// Each melee fighter's step onto the target it reaches (`glueStep`, #535):
+/// a Guard's holder with no gun, not mustering, beside the swing
+/// `guardIntent` issues at the same target; never a squad's member, whose
+/// movement is its Formation's. The mover leaves these bodies standing.
+let glue (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
+    match view.Hostiles with
+    | [] -> []
+    | _ ->
+        let fighting = Threats.fightRooms threats
+
+        view.Creeps
         |> List.choose (fun creep ->
-            match Map.tryFind creep.Name assigned with
-            | Some(Guard room) -> Some room
-            | Some(Fight room as task) when
-                Threats.squadRoleOf threats task creep.Name <> Some Medic
+            match Map.tryFind creep.Name assigned, strikesBy atlas threats assigned creep with
+            | Some(Guard _), Some(room, targets, true) when
+                not (isRangerBody creep)
+                && partCount creep.Body Attack > 0
+                && not (mustering threats assigned creep)
                 ->
-                Some room
-            | _ -> None
-            |> Option.bind (fun room ->
-                guardTarget
-                    view
-                    atlas
-                    (Threats.briefOf threats room).Targets
-                    fighting
-                    creep
-                    room
-                    (fun _ -> true))
-            |> Option.map (strikeAt creep))
+                match
+                    strikeOf view atlas targets fighting creep room,
+                    Atlas.creepTile atlas creep.Name
+                with
+                | Some(target, true), Some from ->
+                    let melee =
+                        view.Hostiles
+                        |> List.filter (fun h ->
+                            h.Pos.Room = from.Room && HostileInfo.melee view.Hostiles h)
+                        |> List.map (fun h -> h.Pos)
+
+                    let onRampart =
+                        Set.contains (RoomPos.pos from) (Atlas.ourRampartTilesIn atlas from.Room)
+
+                    glueStep from target.Pos onRampart melee
+                    |> Option.map (fun direction -> MoveCreep(creep.Name, direction))
+                | _ -> None
+            | _ -> None)

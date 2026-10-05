@@ -659,10 +659,13 @@ let errandStandDownTests =
                         Hostiles = [ defender "Source Keeper" ]
                     }
 
+                // At a bank that buys the ranger which wins it: a melee guard's
+                // swing reaches no shooter as quick as it (#535).
                 let guardServedRoom =
                     { errandRaid with
                         Errands = []
                         RoomControl = Map.add errandRoom neutralRoom errandRaid.RoomControl
+                        Bank = bank 5600 5600
                     }
                     |> withOutpostRoom errandRoom { X = 25; Y = 25 } false
 
@@ -671,11 +674,9 @@ let errandStandDownTests =
                     "a Source Keeper is the expected transit hazard, not a player raid on the target"
 
                 Expect.isTrue
-                    (guardBlocksBeat
-                        guardServedRoom
-                        errandRoom
-                        (Facts.guardBlocksReach guardServedRoom))
-                    "the premise: the declared Outpost can buy the two blocks that win this exchange"
+                    (Facts.rangerAnswers guardServedRoom errandRoom
+                     && Facts.answer guardServedRoom errandRoom = Facts.Answer.Win)
+                    "the premise: the declared Outpost's own row, the ranger's, wins this exchange"
 
                 Expect.isFalse
                     (Set.contains errandRoom (folded guardServedRoom))

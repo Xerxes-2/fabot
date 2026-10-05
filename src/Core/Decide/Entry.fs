@@ -507,10 +507,37 @@ let decideUnarbitrated
         @ taskIntents
         |> Fabot.Core.IntentPlan.create
         |> function
-            | Ok selected -> healReflex view threats selected |> Fabot.Core.IntentPlan.intents
+            | Ok selected ->
+                strikeReflex view atlas threats assigned selected
+                |> healReflex view threats
+                |> Fabot.Core.IntentPlan.intents
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
-    let movement = movementOf view atlas threats pool assigned crossings verbose
+    // A melee fighter steps onto the target it swings at (#535): its move is
+    // that step, and the mover leaves its tile standing, as a tired body's.
+    let glued = glue view atlas threats assigned
+
+    let intents = intents @ glued
+
+    let movement =
+        let stepping =
+            glued
+            |> List.choose (function
+                | MoveCreep(name, _) -> Some name
+                | _ -> None)
+            |> Set.ofList
+
+        let moved = movementOf view atlas threats pool assigned crossings verbose
+
+        if Set.isEmpty stepping then
+            moved
+        else
+            { moved with
+                Tired = Set.union moved.Tired stepping
+                Intents =
+                    moved.Intents
+                    |> List.filter (fun step -> not (Set.contains step.Creep stepping))
+            }
 
     // A refiller that poured this tick has nothing for the light tick after it
     // to replay, a pour being one-shot, so it stood still a tick per member

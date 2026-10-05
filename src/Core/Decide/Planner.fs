@@ -581,7 +581,22 @@ let planTasks
                     (Set.ofList (outposts.Guarded @ holding))
                 |> Set.toList)
 
-        (outposts.Guarded @ holding @ killing |> List.map Guard)
+        // And every Guard a body of ours holds while it still holds the fight
+        // (`Threats.holdsFight`, #535): the verdict starts a fight, never
+        // ends one.
+        let fought =
+            let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+
+            threats.Engaged
+            |> Set.filter (fun room ->
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                |> List.choose (fun name -> Map.tryFind name bodies)
+                |> List.exists (fun creep ->
+                    Threats.holdsFight view atlas threats creep (Guard room)))
+            |> fun rooms -> Set.difference rooms (Set.ofList (outposts.Guarded @ holding @ killing))
+            |> Set.toList
+
+        (outposts.Guarded @ holding @ killing @ fought |> List.map Guard)
         @ briefedAs Duty.Fight
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault

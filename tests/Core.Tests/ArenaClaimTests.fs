@@ -1540,7 +1540,7 @@ let arenaClaimTests =
             }
 
             test
-                "RCL3: the east neck stands 20 from the tower, so without residents its 100k falls before the relief; with them it holds" {
+                "RCL3: the east neck stands 20 from the tower; without residents both defenders strike beside the line and it holds; with them it holds" {
                 let run withResidents =
                     let bodies = if withResidents then residents @ eastRaid else eastRaid
                     let start = rcl3World Engine.towerCapacity Tuning.defaults.RampartFloor bodies
@@ -1549,22 +1549,20 @@ let arenaClaimTests =
 
                 // Measured: the melee strike 32,31–32 from 33,30–32, their
                 // healers in the room behind them; the tower's 150 at range
-                // 20 repairs 51 times. Alone the line falls at t162, the
-                // relief in at t336 (t148 before the defender row): the home's
-                // defenders (#504), born at t71 and t107, kill one melee from
-                // the rampart, then the other breaks through. A raider beside
-                // a defender is no urgent shot, so the tower keeps its 300 for
-                // the tapper (in at t182, dead at t186; it drained to 10 when
-                // the defender counted). With the
-                // residents on the neck the raid is dead by t102, the floor
-                // 55,180.
+                // 20 repairs 51 times. Alone, the home's defenders (#504),
+                // born at t71 and t107, kill Eternity536 from the rampart by
+                // t142, and the second, holding no Defend, swings at Prime803
+                // beside it by the weapon reflex (#535) and it dies at t160:
+                // before #535 that one stood idle and the line fell at t162.
+                // With the residents on the neck the raid is dead by t102, the
+                // floor 55,180.
                 let alone, _, trace = run false
                 let failure = $"{alone}\n{describe trace}"
 
-                match alone.Fell, alone.ReliefIn with
-                | Some fell, Some relief ->
-                    Expect.isLessThan fell relief $"the line falls first\n{failure}"
-                | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
+                Expect.isNone alone.Fell $"the line holds alone\n{failure}"
+
+                for id in [ "Eternity536"; "Prime803" ] do
+                    Expect.isTrue (alone.Died.ContainsKey id) $"{id} dies\n{failure}"
 
                 let held, _, trace = run true
                 let failure = $"{held}\n{describe trace}"

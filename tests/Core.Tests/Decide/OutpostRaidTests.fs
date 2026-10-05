@@ -2392,11 +2392,19 @@ let trespassTests =
                 Expect.isEmpty (decideOn (declaredRaid [])).Aims "a quiet colony aims at nothing"
             }
 
-            test "a neutral's disarmed body and a bare enemy scout pool none (#528)" {
-                Expect.isNone
+            // #535 made the disarmed clause owner-agnostic (any non-ally's): a
+            // cripple left in a room we mine is a fight's to finish, whoever's.
+            test
+                "a neutral's disarmed body is a trespasser too, an ally's and a bare enemy scout are not (#528, #535)" {
+                Expect.isSome
                     (pooledOf (declaredRaid [ disarmedAt "giaco" "W1N2" { X = 25; Y = 44 } ])
                      |> entryFor (Guard "W1N2"))
-                    "only a declared enemy's"
+                    "a neutral's cripple in our outpost"
+
+                Expect.isNone
+                    (pooledOf (declaredRaid [ disarmedAt "Odiodin" "W1N2" { X = 25; Y = 44 } ])
+                     |> entryFor (Guard "W1N2"))
+                    "never an ally's"
 
                 Expect.isNone
                     (pooledOf (
@@ -3166,7 +3174,10 @@ let guardFlavourTests =
             // was the quirk "a raider whose weapons are shot off keeps its Reach
             // and its Guard, priced on its paper", where the stand-down already
             // read it live and reopened the room.
-            test "a raider whose weapons are shot off, alone, has no Reach and no Guard" {
+            // #535: no raid's Guard any more, but a cripple left in a room we
+            // mine is a trespass's kill, one rung up, not a raid's two.
+            test
+                "a raider whose weapons are shot off, alone, has no Reach and no raid's Guard: it is a trespass kill" {
                 let disarmed =
                     { hostileIn "W1N2" { X = 25; Y = 42 } smallMelee with
                         Id = "disarmed"
@@ -3189,14 +3200,27 @@ let guardFlavourTests =
                     (Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
                     "no Reach"
 
-                Expect.isNone (pooledHolding [] (Guard "W1N2") colony) "no Guard is pooled for it"
-
-                let decision = decideOn colony
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N2") colony |> Option.map fst)
+                    (Some(safetyRank OneRungUp))
+                    "its Guard is a kill's, one rung up"
 
                 Expect.equal
-                    (Map.tryFind "r-1" decision.Assignments, Map.tryFind "g-1" decision.Assignments)
-                    (None, None)
-                    "and neither body is sent to it"
+                    ((Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty)
+                    (Duty.Guard BriefKind.Trespass)
+                    "a trespass's"
+
+                let shut =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony).Declared
+                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+                    |> fun gate -> gate.Shut
+
+                Expect.isEmpty shut "and it stands nothing down"
             }
 
             // The Brief's S7, rule 1: healing reaches it, so its parts come back
@@ -3479,7 +3503,9 @@ let guardPrecedenceTests =
                         [ Trespasser ], row [ Trespasser ] [ "Trespass" ] OneRungUp one [ "g-1" ]
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
                         [ Harassed ], row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
-                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        // #535's hold rule: the guard holding the Guard keeps it
+                        // while it can strike a target there, whatever the kind.
+                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         // Out of sight a chase has no ground; the pool walks it in.
                         [ ChaseDark ], row [] [] OneRungUp one [ "r-1" ]
                         // The raid before what it shares the room with.
@@ -3488,8 +3514,8 @@ let guardPrecedenceTests =
                         [ Raid; Trespasser ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         // In a ranger room a raid is kited, on ground of its own;
                         // a harassment room's raid is the enemy's own, on the tier.
-                        [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "r-1" ]
-                        [ Raid; Harassed ], row [] [ "Kite" ] OnTheTier relieved [ "r-1" ]
+                        [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "g-1"; "r-1" ]
+                        [ Raid; Harassed ], row [] [ "Kite" ] OnTheTier relieved [ "g-1" ]
                         // The held exit before the core, either before the trespasser.
                         [ Hold; Core ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
@@ -3502,13 +3528,15 @@ let guardPrecedenceTests =
                         [ Resident; Hold ], unpooled [ Resident ] [ "ResidentRing" ]
                         [ Resident; Core ],
                         row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "r-1" ]
-                        [ Resident; Trespasser ], unpooled [ Resident ] [ "ResidentRing" ]
+                        // The guard holding it holds the trespass's fight (#535).
+                        [ Resident; Trespasser ],
+                        row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "g-1"; "r-1" ]
                         [ Harassed; Hold ],
                         row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
                         [ Harassed; Core ],
                         row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
                         [ Harassed; Trespasser ],
-                        row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
+                        row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "g-1" ]
                         // Quirk, kept: the resident's ground and cap before the
                         // harassment's, but the cap's count is the row ask's,
                         // which asks as the harassment: one ranger, not the
@@ -3522,10 +3550,10 @@ let guardPrecedenceTests =
                             [ "r-1" ]
                         // A chase in sight kites before the core, the held exit
                         // and the trespasser; beside a raid that can close, no chase.
-                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
-                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
+                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         [ ChaseSeen; Trespasser ],
-                        row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         [ ChaseSeen; Raid ],
                         row [] [ "Ring" ] TwoRungsUp (Capacity.fighters 2) [ "g-1" ]
                         // Quirk, kept: a chase out of sight over a held exit takes
@@ -3538,7 +3566,7 @@ let guardPrecedenceTests =
                         // takes it (it was pooled as a kill nobody took).
                         [ ChaseDark; Raid; Hold ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         // And a chase out of sight shuts the trespasser's kill out.
-                        [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "r-1" ]
+                        [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "g-1" ]
                     ]
 
                 Expect.equal
@@ -3995,5 +4023,485 @@ let killAdmissionTests =
                 Expect.isFalse
                     (steps |> List.exists (fun tile -> Set.contains tile reach))
                     "and its step keeps out of the Reach"
+            }
+        ]
+
+/// One room's Guard Brief as a colony whose creeps hold these Tasks reads it.
+let private heldBriefOf (holding: (string * Task) list) (room: string) (colony: ColonyView) =
+    let atlas = Atlas.ofView colony
+
+    let held =
+        heldTaskFacts
+            colony
+            (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+
+    Threats.briefOf (threatsOfHeld colony atlas held) room
+
+/// The W11S28 invasion's shape (#535, live t973,670): a small mixed body
+/// that closes, two shooters that keep range, a healer behind each.
+let private invasion =
+    [
+        { hostileIn "W1N2" { X = 25; Y = 42 } smallMelee with
+            Id = "mixed"
+        }
+        { hostileIn "W1N2" { X = 22; Y = 44 } smallRanged with
+            Id = "shooter-1"
+        }
+        { hostileIn "W1N2" { X = 28; Y = 44 } smallRanged with
+            Id = "shooter-2"
+        }
+        { hostileIn "W1N2" { X = 22; Y = 45 } smallHealer with
+            Id = "healer-1"
+        }
+        { hostileIn "W1N2" { X = 28; Y = 45 } smallHealer with
+            Id = "healer-2"
+        }
+    ]
+
+[<Tests>]
+let engagementTests =
+    testList
+        "an outpost raid's engagement: the row that reaches it, the target in reach, the step after it, together"
+        [
+            test "the W11S28 shape asks the ranger row, not two melee guards" {
+                let colony =
+                    { declaredRaid invasion with
+                        Bank = bank 5600 5600
+                    }
+
+                let atlas = Atlas.ofView colony
+                let brief = Threats.briefOf (threatsOf colony atlas) "W1N2"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Ranger ]
+                    "the guard's swing reaches no shooter, so the ranger row is asked"
+
+                Expect.equal
+                    (brief.Verdict.Value)
+                    Facts.Answer.Win
+                    "and the ranger wins it: the room stays open"
+
+                Expect.isTrue
+                    (brief.Admits
+                        colony
+                        atlas
+                        (creepWith "ranger-1" 0 0 (bodyFor Bodies.rangerPattern 5600)))
+                    "a ranger takes it"
+
+                Expect.isFalse
+                    (brief.Admits colony atlas (guard "g-1"))
+                    "and a melee guard does not"
+
+                let mixedOnly =
+                    { declaredRaid (List.take 1 invasion) with
+                        Bank = bank 5600 5600
+                    }
+
+                Expect.equal
+                    ((Threats.briefOf (threatsOf mixedOnly (Atlas.ofView mixedOnly)) "W1N2").Asks
+                     |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Guard ]
+                    "a raid that closes on the guard is still the guard's"
+            }
+
+            test
+                "a guard with a target beside it and its head three off swings at the one beside it" {
+                // The kill order's head is the raider nearest the Post (25,41).
+                let head =
+                    { hostileIn "W1N2" { X = 25; Y = 43 } smallMelee with
+                        Id = "h-head"
+                    }
+
+                let near =
+                    { hostileIn "W1N2" { X = 28; Y = 46 } smallMelee with
+                        Id = "h-near"
+                    }
+
+                let colony =
+                    declaredRaid [ head; near ] |> withGuards [ guard "g-1", { X = 28; Y = 45 } ]
+
+                let result = decideFrom (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) colony
+
+                Expect.equal
+                    (result.Aims |> List.tryHead)
+                    (Some(AttackCreep("g-1", "h-head")))
+                    "the premise: the head of its order is the one three off"
+
+                Expect.contains
+                    result.Intents
+                    (AttackCreep("g-1", "h-near"))
+                    "it swings at the one beside it"
+
+                Expect.isFalse
+                    (List.contains (AttackCreep("g-1", "h-head")) result.Intents)
+                    "and not at the head"
+            }
+
+            test "a melee guard beside its target steps onto the target's tile with its swing" {
+                let colony = declaredRaid raiders |> withGuards [ guard "g-1", beside ]
+                let result = decideFrom (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) colony
+
+                Expect.contains result.Intents (AttackCreep("g-1", "h-1")) "the swing lands"
+
+                Expect.equal
+                    (moveIntents result.Intents |> List.filter (fst >> (=) "g-1") |> List.map snd)
+                    [ (directionTo beside { X = 25; Y = 42 }).Value ]
+                    "and it steps onto the target's tile: a target that leaves is followed, one that stays costs a failed move"
+            }
+
+            test "two guards that lose alone and win together wait out of reach for each other" {
+                // A smallMelee beside a smallHealer: one 800-bank guard loses it
+                // (`guard`'s own worked example), two win. The bank now buys a
+                // guard that wins alone, so the room is the guard row's `Win`;
+                // the two held were cast smaller.
+                let raid = raiders @ healers 1
+
+                let declared hostiles =
+                    { declaredRaid hostiles with
+                        Bank = bank 1500 1500
+                    }
+
+                // Both still at home, apart: neither has entered the fight.
+                let colony at =
+                    declared raid
+                    |> withBodyAtHome (guard "g-1") { X = 25; Y = 30 }
+                    |> withBodyAtHome (guard "g-2") at
+
+                let holding = [ "g-1", Guard "W1N2"; "g-2", Guard "W1N2" ]
+
+                let apart = heldBriefOf holding "W1N2" (colony atSpawn)
+
+                Expect.equal
+                    (apart.Stances |> Map.keys |> Set.ofSeq)
+                    (set [ "g-1"; "g-2" ])
+                    "both are held off the fight"
+
+                let rally = apart.Stances |> Map.find "g-1"
+
+                Expect.isTrue
+                    (not (Set.isEmpty rally) && rally |> Set.forall (fun tile -> tile.Room = "W1N1"))
+                    $"on the rally ground short of the room: {rally}"
+
+                let decision =
+                    decideFrom
+                        (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+                        (colony atSpawn)
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments, Map.tryFind "g-2" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")), Some(taskId (Guard "W1N2")))
+                    $"each keeps the Guard while it waits: {decision.Verdicts}"
+
+                // Launched without state: one in the room is engaged, and never
+                // pulled back out of reach, nor the other held.
+                let engaged =
+                    declared raid
+                    |> withGuards [ guard "g-1", beside ]
+                    |> withBodyAtHome (guard "g-2") atSpawn
+
+                Expect.isEmpty
+                    (heldBriefOf holding "W1N2" engaged).Stances
+                    "a guard in reach of its raider is never pulled out of it"
+
+                Expect.contains
+                    (decideFrom
+                        (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+                        engaged)
+                        .Intents
+                    (AttackCreep("g-1", "h-1"))
+                    "and swings"
+
+                let alone =
+                    declared raiders
+                    |> withGuards [ guard "g-1", beside ]
+                    |> withBodyAtHome (guard "g-2") atSpawn
+
+                Expect.isEmpty
+                    (heldBriefOf holding "W1N2" alone).Stances
+                    "a guard that wins alone goes in at once"
+
+                let together =
+                    let tiles = rally |> Set.toList |> List.map RoomPos.pos
+
+                    declared raid
+                    |> withBodyAtHome (guard "g-1") tiles.[0]
+                    |> withBodyAtHome (guard "g-2") tiles.[1]
+
+                Expect.isEmpty
+                    (heldBriefOf holding "W1N2" together).Stances
+                    "once both stand on the rally ground they go in together"
+
+                // On the walk in, strung out as one file between the rally
+                // ground and the crossing, off both: launched, not pulled back
+                // (#491's rule for the squads).
+                let walking =
+                    declared raid
+                    |> withBodyAtHome (guard "g-1") { X = 25; Y = 7 }
+                    |> withBodyAtHome (guard "g-2") { X = 25; Y = 9 }
+
+                Expect.isEmpty
+                    (heldBriefOf holding "W1N2" walking).Stances
+                    "holders strung out on the walk in are not pulled back"
+            }
+
+            // Live t974,024 (W18S25): Bang590 and Sky320 priced against the
+            // residents together, and one ranger lent walked in alone.
+            test
+                "a chase two lent residents win together: the first lent waits out of reach for the second" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 10 Move
+                         @ List.replicate 7 RangedAttack
+                         @ List.replicate 3 Heal)
+
+                let mother (r1: string * Pos) =
+                    { watchingBeyond [ harasser ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> withOutpostLayer "W1N3" (fun layer ->
+                        { layer with
+                            CreepPositions = Map.empty
+                        })
+                    |> standingIn (fst r1) ("r-1", snd r1)
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 40 })
+
+                let holding = [ "r-1", Guard "W1N4"; "r-2", Guard "W1N4" ]
+                // The first lent is on its way, near the crossing, the second
+                // still by the controller: neither has entered the chase.
+                let lentIn = mother ("W1N3", { X = 25; Y = 10 })
+                let brief = heldBriefOf holding "W1N4" lentIn
+
+                Expect.equal
+                    (brief.Duty, brief.Verdict.Value)
+                    (Duty.Guard BriefKind.Chase, Facts.Answer.Win)
+                    "the premise: a chase the residents win"
+
+                Expect.equal
+                    (brief.Capacity lentIn (threatsOf lentIn (Atlas.ofView lentIn))
+                     |> Capacity.capOf CapScope.Fighters)
+                    (Some 2)
+                    "the call takes the two the verdict priced"
+
+                Expect.equal
+                    (brief.Stances
+                     |> Map.tryFind "r-1"
+                     |> Option.map (Set.map (fun tile -> tile.Room)))
+                    (Some(set [ "W1N3" ]))
+                    "the first lent is held back beside the crossing until the second stands with it"
+
+                let decision =
+                    decideFrom
+                        (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+                        lentIn
+
+                Expect.equal
+                    (Map.tryFind "r-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "and keeps the chase while it waits"
+
+                Expect.isEmpty
+                    (heldBriefOf holding "W1N4" (mother ("W1N3", { X = 26; Y = 40 }))).Stances
+                    "and once the two stand together they go in"
+            }
+        ]
+
+[<Tests>]
+let pursuitTests =
+    testList
+        "a fight begun is fought to its target's death (#535)"
+        [
+            // Live 2026-10-06, W15S27: invader_W15S27_250 sat at 10 hits, one
+            // MOVE alive, for ~250 ticks beside an idle guard and froze an
+            // anchor: shot disarmed, it pooled no Guard.
+            test "a guard whose invader is disarmed mid-fight keeps its Guard and kills it" {
+                let invader =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 3 RangedAttack @ List.replicate 5 Move) with
+                        Owner = "Invader"
+                        Hits = 10
+                    }
+
+                // A room we hold the fight in but mine nothing in: only the
+                // held Guard makes the cripple ours (`Threats.Engaged`).
+                let unmined =
+                    { declaredRaid [ invader ] with
+                        Sources = []
+                    }
+                    |> withGuards [ guard "g-1", { X = 25; Y = 45 } ]
+
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+                let result = decideFrom held unmined
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard keeps the fight it began"
+
+                Expect.contains
+                    result.Intents
+                    (AttackCreep("g-1", "h-1"))
+                    "and swings at the cripple"
+
+                Expect.notEqual
+                    (Map.tryFind "g-1" (decideOn unmined).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "where nothing of ours is mined, a body that held no fight begins none"
+
+                let mined =
+                    declaredRaid [ invader ] |> withGuards [ guard "g-1", { X = 25; Y = 45 } ]
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decideOn mined).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "where we mine, any guard takes the cripple: a trespass's kill"
+            }
+
+            // Virtual458 (Trepidimous) in W18S25: every ATTACK and all but one
+            // MOVE shot off, 74 hits, limping away from the ranger holding it.
+            test
+                "Virtual458's shape, disarmed and limping off, is chased to death by the ranger holding it" {
+                let virtual458 =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 42 }
+                          (List.replicate 17 Attack @ List.replicate 17 Move) with
+                        Owner = "Trepidimous"
+                        Hits = 74
+                    }
+
+                let colony =
+                    declaredRaid [ virtual458 ] |> withGuards [ ranger "r-1", { X = 25; Y = 45 } ]
+
+                let result = decideFrom (Map.ofList [ "r-1", taskId (Guard "W1N2") ]) colony
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the ranger keeps it"
+
+                Expect.contains result.Intents (RangedAttackCreep("r-1", "h-1")) "and shoots it"
+            }
+
+            test
+                "a stronghold Invader under its own rampart holds no guard; the same Invader off it does" {
+                let invaderAt (pos: Pos) =
+                    { hostileIn "W1N2" pos smallMelee with
+                        Owner = "Invader"
+                    }
+
+                // A rampart not ours (no hits projected for it) on (25,44).
+                let withRampart (colony: ColonyView) =
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "ramp-core"
+                                        (Structure BuiltKind.Rampart)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    TargetPositions =
+                                        Map.add
+                                            "ramp-core"
+                                            { X = 25; Y = 44 }
+                                            outpost.TargetPositions
+                                }
+                    }
+
+                let holds (pos: Pos) =
+                    // A bank whose guard wins it: the fight is not a lost one.
+                    let colony =
+                        { declaredRaid [ invaderAt pos ] with
+                            Bank = bank 1500 1500
+                        }
+                        |> withRampart
+                        |> withGuards [ guard "g-1", { X = 25; Y = 46 } ]
+
+                    let atlas = Atlas.ofView colony
+
+                    let held = heldTaskFacts colony (Map.ofList [ "g-1", taskId (Guard "W1N2") ])
+
+                    Threats.holdsFight
+                        colony
+                        atlas
+                        (threatsOfHeld colony atlas held)
+                        (guard "g-1")
+                        (Guard "W1N2")
+
+                Expect.isFalse
+                    (holds { X = 25; Y = 44 })
+                    "under the rampart: a strike lands on it, held for nothing"
+
+                Expect.isTrue (holds { X = 25; Y = 45 }) "off it: struck, held"
+            }
+
+            test "a disarmed target that outruns its holder is let go" {
+                // A neutral's raider shot down to four MOVE: it outruns a guard
+                // left one MOVE, and walks at the pace of a whole one.
+                let quick =
+                    { hostileIn "W1N2" { X = 25; Y = 44 } ([ Attack ] @ List.replicate 4 Move) with
+                        Owner = "giaco"
+                        Hits = 400
+                    }
+
+                let lame = creepWith "g-1" 0 0 [ Tough; Attack; Attack; Attack; Heal; Move ]
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+
+                let outrun =
+                    decideFrom
+                        held
+                        (declaredRaid [ quick ] |> withGuards [ lame, { X = 25; Y = 45 } ])
+
+                Expect.notEqual
+                    (Map.tryFind "g-1" outrun.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the lame guard is let go"
+
+                let kept =
+                    decideFrom
+                        held
+                        (declaredRaid [ quick ] |> withGuards [ guard "g-1", { X = 25; Y = 45 } ])
+
+                Expect.equal
+                    (Map.tryFind "g-1" kept.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and a whole guard, which it does not outrun, keeps it"
+            }
+
+            test "a fight against an armed raid the holder loses is not kept: it flees" {
+                // An undeclared room pools no Guard for an armed raid; nothing
+                // disarmed is pursued, so the holder out-damaged runs (#533).
+                let colony =
+                    raidedOutpost (raiders @ healers 1) |> withGuards [ guard "g-1", beside ]
+
+                let result = decideFrom (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) colony
+
+                Expect.equal (Map.tryFind "g-1" result.Assignments) (Some(taskId Flee)) "it flees"
             }
         ]
