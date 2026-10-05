@@ -542,19 +542,17 @@ let movementOf
         else
             Set.empty
 
-    // A ranger holding a chased room's Guard kites (#510). It keeps out of
-    // what each melee in its room reaches in a step and a swing rather than
-    // out of the whole Reach, so the ring at three it shoots from stays open
-    // to it; and a step and a swing off the exit a raid left by, where a body
-    // camping across lands beside it. A resident's walk onto its ramparts
-    // under a raid crosses the Reach, and is no kite.
+    // What a Guard's holder walks round is its Brief's (`Brief.Avoid`).
+    let avoidFor name =
+        match Map.tryFind name assigned with
+        | Some(Guard room) -> (Threats.briefOf threats room).Avoid
+        | _ -> Avoid.Runner
+
+    // A ranger kites (#510); a resident's walk onto its ramparts under a raid
+    // crosses the Reach, and is no kite.
     let kiters =
         view.Creeps
-        |> List.filter (fun c ->
-            isRangerBody c
-            && (match Map.tryFind c.Name assigned with
-                | Some(Guard room) -> Threats.kindOf threats room = BriefKind.Chase
-                | _ -> false))
+        |> List.filter (fun c -> isRangerBody c && avoidFor c.Name = Avoid.MeleeStepAndSwing)
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
@@ -573,13 +571,10 @@ let movementOf
                 |> List.collect (fun h -> tilesWithin stepAndSwing (RoomPos.pos h.Pos))
 
             Some(Set.ofList (camp @ strike))
+        elif avoidFor name = Avoid.Reach then
+            Some(Threats.reachIn threats at.Room)
         else
-            // A trespass's killer walks round every Reach on the way (#516):
-            // its target strikes nothing back, and no Threat may.
-            match Map.tryFind name assigned with
-            | Some(Guard room) when Threats.kindOf threats room = BriefKind.Trespass ->
-                Some(Threats.reachIn threats at.Room)
-            | _ -> None
+            None
 
     // The ground an idle body steps off, and the ring of ground just outside
     // it that any step off has to land on — one pair per room some body of

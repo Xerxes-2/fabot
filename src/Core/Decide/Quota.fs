@@ -394,30 +394,11 @@ let private upgradeDrainOf body =
 /// `isGuardParts` asked of a living body.
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
-/// The guard row's own cut, over a name and parts: an ATTACK body that
-/// answers to no row of its own (`ownRowOnly`).
-let internal isGuardRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isGuardParts parts && not (ownRowOnly name)
-
-let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.Body
-
 /// Whether a body is a squad's medic.
 let internal isMedicBody (creep: CreepInfo) =
     squadRoleOf creep.Name creep.Body = Some Medic
 
-/// The ranger cut (#411): a RANGED_ATTACK part and no ATTACK, the guard's cut
-/// taking a body that carries both.
-let internal isRangerParts (parts: Map<BodyPart, int>) =
-    partCount parts RangedAttack > 0 && partCount parts Attack = 0
-
 let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
-
-/// The ranger row's own cut: a ranger body that is no kiter cast
-/// (`ownRowOnly`).
-let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isRangerParts parts && not (ownRowOnly name)
-
-let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
 
 /// Whether a body is an [[assault]]'s sapper or probe, by its name alone: its
 /// parts are a salvage dismantler's.
@@ -442,35 +423,13 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
     |> Option.defaultValue []
     |> List.exists (fun creep -> bodyWins view room (partCount creep.Body) creep.Hits.Hits)
 
-/// ADR-0056
-/// How many guards one guarded room wants: one, two where one block loses
-/// the exchange. The count reads the raid and never our own answer to it
-/// (#272): priced against the guards standing in the room it was not monotone,
-/// and the reinforcement it bought was evicted on arrival. Vision is the whole
-/// of what this reads: an outpost the colony cannot see carries no hostiles.
-/// A room remembered and not seen is one guard (#366): a room with no
-/// `RoomControl` entry contributes no hostile to the view, so neither number
-/// of the two-guard clause exists. Written as its own clause rather than left
-/// to `guardBlocksBeat`'s zero-damage arm: that one is a statement about a
-/// visible raid dealing nothing.
-let internal guardsWanted (view: ColonyView) (room: string) : int =
-    if
-        Set.contains room view.ThreatenedOutposts
-        && not (Map.containsKey room view.RoomControl)
-    then
-        1
-    elif guardBlocksBeat view room 1 then
-        1
-    else
-        Engine.guardCap
-
 /// The guarded rooms each fighting row serves (#411), by each room's kind:
 /// the resident rooms and the harassment rooms (#432) are the ranger's, every
 /// other guarded room the guard's — but a chased one (#510), which neither
 /// row casts for.
 let private guardedSplit (threats: Threats) (outposts: OutpostFacts) =
     outposts.Guarded
-    |> List.map (fun room -> room, Threats.kindOf threats room)
+    |> List.map (fun room -> room, (Threats.briefOf threats room).Kind)
     |> List.filter (fun (_, kind) -> kind <> BriefKind.Chase)
     |> List.partition (fun (_, kind) -> not (BriefKind.isRangers kind))
     |> fun (guards, rangers) -> List.map fst guards, List.map fst rangers
@@ -528,33 +487,6 @@ let internal rangerBlocksFor (view: ColonyView) (room: string) : int =
     |> Option.defaultValue rangerBlocksMost
     |> max floor
     |> min rangerBlocksMost
-
-/// How many rangers one resident room wants: the standing garrison
-/// (`Tuning.RangerResidents`). A raised home whose towers cannot hold its raid
-/// (`BorrowedWork.Defended`, #428) and whose resident loses it alone adds
-/// #428's relief, `Engine.guardCap` raid-sized bodies, on top of the garrison
-/// (#447). A resident room whose raid no ranger size wins (`outmatched`)
-/// wants none (#451): a body cast into it only feeds the raid, so the home
-/// is the child's safe mode's, and the garrison already standing keeps its
-/// Guard (the pool's cap counts it) on safe ground. One in a harassment room
-/// (#432): a raid that one loses is the room's [[stand-down]]. A launched
-/// squad is the relief: none is cast beside it, and none is held back while
-/// it musters.
-let internal rangersWanted (view: ColonyView) (threats: Threats) (room: string) : int =
-    if Set.contains room (harassRooms view) then
-        1
-    elif outmatched view room then
-        0
-    elif Threats.fightLaunchedIn threats room then
-        view.Tuning.RangerResidents
-    elif
-        Set.contains room (raisedHomes view)
-        && List.contains room view.Borrowed.Defended
-        && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
-    then
-        view.Tuning.RangerResidents + Engine.guardCap
-    else
-        view.Tuning.RangerResidents
 
 /// The ranger row's quota: `rangersWanted` over every worked errand and
 /// harassment room.

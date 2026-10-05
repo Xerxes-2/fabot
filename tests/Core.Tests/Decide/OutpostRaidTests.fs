@@ -2602,11 +2602,11 @@ let guardPrecedenceTests =
 
                     let supplying =
                         [
-                            "Kite", Map.tryFind "W1N2" threats.Kite
-                            "ResidentRing", Map.tryFind "W1N2" threats.ResidentRing
-                            "HarassRing", Map.tryFind "W1N2" threats.HarassRing
-                            "Trespass", Map.tryFind "W1N2" threats.Trespass
-                            "Ring", Map.tryFind "W1N2" threats.Ring
+                            "Kite", (Threats.briefOf threats "W1N2").Laid.Kite
+                            "ResidentRing", (Threats.briefOf threats "W1N2").Laid.Resident
+                            "HarassRing", (Threats.briefOf threats "W1N2").Laid.Harass
+                            "Trespass", (Threats.briefOf threats "W1N2").Laid.Trespass
+                            "Ring", (Threats.briefOf threats "W1N2").Laid.Ring
                         ]
                         |> List.filter (fun (_, field) -> Option.isSome ground && field = ground)
                         |> List.map fst
@@ -2769,7 +2769,7 @@ let guardPrecedenceTests =
                 let threats = threatsOf colony (Atlas.ofView colony)
 
                 Expect.equal
-                    (Threats.kindOf threats "W1N2", Threats.guardGroundIn threats "W1N2")
+                    ((Threats.briefOf threats "W1N2").Kind, Threats.guardGroundIn threats "W1N2")
                     (BriefKind.Resident, Some(besideIn { X = 6; Y = 46 }))
                     "read as the resident's, on the Reactor's ring"
 
@@ -2790,7 +2790,9 @@ let guardPrecedenceTests =
                 let laid flavours =
                     let colony = List.fold withFlavour precedenceBasis flavours
                     let threats = threatsOf colony (Atlas.ofView colony)
-                    Set.contains "W1N2" threats.Held, Map.tryFind "W1N2" threats.Ring
+
+                    List.contains BriefKind.ExitHold (Threats.briefOf threats "W1N2").Claims,
+                    (Threats.briefOf threats "W1N2").Laid.Ring
 
                 let ringOf flavours = snd (laid flavours)
 
@@ -2835,7 +2837,7 @@ let guardPrecedenceTests =
             test "each mix of flavours is read as one kind" {
                 let kindOf flavours =
                     let colony = List.fold withFlavour precedenceBasis flavours
-                    Threats.kindOf (threatsOf colony (Atlas.ofView colony)) "W1N2"
+                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Kind
 
                 let rows =
                     [

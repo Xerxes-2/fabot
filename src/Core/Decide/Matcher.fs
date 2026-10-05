@@ -6,11 +6,6 @@ module Fabot.Core.Decide.Matcher
 open Fabot.Core
 open Fabot.Core.Types
 
-/// How far a quiet ranger walks for a chase (#510), in travel cost (two
-/// units a tick): two rooms' side, where the kill is made and it is home
-/// again inside the time a raid takes to reach the room it left.
-let private chaseWalk = 2 * 2 * Engine.roomSide
-
 /// Keep still-valid assignments (anti-thrash) and greedily assign the rest.
 /// Verdicts out: releases first in memory order, then one status Verdict per
 /// living creep in view order — each preceded, for a creep on the verbose
@@ -366,13 +361,19 @@ let matchCreeps
 
     // The holders let go for a kill this tick (#510, #516), decided once
     // against the remembered assignments, so the order the fold walks them in
-    // moves nothing. Per kill nobody holds (`Threats.isKill`): the nearest
-    // holder within `chaseWalk` of a Guard it may be called off
-    // (`Facts.mayBeCalled`), for a kill that outranks that Guard and that the
-    // cascade would give it (the gate says which bodies a kill admits). It
-    // is back once the kill is made.
+    // moves nothing. Per kill nobody holds (a Brief with a `Recall`): the
+    // nearest holder within its walk of a Guard it may be called off, for a
+    // kill that outranks that Guard and that the cascade would give it (the
+    // gate says which bodies a kill admits). It is back once the kill is made.
     let called =
-        let kills = Threats.roomsOf threats BriefKind.isKill
+        let recalls =
+            threats.Briefs
+            |> Map.toSeq
+            |> Seq.choose (fun (room, brief) ->
+                brief.Recall |> Option.map (fun recall -> room, recall))
+            |> Map.ofSeq
+
+        let kills = recalls |> Map.keys |> Set.ofSeq
 
         if Set.isEmpty kills then
             Set.empty
@@ -397,19 +398,19 @@ let matchCreeps
                     Set.contains room kills
                     && not (assignments |> Map.exists (fun _ tid -> tid = taskId kill.Task))
                     ->
-                    Some(kill, room)
+                    Some(kill, room, Map.find room recalls)
                 | _ -> None)
             |> List.fold
-                (fun (taken: Set<string>) (chase, killRoom) ->
+                (fun (taken: Set<string>) (chase, killRoom, recall) ->
                     holders
                     |> List.filter (fun (creep, pooled, held) ->
                         not (Set.contains creep.Name taken)
                         && chase.Priority < pooled.Priority
-                        && Facts.mayBeCalled view kills held killRoom)
+                        && recall.MayBeCalled view kills held killRoom)
                     |> List.choose (fun (creep, _, _) ->
                         travelCostOf threats atlas creep.Name chase.Task
                         |> Option.filter (fun cost ->
-                            cost <= chaseWalk
+                            cost <= recall.Walk
                             && Result.isOk (
                                 gate (lazy false) (Map.remove creep.Name assignments) creep chase
                             ))

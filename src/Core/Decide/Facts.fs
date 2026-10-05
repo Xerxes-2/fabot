@@ -811,7 +811,7 @@ let internal kitedByRanger (view: ColonyView) (room: string) : bool =
 
 /// Whether a guarded room no ranger row serves is a ranger's chase (#510):
 /// a ranger kites its raid down (`kitedByRanger`), and the biggest melee body
-/// the bank buys loses to it. Read once a tick into `Threats.Chased`.
+/// the bank buys loses to it. Read once a tick into the chase's `Brief`.
 let internal chased (view: ColonyView) (room: string) : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))

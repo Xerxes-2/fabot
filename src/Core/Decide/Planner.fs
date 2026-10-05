@@ -435,7 +435,7 @@ let private coredOutpostsOf (view: ColonyView) (declared: string list) : string 
 /// ADR-0077
 /// The errand rooms the ranger row keeps a body in: every one this colony works
 /// this tick, raid or none — the ranger stands on the Reactor's ring and meets
-/// what comes (`Threats.ResidentRing`), while there is ore to burn in it
+/// what comes (`Laid.Resident`), while there is ore to burn in it
 /// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
 /// `view.Errands` before this reads it.
 let private guardedErrandsOf (fuelled: Errand list) : string list =
@@ -560,8 +560,14 @@ let planTasks
     // And one per room a trespasser stands in (#516): its kill, for a body
     // no row casts.
     let guards =
+        let briefed (claimed: Brief -> bool) =
+            threats.Briefs
+            |> Map.filter (fun _ brief -> claimed brief)
+            |> Map.keys
+            |> Set.ofSeq
+
         let holding =
-            threats.Held
+            briefed (fun brief -> List.contains BriefKind.ExitHold brief.Claims)
             |> Set.filter (fun room ->
                 Set.contains (taskId (Guard room)) held.All
                 && not (List.contains room outposts.Guarded))
@@ -571,7 +577,7 @@ let planTasks
             [ BriefKind.Chase; BriefKind.Trespass ]
             |> List.collect (fun kind ->
                 Set.difference
-                    (Threats.roomsOf threats ((=) kind))
+                    (briefed (fun brief -> brief.Kind = kind))
                     (Set.ofList (outposts.Guarded @ holding))
                 |> Set.toList)
 

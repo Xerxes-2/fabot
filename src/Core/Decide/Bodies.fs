@@ -366,6 +366,25 @@ let ownRowOnly (name: string) =
 let isOwnRowPattern (pattern: BodyPattern) =
     isSquadPattern pattern || pattern.Name = defenderPattern.Name
 
+/// The guard row's own cut, over a name and parts: an ATTACK body that
+/// answers to no row of its own (`ownRowOnly`).
+let internal isGuardRowCut (name: string) (parts: Map<BodyPart, int>) =
+    isGuardParts parts && not (ownRowOnly name)
+
+let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.Body
+
+/// The ranger cut (#411): a RANGED_ATTACK part and no ATTACK, the guard's cut
+/// taking a body that carries both.
+let internal isRangerParts (parts: Map<BodyPart, int>) =
+    partCount parts RangedAttack > 0 && partCount parts Attack = 0
+
+/// The ranger row's own cut: a ranger body that is no kiter cast
+/// (`ownRowOnly`).
+let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
+    isRangerParts parts && not (ownRowOnly name)
+
+let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
+
 /// The slot a body's parts fit, for a body that is no squad cast — a resident
 /// ranger: ATTACK and no HEAL, HEAL and no weapon, or no ATTACK and the
 /// kiter's guns (an eight-block ranger's). A smaller ranger fits no slot.

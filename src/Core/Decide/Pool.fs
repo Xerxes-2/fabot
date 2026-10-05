@@ -265,14 +265,16 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // give the walk a destination; the instant the guard arrives the room
         // is lit and this branch is not taken again.
         //
-        // Which ground is the Guard's otherwise is `Threats.guardGroundIn`'s.
-        // A chased room shut on its raid places no source (#510): its
-        // walkable ground off the border gives the walk in a destination.
+        // Which ground is the Guard's otherwise is its Brief's. One that walks
+        // in with no source placed (`Brief.WalksIn`) has the room's walkable
+        // ground off the border for a destination.
         | Guard room ->
-            Threats.guardGroundIn threats room
+            let brief = Threats.briefOf threats room
+
+            brief.Ground
             |> Option.defaultWith (fun () ->
                 match Atlas.sourceRingIn atlas room with
-                | ring when Set.isEmpty ring && Threats.kindOf threats room = BriefKind.Chase ->
+                | ring when Set.isEmpty ring && brief.WalksIn ->
                     Atlas.walkableTilesIn atlas room
                     |> Set.filter (Seam.onRing >> not)
                     |> RoomPos.setAt room
@@ -515,16 +517,6 @@ let deadlineRank = -tierRungs
 /// The step a Task is moved by when it is ordered against another inside one
 /// tier: one rung of ten, so it never crosses a tier.
 let priorityStep = 1
-
-/// The rungs a Task may be stepped by inside its tier, a union rather than an
-/// int for the reason `Tier` is one (#237): the Resolver's `weightOfRank` has
-/// to round every one of them back onto the tier's own push weight, and the
-/// test that checks that walks the cases off the union. A rung always steps a
-/// Task up, so the ranks below are negative.
-type Rung =
-    | OnTheTier
-    | OneRungUp
-    | TwoRungsUp
 
 /// What a rung is worth on the ladder, exhaustive over `Rung` on purpose.
 let rankOfRung =
@@ -1059,10 +1051,8 @@ let planPool
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
-            // A chase over a quiet ranger's own Guard (#510): its kill is
-            // the room's whole income back, and the ranger is let go for it.
-            // A trespass's likewise (#516), a quiet resident's ring too.
-            | Guard room when Threats.isKill threats room -> OneRungUp
+            // A kill over a quiet holder's own Guard (#510, #516): its Brief's.
+            | Guard room -> (Threats.briefOf threats room).Rung
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
             | _ -> OnTheTier
@@ -1115,34 +1105,8 @@ let planPool
                  |> Option.filter (fun _ -> posts > 0)
                  |> Option.map (fun n -> max 0 (n - posts)))
             |> Capacity.garrisoning postTiles
-        // The guards that room wants and nobody else at all: `guardsWanted`
-        // is the row's own arithmetic, read here a second time so the number
-        // the cascade hires against and the number the Matcher counts holders
-        // against are one number.
-        //
-        // One over per garrison body in a resident room (#414, #419, #447): its
-        // rangers are resident, and each relief — cast at its incumbent's lead,
-        // two of them together when the garrison was cast together — must take
-        // the Task and walk three crossings while the incumbent still holds
-        // the ring. A Guard has
-        // no arrival price for a handover window to be read against, and the
-        // row's count, not this cap, is what buys bodies.
-        | Guard room ->
-            match Threats.kindOf threats room with
-            | BriefKind.Resident ->
-                Capacity.fighters (rangersWanted view threats room + view.Tuning.RangerResidents)
-            // One ranger per harassment room (#439), and its relief beside it
-            // (`Capacity.Relieved`).
-            | BriefKind.Harass ->
-                Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
-            // One ranger kites what cannot close on it (#510).
-            | BriefKind.Chase -> Capacity.fighters 1
-            // One body kills a trespasser, which strikes nothing back (#516),
-            // and never fewer than the room's own guards.
-            | BriefKind.Trespass -> Capacity.fighters (max 1 (guardsWanted view room))
-            | BriefKind.Outpost
-            | BriefKind.Core
-            | BriefKind.ExitHold -> Capacity.fighters (guardsWanted view room)
+        // The bodies the room's Brief admits, off the row's own count.
+        | Guard room -> (Threats.briefOf threats room).Capacity view threats
         // The defender row's own count, read a second time as the guard's is.
         | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)
         // The squad's slots, one cap per role.

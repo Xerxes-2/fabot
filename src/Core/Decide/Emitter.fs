@@ -303,37 +303,9 @@ let internal applicable
     // for it is a generalist lost to the colony for the walk, and a sapper
     // an assault lost.
     | Dismantle _ -> isDismantlerParts heavy creep.Body && not (isSapperBody creep)
-    // Spelled through the row predicate the body-class ladder reads, so the
-    // gate and `bodyClassOf` cannot disagree. The room's kind decides which
-    // row: a resident room's Guard is the ranger's (#411), and a harassment
-    // room's (#432), and a chased room's (#510) to a ranger every raider there
-    // falls behind; every other the melee guard's. The walk to the work area
-    // is what travel cost prices.
-    | Guard room ->
-        match Threats.kindOf threats room with
-        | BriefKind.Resident
-        | BriefKind.Harass -> isRangerRowBody creep
-        | BriefKind.Chase ->
-            // Kited down by this body's own live parts, or out of sight; and a
-            // ranger the resident rule lends (#516).
-            isRangerRowBody creep
-            && (Facts.kitedDown view (partCount creep.Body) room
-                || not (
-                    view.Hostiles
-                    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raiderOnPaper h)
-                ))
-            && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
-        | BriefKind.Trespass ->
-            // A trespass's kill (#516), defence first: the guard row's body,
-            // or a ranger the resident rule lends. A child's outpost is the
-            // child's guard's, and the residents' beside it (#517).
-            not (Facts.underRaid view)
-            && (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
-                || isRangerRowBody creep
-                   && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
-        | BriefKind.Outpost
-        | BriefKind.Core
-        | BriefKind.ExitHold -> isGuardRowBody creep
+    // Spelled through the row predicates the body-class ladder reads, so the
+    // gate and `bodyClassOf` cannot disagree; which row is the Brief's.
+    | Guard room -> (Threats.briefOf threats room).Admits view atlas creep
     // A squad cast, or once the squad launches a resident of the room whose
     // parts fit a slot (`FightGround.Roles`); how many of each role is the
     // capacity's.
@@ -566,6 +538,7 @@ let private glyphFor =
 let private guardTarget
     (view: ColonyView)
     atlas
+    (targets: Selector)
     (fighting: Set<string>)
     (creep: CreepInfo)
     (room: string)
@@ -594,15 +567,10 @@ let private guardTarget
 
     // In a harassment room the declared enemy's unarmed creeps are targets
     // too (#432), after its armed ones.
-    match
-        view.Hostiles
-        |> List.filter (fun h ->
-            h.Pos.Room = room && Facts.guardShoots view residentRooms fighting h && among h)
-    with
-    | [] -> None
-    | targets ->
-        let rank = Facts.killRank view room
-        targets |> List.sortBy (fun h -> rank h, distance h, h.Id) |> List.tryHead
+    view.Hostiles
+    |> List.filter (fun h ->
+        h.Pos.Room = room && targets.Shoots view residentRooms fighting h && among h)
+    |> targets.Head view room distance
 
 /// A Guard chooses one reachable target, melee for a guard and within three for
 /// a ranger (#411). Self-healing belongs to the
@@ -611,6 +579,7 @@ let private guardTarget
 let private guardIntent
     (view: ColonyView)
     atlas
+    (targets: Selector)
     (fighting: Set<string>)
     (creep: CreepInfo)
     (room: string)
@@ -639,7 +608,7 @@ let private guardIntent
                    |> Option.exists (fun r -> r <= reach))
             |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
 
-    guardTarget view atlas fighting creep room inReach
+    guardTarget view atlas targets fighting creep room inReach
     |> Option.map (fun hostile ->
         if ranged then
             RangedAttackCreep(creep.Name, hostile.Id)
@@ -861,11 +830,15 @@ let private actionIntents
     let fighting = Threats.fightRooms threats
 
     match task with
-    | Guard room -> guardIntent view atlas fighting creep room |> Option.toList
+    | Guard room ->
+        guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
+        |> Option.toList
     // A medic's act is the heal reflex's; a brawler swings and a kiter shoots
-    // as a guard and a ranger do.
+    // as a guard and a ranger do, at the room's Guard's targets.
     | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
-    | Fight room -> guardIntent view atlas fighting creep room |> Option.toList
+    | Fight room ->
+        guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
+        |> Option.toList
     | Defend _ -> defendIntent view atlas threats creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
     // medic's act is the heal reflex's.
