@@ -467,14 +467,14 @@ module Brief =
                 | Answer.Win
                 | Answer.Lose -> true)
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
-        // A trespass's kill (#516), defence first: the guard row's body, or a
-        // ranger the resident rule lends. A child's outpost is the child's
-        // guard's, and the residents' beside it (#517).
+        // A trespass's kill (#516): the guard row's body, or a ranger the
+        // resident rule lends. A child's outpost is the child's guard's, and
+        // the residents' beside it (#517). Defence first is the rank's: a
+        // raid's Guard outranks it (`claimed`, #528).
         | BriefKind.Trespass ->
-            not (Facts.underRaid view)
-            && (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
-                || isRangerRowBody creep
-                   && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
+            isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
+            || isRangerRowBody creep
+               && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
         | BriefKind.Outpost
         | BriefKind.Core
         | BriefKind.ExitHold -> isGuardRowBody creep
@@ -608,11 +608,16 @@ module Brief =
     /// One room's Brief, off the kinds that claimed it down `BriefKind.order`
     /// and the ground each source laid there. A kill (#510, #516) is stepped a
     /// rung up — its kill is the room's whole income back, and a quiet holder
-    /// is let go for it — and calls that holder off within its walk. The
-    /// room's verdict and the rangers that win it (`Facts.rangersWin`) come
-    /// priced lazily, once a tick.
+    /// is let go for it — and calls that holder off within its walk. A raid's
+    /// Guard two: the melee guard's ring, or a garrison's or a chase's where
+    /// a Threat stands (`raided`). Defence first, so a body the raid wants
+    /// never goes to a kill, and only one the raid leaves free does (#528).
+    /// A harassment room's Threat is the enemy's own. The room's verdict and the
+    /// rangers that win it (`Facts.rangersWin`) come priced lazily, once a
+    /// tick.
     let internal claimed
         (room: string)
+        (raided: bool)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
         (claims: BriefKind list)
@@ -636,7 +641,13 @@ module Brief =
                 | BriefKind.Chase -> Avoid.MeleeStepAndSwing
                 | BriefKind.Trespass -> Avoid.Reach
                 | _ -> Avoid.Runner
-            Rung = if kill then OneRungUp else OnTheTier
+            Rung =
+                match kind with
+                | BriefKind.Outpost -> TwoRungsUp
+                | BriefKind.Resident
+                | BriefKind.Chase when raided -> TwoRungsUp
+                | _ when kill -> OneRungUp
+                | _ -> OnTheTier
             Asks = ask
             Capacity = capacityOf kind verdict rangers ask
             Verdict = verdict
@@ -646,7 +657,7 @@ module Brief =
     /// on no ground, the one a remembered raid pools in a room the colony is
     /// blind in (#366). No raider stands in it, so its verdict is `Win`.
     let unclaimed (room: string) : Brief =
-        claimed room (lazy Answer.Win) (lazy None) [] bare
+        claimed room false (lazy Answer.Win) (lazy None) [] bare
 
     /// The same Brief on this kite ground: a launched squad's (`withFights`).
     let internal kitingOn (ground: Set<RoomPos>) (brief: Brief) : Brief =
@@ -1535,6 +1546,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             room,
             Brief.claimed
                 room
+                (Map.containsKey room ring)
                 verdict
                 winners
                 (Map.tryFind room claimants |> Option.defaultValue [])

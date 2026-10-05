@@ -588,6 +588,7 @@ let decideUnarbitrated
         OutpostRooms = outposts.Declared
         Steps = steps
         Next = nextPours
+        Aims = aims view atlas threats assigned
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:

@@ -46,6 +46,7 @@ let private mobile: Gait = { Weight = 1; Moves = 1 }
 
 let private hostile x y owner armed : GlanceHostile =
     {
+        Id = "h-1"
         Tile = tile x y
         Owner = owner
         Armed = armed
@@ -202,6 +203,48 @@ let replayTests =
                     [ HarvestSource("digger", "src-a"); UpgradeController("hauler", "ctrl") ]
                     "digger before hauler, whatever the full tick's order"
             }
+
+            test
+                "a fighter swings at its full tick's aim two tiles off, the tick it steps beside it (#528)" {
+                // Live t971,345 W17S26: a guard chasing an unarmed digger came
+                // beside it on light ticks and never swung.
+                let guarded =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "guard" (creepAt 10 14 1000)
+                    }
+
+                let aimed =
+                    { LightTick.lastFull guarded Map.empty [] with
+                        Aims = [ AttackCreep("guard", "h-1") ]
+                    }
+
+                let beside =
+                    { guarded with
+                        Creeps = guarded.Creeps |> Map.add "guard" (creepAt 11 14 1000)
+                        Hostiles = [ hostile 12 14 "Trepidimous" false ]
+                    }
+
+                Expect.equal (LightTick.forced aimed beside) None "an unarmed digger forces nothing"
+
+                Expect.contains
+                    (LightTick.intents aimed beside)
+                    (AttackCreep("guard", "h-1"))
+                    "the light tick swings at the aim"
+
+                Expect.isFalse
+                    (LightTick.intents (LightTick.lastFull guarded Map.empty []) beside
+                     |> List.exists (function
+                         | AttackCreep _ -> true
+                         | _ -> false))
+                    "no aim recorded, no swing"
+
+                Expect.isFalse
+                    (LightTick.intents aimed { beside with Hostiles = [] }
+                     |> List.exists (function
+                         | AttackCreep _ -> true
+                         | _ -> false))
+                    "and none at a target gone from sight"
+            }
         ]
 
 [<Tests>]
@@ -316,6 +359,7 @@ let forcedTests =
                         Hostiles =
                             [
                                 {
+                                    Id = "trep"
                                     Tile = RoomPos.at harassed { X = x; Y = 10 }
                                     Owner = "Trepidimous"
                                     Armed = true
@@ -383,6 +427,7 @@ let forcedTests =
                         Hostiles =
                             [
                                 {
+                                    Id = "trep"
                                     Tile = tile
                                     Owner = "Trepidimous"
                                     Armed = true
@@ -762,6 +807,7 @@ let forcedTests =
                         Hostiles =
                             [
                                 {
+                                    Id = "rival"
                                     Tile = RoomPos.at "W2N1" { X = 10; Y = 10 }
                                     Owner = "Rival"
                                     Armed = true
@@ -1051,6 +1097,7 @@ let private fourColonies =
 
 let private hostileIn roomName x y owner armed : GlanceHostile =
     {
+        Id = "h-1"
         Tile = RoomPos.at roomName { X = x; Y = y }
         Owner = owner
         Armed = armed

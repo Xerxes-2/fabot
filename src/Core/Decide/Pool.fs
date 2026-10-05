@@ -1066,8 +1066,11 @@ let planPool
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
-            // A kill over a quiet holder's own Guard (#510, #516): its Brief's.
-            | Guard room -> (Threats.briefOf threats room).Rung
+            // A kill over a quiet holder's own Guard (#510, #516), and a raid's
+            // Guard over a kill (#528): its Brief's. The room's Fight ranks
+            // alike, a resident in a squad slot taking either.
+            | Guard room
+            | Fight room -> (Threats.briefOf threats room).Rung
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
             | _ -> OnTheTier

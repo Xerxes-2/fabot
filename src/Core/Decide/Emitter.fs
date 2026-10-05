@@ -572,6 +572,13 @@ let private guardTarget
         h.Pos.Room = room && targets.Shoots view residentRooms fighting h && among h)
     |> targets.Head view room distance
 
+/// A fighter's strike at a hostile: a ranger's shot, a guard's swing (#411).
+let private strikeAt (creep: CreepInfo) (hostile: HostileInfo) : Intent =
+    if isRangerBody creep then
+        RangedAttackCreep(creep.Name, hostile.Id)
+    else
+        AttackCreep(creep.Name, hostile.Id)
+
 /// A Guard chooses one reachable target, melee for a guard and within three for
 /// a ranger (#411). Self-healing belongs to the
 /// colony-wide reflex, which reads damage and the same compatibility rules as
@@ -609,11 +616,7 @@ let private guardIntent
             |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
 
     guardTarget view atlas targets fighting creep room inReach
-    |> Option.map (fun hostile ->
-        if ranged then
-            RangedAttackCreep(creep.Name, hostile.Id)
-        else
-            AttackCreep(creep.Name, hostile.Id))
+    |> Option.map (strikeAt creep)
     |> Option.orElseWith coreBeside
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
@@ -898,3 +901,32 @@ let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
             |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
 
     actions @ says
+
+/// Each fighter's aim (#528): its strike at the head of its Guard's or
+/// Fight's targets, in reach or not — the target it walks to. The light
+/// ticks after issue it again (`LightTick.intents`), so a body that steps
+/// beside a target between full ticks swings; out of reach the engine
+/// refuses it, and a refused act costs no CPU. A medic aims at nothing.
+let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
+    match view.Hostiles with
+    | [] -> []
+    | _ ->
+        let fighting = Threats.fightRooms threats
+
+        view.Creeps
+        |> List.choose (fun creep ->
+            match Map.tryFind creep.Name assigned with
+            | Some(Guard room) -> Some room
+            | Some(Fight room) when Threats.fightRoleOf threats room creep.Name <> Some Medic ->
+                Some room
+            | _ -> None
+            |> Option.bind (fun room ->
+                guardTarget
+                    view
+                    atlas
+                    (Threats.briefOf threats room).Targets
+                    fighting
+                    creep
+                    room
+                    (fun _ -> true))
+            |> Option.map (strikeAt creep))

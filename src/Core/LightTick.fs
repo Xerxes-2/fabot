@@ -20,6 +20,8 @@ type GlanceCreep =
 /// (`glanceOf`).
 type GlanceHostile =
     {
+        /// What a replayed aim names (`LastFull.Aims`).
+        Id: string
         Tile: RoomPos
         Owner: string
         Armed: bool
@@ -35,6 +37,7 @@ type GlanceHostile =
 /// wrong "unarmed" a shot undecided.
 let glanceOf (side: HostileInfo list) (hostile: HostileInfo) : GlanceHostile =
     {
+        Id = hostile.Id
         Tile = hostile.Pos
         Owner = hostile.Owner
         Armed = HostileInfo.armed side hostile
@@ -91,6 +94,10 @@ type LastFull =
         /// The full tick's ranged shots and self-heals, which a ranger standing
         /// in a loose room issues again (`intents`).
         Shots: Intent list
+        /// Each fighter's strike at its target, in reach or not
+        /// (`Emitter.aims`), which a light tick issues again while the target
+        /// is in sight (#528): a swing lands the tick a body steps beside it.
+        Aims: Intent list
     }
 
 /// One colony's rooms as `loose` reads them: the rooms it works (its scan set
@@ -375,6 +382,7 @@ and lastFullWith
                 | RangedAttackCreep _ -> true
                 | HealCreep(creep, target) -> creep = target
                 | _ -> false)
+        Aims = []
     }
 
 /// How close a hostile of any kind may come to a creep or structure of ours
@@ -561,7 +569,8 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
 /// standing on its step plan's first tile steps toward the second. A harass
 /// ranger standing in a loose room shoots and heals itself again from wherever
 /// it stands: the engine checks the range, and a target gone is a harmless
-/// refusal. Nothing else, ever: a one-shot act waits for the next full tick.
+/// refusal. A fighter strikes at its aim again the same way (#528). Nothing
+/// else, ever: a one-shot act waits for the next full tick.
 let intents (last: LastFull) (now: Glance) : Intent list =
     let work =
         last.Work
@@ -587,6 +596,26 @@ let intents (last: LastFull) (now: Glance) : Intent list =
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
 
+    // The full tick's aims (#528), each while its target is still in sight
+    // and its fighter replays no shot of its own: a swing lands beside a
+    // target the body has stepped to, and out of reach the engine refuses it.
+    let aims =
+        match last.Aims with
+        | [] -> Map.empty
+        | kept ->
+            let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
+
+            kept
+            |> List.choose (fun intent ->
+                match intent with
+                | AttackCreep(creep, target)
+                | RangedAttackCreep(creep, target) when
+                    Set.contains target seen && not (Map.containsKey creep shots)
+                    ->
+                    Some(creep, intent)
+                | _ -> None)
+            |> Map.ofList
+
     [
         for KeyValue(name, creep) in now.Creeps do
             match creep.Inward with
@@ -594,10 +623,18 @@ let intents (last: LastFull) (now: Glance) : Intent list =
                 yield MoveCreep(name, direction)
             | _ -> ()
 
-            if Map.tryFind name last.Standing = Some creep.Tile then
-                yield! Map.tryFind name work |> Option.defaultValue []
+            let replayed =
+                if Map.tryFind name last.Standing = Some creep.Tile then
+                    Map.tryFind name work |> Option.defaultValue []
+                else
+                    []
 
+            yield! replayed
             yield! Map.tryFind name shots |> Option.defaultValue []
+
+            // Never beside replayed work, whose channel a swing would share.
+            if List.isEmpty replayed then
+                yield! Map.tryFind name aims |> Option.toList
 
             match Map.tryFind name last.Steps with
             | Some(first, second) when first = creep.Tile ->

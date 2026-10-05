@@ -150,7 +150,7 @@ let pooledTests =
 
             // Characterisation (the Brief's S0): the one part of the Fight's pool
             // entry the cases around it leave unpinned.
-            test "the Fight and the residents' Guard beside it rank alike, on the Safety tier" {
+            test "the Fight and the residents' Guard beside it rank alike, a raid's two rungs up" {
                 let mother = fightingMother (w17s25RaidIn "W1N2") []
                 let atlas = Atlas.ofView mother
 
@@ -166,8 +166,8 @@ let pooledTests =
 
                 Expect.equal
                     (rankOf (Fight "W1N2"), rankOf (Guard "W1N2"))
-                    (Some(safetyRank OnTheTier), Some(safetyRank OnTheTier))
-                    "neither is a kill's rung up"
+                    (Some(safetyRank TwoRungsUp), Some(safetyRank TwoRungsUp))
+                    "both over a trespass's kill (#528)"
             }
 
             test "no catalogue squad wins, and no Fight is pooled" {

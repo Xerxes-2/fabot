@@ -812,6 +812,7 @@ let private fullTick
                 Deferred = Fresh.setOfSeq waiting
                 Loose = LightTick.loose roles
                 Rangers = LightTick.harassRangers roles
+                Aims = decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Aims)
             })
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it

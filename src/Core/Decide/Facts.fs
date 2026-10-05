@@ -494,17 +494,20 @@ let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
            && within Engine.rangedRange other.Pos hostile.Pos)
 
 /// Whether a hostile's body trespasses wherever it stands (#516), among
-/// `side`: a declared enemy's (`Colony.enemies`) working or carrying with a
-/// WORK, CARRY or CLAIM, and unarmed. A hauler carries our dug energy off; a
-/// bare scout takes nothing.
+/// `side`: a declared enemy's (`Colony.enemies`), unarmed, and working or
+/// carrying with a WORK, CARRY or CLAIM, or shot disarmed — a weapon on
+/// paper and none in effect (#528), so it strikes nothing back. A hauler
+/// carries our dug energy off; a bare scout takes nothing.
 let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
     let takes part =
         part = Work || part = Carry || part = BodyPart.Claim
 
-    List.exists takes hostile.Body
+    let paperWeapon = Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
+
+    (paperWeapon || List.exists takes hostile.Body)
     && Colony.isEnemy hostile.Owner
-    && List.exists takes (HostileInfo.effectiveParts side hostile)
     && not (HostileInfo.armed side hostile)
+    && (paperWeapon || List.exists takes (HostileInfo.effectiveParts side hostile))
 
 /// Whether this colony mines a room: its home, or a room of its sources.
 let internal minesRoom (view: ColonyView) (room: string) =
@@ -577,20 +580,6 @@ let internal rangerMayKill (view: ColonyView) (room: string) (standing: string o
     && standing
        |> Option.forall (fun here ->
            not (Set.contains here resident) || RoomName.neighbouring here room)
-
-/// Whether an armed raid stands in a room this colony defends (#516): its
-/// home, a resident room, a defended child's home or a room it mines.
-/// Defence first: no trespass's kill is held meanwhile, so no fresh or
-/// passing body is spent on one while a raid wants it.
-let internal underRaid (view: ColonyView) =
-    view.Hostiles
-    |> List.exists (fun h ->
-        HostileInfo.raider view.Hostiles h
-        && (let room = h.Pos.Room
-
-            Set.contains room (residentRooms view)
-            || List.contains room view.Borrowed.Defended
-            || minesRoom view room))
 
 /// Whether the holder of a room's Guard may be called off it for a kill in
 /// another (#510, #516), the bodies the kill admits being the gate's to say.

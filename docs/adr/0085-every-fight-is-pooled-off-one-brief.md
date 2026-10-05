@@ -10,7 +10,7 @@ Ten combat behaviours were added one issue at a time, and each answers the same 
 
 ### Inventory
 
-Every behaviour below is a Safety-tier Task. "Sites" counts the Decide functions (`Decide/*.fs`, file:function) that name the behaviour or its discriminator; the second number counts every function in `src/Core` and `src/App`. Appendix A lists them.
+Every behaviour below is a Safety-tier Task. The table is the S0 inventory as it stood; the stages amend the code, not the table (since #528: a raided Outpost Guard, a raided Resident Guard, a Chase in sight and its room's Fight rank TwoRungsUp, a Trespass kill and a dark Chase OneRungUp, and the Trespass admit has no `underRaid` gate). "Sites" counts the Decide functions (`Decide/*.fs`, file:function) that name the behaviour or its discriminator; the second number counts every function in `src/Core` and `src/App`. Appendix A lists them.
 
 | Behaviour | Targets | Who may take it | Ground | Rung / capacity | Stand-down coupling | Casting row | Sites |
 |---|---|---|---|---|---|---|---|
@@ -79,7 +79,7 @@ Brief = { Task      : Task                       // wire identity, unchanged
           Recall    : Recall option              // who may be called off another Brief, within what walk
           Ground    : Ground                     // Set<RoomPos>, or per role for a Formation
           Avoid     : Avoid                      // Reach | MeleeStepAndSwing (+ exit camp) | DefendAvoid
-          Rung      : Rung                       // OnTheTier | OneRungUp (a kill)
+          Rung      : Rung                       // OnTheTier | OneRungUp (a kill) | TwoRungsUp (a raid's, #528)
           Capacity  : Capacity                   // the existing kind-free record
           Asks      : RowAsk                     // Row(pattern, count, blocks) | None | Squad(roles) | Declared
           Answer    : view -> Verdict }          // Win | Kite | Lose: what the stand-down, the row and the chase all read
@@ -93,7 +93,7 @@ Each behaviour then becomes a configuration of the Brief:
 - **Resident:** resident selector; ranger cut; resident ring, or the Kite chain under a raid; `rangersWanted` plus the residents; Row(ranger); Answer from `outmatched`/`kitedByRanger`.
 - **Harass:** `harassTarget` with digger-first order; ranger cut; ambush ground; relief cap; Row(ranger, floor); Answer from `rangerBlocksBeat`. Its sighting clock stays on the stand-down.
 - **Chase:** raid selector; ranger cut plus `kitedDown` plus `rangerMayKill`; Recall(quiet, `chaseWalk`); kite ground; MeleeStepAndSwing avoid; OneRungUp; cap 1; no row.
-- **Trespass:** `trespasser`; guard or lent ranger, with `not underRaid`; the same Recall; store or beside ground; Reach avoid; OneRungUp; no row.
+- **Trespass:** `trespasser`; guard or lent ranger; the same Recall; store or beside ground; Reach avoid; OneRungUp; no row. Defence first is rank, not a gate (#528): an Outpost Guard, and a Resident's or Chase's where a Threat stands, rank TwoRungsUp, the room's Fight alike.
 - **Defend:** `AtLine` with fewest-hits order; defender cut; perimeter ground; DefendAvoid; Row(defender).
 - **Fight:** Ground is a `Formation` (per-role grounds plus `Launched`); Capacity is roles; a Squad ask; Answer from `residentsLose`/`pricedSquad`.
 - **Assault:** Formation; structure selector; a Declared ask. Its Answer is the safe-mode window, not a stand-down.

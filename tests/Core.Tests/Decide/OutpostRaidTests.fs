@@ -112,12 +112,14 @@ let guardTaskTests =
                     [ "guard:W1N2" ]
                     "the raid pools exactly one, under the room's own name"
 
-                // The Safety tier's priority has no rung: nothing ever asks how its
-                // two Tasks order.
+                // A raid's Guard is two rungs over the Safety tier (#528), over a
+                // trespass's kill; Flee, which admits no fighter, on it.
                 Expect.equal
                     (raided |> entryFor (Guard "W1N2") |> Option.map (fun e -> e.Priority))
-                    (raided |> entryFor Flee |> Option.map (fun e -> e.Priority))
-                    "and it ranks exactly where Flee does — Safety, no rung"
+                    (raided
+                     |> entryFor Flee
+                     |> Option.map (fun e -> e.Priority + rankOfRung TwoRungsUp))
+                    "and it ranks two rungs over Flee"
             }
 
             test "the cap is the room's own quota, one guard and then two" {
@@ -1728,6 +1730,46 @@ let private raisingBeyond hostiles =
 
 let private residentHeld = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
 
+/// The outpost floored out to its borders, and beyond it W1N3, a second
+/// room this colony mines, its source at (25,25): outpost A and outpost B
+/// (#528), the guards of ours standing in A on the tiles the case names.
+let private secondOutpost hostiles (ours: (CreepInfo * Pos) list) =
+    let colony = declaredRaid hostiles |> withGuards ours
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Sources = source "src-b" :: colony.Sources
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N3" plainRing
+                TargetKinds = colony.Spatial.TargetKinds |> Map.add "src-b" Source
+            }
+            |> withNeighbour "W1N2" { outpost with Terrain = floor }
+            |> withNeighbour
+                "W1N3"
+                { RoomLayer.empty with
+                    Terrain = floor
+                    TargetPositions = Map.ofList [ "src-b", { X = 25; Y = 25 } ]
+                    Obstacles = Set.singleton { X = 25; Y = 25 }
+                }
+    }
+
+/// Virtual458 as W18S25 saw it (#528): a declared enemy's 17 ATTACK on 17
+/// MOVE, shot to 74 hits, every ATTACK and all but one MOVE gone. It strikes
+/// nothing back.
+let private disarmedAt owner room pos =
+    { hostileIn room pos (List.replicate 17 Attack @ List.replicate 17 Move) with
+        Owner = owner
+        Hits = 74
+    }
+
 [<Tests>]
 let trespassTests =
     testList
@@ -1745,14 +1787,19 @@ let trespassTests =
                     (Some(Capacity.fighters 1))
                     "for one body"
 
-                let quietGuard =
+                let raidGuard =
                     pooledOf (declaredRaid [ hostileIn "W1N2" { X = 25; Y = 42 } smallMelee ])
                     |> entryFor (Guard "W1N2")
 
+                Expect.equal
+                    (entry |> Option.map (fun e -> e.Priority))
+                    (Some(safetyRank OneRungUp))
+                    "a rung over the tier, a quiet holder's Guard"
+
                 Expect.isLessThan
+                    (raidGuard |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0)
                     (entry |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0)
-                    (quietGuard |> Option.map (fun e -> e.Priority) |> Option.defaultValue 0)
-                    "a rung over a raided outpost's Guard"
+                    "and under a raided outpost's Guard: defence first (#528)"
 
                 Expect.isSome
                     (pooledOf (declaredRaid [ diggerAt "W1N1" { X = 25; Y = 5 } ])
@@ -2098,6 +2145,110 @@ let trespassTests =
                     (Some(taskId (Guard "W1N3")))
                     "and it holds its home again"
             }
+
+            test
+                "a raid in outpost A withholds no trespass kill in B from a guard A leaves spare (#528)" {
+                let raid = hostileIn "W1N2" { X = 25; Y = 42 } smallMelee
+
+                let digger =
+                    { diggerAt "W1N3" { X = 25; Y = 20 } with
+                        Id = "h-2"
+                    }
+
+                let colony =
+                    secondOutpost
+                        [ raid; digger ]
+                        [ guard "g-1", beside; guard "g-2", { X = 25; Y = 30 } ]
+
+                let result =
+                    decide colony (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the raid's guard holds the raid"
+
+                Expect.equal
+                    (Map.tryFind "g-2" result.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "and the spare guard takes B's trespasser"
+            }
+
+            test "defence first: a lone guard takes outpost A's raid over B's trespasser (#528)" {
+                let raid = hostileIn "W1N2" { X = 25; Y = 42 } smallMelee
+
+                let digger =
+                    { diggerAt "W1N3" { X = 25; Y = 20 } with
+                        Id = "h-2"
+                    }
+
+                let colony = secondOutpost [ raid; digger ] [ guard "g-1", { X = 25; Y = 30 } ]
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the raid's Guard ranks over the trespass's kill"
+            }
+
+            test "a declared enemy's body shot disarmed in our outpost is a trespasser (#528)" {
+                let colony =
+                    declaredRaid [ disarmedAt "Trepidimous" "W1N2" { X = 25; Y = 44 } ]
+                    |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
+
+                let atlas = Atlas.ofView colony
+
+                Expect.equal
+                    ((Threats.briefOf (threatsOf colony atlas) "W1N2").Kind)
+                    BriefKind.Trespass
+                    "its Guard is the trespass's kill"
+
+                Expect.isSome (pooledOf colony |> entryFor (Guard "W1N2")) "pooled"
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and taken"
+            }
+
+            test "a guard three off its trespasser aims at it, for the light ticks to swing (#528)" {
+                let colony =
+                    declaredRaid [ diggerAt "W1N2" { X = 25; Y = 44 } ]
+                    |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
+
+                let result = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: it holds the kill"
+
+                Expect.isFalse
+                    (List.contains (AttackCreep("g-1", "h-1")) result.Intents)
+                    "out of reach, no swing this tick"
+
+                Expect.equal result.Aims [ AttackCreep("g-1", "h-1") ] "but its aim is recorded"
+
+                Expect.isEmpty (decideOn (declaredRaid [])).Aims "a quiet colony aims at nothing"
+            }
+
+            test "a neutral's disarmed body and a bare enemy scout pool none (#528)" {
+                Expect.isNone
+                    (pooledOf (declaredRaid [ disarmedAt "giaco" "W1N2" { X = 25; Y = 44 } ])
+                     |> entryFor (Guard "W1N2"))
+                    "only a declared enemy's"
+
+                Expect.isNone
+                    (pooledOf (
+                        declaredRaid
+                            [
+                                { hostileIn "W1N2" { X = 25; Y = 44 } [ Move ] with
+                                    Owner = "Trepidimous"
+                                }
+                            ]
+                     )
+                     |> entryFor (Guard "W1N2"))
+                    "a scout carried no weapon to lose"
+            }
         ]
 
 [<Tests>]
@@ -2375,15 +2526,15 @@ let guardFlavourTests =
         "one outpost's Guard, flavour by flavour"
         [
             test
-                "a raid: the guard row's body on the raider's ring, on the tier, the room's own count" {
+                "a raid: the guard row's body on the raider's ring, two rungs up, the room's own count" {
                 let colony =
                     declaredRaid raiders
                     |> withGuards [ guard "g-1", beside; ranger "r-1", { X = 21; Y = 47 } ]
 
                 Expect.equal
                     (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
-                    "one Guard on the Safety tier, for the one body the raid wants"
+                    (Some(safetyRank TwoRungsUp, Capacity.fighters 1))
+                    "one Guard over every kill (#528), for the one body the raid wants"
 
                 Expect.equal
                     (Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
@@ -2454,7 +2605,7 @@ let guardFlavourTests =
                 Expect.equal (guardQuotaOf colony) (Some 0) "the guard row hires none"
             }
 
-            test "a chase: one ranger, a rung up, and no row casts for it" {
+            test "a chase: one ranger, a raid's two rungs up in sight, and no row casts for it" {
                 let colony =
                     declaredRaid [ crippledAt { X = 25; Y = 44 } ]
                     |> withGuards
@@ -2462,8 +2613,8 @@ let guardFlavourTests =
 
                 Expect.equal
                     (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
-                    "one kill, one rung over the tier"
+                    (Some(safetyRank TwoRungsUp, Capacity.fighters 1))
+                    "one kill, over a trespass's (#528)"
 
                 Expect.equal
                     (rowOf "ranger" colony |> Option.map (fun row -> row.Quota))
@@ -2782,22 +2933,24 @@ let guardPrecedenceTests =
 
                 let rows =
                     [
-                        // Each alone.
-                        [ Raid ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
+                        // Each alone. A raid's Guard two rungs up, over every
+                        // kill (#528); a kill one, over a quiet holder's.
+                        [ Raid ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         [ Core ], row [ Core ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Trespasser ], row [ Trespasser ] [ "Trespass" ] OneRungUp one [ "g-1" ]
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
                         [ Harassed ], row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
-                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] OneRungUp one [ "r-1" ]
+                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         // Out of sight a chase has no ground; the pool walks it in.
                         [ ChaseDark ], row [] [] OneRungUp one [ "r-1" ]
                         // The raid before what it shares the room with.
-                        [ Raid; Hold ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        [ Raid; Core ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        [ Raid; Trespasser ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        // In a ranger room a raid is kited, on ground of its own.
-                        [ Raid; Resident ], row [] [ "Kite" ] OnTheTier garrison [ "r-1" ]
+                        [ Raid; Hold ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
+                        [ Raid; Core ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
+                        [ Raid; Trespasser ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
+                        // In a ranger room a raid is kited, on ground of its own;
+                        // a harassment room's raid is the enemy's own, on the tier.
+                        [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "r-1" ]
                         [ Raid; Harassed ], row [] [ "Kite" ] OnTheTier relieved [ "r-1" ]
                         // The held exit before the core, either before the trespasser.
                         [ Hold; Core ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
@@ -2831,12 +2984,12 @@ let guardPrecedenceTests =
                             [ "r-1" ]
                         // A chase in sight kites before the core, the held exit
                         // and the trespasser; beside a raid that can close, no chase.
-                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] OneRungUp one [ "r-1" ]
-                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] OneRungUp one [ "r-1" ]
+                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         [ ChaseSeen; Trespasser ],
-                        row [ ChaseSeen ] [ "Kite" ] OneRungUp one [ "r-1" ]
+                        row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         [ ChaseSeen; Raid ],
-                        row [] [ "Ring" ] OnTheTier (Capacity.fighters 2) [ "g-1" ]
+                        row [] [ "Ring" ] TwoRungsUp (Capacity.fighters 2) [ "g-1" ]
                         // Quirk, kept: a chase out of sight over a held exit takes
                         // the melee guard's range-1 exit ground, a rung up.
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
@@ -2845,7 +2998,7 @@ let guardPrecedenceTests =
                         // there after all. The Brief's S7, rule 2: its verdict is the
                         // guard's win, so it is the raid's Guard and the guard
                         // takes it (it was pooled as a kill nobody took).
-                        [ ChaseDark; Raid; Hold ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
+                        [ ChaseDark; Raid; Hold ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         // And a chase out of sight shuts the trespasser's kill out.
                         [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "r-1" ]
                     ]

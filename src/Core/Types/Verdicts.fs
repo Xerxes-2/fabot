@@ -522,4 +522,7 @@ type Decision =
         /// and stands beside another hungry member of the refill cluster,
         /// its transfer into that one. Never issued on this tick.
         Next: Intent list
+        /// Each fighter's strike at its target, in reach or not
+        /// (`Emitter.aims`): what the light ticks after issue again.
+        Aims: Intent list
     }
