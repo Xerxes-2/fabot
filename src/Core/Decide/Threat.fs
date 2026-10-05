@@ -400,9 +400,9 @@ let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : in
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Brief =
     /// How far a quiet ranger walks for a kill (#510), in travel cost (two
-    /// units a tick): two rooms' side, where the kill is made and it is home
-    /// again inside the time a raid takes to reach the room it left.
-    let private killWalk = 2 * 2 * Engine.roomSide
+    /// units a tick): the reaction window of a lend, inside which no raid
+    /// reaches the home it left (`Facts.mayLend`).
+    let private killWalk = 2 * Reaction.lend
 
     let private bare =
         {
@@ -441,7 +441,10 @@ module Brief =
         BriefKind.order |> List.skipWhile ((<>) kind) |> List.tryPick own
 
     /// A resident room's Guard is the ranger row's (#411), and a harassment
-    /// room's (#432); every ring kind's the melee guard's.
+    /// room's (#432); every ring kind's the melee guard's, which holds the
+    /// post where it cannot catch the raid (#531). A kill admits only a body
+    /// that strikes every target it counts (`Facts.strikesEvery`), the rule
+    /// its verdict prices the rangers by.
     let private admitsOf
         (kind: BriefKind)
         (room: string)
@@ -450,6 +453,9 @@ module Brief =
         (atlas: Atlas.Atlas)
         (creep: CreepInfo)
         : bool =
+        let strikes counts =
+            Facts.strikesEvery view (partCount creep.Body) counts room
+
         match kind with
         | BriefKind.Resident
         | BriefKind.Harass -> isRangerRowBody creep
@@ -464,14 +470,16 @@ module Brief =
                 | Answer.Win
                 | Answer.Lose -> true)
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
+            && strikes (HostileInfo.raider view.Hostiles)
         // A trespass's kill (#516): the guard row's body, or a ranger the
         // resident rule lends. A child's outpost is the child's guard's, and
         // the residents' beside it (#517). Defence first is the rank's: a
         // raid's Guard outranks it (`claimed`, #528).
         | BriefKind.Trespass ->
-            isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
-            || isRangerRowBody creep
-               && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
+            (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
+             || isRangerRowBody creep
+                && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
+            && strikes (Facts.trespasser view)
         | BriefKind.Outpost
         | BriefKind.Core
         | BriefKind.ExitHold -> isGuardRowBody creep
@@ -1447,12 +1455,34 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     // Asked of the grid a tile at a time rather than against the
                     // room's materialised walkable ground (#371): a ring is nine
                     // tiles a Threat and the ground is two thousand.
-                    let tiles =
-                        inRoom
-                        |> List.collect (fun (_, pos, _) ->
+                    let around (tiles: Pos list) =
+                        tiles
+                        |> List.collect (fun pos ->
                             Atlas.adjacentWalkableIn atlas room pos
                             |> List.filter (fun tile -> not (Set.contains tile standing)))
                         |> Set.ofList
+
+                    // A raid that outruns the row's guard (`Facts.canStrike`,
+                    // #531) is held off our work, not chased: the guard holds
+                    // the tiles beside the room's Posts, which a raider must
+                    // come within reach of to hurt the work there.
+                    let guard part =
+                        max 1 (guardBlocksReach view) * partCountIn guardPattern.Block part
+
+                    let posts = Atlas.postsIn atlas room |> Set.toList
+
+                    let tiles =
+                        if
+                            List.isEmpty posts
+                            || Facts.strikesEvery
+                                view
+                                guard
+                                (HostileInfo.raider view.Hostiles)
+                                room
+                        then
+                            around (inRoom |> List.map (fun (_, pos, _) -> pos))
+                        else
+                            Set.difference (around posts) (Set.ofList posts)
 
                     room, RoomPos.setAt room tiles)
                 |> Map.ofList

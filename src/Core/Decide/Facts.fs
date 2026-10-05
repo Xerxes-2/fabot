@@ -547,60 +547,6 @@ let internal guardShoots
        && HostileInfo.heals view.Hostiles hostile
     || trespasser view hostile
 
-/// Whether a resident room is quiet enough to lend its garrison to a kill
-/// in `kill` (#516): nothing its Guard shoots stands in it, and no armed
-/// hostile next door but the kill's own target.
-let private residentQuiet (view: ColonyView) (resident: Set<string>) (kill: string) (home: string) =
-    view.Hostiles
-    |> List.forall (fun h ->
-        if h.Pos.Room = home then
-            not (guardShoots view resident Set.empty h)
-        else
-            h.Pos.Room = kill
-            || not (RoomName.neighbouring home h.Pos.Room && HostileInfo.raider view.Hostiles h))
-
-/// Whether a ranger standing in a room may be lent to a kill in `kill`, a
-/// chase's or a trespass's (#510, #516): one rule, its lender's, whichever
-/// colony asks (#518). `resident` is the lender's resident rooms: a colony's
-/// own for its own bodies, and for a child pricing her mother's residents
-/// (`ColonyView.Lendable`) her own with the home they stand in. Nothing a
-/// ranger carries says whose resident it is, so every resident room beside
-/// the kill is quiet (`residentQuiet`), or no ranger may — a harassment
-/// ranger or a fresh cast as much as the garrison: a raid arriving there
-/// calls its garrison back off the kill at once. And one standing in a
-/// resident room is its garrison, lent only to a room beside it.
-let internal mayLend
-    (view: ColonyView)
-    (resident: Set<string>)
-    (kill: string)
-    (standing: string option)
-    =
-    resident
-    |> Set.forall (fun home ->
-        not (RoomName.neighbouring home kill) || residentQuiet view resident kill home)
-    && standing
-       |> Option.forall (fun here ->
-           not (Set.contains here resident) || RoomName.neighbouring here kill)
-
-/// `mayLend` for this colony's own bodies.
-let internal rangerMayKill (view: ColonyView) (room: string) (standing: string option) =
-    mayLend view (residentRooms view) room standing
-
-/// Whether the holder of a room's Guard may be called off it for a kill in
-/// another (#510, #516), the bodies the kill admits being the gate's to say.
-/// A resident only as it may be lent (`mayLend`); any other holder while
-/// nothing its Guard shoots stands in its room, and never off another kill.
-let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) (kill: string) =
-    let resident = residentRooms view
-
-    if Set.contains held resident then
-        mayLend view resident kill (Some held)
-    else
-        not (Set.contains held kills)
-        && view.Hostiles
-           |> List.forall (fun h ->
-               h.Pos.Room <> held || not (guardShoots view resident Set.empty h))
-
 /// Whether a ranged body of these part counts holds the range on a hostile
 /// for as long as it likes (#510): the hostile shoots nothing, and falls
 /// behind ours on road and plain alike (`Gait.fallsBehind`), ours read off
@@ -608,6 +554,45 @@ let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) 
 let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
     not (HostileInfo.shoots side hostile)
     && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait side hostile)
+
+/// Whether an unarmed worker stands on a seat it digs from: WORK in effect,
+/// no weapon, within a step of a source of its room.
+let private onDigSeat (view: ColonyView) (hostile: HostileInfo) =
+    HostileInfo.works view.Hostiles hostile
+    && not (HostileInfo.armed view.Hostiles hostile)
+    && (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
+       |> Map.exists (fun id tile ->
+           Map.tryFind id view.Spatial.TargetKinds = Some Source
+           && range tile (RoomPos.pos hostile.Pos) <= 1)
+
+/// Whether a body of these live part counts can strike a hostile to kill it
+/// (#531): the one rule every kill's admission and its verdict read. A body
+/// with a weapon strikes any target that does not outrun it
+/// (`Gait.outruns`), and one that does but is rooted (`HostileInfo.stationary`,
+/// or an unarmed worker on its dig seat) or penned in its room (an Invader).
+/// A target that outruns it is held off our work instead (`Brief`'s hold
+/// ground), never chased.
+let internal canStrike (view: ColonyView) (ours: BodyPart -> int) (target: HostileInfo) =
+    let side = view.Hostiles
+
+    (ours RangedAttack > 0 || ours Attack > 0)
+    && (not (Gait.outruns (HostileInfo.gait side target) (Gait.ofParts ours))
+        || not (HostileInfo.crossesExits target)
+        || HostileInfo.stationary side target
+        || onDigSeat view target)
+
+/// Whether a body strikes every target a kill counts in a room (`canStrike`):
+/// what the kill admits it by, and what the verdict prices it by — a chase's
+/// raiders, a trespass's trespassers. Every, not any: a body that kills one
+/// and is kited by another neither wins the room nor ends the kill.
+let internal strikesEvery
+    (view: ColonyView)
+    (ours: BodyPart -> int)
+    (counts: HostileInfo -> bool)
+    (room: string)
+    =
+    view.Hostiles
+    |> List.forall (fun h -> h.Pos.Room <> room || not (counts h) || canStrike view ours h)
 
 /// What a body deals a tick, off its part counts: melee and ranged, unboosted.
 let private damageOf (parts: BodyPart -> int) =
@@ -765,30 +750,30 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
             }
 
 /// Whether our side — this damage, healing and hits a tick — wins the exchange
-/// against the raid standing in one room: two clocks compared,
-/// cross-multiplied to stay in whole numbers. A raid that out-heals our damage
-/// is never killed. Healers are priced in the healing and never in the hits.
-/// Each raider is priced as it fights (`HostileInfo.effectiveParts`): what is
-/// left of it, or the whole body at full hits where healing reaches it.
-let internal exchangeWon
+/// against a raid: two clocks compared, cross-multiplied to stay in whole
+/// numbers. A raid that out-heals our damage is never killed. Healers are
+/// priced in the healing and never in the hits. Each raider deals what it
+/// fights with (`HostileInfo.effectiveParts`) and stands at the hits it has,
+/// its healing priced once, as the rate set against our damage.
+let private exchangeAgainst
     (view: ColonyView)
-    (room: string)
+    (window: int)
+    (raid: HostileInfo list)
     (ourDamage: int)
     (ourHealing: int)
     (ourHits: int)
     : bool =
-    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let parts h =
+        HostileInfo.partsWithin window view.Hostiles h
 
-    let raidDamage =
-        raid
-        |> List.sumBy (fun h -> damageOf (partCountIn (HostileInfo.effectiveParts view.Hostiles h)))
+    let raidDamage = raid |> List.sumBy (fun h -> damageOf (partCountIn (parts h)))
 
     let raidHealing = raid |> List.sumBy (HostileInfo.healing view.Hostiles)
 
     let raidHits =
         raid
-        |> List.filter (HostileInfo.armed view.Hostiles)
-        |> List.sumBy (HostileInfo.effectiveHits view.Hostiles)
+        |> List.filter (fun h -> Option.isSome (HostileInfo.weaponRangeOf (parts h)))
+        |> List.sumBy (fun h -> h.Hits)
 
     if raidDamage = 0 then
         true
@@ -798,6 +783,18 @@ let internal exchangeWon
         true
     else
         raidHits * (raidDamage - ourHealing) < ourHits * (ourDamage - raidHealing)
+
+/// `exchangeAgainst` the raid standing in one room, read at the window to
+/// close and strike (`Reaction.strike`).
+let internal exchangeWon
+    (view: ColonyView)
+    (room: string)
+    (ourDamage: int)
+    (ourHealing: int)
+    (ourHits: int)
+    =
+    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    exchangeAgainst view Reaction.strike raid ourDamage ourHealing ourHits
 
 /// `exchangeWon` for one body of these active part counts and hits: what a
 /// body standing in the room is weighed by (`Quota.homeHolds`).
@@ -882,11 +879,116 @@ let private towerDamageIn (view: ColonyView) (room: string) =
     let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
     towers * Engine.towerAttackAt Engine.towerFalloffRange
 
+/// A home's middle: what a raid on it strikes, its spawn, store and
+/// controller standing about there.
+let private homeMiddle = Engine.roomSide / 2
+
+/// Whether a hostile standing outside `home` is a raider that reaches
+/// striking range of its middle inside the window a lent body is away
+/// (#531): armed, paced and ranged all read at that one window
+/// (`Reaction.lend`), its walk the world tiles there less its weapon's range,
+/// at its pace on road, the faster ground. One that never leaves its room
+/// (an Invader) or steps of itself arrives nowhere.
+let private arrivesWithin (view: ColonyView) (home: string) (hostile: HostileInfo) =
+    let parts = HostileInfo.partsWithin Reaction.lend view.Hostiles hostile
+
+    HostileInfo.crossesExits hostile
+    && (match
+            RoomName.tileRange hostile.Pos (RoomPos.at home { X = homeMiddle; Y = homeMiddle }),
+            HostileInfo.weaponRangeOf parts
+        with
+        | Some tiles, Some reach ->
+            Gait.ticks Gait.road (Gait.ofBody hostile.Body parts)
+            |> Option.exists (fun pace -> max 0 (tiles - reach) * pace <= Reaction.lend)
+        | _ -> false)
+
+/// Whether what a home keeps while its garrison is lent beats the raiders
+/// arriving inside the lend's window (#531), priced together by the exchange
+/// at that window: its loaded towers, standing at their hits, and the bodies
+/// of ours standing there that no lend takes (anything but the ranger row's).
+let private homeHolds (view: ColonyView) (home: string) (arriving: HostileInfo list) =
+    let staying =
+        view.Creeps
+        |> List.filter (fun creep ->
+            not (isRangerRowBody creep)
+            && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+               |> Option.exists (fun at -> at.Room = home))
+        |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits)
+
+    let towers = Map.tryFind home view.LoadedTowers |> Option.defaultValue 0
+
+    exchangeAgainst
+        view
+        Reaction.lend
+        arriving
+        (towerDamageIn view home + List.sumBy (fst >> damageOf) staying)
+        (List.sumBy (fst >> selfHealOf) staying)
+        (towers * Engine.towerHits + List.sumBy snd staying)
+
+/// Whether a resident room is quiet enough to lend its garrison to a kill
+/// in `kill` (#516): nothing its Guard shoots stands in it, and what it
+/// keeps beats every raider but the kill's own that reaches it before the
+/// garrison is back (`arrivesWithin`, `homeHolds`).
+let private residentQuiet (view: ColonyView) (resident: Set<string>) (kill: string) (home: string) =
+    let inHome, arriving =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room <> kill)
+        |> List.partition (fun h -> h.Pos.Room = home)
+
+    inHome |> List.forall (guardShoots view resident Set.empty >> not)
+    && (match arriving |> List.filter (arrivesWithin view home) with
+        | [] -> true
+        | raid -> homeHolds view home raid)
+
+/// Whether a ranger standing in a room may be lent to a kill in `kill`, a
+/// chase's or a trespass's (#510, #516): one rule, its lender's, whichever
+/// colony asks (#518). `resident` is the lender's resident rooms: a colony's
+/// own for its own bodies, and for a child pricing her mother's residents
+/// (`ColonyView.Lendable`) her own with the home they stand in. Nothing a
+/// ranger carries says whose resident it is, so every resident room beside
+/// the kill is quiet (`residentQuiet`), or no ranger may — a harassment
+/// ranger or a fresh cast as much as the garrison: a raid arriving there
+/// calls its garrison back off the kill at once. And one standing in a
+/// resident room is its garrison, lent only to a room beside it.
+let internal mayLend
+    (view: ColonyView)
+    (resident: Set<string>)
+    (kill: string)
+    (standing: string option)
+    =
+    resident
+    |> Set.forall (fun home ->
+        not (RoomName.neighbouring home kill) || residentQuiet view resident kill home)
+    && standing
+       |> Option.forall (fun here ->
+           not (Set.contains here resident) || RoomName.neighbouring here kill)
+
+/// `mayLend` for this colony's own bodies.
+let internal rangerMayKill (view: ColonyView) (room: string) (standing: string option) =
+    mayLend view (residentRooms view) room standing
+
+/// Whether the holder of a room's Guard may be called off it for a kill in
+/// another (#510, #516), the bodies the kill admits being the gate's to say.
+/// A resident only as it may be lent (`mayLend`); any other holder while
+/// nothing its Guard shoots stands in its room, and never off another kill.
+let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) (kill: string) =
+    let resident = residentRooms view
+
+    if Set.contains held resident then
+        mayLend view resident kill (Some held)
+    else
+        not (Set.contains held kills)
+        && view.Hostiles
+           |> List.forall (fun h ->
+               h.Pos.Room <> held || not (guardShoots view resident Set.empty h))
+
 /// Whether the biggest body a room's own row casts wins its raid alone: the
 /// ranger's in a ranger room or one the colony harasses, beside a raised
 /// home's loaded towers, at least one block as for the kite; the melee
-/// guard's anywhere else (#417, #411). Never in a child's outpost, which no
-/// row of this colony casts for (#517).
+/// guard's anywhere else (#417, #411). A guard that cannot catch a raider
+/// still wins its room by the exchange: it holds the post, the tiles the
+/// raider must reach to hurt our work (`Brief`'s hold ground, #531). Never in
+/// a child's outpost, which no row of this colony casts for (#517).
 let private rowWins (view: ColonyView) (room: string) : bool =
     if List.contains room view.Borrowed.ChildOutposts then
         false
@@ -923,7 +1025,9 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
                 h.Pos.Room <> here || not (guardShoots view (lenders here) Set.empty h))
 
         standing
-        |> List.filter (fst >> isRangerRowBody)
+        |> List.filter (fun (creep, _) ->
+            isRangerRowBody creep
+            && strikesEvery view (partCount creep.Body) (HostileInfo.raider view.Hostiles) room)
         |> List.filter (fun (_, here) ->
             here = room
             || RoomName.neighbouring here room
@@ -1135,11 +1239,7 @@ let squadFight
     let raid =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
-        |> List.map (fun h ->
-            combatant
-                h.Body
-                (HostileInfo.effectiveHits view.Hostiles h)
-                (claimsAFlag view.Hostiles resident h))
+        |> List.map (fun h -> combatant h.Body h.Hits (claimsAFlag view.Hostiles resident h))
         |> Array.ofList
 
     let ours =

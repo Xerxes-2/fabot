@@ -170,6 +170,9 @@ module Engine =
     /// less does nothing.
     let towerEnergyCost = 10
 
+    /// TOWER_HITS: a tower's hits, what a raid must break before it stops.
+    let towerHits = 3000
+
     /// TOWER_OPTIMAL_RANGE: the range a tower acts at full power out to.
     let towerOptimalRange = 5
 

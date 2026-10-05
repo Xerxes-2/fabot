@@ -70,6 +70,19 @@ module Gait =
 
         slower road && slower plain
 
+    /// Whether a quarry's gait outruns a chaser's (#531): strictly quicker on
+    /// every ground the chase crosses, road, plain and swamp. Equal pace, or
+    /// slower on any of them, is worth the chase: a real opponent runs into
+    /// dead ends, swamp and exit bounces (the user, 2026-10-05). A named
+    /// stand-in for the movement epic's progress checks and give-up budgets.
+    let outruns (quarry: Gait) (chaser: Gait) : bool =
+        [ road; plain; Engine.swampWeight ]
+        |> List.forall (fun fatigue ->
+            match ticks fatigue quarry, ticks fatigue chaser with
+            | Some q, Some c -> q < c
+            | Some _, None -> true
+            | None, _ -> false)
+
     /// Five ticks a plain tile: a swamp tile's pace for a body at a MOVE a
     /// part, so whatever walks past it is gone before its next step.
     let private stationaryTicks = 5
@@ -79,6 +92,20 @@ module Gait =
     /// no MOVE acting, which another body may pull.
     let stationary (gait: Gait) : bool =
         ticks plain gait |> Option.exists (fun ticks -> ticks >= stationaryTicks)
+
+/// The reaction window (#531): the ticks our answering body needs, which is
+/// what a hostile is read over — the parts its healing restores before our
+/// strike lands, and whether it reaches a home a lent body has left. Read at
+/// a tile a tick, the pace every fighting row walks plain at (a MOVE a part).
+[<RequireQualifiedAccess>]
+module Reaction =
+    /// To close and strike: a garrison holds its room's middle, so the raid
+    /// it answers, at its border or just past it, is half a room's side off.
+    let strike = Engine.roomSide / 2
+
+    /// To walk to a kill and back: a room's side each way, the walk a kill's
+    /// call allows a lent body (`Brief.killWalk`).
+    let lend = 2 * Engine.roomSide
 
 /// What the decision layer knows about one hostile creep in a room the colony
 /// is looking into this tick.
@@ -106,9 +133,8 @@ type HostileInfo =
 /// The one set of questions asked of a hostile, every rule reading
 /// these and spelling none of its own. Each part-question is asked of the
 /// hostile **in effect**, beside the side it stands among
-/// (`effectiveParts`): live, of the parts still acting
-/// (`Engine.liveParts`), unless healing reaches it (`healReaches`), and then
-/// on paper, every part in `Body` at full hits, since healed parts come back.
+/// (`effectiveParts`): its parts still acting (`Engine.liveParts`) and the
+/// ones the healing reaching it restores inside the reaction window.
 /// The `...Of` questions read a part list the caller hands them; the
 /// owner-questions (`isKeeper`, `crossesExits`) read no parts.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -155,36 +181,79 @@ module HostileInfo =
     let private whole (hostile: HostileInfo) : bool =
         hostile.Hits > Engine.partHits * (List.length hostile.Body - 1)
 
-    /// Whether a HEAL of its own still acts.
-    let private healsItself (hostile: HostileInfo) : bool = liveParts hostile |> List.contains Heal
+    /// Its HEAL still acting.
+    let private liveHeals (hostile: HostileInfo) : int = partCountIn (liveParts hostile) Heal
 
-    /// Whether healing reaches a hostile among `side`, the hostiles
-    /// it stands beside: a HEAL of its owner's still acting within ranged heal
-    /// of it, its own included.
-    let healReaches (side: HostileInfo list) (hostile: HostileInfo) : bool =
-        healsItself hostile
-        || side
-           |> List.exists (fun healer ->
-               healer.Owner = hostile.Owner
-               && healer.Id <> hostile.Id
-               && RoomPos.range healer.Pos hostile.Pos
-                  |> Option.exists (fun r -> r <= Engine.rangedRange)
-               && healsItself healer)
+    /// The hits a hostile is short of whole.
+    let private missing (hostile: HostileInfo) : int =
+        Engine.partHits * List.length hostile.Body - hostile.Hits
 
-    /// The parts a hostile fights with among `side`: every part where healing
-    /// reaches it (`healReaches`), else the ones still acting.
-    let effectiveParts (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
-        if whole hostile || healReaches side hostile then
+    /// Whom one healer among `side` heals a tick: a heal acts on one target, so
+    /// its side's budget is spent once — on the body of its owner's within
+    /// ranged heal, itself included, short of the most hits (the least id
+    /// on a tie). None while every one is whole.
+    let private healTargetOf (side: HostileInfo list) (healer: HostileInfo) : string option =
+        side
+        |> List.filter (fun ally ->
+            ally.Owner = healer.Owner
+            && missing ally > 0
+            && (ally.Id = healer.Id
+                || RoomPos.range healer.Pos ally.Pos
+                   |> Option.exists (fun r -> r <= Engine.rangedRange)))
+        |> List.sortBy (fun ally -> -(missing ally), ally.Id)
+        |> List.tryHead
+        |> Option.map (fun ally -> ally.Id)
+
+    /// The hits a tick the healing reaching a hostile among `side` restores:
+    /// every live HEAL whose one target it is (`healTargetOf`), its own or its
+    /// owner's within ranged heal, at the heal's power beside it and the
+    /// ranged heal's beyond.
+    let private healedATick (side: HostileInfo list) (hostile: HostileInfo) : int =
+        let side =
+            if side |> List.exists (fun h -> h.Id = hostile.Id) then
+                side
+            else
+                hostile :: side
+
+        side
+        |> List.sumBy (fun healer ->
+            let heals = liveHeals healer
+
+            if
+                heals = 0
+                || healer.Owner <> hostile.Owner
+                || healTargetOf side healer <> Some hostile.Id
+            then
+                0
+            else
+                match RoomPos.range healer.Pos hostile.Pos with
+                | Some r when r <= Engine.meleeRange -> Engine.healPower * heals
+                | _ -> Engine.rangedHealPower * heals)
+
+    /// Its hits `window` ticks on, its healing restoring them meanwhile
+    /// (`healedATick`) up to the whole body.
+    let private hitsWithin (window: int) (side: HostileInfo list) (hostile: HostileInfo) : int =
+        min
+            (Engine.partHits * List.length hostile.Body)
+            (hostile.Hits + window * healedATick side hostile)
+
+    /// The parts a hostile among `side` fights with `window` ticks on: its
+    /// live parts and the ones its healing restores meanwhile, the engine's
+    /// back-to-front order (`Engine.liveParts`). A dying healer barely
+    /// restores; a whole one brings back the paper.
+    let partsWithin (window: int) (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
+        if whole hostile then
             hostile.Body
         else
-            liveParts hostile
+            Engine.liveParts hostile.Body (hitsWithin window side hostile)
 
-    /// Its hits in effect: whole where healing reaches it, else what it has.
-    let effectiveHits (side: HostileInfo list) (hostile: HostileInfo) : int =
-        if not (whole hostile) && healReaches side hostile then
-            Engine.partHits * List.length hostile.Body
-        else
-            hostile.Hits
+    /// The parts a hostile fights with among `side`: `partsWithin` the
+    /// window our answering body needs to close and strike (`Reaction.strike`).
+    /// Every part-question below reads it, and so at that window; a lend's
+    /// quiet reads `partsWithin Reaction.lend` (`Facts.mayLend`). Its hits stay
+    /// what it has: a reader pricing an exchange prices the healing as a rate.
+    let effectiveParts (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
+        partsWithin Reaction.strike side hostile
 
     /// How many of one part it fights with (`effectiveParts`).
     let private count (side: HostileInfo list) (hostile: HostileInfo) (part: BodyPart) : int =
@@ -229,13 +298,13 @@ module HostileInfo =
         effectiveParts side hostile
         |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Work)
 
-    /// What it heals a tick, its HEAL parts priced unboosted: the projection
-    /// carries no boosts.
-    let healing (side: HostileInfo list) (hostile: HostileInfo) : int =
-        Engine.healPower * count side hostile Heal
+    /// What it heals a tick, its live HEAL priced unboosted (the projection
+    /// carries no boosts): a rate, read now, as the window's restoring is.
+    let healing (_side: HostileInfo list) (hostile: HostileInfo) : int =
+        Engine.healPower * liveHeals hostile
 
-    /// Whether it heals with a HEAL.
-    let heals (side: HostileInfo list) (hostile: HostileInfo) : bool = count side hostile Heal > 0
+    /// Whether it heals with a HEAL: the live parts `healing` reads.
+    let heals (_side: HostileInfo list) (hostile: HostileInfo) : bool = liveHeals hostile > 0
 
     /// A hostile's gait (#510): its weight on paper, the MOVE it walks with.
     let gait (side: HostileInfo list) (hostile: HostileInfo) : Gait =

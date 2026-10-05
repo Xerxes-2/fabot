@@ -264,6 +264,14 @@ module RoomName =
         | Some(hereX, hereY), Some(thereX, thereY) -> Some(thereX - hereX, thereY - hereY)
         | _ -> None
 
+    /// The tiles between two positions on the world grid, across rooms as
+    /// within one: a floor on a walk between them, never the route. None
+    /// where either room is outside the grammar.
+    let tileRange (a: RoomPos) (b: RoomPos) : int option =
+        offsetOf a.Room b.Room
+        |> Option.map (fun (dx, dy) ->
+            max (abs (dx * Engine.roomSide + b.X - a.X)) (abs (dy * Engine.roomSide + b.Y - a.Y)))
+
     /// Where a room stands inside its sector of ten by ten, read off the name's
     /// own two numbers mod ten — `W15S26` is (5, 6), whichever way its axes
     /// run. None for a name outside the grammar.

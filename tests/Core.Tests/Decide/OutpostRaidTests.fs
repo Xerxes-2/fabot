@@ -1287,6 +1287,40 @@ let private plodderAt pos =
 let private runnerAt pos =
     hostileIn "W1N2" pos (List.replicate 10 Move @ List.replicate 10 Attack)
 
+/// Crunchy047 as W17S25's door saw it (live t972,544): Torque404's shape,
+/// Trepidimous's.
+let private crunchyAt pos =
+    { crippledAt pos with
+        Id = "Crunchy047"
+        Owner = "Trepidimous"
+    }
+
+/// Isolate093 beside it: eighteen parts at 180 hits, the two HEAL at its
+/// tail all that still acts.
+let private dyingHealerAt pos =
+    { hostileIn "W1N2" pos (List.replicate 9 Move @ List.replicate 9 Heal) with
+        Id = "Isolate093"
+        Owner = "Trepidimous"
+        Hits = 180
+    }
+
+/// A whole healer of the same side: twelve HEAL on twelve MOVE.
+let private strongHealerAt pos =
+    { hostileIn "W1N2" pos (List.replicate 12 Move @ List.replicate 12 Heal) with
+        Id = "medic"
+        Owner = "Trepidimous"
+    }
+
+/// Wraith403 as W17S26 saw it (live t972,544): its RANGED_ATTACK and a MOVE
+/// shot off, MOVE, HEAL and MOVE acting on 266 hits, its own HEAL the only
+/// one reaching it.
+let private wraithAt room pos =
+    { hostileIn room pos [ Move; RangedAttack; Move; Heal; Move ] with
+        Id = "Wraith403"
+        Owner = "Trepidimous"
+        Hits = 266
+    }
+
 /// The raided field with a one-wide dead end off its east side, (31..36, 44):
 /// a pocket a ranger kited into is pinned in.
 let private withDeadEnd (colony: ColonyView) =
@@ -1339,6 +1373,133 @@ let kiteTests =
                     (reachOf (declaredRaid [ { crippledAt at with Hits = 3_500 } ])
                      |> Set.contains { X = 25; Y = 41 })
                     "the whole body walks, so its Reach keeps the margin"
+            }
+
+            // A hostile's strength is its live parts and the parts the healing
+            // reaching it restores in the reaction window (#531), replacing the
+            // Brief's S7 rule 1 (any healer within three read it on paper).
+            test
+                "a cripple beside a dying healer is read near its live parts, beside a whole one near its paper" {
+                let at = { X = 25; Y = 44 }
+                let crunchy = crunchyAt at
+
+                let reachOf colony =
+                    Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
+                let weak = [ crunchy; dyingHealerAt { X = 26; Y = 44 } ]
+                let strong = [ crunchy; strongHealerAt { X = 26; Y = 44 } ]
+
+                Expect.isTrue
+                    (HostileInfo.stationary weak crunchy)
+                    "two HEAL restore too little in the window: it still cannot walk"
+
+                Expect.equal
+                    (reachOf (declaredRaid weak) |> Set.filter (fun tile -> range tile at <= 2))
+                    (reachOf (declaredRaid [ crunchy ]))
+                    "so it threatens a step and a swing about it, as alone"
+
+                Expect.equal
+                    (HostileInfo.effectiveParts strong crunchy)
+                    crunchy.Body
+                    "twelve HEAL restore every part within the window: its paper"
+
+                Expect.isFalse (HostileInfo.stationary strong crunchy) "and it walks"
+            }
+
+            test "beside a dying healer a ranger out-shooting its two HEAL kites the cripple down" {
+                let crunchy = crunchyAt { X = 25; Y = 44 }
+                let healer = dyingHealerAt { X = 26; Y = 44 }
+
+                // Two ranger blocks, 40 a tick against the healer's 24.
+                let colony =
+                    { declaredRaid [ crunchy; healer ] with
+                        Bank = bank 1400 1400
+                    }
+                    |> withGuards
+                        [
+                            creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 1400),
+                            { X = 22; Y = 44 }
+                        ]
+
+                Expect.equal (Facts.answer colony "W1N2") Facts.Answer.Kite "a ranger kites it down"
+
+                let result = decide colony Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and the ranger takes the room"
+
+                Expect.isTrue
+                    (groundOf colony
+                     |> Set.exists (fun tile -> rangeTo (RoomPos.pos crunchy.Pos) tile <= 3))
+                    "on ground in range of the cripple, not kited off the room"
+            }
+
+            test "a body whose gun is shot off and heals itself is unarmed within a short window" {
+                let wraith = wraithAt "W1N2" { X = 25; Y = 44 }
+
+                Expect.equal
+                    (Engine.liveParts wraith.Body wraith.Hits)
+                    [ Move; Heal; Move ]
+                    "the premise: MOVE, HEAL, MOVE acting"
+
+                Expect.isFalse
+                    (HostileInfo.partsWithin 2 [ wraith ] wraith |> List.contains RangedAttack)
+                    "two ticks of its own 12 a tick leave its gun off"
+
+                Expect.isTrue
+                    (HostileInfo.partsWithin 3 [ wraith ] wraith |> List.contains RangedAttack)
+                    "the third brings it back"
+            }
+
+            // A heal acts on one target a tick (#531): a side's healing is
+            // spent once, on the body short of the most hits in its reach.
+            test "one healer's heal restores the most hurt of two cripples, never both" {
+                let crunchy = crunchyAt { X = 25; Y = 44 }
+
+                let lighter =
+                    { crunchyAt { X = 27; Y = 44 } with
+                        Id = "lighter"
+                        Hits = 2_500
+                    }
+
+                let medic = strongHealerAt { X = 26; Y = 44 }
+                let side = [ crunchy; lighter; medic ]
+
+                Expect.equal
+                    (HostileInfo.effectiveParts side crunchy)
+                    crunchy.Body
+                    "the most hurt takes the whole heal: its paper"
+
+                Expect.equal
+                    (HostileInfo.effectiveParts side lighter)
+                    (Engine.liveParts lighter.Body lighter.Hits)
+                    "the other none: its live parts"
+            }
+
+            test
+                "a healer whose HEAL is shot off heals nothing and is no healer, whatever comes back" {
+                // HEAL at the head: 100 hits leave the MOVE at the tail alone.
+                let worn =
+                    { hostileIn "W1N2" { X = 25; Y = 44 } [ Heal; Heal; Move ] with
+                        Id = "worn"
+                        Owner = "Trepidimous"
+                        Hits = 100
+                    }
+
+                // A whole healer beside it restores its HEAL inside the window.
+                let side = [ worn; strongHealerAt { X = 26; Y = 44 } ]
+
+                Expect.isTrue
+                    (HostileInfo.effectiveParts side worn |> List.contains Heal)
+                    "the premise: its HEAL comes back in the window"
+
+                Expect.equal (HostileInfo.healing side worn) 0 "it heals nothing now"
+
+                Expect.isFalse
+                    (HostileInfo.heals side worn)
+                    "and is read as no healer by the same parts"
             }
 
             test "a ranger is matched to kill it from range three, and the melee guard is not sent" {
@@ -2685,6 +2846,198 @@ let childOutpostTests =
 
                 Expect.contains (shut both) "W1N2" "and she stands her outpost down"
             }
+
+            // A home is quiet for a lend while no hostile can reach striking
+            // range of it inside the reaction window (#531), not while no
+            // raider stands next door: live t972,544, Crunchy047 in W18S25
+            // stepping once in seventeen ticks and Wraith403 in W17S26 each
+            // kept the residents from the other's kill.
+            test
+                "a slow raid and a disarmed one beside the home lend the residents; a fast raider two rooms off does not" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                // The mother's view: the child's home W1N3, the kill in W1N4
+                // beyond it, W2N3 on its other side.
+                let mother others =
+                    { watchingBeyond (harasser :: others) with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                let slow =
+                    { crunchyAt { X = 25; Y = 20 } with
+                        Pos = RoomPos.at "W2N3" { X = 25; Y = 20 }
+                    }
+
+                let disarmed =
+                    { disarmedAt "Trepidimous" "W2N3" { X = 30; Y = 20 } with
+                        Id = "Virtual458"
+                    }
+
+                Expect.isTrue (HostileInfo.armed [ slow ] slow) "the premise: the slow one is armed"
+
+                Expect.equal
+                    (Facts.answer (mother [ slow; disarmed ]) "W1N4")
+                    Facts.Answer.Win
+                    "seventeen ticks a step and no weapon reach no home in the window: the residents are lent"
+
+                // Two rooms west of the home, a tile a tick: 77 tiles to the
+                // home's middle less its reach, inside the 100-tick window.
+                let fast =
+                    { hostileIn
+                          "W3N3"
+                          { X = 45; Y = 25 }
+                          (List.replicate 10 Move @ List.replicate 10 RangedAttack) with
+                        Id = "Runner"
+                        Owner = "Trepidimous"
+                    }
+
+                Expect.equal
+                    (Facts.answer (mother [ fast ]) "W1N4")
+                    Facts.Answer.Lose
+                    "a fast armed raider that reaches the home before the residents are back keeps them home"
+            }
+
+            // A raider breaks a home's quiet only if it arrives inside the
+            // lend's window and what the home keeps would not beat it (#531):
+            // live t972,544, Wraith403 heals its gun back in three ticks and
+            // walks a tile a tick, but one loaded tower out-shoots its HEAL.
+            test
+                "a raider arriving inside the window breaks the quiet only where the home's towers lose to it" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let mother towers others =
+                    { watchingBeyond (harasser :: others) with
+                        Bank = bank 5600 5600
+                        LoadedTowers =
+                            if towers > 0 then
+                                Map.ofList [ "W1N3", towers ]
+                            else
+                                Map.empty
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                let wraith = wraithAt "W2N3" { X = 25; Y = 20 }
+
+                Expect.equal
+                    (Facts.answer (mother 0 [ wraith ]) "W1N4")
+                    Facts.Answer.Lose
+                    "with no tower it reaches a home nothing holds: nobody is lent"
+
+                Expect.equal
+                    (Facts.answer (mother 1 [ wraith ]) "W1N4")
+                    Facts.Answer.Win
+                    "one loaded tower beats it, so the home is quiet and the residents are lent"
+            }
+
+            // One window for one question (#531): a raider's arms for the
+            // quiet are read at the window of its arrival, the lend's, never
+            // at the shorter one to close and strike.
+            test
+                "a raider whose gun heals back after the strike window but inside the lend's breaks the quiet" {
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let mother others =
+                    { watchingBeyond (harasser :: others) with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                // Its gun at the head of eleven parts, back past 1,000 hits:
+                // 42 ticks of its own 12 from 500.
+                let mending =
+                    { hostileIn
+                          "W2N3"
+                          { X = 45; Y = 25 }
+                          ([ RangedAttack ]
+                           @ List.replicate 6 Tough
+                           @ List.replicate 3 Move
+                           @ [ Heal ]) with
+                        Id = "Mender"
+                        Owner = "Trepidimous"
+                        Hits = 500
+                    }
+
+                Expect.isFalse
+                    (HostileInfo.armed [ mending ] mending)
+                    "the premise: unarmed at the window to close and strike"
+
+                Expect.isTrue
+                    (HostileInfo.partsWithin Reaction.lend [ mending ] mending
+                     |> List.contains RangedAttack)
+                    "the premise: armed at the lend's"
+
+                Expect.equal
+                    (Facts.answer (mother [ mending ]) "W1N4")
+                    Facts.Answer.Lose
+                    "so it keeps the residents home"
+            }
         ]
 
 /// The tiles beside one tile of W1N2, the tile itself left out.
@@ -3432,6 +3785,102 @@ let killAdmissionTests =
                     (takes slow)
                     (Some(taskId (Guard "W1N2")))
                     "a slow ranger is refused"
+            }
+
+            // A target is out of a chase only if it outruns the chaser on
+            // road, plain and swamp alike (#531, the user 2026-10-05: a real
+            // opponent runs into dead ends, swamp and exit bounces).
+            // Synapse673 keeps a 1:1 guard's pace on road and falls behind it
+            // on plain, so the guard chases it.
+            test
+                "a ranged raider slower on plain than the guard is chased, and the outpost stays open; with no guard castable it stands down" {
+                let synapse =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 45 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let shut (colony: ColonyView) =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony).Declared
+                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+                    |> fun gate -> gate.Shut
+
+                // Two guard blocks out-trade it.
+                let colony =
+                    { declaredRaid [ synapse ] with
+                        Bank = bank 1500 1500
+                    }
+                    |> withGuards [ guard "g-1", { X = 20; Y = 41 } ]
+
+                Expect.isTrue
+                    (guardBlocksBeat colony "W1N2" (guardBlocksReach colony))
+                    "the premise: the guard row's body out-trades it"
+
+                let ground = groundOf colony
+
+                Expect.isNonEmpty ground "the guard has ground"
+
+                Expect.isTrue
+                    (ground |> Set.forall (fun tile -> rangeTo (RoomPos.pos synapse.Pos) tile <= 1))
+                    "the ring round the raider: a chase, not the post"
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard takes the room"
+
+                Expect.isEmpty (shut colony) "and the outpost is not stood down"
+
+                let bare =
+                    { declaredRaid [ synapse ] with
+                        Bank = bank 300 300
+                    }
+
+                Expect.equal (shut bare) (Set.singleton "W1N2") "with no guard castable it is"
+            }
+
+            // `Gait.outruns`, the kill's one catch rule (#531): strictly quicker
+            // on road, plain and swamp alike.
+            test
+                "a kill admits no body its target outruns on every ground; equal pace on one is a chase" {
+                let hauler =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Owner = "Trepidimous"
+                    }
+
+                // Five RANGED_ATTACK on one MOVE: three ticks a road tile.
+                let slow = creepWith "r-slow" 0 0 (List.replicate 5 RangedAttack @ [ Move ])
+
+                let colony =
+                    declaredRaid [ hauler ]
+                    |> withGuards [ guard "g-1", { X = 20; Y = 41 }; slow, { X = 22; Y = 47 } ]
+
+                let atlas = Atlas.ofView colony
+                let brief = Threats.briefOf (threatsOf colony atlas) "W1N2"
+
+                Expect.equal
+                    brief.Duty
+                    (Duty.Guard BriefKind.Trespass)
+                    "the premise: a trespass's kill"
+
+                Expect.isFalse
+                    (brief.Admits colony atlas slow)
+                    "an empty hauler outruns the slow ranger on every ground"
+
+                Expect.isTrue
+                    (brief.Admits colony atlas (guard "g-1"))
+                    "the 1:1 guard keeps its pace on road: worth the chase"
             }
 
             test "a chase out of sight in a room with no source walks the ranger in off the border" {
