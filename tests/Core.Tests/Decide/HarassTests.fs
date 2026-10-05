@@ -214,8 +214,8 @@ let harassGuardTests =
                     }
 
                 // Nine 17-ATTACK bodies: a raid no ranger of any size wins. The
-                // harassment room still wants its one: `rangersWanted` asks the
-                // harassment before it asks `outmatched`.
+                // harassment room still wants its one: its row ask never reads
+                // `outmatched`.
                 let overrun =
                     { quiet with
                         Hostiles =

@@ -633,12 +633,12 @@ type BodySizing =
         /// `Tuning`'s own number: a tunable rather than a fact of the tick,
         /// so every caster hands over its colony's own.
         MinerWorkPerMove: int
-        /// `Quota.guardBlocksWanted`'s answer this tick, at least one. The
+        /// `Quota.rowBlocksWanted`'s guard answer this tick, at least one. The
         /// guard row was the one row sized by the bank alone — three blocks
         /// at 2,250 against a 1,000-hit invader one block kills — and a body
         /// the bank never reaches is a row that never casts.
         GuardBlocks: int
-        /// `Quota.rangerBlocksWanted`'s answer this tick (#411).
+        /// `Quota.rowBlocksWanted`'s ranger answer this tick (#411).
         RangerBlocks: int
         /// `Quota.upgraderWorkOf`'s answer this tick (#483).
         UpgraderWork: int

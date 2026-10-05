@@ -634,7 +634,7 @@ let private rivalDeadlines (view: ColonyView) =
 /// sighting and not the squad's life (#441). A raised child's home is no
 /// room to withdraw from (#447), as a defended one is not (#428), whatever
 /// the raid: one no ranger wins keeps its garrison, on safe ground, and has
-/// nobody cast into it (`Quota.rangersWanted`, #451); it is the child's safe
+/// nobody cast into it (its Brief's `Asks`, #451); it is the child's safe
 /// mode's.
 let private raidDeadlines (view: ColonyView) (declared: string list) =
     let rangerRooms =

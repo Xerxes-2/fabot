@@ -28,7 +28,7 @@ Implemented in `Observe.raidDeadlines`, `Planner.guardedErrandsOf`, `Emitter.gua
 - The guard is resident, so the room has eyes whenever it is worked; the raid log's blind-tick latch (#366) is not extended to errand rooms.
 - One more body for as long as the errand is worked: a one-block guard in peace, about 750 energy a life. Its relief takes the Guard at the incumbent's lead, the Task holding one more than the row wants there, so the ring is never bare while the relief walks.
 - A withdrawal takes the Guard Task away from a guard already standing in the room: a Fighter does not Flee, so against a raid the cap loses to, the resident guard most likely dies there. The row buys the next one when the deadline returns the room.
-- The guard row is one census across the colony: an outpost raid can draw the resident guard away, and `guardBlocksWanted`'s maximum sizes the errand's relief to the biggest raid in any guarded room.
+- The guard row is one census across the colony: an outpost raid can draw the resident guard away, and `guardBlocksWanted`'s maximum sizes the errand's relief to the biggest raid in any guarded room. (Since #518 S6: `Quota.rowBlocksWanted`.)
 - Damaging SlothBot's creeps is aggression in its diplomacy module: expect harassment of W15S28's outposts.
 - Source Keepers remain ADR 0060 decision 2's terrain for the withdrawal. The guard-cap exchange and the guard's target still read every hostile in the room; a sector centre such as W15S25 has no keeper lair, so this does not bite there.
 

@@ -129,13 +129,6 @@ module BriefKind =
     let opens (ahead: BriefKind) (kind: BriefKind) =
         ahead = BriefKind.Chase && laysRing kind
 
-    /// The ranger row's kinds (`Facts.rangerRooms`): every other is the guard's.
-    let isRangers (kind: BriefKind) =
-        match kind with
-        | BriefKind.Resident
-        | BriefKind.Harass -> true
-        | _ -> false
-
     /// A kill (#510, #516): one body, a rung up, cast for by no row, and a
     /// quiet holder called to it.
     let isKill (kind: BriefKind) =
@@ -169,6 +162,21 @@ type Avoid =
     /// the exit a raid left by, where a body camping across lands beside it.
     /// Across the border too.
     | MeleeStepAndSwing
+
+/// The fighting row a Guard's room casts for: the melee guard's, or the
+/// ranger's (#411).
+[<RequireQualifiedAccess>]
+type CastRow =
+    | Guard
+    | Ranger
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module CastRow =
+    /// The row's own cut over a name and parts: who stands in it.
+    let internal cut (row: CastRow) (name: string) (parts: Map<BodyPart, int>) : bool =
+        match row with
+        | CastRow.Guard -> isGuardRowCut name parts
+        | CastRow.Ranger -> isRangerRowCut name parts
 
 /// What a Guard's holder shoots in its room, and in what kill order.
 type Selector =
@@ -255,9 +263,24 @@ type Brief =
         WalksIn: bool
         Avoid: Avoid
         Rung: Rung
+        /// What its room asks a fighting row for; None for a chase (#510),
+        /// which no row casts for.
+        Asks: RowAsk option
         /// How many bodies it admits, off the row's own count, the colony and
         /// the tick's Threats given.
         Capacity: ColonyView -> Threats -> Capacity
+    }
+
+/// What one room's Guard asks its row for: the row, how many bodies, and the
+/// blocks each must carry to win the room alone. The rows sum it over the
+/// guarded rooms (`OutpostFacts.Guarded`), so a held exit's or a trespass's
+/// ask is read only where its room is guarded too.
+and [<NoEquality; NoComparison>] RowAsk =
+    {
+        Row: CastRow
+        /// How many bodies, the colony and the tick's Threats given.
+        Wanted: ColonyView -> Threats -> int
+        Blocks: ColonyView -> int
     }
 
 /// ADR-0033. Derived once a tick and shared by the applicability gate, Flee's
@@ -346,32 +369,33 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
     else
         Engine.guardCap
 
-/// How many rangers one resident room wants: the standing garrison
-/// (`Tuning.RangerResidents`). A raised home whose towers cannot hold its raid
-/// (`BorrowedWork.Defended`, #428) and whose resident loses it alone adds
-/// #428's relief, `Engine.guardCap` raid-sized bodies, on top of the garrison
-/// (#447). A resident room whose raid no ranger size wins (`outmatched`)
-/// wants none (#451): a body cast into it only feeds the raid, so the home
-/// is the child's safe mode's, and the garrison already standing keeps its
-/// Guard (the pool's cap counts it) on safe ground. One in a harassment room
-/// (#432): a raid that one loses is the room's [[stand-down]]. A launched
-/// squad is the relief: none is cast beside it, and none is held back while
-/// it musters.
-let internal rangersWanted (view: ColonyView) (threats: Threats) (room: string) : int =
-    if Set.contains room (harassRooms view) then
-        1
-    elif outmatched view room then
-        0
-    elif Map.tryFind room threats.Fight |> Option.exists (fun ground -> ground.Launched) then
-        view.Tuning.RangerResidents
-    elif
-        Set.contains room (raisedHomes view)
-        && List.contains room view.Borrowed.Defended
-        && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
-    then
-        view.Tuning.RangerResidents + Engine.guardCap
+/// ADR-0072
+/// The whole guard blocks one raided room's exchange takes to win: the
+/// smallest count `guardBlocksBeat` answers yes to, the largest body where
+/// none wins. A room the colony is blind in prices at one, since `view.Hostiles`
+/// carries nothing of its raid: enough to go and look. A room holding a
+/// level-0 core takes the biggest body the bank buys (#487): one block's 90 a
+/// tick spends most of a body's life on the core's 100,000 hits.
+let internal guardBlocksFor (view: ColonyView) (room: string) : int =
+    let fight =
+        [ 1..guardBlocksMost ]
+        |> List.tryFind (guardBlocksBeat view room)
+        |> Option.defaultValue guardBlocksMost
+
+    if Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room) then
+        max fight (guardBlocksReach view)
     else
-        view.Tuning.RangerResidents
+        fight
+
+/// The ranger blocks one ranger room wants (#411): the smallest body that wins
+/// its raid alone, never below the room's floor, and the largest body where
+/// none wins.
+let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : int =
+    [ 1..rangerBlocksMost ]
+    |> List.tryFind (rangerBlocksBeat view room)
+    |> Option.defaultValue rangerBlocksMost
+    |> max floor
+    |> min rangerBlocksMost
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Brief =
@@ -451,16 +475,99 @@ module Brief =
         | BriefKind.Core
         | BriefKind.ExitHold -> isGuardRowBody creep
 
-    /// The guards a ring kind's room wants and nobody else at all:
-    /// `guardsWanted` is the row's own arithmetic, read here a second time so
-    /// the number the cascade hires against and the number the Matcher counts
-    /// holders against are one number.
+    /// How many rangers one resident room wants: the standing garrison
+    /// (`Tuning.RangerResidents`). A raised home whose towers cannot hold its
+    /// raid (`BorrowedWork.Defended`, #428) and whose resident loses it alone
+    /// adds #428's relief, `Engine.guardCap` raid-sized bodies, on top of the
+    /// garrison (#447). A resident room whose raid no ranger size wins
+    /// (`outmatched`) wants none (#451): a body cast into it only feeds the
+    /// raid, so the home is the child's safe mode's, and the garrison already
+    /// standing keeps its Guard (the pool's cap counts it) on safe ground. A
+    /// launched squad is the relief: none is cast beside it, and none is held
+    /// back while it musters.
+    let private residentsWanted (room: string) (view: ColonyView) (threats: Threats) : int =
+        if outmatched view room then
+            0
+        elif Map.tryFind room threats.Fight |> Option.exists (fun ground -> ground.Launched) then
+            view.Tuning.RangerResidents
+        elif
+            Set.contains room (raisedHomes view)
+            && List.contains room view.Borrowed.Defended
+            && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
+        then
+            view.Tuning.RangerResidents + Engine.guardCap
+        else
+            view.Tuning.RangerResidents
+
+    /// A harassment room's ranger (#432), one: a raid that one loses is the
+    /// room's [[stand-down]]. Its floor is the one it was cast at
+    /// (`ColonyView.HarassFloors`, #457).
+    let private harassAsk (room: string) : RowAsk =
+        {
+            Row = CastRow.Ranger
+            Wanted = fun _ _ -> 1
+            Blocks =
+                fun view ->
+                    let floor =
+                        Map.tryFind room view.HarassFloors
+                        |> Option.defaultValue view.Tuning.HarassBlocks
+
+                    rangerBlocksFor floor view room
+        }
+
+    /// What each kind asks its row for. A ranger kind the ranger row's, never
+    /// below `Tuning.RangerResidentBlocks` for a resident, the resident a raid
+    /// meets first; a chase nothing; every other kind the guard row's
+    /// `guardsWanted`, at `guardBlocksFor`.
+    let private askOf (kind: BriefKind) (room: string) : RowAsk option =
+        match kind with
+        // Quirk, kept (the Brief's S0), for the B-stage to settle: a resident
+        // room that is a harassment room too is the resident's kind, ground
+        // and cap, but casts as the harassment: one ranger, not the garrison,
+        // at the harassment's floor.
+        | BriefKind.Resident ->
+            Some
+                {
+                    Row = CastRow.Ranger
+                    Wanted =
+                        fun view threats ->
+                            if Set.contains room (harassRooms view) then
+                                (harassAsk room).Wanted view threats
+                            else
+                                residentsWanted room view threats
+                    Blocks =
+                        fun view ->
+                            if Set.contains room (harassRooms view) then
+                                (harassAsk room).Blocks view
+                            else
+                                rangerBlocksFor view.Tuning.RangerResidentBlocks view room
+                }
+        | BriefKind.Harass -> Some(harassAsk room)
+        | BriefKind.Chase -> None
+        | BriefKind.Trespass
+        | BriefKind.Outpost
+        | BriefKind.Core
+        | BriefKind.ExitHold ->
+            Some
+                {
+                    Row = CastRow.Guard
+                    Wanted = fun view _ -> guardsWanted view room
+                    Blocks = fun view -> guardBlocksFor view room
+                }
+
+    /// The bodies a kind's room admits and nobody else at all: its row ask's
+    /// count is the row's own arithmetic, read here a second time so the number
+    /// the cascade hires against and the number the Matcher counts holders
+    /// against are one number.
     let private capacityOf
         (kind: BriefKind)
-        (room: string)
+        (ask: RowAsk option)
         (view: ColonyView)
         (threats: Threats)
         : Capacity =
+        let wanted () =
+            ask |> Option.map (fun a -> a.Wanted view threats) |> Option.defaultValue 1
+
         match kind with
         // One over per garrison body in a resident room (#414, #419, #447): its
         // rangers are resident, and each relief — cast at its incumbent's
@@ -469,20 +576,18 @@ module Brief =
         // still holds the ring. A Guard has no arrival price for a handover
         // window to be read against, and the row's count, not this cap, is
         // what buys bodies.
-        | BriefKind.Resident ->
-            Capacity.fighters (rangersWanted view threats room + view.Tuning.RangerResidents)
+        | BriefKind.Resident -> Capacity.fighters (wanted () + view.Tuning.RangerResidents)
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
-        | BriefKind.Harass ->
-            Capacity.fighters (rangersWanted view threats room) |> Capacity.relieving
+        | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
         // One ranger kites what cannot close on it (#510).
         | BriefKind.Chase -> Capacity.fighters 1
         // One body kills a trespasser, which strikes nothing back (#516), and
         // never fewer than the room's own guards.
-        | BriefKind.Trespass -> Capacity.fighters (max 1 (guardsWanted view room))
+        | BriefKind.Trespass -> Capacity.fighters (max 1 (wanted ()))
         | BriefKind.Outpost
         | BriefKind.Core
-        | BriefKind.ExitHold -> Capacity.fighters (guardsWanted view room)
+        | BriefKind.ExitHold -> Capacity.fighters (wanted ())
 
     /// One room's Brief, off the kinds that claimed it down `BriefKind.order`
     /// and the ground each source laid there. A kill (#510, #516) is stepped a
@@ -491,6 +596,7 @@ module Brief =
     let internal claimed (room: string) (claims: BriefKind list) (laid: Laid) : Brief =
         let kind = List.tryHead claims |> Option.defaultValue BriefKind.Outpost
         let kill = BriefKind.isKill kind
+        let ask = askOf kind room
 
         {
             Kind = kind
@@ -507,7 +613,8 @@ module Brief =
                 | BriefKind.Trespass -> Avoid.Reach
                 | _ -> Avoid.Runner
             Rung = if kill then OneRungUp else OnTheTier
-            Capacity = capacityOf kind room
+            Asks = ask
+            Capacity = capacityOf kind ask
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`

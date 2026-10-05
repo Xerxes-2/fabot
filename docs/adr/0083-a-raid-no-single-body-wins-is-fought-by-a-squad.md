@@ -17,7 +17,7 @@ We decided **a raid no single body wins is answered by a squad: a fixed composit
 
 ## Consequences
 
-- Until S2 ships, nothing casts or engages off `squadWins`; `rangersWanted` and `outmatched` still price one body.
+- Until S2 ships, nothing casts or engages off `squadWins`; `rangersWanted` and `outmatched` still price one body. (Since #518 S6: `rangersWanted` is the ranger kinds' `RowAsk.Wanted` on the Brief.)
 - The simulation has no positions, swamp, fatigue, or range-dependent heal; all heal is adjacent. The kite flag is the whole of terrain. It reproduces the research simulator's verdicts on the t880,341 raid with the tapper shot first: the duo standing by t6, 2 × R7 kiting by t56, three kiters kiting by t29.
 - Boosts and ranged mass attack are not modelled.
 - The raid always strikes our front, so the duo's medic is never its target and shooting their melee first costs the duo nothing here; the order decides the ranger rows.

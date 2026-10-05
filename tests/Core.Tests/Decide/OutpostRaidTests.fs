@@ -2689,8 +2689,8 @@ let guardPrecedenceTests =
                         [ Harassed; Trespasser ],
                         row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
                         // Quirk, kept: the resident's ground and cap before the
-                        // harassment's, but the cap's count is `rangersWanted`'s,
-                        // which asks the harassment first: one ranger, not the
+                        // harassment's, but the cap's count is the row ask's,
+                        // which asks as the harassment: one ranger, not the
                         // garrison, plus the reliefs.
                         [ Resident; Harassed ],
                         row
@@ -2736,7 +2736,7 @@ let guardPrecedenceTests =
                         safetyRank OnTheTier,
                         Capacity.fighters (1 + precedenceBasis.Tuning.RangerResidents)
                     ))
-                    "the cap's arm is the resident's, its count `rangersWanted`'s harassment one"
+                    "the cap's arm is the resident's, its count the row ask's harassment one"
             }
 
             test
