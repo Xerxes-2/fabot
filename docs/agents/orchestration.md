@@ -25,13 +25,18 @@ stated blockers, and reports which pairs touch the same functions.
 Recon earns its cost on the runs where it contradicts a ticket. The code and the ADRs are
 the **authority**.
 
-## One issue at a time
+## Parallel where the functions don't overlap
 
-Nearly every issue lands under `src/Core/Decide/` and `tests/Core.Tests/Decide/`, so
-parallel worktrees buy merge conflicts rather than speed. The orchestrator ships each issue
-before the next implementer starts, so every one begins from a clean, pushed `main`.
+Issues whose changes touch different functions run at once, each implementer in its own
+hook-made workspace (`AGENTS.md` § Working alongside); issues that touch the same functions
+run one after the other. Recon's queue-wide map says which pairs overlap; when in doubt,
+serialise. A shared test file is not an overlap — both sides adding tests merges cleanly.
 
-Parallelise *inside* an issue instead — the review lenses run at once.
+Every change ships alone: rebase it onto the current `main`, rerun the gates, ship, deploy,
+then the next. A change that conflicts on rebase goes back to its implementer, never
+resolved by hand in the default workspace.
+
+Parallelise *inside* an issue too — the review lenses run at once.
 
 ## Where a new Decide test goes
 
