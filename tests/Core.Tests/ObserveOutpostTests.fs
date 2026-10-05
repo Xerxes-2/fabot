@@ -1407,11 +1407,10 @@ let clocklessTests =
                 Expect.isEmpty home.RivalHeld "the room we own is not a room somebody took"
             }
 
-            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
-            // pre-world-layer behaviour, flips at S2 (one world danger log).
+            // The world layer's S0 pin, flipped at S2 (one world danger log).
             // Live t973,5xx: W18S26 was in W15S28's and W17S29's `rivalHeld`,
             // looked into at 970,261 and 972,434.
-            test "two colonies that see one rival room each latch it, on a look stride of their own" {
+            test "two colonies that see one rival room hold one latch, on one look stride" {
                 let recheck = Tuning.defaults.RivalRecheck
 
                 let other =
@@ -1422,15 +1421,15 @@ let clocklessTests =
                             }
                     }
 
-                let first =
-                    RaidState.empty
-                    |> raidTick 100 (quiet |> ownedByRival outpostRoom)
-                    |> raidTick (100 + recheck) (quiet |> ownedByRival outpostRoom)
-
-                let second = RaidState.empty |> raidTick 300 (other |> ownedByRival outpostRoom)
+                let _, danger =
+                    (RaidState.empty, Danger.empty)
+                    |> dangerTick [] 100 (quiet |> ownedByRival outpostRoom)
+                    |> dangerTick [] (100 + recheck) (quiet |> ownedByRival outpostRoom)
+                    |> fun (_, danger) -> RaidState.empty, danger
+                    |> dangerTick [] (100 + recheck + 10) (other |> ownedByRival outpostRoom)
 
                 Expect.equal
-                    (first.RivalHeld, second.RivalHeld)
+                    danger.Rivals
                     (Map.ofList
                         [
                             outpostRoom,
@@ -1438,9 +1437,13 @@ let clocklessTests =
                                 Since = 100
                                 LastLooked = 100 + recheck
                             }
-                        ],
-                     Map.ofList [ outpostRoom, { Since = 300; LastLooked = 300 } ])
-                    "one room, two latches, each dated and strided by the colony that looked"
+                        ])
+                    "one latch, dated by the first look, strided by the last look due"
+
+                Expect.equal
+                    (recheckedAt (100 + 2 * recheck) (Danger.into danger RaidState.empty))
+                    (Set.singleton outpostRoom)
+                    "and every colony's gate looks again on the one stride"
             }
         ]
 
@@ -2052,6 +2055,7 @@ let private shutOnRaid: RaidState =
                     Raiders = set [ "raid-0" ]
                     PlayerSince = None
                     Chased = false
+                    Bounced = false
                 }
             ]
     }
@@ -2137,5 +2141,235 @@ let watchedShutTests =
                 Expect.isEmpty
                     (chasedAt 153 blindAgain)
                     "and an observer looking every other tick cannot bring it back"
+            }
+        ]
+
+/// One stand-down row of `room`, standing from `opened` to `expiry`.
+let private rowOf room opened expiry basis stronghold : OutpostEpisode =
+    {
+        RoomName = room
+        Opened = opened
+        LastSeen = opened
+        Expiry = expiry
+        Basis = basis
+        Stronghold = stronghold
+        Raiders = Set.empty
+        PlayerSince = None
+        Chased = false
+        Bounced = false
+    }
+
+/// A colony beside the fixture's, home `W13S28`, declaring nothing.
+let private neighbour =
+    { quiet with
+        Spatial =
+            { quiet.Spatial with
+                RoomName = Some "W13S28"
+            }
+    }
+
+[<Tests>]
+let worldDangerTests =
+    testList
+        "the world danger log: one record a room"
+        [
+            test
+                "the reset tick's merge keeps a stronghold row a stronghold, whichever colony saw the bunker" {
+                // W16S26: a bunker under W15S28's row, a later raid under
+                // another's. A merge that kept the longer row's bit alone would
+                // let every chain walk back through the towers.
+                let mother =
+                    { RaidState.empty with
+                        Outposts = [ rowOf "W16S26" 100 5_000 StandDownBasis.CollapseTimer true ]
+                        RivalHeld = Map.ofList [ "W18S26", { Since = 900; LastLooked = 970 } ]
+                        Holds =
+                            Map.ofList
+                                [
+                                    "W16S27",
+                                    {
+                                        Holder = ReservationHolder.Rival
+                                        Until = 4_000
+                                    }
+                                ]
+                    }
+
+                let child =
+                    { RaidState.empty with
+                        Outposts =
+                            [
+                                rowOf "W16S26" 10 50 StandDownBasis.RaidGone false
+                                rowOf "W16S26" 900 6_000 StandDownBasis.InvaderRaid false
+                            ]
+                        RivalHeld = Map.ofList [ "W18S26", { Since = 950; LastLooked = 960 } ]
+                        Holds =
+                            Map.ofList
+                                [
+                                    "W16S27",
+                                    {
+                                        Holder = ReservationHolder.Rival
+                                        Until = 4_500
+                                    }
+                                ]
+                    }
+
+                let merged = Danger.ofColonies Tuning.defaults 1_000 [ mother; child ]
+
+                Expect.equal
+                    ((gateAt 1_000 merged).Impassable, (gateAt 5_500 merged).Impassable)
+                    (Set.singleton "W16S26", Set.singleton "W16S26")
+                    "impassable to every colony, and past the bunker's own clock"
+
+                Expect.equal
+                    (merged.Rooms
+                     |> Map.tryFind "W16S26"
+                     |> Option.bind _.Down
+                     |> Option.map (fun row -> row.Opened, row.Expiry, row.Basis, row.Stronghold))
+                    (Some(100, 6_000, StandDownBasis.InvaderRaid, true))
+                    "one row: the earliest opening, the max expiry and its basis, the OR of the bunker; the spent row is gone"
+
+                Expect.equal
+                    merged.Rivals
+                    (Map.ofList [ "W18S26", { Since = 900; LastLooked = 960 } ])
+                    "one latch: the earliest shut, the earliest look"
+
+                Expect.equal
+                    (merged.Rooms
+                     |> Map.tryFind "W16S27"
+                     |> Option.bind _.Hold
+                     |> Option.map _.Until)
+                    (Some 4_500)
+                    "the later hold"
+            }
+
+            test
+                "a raid row one colony opens shuts the room for every colony, and one that does not price it leaves it be" {
+                let squad = squadIn outpostRoom "Trepidimous"
+
+                let _, opened =
+                    (RaidState.empty, Danger.empty) |> dangerTick [ outpostRoom ] 100 squad
+
+                let row = opened.Rooms |> Map.tryFind outpostRoom |> Option.bind _.Down
+
+                Expect.isSome row "the declaring colony opens it"
+
+                Expect.equal
+                    ((gateAt 101 opened).Shut)
+                    (Set.singleton outpostRoom)
+                    "and any colony's gate reads it shut"
+
+                let _, after =
+                    (RaidState.empty, opened)
+                    |> dangerTick
+                        []
+                        101
+                        { neighbour with
+                            Hostiles = squad.Hostiles
+                            Bank = squad.Bank
+                        }
+
+                Expect.equal
+                    (after.Rooms |> Map.tryFind outpostRoom |> Option.bind _.Down)
+                    row
+                    "a colony that sees the raid and does not price the room neither re-prices nor strikes it"
+            }
+
+            test
+                "a stronghold sighted in a room whose raid row a colony was not handed merges into that row" {
+                let squad = squadIn outpostRoom "Trepidimous"
+
+                let _, opened =
+                    (RaidState.empty, Danger.empty) |> dangerTick [ outpostRoom ] 100 squad
+
+                let _, after =
+                    (RaidState.empty, opened)
+                    |> dangerTick
+                        []
+                        101
+                        { neighbour with
+                            InvaderCores = [ bunker outpostRoom (Some 90_000) 1 ]
+                        }
+
+                Expect.equal
+                    (after.Rooms
+                     |> Map.tryFind outpostRoom
+                     |> Option.bind _.Down
+                     |> Option.map (fun row -> row.Opened, row.Expiry, row.Stronghold))
+                    (Some(100, 90_000, true))
+                    "the raid's opening, the bunker's clock and its bit, in one row"
+
+                Expect.equal
+                    ((gateAt 102 after).Impassable)
+                    (Set.singleton outpostRoom)
+                    "impassable to every colony"
+            }
+
+            test
+                "a squad bouncing on the border flips the outpost once a bounce in the world log too" {
+                // The world keeps one row a room, so the earlier row the raid's
+                // going ended is gone once the next opens: its bounce is read at
+                // the opening.
+                let bouncing =
+                    [ 100..140 ]
+                    |> List.scan
+                        (fun state t ->
+                            let room = if t % 2 = 0 then outpostRoom else raidRoom
+                            state |> dangerTick [] t (squadIn room "Trepidimous"))
+                        (RaidState.empty, Danger.empty)
+                    |> List.tail
+                    |> List.map snd
+
+                Expect.equal
+                    (List.zip [ 100..140 ] bouncing
+                     |> List.filter (fun (t, danger) ->
+                         t >= 102 && not ((gateAt (t + 1) danger).Shut.Contains outpostRoom)))
+                    []
+                    "the first return shuts it for RaidBounceTicks, however often the squad steps out"
+
+                Expect.isTrue
+                    (List.last bouncing
+                     |> fun danger -> danger.Rooms.[outpostRoom].Down
+                     |> Option.exists _.Bounced)
+                    "one row, marked bounced"
+            }
+
+            test "the exit watch rides the log, and a room nothing holds leaves it" {
+                let held =
+                    ExitWatch.Held
+                        {
+                            Run = [ { X = 0; Y = 20 }; { X = 0; Y = 21 } ]
+                            Exit = { X = 0; Y = 20 }
+                            Until = 150
+                        }
+
+                let watched = Danger.empty |> Danger.watching (Map.ofList [ outpostRoom, held ])
+
+                Expect.equal
+                    (Danger.watches watched)
+                    (Map.ofList [ outpostRoom, held ])
+                    "what a cold heap starts from"
+
+                Expect.equal
+                    (Danger.standing 120 watched, Danger.standing 150 watched)
+                    (Set.singleton outpostRoom, Set.empty)
+                    "danger while the exit is held"
+
+                Expect.isEmpty
+                    (watched |> Danger.watching Map.empty).Rooms
+                    "the hold gone, the room leaves the log"
+
+                let seen =
+                    Danger.empty
+                    |> Danger.watching (
+                        Map.ofList
+                            [
+                                outpostRoom,
+                                ExitWatch.Seen [ { At = { X = 10; Y = 10 }; Dies = 130 } ]
+                            ]
+                    )
+
+                Expect.equal
+                    (Danger.standing 120 seen, Danger.standing 130 seen)
+                    (Set.singleton outpostRoom, Set.empty)
+                    "a sighting is danger while its body lives, as the watch reads it"
             }
         ]

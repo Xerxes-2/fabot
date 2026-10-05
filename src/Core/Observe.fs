@@ -302,6 +302,11 @@ type OutpostEpisode =
         /// sighting, one a ranger chases (`Decide.Facts.chased`, #510): the
         /// room stays projected for the chase while the row stands.
         Chased: bool
+        /// Whether the row reopened inside `Tuning.RaidBounceTicks` of an
+        /// earlier one in its room that the raid's going ended (`bounceFloor`):
+        /// read off that row at the opening, since the world log keeps one row
+        /// a room and the earlier one is gone the tick after.
+        Bounced: bool
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: the one
@@ -718,7 +723,12 @@ let private harassOverrides (basis: StandDownBasis) =
 /// running clock outward, and the basis with it, so reading in a worse
 /// deadline cannot cut a stand-down short, except a harassment sighting over a
 /// clock `harassOverrides` names, which it replaces.
-let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpisode list) =
+let private sight
+    (bounceTicks: int)
+    tick
+    (room, (expiry, basis, stronghold))
+    (episodes: OutpostEpisode list)
+    =
     let holds (episode: OutpostEpisode) =
         episode.RoomName = room && standingDown tick episode
 
@@ -754,6 +764,12 @@ let private sight tick (room, (expiry, basis, stronghold)) (episodes: OutpostEpi
                 Raiders = Fresh.setOfSeq Seq.empty
                 PlayerSince = None
                 Chased = false
+                Bounced =
+                    episodes
+                    |> List.exists (fun earlier ->
+                        earlier.RoomName = room
+                        && earlier.Basis = StandDownBasis.RaidGone
+                        && tick - earlier.Expiry <= bounceTicks)
             }
         ]
 
@@ -767,23 +783,11 @@ let private raidClocked (episode: OutpostEpisode) =
 
 /// The least tick a raid's row may end on once its bodies are gone: now, or,
 /// where the row reopened inside `Tuning.RaidBounceTicks` of an earlier one
-/// the raid's going ended, that many ticks past its opening, so a squad
-/// bouncing on the border flips the projection once a bounce and not once a
-/// tick.
-let private bounceFloor
-    (view: ColonyView)
-    (episodes: OutpostEpisode list)
-    (episode: OutpostEpisode)
-    =
-    let bounced =
-        episodes
-        |> List.exists (fun earlier ->
-            earlier.RoomName = episode.RoomName
-            && earlier.Basis = StandDownBasis.RaidGone
-            && earlier.Opened < episode.Opened
-            && episode.Opened - earlier.Expiry <= view.Tuning.RaidBounceTicks)
-
-    if bounced then
+/// the raid's going ended (`Bounced`), that many ticks past its opening, so a
+/// squad bouncing on the border flips the projection once a bounce and not
+/// once a tick.
+let private bounceFloor (view: ColonyView) (episode: OutpostEpisode) =
+    if episode.Bounced then
         max view.Time (episode.Opened + view.Tuning.RaidBounceTicks)
     else
         view.Time
@@ -906,7 +910,7 @@ let private strikeGone
                         PlayerSince = playerSince
                     }
 
-            let floor = bounceFloor view episodes episode
+            let floor = bounceFloor view episode
 
             let hold = holdPast floor
 
@@ -1342,7 +1346,8 @@ let foldRaids
         // stand-down exactly as it found it, clock included.
         Outposts =
             (prior.Outposts, deadlines view looking priced)
-            ||> List.fold (fun episodes seen -> sight view.Time seen episodes)
+            ||> List.fold (fun episodes seen ->
+                sight view.Tuning.RaidBounceTicks view.Time seen episodes)
             |> strikeGone looking priced rivalHolds
             |> trimOutposts cap view.Time
         // The clockless withdrawal's memory, moved by the ticks with vision
@@ -1525,6 +1530,317 @@ let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : Ra
         { state with
             Probes = List.fold foldRoom state.Probes assaults |> Map.toSeq |> Fresh.mapOfSeq
         }
+
+/// One room's entry in the world [[danger log]]: its stand-down row, somebody
+/// else's hold on its controller, the memory of an armed threat in it, and its
+/// exit watch. One record a room, whichever colony concluded each part; a part
+/// is None while nothing holds it: the world layer's (`WorldView`) memory.
+type DangerRoom =
+    {
+        Down: OutpostEpisode option
+        Hold: OutpostHold option
+        Threat: ThreatLatch option
+        /// The exit watch (`World.watchExits`, #450), written beside the rest
+        /// so a reset keeps a held exit (#542).
+        Watch: ExitWatch option
+    }
+
+/// The world danger log: one `DangerRoom` a room, and the rival latches
+/// beside it, which the shell files under `observe.rooms.rivals`.
+type Danger =
+    {
+        Rooms: Map<string, DangerRoom>
+        Rivals: Map<string, RivalLatch>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Danger =
+    let empty =
+        {
+            Rooms = Fresh.mapOfSeq Seq.empty
+            Rivals = Fresh.mapOfSeq Seq.empty
+        }
+
+    let private quiet =
+        {
+            Down = None
+            Hold = None
+            Threat = None
+            Watch = None
+        }
+
+    let private held (entry: DangerRoom) =
+        Option.isSome entry.Down
+        || Option.isSome entry.Hold
+        || Option.isSome entry.Threat
+        || Option.isSome entry.Watch
+
+    let private entryOf (danger: Danger) (room: string) =
+        Map.tryFind room danger.Rooms |> Option.defaultValue quiet
+
+    let private partsOf (pick: DangerRoom -> 'a option) (danger: Danger) : Map<string, 'a> =
+        danger.Rooms
+        |> Map.toSeq
+        |> Seq.choose (fun (room, entry) -> pick entry |> Option.map (fun part -> room, part))
+        |> Fresh.mapOfSeq
+
+    /// A colony's own log with the world's danger laid in: every row, hold,
+    /// threat and latch, whoever concluded it. What its stand-down gate is read
+    /// off (`standDown`): one log, so every colony's gate agrees on a room.
+    let into (danger: Danger) (own: RaidState) : RaidState =
+        { own with
+            Outposts =
+                danger.Rooms
+                |> Map.toList
+                |> List.choose (fun (_, entry) -> entry.Down)
+                |> List.sortBy (fun row -> row.Opened, row.RoomName)
+            RivalHeld = danger.Rivals
+            Holds = partsOf _.Hold danger
+            Threatened = partsOf _.Threat danger
+        }
+
+    /// Two standing rows of one room as one: the later expiry and its basis, a
+    /// bunker either saw (a wrong merge reopens a stronghold room), the earlier
+    /// opening and the later sighting, every raid body either waits on, the
+    /// earlier player's raid, a chase or a bounce either read.
+    let private mergeDown (a: OutpostEpisode) (b: OutpostEpisode) =
+        let later = if b.Expiry > a.Expiry then b else a
+
+        { later with
+            Opened = min a.Opened b.Opened
+            LastSeen = max a.LastSeen b.LastSeen
+            Stronghold = a.Stronghold || b.Stronghold
+            Raiders = Seq.append a.Raiders b.Raiders |> Fresh.setOfSeq
+            PlayerSince =
+                match a.PlayerSince, b.PlayerSince with
+                | Some x, Some y -> Some(min x y)
+                | x, None -> x
+                | None, y -> y
+            Chased = a.Chased || b.Chased
+            Bounced = a.Bounced || b.Bounced
+        }
+
+    /// Several logs' rival latches as one: every room any latched, on its
+    /// earliest shut and its earliest look, so the merged stride is never
+    /// further off than any colony's.
+    let mergeRivals (latches: Map<string, RivalLatch> list) : Map<string, RivalLatch> =
+        latches
+        |> List.collect Map.toList
+        |> List.groupBy fst
+        |> List.map (fun (room, latches) ->
+            let latches = latches |> List.map snd
+
+            room,
+            {
+                Since = latches |> List.map _.Since |> List.min
+                LastLooked = latches |> List.map _.LastLooked |> List.min
+            })
+        |> Fresh.mapOfList
+
+    /// The one row a room keeps of several: its standing rows merged, else the
+    /// last to expire.
+    let private oneRow tick (rows: OutpostEpisode list) =
+        match rows |> List.filter (standingDown tick) with
+        | [] -> rows |> List.maxBy (fun row -> row.Expiry, row.Opened)
+        | standing -> standing |> List.reduce mergeDown
+
+    /// The per-colony logs a bundle before the world log wrote, merged into
+    /// one (the reset tick's migration): each room's standing rows merged
+    /// (`mergeDown`: the max expiry, the OR of the stronghold bit), else its
+    /// latest; the later hold and threat; every latch, on its earliest shut and
+    /// earliest look. A ring's bounce is read off it before its rows merge.
+    let ofColonies (tuning: Tuning) (tick: int) (logs: RaidState list) : Danger =
+        let bounced (ring: OutpostEpisode list) (row: OutpostEpisode) =
+            { row with
+                Bounced =
+                    row.Bounced
+                    || ring
+                       |> List.exists (fun earlier ->
+                           earlier.RoomName = row.RoomName
+                           && earlier.Basis = StandDownBasis.RaidGone
+                           && earlier.Opened < row.Opened
+                           && row.Opened - earlier.Expiry <= tuning.RaidBounceTicks)
+            }
+
+        let downs =
+            logs
+            |> List.collect (fun log -> log.Outposts |> List.map (bounced log.Outposts))
+            |> List.groupBy _.RoomName
+            |> List.map (fun (room, rows) -> room, oneRow tick rows)
+
+        let latest (until: 'a -> int) (maps: Map<string, 'a> list) =
+            maps
+            |> List.collect Map.toList
+            |> List.groupBy fst
+            |> List.map (fun (room, parts) -> room, parts |> List.map snd |> List.maxBy until)
+
+        let holds = logs |> List.map _.Holds |> latest _.Until
+        let threats = logs |> List.map _.Threatened |> latest _.Until
+
+        let rooms =
+            let set (room: string) (fill: DangerRoom -> DangerRoom) rooms =
+                Map.add room (fill (Map.tryFind room rooms |> Option.defaultValue quiet)) rooms
+
+            let rooms =
+                (Map.empty, downs)
+                ||> List.fold (fun rooms (room, row) ->
+                    set room (fun entry -> { entry with Down = Some row }) rooms)
+
+            let rooms =
+                (rooms, holds)
+                ||> List.fold (fun rooms (room, hold) ->
+                    set room (fun entry -> { entry with Hold = Some hold }) rooms)
+
+            (rooms, threats)
+            ||> List.fold (fun rooms (room, threat) ->
+                set room (fun entry -> { entry with Threat = Some threat }) rooms)
+
+        {
+            Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
+            Rivals = logs |> List.map _.RivalHeld |> mergeRivals
+        }
+
+    /// One colony's Raid-log fold over the world log: its own log with the
+    /// world's laid in, less the standing raid rows of rooms it does not price
+    /// — those it declares (`owned`), works (`declared`), or sends a ranger to
+    /// (`Facts.rangerRooms`, `HarassCast`) —, folded as its own (`foldRaids`)
+    /// and written back. A row it opens in a room whose row it was not handed
+    /// (a core or a reservation it saw there) merges with the world's
+    /// (`mergeDown`); the holds, threats and latches come back whole, each
+    /// colony moving only the rooms it saw. Threaded through the colonies in
+    /// order, so each folds what the one before wrote. The colony's log comes
+    /// back with the rows laid in as it folded them.
+    let foldColony
+        (cap: int)
+        (alive: Set<string>)
+        (owned: Set<string>)
+        (view: ColonyView)
+        (declared: string list)
+        (own: RaidState)
+        (danger: Danger)
+        : RaidState * Danger =
+        let prices =
+            Set.unionMany
+                [ owned; Set.ofList declared; Decide.Facts.rangerRooms view; view.HarassCast ]
+
+        let laid = into danger own
+
+        let prior =
+            { laid with
+                Outposts =
+                    laid.Outposts
+                    |> List.filter (fun row ->
+                        prices.Contains row.RoomName
+                        || not (standingDown view.Time row && raidClocked row))
+            }
+
+        let handed = prior.Outposts |> List.map _.RoomName |> Set.ofList
+        let folded = foldRaids cap alive view declared prior
+
+        // The ring's last row of each room: one it opened is appended after
+        // the spent one it replaces.
+        let downs =
+            (Map.empty, folded.Outposts)
+            ||> List.fold (fun downs row -> Map.add row.RoomName row downs)
+
+        let rooms =
+            (danger.Rooms, downs)
+            ||> Map.fold (fun rooms room row ->
+                let entry = entryOf danger room
+
+                let row =
+                    match entry.Down with
+                    | Some standing when
+                        not (handed.Contains room) && standingDown view.Time standing
+                        ->
+                        mergeDown standing row
+                    | _ -> row
+
+                Map.add room { entry with Down = Some row } rooms)
+
+        let touched =
+            Seq.concat [ Map.keys rooms; Map.keys folded.Holds; Map.keys folded.Threatened ]
+            |> Set.ofSeq
+
+        folded,
+        {
+            Rooms =
+                touched
+                |> Seq.choose (fun room ->
+                    let entry =
+                        { (Map.tryFind room rooms |> Option.defaultValue quiet) with
+                            Hold = Map.tryFind room folded.Holds
+                            Threat = Map.tryFind room folded.Threatened
+                        }
+
+                    if held entry then Some(room, entry) else None)
+                |> Fresh.mapOfSeq
+            Rivals = folded.RivalHeld |> Map.toSeq |> Fresh.mapOfSeq
+        }
+
+    /// The log with this tick's exit watches laid in, every room's replaced.
+    let watching (watches: Map<string, ExitWatch>) (danger: Danger) : Danger =
+        { danger with
+            Rooms =
+                Seq.append (Map.keys danger.Rooms) (Map.keys watches)
+                |> Seq.distinct
+                |> Seq.choose (fun room ->
+                    let entry =
+                        { entryOf danger room with
+                            Watch = Map.tryFind room watches
+                        }
+
+                    if held entry then Some(room, entry) else None)
+                |> Fresh.mapOfSeq
+        }
+
+    /// Every room's exit watch: what a cold heap starts from.
+    let watches (danger: Danger) : Map<string, ExitWatch> = partsOf _.Watch danger
+
+    /// The log's rows past the cap, the oldest spent first and never one
+    /// still standing (`trimOutposts`' rule, over the one world ring).
+    let trim (cap: int) (tick: int) (danger: Danger) : Danger =
+        let rows =
+            danger.Rooms
+            |> Map.toList
+            |> List.choose (fun (_, entry) -> entry.Down)
+            |> List.sortBy (fun row -> row.Opened, row.RoomName)
+
+        let kept = trimOutposts cap tick rows |> List.map _.RoomName |> Set.ofList
+
+        if List.length rows = Set.count kept then
+            danger
+        else
+            { danger with
+                Rooms =
+                    danger.Rooms
+                    |> Map.toSeq
+                    |> Seq.choose (fun (room, entry) ->
+                        let entry =
+                            if kept.Contains room then
+                                entry
+                            else
+                                { entry with Down = None }
+
+                        if held entry then Some(room, entry) else None)
+                    |> Fresh.mapOfSeq
+            }
+
+    /// The rooms the log holds danger in at this tick: a standing row, a
+    /// threat not yet run out, or an exit held.
+    let standing (tick: int) (danger: Danger) : Set<string> =
+        danger.Rooms
+        |> Map.toSeq
+        |> Seq.filter (fun (_, entry) ->
+            entry.Down |> Option.exists (standingDown tick)
+            || entry.Threat |> Option.exists (fun threat -> tick < threat.Until)
+            || entry.Watch
+               |> Option.exists (function
+                   | ExitWatch.Held hold -> ExitHold.stands tick hold
+                   | ExitWatch.Seen threats ->
+                       threats |> List.exists (fun threat -> threat.Dies > tick)))
+        |> Seq.map fst
+        |> Set.ofSeq
 
 /// One reading of `Grid.Counters`: floods built, how many of them
 /// free-origin, and heap pops. Cumulative where the shell reads it,

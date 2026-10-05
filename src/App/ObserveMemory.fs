@@ -450,6 +450,10 @@ let private encodeOutpost (episode: OutpostEpisode) =
     if episode.Chased then
         o?chased <- true
 
+    // Written only when true, so a legacy row reads as no bounce.
+    if episode.Bounced then
+        o?bounced <- true
+
     o
 
 let private decodeOutpost (raw: obj) : OutpostEpisode =
@@ -482,6 +486,9 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         // Absent on a legacy row and on one no ranger chases; anything but
         // `true` reads as no chase, which projects nothing.
         Chased = (raw?chased: obj) = box true
+        // Absent on a legacy row: `Danger.ofColonies` reads a legacy ring's
+        // bounce off its earlier rows.
+        Bounced = (raw?bounced: obj) = box true
     }
 
 // One room held by somebody else's reservation on the wire: `{ holder,
@@ -959,8 +966,11 @@ let loadRaids (home: string) : RaidState =
     leafOr RaidState.empty (fun () -> colonyLeaf home "raids") (fun raids ->
         {
             Episodes = raids?episodes |> rowsOf (decodeEpisode >> Some)
-            // Each of these maps is absent from a bundle that predates it,
-            // and empty is what that says.
+            // The four danger keys a bundle before the world log wrote
+            // (`Danger`): read for `loadDanger`'s migration alone, and absent
+            // once the colony's log is written back. Each of these maps is
+            // absent from a bundle that predates it, and empty is what that
+            // says.
             Outposts = raids?outposts |> rowsOf (decodeOutpost >> Some)
             RivalHeld = latchMapOf raids?rivalHeld
             Holds = holdMapOf raids?holds
@@ -1029,12 +1039,8 @@ let saveRaids (home: string) (declared: string list) (state: RaidState) =
     let raids = createEmpty<obj>
     raids?declared <- declared |> List.toArray
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
-    raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
-    // The three per-room maps: none has a window, expiry or basis, so each
-    // stays under the room's own key rather than a row of the ring.
-    raids?rivalHeld <- state.RivalHeld |> Map.toSeq |> hashOf encodeLatch
-    raids?holds <- state.Holds |> Map.toSeq |> hashOf encodeHold
-    raids?threatened <- state.Threatened |> Map.toSeq |> hashOf encodeThreat
+    // The stand-down rows, latches, holds and threats are the world's
+    // (`saveDanger`, `saveRoomLatches`), and not written here.
     raids?fought <- state.Fought |> Map.toSeq |> hashOf encodeFight
     raids?probes <- state.Probes |> Map.toSeq |> hashOf encodeProbe
     // Each taken assault room against its tick (#496).
@@ -1052,6 +1058,186 @@ let saveRaids (home: string) (declared: string list) (state: RaidState) =
 
     raids?hits <- state.Hits |> Map.toSeq |> hashOf box
     writeColonyLeaf home "raids" raids
+
+// A tile of an exit watch as `[x, y]`: a held run is up to 48 of them. Boxed
+// apiece, so Fable writes a plain array and not an `Int32Array`, which
+// `JSON.stringify` spells as an object.
+let private pairOf (tile: Pos) : obj = box [| box tile.X; box tile.Y |]
+
+let private tileOfPair (raw: obj) : Pos =
+    if not (JS.Constructors.Array.isArray raw) then
+        failwith "not a tile"
+    else
+        let pair = unbox<obj[]> raw
+
+        match pair |> Array.map numberValue with
+        | [| Some x; Some y |] -> { X = x; Y = y }
+        | _ -> failwith "not a tile"
+
+// One exit watch on the wire (#450, #542): `{ seen: [{ x, y, dies }] }` while
+// its armed bodies stand, `{ run, exit, until }` once their exit is held.
+let private encodeWatch (watch: ExitWatch) =
+    let o = createEmpty<obj>
+
+    match watch with
+    | ExitWatch.Seen threats ->
+        o?seen <-
+            threats
+            |> List.map (fun threat ->
+                let t = createEmpty<obj>
+                t?x <- threat.At.X
+                t?y <- threat.At.Y
+                t?dies <- threat.Dies
+                t)
+            |> List.toArray
+    | ExitWatch.Held hold ->
+        o?run <- hold.Run |> List.map pairOf |> List.toArray
+        o?exit <- pairOf hold.Exit
+        o?until <- hold.Until
+
+    o
+
+// A checker: a tick that is no number or a tile that is no pair costs the
+// watch, and the room's Guard falls back to what vision says.
+let private decodeWatch (raw: obj) : ExitWatch =
+    if isNull raw || jsTypeof raw <> "object" then
+        failwith "not a watch"
+    elif JS.Constructors.Array.isArray raw?seen then
+        raw?seen
+        |> unbox<obj[]>
+        |> Array.map (fun threat ->
+            {
+                At =
+                    {
+                        X = numberOf threat "x"
+                        Y = numberOf threat "y"
+                    }
+                Dies = numberOf threat "dies"
+            })
+        |> List.ofArray
+        |> ExitWatch.Seen
+    elif JS.Constructors.Array.isArray raw?run then
+        ExitWatch.Held
+            {
+                Run = raw?run |> unbox<obj[]> |> Array.map tileOfPair |> List.ofArray
+                Exit = tileOfPair raw?exit
+                Until = numberOf raw "until"
+            }
+    else
+        failwith "not a watch"
+
+// One room of the world danger log on the wire: `{ down?, hold?,
+// threat?, watch? }`, each part written only while it holds and read alone,
+// so a bad part costs that part and never the room's others.
+let private encodeDangerRoom (entry: DangerRoom) =
+    let o = createEmpty<obj>
+    entry.Down |> Option.iter (fun down -> o?down <- encodeOutpost down)
+    entry.Hold |> Option.iter (fun hold -> o?hold <- encodeHold hold)
+    entry.Threat |> Option.iter (fun threat -> o?threat <- encodeThreat threat)
+    entry.Watch |> Option.iter (fun watch -> o?watch <- encodeWatch watch)
+    o
+
+let private decodeDangerRoom (room: string) (raw: obj) : DangerRoom option =
+    let part (key: string) (decode: obj -> 'a) =
+        let value = raw?(key)
+
+        if isNull value then
+            None
+        else
+            try
+                Some(decode value)
+            with _ ->
+                None
+
+    if isNull raw || jsTypeof raw <> "object" then
+        None
+    else
+        let entry =
+            {
+                // Filed under its room: a row naming another is the room's.
+                Down =
+                    part "down" (fun value ->
+                        { decodeOutpost value with
+                            RoomName = room
+                        })
+                Hold = part "hold" decodeHold
+                Threat = part "threat" decodeThreat
+                Watch = part "watch" decodeWatch
+            }
+
+        if
+            Option.isSome entry.Down
+            || Option.isSome entry.Hold
+            || Option.isSome entry.Threat
+            || Option.isSome entry.Watch
+        then
+            Some entry
+        else
+            None
+
+// `Memory.fabot.observe.world.danger` as it stands, or null.
+let private dangerLeaf () : obj =
+    let world = observeLeaf "world"
+
+    if isNull world || jsTypeof world <> "object" then
+        null
+    else
+        world?danger
+
+// Whether the world danger log has been written: until it has, the colonies'
+// legacy danger keys are the record (`loadDanger`, `loadRoomLatches`).
+let dangerStands () =
+    let leaf = dangerLeaf ()
+
+    not (isNull leaf)
+    && jsTypeof leaf = "object"
+    && not (JS.Constructors.Array.isArray leaf)
+
+// Every colony's log as it stands under `observe.colonies`, the given-up ones
+// included: what the migration merges.
+let private everyColonyLog () : RaidState list =
+    let colonies = observeLeaf "colonies"
+
+    if isNull colonies || jsTypeof colonies <> "object" then
+        []
+    else
+        objectEntries colonies |> Array.map (fst >> loadRaids) |> List.ofArray
+
+/// The world danger log's rooms (`Danger`), the latches being the room
+/// latches' (`loadRoomLatches`). An absent leaf is a bundle before the world
+/// log: every colony's legacy rows, holds and threats merged into one
+/// (`Danger.ofColonies`), once, the tick's write making the leaf stand. A room
+/// that will not decode costs that room alone.
+let loadDanger (tuning: Tuning) (tick: int) : Danger =
+    if not (dangerStands ()) then
+        { Danger.ofColonies tuning tick (everyColonyLog ()) with
+            Rivals = Danger.empty.Rivals
+        }
+    else
+        leafOr Danger.empty dangerLeaf (fun leaf ->
+            { Danger.empty with
+                Rooms =
+                    objectEntries leaf
+                    |> Array.choose (fun (room, raw) ->
+                        decodeDangerRoom room raw |> Option.map (fun entry -> room, entry))
+                    |> Fresh.mapOfArray
+            })
+
+/// Write the world danger log's rooms under `Memory.fabot.observe.world.danger`,
+/// every tick and whole, leaving the rest of `world` alone.
+let saveDanger (danger: Danger) =
+    ensureObserve ()
+
+    let world = Memory?fabot?observe?world
+
+    if
+        isNull world
+        || jsTypeof world <> "object"
+        || JS.Constructors.Array.isArray world
+    then
+        Memory?fabot?observe?world <- createEmpty<obj>
+
+    Memory?fabot?observe?world?danger <- danger.Rooms |> Map.toSeq |> hashOf encodeDangerRoom
 
 /// One tile as a wire object; the deferral rows carry two of them. The room
 /// is not written: the leaf is already filed under the colony's home name.
@@ -1534,10 +1720,13 @@ let saveDrawn (drawn: Map<string, DrawRecord>) =
 /// of ours has stood full in (`World.Towered`, #445), and the last tick an
 /// armed rival was seen in each room a non-fighter walks round
 /// (`World.ArmedSeen`, #485), and every rival controller's safe-mode facts as
-/// last seen (`World.RivalControllers`, #489).
+/// last seen (`World.RivalControllers`, #489). Beside the owners under
+/// `rivals`, the world's rival latches (`Danger.Rivals`): one latch
+/// and one look stride a room, whichever colony saw it.
 type RoomLatches =
     {
         Rivals: Map<string, string>
+        Latched: Map<string, RivalLatch>
         Towered: Set<string>
         Armed: Map<string, int>
         Controllers: Map<string, RivalController>
@@ -1583,78 +1772,131 @@ let loadRoomLatches () : RoomLatches =
     let empty =
         {
             Rivals = Map.empty
+            Latched = Map.empty
             Towered = Set.empty
             Armed = Map.empty
             Controllers = Map.empty
         }
 
-    leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
-        if jsTypeof rooms <> "object" || JS.Constructors.Array.isArray rooms then
-            empty
-        else
-            let rivals = rooms?rivals
-            let towered = rooms?towered
-            let armed = rooms?armed
-            let controllers = rooms?controllers
+    let read =
+        leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
+            if jsTypeof rooms <> "object" || JS.Constructors.Array.isArray rooms then
+                empty
+            else
+                let rivals = rooms?rivals
+                let towered = rooms?towered
+                let armed = rooms?armed
+                let controllers = rooms?controllers
 
-            {
-                Rivals =
+                // Each entry the owner's name, or `{ o?, since, lastLooked }`
+                // for a room latched (`decodeLatch`'s rules), its owner
+                // beside the latch while a sighting names one.
+                let entries =
                     if
                         isNull rivals
                         || jsTypeof rivals <> "object"
                         || JS.Constructors.Array.isArray rivals
                     then
-                        Map.empty
+                        [||]
                     else
-                        objectEntries rivals
-                        |> Array.filter (fun (room, owner) ->
-                            room.Length > 0 && nonEmptyString owner)
-                        |> Array.map (fun (room, owner) -> room, unbox<string> owner)
-                        |> Fresh.mapOfArray
-                Towered =
-                    if isNull towered || not (JS.Constructors.Array.isArray towered) then
-                        Set.empty
-                    else
-                        towered
-                        |> unbox<obj[]>
-                        |> Array.filter nonEmptyString
-                        |> Array.map unbox<string>
-                        |> Fresh.setOfSeq
-                // Absent on a leaf an older bundle wrote: nothing remembered.
-                Armed =
-                    if
-                        isNull armed
-                        || jsTypeof armed <> "object"
-                        || JS.Constructors.Array.isArray armed
-                    then
-                        Map.empty
-                    else
-                        intMapOf armed
-                        |> Map.toArray
-                        |> Array.filter (fun (room, _) -> room.Length > 0)
-                        |> Fresh.mapOfArray
-                // Absent on a leaf an older bundle wrote: nothing remembered.
-                Controllers =
-                    if
-                        isNull controllers
-                        || jsTypeof controllers <> "object"
-                        || JS.Constructors.Array.isArray controllers
-                    then
-                        Map.empty
-                    else
-                        objectEntries controllers
-                        |> Array.filter (fun (room, _) -> room.Length > 0)
-                        |> Array.choose (fun (room, raw) ->
-                            decodeRivalController raw |> Option.map (fun c -> room, c))
-                        |> Fresh.mapOfArray
-            })
+                        objectEntries rivals |> Array.filter (fun (room, _) -> room.Length > 0)
 
-/// Write the room latches whole: the rivals as a room-to-owner object, the
-/// towers as a room-name array, the armed rooms as a room-to-tick object, the
-/// rival controllers as a room-to-facts object.
+                let ownerOf (raw: obj) =
+                    if nonEmptyString raw then
+                        Some(unbox<string> raw)
+                    elif not (isNull raw) && jsTypeof raw = "object" && nonEmptyString raw?o then
+                        Some(unbox<string> raw?o)
+                    else
+                        None
+
+                {
+                    Rivals =
+                        entries
+                        |> Array.choose (fun (room, raw) ->
+                            ownerOf raw |> Option.map (fun owner -> room, owner))
+                        |> Fresh.mapOfArray
+                    Latched =
+                        entries
+                        |> Array.choose (fun (room, raw) ->
+                            if isNull raw || jsTypeof raw <> "object" || isNull raw?since then
+                                None
+                            else
+                                try
+                                    Some(room, decodeLatch raw)
+                                with _ ->
+                                    None)
+                        |> Fresh.mapOfArray
+                    Towered =
+                        if isNull towered || not (JS.Constructors.Array.isArray towered) then
+                            Set.empty
+                        else
+                            towered
+                            |> unbox<obj[]>
+                            |> Array.filter nonEmptyString
+                            |> Array.map unbox<string>
+                            |> Fresh.setOfSeq
+                    // Absent on a leaf an older bundle wrote: nothing remembered.
+                    Armed =
+                        if
+                            isNull armed
+                            || jsTypeof armed <> "object"
+                            || JS.Constructors.Array.isArray armed
+                        then
+                            Map.empty
+                        else
+                            intMapOf armed
+                            |> Map.toArray
+                            |> Array.filter (fun (room, _) -> room.Length > 0)
+                            |> Fresh.mapOfArray
+                    // Absent on a leaf an older bundle wrote: nothing remembered.
+                    Controllers =
+                        if
+                            isNull controllers
+                            || jsTypeof controllers <> "object"
+                            || JS.Constructors.Array.isArray controllers
+                        then
+                            Map.empty
+                        else
+                            objectEntries controllers
+                            |> Array.filter (fun (room, _) -> room.Length > 0)
+                            |> Array.choose (fun (room, raw) ->
+                                decodeRivalController raw |> Option.map (fun c -> room, c))
+                            |> Fresh.mapOfArray
+                })
+
+    // Before the world log was first written, the latches are still the
+    // colonies': every one merged in, once (`Danger.mergeRivals`).
+    if dangerStands () then
+        read
+    else
+        { read with
+            Latched =
+                read.Latched :: (everyColonyLog () |> List.map _.RivalHeld)
+                |> Danger.mergeRivals
+        }
+
+/// Write the room latches whole: the rivals as a room-to-owner object, each
+/// latched room's entry `{ o?, since, lastLooked }`, the towers as a room-name
+/// array, the armed rooms as a room-to-tick object, the rival controllers as a
+/// room-to-facts object.
 let saveRoomLatches (latches: RoomLatches) =
     let raw = createEmpty<obj>
-    raw?rivals <- latches.Rivals |> Map.toSeq |> hashOf box
+
+    raw?rivals <-
+        Seq.append (Map.keys latches.Rivals) (Map.keys latches.Latched)
+        |> Seq.distinct
+        |> Seq.map (fun room ->
+            let owner = Map.tryFind room latches.Rivals
+
+            room,
+            match Map.tryFind room latches.Latched with
+            | Some latch ->
+                let entry = encodeLatch latch
+                owner |> Option.iter (fun owner -> entry?o <- owner)
+                entry
+            | None -> box owner.Value)
+        |> hashOf id
+
     raw?towered <- latches.Towered |> Set.toArray
     raw?armed <- latches.Armed |> Map.toSeq |> hashOf box
     raw?controllers <- latches.Controllers |> Map.toSeq |> hashOf encodeRivalController

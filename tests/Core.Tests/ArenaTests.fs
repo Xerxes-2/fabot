@@ -2910,6 +2910,7 @@ let private shutOutpostCripple () : Arena =
                                             Raiders = set [ "Idol768"; "Shade461" ]
                                             PlayerSince = Some 973_265
                                             Chased = false
+                                            Bounced = false
                                         }
                                     ]
                             }
@@ -3221,6 +3222,7 @@ let private rootedInvaderOnAnchorStep () : Arena =
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
+                                            Bounced = false
                                         }
                                     ]
                             }
@@ -3746,6 +3748,7 @@ let private diggerBesideHeldExit () : Arena =
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
+                                            Bounced = false
                                         }
                                     ]
                             }

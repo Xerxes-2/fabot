@@ -67,10 +67,6 @@ const raidsThrough = async (value, declared = []) => {
 
 const emptyRaids = {
   episodes: [],
-  outposts: [],
-  rivalHeld: {},
-  holds: {},
-  threatened: {},
   fought: {},
   probes: {},
   taken: {},
@@ -116,10 +112,6 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
   const full = {
     ...emptyRaids,
     episodes: [episode],
-    outposts: [outpost],
-    rivalHeld: { W1N3: { since: 100, lastLooked: 150 } },
-    holds: { W1N4: { holder: "invader", until: 900 } },
-    threatened: { W1N5: { until: 800 } },
     fought: { W1N6: { seen: 700, squad: "duo", raiders: ["inv-1", "inv-2"] }, W1N7: { seen: 690 } },
     probes: { W18S26: probeOut, W17S24: probeProbing },
     taken: { W18S26: 930_120 },
@@ -139,15 +131,17 @@ wire("raids: the declared outposts (#162) are written beside the ring, the leaf'
   assert.deepEqual(written.declared, ["W1N2", "W2N1"]);
 });
 
-wire("raids: #275's null latch costs its own entry and not the state", async () => {
+wire("raids: the danger keys a bundle before the world log wrote are read for the migration and never written back", async () => {
   const written = await raidsThrough({
     ...emptyRaids,
     episodes: [episode],
-    rivalHeld: { W1N3: null, W1N4: { since: 100, lastLooked: 150 } },
+    outposts: [outpost],
+    rivalHeld: { W1N3: { since: 100, lastLooked: 150 } },
+    holds: { W1N4: { holder: "invader", until: 900 } },
+    threatened: { W1N5: { until: 800 } },
   });
 
-  assert.equal(stable(written.rivalHeld), stable({ W1N4: { since: 100, lastLooked: 150 } }));
-  assert.equal(written.episodes.length, 1, "the rest of the leaf survives the bad entry");
+  assert.equal(stable(written), stable({ ...emptyRaids, episodes: [episode] }));
 });
 
 wire("raids: a fought room with no seen tick costs its own entry, and a legacy leaf reads none", async () => {
@@ -266,17 +260,71 @@ wire("raids: the haul overflow (#508) owes only as a boolean, its fill reads 0 o
   assert.equal(written.haulOwed, false);
 });
 
-wire("raids: a stand-down with no expiry costs its row and no other", async () => {
-  const written = await raidsThrough({
-    ...emptyRaids,
-    outposts: [{ room: "W1N9", opened: 1, last: 2, basis: "collapse-timer" }, outpost],
-  });
+// ---- the world danger log ----------------------------------------------
 
-  assert.equal(written.outposts.length, 1, "the row with no expiry is dropped");
-  assert.equal(written.outposts[0].room, "W1N2");
+// The world danger log (ADR 0086 S2): one record a room under
+// `observe.world.danger`, each part — the stand-down row, the hold, the threat
+// memory, the exit watch — read alone. Loaded and written back as the raids
+// leaf is; `colonies` lays per-colony leaves beside it for the migration.
+const RULES = "../build/fable/Core/Types/Rules.js";
+
+const dangerThrough = async (leaf, colonies = undefined, tick = 1000) => {
+  const { loadDanger, saveDanger } = await import(MODULE);
+  const { TuningModule_defaults } = await import(RULES);
+  const observe = {};
+  if (leaf !== undefined) observe.world = { danger: leaf };
+  if (colonies !== undefined) observe.colonies = colonies;
+  globalThis.Memory = { fabot: { observe } };
+  saveDanger(loadDanger(TuningModule_defaults, tick));
+  return globalThis.Memory.fabot.observe.world.danger;
+};
+
+const hold = { holder: "invader", until: 900 };
+const threat = { until: 800 };
+const heldWatch = { run: [[0, 20], [0, 21]], exit: [0, 20], until: 950 };
+const seenWatch = { seen: [{ x: 10, y: 11, dies: 1400 }] };
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["a number", 7],
+  ["an array", []],
+]) {
+  wire(`danger: a leaf that is ${name}, with no colony log beside it, reads empty and writes empty`, async () => {
+    assert.equal(stable(await dangerThrough(leaf)), stable({}));
+  });
+}
+
+wire("danger: a well-formed leaf round-trips unchanged", async () => {
+  const full = {
+    W1N2: { down: outpost, hold, threat, watch: heldWatch },
+    W1N3: { watch: seenWatch },
+    W1N4: { threat },
+  };
+
+  assert.equal(stable(await dangerThrough(full)), stable(full));
 });
 
-wire("raids: every stand-down basis round-trips, #441's harass-sighting included", async () => {
+wire("danger: a part off its shape costs that part, and a room left with none is dropped", async () => {
+  const written = await dangerThrough({
+    W1N9: { down: { room: "W1N9", opened: 1, last: 2, basis: "collapse-timer" }, hold },
+    W1N2: { down: outpost },
+    W1N5: { hold: { holder: "invader", until: "soon" }, threat: { until: null } },
+    W1N6: { watch: { seen: [{ x: 1, y: 2, dies: "soon" }] } },
+    W1N7: { watch: { run: [[0, 1], "0,2"], exit: [0, 1], until: 900 } },
+    W1N8: null,
+  });
+
+  assert.equal(stable(written), stable({ W1N9: { hold }, W1N2: { down: outpost } }));
+});
+
+wire("danger: a row filed under a room is that room's, whatever it names", async () => {
+  const written = await dangerThrough({ W1N3: { down: outpost } });
+  assert.equal(written.W1N3.down.room, "W1N3");
+});
+
+wire("danger: every stand-down basis round-trips, #441's harass-sighting included", async () => {
   const bases = [
     "collapse-timer",
     "reservation",
@@ -287,101 +335,108 @@ wire("raids: every stand-down basis round-trips, #441's harass-sighting included
     "raid-gone",
     "player-raid-hold",
   ];
-  const outposts = bases.map((basis, i) => ({ ...outpost, room: `W1N${i + 10}`, basis }));
-  const written = await raidsThrough({ ...emptyRaids, outposts });
+  const leaf = Object.fromEntries(
+    bases.map((basis, i) => [`W1N${i + 10}`, { down: { ...outpost, room: `W1N${i + 10}`, basis } }]),
+  );
 
-  assert.equal(stable(written.outposts), stable(outposts));
+  assert.equal(stable(await dangerThrough(leaf)), stable(leaf));
 });
 
-wire("raids: a stand-down whose basis is not in the vocabulary costs its row", async () => {
-  const written = await raidsThrough({
-    ...emptyRaids,
-    outposts: [{ ...outpost, room: "W1N9", basis: "not-a-basis" }, outpost],
+wire("danger: a stand-down whose basis is not in the vocabulary costs its row", async () => {
+  const written = await dangerThrough({
+    W1N9: { down: { ...outpost, room: "W1N9", basis: "not-a-basis" } },
+    W1N2: { down: outpost },
   });
 
-  assert.equal(written.outposts.length, 1);
-  assert.equal(written.outposts[0].room, "W1N2");
+  assert.equal(stable(written), stable({ W1N2: { down: outpost } }));
 });
 
-wire("raids: a legacy episode with no damage and no loss tile reads as zero and none", async () => {
-  const written = await raidsThrough({
-    ...emptyRaids,
-    episodes: [{ opened: 10, last: 20, roster: [], losses: [{ creep: "w1", t: 12 }] }],
-  });
+wire("danger: a row's raid bodies (#507), player's tick (#513), chase (#510) and bounce round-trip; legacy rows write none", async () => {
+  const flagged = { ...outpost, basis: "invader-raid", raiders: ["h1", "h2"], player: 15, chased: true, bounced: true };
+  const written = await dangerThrough({ W1N2: { down: flagged }, W1N3: { down: { ...outpost, room: "W1N3" } } });
 
-  assert.equal(written.episodes[0].damage, 0, "a bundle written before ADR 0034 charges nothing");
-  assert.equal(written.episodes[0].losses[0].room, undefined, "and a loss written before #376 has no tile");
-});
+  assert.equal(stable(written.W1N2.down), stable(flagged));
 
-wire("raids: a stand-down's raid bodies and an episode's dead round-trip (#507)", async () => {
-  const full = {
-    ...emptyRaids,
-    episodes: [{ ...episode, killed: ["h1"] }],
-    outposts: [{ ...outpost, basis: "invader-raid", raiders: ["h1", "h2"] }],
-  };
-
-  assert.equal(stable(await raidsThrough(full)), stable(full));
-});
-
-wire("raids: a legacy row has no raid bodies and no dead, and writes none", async () => {
-  const written = await raidsThrough({ ...emptyRaids, episodes: [episode], outposts: [outpost] });
-
-  assert.equal(written.outposts[0].raiders, undefined, "no body to wait on: the clock alone, as before #507");
-  assert.equal(written.episodes[0].killed, undefined);
-});
-
-wire("raids: a raid-body entry that is no id costs the entry, never the row", async () => {
-  for (const bad of [7, {}, "", null]) {
-    const written = await raidsThrough({
-      ...emptyRaids,
-      episodes: [{ ...episode, killed: [bad, "h1"] }],
-      outposts: [{ ...outpost, raiders: [bad, "h2"] }],
-    });
-
-    assert.deepEqual(written.outposts[0].raiders, ["h2"], `raiders ${JSON.stringify(bad)}`);
-    assert.deepEqual(written.episodes[0].killed, ["h1"], `killed ${JSON.stringify(bad)}`);
-  }
-
-  for (const notAList of [7, "h1", { h1: true }]) {
-    const written = await raidsThrough({
-      ...emptyRaids,
-      episodes: [{ ...episode, killed: notAList }],
-      outposts: [{ ...outpost, raiders: notAList }],
-    });
-
-    assert.equal(written.outposts.length, 1, "the shut stands: the row is the shut");
-    assert.equal(written.outposts[0].raiders, undefined);
-    assert.equal(written.episodes[0].killed, undefined);
+  for (const key of ["raiders", "player", "chased", "bounced", "stronghold"]) {
+    assert.equal(written.W1N3.down[key], undefined, `a legacy row writes no ${key}`);
   }
 });
 
-wire("raids: a player's raid tick (#513) round-trips, and a legacy row writes none", async () => {
-  const player = { ...outpost, basis: "player-raid-hold", player: 15 };
-  const written = await raidsThrough({ ...emptyRaids, outposts: [player, outpost] });
+wire("danger: an odd flag reads as none, an off-shape player tick costs the row, a bad raid id the id", async () => {
+  const written = await dangerThrough({
+    W1N2: { down: { ...outpost, chased: "yes", bounced: 1, raiders: [7, "h2"] } },
+    W1N3: { down: { ...outpost, room: "W1N3", player: "soon" } },
+  });
 
-  assert.equal(stable(written.outposts), stable([player, outpost]));
-  assert.equal(written.outposts[1].player, undefined, "absent means no player's raid, as before #513");
-
-  const bad = await raidsThrough({ ...emptyRaids, outposts: [{ ...outpost, player: "soon" }] });
-  assert.equal(bad.outposts.length, 0, "an off-shape tick costs its row, like every number");
+  assert.equal(stable(written), stable({ W1N2: { down: { ...outpost, raiders: ["h2"] } } }));
 });
 
-wire("raids: a chased row (#510) round-trips, and a legacy or off-shape flag reads as no chase", async () => {
-  const chased = { ...outpost, chased: true };
-  const written = await raidsThrough({ ...emptyRaids, outposts: [chased, outpost] });
+// The migration: no world log yet, every colony's legacy danger keys merged
+// once. W16S26's bunker is under one colony's row, a longer raid under
+// another's: the merged row keeps the bunker (a wrong merge reopens a
+// stronghold room).
+const legacyColonies = {
+  W15S28: {
+    raids: {
+      outposts: [{ room: "W16S26", opened: 100, last: 120, expiry: 5000, basis: "collapse-timer", stronghold: true }],
+      holds: { W16S27: { holder: "rival", until: 4000 } },
+      threatened: { W17S27: { until: 1100 } },
+      rivalHeld: { W18S26: { since: 900, lastLooked: 970 } },
+    },
+  },
+  W17S29: {
+    raids: {
+      outposts: [
+        { room: "W16S26", opened: 10, last: 20, expiry: 40, basis: "raid-gone" },
+        { room: "W16S26", opened: 900, last: 990, expiry: 6000, basis: "invader-raid", raiders: ["h1"] },
+      ],
+      holds: { W16S27: { holder: "rival", until: 4500 } },
+      threatened: { W17S27: { until: 1050 } },
+      rivalHeld: { W18S26: { since: 950, lastLooked: 960 } },
+    },
+  },
+};
 
-  assert.equal(stable(written.outposts), stable([chased, outpost]));
-  assert.equal(written.outposts[1].chased, undefined, "absent means no chase, as before #510");
+wire("danger: with no world log, every colony's rows, holds and threats merge into one record a room", async () => {
+  const written = await dangerThrough(undefined, legacyColonies);
 
-  const odd = await raidsThrough({ ...emptyRaids, outposts: [{ ...outpost, chased: "yes" }] });
-  assert.equal(odd.outposts.length, 1, "an odd flag costs nothing but the chase");
-  assert.equal(odd.outposts[0].chased, undefined, "and reads as none");
+  assert.equal(
+    stable(written),
+    stable({
+      W16S26: {
+        down: {
+          room: "W16S26",
+          opened: 100,
+          last: 990,
+          expiry: 6000,
+          basis: "invader-raid",
+          stronghold: true,
+          raiders: ["h1"],
+        },
+      },
+      W16S27: { hold: { holder: "rival", until: 4500 } },
+      W17S27: { threat: { until: 1100 } },
+    }),
+  );
 });
 
-wire("raids: a legacy stand-down with no stronghold flag reads as no bunker", async () => {
-  const written = await raidsThrough({ ...emptyRaids, outposts: [outpost] });
+wire("danger: a legacy ring's bounce is read off its earlier row in the merge", async () => {
+  const written = await dangerThrough(undefined, {
+    W1N1: {
+      raids: {
+        outposts: [
+          { room: "W1N2", opened: 900, last: 905, expiry: 910, basis: "raid-gone" },
+          { room: "W1N2", opened: 920, last: 990, expiry: 2000, basis: "invader-raid" },
+        ],
+      },
+    },
+  });
 
-  assert.equal(written.outposts[0].stronghold, undefined, "absent means what it meant before #382");
+  assert.equal(written.W1N2.down.bounced, true);
+});
+
+wire("danger: once the world log stands, a colony's legacy keys read as absent", async () => {
+  assert.equal(stable(await dangerThrough({}, legacyColonies)), stable({}));
 });
 
 // ---- the CPU line -------------------------------------------------------
@@ -901,8 +956,19 @@ wire("positions: a row that will not read costs its row and no other", async () 
 // a hand edit through the Memory HTTP API both leave behind, and it is the
 // value `unbox` turns into 0 most quietly.
 
+wire("ticks: a stand-down's expiry, a hold's, a threat's or a watch's tick off the shape costs its part, and invents no zero", async () => {
+  const written = await dangerThrough({
+    W1N2: { down: { ...outpost, expiry: {} } },
+    W1N3: { hold: { ...hold, until: {} } },
+    W1N4: { threat: { until: {} } },
+    W1N5: { watch: { ...heldWatch, until: {} } },
+    W1N6: { watch: { seen: [{ x: 1, y: 2, dies: {} }] } },
+  });
+
+  assert.equal(stable(written), stable({}), "a zero here would read as the oldest tick there is, not as a gap");
+});
+
 const offShape = [
-  ["a stand-down's expiry", (l) => ({ ...l, outposts: [{ ...outpost, expiry: {} }] }), (w) => w.outposts],
   ["an episode's opening tick", (l) => ({ ...l, episodes: [{ ...episode, opened: {} }] }), (w) => w.episodes],
   ["an episode's last-seen tick", (l) => ({ ...l, episodes: [{ ...episode, last: [] }] }), (w) => w.episodes],
   [
@@ -935,12 +1001,12 @@ wire("ticks: a bad row costs itself and the rows beside it survive", async () =>
   const written = await raidsThrough({
     ...emptyRaids,
     episodes: [{ ...episode, opened: {} }, episode],
-    outposts: [{ ...outpost, room: "W1N9", expiry: {} }, outpost],
   });
 
   assert.equal(written.episodes.length, 1, "one episode is dropped, one kept");
-  assert.equal(written.outposts.length, 1);
-  assert.equal(written.outposts[0].room, "W1N2", "and the kept stand-down is the well-formed one");
+
+  const danger = await dangerThrough({ W1N9: { down: { ...outpost, room: "W1N9", expiry: {} } }, W1N2: { down: outpost } });
+  assert.deepEqual(Object.keys(danger), ["W1N2"], "and the kept stand-down is the well-formed one");
 });
 
 wire("ticks: a number under the living roster is not a creep name", async () => {
@@ -1243,6 +1309,108 @@ wire("rooms: the rival controllers (#489) are a room-to-facts object; an off-sha
     ),
     stable({ rivals: {}, towered: [], armed: {}, controllers: { W18S26: w18s26 } }),
     "an empty owner or a key that is not a number costs its own room",
+  );
+});
+
+// The world's rival latches (ADR 0086 S2) ride `rivals`: a latched room's
+// entry is `{ o?, since, lastLooked }`, an owner alone stays a bare string.
+// Each `roomsThrough` stands a world log first unless the case says not, so a
+// case reads the leaf and not the migration.
+const roomsBeside = async (value, colonies, world) => {
+  const { loadRoomLatches, saveRoomLatches } = await import(MODULE);
+  const observe = { rooms: value, colonies };
+  if (world) observe.world = { danger: {} };
+  globalThis.Memory = { fabot: { observe } };
+  saveRoomLatches(loadRoomLatches());
+  return globalThis.Memory.fabot.observe.rooms;
+};
+
+wire("rooms: a latched room round-trips with its owner, or without one, and a legacy bare owner stays bare", async () => {
+  const leaf = {
+    ...emptyRooms,
+    rivals: {
+      W18S26: { o: "Trepidimous", since: 900, lastLooked: 960 },
+      W16S25: { since: 800, lastLooked: 800 },
+      W17S24: "Trepidimous",
+    },
+  };
+
+  assert.equal(stable(await roomsBeside(leaf, undefined, true)), stable(leaf));
+});
+
+wire("rooms: #275's null latch costs its own entry; a latch off its shape costs the latch and keeps the owner", async () => {
+  const written = await roomsBeside(
+    {
+      ...emptyRooms,
+      rivals: {
+        W1N3: null,
+        W1N4: { since: 100, lastLooked: 150 },
+        W1N5: { o: "Trepidimous", since: "soon" },
+        W1N6: { since: 100 },
+      },
+    },
+    undefined,
+    true,
+  );
+
+  assert.equal(
+    stable(written.rivals),
+    stable({
+      W1N4: { since: 100, lastLooked: 150 },
+      W1N5: "Trepidimous",
+      W1N6: { since: 100, lastLooked: 100 },
+    }),
+  );
+});
+
+wire("rooms: with no world log, every colony's latches merge in on the earliest shut and look; once it stands they read absent", async () => {
+  const colonies = {
+    W15S28: { raids: { rivalHeld: { W18S26: { since: 900, lastLooked: 970 } } } },
+    W17S29: { raids: { rivalHeld: { W18S26: { since: 950, lastLooked: 960 }, W19S26: 940 } } },
+  };
+  const leaf = { ...emptyRooms, rivals: { W18S26: "Trepidimous" } };
+
+  assert.equal(
+    stable((await roomsBeside(leaf, colonies, false)).rivals),
+    stable({
+      W18S26: { o: "Trepidimous", since: 900, lastLooked: 960 },
+      W19S26: { since: 940, lastLooked: 940 },
+    }),
+    "one latch a room, the legacy bare tick read as both",
+  );
+
+  assert.equal(
+    stable((await roomsBeside(leaf, colonies, true)).rivals),
+    stable({ W18S26: "Trepidimous" }),
+  );
+});
+
+wire("rooms: the migrating tick's writes alone keep the latches across the next reset", async () => {
+  const { loadRoomLatches, saveRoomLatches, loadDanger, saveDanger, loadRaids, saveRaids, dangerStands } =
+    await import(MODULE);
+  const { TuningModule_defaults } = await import(RULES);
+  const { ofArray } = await import(LIST);
+  globalThis.Memory = {
+    fabot: {
+      observe: {
+        rooms: { ...emptyRooms, rivals: { W18S26: "Trepidimous" } },
+        colonies: { [home]: { raids: { ...emptyRaids, rivalHeld: { W18S26: { since: 900, lastLooked: 960 } } } } },
+      },
+    },
+  };
+  // The tick `Main.fullTick` runs: it saves the latches whenever the load migrated.
+  assert.equal(dangerStands(), false);
+  const latches = loadRoomLatches();
+  saveDanger(loadDanger(TuningModule_defaults, 1000));
+  saveRaids(home, ofArray([]), loadRaids(home));
+  saveRoomLatches(latches);
+
+  assert.equal(globalThis.Memory.fabot.observe.colonies[home].raids.rivalHeld, undefined, "the legacy copy is gone");
+  saveRoomLatches(loadRoomLatches());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.rooms.rivals),
+    stable({ W18S26: { o: "Trepidimous", since: 900, lastLooked: 960 } }),
+    "a reset reading Memory alone keeps the latch",
   );
 });
 

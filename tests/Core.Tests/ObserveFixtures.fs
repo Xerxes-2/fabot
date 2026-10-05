@@ -205,6 +205,22 @@ let raidTickIn alive t (colony: ColonyView) state =
         (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
         state
 
+/// One colony's Raid-log tick over the world danger log
+/// (`Danger.foldColony`), on `raidTick`'s terms, declaring the `owned` rooms
+/// beside the ones it works: its own log and the world's out, threaded as the
+/// shell threads them.
+let dangerTick (owned: string list) t (colony: ColonyView) (own: RaidState, danger: Danger) =
+    let alive = colony.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
+
+    Danger.foldColony
+        3
+        alive
+        (Set.ofList owned)
+        (atShortGap t colony)
+        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
+        own
+        danger
+
 /// The recorded episodes as (opened, last-seen) windows, oldest first.
 let windows (state: RaidState) =
     state.Episodes |> List.map (fun e -> e.Opened, e.LastSeen)
@@ -357,6 +373,10 @@ let heldAt tick state =
 /// and whose memory this tick is still short of; withholds no room.
 let threatenedAt tick state =
     (standDown Tuning.defaults tick state).ThreatenedOutposts
+
+/// Any colony's gate off the world danger log at a tick, its own log empty.
+let gateAt tick (danger: Danger) =
+    standDown Tuning.defaults tick (Danger.into danger RaidState.empty)
 
 /// An armed raider in a room: a Threat.
 let armedIn room = raiderIn room 1 [ Move; Attack ]

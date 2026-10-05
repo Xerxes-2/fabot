@@ -5678,6 +5678,8 @@ if (unprojected.length) {
     ["assignments", globalThis.Memory?.fabot?.assignments],
     ["creeps", observe.creeps],
     ["colonies", observe.colonies],
+    // The world danger log (ADR 0086 S2), the stand-down rows once a room.
+    ["world", observe.world],
     ["positions", observe.positions],
     ["reactor", observe.reactor],
     ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
@@ -5722,6 +5724,10 @@ if (unprojected.length) {
       observe: { ...memory.fabot?.observe, cpu: line.map((r) => r.t) },
     };
     resetRows.push({ ms, row, pops, print: fingerprint(memory) });
+    // The first reset's Memory, for attributing a moved reset fingerprint.
+    if (i === 0 && process.env.FABOT_DUMP_RESET) {
+      writeFileSync(process.env.FABOT_DUMP_RESET, JSON.stringify(canonical(memory.fabot ?? null), null, 1));
+    }
   }
   const { profile: resetProfile } = await resetSession.post("Profiler.stop");
   resetSession.disconnect();

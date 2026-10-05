@@ -62,7 +62,8 @@ let mutable private sightings: Map<string, RoomSighting> = Map.empty
 let mutable private towered: Set<string> = Set.empty
 
 // Each room's armed Threats as last seen, or the exit they left by
-// (`World.ExitWatches`, #450): heap only, a reset costing one hold.
+// (`World.ExitWatches`, #450): heap state written into the world danger log
+// every full tick and seeded off it on a cold heap (#542).
 let mutable private exitWatches: Map<string, ExitWatch> = Map.empty
 
 // Each room's raid healers of the last few ticks (`World.Healers`, #480):
@@ -391,8 +392,15 @@ let private fullTick
     (seen: LightTick.Glance option)
     (forced: LightTick.LightForce option)
     =
+    // The world danger log's rooms, read once a tick off Memory as each
+    // colony's own log is: every colony's gate stands on them. Absent, the
+    // load migrates the colonies' legacy keys, which this tick's writes drop.
+    let migrating = not (ObserveMemory.dangerStands ())
+    let dangerRooms = ObserveMemory.loadDanger Tuning.defaults Game.time
+
     // A cold heap reads back what the last one wrote, so a rival's dark room
-    // stays unentered and a weaned child stays weaned across the reset.
+    // stays unentered, a weaned child stays weaned and a held exit stays held
+    // across the reset.
     let written =
         match roomLatches with
         | Some latches -> latches
@@ -402,7 +410,13 @@ let private fullTick
             towered <- Set.union towered loaded.Towered
             armedSeen <- loaded.Armed
             rivalControllers <- loaded.Controllers
+            exitWatches <- Observe.Danger.watches dangerRooms
             loaded
+
+    let danger =
+        { dangerRooms with
+            Rivals = written.Latched
+        }
 
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch, exit watch and healer memory laid under it.
@@ -427,18 +441,16 @@ let private fullTick
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers
 
+    // Written at the tick's end, once the Raid-log folds have moved the
+    // latches.
     let latches: ObserveMemory.RoomLatches =
         {
             Rivals = World.rivalOwners world
+            Latched = written.Latched
             Towered = world.Towered
             Armed = world.ArmedSeen
             Controllers = world.RivalControllers
         }
-
-    if latches <> written then
-        ObserveMemory.saveRoomLatches latches
-
-    roomLatches <- Some latches
 
     let colonies = World.living Colony.declared world
 
@@ -453,9 +465,12 @@ let private fullTick
         |> Map.ofList
 
     // The gate's answer per colony, derived once: a second derivation would
-    // be a second answer free to disagree.
+    // be a second answer free to disagree. Each the colony's projection of
+    // the one world danger log.
     let gates =
-        raids |> Map.map (fun _ log -> Observe.standDown Tuning.defaults world.Time log)
+        raids
+        |> Map.map (fun _ log ->
+            Observe.standDown Tuning.defaults world.Time (Observe.Danger.into danger log))
 
     let gateOf home =
         gates |> Map.tryFind home |> Option.defaultValue StandDown.none
@@ -564,10 +579,15 @@ let private fullTick
         if resetTick then
             views
             |> List.map (fun (colony, view) ->
-                colony.Home, view.Spatial.Rooms |> Map.keys |> Set.ofSeq |> Set.add colony.Home)
+                colony.Home,
+                view.Spatial.Rooms
+                |> Map.keys
+                |> Set.ofSeq
+                |> Set.union (Colony.declaredRooms colony))
             |> LightTick.resetSplit
                 Tuning.defaults.ResetFirstShare
                 (seen |> Option.defaultWith glance)
+                (Observe.Danger.standing world.Time danger)
             |> snd
             |> Set.ofList
         else
@@ -769,15 +789,28 @@ let private fullTick
 
     observeLog <- Some log
 
+    // The world danger log, folded through every deciding colony in order
+    // (`Danger.foldColony`): each reads what the one before wrote.
+    let mutable folded = danger
+
     for colony, view, decision, _, _ in decisions do
         // The Raid log, written every tick whether or not the fold changed
         // anything, so the leaf's presence lets `observe.mjs raids` tell "no
         // channel" from "no raids". Folded here and read at the top of the
         // loop: this tick's sightings are what the next tick's gate stands on.
-        raids
-        |> Map.tryFind colony.Home
-        |> Option.defaultValue Observe.RaidState.empty
-        |> Observe.foldRaids Observe.capEpisodes living view decision.OutpostRooms
+        let state, after =
+            Observe.Danger.foldColony
+                Observe.capEpisodes
+                living
+                (Colony.declaredRooms colony)
+                view
+                decision.OutpostRooms
+                (raids |> Map.tryFind colony.Home |> Option.defaultValue Observe.RaidState.empty)
+                folded
+
+        folded <- after
+
+        state
         |> Observe.foldProbes view decision.Intents
         // The haul overflow reading the decision smoothed (#508).
         |> fun state ->
@@ -809,6 +842,24 @@ let private fullTick
         ObserveMemory.loadBreaches colony.Home
         |> Observe.foldBreaches Observe.capBreaches Game.time view
         |> ObserveMemory.saveBreaches colony.Home
+
+    // The world danger log, written every tick with this tick's exit watches,
+    // and its latches with the room latches when either moved.
+    let folded =
+        folded
+        |> Observe.Danger.trim Observe.capEpisodes world.Time
+        |> Observe.Danger.watching world.ExitWatches
+
+    ObserveMemory.saveDanger folded
+
+    let latches = { latches with Latched = folded.Rivals }
+
+    // Always on the migrating tick: the merged latches equal what was read,
+    // and `saveRaids` has dropped the only copy Memory held of them.
+    if migrating || latches <> written then
+        ObserveMemory.saveRoomLatches latches
+
+    roomLatches <- Some latches
 
     pruneDeadCreepMemory living
 

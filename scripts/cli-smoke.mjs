@@ -261,6 +261,36 @@ smoke("observe outposts on a leaf with no declared list says what it cannot name
   assert.match(out, /is not named above/);
 });
 
+smoke("observe outposts reads the world danger log (ADR 0086 S2) and the latches beside the owners", () => {
+  const file = join(dir, "world-danger.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      fabot: {
+        observe: {
+          colonies: { W1N1: { raids: { episodes: [], declared: ["W1N2", "W2N1"] } } },
+          world: {
+            danger: {
+              W2N1: {
+                down: { room: "W2N1", opened: 10, last: 20, expiry: 5000, basis: "collapse-timer", stronghold: true },
+                hold: { holder: "invader", until: 4000 },
+              },
+            },
+          },
+          rooms: { rivals: { W3N1: { o: "Trepidimous", since: 100, lastLooked: 200 }, W4N1: "Trepidimous" } },
+        },
+      },
+    }),
+  );
+  const { code, out, err } = runOutposts(file);
+  assert.equal(code, 0, err);
+  assert.match(out, /^W1N2 {2}open: declared/m, "the never-shut outpost has a line");
+  assert.doesNotMatch(out, /^W2N1 {2}open/m, "the world's row shuts it");
+  const json = JSON.parse(runOutposts(file, ["--json"]).out);
+  assert.deepEqual(Object.keys(json.rivalHeld), ["W3N1"], "a latched room, and not a bare owner");
+  assert.equal(json.outposts[0].room, "W2N1");
+});
+
 smoke("observe outposts refuses a declared list off its shape", () => {
   const { code, err } = runOutposts(raidsMemory({ ...quietRaids, declared: [7] }));
   assert.equal(code, 1, err);

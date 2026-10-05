@@ -1472,6 +1472,15 @@ module Colony =
         |> Option.map (fun colony -> colony.Errands)
         |> Option.defaultValue []
 
+    /// Every room one colony's declaration names: its home, outposts,
+    /// [[errand]]s, [[salvage]] and [[assault]] rooms, shut or not.
+    let declaredRooms (colony: Colony) : Set<string> =
+        colony.Home :: (colony.Outposts |> List.map (fun outpost -> outpost.RoomName))
+        @ (colony.Errands |> List.map (fun errand -> errand.RoomName))
+        @ colony.Salvage
+        @ (colony.Assaults |> List.map (fun assault -> assault.RoomName))
+        |> Set.ofList
+
     /// Every declared colony's home room, in declaration order
     /// (`ColonyView.Declared`): which rooms a human means to own is not a
     /// thing vision can answer.

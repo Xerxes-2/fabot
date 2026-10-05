@@ -988,6 +988,7 @@ let harassStandDownTests =
                                     Raiders = Set.empty
                                     PlayerSince = None
                                     Chased = false
+                                    Bounced = false
                                 }
                             ]
                     }
@@ -1048,6 +1049,7 @@ let harassStandDownTests =
                         Raiders = Set.empty
                         PlayerSince = None
                         Chased = false
+                        Bounced = false
                     }
 
                 let state =

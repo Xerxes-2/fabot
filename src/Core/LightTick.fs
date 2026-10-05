@@ -454,14 +454,34 @@ let private within (ours: Ours) (hostile: GlanceHostile) : bool =
      && (near ours.CreepTiles || near ours.StructureTiles))
     || (hostile.Breaks && near ours.StructureTiles)
 
+/// Whether a body can act on nothing of ours: an ally fights beside us, and a
+/// body in a room under our safe mode is held off (live t931,466, W17S25's
+/// safe mode held 100 full ticks of 95 ms).
+let private harmless (now: Glance) (hostile: GlanceHostile) =
+    Colony.isAlly hostile.Owner
+    || Map.tryFind hostile.Tile.Room now.Controllers |> Option.exists snd
+
+/// Who can hurt us this tick, read once off the glance: every hostile that is
+/// not `harmless` with something of ours it can hurt in its reach (`within`).
+/// The one reading the light tick's forcing rules are to stand on (#549).
+let hurting (now: Glance) : GlanceHostile list =
+    let ours = oursOf now
+
+    now.Hostiles
+    |> List.filter (fun hostile -> not (harmless now hostile) && within ours hostile)
+
 /// The colonies a cold reset decides on its own tick and the ones it leaves
 /// to the next (#488), each in the order given: every colony with a threat in
 /// a room it projects — an armed body of neither a keeper nor an ally, or one
-/// the near rule reads within reach of ours — then the rest in order until
-/// `share` of them is decided. Never none: a lone colony decides.
+/// the near rule reads within reach of ours — or with a room of its own the
+/// world danger log holds danger in (`danger`, `Observe.Danger.standing`),
+/// seen or not: a shut room watched by vision alone is still its colony's;
+/// then the rest in order until `share` of them is decided. Never none: a
+/// lone colony decides.
 let resetSplit
     (share: float)
     (now: Glance)
+    (danger: Set<string>)
     (colonies: (string * Set<string>) list)
     : string list * string list =
     let ours = oursOf now
@@ -474,6 +494,7 @@ let resetSplit
             && (hostile.Armed || within ours hostile))
         |> List.map (fun hostile -> hostile.Tile.Room)
         |> Set.ofList
+        |> Set.union danger
 
     let threatened, quiet =
         colonies
@@ -487,14 +508,7 @@ let resetSplit
 /// The first fact that makes replaying the last full tick wrong, in the
 /// ADR's order; `None` when the light tick may run.
 let forced (last: LastFull) (now: Glance) : LightForce option =
-    // An ally fights beside us, and a body in a room under our safe mode can
-    // act on nothing of ours: neither is a reason to decide (live t931,466,
-    // W17S25's safe mode held 100 full ticks of 95 ms).
-    let hostiles =
-        now.Hostiles
-        |> List.filter (fun hostile ->
-            not (Colony.isAlly hostile.Owner)
-            && not (Map.tryFind hostile.Tile.Room now.Controllers |> Option.exists snd))
+    let hostiles = now.Hostiles |> List.filter (harmless now >> not)
 
     // Only in a room where we own a structure: an armed body standing off in
     // a remote or harassment room is the near rule's to answer (#461), and in
@@ -510,7 +524,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
 
     let near () =
-        let ours = oursOf now
+        let hurt = hurting now |> List.map _.Id |> Set.ofList
 
         // The full tick's shooters, where they stand now: any hostile near
         // one is the fight going on.
@@ -536,7 +550,7 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
         |> List.tryFind (fun hostile ->
             not (Set.contains hostile.Tile.Room loose)
             && (not now.Lean || Set.contains hostile.Tile.Room homes)
-            && (within ours hostile || besideAShooter hostile))
+            && (hurt.Contains hostile.Id || besideAShooter hostile))
         |> Option.map (fun hostile -> LightForce.HostileNear(hostile.Tile.Room, hostile.Owner))
 
     let fought () =

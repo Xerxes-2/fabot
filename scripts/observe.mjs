@@ -277,6 +277,36 @@ const colonyLeaf = async (leaf) => {
 // stand-downs — stays in its command, because those differ deliberately.
 const raidLeaf = () => colonyLeaf("raids");
 
+// The world danger log (ADR 0086 S2) in the Raid log's old shape: one record
+// a room under `observe.world.danger` — its stand-down row `down`, `hold`,
+// `threat` — and the rival latches beside the owners under
+// `observe.rooms.rivals` (`{ o?, since, lastLooked }`). One log for every
+// colony, so a row here shuts its room for each. A bundle before it writes
+// no `world` leaf, and `fallback` (the colony's own keys) is read as it was.
+const worldDanger = async (fallback) => {
+  const danger = await memoryGet("fabot.observe.world.danger");
+  if (danger == null || typeof danger !== "object" || Array.isArray(danger)) return fallback;
+  const rivals = await memoryGet("fabot.observe.rooms.rivals");
+  const outposts = [];
+  const holds = {};
+  const threatened = {};
+  const rivalHeld = {};
+  for (const [room, entry] of Object.entries(danger)) {
+    if (entry?.down != null) outposts.push(entry.down);
+    if (entry?.hold != null) holds[room] = entry.hold;
+    if (entry?.threat != null) threatened[room] = entry.threat;
+  }
+  outposts.sort((a, b) => (a?.opened ?? 0) - (b?.opened ?? 0));
+  if (rivals != null && typeof rivals === "object" && !Array.isArray(rivals)) {
+    for (const [room, entry] of Object.entries(rivals)) {
+      if (entry != null && typeof entry === "object" && "since" in entry) {
+        rivalHeld[room] = { since: entry.since, lastLooked: entry.lastLooked ?? entry.since };
+      }
+    }
+  }
+  return { ...(fallback ?? {}), outposts, rivalHeld, holds, threatened };
+};
+
 // How many CPU rows `cpu` prints without `--all`.
 const CPU_ROWS = 20;
 
@@ -524,8 +554,8 @@ if (command === "console") {
     const c = colonies[home] ?? {};
     const rooms = new Set([home]);
     for (const row of c.quotas?.haul ?? []) if (typeof row?.room === "string") rooms.add(row.room);
-    for (const row of c.raids?.outposts ?? []) if (typeof row?.room === "string") rooms.add(row.room);
-    for (const key of ["rivalHeld", "holds", "threatened", "placed"]) {
+    for (const room of c.raids?.declared ?? []) if (typeof room === "string") rooms.add(room);
+    for (const key of ["placed"]) {
       for (const room of Object.keys(c.raids?.[key] ?? {})) rooms.add(room);
     }
     for (const row of c.breaches?.rows ?? []) if (typeof row?.room === "string") rooms.add(row.room);
@@ -583,20 +613,24 @@ if (command === "console") {
     }
   }
 
-  for (const home of homes) {
-    const raids = colonies[home]?.raids ?? {};
+  // The world danger log's rows once, or each colony's own before it.
+  const world = await worldDanger(null);
+  for (const [whose, raids] of world ? [["world", world]] : homes.map((home) => [home, colonies[home]?.raids ?? {}])) {
     for (const row of raids.outposts ?? []) {
       if (typeof row?.expiry === "number" && row.expiry > now) {
         counts.standDown++;
         lines.push(
-          `stand-down ${row.room} (${home}) until t${row.expiry}, ${row.expiry - now} ticks left, ${row.basis}`,
+          `stand-down ${row.room} (${whose}) until t${row.expiry}, ${row.expiry - now} ticks left, ${row.basis}`,
         );
       }
     }
     for (const [room, held] of Object.entries(raids.rivalHeld ?? {})) {
       counts.standDown++;
-      lines.push(`rival-held ${room} (${home}) since t${held?.since}`);
+      lines.push(`rival-held ${room} (${whose}) since t${held?.since}`);
     }
+  }
+
+  for (const home of homes) {
     for (const row of colonies[home]?.breaches?.rows ?? []) {
       counts.breach++;
       lines.push(
@@ -980,7 +1014,11 @@ if (command === "console") {
   // the reservation the core had taken outlived it by CONTROLLER_RESERVE_MAX.
   // "Open" was a true statement about the stand-down and a false one about
   // the room, which is the only thing an operator reads it for.
-  const { home, stored } = await raidLeaf();
+  //
+  // Since ADR 0086 S2 the rows, latches, holds and threats are the world's
+  // (`worldDanger`); `declared` is still the colony's.
+  const { home, stored: colonyStored } = await raidLeaf();
+  const stored = await worldDanger(colonyStored);
   // The list is guarded in its own right, the way each of the Layout
   // record's three is: a leaf carrying `episodes` and no `outposts` is a
   // bundle predating ADR 0043's family or a wire shape that has moved, and

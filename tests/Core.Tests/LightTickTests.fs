@@ -1556,6 +1556,74 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
     }
 
 [<Tests>]
+let hurtingTests =
+    testList
+        "who can hurt us this tick"
+        [
+            test
+                "an armed body within reach of a creep of ours can; one far off, a scout beside it and an ally cannot" {
+                let near =
+                    { hostile 12 10 "Trepidimous" true with
+                        Id = "near"
+                    }
+
+                let far =
+                    { hostile 45 45 "Trepidimous" true with
+                        Id = "far"
+                    }
+
+                let scout =
+                    { hostile 11 10 "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let ally =
+                    { hostile 11 11 "Odiodin" true with
+                        Id = "ally"
+                    }
+
+                let seen =
+                    { quiet with
+                        Hostiles = [ near; far; scout; ally ]
+                    }
+
+                Expect.equal
+                    (LightTick.hurting seen |> List.map _.Id)
+                    [ "near" ]
+                    "the armed body in reach alone"
+            }
+
+            test "a body in a room under our safe mode can hurt nothing" {
+                let seen =
+                    { quiet with
+                        Hostiles = [ hostile 12 10 "Trepidimous" true ]
+                        Controllers = Map.ofList [ room, (5, true) ]
+                    }
+
+                Expect.isEmpty (LightTick.hurting seen) "safe mode holds it off"
+            }
+
+            test "a dismantler beside a structure of ours can, beside only a creep it cannot" {
+                let breaker =
+                    { hostile 31 30 "Trepidimous" false with
+                        Breaks = true
+                    }
+
+                Expect.equal
+                    (LightTick.hurting { quiet with Hostiles = [ breaker ] } |> List.length)
+                    1
+                    "beside the spawn"
+
+                Expect.isEmpty
+                    (LightTick.hurting
+                        { quiet with
+                            Hostiles = [ { breaker with Tile = tile 11 10 } ]
+                        })
+                    "beside the digger alone"
+            }
+        ]
+
+[<Tests>]
 let resetSplitTests =
     testList
         "reset split"
@@ -1567,7 +1635,7 @@ let resetSplitTests =
                         Hostiles = [ hostileIn "W8N1" 25 25 "Trepidimous" true ]
                     }
 
-                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+                let first, rest = LightTick.resetSplit 0.5 seen Set.empty fourColonies
 
                 Expect.equal
                     first
@@ -1590,7 +1658,7 @@ let resetSplitTests =
                             ]
                     }
 
-                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+                let first, rest = LightTick.resetSplit 0.5 seen Set.empty fourColonies
 
                 Expect.equal first [ "W1N1"; "W3N1" ] "the first half in order"
                 Expect.equal rest [ "W5N1"; "W7N1" ] "the second half"
@@ -1612,7 +1680,7 @@ let resetSplitTests =
                         Hostiles = [ hostileIn "W6N1" 12 10 "Trepidimous" false ]
                     }
 
-                let first, _ = LightTick.resetSplit 0.5 seen fourColonies
+                let first, _ = LightTick.resetSplit 0.5 seen Set.empty fourColonies
 
                 Expect.equal first [ "W1N1"; "W3N1" ] "the colonies in their order, none picked out"
             }
@@ -1628,14 +1696,29 @@ let resetSplitTests =
                             ]
                     }
 
-                let first, rest = LightTick.resetSplit 0.5 seen fourColonies
+                let first, rest = LightTick.resetSplit 0.5 seen Set.empty fourColonies
 
                 Expect.equal first [ "W1N1"; "W3N1"; "W7N1" ] "every threatened colony"
                 Expect.equal rest [ "W5N1" ] "only the quiet one waits"
             }
 
+            test "a colony with a room the world danger log holds danger in decides first, unseen" {
+                // A shut outpost watched by vision alone: nothing of the raid is
+                // in sight on the reset tick, and the log still says whose it is.
+                let first, rest =
+                    LightTick.resetSplit 0.5 quiet (Set.ofList [ "W6N1" ]) fourColonies
+
+                Expect.equal
+                    first
+                    [ "W5N1"; "W1N1" ]
+                    "the endangered colony, then the first in order"
+
+                Expect.equal rest [ "W3N1"; "W7N1" ] "the rest wait"
+            }
+
             test "a lone colony decides on the reset tick" {
-                let first, rest = LightTick.resetSplit 0.5 quiet [ List.head fourColonies ]
+                let first, rest =
+                    LightTick.resetSplit 0.5 quiet Set.empty [ List.head fourColonies ]
 
                 Expect.equal first [ "W1N1" ] "one colony is its own half"
                 Expect.isEmpty rest "nothing waits"

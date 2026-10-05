@@ -2487,6 +2487,7 @@ let worldSeamTests =
                         Raiders = set [ raider.Id ]
                         PlayerSince = None
                         Chased = false
+                        Bounced = false
                     }
 
                 let log =

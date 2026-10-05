@@ -10,10 +10,13 @@
 /// `World.latchTowers`, `World.watchExits`), cuts every living colony's view
 /// (`World.creepColoniesRecalling`, `ColonyView.ofWorldRecalling`), decides
 /// each (`decideUnarbitrated`) and arbitrates every room's moves once
-/// (`resolveRooms`) — `Main.fullTick` less Memory. Each colony's Raid log is
-/// carried in heap and not Memory: folded after the tick
-/// (`Observe.foldRaids`) and read into the next tick's [[stand-down]] gate
-/// (`Observe.standDown`), as `Main` does (#469). What the arena leaves out,
+/// (`resolveRooms`) — `Main.fullTick` less Memory. Each colony's Raid log and
+/// the world danger log are carried in heap and not Memory: folded after the
+/// tick (`Observe.Danger.foldColony`) and read into the next tick's
+/// [[stand-down]] gate (`Observe.standDown`), as `Main` does (#469); the
+/// first tick merges the danger rows an arena seeds in a colony's log
+/// (`Observe.Danger.ofColonies`), as `Main`'s first tick merges a bundle's
+/// before the world log. What the arena leaves out,
 /// and says so: harassment casting (`HarassCasting.none`), the round-robin
 /// replan (every colony is `ReplanTurn.Now`), and light ticks (`LightTick`):
 /// every tick is a full one.
@@ -293,8 +296,11 @@ type Carried =
         LastPositions: Map<string, RoomPos>
         /// The store each body's load was drawn from (#530).
         Drawn: Map<string, DrawRecord>
-        /// Each colony's Raid log (`Observe.foldRaids`), by home.
+        /// Each colony's Raid log (`Observe.Danger.foldColony`), by home, the
+        /// world's rows laid in as it folded them.
         Raids: Map<string, Observe.RaidState>
+        /// The world danger log; None before the first tick.
+        Danger: Observe.Danger option
         /// Every rival controller as last seen (`World.recallRivalControllers`).
         RivalControllers: Map<string, RivalController>
     }
@@ -757,6 +763,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 LastPositions = Map.empty
                 Drawn = Map.empty
                 Raids = Map.empty
+                Danger = None
                 RivalControllers = Map.empty
             }
         Scores = Map.empty
@@ -1226,6 +1233,16 @@ let worldOf (a: Arena) : World =
 let private raidsOf (a: Arena) (home: string) =
     Map.tryFind home a.Carried.Raids |> Option.defaultValue Observe.RaidState.empty
 
+/// The world danger log as the arena carries it, or the colonies' seeded
+/// rows merged on the first tick.
+let private dangerOf (a: Arena) =
+    a.Carried.Danger
+    |> Option.defaultWith (fun () ->
+        a.Carried.Raids
+        |> Map.toList
+        |> List.map snd
+        |> Observe.Danger.ofColonies Tuning.defaults a.Time)
+
 /// Every living colony's view cut from this tick's world, as
 /// `Main.fullTick` cuts them, beside the world.
 let private cut (a: Arena) : World * (Colony * ColonyView) list =
@@ -1235,9 +1252,12 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
     let joins = JoinTable()
     let casting = HarassCasting.none
 
+    let danger = dangerOf a
+
     let gates =
         living
-        |> List.map (fun c -> c.Home, Observe.standDown tuning a.Time (raidsOf a c.Home))
+        |> List.map (fun c ->
+            c.Home, Observe.standDown tuning a.Time (Observe.Danger.into danger (raidsOf a c.Home)))
         |> Map.ofList
 
     // Every colony's shut rooms, as `Main` hands the adoption them.
@@ -1284,28 +1304,35 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         |> List.map (fun b -> b.Id)
         |> Set.ofList
 
-    let decided =
+    // Every colony decided, then the danger log folded through them in order.
+    let decisions =
         views
         |> List.map (fun (c, view) ->
-            let decision =
-                decideUnarbitrated
+            c,
+            view,
+            decideUnarbitrated
+                view
+                a.Carried.Assignments
+                Set.empty
+                (Map.tryFind c.Home a.Carried.Memos)
+                ReplanTurn.Now)
+
+    let raids, danger =
+        ((Map.empty, dangerOf a), decisions)
+        ||> List.fold (fun (raids, danger) (c, view, decision) ->
+            let state, danger =
+                Observe.Danger.foldColony
+                    Observe.capEpisodes
+                    alive
+                    (Colony.declaredRooms c)
                     view
-                    a.Carried.Assignments
-                    Set.empty
-                    (Map.tryFind c.Home a.Carried.Memos)
-                    ReplanTurn.Now
+                    decision.OutpostRooms
+                    (raidsOf a c.Home)
+                    danger
 
-            (c.Home,
-             Observe.foldRaids
-                 Observe.capEpisodes
-                 alive
-                 view
-                 decision.OutpostRooms
-                 (raidsOf a c.Home)
-             |> Observe.foldProbes view decision.Intents),
-            (c.Home, decision))
+            Map.add c.Home (Observe.foldProbes view decision.Intents state) raids, danger)
 
-    let decisions = decided |> List.map snd
+    let decisions = decisions |> List.map (fun (c, _, decision) -> c.Home, decision)
 
     let moves, _ = resolveRooms (decisions |> List.map (fun (_, d) -> d.Movement))
 
@@ -1333,7 +1360,12 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         ExitWatches = world.ExitWatches
         Healers = world.Healers
         ArmedSeen = world.ArmedSeen
-        Raids = decided |> List.map fst |> Map.ofList
+        Raids = raids
+        Danger =
+            danger
+            |> Observe.Danger.trim Observe.capEpisodes a.Time
+            |> Observe.Danger.watching world.ExitWatches
+            |> Some
         RivalControllers = world.RivalControllers
     }
 
