@@ -480,6 +480,12 @@ let decideOn colony = decide colony Map.empty Set.empty None
 /// test varies.
 let decideFrom assigned colony = decide colony assigned Set.empty None
 
+/// The act a creep holding `task` would make on arrival at `landing`
+/// (`Emitter.arrival`), on a quiet colony.
+let arrivalOn (colony: ColonyView) (creep: CreepInfo) task (landing: Pos) =
+    let room = SpatialInfo.homeName colony.Spatial
+    arrival colony (Atlas.ofView colony) noThreats creep task (RoomPos.at room landing)
+
 /// `planTasksOn` over a colony whose assignment table holds nothing. Named
 /// `…On` like `decideOn` rather than shadowing `Planner.planTasks`: a shadow
 /// resolves by open order, and the day the Planner gains a fourth fact the

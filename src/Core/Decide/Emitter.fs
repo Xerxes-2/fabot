@@ -713,7 +713,7 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
                     else
                         RangedHealCreep(healer.Name, patient.Name), Engine.rangedHealPower
 
-                match Fabot.Core.IntentPlan.tryAdd intent plan with
+                match Fabot.Core.IntentPlan.tryReflex intent plan with
                 | Ok healed ->
                     healed, Map.add patient.Name (Map.find patient.Name owed - parts * power) owed
                 | Error _ -> plan, owed)
@@ -823,6 +823,27 @@ let private defendIntent
 /// reach a creep the projection places nothing for, so `Atlas.mayAct` answers
 /// false for it on every tick, and the range it is really gated on is the
 /// swing `guardIntent` measures itself.
+/// A non-fighting Task's act, behind the gates that withhold it: out of its
+/// Work Area, a drained rock, a cooldown, a full mine container.
+let private taskAct
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (partyWalks: Map<string, int list>)
+    (creep: CreepInfo)
+    (task: Task)
+    (drained: bool)
+    : Intent option =
+    if
+        mayActNow threats atlas creep.Name task
+        && not drained
+        && not (heldByCooldown atlas task)
+        && not (heldByFullContainer view atlas creep task)
+    then
+        intentFor view atlas partyWalks creep task
+    else
+        None
+
 let private actionIntents
     (view: ColonyView)
     atlas
@@ -864,17 +885,9 @@ let private actionIntents
             |> Option.toList
         | _ -> []
     | _ ->
-        if
-            mayActNow threats atlas creep.Name task
-            && not drained
-            && not (heldByCooldown atlas task)
-            && not (heldByFullContainer view atlas creep task)
-        then
-            match intentFor view atlas partyWalks creep task with
-            | Some(UpgradeController _ as act) -> act :: topUp view atlas creep
-            | act -> Option.toList act
-        else
-            []
+        match taskAct view atlas threats partyWalks creep task drained with
+        | Some(UpgradeController _ as act) -> act :: topUp view atlas creep
+        | act -> Option.toList act
 
 /// Emitter: each assigned creep's action Intent, then every assigned
 /// creep's chat bubble, both in view creep order. Judges actions from
@@ -904,6 +917,33 @@ let emit (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
             |> Option.map (fun task -> SayCreep(creep.Name, glyphFor task)))
 
     actions @ says
+
+/// A hauler's act on arrival (#529): its Withdraw's, Pickup's or Refill's act
+/// as this Emitter issues it standing on `landing`, the tile it steps onto
+/// this tick — the same gates, the same `intentFor` (`Atlas.standingAt`). The
+/// light tick after issues it. None for any other Task, off its room, for a
+/// drop, which lands where the body stands, and for a draw naming an amount,
+/// which the light tick replays nowhere.
+let arrival
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (creep: CreepInfo)
+    (task: Task)
+    (landing: RoomPos)
+    : Intent option =
+    match task with
+    | Withdraw _
+    | Pickup _
+    | Refill _ ->
+        Atlas.standingAt atlas creep.Name landing (fun () ->
+            taskAct view atlas threats Map.empty creep task (restockWait view task > 0))
+        |> Option.flatten
+        |> Option.filter (function
+            | DropEnergy _
+            | WithdrawFromStore(_, _, _, Some _) -> false
+            | _ -> true)
+    | _ -> None
 
 /// Each fighter's aim (#528): its strike at the head of its Guard's or
 /// Fight's targets, in reach or not — the target it walks to. The light

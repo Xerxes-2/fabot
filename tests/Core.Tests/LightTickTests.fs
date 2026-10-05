@@ -18,7 +18,8 @@ let private creepAt x y hits : GlanceCreep =
     }
 
 /// A quiet world: two creeps of ours, a spawn, one controller at level 5, and
-/// nobody else.
+/// nobody else. Every object an act below names still stands, as the glance
+/// looks it up (`LightTick.lookups`).
 let private quiet: Glance =
     {
         Creeps = Map.ofList [ "digger", creepAt 10 10 1000; "hauler", creepAt 20 20 500 ]
@@ -26,6 +27,24 @@ let private quiet: Glance =
         Structures = [ tile 30 30 ]
         Controllers = Map.ofList [ room, (5, false) ]
         Lean = false
+        Objects =
+            Set.ofList
+                [
+                    "src-a"
+                    "link-1"
+                    "ext-9"
+                    "ctrl"
+                    "site"
+                    "road"
+                    "wall"
+                    "store"
+                    "can-buf"
+                    "pile"
+                    "reactor"
+                    "core"
+                    "obs-1"
+                    "spawn"
+                ]
     }
 
 /// The full tick that saw `quiet`: the digger harvesting where it stands and
@@ -66,11 +85,221 @@ let replayTests =
     testList
         "light tick replay"
         [
-            test "a creep on the tile it worked from re-issues its repeatable work and nothing else" {
+            test "a creep re-issues every act of the full tick whose target still stands" {
+                // #529: a light tick replays by target, not by tile; the engine
+                // checks range, store and cooldown, and a refusal costs no CPU.
                 Expect.equal
                     (LightTick.intents last stepped)
+                    [
+                        HarvestSource("digger", "src-a")
+                        TransferEnergyToStructure("digger", "link-1", Energy)
+                        MoveCreep("hauler", Right)
+                    ]
+                    "the harvest, the transfer and the next step; never the spawn"
+
+                Expect.equal
+                    (LightTick.intents
+                        last
+                        { stepped with
+                            Objects = Set.remove "link-1" stepped.Objects
+                        })
                     [ HarvestSource("digger", "src-a"); MoveCreep("hauler", Right) ]
-                    "the harvest again and the next step; never the transfer or the spawn"
+                    "a target gone from the glance: that act is dropped"
+            }
+
+            test
+                "a hauler that stepped beside its Refill target on the full tick transfers on the light tick" {
+                // #529: out of reach at the start of the full tick it issued
+                // nothing; the full tick lays its pour on arrival
+                // (`Decision.Next`), which the light tick issues.
+                let arriving =
+                    LightTick.lastFullWith
+                        quiet
+                        Map.empty
+                        [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                        [ MoveCreep("hauler", Left) ]
+
+                let arrived =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "hauler" (creepAt 19 20 500)
+                    }
+
+                Expect.equal
+                    (LightTick.intents arriving arrived)
+                    [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                    "the pour, from the tile it stepped onto"
+
+                Expect.isEmpty
+                    (LightTick.intents
+                        arriving
+                        { arrived with
+                            Objects = Set.remove "ext-9" arrived.Objects
+                        })
+                    "its target gone: nothing"
+            }
+
+            test "the full tick's one-shots by a creep, a tower or a planner are never replayed" {
+                let oneShots =
+                    [
+                        SpawnCreep("Spawn1", [ Move ], "x")
+                        PlaceConstructionSite(tile 5 5, StructureKind.Road)
+                        PlaceSpawnSite(tile 6 6, "Spawn9")
+                        ClaimController("digger", "ctrl")
+                        SignController("digger", "ctrl", "hi")
+                        SayCreep("digger", "o/")
+                        SetRampartPublic("rampart", true)
+                        SendFromTerminal("term", Energy, 100, "W2N2")
+                        // A named amount: one that landed would be drawn twice.
+                        WithdrawFromStore("hauler", "store", Energy, Some 100)
+                        MoveCreep("digger", Top)
+                    ]
+
+                for oneShot in oneShots do
+                    let full = LightTick.lastFull quiet Map.empty [ oneShot ]
+
+                    Expect.isEmpty full.Acts $"%A{oneShot} is not kept"
+                    Expect.isEmpty (LightTick.intents full quiet) $"%A{oneShot} is never replayed"
+            }
+
+            test "an observer's look is issued again, so its vision lands on the next full tick" {
+                // #529: vision lands the tick after the call; a look on the full
+                // tick lands on the light tick, which reads nothing.
+                let looked = LightTick.lastFull quiet Map.empty [ ObserveRoom("obs-1", "W5N5") ]
+
+                Expect.equal
+                    (LightTick.intents looked quiet)
+                    [ ObserveRoom("obs-1", "W5N5") ]
+                    "the same look"
+
+                Expect.equal (LightTick.lookups looked) [ "obs-1" ] "the observer is looked up"
+
+                Expect.isEmpty
+                    (LightTick.intents
+                        looked
+                        { quiet with
+                            Objects = Set.remove "obs-1" quiet.Objects
+                        })
+                    "an observer gone: nothing"
+            }
+
+            test "a swing at a core, a re-claim and a pickup are replayed while their targets stand" {
+                // #529: a level-0 core swung half the time took twice as long.
+                let full =
+                    LightTick.lastFull
+                        quiet
+                        Map.empty
+                        [
+                            AttackStructure("digger", "core")
+                            ClaimReactor("digger", "reactor")
+                            PickupPile("hauler", "pile")
+                        ]
+
+                Expect.equal
+                    (LightTick.intents full stepped)
+                    [
+                        AttackStructure("digger", "core")
+                        ClaimReactor("digger", "reactor")
+                        PickupPile("hauler", "pile")
+                    ]
+                    "each again"
+
+                Expect.equal
+                    (LightTick.lookups full |> List.sort)
+                    [ "core"; "pile"; "reactor" ]
+                    "and each target looked up"
+            }
+
+            test "a drop is replayed only from the tile it was decided on" {
+                // A drop has no target but the ground under the body.
+                let dropped = LightTick.lastFull quiet Map.empty [ DropEnergy "hauler" ]
+
+                Expect.equal (LightTick.intents dropped quiet) [ DropEnergy "hauler" ] "standing"
+                Expect.isEmpty (LightTick.intents dropped stepped) "a step off: never"
+            }
+
+            test
+                "a guard that pre-healed out of reach swings at its aim beside it, as on a full tick" {
+                // The full tick's priority (`IntentPlan.arbitrate`): a heal is a
+                // reflex, and a swing or a shot beats it for the channel.
+                let guarded =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "guard" (creepAt 12 10 1000)
+                        Hostiles = [ hostile 13 10 "Trepidimous" false ]
+                    }
+
+                let preHealed heal aim =
+                    { LightTick.lastFull guarded Map.empty [ heal ] with
+                        Aims = [ aim ]
+                    }
+
+                let ofGuard record =
+                    LightTick.intents record guarded
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | HealCreep("guard", _)
+                        | RangedHealCreep("guard", _)
+                        | AttackCreep("guard", _)
+                        | RangedAttackCreep("guard", _) -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (ofGuard (preHealed (HealCreep("guard", "guard")) (AttackCreep("guard", "h-1"))))
+                    [ AttackCreep("guard", "h-1") ]
+                    "the swing, not the pre-heal"
+
+                Expect.equal
+                    (ofGuard (
+                        preHealed
+                            (RangedHealCreep("guard", "digger"))
+                            (RangedAttackCreep("guard", "h-1"))
+                    ))
+                    [ RangedAttackCreep("guard", "h-1") ]
+                    "the shot, not the ranged heal"
+
+                Expect.equal
+                    (ofGuard (
+                        preHealed (HealCreep("guard", "guard")) (RangedAttackCreep("guard", "h-1"))
+                    ))
+                    [ RangedAttackCreep("guard", "h-1"); HealCreep("guard", "guard") ]
+                    "a heal on a channel the shot leaves free stands beside it"
+            }
+
+            test "a light tick never lays two acts on one channel of one creep" {
+                // The full tick's acts passed `IntentPlan`; a planned act or an
+                // aim on a channel one of them holds is dropped, and a next pour
+                // supersedes the full tick's own.
+                let guarded =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "guard" (creepAt 12 10 1000)
+                        Hostiles = [ hostile 13 10 "Trepidimous" false ]
+                    }
+
+                let full =
+                    { LightTick.lastFullWith
+                          guarded
+                          Map.empty
+                          [ TransferEnergyToStructure("digger", "ext-9", Energy) ]
+                          [
+                              HarvestSource("digger", "src-a")
+                              TransferEnergyToStructure("digger", "link-1", Energy)
+                              RepairStructure("guard", "road")
+                          ] with
+                        Aims = [ AttackCreep("guard", "h-1"); RangedAttackCreep("hauler", "h-1") ]
+                    }
+
+                let replayed = LightTick.intents full guarded
+
+                Expect.equal
+                    replayed
+                    [
+                        HarvestSource("digger", "src-a")
+                        TransferEnergyToStructure("digger", "ext-9", Energy)
+                        RepairStructure("guard", "road")
+                        RangedAttackCreep("hauler", "h-1")
+                    ]
+                    "the next pour over the full tick's; no swing beside the repair"
+
+                Expect.isOk (IntentPlan.create replayed) "one act per channel"
             }
 
             test "a refiller still on its tile issues the full tick's next pour, once" {
@@ -89,46 +318,32 @@ let replayTests =
                     "the next pour, and never the full tick's own"
             }
 
-            test "every repeatable work intent is kept and every one-shot one dropped" {
-                let work =
+            test "every act on a target is kept, in the full tick's order" {
+                let acts =
                     [
                         HarvestSource("digger", "src-a")
                         UpgradeController("digger", "ctrl")
                         ReserveController("digger", "ctrl")
+                        AttackController("digger", "ctrl")
                         BuildSite("digger", "site")
                         RepairStructure("digger", "road")
                         DismantleStructure("digger", "wall")
-                    ]
-
-                let oneShot =
-                    [
                         TransferEnergyToStructure("digger", "spawn", Energy)
-                        // The hauler's: one beside an upgrade is replayed.
                         WithdrawFromStore("hauler", "store", Energy, None)
                         PickupPile("digger", "pile")
-                        SpawnCreep("Spawn1", [ Move ], "x")
-                        PlaceConstructionSite(tile 5 5, StructureKind.Road)
-                        ClaimController("digger", "ctrl")
                         ClaimReactor("digger", "reactor")
-                        SignController("digger", "ctrl", "hi")
-                        SendFromTerminal("term", Energy, 100, "W2N2")
-                        SayCreep("digger", "o/")
+                        AttackStructure("digger", "core")
                     ]
 
-                let full = LightTick.lastFull quiet Map.empty (work @ oneShot)
+                let full = LightTick.lastFull quiet Map.empty acts
 
-                Expect.equal full.Work work "the six repeatable verbs, in the full tick's order"
-                Expect.isFalse full.Fought "none of them shoots or heals"
-
-                Expect.equal
-                    (LightTick.intents full quiet)
-                    work
-                    "and a light tick replays exactly those"
+                Expect.equal full.Acts acts "each, in order"
+                Expect.isFalse full.Fought "none of them a structure's fight"
             }
 
-            test "a standing upgrader's withdraw beside its upgrade is replayed with it" {
-                // The Emitter pairs the two for a standing body beside its
-                // buffer and for no one else; a lone withdraw is one-shot.
+            test "a standing upgrader's draw is replayed with its upgrade, a step off or not" {
+                // #498's pair, now under the one rule: the engine checks the
+                // buffer's range.
                 let paired =
                     LightTick.lastFull
                         quiet
@@ -136,29 +351,24 @@ let replayTests =
                         [
                             UpgradeController("digger", "ctrl")
                             WithdrawFromStore("digger", "can-buf", Energy, None)
-                            WithdrawFromStore("hauler", "store", Energy, None)
                         ]
-
-                Expect.equal
-                    (LightTick.intents paired quiet)
-                    [
-                        UpgradeController("digger", "ctrl")
-                        WithdrawFromStore("digger", "can-buf", Energy, None)
-                    ]
-                    "both acts for the upgrader, nothing for the hauler"
 
                 let pushed =
                     { quiet with
                         Creeps = quiet.Creeps |> Map.add "digger" (creepAt 11 10 1000)
                     }
 
-                Expect.equal
-                    (LightTick.intents paired pushed)
-                    []
-                    "moved, it may stand out of the buffer's reach: neither"
+                for glance in [ quiet; pushed ] do
+                    Expect.equal
+                        (LightTick.intents paired glance)
+                        [
+                            UpgradeController("digger", "ctrl")
+                            WithdrawFromStore("digger", "can-buf", Energy, None)
+                        ]
+                        "both acts for the upgrader"
             }
 
-            test "a creep off the tile it worked from re-issues nothing" {
+            test "a creep off the tile it worked from re-issues its acts all the same" {
                 let pushed =
                     { stepped with
                         Creeps = stepped.Creeps |> Map.add "digger" (creepAt 11 10 1000)
@@ -166,8 +376,12 @@ let replayTests =
 
                 Expect.equal
                     (LightTick.intents last pushed)
-                    [ MoveCreep("hauler", Right) ]
-                    "the digger waits for the next full tick"
+                    [
+                        HarvestSource("digger", "src-a")
+                        TransferEnergyToStructure("digger", "link-1", Energy)
+                        MoveCreep("hauler", Right)
+                    ]
+                    "out of reach, the engine refuses them for nothing"
             }
 
             test "a walker steps toward its plan's second tile only while it stands on the first" {
@@ -185,9 +399,11 @@ let replayTests =
                     "the direction is the plan's, not last tick's"
 
                 // Blocked, fatigued or pushed: it never reached the first tile.
-                Expect.equal
-                    (LightTick.intents last quiet)
-                    [ HarvestSource("digger", "src-a") ]
+                Expect.isFalse
+                    (LightTick.intents last quiet
+                     |> List.exists (function
+                         | MoveCreep _ -> true
+                         | _ -> false))
                     "a blocked walker waits"
             }
 
@@ -555,31 +771,32 @@ let forcedTests =
                         | HealCreep _ -> true
                         | _ -> false)
 
-                Expect.equal
-                    (replayed (withRanger 11) full)
-                    [ RangedAttackCreep("ranger", "trep"); HealCreep("ranger", "ranger") ]
-                    "the shot and the self-heal, a step off the tile they were decided on; never the digger's at home"
-
-                Expect.isEmpty
-                    (replayed (withRanger 11) { full with Loose = Set.empty })
-                    "outside a loose room a shot waits for the next full tick"
-
-                let crossed =
+                let trepSeen =
                     { withRanger 11 with
-                        Creeps =
-                            (withRanger 11).Creeps
-                            |> Map.add
-                                "hauler"
-                                {
-                                    Tile = at 30
-                                    Hits = 500
-                                    Inward = None
+                        Hostiles =
+                            [
+                                { hostile 14 10 "Trepidimous" false with
+                                    Id = "trep"
+                                    Tile = at 14
                                 }
+                            ]
                     }
 
-                Expect.isEmpty
-                    (replayed crossed full)
-                    "a room with a body of ours beside the rangers is not loose"
+                // #529 took #520's replay into the one rule: every shot and
+                // heal whose target still stands, a loose room or not.
+                Expect.equal
+                    (replayed trepSeen full)
+                    [
+                        HealCreep("digger", "hauler")
+                        RangedAttackCreep("ranger", "trep")
+                        HealCreep("ranger", "ranger")
+                    ]
+                    "the shot and the self-heal a step off the tile they were decided on; the digger's heal on a hauler still standing, its shot at a body out of sight never"
+
+                Expect.equal
+                    (replayed trepSeen { full with Loose = Set.empty })
+                    (replayed trepSeen full)
+                    "outside a loose room alike"
             }
 
             test "the harass rangers are the bodies holding a harassment room's Guard" {
@@ -840,9 +1057,20 @@ let forcedTests =
                         $"%A{fight} forces the next tick full"
             }
 
-            test "a creep's shot or heal forces nothing on its own, and is never replayed" {
+            test
+                "a creep's shot or heal forces nothing on its own, and is replayed while its target stands" {
                 // A target still in reach forces the tick on the near rule;
                 // one dead or gone leaves nothing to decide.
+                let seen =
+                    { quiet with
+                        Hostiles =
+                            [
+                                { hostile 40 40 "Enemy" false with
+                                    Id = "h"
+                                }
+                            ]
+                    }
+
                 for shot in
                     [
                         AttackCreep("digger", "h")
@@ -854,7 +1082,16 @@ let forcedTests =
 
                     Expect.isFalse full.Fought $"%A{shot} is no structure's fight"
                     Expect.equal (LightTick.forced full quiet) None $"%A{shot} forces nothing"
-                    Expect.isEmpty (LightTick.intents full quiet) $"%A{shot} is not replayed"
+                    Expect.equal (LightTick.intents full seen) [ shot ] $"%A{shot} is replayed"
+
+                    // The hostile out of sight, and the healed body gone.
+                    let gone =
+                        { seen with
+                            Hostiles = []
+                            Creeps = seen.Creeps |> Map.remove "hauler"
+                        }
+
+                    Expect.isEmpty (LightTick.intents full gone) $"%A{shot}: its target gone, never"
 
                 // And a hostile still within reach forces the tick all the same.
                 let shooting =

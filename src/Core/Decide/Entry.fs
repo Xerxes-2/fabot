@@ -566,6 +566,28 @@ let decideUnarbitrated
                             None
                 | _ -> None)
 
+    // A hauler stepping into its Task's Work Area this tick acts on arrival,
+    // which the tick after it, light, issues (#529): withheld now for reach
+    // alone, it stood a tick idle per leg. Off the tile it asks to step onto,
+    // the Emitter's own act read there (`Emitter.arrival`), never on a
+    // channel one of the body's acts this tick holds.
+    let arrivals =
+        let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+
+        movement.Intents
+        |> List.choose (fun step ->
+            // The tile it wants most; the arbitration may hand it another,
+            // and the engine refuses the act out of reach.
+            match
+                Map.tryFind step.Creep assigned,
+                Map.tryFind step.Creep bodies,
+                List.tryHead step.Candidates
+            with
+            | Some task, Some creep, Some landing when landing <> step.Pos ->
+                arrival view atlas threats creep task landing
+            | _ -> None)
+        |> List.filter (fun act -> intents |> List.forall (IntentPlan.compatible act))
+
     // Read after the mover, which is what fills the table. A pair whose tiles
     // name two rooms is no plan a light tick could walk.
     let steps = Atlas.stepPlans atlas |> Fresh.mapOfSeq
@@ -587,7 +609,7 @@ let decideUnarbitrated
         HaulOverflow = overflow
         OutpostRooms = outposts.Declared
         Steps = steps
-        Next = nextPours
+        Next = nextPours @ arrivals
         Aims = aims view atlas threats assigned
     }
 

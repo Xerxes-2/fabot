@@ -1351,3 +1351,25 @@ let thoriumPileTests =
                     "another player's mine bleeding is not this colony's trip"
             }
         ]
+
+[<Tests>]
+let withdrawArrivalTests =
+    testList
+        "a draw on arrival, laid for the light tick"
+        [
+            test "a body stepping into the Storage's Work Area draws there on arrival" {
+                // #529: (15,10) is two off the Storage at (17,11); (16,11) is
+                // beside it, (15,11) is not.
+                let empty = creepWith "h1" 0 100 [ Carry; Carry; Move ]
+                let colony = drawColony (Map.ofList [ "sto-1", 500 ]) empty { X = 15; Y = 10 }
+
+                Expect.equal
+                    (arrivalOn colony empty (Withdraw("sto-1", Energy)) { X = 16; Y = 11 })
+                    (Some(WithdrawFromStore("h1", "sto-1", Energy, None)))
+                    "the Emitter's draw, off the tile it steps onto"
+
+                Expect.isNone
+                    (arrivalOn colony empty (Withdraw("sto-1", Energy)) { X = 15; Y = 11 })
+                    "a step that leaves it out of reach: nothing"
+            }
+        ]

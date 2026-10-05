@@ -246,7 +246,16 @@ let private glance () : LightTick.Glance =
             |> Fresh.mapOfArray
         // Half a bucket: past it a raid's forced full ticks are what empties it.
         Lean = Game.cpu.bucket < 5000
+        // A light tick's alone (`standingOf`): a forced tick never asks.
+        Objects = Fresh.setOfSeq Seq.empty
     }
+
+/// Of the objects the last full tick's acts name (`LightTick.lookups`), the
+/// ones `Game` still holds: the glance's `Objects` on a light tick.
+let private standingOf (last: LightTick.LastFull) : Set<string> =
+    LightTick.lookups last
+    |> Seq.filter (fun id -> not (isNull (Game.getObjectById id)))
+    |> Fresh.setOfSeq
 
 /// The CPU line's write, the same on both kinds of tick: nothing in the bot
 /// reads it back.
@@ -317,7 +326,7 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
     // `Moved` keeps meaning "moved since the last tick".
     World.positions () |> ObserveMemory.savePositions
     let atSave = Game.cpu.getUsed ()
-    let accepted = Executor.run plan |> acceptedOf
+    let accepted = Executor.runQuiet plan |> acceptedOf
     let heap, external = heapReading ()
 
     writeCpuLine
@@ -872,6 +881,6 @@ let loop () =
         match lastFull with
         | Some(tick, last) when tick = Game.time - 1 ->
             match LightTick.forced last seen with
-            | None -> lightTick atEntry last seen
+            | None -> lightTick atEntry last { seen with Objects = standingOf last }
             | forced -> fullTick atEntry (Some seen) forced
         | _ -> fullTick atEntry (Some seen) None

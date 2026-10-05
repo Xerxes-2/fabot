@@ -2489,3 +2489,31 @@ let errandExitHoldTests =
                     "and nothing is laid beside the exit"
             }
         ]
+
+[<Tests>]
+let courierArrivalTests =
+    testList
+        "the courier's draw on arrival"
+        [
+            test "the delivery draw names its load, so it never arrives" {
+                // #529: a draw that landed would be drawn twice by a light
+                // tick's replay. The Storage at (14,10): (12,10) is two off.
+                let empty = courier "courier-empty"
+                let ready = deliveryColony (Some Ownership.Ours)
+
+                Expect.contains
+                    (emitOn
+                        (ready |> withHomeCreep { X = 13; Y = 10 } empty)
+                        [ empty.Name, Withdraw("sto-1", Thorium) ])
+                    (WithdrawFromStore(empty.Name, "sto-1", Thorium, Some 500))
+                    "the premise: beside the Storage the draw names 500"
+
+                Expect.isNone
+                    (arrivalOn
+                        (ready |> withHomeCreep { X = 12; Y = 10 } empty)
+                        empty
+                        (Withdraw("sto-1", Thorium))
+                        { X = 13; Y = 10 })
+                    "on arrival: nothing"
+            }
+        ]

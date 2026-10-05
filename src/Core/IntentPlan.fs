@@ -123,6 +123,21 @@ let create (intents: Intent list) : Result<Plan, Conflict> =
 
     collect Map.empty intents
 
+/// Whether two acts may stand in one plan: never two on one creep's channel,
+/// nor an engine suppression pair.
+let compatible (first: Intent) (second: Intent) : bool =
+    match create [ first; second ] with
+    | Ok _ -> true
+    | Error _ -> false
+
+/// A reflex's act: a heal (#409), which a chosen act — a swing, a shot, a
+/// harvest, a build — beats for a channel.
+let isReflex (intent: Intent) : bool =
+    match intent with
+    | HealCreep _
+    | RangedHealCreep _ -> true
+    | _ -> false
+
 /// Read-only projection for execution and observation. There is no unchecked
 /// constructor or append: combining colonies and movement must pass create again.
 let intents (Plan intents) = intents
@@ -130,3 +145,27 @@ let intents (Plan intents) = intents
 /// Add a reflex only if its action fits the already selected turn. Failure
 /// leaves the original immutable plan available to the caller unchanged.
 let tryAdd intent plan = create (intents plan @ [ intent ])
+
+/// The priority a creep's acts are arbitrated by, on the full tick
+/// (`Emitter.healReflex`) and the light tick alike: a reflex joins the acts
+/// already chosen only on channels none of them holds, so a swing beats a
+/// pre-heal.
+let tryReflex intent plan =
+    if isReflex intent then
+        tryAdd intent plan
+    else
+        invalidArg (nameof intent) $"%A{intent} is a chosen act, not a reflex"
+
+/// The chosen acts, then each reflex `tryReflex` admits, in order.
+let arbitrate (chosen: Intent list) (reflexes: Intent list) : Intent list =
+    match create chosen with
+    | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+    | Ok plan ->
+        reflexes
+        |> List.fold
+            (fun plan reflex ->
+                match tryReflex reflex plan with
+                | Ok joined -> joined
+                | Error _ -> plan)
+            plan
+        |> intents

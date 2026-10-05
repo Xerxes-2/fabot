@@ -974,3 +974,58 @@ let stockDrawTests =
                     "the ordinary transfer puts the remainder back: nothing is dropped"
             }
         ]
+
+[<Tests>]
+let storeArrivalTests =
+    testList
+        "a store's act on arrival, laid for the light tick"
+        [
+            test "a loaded body stepping beside the Storage pours into it on arrival" {
+                // #529: (15,10) is two off the Storage at (17,11).
+                let loaded = creepWith "h1" 100 0 [ Carry; Carry; Move ]
+                let colony = drawColony Map.empty loaded { X = 15; Y = 10 }
+
+                Expect.equal
+                    (arrivalOn colony loaded (Refill("sto-1", Energy)) { X = 16; Y = 11 })
+                    (Some(TransferEnergyToStructure("h1", "sto-1", Energy)))
+                    "the Emitter's pour, off the tile it steps onto"
+            }
+
+            test "a terminal draw names an amount, so it never arrives" {
+                // The fee reserve's draw (#349): a draw that landed would be
+                // drawn twice by a light tick's replay.
+                let empty = creepWith "h1" 0 100 [ Carry; Carry; Move ]
+
+                let colony =
+                    let drawn = drawColony (Map.ofList [ "sto-1", 500 ]) empty { X = 15; Y = 10 }
+
+                    { drawn with
+                        Spatial =
+                            { drawn.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "sto-1"
+                                        (Structure BuiltKind.Terminal)
+                                        drawn.Spatial.TargetKinds
+                            }
+                    }
+
+                let beside =
+                    { colony with
+                        Spatial = colony.Spatial |> withCreepsAt [ "h1", { X = 16; Y = 11 } ]
+                    }
+
+                Expect.contains
+                    (emit
+                        beside
+                        (Atlas.ofView beside)
+                        noThreats
+                        (Map.ofList [ "h1", Withdraw("sto-1", Energy) ]))
+                    (WithdrawFromStore("h1", "sto-1", Energy, Some 100))
+                    "the premise: beside it, the draw names the body's room"
+
+                Expect.isNone
+                    (arrivalOn colony empty (Withdraw("sto-1", Energy)) { X = 16; Y = 11 })
+                    "on arrival: nothing"
+            }
+        ]

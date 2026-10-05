@@ -529,3 +529,24 @@ let logisticsTests =
                 Expect.contains intents (SayCreep("w1", "📥")) "the Task's own chat bubble"
             }
         ]
+
+[<Tests>]
+let pickupArrivalTests =
+    testList
+        "a pickup on arrival, laid for the light tick"
+        [
+            test "a body stepping beside its pile picks it up on arrival" {
+                // #529: the pile at (10,10); (12,12) is two off, (11,11) beside.
+                let empty = creepWith "h" 0 100 [ Carry; Carry; Move ]
+                let colony = pileColony [ empty ] [ "h", { X = 12; Y = 12 } ]
+
+                Expect.equal
+                    (arrivalOn colony empty (Pickup("pile-1", Energy)) { X = 11; Y = 11 })
+                    (Some(PickupPile("h", "pile-1")))
+                    "the Emitter's pickup, off the tile it steps onto"
+
+                Expect.isNone
+                    (arrivalOn colony empty (Pickup("pile-1", Energy)) { X = 12; Y = 11 })
+                    "still two off: nothing"
+            }
+        ]

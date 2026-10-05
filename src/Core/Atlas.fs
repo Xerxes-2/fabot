@@ -3043,6 +3043,21 @@ let withoutRecording (atlas: Atlas) (creep: string) (read: unit -> 'a) : 'a =
 
     answer
 
+/// A reading taken as though a creep stood on another tile of its own room —
+/// the tile it steps onto, where its act on arrival is judged (#529): every
+/// per-creep ask answers off that tile, and the creep is put back after.
+/// None off the creep's room, or for a creep the projection places nowhere.
+let standingAt (atlas: Atlas) (creep: string) (tile: RoomPos) (read: unit -> 'a) : 'a option =
+    match creepAt atlas creep with
+    | Some(room, held) when room = tile.Room ->
+        atlas.CreepAt.[creep] <- (room, RoomPos.pos tile)
+
+        try
+            Some(read ())
+        finally
+            atlas.CreepAt.[creep] <- (room, held)
+    | _ -> None
+
 /// Sets a creep's step plan by hand: a fatigued walker the mover issued no
 /// step for this tick, standing on the first tile and stepping to the second.
 let recordStep (atlas: Atlas) (creep: string) (plan: RoomPos * RoomPos) =

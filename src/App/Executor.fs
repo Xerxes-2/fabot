@@ -146,17 +146,47 @@ let private execute (intent: Intent) : Outcome =
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))
 
-/// Replay every Intent and answer back what the engine said. Failures are
-/// logged here, once; the outcome list is what `Main.loop` counts accepted
-/// intents off.
-let run (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
+let private replay (logged: bool) (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
     Fabot.Core.IntentPlan.intents plan
     |> List.map (fun intent ->
         let outcome = execute intent
 
-        match outcome with
-        | Ok -> ()
-        | Failed code -> JS.console.log $"%A{intent} failed: {code}"
-        | ActorMissing -> JS.console.log $"%A{intent}: actor or target not found"
+        if logged then
+            match outcome with
+            | Ok -> ()
+            | Failed code -> JS.console.log $"%A{intent} failed: {code}"
+            | ActorMissing -> JS.console.log $"%A{intent}: actor or target not found"
 
         intent, outcome)
+
+/// Replay every Intent and answer back what the engine said. Failures are
+/// logged here, once; the outcome list is what `Main.loop` counts accepted
+/// intents off.
+let run (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list = replay true plan
+
+/// The refusals a light tick's replay expects (#529): it re-issues every act
+/// whose target stands for the engine to refuse out of range
+/// (ERR_NOT_IN_RANGE), full (ERR_FULL), empty (ERR_NOT_ENOUGH_*) or tired
+/// (ERR_TIRED).
+let private expected code =
+    code = -9 || code = -8 || code = -6 || code = -11
+
+/// `run` for a light tick: an expected refusal is not news, so only the
+/// rest are logged, on one line for the tick.
+let runQuiet (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
+    let outcomes = replay false plan
+
+    let unexpected =
+        outcomes
+        |> List.choose (fun (intent, outcome) ->
+            match outcome with
+            | Failed code when not (expected code) -> Some $"%A{intent} failed: {code}"
+            | ActorMissing -> Some $"%A{intent}: actor or target not found"
+            | Ok
+            | Failed _ -> None)
+
+    if not (List.isEmpty unexpected) then
+        let shown = String.concat "; " unexpected
+        JS.console.log $"light tick, {List.length unexpected} unexpected: {shown}"
+
+    outcomes

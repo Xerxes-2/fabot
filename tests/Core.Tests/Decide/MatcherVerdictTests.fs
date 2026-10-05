@@ -412,6 +412,7 @@ let fullMineContainerTests =
                             Structures = []
                             Controllers = Map.empty
                             Lean = false
+                            Objects = Set.ofList [ "min-a" ]
                         }
 
                     LightTick.intents (LightTick.lastFull glance Map.empty intents) glance

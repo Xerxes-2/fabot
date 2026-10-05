@@ -518,9 +518,11 @@ type Decision =
         /// tick: the tile it asked to step onto and the one after it, both in
         /// the room it stands in. What a light tick walks it on along.
         Steps: Map<string, RoomPos * RoomPos>
-        /// The light tick's next pours: each refiller that poured this tick
-        /// and stands beside another hungry member of the refill cluster,
-        /// its transfer into that one. Never issued on this tick.
+        /// The light tick's planned acts, never issued on this tick: each
+        /// refiller that poured this tick and stands beside another hungry
+        /// member of the refill cluster, its transfer into that one; and each
+        /// hauler stepping into its Withdraw's, Pickup's or Refill's Work Area,
+        /// its act on arrival (#529).
         Next: Intent list
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`): what the light ticks after issue again.

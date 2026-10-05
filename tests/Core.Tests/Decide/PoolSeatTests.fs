@@ -1407,4 +1407,31 @@ let nextPourTests =
 
                 Expect.isEmpty next "an empty store has no next pour"
             }
+
+            test
+                "stepping into reach of a hungry member: the pour on arrival is laid, not issued now" {
+                // #529: a hauler out of reach at the start of the tick pours
+                // nothing; the light tick after its step does. `h` at (11,16)
+                // is two off ext-2 (10,14), every step it can take one off.
+                let colony =
+                    clusterColony
+                        (0, 0, 50)
+                        [ creepWith "h" 100 0 [ Carry; Carry; Move ] ]
+                        [ "h", { X = 11; Y = 16 } ]
+
+                let sticky = Map.ofList [ "h", taskId (Refill("spawn-1", Energy)) ]
+                let { Intents = intents; Next = next } = decideFrom sticky colony
+
+                Expect.isFalse
+                    (intents
+                     |> List.exists (function
+                         | TransferEnergyToStructure _ -> true
+                         | _ -> false))
+                    "out of reach: no pour this tick"
+
+                Expect.equal
+                    next
+                    [ TransferEnergyToStructure("h", "ext-2", Energy) ]
+                    "the pour into the member beside the tile it steps onto"
+            }
         ]

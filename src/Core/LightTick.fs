@@ -60,19 +60,24 @@ type Glance =
         /// structure in, so a hostile loitering in an outpost no longer
         /// holds every tick full while the bucket drains.
         Lean: bool
+        /// Of the ids the last full tick's acts name (`lookups`), the ones
+        /// still standing: a store, a pile, a site, a structure, a source, a
+        /// controller, the Reactor, an observer. Looked up only on a tick
+        /// that may be light.
+        Objects: Set<string>
     }
 
 /// What the last full tick left for the light tick after it.
 type LastFull =
     {
-        /// Each creep's tile at the start of the full tick: where its work
-        /// intents were decided from.
+        /// Each creep's tile at the start of the full tick: where a drop, the
+        /// one act with no target, was decided to land.
         Standing: Map<string, RoomPos>
         /// Each walking creep's step plan, every colony's merged.
         Steps: Map<string, RoomPos * RoomPos>
-        /// The full tick's repeatable intents and standing draws (`workOf`),
-        /// in its own order.
-        Work: Intent list
+        /// The full tick's acts a light tick issues again (`replayed`), in its
+        /// own order, its planned next acts (`Decision.Next`) among them.
+        Acts: Intent list
         /// Whether a structure of ours fought on the full tick (`fights`).
         Fought: bool
         /// The creeps of ours that swung or shot on the full tick: a hostile
@@ -91,9 +96,6 @@ type LastFull =
         Loose: Set<string>
         /// The harass rangers (`harassRangers`).
         Rangers: Set<string>
-        /// The full tick's ranged shots and self-heals, which a ranger standing
-        /// in a loose room issues again (`intents`).
-        Shots: Intent list
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`), which a light tick issues again while the target
         /// is in sight (#528): a swing lands the tick a body steps beside it.
@@ -223,72 +225,81 @@ let inward (walkable: Pos -> bool) (tile: Pos) : Direction option =
         let next = stepTo direction
         not (Seam.onRing next) && walkable next)
 
-/// The repeatable work intents, by the creep that acts: a light tick issues
-/// them again from the tile they were decided on. Every case named, so an
-/// Intent added later is a compile error here and not a silent "not work".
-let private repeatableActor (intent: Intent) : string option =
+/// What a replayed act needs still standing in the glance besides its actor.
+[<RequireQualifiedAccess>]
+type private Stands =
+    /// An object by id (`Glance.Objects`).
+    | Object of id: string
+    /// A hostile creep by id, while the glance still sees it (`Glance.Hostiles`).
+    | Hostile of id: string
+    /// A creep of ours, by name.
+    | Ours of name: string
+    /// No target but the ground: the tile the act was decided on.
+    | Tile
+
+/// The acts a light tick issues again (#529), by the creep that acts — none
+/// for a look, whose actor is the observer it names — and what must still
+/// stand for it. Range, store and cooldown are the engine's to check, and a
+/// refused act costs no CPU. Every case named, so an Intent added later is a
+/// compile error here and not a silent "not replayed".
+let private replayed (intent: Intent) : (string option * Stands) option =
     match intent with
-    | HarvestSource(creep, _)
-    | UpgradeController(creep, _)
-    | ReserveController(creep, _)
-    | AttackController(creep, _)
-    | BuildSite(creep, _)
-    | RepairStructure(creep, _)
-    | DismantleStructure(creep, _) -> Some creep
+    | HarvestSource(creep, target)
+    | UpgradeController(creep, target)
+    | ReserveController(creep, target)
+    | AttackController(creep, target)
+    | BuildSite(creep, target)
+    | RepairStructure(creep, target)
+    | DismantleStructure(creep, target)
+    | TransferEnergyToStructure(creep, target, _)
+    | WithdrawFromStore(creep, target, _, None)
+    | PickupPile(creep, target)
+    | AttackStructure(creep, target)
+    | ClaimReactor(creep, target) -> Some(Some creep, Stands.Object target)
+    | AttackCreep(creep, target)
+    | RangedAttackCreep(creep, target) -> Some(Some creep, Stands.Hostile target)
+    | HealCreep(creep, target)
+    | RangedHealCreep(creep, target) -> Some(Some creep, Stands.Ours target)
+    | DropEnergy creep -> Some(Some creep, Stands.Tile)
+    // Vision lands the tick after the look: one issued on the full tick
+    // lands on the light tick, which reads nothing.
+    | ObserveRoom(observer, _) -> Some(None, Stands.Object observer)
+    // A named amount: a draw that landed would be drawn twice — under the
+    // terminal's fee reserve, or past the courier's marked load (#378).
+    | WithdrawFromStore(_, _, _, Some _)
+    // As a terminal's send names one.
+    | SendFromTerminal _
+    // The step plan's, one tile on.
+    | MoveCreep _
+    // A glyph priced as an intent, for nothing.
+    | SayCreep _
+    // Written once.
+    | SignController _
+    // It takes the room, which forces the next tick full, or the engine
+    // refuses it for a GCL that another try does not change.
+    | ClaimController _
+    // The planner's, off a bank or a site count the first one moved.
     | SpawnCreep _
     | PlaceConstructionSite _
     | PlaceSpawnSite _
-    | TransferEnergyToStructure _
-    | WithdrawFromStore _
-    | ClaimController _
-    | ClaimReactor _
-    | PickupPile _
-    | DropEnergy _
-    | SignController _
-    | AttackCreep _
-    // One-shot (#487), as a swing at a creep is.
-    | AttackStructure _
-    | HealCreep _
-    | RangedHealCreep _
-    | RangedAttackCreep _
-    | MoveCreep _
-    | SayCreep _
+    // A state, already set.
+    | SetRampartPublic _
+    // A structure's fight: the next tick is full (`fights`).
     | ActivateSafeMode _
     | FireTower _
     | HealWithTower _
-    | RepairWithTower _
-    | SetRampartPublic _
-    // One-shot (#484): a light tick looks nowhere, and the next full tick
-    // aims again.
-    | ObserveRoom _
-    | SendFromTerminal _ -> None
+    | RepairWithTower _ -> None
 
-/// The actor of a kept work intent: a repeatable one's, or a standing
-/// upgrader's draw's. `lastFull` keeps no other withdraw.
-let private workActor (intent: Intent) : string option =
-    match intent with
-    | WithdrawFromStore(creep, _, _, _) -> Some creep
-    // The full tick's next pour into the refill cluster (`lastFull`'s `next`).
-    | TransferEnergyToStructure(creep, _, _) -> Some creep
-    | _ -> repeatableActor intent
+/// The full tick's acts worth replaying, its planned next acts after them,
+/// each superseding a full-tick act of its creep on its channel: a refiller's
+/// next pour replaces the pour it made.
+let private actsOf (next: Intent list) (intents: Intent list) : Intent list =
+    let kept = intents |> List.filter (replayed >> Option.isSome)
+    let planned = next |> List.filter (replayed >> Option.isSome)
 
-/// The full tick's work worth replaying: the repeatable intents, and a
-/// withdraw issued beside an upgrade by the same creep — the Emitter pairs
-/// the two for a standing body beside its buffer alone (#498), and the
-/// same-tile rule keeps it within the buffer's reach.
-let private workOf (intents: Intent list) : Intent list =
-    let upgrading =
-        intents
-        |> List.choose (function
-            | UpgradeController(creep, _) -> Some creep
-            | _ -> None)
-        |> Set.ofList
-
-    intents
-    |> List.filter (fun intent ->
-        match intent with
-        | WithdrawFromStore(creep, _, _, _) -> Set.contains creep upgrading
-        | _ -> Option.isSome (repeatableActor intent))
+    (kept
+     |> List.filter (fun act -> planned |> List.forall (IntentPlan.compatible act)))
+    @ planned
 
 /// Whether an intent is a structure's fight — a tower's shot, heal or repair
 /// of a struck rampart, or safe mode raised: a tick that holds one is followed by a full tick, never a
@@ -341,9 +352,10 @@ let rec lastFull
     : LastFull =
     lastFullWith glance steps [] intents
 
-/// `lastFull` with the full tick's planned **next** acts beside its own: a
-/// refiller's pour into the next hungry member it stands beside, which the
-/// light tick issues once (`Decision.Next`), the full tick never.
+/// `lastFull` with the full tick's planned **next** acts beside its own
+/// (`Decision.Next`): a refiller's pour into the next hungry member it stands
+/// beside, and a hauler's act on the tile it steps onto. The light tick
+/// issues them, the full tick never.
 and lastFullWith
     (glance: Glance)
     (steps: Map<string, RoomPos * RoomPos>)
@@ -357,7 +369,7 @@ and lastFullWith
             |> Seq.map (fun (name, creep) -> name, creep.Tile)
             |> Fresh.mapOfSeq
         Steps = steps
-        Work = workOf intents @ next
+        Acts = actsOf next intents
         Fought = intents |> List.exists fights
         Shooters =
             intents
@@ -376,12 +388,6 @@ and lastFullWith
         Deferred = Fresh.setOfSeq Seq.empty
         Loose = Fresh.setOfSeq Seq.empty
         Rangers = Fresh.setOfSeq Seq.empty
-        Shots =
-            intents
-            |> List.filter (function
-                | RangedAttackCreep _ -> true
-                | HealCreep(creep, target) -> creep = target
-                | _ -> false)
         Aims = []
     }
 
@@ -564,57 +570,64 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
     |> Option.orElseWith hitsLost
     |> Option.orElseWith controllerChanged
 
-/// The light tick's intents, in creep-name order: a creep standing where it
-/// stood at the full tick re-issues that tick's repeatable work, and a creep
-/// standing on its step plan's first tile steps toward the second. A harass
-/// ranger standing in a loose room shoots and heals itself again from wherever
-/// it stands: the engine checks the range, and a target gone is a harmless
-/// refusal. A fighter strikes at its aim again the same way (#528). Nothing
-/// else, ever: a one-shot act waits for the next full tick.
+/// The ids the last full tick's acts name, for the glance to look up
+/// (`Glance.Objects`): each act's object and each look's observer. A
+/// creep's or a hostile's stands in the glance already.
+let lookups (last: LastFull) : string list =
+    last.Acts
+    |> List.choose (fun act ->
+        match replayed act with
+        | Some(_, Stands.Object id) -> Some id
+        | _ -> None)
+    |> List.distinct
+
+/// The light tick's intents (#529), in creep-name order and the looks after
+/// them: every act the full tick issued or planned (`LastFull.Acts`) whose
+/// actor and target still stand in the glance, wherever the body stands —
+/// the engine checks range, store and cooldown, and a refused act costs no
+/// CPU; a drop only from the tile it was decided on. A fighter strikes at
+/// its aim again the same way (#528), on a channel no act of its holds. A
+/// creep standing on its step plan's first tile steps toward the second.
 let intents (last: LastFull) (now: Glance) : Intent list =
-    let work =
-        last.Work
-        |> List.choose (fun intent -> workActor intent |> Option.map (fun creep -> creep, intent))
+    let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
+
+    let stands (actor: string option) (target: Stands) =
+        let body = actor |> Option.bind (fun name -> Map.tryFind name now.Creeps)
+
+        (Option.isNone actor || Option.isSome body)
+        && match target with
+           | Stands.Object id -> Set.contains id now.Objects
+           | Stands.Hostile id -> Set.contains id seen
+           | Stands.Ours name -> Map.containsKey name now.Creeps
+           | Stands.Tile ->
+               match actor, body with
+               | Some name, Some body -> Map.tryFind name last.Standing = Some body.Tile
+               | _ -> false
+
+    let standing =
+        last.Acts
+        |> List.choose (fun act ->
+            match replayed act with
+            | Some(actor, target) when stands actor target -> Some(actor, act)
+            | _ -> None)
+
+    let acts =
+        standing
+        |> List.choose (fun (actor, act) -> actor |> Option.map (fun creep -> creep, act))
         |> List.groupBy fst
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
 
-    let shots =
-        let loose = looseNow last now
-
-        last.Shots
-        |> List.choose (fun intent ->
-            match intent with
-            | RangedAttackCreep(creep, _)
-            | HealCreep(creep, _) when
-                Map.tryFind creep now.Creeps
-                |> Option.exists (fun body -> Set.contains body.Tile.Room loose)
-                ->
-                Some(creep, intent)
+    let aims =
+        last.Aims
+        |> List.choose (fun aim ->
+            match aim with
+            | AttackCreep(creep, target)
+            | RangedAttackCreep(creep, target) when Set.contains target seen -> Some(creep, aim)
             | _ -> None)
         |> List.groupBy fst
         |> List.map (fun (creep, pairs) -> creep, List.map snd pairs)
         |> Map.ofList
-
-    // The full tick's aims (#528), each while its target is still in sight
-    // and its fighter replays no shot of its own: a swing lands beside a
-    // target the body has stepped to, and out of reach the engine refuses it.
-    let aims =
-        match last.Aims with
-        | [] -> Map.empty
-        | kept ->
-            let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
-
-            kept
-            |> List.choose (fun intent ->
-                match intent with
-                | AttackCreep(creep, target)
-                | RangedAttackCreep(creep, target) when
-                    Set.contains target seen && not (Map.containsKey creep shots)
-                    ->
-                    Some(creep, intent)
-                | _ -> None)
-            |> Map.ofList
 
     [
         for KeyValue(name, creep) in now.Creeps do
@@ -623,18 +636,26 @@ let intents (last: LastFull) (now: Glance) : Intent list =
                 yield MoveCreep(name, direction)
             | _ -> ()
 
-            let replayed =
-                if Map.tryFind name last.Standing = Some creep.Tile then
-                    Map.tryFind name work |> Option.defaultValue []
-                else
-                    []
+            // The full tick's own priority (`IntentPlan.arbitrate`): its
+            // chosen acts, an aim on a channel none of them holds, then a
+            // replayed heal on what is left — a swing beats a pre-heal.
+            let reflexes, chosen =
+                Map.tryFind name acts
+                |> Option.defaultValue []
+                |> List.partition IntentPlan.isReflex
 
-            yield! replayed
-            yield! Map.tryFind name shots |> Option.defaultValue []
+            let aimed =
+                Map.tryFind name aims
+                |> Option.defaultValue []
+                |> List.fold
+                    (fun taken aim ->
+                        if taken |> List.forall (IntentPlan.compatible aim) then
+                            taken @ [ aim ]
+                        else
+                            taken)
+                    chosen
 
-            // Never beside replayed work, whose channel a swing would share.
-            if List.isEmpty replayed then
-                yield! Map.tryFind name aims |> Option.toList
+            yield! IntentPlan.arbitrate aimed reflexes
 
             match Map.tryFind name last.Steps with
             | Some(first, second) when first = creep.Tile ->
@@ -642,4 +663,8 @@ let intents (last: LastFull) (now: Glance) : Intent list =
                 | Some direction -> yield MoveCreep(name, direction)
                 | None -> ()
             | _ -> ()
+
+        yield!
+            standing
+            |> List.choose (fun (actor, act) -> if Option.isNone actor then Some act else None)
     ]
