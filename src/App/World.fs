@@ -140,10 +140,112 @@ type private StableCensus =
         Count: int
         Kinds: Map<string, TargetKind>
         Positions: Map<string, Pos>
+        /// The layer's two fixture-only sets, rebuilt with the census: a
+        /// fixture's id fixes its kind and its tile, and these two Pos sets
+        /// were a quarter of the room sweep (#556).
+        Obstacles: Set<Pos>
+        Roads: Set<Pos>
     }
 
 let private censusMemo =
     System.Collections.Generic.Dictionary<string, StableCensus>()
+
+/// One room's id-keyed table as last built, with the column it was built
+/// from (#556). Most of a seen room's numbers stand still from one tick to
+/// the next, so a table over the same ids is the held one with the changed
+/// entries re-added, and only a new id set pays for a fresh build. Heap only,
+/// like `censusMemo`; the held tree is a `Fresh` one, so `Map.add` keeps a
+/// comparer that captures nothing.
+type private HeldTable<'v> =
+    {
+        Ids: string[]
+        Values: 'v[]
+        Table: Map<string, 'v>
+    }
+
+/// Whether two id columns of one length are the same ids in the same order:
+/// the usual answer, since a room's `find` sweeps answer in one order tick
+/// after tick.
+let private sameOrder (held: string[]) (ids: string[]) : bool =
+    let mutable i = 0
+
+    while i < ids.Length && held.[i] = ids.[i] do
+        i <- i + 1
+
+    i = ids.Length
+
+/// The table `Map.ofArray (Array.zip ids values)` builds, recalled from
+/// `memo` where the ids are the held build's. `same` is the value's
+/// equality, spelled per table so no generic comparison runs. The ids of one
+/// table are distinct (one engine object each), so the same count with every
+/// id held is the same id set, and re-adding the changed entries is the same
+/// map as a rebuild. Ids in another order are checked against the held tree.
+let private recalled
+    (memo: System.Collections.Generic.Dictionary<string, HeldTable<'v>>)
+    (same: 'v -> 'v -> bool)
+    (roomName: string)
+    (ids: string[])
+    (values: 'v[])
+    : Map<string, 'v> =
+    let rebuild () =
+        let table = Fresh.mapOfArray (Array.zip ids values)
+
+        memo.[roomName] <-
+            {
+                Ids = ids
+                Values = values
+                Table = table
+            }
+
+        table
+
+    match memo.TryGetValue roomName with
+    | true, held when held.Ids.Length = ids.Length ->
+        let inOrder = sameOrder held.Ids ids
+        let mutable table = held.Table
+        let mutable changed = false
+        let mutable missing = false
+        let mutable i = 0
+
+        while not missing && i < ids.Length do
+            if inOrder then
+                if not (same held.Values.[i] values.[i]) then
+                    table <- Map.add ids.[i] values.[i] table
+                    changed <- true
+            else
+                match Map.tryFind ids.[i] held.Table with
+                | None -> missing <- true
+                | Some value when same value values.[i] -> ()
+                | Some _ ->
+                    table <- Map.add ids.[i] values.[i] table
+                    changed <- true
+
+            i <- i + 1
+
+        if missing then
+            rebuild ()
+        else
+            // Held under this tick's order, so the next tick's check is the
+            // cheap one again.
+            if changed || not inOrder then
+                memo.[roomName] <-
+                    {
+                        Ids = ids
+                        Values = values
+                        Table = table
+                    }
+
+            table
+    | _ -> rebuild ()
+
+let private hitsMemo =
+    System.Collections.Generic.Dictionary<string, HeldTable<HitsInfo>>()
+
+let private storesMemo =
+    System.Collections.Generic.Dictionary<string, HeldTable<int>>()
+
+let private thoriumMemo =
+    System.Collections.Generic.Dictionary<string, HeldTable<int>>()
 
 let private seenFacts
     (ours: string option)
@@ -190,7 +292,8 @@ let private seenFacts
             let st = o :?> IStructure
             st, builtKindOf st.structureType)
 
-    let ourIds = mine |> Array.map (fun (st, _) -> st.id) |> Set.ofArray
+    let ourIds =
+        System.Collections.Generic.HashSet<string>(mine |> Array.map (fun (st, _) -> st.id))
 
     let sources = room.find findSources |> Array.map (fun o -> o :?> ISource)
 
@@ -321,6 +424,39 @@ let private seenFacts
                                     minerals |> Array.map (fun m -> m.id, posOf m.pos)
                                 ]
                         )
+                    // Structures a creep cannot stand on block their tile; the
+                    // kinds it can are the Core's own predicate (Screeps
+                    // OBSTACLE_OBJECT_TYPES).
+                    Obstacles =
+                        Fresh.setOfSeq (
+                            Array.concat
+                                [
+                                    structures
+                                    |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                                    |> Array.map (fun (st, _) -> posOf st.pos)
+                                    // The engine refuses to move a creep onto
+                                    // its own obstacle-type construction site,
+                                    // so those tiles block exactly like the
+                                    // finished structure would.
+                                    sites
+                                    |> Array.filter (fun (_, kind) -> not (isWalkable kind))
+                                    |> Array.map (fun (site, _) -> posOf site.pos)
+                                    controllers |> Array.map (fun c -> posOf c.pos)
+                                    // A mineral is one of Screeps'
+                                    // OBSTACLE_OBJECT_TYPES, exactly as the
+                                    // controller beside it is. The season's
+                                    // deposits stand on wall tiles, so this
+                                    // subtracts nothing today; it is here
+                                    // because it is what the engine does.
+                                    minerals |> Array.map (fun m -> posOf m.pos)
+                                ]
+                        )
+                    // Built roads only: a road site is not yet a road.
+                    Roads =
+                        structures
+                        |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
+                        |> Array.map (fun (st, _) -> posOf st.pos)
+                        |> Fresh.setOfSeq
                 }
 
             censusMemo.[room.name] <- built
@@ -341,39 +477,8 @@ let private seenFacts
                 // elsewhere filed here under that room's coordinates is a
                 // phantom occupant the Resolver arbitrates against.
                 CreepPositions = standing |> List.map (fun c -> c.name, posOf c.pos) |> Map.ofList
-                // Structures a creep cannot stand on block their tile; the
-                // kinds it can are the Core's own predicate (Screeps
-                // OBSTACLE_OBJECT_TYPES).
-                Obstacles =
-                    Set.ofArray (
-                        Array.concat
-                            [
-                                structures
-                                |> Array.filter (fun (_, kind) -> not (isWalkable kind))
-                                |> Array.map (fun (st, _) -> posOf st.pos)
-                                // The engine refuses to move a creep onto
-                                // its own obstacle-type construction site,
-                                // so those tiles block exactly like the
-                                // finished structure would.
-                                sites
-                                |> Array.filter (fun (_, kind) -> not (isWalkable kind))
-                                |> Array.map (fun (site, _) -> posOf site.pos)
-                                controllers |> Array.map (fun c -> posOf c.pos)
-                                // A mineral is one of Screeps'
-                                // OBSTACLE_OBJECT_TYPES, exactly as the
-                                // controller beside it is. The season's
-                                // deposits stand on wall tiles, so this
-                                // subtracts nothing today; it is here because
-                                // it is what the engine does.
-                                minerals |> Array.map (fun m -> posOf m.pos)
-                            ]
-                    )
-                // Built roads only: a road site is not yet a road.
-                Roads =
-                    structures
-                    |> Array.filter (fun (_, kind) -> kind = BuiltKind.Road)
-                    |> Array.map (fun (st, _) -> posOf st.pos)
-                    |> Set.ofArray
+                Obstacles = stable.Obstacles
+                Roads = stable.Roads
                 // Deliberately not in `Obstacles`: the engine blocks only the
                 // owner's own creep on an obstacle-type site, and a hostile
                 // that walks onto one destroys it, so a rival's site prices
@@ -416,26 +521,40 @@ let private seenFacts
             ||> Array.fold (fun kinds (id, kind) -> Map.add id kind kinds)
         // Hits on the repairable kinds only; fields nobody decides on stay out.
         Hits =
-            structures
-            |> Array.filter (fun (st, kind) ->
-                (wholeLine kind).IsSome && (not (needsOwner kind) || Set.contains st.id ourIds))
-            |> Array.map (fun (st, _) -> st.id, { Hits = st.hits; HitsMax = st.hitsMax })
-            |> Map.ofArray
+            let repairable =
+                structures
+                |> Array.filter (fun (st, kind) ->
+                    (wholeLine kind).IsSome && (not (needsOwner kind) || ourIds.Contains st.id))
+
+            recalled
+                hitsMemo
+                (fun a b -> a.Hits = b.Hits && a.HitsMax = b.HitsMax)
+                room.name
+                (repairable |> Array.map (fun (st, _) -> st.id))
+                (repairable
+                 |> Array.map (fun (st, _) -> { Hits = st.hits; HitsMax = st.hitsMax }))
         // Stored energy, with the transient stores (tombstones, piles) in the
         // same table.
         Stores =
-            Array.concat
-                [
-                    storedStructures
-                    |> Array.map (fun (st, _) ->
-                        st.id, st.store.getUsedCapacity (resourceName Energy))
-                    tombstones
-                    |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Energy))
-                    dropped
-                    |> Array.choose (fun (r, resource) ->
-                        if resource = Energy then Some(r.id, r.amount) else None)
-                ]
-            |> Map.ofArray
+            let column =
+                Array.concat
+                    [
+                        storedStructures
+                        |> Array.map (fun (st, _) ->
+                            st.id, st.store.getUsedCapacity (resourceName Energy))
+                        tombstones
+                        |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Energy))
+                        dropped
+                        |> Array.choose (fun (r, resource) ->
+                            if resource = Energy then Some(r.id, r.amount) else None)
+                    ]
+
+            recalled
+                storesMemo
+                (fun (a: int) b -> a = b)
+                room.name
+                (Array.map fst column)
+                (Array.map snd column)
         // The Thorium beside it, the deposit's own remaining amount included.
         // A store holding none has no entry.
         Thorium =
@@ -459,7 +578,13 @@ let private seenFacts
                     |> Array.map (fun r -> r.id, r.store.getUsedCapacity (resourceName Thorium))
                 ]
             |> Array.filter (fun (_, held) -> held > 0)
-            |> Map.ofArray
+            |> fun column ->
+                recalled
+                    thoriumMemo
+                    (fun (a: int) b -> a = b)
+                    room.name
+                    (Array.map fst column)
+                    (Array.map snd column)
         // The extractor's cooldown: `cooldown` is undefined on every other
         // kind we build, and 0 is a real answer ("this tick"), so the map is
         // not filtered the way the Thorium above is.
