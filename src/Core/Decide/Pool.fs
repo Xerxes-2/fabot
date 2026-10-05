@@ -1249,6 +1249,12 @@ let planPool
         | Repair id when Set.contains id rescued || Set.contains id dying -> Capacity.total 1
         | _ -> Capacity.unbounded
 
+    // The ramparts a hostile strikes this tick, whose Repairs let a holder go.
+    let struck =
+        match view.Hostiles with
+        | [] -> Set.empty
+        | _ -> Facts.rampartsUnderAttack view
+
     tasks
     |> List.map (fun task ->
         {
@@ -1263,4 +1269,15 @@ let planPool
                 | Upgrade controllerId -> isBorrowedUpgrade view controllerId
                 | Build siteId -> isBorrowedSite siteId
                 | _ -> false
+            // Every Guard's holder may be called off it for a kill, and a
+            // Guard whose Brief recalls is a kill.
+            Recall =
+                match task with
+                | Guard room ->
+                    match (Threats.briefOf threats room).Recall with
+                    | Some recall -> Some(RecallPolicy.Kill(room, recall))
+                    | None -> Some(RecallPolicy.Callable room)
+                | Repair id when Set.contains id struck ->
+                    Atlas.targetRoom atlas id |> Option.map RecallPolicy.Struck
+                | _ -> None
         })

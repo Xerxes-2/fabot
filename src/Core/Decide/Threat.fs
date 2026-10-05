@@ -170,18 +170,6 @@ type Avoid =
     /// Across the border too.
     | MeleeStepAndSwing
 
-/// Who a kill may call off another room's Guard (#510, #516), and within what
-/// walk.
-type Recall =
-    {
-        /// How far the holder walks for it, in travel cost.
-        Walk: int
-        /// Whether the holder of one room's Guard may be called off it for the
-        /// kill (`Facts.mayBeCalled`): the colony, every kill's room, the
-        /// held room, the kill's.
-        MayBeCalled: ColonyView -> Set<string> -> string -> string -> bool
-    }
-
 /// What a Guard's holder shoots in its room, and in what kill order.
 type Selector =
     {
@@ -251,7 +239,8 @@ type Brief =
         /// Whether a body may take it: the Emitter's gate, the colony and the
         /// Atlas given. The walk to the ground is what travel cost prices.
         Admits: ColonyView -> Atlas.Atlas -> CreepInfo -> bool
-        /// For a kill, who it calls off another room's Guard (the Matcher's).
+        /// For a kill, how far a holder of another room's Guard is called off
+        /// it (the Pool's `RecallPolicy.Kill`).
         Recall: Recall option
         Laid: Laid
         /// Its holder's ground: the first laid in the room from its kind down
@@ -508,15 +497,7 @@ module Brief =
             Claims = claims
             Targets = guardTargets
             Admits = admitsOf kind room
-            Recall =
-                if kill then
-                    Some
-                        {
-                            Walk = killWalk
-                            MayBeCalled = mayBeCalled
-                        }
-                else
-                    None
+            Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind laid
             WalksIn = kind = BriefKind.Chase

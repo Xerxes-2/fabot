@@ -284,18 +284,16 @@ let matchCreeps
     // where; the question has to be asked of the creep. A holder inside a
     // Reach is denied the grace and rematches in the cascade below.
     // The struck ramparts' Repairs (#467), by room: what a non-fighter holding
-    // lesser work in that room is let go for (#481). Empty on a quiet tick.
+    // lesser work in that room is let go for (#481). Empty on a quiet tick:
+    // the Pool marks none then, and the match skips the scan.
     let struckRepairs =
         match view.Hostiles with
         | [] -> []
         | _ ->
-            let struck = Facts.rampartsUnderAttack view
-
             pool
             |> List.choose (fun pooled ->
-                match pooled.Task with
-                | Repair id when Set.contains id struck ->
-                    Atlas.targetRoom atlas id |> Option.map (fun room -> room, pooled)
+                match pooled.Recall with
+                | Some(RecallPolicy.Struck room) -> Some(room, pooled)
                 | _ -> None)
 
     let graced (creep: CreepInfo) tid =
@@ -361,25 +359,26 @@ let matchCreeps
 
     // The holders let go for a kill this tick (#510, #516), decided once
     // against the remembered assignments, so the order the fold walks them in
-    // moves nothing. Per kill nobody holds (a Brief with a `Recall`): the
-    // nearest holder within its walk of a Guard it may be called off, for a
-    // kill that outranks that Guard and that the cascade would give it (the
+    // moves nothing. Per kill nobody holds (a `RecallPolicy.Kill`): the
+    // nearest holder within its walk of a Task it may be called off, for a
+    // kill that outranks that Task and that the cascade would give it (the
     // gate says which bodies a kill admits). It is back once the kill is made.
     let called =
         let recalls =
-            threats.Briefs
-            |> Map.toSeq
-            |> Seq.choose (fun (room, brief) ->
-                brief.Recall |> Option.map (fun recall -> room, recall))
-            |> Map.ofSeq
+            pool
+            |> List.choose (fun kill ->
+                match kill.Recall with
+                | Some(RecallPolicy.Kill(room, recall)) -> Some(kill, room, recall)
+                | _ -> None)
 
-        let kills = recalls |> Map.keys |> Set.ofSeq
+        let kills = recalls |> List.map (fun (_, room, _) -> room) |> Set.ofList
 
         if Set.isEmpty kills then
             Set.empty
         else
 
-            // Each holder of a Guard, beside the room it holds.
+            // Each holder of a Task it may be called off, beside the room it
+            // holds.
             let holders =
                 assignments
                 |> Map.toList
@@ -387,26 +386,22 @@ let matchCreeps
                     match
                         Map.tryFind tid byId, view.Creeps |> List.tryFind (fun c -> c.Name = name)
                     with
-                    | Some({ Task = Guard room } as pooled), Some creep ->
-                        Some(creep, pooled, room)
+                    | Some({
+                               Recall = Some(RecallPolicy.Callable room | RecallPolicy.Kill(room, _))
+                           } as pooled),
+                      Some creep -> Some(creep, pooled, room)
                     | _ -> None)
 
-            pool
-            |> List.choose (fun kill ->
-                match kill.Task with
-                | Guard room when
-                    Set.contains room kills
-                    && not (assignments |> Map.exists (fun _ tid -> tid = taskId kill.Task))
-                    ->
-                    Some(kill, room, Map.find room recalls)
-                | _ -> None)
+            recalls
+            |> List.filter (fun (kill, _, _) ->
+                not (assignments |> Map.exists (fun _ tid -> tid = taskId kill.Task)))
             |> List.fold
                 (fun (taken: Set<string>) (chase, killRoom, recall) ->
                     holders
                     |> List.filter (fun (creep, pooled, held) ->
                         not (Set.contains creep.Name taken)
                         && chase.Priority < pooled.Priority
-                        && recall.MayBeCalled view kills held killRoom)
+                        && Facts.mayBeCalled view kills held killRoom)
                     |> List.choose (fun (creep, _, _) ->
                         travelCostOf threats atlas creep.Name chase.Task
                         |> Option.filter (fun cost ->

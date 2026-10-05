@@ -204,6 +204,26 @@ module Capacity =
         || Option.isSome capacity.Budget
         || Option.isSome capacity.WorkBudget
 
+/// A kill's call on another Task's holder (#510, #516): within what walk.
+type Recall =
+    {
+        /// How far the holder walks for it, in travel cost.
+        Walk: int
+    }
+
+/// How a pooled Task takes part in the Matcher's call-offs, by the room it is
+/// for. Data only, so a pool compares structurally; who may be called is
+/// `Facts.mayBeCalled`'s and the gate's to say.
+type RecallPolicy =
+    /// Its holder may be called off it for a kill in another room.
+    | Callable of room: string
+    /// A kill in the room: it calls the nearest holder it may within its walk,
+    /// and its own holder may be called off it as a `Callable` one's may.
+    | Kill of room: string * recall: Recall
+    /// A struck rampart's repair (#481) in the room: it lets go every
+    /// non-fighter there whose Task it outranks.
+    | Struck of room: string
+
 /// One entry of this tick's Task pool: the Task, where it ranks and how many
 /// bodies it admits.
 type PooledTask =
@@ -219,6 +239,8 @@ type PooledTask =
         /// child's builds beside it. Read by one body gate: a standing body
         /// holds no commuting work.
         Borrowed: bool
+        /// Its part in the Matcher's call-offs; None for most of the pool.
+        Recall: RecallPolicy option
     }
 
 /// What kind of structure a placement Intent asks for.
