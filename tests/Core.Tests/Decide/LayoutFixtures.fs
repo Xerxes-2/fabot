@@ -193,8 +193,9 @@ let withPlanPending colony =
 /// that pick is spoken for — four wall, the source itself, the one trunk
 /// road out and two standing extensions, the live room's own tile table
 /// in proportion. Nothing is left for the fold to reserve, so this room's
-/// guarantee is short by one; `pocketColony`, the same room without the
-/// seal, is the control that serves all four.
+/// guarantee is short by one. The four walls are `pocketColony`'s own; what
+/// this fixture adds is the two extensions, and `pocketColony`, the same
+/// room without them, is the control that serves all four.
 ///
 /// The trunk leaves the Seat by the diagonal `22,29`, which is on the
 /// other checkerboard colour from the spawn: no reservation at any level
@@ -205,23 +206,13 @@ let withPlanPending colony =
 /// nothing to fall short of.
 let sealedPocketColony level =
     let colony = pocketColony level
-    let sealedTiles = [ { X = 21; Y = 29 }; { X = 21; Y = 31 } ]
 
     let standingExtensions =
         [ "ext-3", { X = 22; Y = 30 }; "ext-4", { X = 22; Y = 31 } ]
 
-    let walled =
-        colony.Spatial
-        |> withHome (fun layer ->
-            { layer with
-                Terrain =
-                    (layer.Terrain, sealedTiles)
-                    ||> List.fold (fun acc tile -> TerrainGrid.add tile Wall acc)
-            })
-
     { colony with
         Spatial =
-            (walled, standingExtensions)
+            (colony.Spatial, standingExtensions)
             ||> List.fold (fun room (id, tile) ->
                 withStanding id tile (Structure BuiltKind.Extension) room)
     }
