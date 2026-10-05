@@ -1123,6 +1123,12 @@ module Colony =
     /// Whether the engine's username is one of `enemies`.
     let isEnemy (username: string) = Set.contains username enemies
 
+    /// Whether whatever this username owns is ours to strike wherever it
+    /// stands: a declared enemy's, or the NPC Invader's (`Facts.mayStrike`).
+    /// Anybody else's structure or power creep shields a mass attack (#537).
+    let strikesAnywhere (username: string) =
+        isEnemy username || username = "Invader"
+
     /// The rooms another player, not an ally, owns the controller of, as a
     /// human surveyed them (#459): `World.rivalHeld` treats each as rival
     /// until a sighting says otherwise, so an unseen tower room is never

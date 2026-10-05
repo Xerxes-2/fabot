@@ -286,6 +286,12 @@ type RoomLayer =
         /// hostile creep walking onto one destroys it, so these tiles stay out
         /// of `Obstacles` and out of the pricing.
         RivalSites: Set<Pos>
+        /// The objects besides creeps the engine's `rangedMassAttack` strikes
+        /// (#537), by tile, under their owner's username: every structure
+        /// somebody else owns, whatever its kind, and every power creep; a
+        /// power bank under "". Whose of them shield a mass attack is
+        /// `Emitter.shields`'.
+        Foreign: Map<Pos, string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -300,6 +306,7 @@ module RoomLayer =
             Obstacles = Set.empty
             Roads = Set.empty
             RivalSites = Set.empty
+            Foreign = Map.empty
         }
 
 /// A [[colony view]]'s spatial projection: the terrain of the rooms the colony

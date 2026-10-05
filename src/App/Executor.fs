@@ -118,6 +118,7 @@ let private execute (intent: Intent) : Outcome =
         withCreepTarget creepName structureId (fun c t -> c.attack t)
     | RangedAttackCreep(creepName, hostileId) ->
         withCreepTarget creepName hostileId (fun c t -> c.rangedAttack t)
+    | RangedMassAttack creepName -> withCreep creepName (fun c -> c.rangedMassAttack ())
     | HealCreep(creepName, targetName) ->
         withOurCreepTarget creepName targetName (fun c t -> c.heal (box t))
     | RangedHealCreep(creepName, targetName) ->

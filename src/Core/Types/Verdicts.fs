@@ -530,6 +530,9 @@ type Decision =
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`): what the light ticks after issue again.
         Aims: Intent list
+        /// Each aiming ranger's guns and shields (`Emitter.volleys`, #537):
+        /// what the light tick's mass attack is chosen by.
+        Volleys: Map<string, Volley>
         /// The store each living creep's energy was drawn from, while any is
         /// aboard (#530): the Memory the next tick's `CreepInfo.DrawnFrom`
         /// is read off.

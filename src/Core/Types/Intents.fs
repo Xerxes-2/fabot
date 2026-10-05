@@ -90,6 +90,11 @@ type Intent =
     /// attack and harvest in the engine's table, and not beside ranged heal,
     /// repair or build.
     | RangedAttackCreep of creepName: string * hostileId: string
+    /// `rangedMassAttack` (#537): `Engine.massAttackPowerAt` a part, by range,
+    /// on every creep and structure within 3 that is not ours — an ally's
+    /// and a neutral's too, the engine knowing no ally. `rangedAttack`'s
+    /// slot in the engine's table.
+    | RangedMassAttack of creepName: string
     | MoveCreep of creepName: string * direction: Direction
     | SayCreep of creepName: string * message: string
     | ActivateSafeMode of controllerId: string
@@ -118,6 +123,17 @@ type Intent =
         resource: Resource *
         amount: int *
         destination: string
+
+/// What the light tick's strike choice reads of a fighter that the glance
+/// does not carry (#537): the room it stood in, its live RANGED_ATTACK parts,
+/// and the tiles there a mass attack may not reach (`Emitter.shields`). A
+/// body that has left the room fires none.
+type Volley =
+    {
+        Room: string
+        Guns: int
+        Shields: Set<Pos>
+    }
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).
 type Assignments = Map<string, string>

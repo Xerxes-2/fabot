@@ -580,8 +580,7 @@ let internal struckUsFirst (_hostile: HostileInfo) = false
 let internal mayStrike (view: ColonyView) (engaged: Set<string>) (hostile: HostileInfo) =
     not (HostileInfo.isKeeper hostile)
     && not (Colony.isAlly hostile.Owner)
-    && (Colony.isEnemy hostile.Owner
-        || hostile.Owner = "Invader"
+    && (Colony.strikesAnywhere hostile.Owner
         || Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
            && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
         || struckUsFirst hostile)

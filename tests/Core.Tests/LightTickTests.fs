@@ -27,6 +27,7 @@ let private quiet: Glance =
         Structures = [ tile 30 30 ]
         Controllers = Map.ofList [ room, (5, false) ]
         Lean = false
+        PowerCreeps = []
         Objects =
             Set.ofList
                 [
@@ -72,6 +73,7 @@ let private hostile x y owner armed : GlanceHostile =
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
+        Hits = 1000
     }
 
 /// The world one tick on: the hauler took its step and everything else held.
@@ -262,6 +264,103 @@ let replayTests =
                     ))
                     [ RangedAttackCreep("guard", "h-1"); HealCreep("guard", "guard") ]
                     "a heal on a channel the shot leaves free stands beside it"
+            }
+
+            test
+                "a ranger with two aims beside it mass attacks; with a body beside it that is none of its aims, it shoots" {
+                // #537: the full tick's strike choice off the glance
+                // (`Emitter.pickStrike`), its guns and shields the full tick's
+                // (`LastFull.Volleys`).
+                let shooting extra =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "ranger" (creepAt 12 10 1000)
+                        Hostiles =
+                            [
+                                { hostile 13 10 "Trepidimous" true with
+                                    Id = "h-1"
+                                }
+                                { hostile 11 10 "Trepidimous" true with
+                                    Id = "h-2"
+                                }
+                            ]
+                            @ extra
+                    }
+
+                let full volleys =
+                    { LightTick.lastFull
+                          (shooting [])
+                          Map.empty
+                          [ RangedAttackCreep("ranger", "h-1") ] with
+                        Aims =
+                            [
+                                RangedAttackCreep("ranger", "h-1")
+                                RangedAttackCreep("ranger", "h-2")
+                            ]
+                        Volleys = volleys
+                    }
+
+                let gunned =
+                    Map.ofList
+                        [
+                            "ranger",
+                            {
+                                Room = room
+                                Guns = 2
+                                Shields = Set.empty
+                            }
+                        ]
+
+                let ofRanger record glance =
+                    LightTick.intents record glance
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | RangedAttackCreep("ranger", _)
+                        | RangedMassAttack "ranger" -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (ofRanger (full gunned) (shooting []))
+                    [ RangedMassAttack "ranger" ]
+                    "two at range 1: the mass attack, in place of the full tick's shot"
+
+                Expect.equal
+                    (ofRanger
+                        (full gunned)
+                        (shooting
+                            [
+                                { hostile 12 13 "Odiodin" false with
+                                    Id = "ally"
+                                }
+                            ]))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "an ally at range 3: the shot"
+
+                Expect.equal
+                    (ofRanger
+                        (full (
+                            gunned
+                            |> Map.map (fun _ volley ->
+                                { volley with
+                                    Shields = Set.ofList [ { X = 12; Y = 12 } ]
+                                })
+                        ))
+                        (shooting []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "a shield at range 2: the shot"
+
+                Expect.equal
+                    (ofRanger
+                        (full gunned)
+                        { shooting [] with
+                            PowerCreeps = [ tile 12 13 ]
+                        })
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "a neutral's power creep glanced at range 3: the shot"
+
+                Expect.equal
+                    (ofRanger (full Map.empty) (shooting []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "no volley recorded: the shot"
             }
 
             test
@@ -691,6 +790,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
+                                    Hits = 1000
                                 }
                             ]
                     }
@@ -759,6 +859,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = true
+                                    Hits = 1000
                                 }
                             ]
                     }
@@ -1140,6 +1241,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
+                                    Hits = 1000
                                 }
                             ]
                     }
@@ -1450,6 +1552,7 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
+        Hits = 1000
     }
 
 [<Tests>]

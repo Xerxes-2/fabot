@@ -160,6 +160,11 @@ let private seenFacts
             let st = o :?> IStructure
             st, builtKindOf st.structureType)
 
+    // Every structure a user not us owns, the NPC Invader's included: the
+    // invader cores and the mass attack's shields.
+    let hostileStructures =
+        room.find findHostileStructures |> Array.map (fun o -> o :?> IStructure)
+
     // Swept once for the energy table and the Thorium table both.
     let storedStructures = structures |> Array.filter (fun (_, kind) -> isStored kind)
 
@@ -374,6 +379,30 @@ let private seenFacts
                 // that walks onto one destroys it, so a rival's site prices
                 // nothing.
                 RivalSites = Set.ofArray rivalSites
+                // The engine's mass attack strikes every object whose user is
+                // not ours, and a power bank (#537). Two on one tile keep the
+                // one we may not strike.
+                Foreign =
+                    Array.concat
+                        [
+                            hostileStructures
+                            |> Array.map (fun st ->
+                                posOf st.pos,
+                                (if isNull (box st.owner) then "" else st.owner.username))
+                            structures
+                            |> Array.filter (fun (st, _) -> st.structureType = "powerBank")
+                            |> Array.map (fun (st, _) -> posOf st.pos, "")
+                            room.find findHostilePowerCreeps
+                            |> Array.map (fun o ->
+                                let c = o :?> ICreep
+                                posOf c.pos, c.owner.username)
+                        ]
+                    |> Array.fold
+                        (fun owners (tile, owner) ->
+                            match Map.tryFind tile owners with
+                            | Some held when not (Colony.strikesAnywhere held) -> owners
+                            | _ -> Map.add tile owner owners)
+                        Map.empty
             }
         Border = terrain.Border
         // Same array order as the layer's TargetPositions, so a controller
@@ -645,8 +674,7 @@ let private seenFacts
         // `FIND_HOSTILE_CREEPS` cannot answer with one; `FIND_HOSTILE_STRUCTURES`
         // answers with every structure a rival owns, so the kind is checked.
         InvaderCores =
-            room.find findHostileStructures
-            |> Array.map (fun o -> o :?> IStructure)
+            hostileStructures
             |> Array.filter (fun st -> st.structureType = structureInvaderCore)
             |> Array.map (fun st ->
                 ({

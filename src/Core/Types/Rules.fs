@@ -147,6 +147,17 @@ module Engine =
     /// buys one.
     let rangedAttackPower = 10
 
+    /// What one RANGED_ATTACK part's `rangedMassAttack` takes off each target
+    /// at this range (`RANGED_MASS_ATTACK` distance rates 1 / 0.4 / 0.1):
+    /// 10, 4, 1 to range 3, nothing past it.
+    let massAttackPowerAt (range: int) =
+        match range with
+        | 0
+        | 1 -> rangedAttackPower
+        | 2 -> 4
+        | 3 -> 1
+        | _ -> 0
+
     /// HEAL_POWER: the hits one HEAL part puts back at range 1 — the rate a
     /// raid's healing is priced at, and never `RANGED_HEAL_POWER`'s 4: a
     /// healer standing beside its own invader heals at 12, and pricing the

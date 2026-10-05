@@ -73,7 +73,8 @@ let private channels =
     | BuildSite(name, _)
     | RepairStructure(name, _)
     | RangedHealCreep(name, _) -> [ name, Exclusive; name, Ranged ]
-    | RangedAttackCreep(name, _) -> [ name, Ranged ]
+    | RangedAttackCreep(name, _)
+    | RangedMassAttack name -> [ name, Ranged ]
     | TransferEnergyToStructure(name, _, _) -> [ name, Transfer ]
     | WithdrawFromStore(name, _, _, _) -> [ name, Withdraw ]
     | UpgradeController(name, _) -> [ name, Upgrade ]

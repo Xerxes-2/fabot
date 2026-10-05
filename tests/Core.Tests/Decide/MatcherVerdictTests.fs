@@ -412,6 +412,7 @@ let fullMineContainerTests =
                             Structures = []
                             Controllers = Map.empty
                             Lean = false
+                            PowerCreeps = []
                             Objects = Set.ofList [ "min-a" ]
                         }
 

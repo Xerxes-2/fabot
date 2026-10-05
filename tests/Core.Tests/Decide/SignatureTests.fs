@@ -254,3 +254,182 @@ let weaponReflexTests =
                 Expect.isFalse (shoots "Odiodin" false) "never an ally"
             }
         ]
+
+/// A raider's smallMelee in our outpost at this tile, under this id.
+let private raiderAt id (pos: Pos) =
+    { hostileIn "W1N2" pos smallMelee with
+        Id = id
+    }
+
+/// What the ranger "r-1" (two guns, on Flee at `beside`, (24,43)) strikes this
+/// tick among the bodies of this outpost: its shots and its mass attack.
+let private strikesAmong (colony: ColonyView) =
+    (decideFrom (Map.ofList [ "r-1", taskId Flee ]) (colony |> withGuards [ ranger "r-1", beside ]))
+        .Intents
+    |> List.filter (fun intent ->
+        match intent with
+        | RangedAttackCreep("r-1", _)
+        | RangedMassAttack "r-1" -> true
+        | _ -> false)
+
+/// Two raiders beside the ranger.
+let private pair () =
+    raidedOutpost [ raiderAt "h-1" { X = 25; Y = 42 }; raiderAt "h-2" { X = 23; Y = 42 } ]
+
+/// The outpost with an object of this owner's at this tile, as
+/// `World.factsOf` projects every object besides creeps a mass attack hits: a
+/// structure somebody else owns, of whatever kind, or a power creep.
+let private withForeign (owner: string) (pos: Pos) (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Foreign = Map.add pos owner outpost.Foreign
+                }
+    }
+
+[<Tests>]
+let strikeChoiceTests =
+    testList
+        "the strike choice: the strike dealing the most, never a mass attack beside a body we may not strike (#537)"
+        [
+            test "two hostiles beside a ranger take a mass attack; one takes a shot" {
+                Expect.equal
+                    (strikesAmong (pair ()))
+                    [ RangedMassAttack "r-1" ]
+                    "two at range 1: 40 against 20"
+
+                Expect.equal
+                    (strikesAmong (raidedOutpost [ raiderAt "h-1" { X = 25; Y = 42 } ]))
+                    [ RangedAttackCreep("r-1", "h-1") ]
+                    "one: the shot, which deals the same"
+            }
+
+            test "three hostiles at range 2 take a mass attack" {
+                Expect.equal
+                    (strikesAmong (
+                        raidedOutpost
+                            [
+                                raiderAt "h-1" { X = 26; Y = 43 }
+                                raiderAt "h-2" { X = 22; Y = 43 }
+                                raiderAt "h-3" { X = 24; Y = 45 }
+                            ]
+                    ))
+                    [ RangedMassAttack "r-1" ]
+                    "24 against 20"
+            }
+
+            test
+                "a hostile beside it with 5 hits left and one at range 3 take a shot: damage is capped by hits" {
+                let struck =
+                    strikesAmong (
+                        raidedOutpost
+                            [
+                                { raiderAt "h-1" { X = 25; Y = 42 } with
+                                    Hits = 5
+                                }
+                                raiderAt "h-2" { X = 27; Y = 43 }
+                            ]
+                    )
+
+                Expect.isFalse
+                    (List.contains (RangedMassAttack "r-1") struck)
+                    "the mass deals 5 + 2"
+
+                Expect.hasLength struck 1 "a shot, up to 20"
+            }
+
+            test "an ally's creep within three: never a mass attack, whose blast would hit it" {
+                let odiodin =
+                    { raiderAt "ally" { X = 24; Y = 46 } with
+                        Owner = "Odiodin"
+                    }
+
+                let filed = { pair () with Allies = [ odiodin ] }
+
+                Expect.isFalse
+                    (strikesAmong filed |> List.contains (RangedMassAttack "r-1"))
+                    "an Odiodin creep at range 3, filed as an ally"
+
+                Expect.isFalse
+                    (strikesAmong
+                        { pair () with
+                            Hostiles = (pair ()).Hostiles @ [ odiodin ]
+                        }
+                     |> List.contains (RangedMassAttack "r-1"))
+                    "nor filed among the hostiles"
+
+                Expect.hasLength (strikesAmong filed) 1 "a single shot instead"
+            }
+
+            test
+                "an ally's or a neutral's structure within three: never a mass attack; an enemy's: still" {
+                let massed owner pos =
+                    strikesAmong (withForeign owner pos (pair ()))
+                    |> List.contains (RangedMassAttack "r-1")
+
+                Expect.isFalse
+                    (massed "passer" { X = 24; Y = 46 })
+                    "a neutral's extension at range 3"
+
+                Expect.isFalse
+                    (massed "Odiodin" { X = 24; Y = 46 })
+                    "an Odiodin structure at range 3"
+
+                Expect.isFalse (massed "" { X = 24; Y = 46 }) "a power bank at range 3"
+
+                Expect.isTrue
+                    (massed "passer" { X = 24; Y = 47 })
+                    "at range 4 it is out of the blast"
+
+                Expect.isTrue
+                    (massed "Trepidimous" { X = 24; Y = 46 })
+                    "a Trepidimous rampart at range 3: a target too"
+            }
+
+            test "a keeper or an unarmed neutral within three: never a mass attack" {
+                let beside owner body =
+                    { pair () with
+                        Hostiles =
+                            (pair ()).Hostiles
+                            @ [
+                                { hostileIn "W1N2" { X = 24; Y = 46 } body with
+                                    Id = "other"
+                                    Owner = owner
+                                }
+                            ]
+                    }
+
+                Expect.isFalse
+                    (strikesAmong (beside "Source Keeper" smallMelee)
+                     |> List.contains (RangedMassAttack "r-1"))
+                    "a Source Keeper at range 3, not provoked"
+
+                Expect.isFalse
+                    (strikesAmong (beside "passer" [ Move; Carry ])
+                     |> List.contains (RangedMassAttack "r-1"))
+                    "a neutral's hauler at range 3, which we may not strike"
+
+                Expect.hasLength
+                    (strikesAmong (beside "passer" [ Move; Carry ]))
+                    1
+                    "a single shot at a raider instead"
+            }
+
+            test "in a room the view only crosses: never a mass attack, its objects unseen" {
+                let crossed =
+                    { pair () with
+                        Hostiles =
+                            (pair ()).Hostiles |> List.map (fun h -> { h with Owner = "Invader" })
+                        Crossed = Set.ofList [ "W1N2" ]
+                    }
+
+                Expect.isFalse
+                    (strikesAmong crossed |> List.contains (RangedMassAttack "r-1"))
+                    "a crossed room carries no shields to read"
+            }
+        ]

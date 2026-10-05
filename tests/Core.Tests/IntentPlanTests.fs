@@ -92,6 +92,17 @@ let tests =
                         (create [ RangedAttackCreep("r", "h"); suppressing ])
                         "the engine keeps only one of the two"
             }
+            test "a mass attack takes the ranged attack's slot" {
+                // #537: one slot in the engine's table, `rangedAttack`'s.
+                Expect.equal
+                    (accepted [ RangedMassAttack "r"; HealCreep("r", "r") ])
+                    [ RangedMassAttack "r"; HealCreep("r", "r") ]
+                    "it stands beside a heal"
+
+                Expect.isError
+                    (create [ RangedMassAttack "r"; RangedAttackCreep("r", "h") ])
+                    "and never beside a single shot"
+            }
 
             test "different targets still overwrite the same method" {
                 match create [ PickupPile("hauler", "one"); PickupPile("hauler", "two") ] with

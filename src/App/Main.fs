@@ -246,6 +246,23 @@ let private glance () : LightTick.Glance =
             |> Fresh.mapOfArray
         // Half a bucket: past it a raid's forced full ticks are what empties it.
         Lean = Game.cpu.bucket < 5000
+        // Asked only in a room a volley stands in, mostly none (#537).
+        PowerCreeps =
+            match lastFull with
+            | None -> []
+            | Some(_, last) ->
+                [
+                    for room in
+                        last.Volleys |> Map.values |> Seq.map (fun v -> v.Room) |> Seq.distinct do
+                        let seen = objectItem<IRoom> Game.rooms room
+
+                        if not (isNull (box seen)) then
+                            for o in seen.find findHostilePowerCreeps do
+                                let c = unbox<ICreep> o
+
+                                if not (Colony.strikesAnywhere c.owner.username) then
+                                    yield tileOf room c.pos
+                ]
         // A light tick's alone (`standingOf`): a forced tick never asks.
         Objects = Fresh.setOfSeq Seq.empty
     }
@@ -854,6 +871,10 @@ let private fullTick
                 Loose = LightTick.loose roles
                 Rangers = LightTick.harassRangers roles
                 Aims = decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Aims)
+                Volleys =
+                    decisions
+                    |> Seq.collect (fun (_, _, decision, _, _) -> Map.toSeq decision.Volleys)
+                    |> Fresh.mapOfSeq
             })
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it

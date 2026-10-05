@@ -28,6 +28,8 @@ type GlanceHostile =
         Weapon: int option
         Breaks: bool
         Gait: Gait
+        /// Hits left: what a mass attack's damage is capped by (#537).
+        Hits: int
     }
 
 /// A hostile as the glance reads it, beside its room's other hostiles
@@ -44,6 +46,7 @@ let glanceOf (side: HostileInfo list) (hostile: HostileInfo) : GlanceHostile =
         Weapon = HostileInfo.weaponRange side hostile
         Breaks = HostileInfo.breaks side hostile
         Gait = HostileInfo.gait side hostile
+        Hits = hostile.Hits
     }
 
 /// What a tick reads off `Game` directly, before any World is built: our
@@ -60,6 +63,11 @@ type Glance =
         /// structure in, so a hostile loitering in an outpost no longer
         /// holds every tick full while the bucket drains.
         Lean: bool
+        /// The power creeps not ours to strike anywhere
+        /// (`Colony.strikesAnywhere`) standing in the rooms of
+        /// the last full tick's volleys (`LastFull.Volleys`, #537): shields a
+        /// mass attack may not reach, which move. Read in no other room.
+        PowerCreeps: RoomPos list
         /// Of the ids the last full tick's acts name (`lookups`), the ones
         /// still standing: a store, a pile, a site, a structure, a source, a
         /// controller, the Reactor, an observer. Looked up only on a tick
@@ -100,6 +108,8 @@ type LastFull =
         /// (`Emitter.aims`), which a light tick issues again while the target
         /// is in sight (#528): a swing lands the tick a body steps beside it.
         Aims: Intent list
+        /// Each aiming ranger's guns and shields (`Emitter.volleys`, #537).
+        Volleys: Map<string, Volley>
     }
 
 /// One colony's rooms as `loose` reads them: the rooms it works (its scan set
@@ -264,6 +274,9 @@ let private replayed (intent: Intent) : (string option * Stands) option =
     // Vision lands the tick after the look: one issued on the full tick
     // lands on the light tick, which reads nothing.
     | ObserveRoom(observer, _) -> Some(None, Stands.Object observer)
+    // It hits whoever stands near now, an ally walked in among them: an
+    // aiming ranger's is chosen again off the glance (`intents`).
+    | RangedMassAttack _
     // A named amount: a draw that landed would be drawn twice — under the
     // terminal's fee reserve, or past the courier's marked load (#378).
     | WithdrawFromStore(_, _, _, Some _)
@@ -317,6 +330,7 @@ let private fights (intent: Intent) : bool =
     | AttackCreep _
     | AttackStructure _
     | RangedAttackCreep _
+    | RangedMassAttack _
     | HealCreep _
     | RangedHealCreep _
     | SpawnCreep _
@@ -375,7 +389,8 @@ and lastFullWith
             intents
             |> List.choose (function
                 | AttackCreep(creep, _)
-                | RangedAttackCreep(creep, _) -> Some creep
+                | RangedAttackCreep(creep, _)
+                | RangedMassAttack creep -> Some creep
                 | _ -> None)
             |> Fresh.setOfSeq
         Hits =
@@ -389,6 +404,7 @@ and lastFullWith
         Loose = Fresh.setOfSeq Seq.empty
         Rangers = Fresh.setOfSeq Seq.empty
         Aims = []
+        Volleys = Fresh.mapOfSeq Seq.empty
     }
 
 /// How close a hostile of any kind may come to a creep or structure of ours
@@ -632,6 +648,16 @@ let intents (last: LastFull) (now: Glance) : Intent list =
     let tiles =
         now.Hostiles |> List.map (fun hostile -> hostile.Id, hostile.Tile) |> Map.ofList
 
+    let hits =
+        now.Hostiles |> List.map (fun hostile -> hostile.Id, hostile.Hits) |> Map.ofList
+
+    // The hostile an aim names.
+    let aimedAt (aim: Intent) =
+        match aim with
+        | AttackCreep(_, target)
+        | RangedAttackCreep(_, target) -> Some target
+        | _ -> None
+
     // The aim's target's tile and the body's reach, for an aim it holds.
     let aimed (aim: Intent) =
         match aim with
@@ -644,7 +670,8 @@ let intents (last: LastFull) (now: Glance) : Intent list =
     let strikes (act: Intent) =
         match act with
         | AttackCreep _
-        | RangedAttackCreep _ -> true
+        | RangedAttackCreep _
+        | RangedMassAttack _ -> true
         | _ -> false
 
     [
@@ -658,19 +685,53 @@ let intents (last: LastFull) (now: Glance) : Intent list =
             | Some direction -> yield MoveCreep(name, direction)
             | None -> ()
 
-            // The full tick's target choice again off the glance (#535): the
-            // first aim in reach, else the head (`Emitter.pickStrike`). It
-            // replaces the full tick's own strike, which named the target in
-            // reach where the bodies stood then.
+            // The full tick's strike choice again off the glance (#535, #537):
+            // the first aim in reach, else the head, or the mass attack where
+            // it deals more (`Emitter.pickStrike`) — never with a body within
+            // three that is none of its aims. It replaces the full tick's own
+            // strike, which named the target in reach where the bodies stood
+            // then.
+            let volley =
+                Map.tryFind name last.Volleys
+                |> Option.filter (fun volley -> volley.Room = creep.Tile.Room)
+
+            let guns = volley |> Option.map (fun volley -> volley.Guns) |> Option.defaultValue 0
+
             let pick =
                 Map.tryFind name aims
-                |> Option.bind (
-                    Decide.Emitter.pickStrike (fun aim ->
-                        aimed aim
-                        |> Option.bind (fun (tile, reach) ->
-                            RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
-                        |> Option.defaultValue false)
-                )
+                |> Option.bind (fun held ->
+                    let targets = held |> List.choose aimedAt |> Set.ofList
+
+                    let mass =
+                        volley
+                        |> Option.bind (fun volley ->
+                            now.Hostiles
+                            |> List.map (fun h -> h.Tile, h.Hits, Set.contains h.Id targets)
+                            |> Decide.Emitter.massDamage
+                                volley.Guns
+                                creep.Tile
+                                (Set.union
+                                    volley.Shields
+                                    (RoomPos.inRoom volley.Room (Set.ofList now.PowerCreeps))))
+
+                    let dealt aim =
+                        aimedAt aim
+                        |> Option.bind (fun target -> Map.tryFind target hits)
+                        |> Option.map (fun left -> min left (guns * Engine.rangedAttackPower))
+                        |> Option.defaultValue 0
+
+                    held
+                    |> Decide.Emitter.pickStrike
+                        (fun aim ->
+                            aimed aim
+                            |> Option.bind (fun (tile, reach) ->
+                                RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
+                            |> Option.defaultValue false)
+                        dealt
+                        mass
+                    |> Option.map (function
+                        | Decide.Emitter.At(aim, reaches) -> aim, reaches
+                        | Decide.Emitter.Mass -> RangedMassAttack name, true))
 
             // The full tick's own priority (`IntentPlan.arbitrate`): its
             // chosen acts, the aim on a channel none of them holds, then a

@@ -291,9 +291,11 @@ let harassGuardTests =
                         { X = 23; Y = 20 }
                         [ Move; Move; Move; RangedAttack; Heal ]
 
+                // The miner two off, not beside it: there a mass attack's 20 + 2
+                // outdeals the shot's 20 (#537).
                 let colony =
                     { (bareHome |> harassing) with
-                        Hostiles = [ miner "miner" { X = 21; Y = 20 }; escort ]
+                        Hostiles = [ miner "miner" { X = 22; Y = 20 }; escort ]
                     }
                     |> standingThere [ shooter, here ]
 

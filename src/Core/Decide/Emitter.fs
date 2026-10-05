@@ -592,18 +592,98 @@ let private glyphFor =
     | Defend _ -> "🧱"
     | Assault _ -> "🏰"
 
-/// The one target choice (#535), every tick's: the first target in the kill
-/// order a body reaches, else the order's head, with whether it reaches it.
-/// The full tick strikes only one it reaches (`strikeOf`); the light tick
-/// picks again off its glance (`LightTick.intents`). In reach first narrows
+/// A strike a body issues (#537): a shot or a swing at one target, with
+/// whether it reaches it, or a mass attack at everything within three.
+type Strike<'target> =
+    | At of 'target * reaches: bool
+    | Mass
+
+/// The tiles of a room a mass attack may not reach (#537): each structure or
+/// power creep of `RoomLayer.Foreign` whose owner is not ours to strike
+/// anywhere (`Colony.strikesAnywhere`, the diplomacy rule's: an ally's, a
+/// neutral's, a power bank), where a declared enemy's or an Invader's is a
+/// target too. None for a room whose objects this view does not carry — a
+/// transit room's, or one it does not project —, where no mass attack is
+/// fired.
+let shields (view: ColonyView) (room: string) : Set<Pos> option =
+    if not (Map.containsKey room view.Spatial.Rooms) || Set.contains room view.Crossed then
+        None
+    else
+        (SpatialInfo.layerOf view.Spatial room).Foreign
+        |> Map.fold
+            (fun shields tile owner ->
+                if Colony.strikesAnywhere owner then
+                    shields
+                else
+                    Set.add tile shields)
+            Set.empty
+        |> Some
+
+/// What a mass attack from `from` deals (#537), off the body's live guns, the
+/// shields of its room (`shields`), and the creeps within three of it as
+/// (tile, hits left, whether we may strike it): each takes its rate a gun
+/// (`Engine.massAttackPowerAt`), capped by the hits it has left. None where
+/// it may not fire: no gun, a shield within three, or a body within three we
+/// may not strike — the engine hits every creep and structure not ours, an
+/// ally's and a neutral's alike.
+let massDamage
+    (guns: int)
+    (from: RoomPos)
+    (shields: Set<Pos>)
+    (near: (RoomPos * int * bool) list)
+    : int option =
+    let at = RoomPos.pos from
+
+    if
+        guns = 0
+        || shields |> Set.exists (fun tile -> range at tile <= Engine.rangedRange)
+    then
+        None
+    else
+        let reached =
+            near
+            |> List.choose (fun (tile, hits, may) ->
+                RoomPos.range from tile
+                |> Option.filter (fun r -> r <= Engine.rangedRange)
+                |> Option.map (fun r -> r, hits, may))
+
+        if List.exists (fun (_, _, may) -> not may) reached then
+            None
+        else
+            Some(
+                reached
+                |> List.sumBy (fun (r, hits, _) -> min hits (guns * Engine.massAttackPowerAt r))
+            )
+
+/// The one strike choice (#535, #537), every tick's: the first target in the
+/// kill order a body reaches, else the order's head, with whether it reaches
+/// it — or the mass attack (`massDamage`, None for a melee body), where it
+/// deals more than the best single strike at any target it reaches would
+/// (`dealt`, each capped by the target's hits). Ties keep the single strike.
+/// The full tick strikes only in reach (`strikeOf`); the light tick picks
+/// again off its glance (`LightTick.intents`). In reach first narrows
 /// ADR-0056 decision 2 without overturning it: ordered the other way round, a
 /// guard standing on the ring of the second invader of a two-creep raid is
 /// handed the one nearest the Post, finds it three tiles off, and swings at
 /// nothing while the invader beside it deals 40 a tick.
-let pickStrike (reaches: 'target -> bool) (order: 'target list) : ('target * bool) option =
-    match List.tryFind reaches order with
-    | Some target -> Some(target, true)
-    | None -> List.tryHead order |> Option.map (fun head -> head, false)
+let pickStrike
+    (reaches: 'target -> bool)
+    (dealt: 'target -> int)
+    (mass: int option)
+    (order: 'target list)
+    : Strike<'target> option =
+    let single () =
+        match List.tryFind reaches order with
+        | Some target -> Some(At(target, true))
+        | None -> List.tryHead order |> Option.map (fun head -> At(head, false))
+
+    match mass with
+    | Some deals when
+        deals > (order
+                 |> List.fold (fun best t -> if reaches t then max best (dealt t) else best) 0)
+        ->
+        Some Mass
+    | _ -> single ()
 
 /// A melee fighter's step onto the tile of the target it reaches (#535),
 /// beside its swing: attacks resolve before moves, and a move onto a tile
@@ -688,8 +768,28 @@ let private reachOf (creep: CreepInfo) =
     else
         Engine.meleeRange
 
+/// A ranger's live guns; a melee body's none, its strike being the swing
+/// (`strikeAt`).
+let private gunsOf (creep: CreepInfo) =
+    if isRangerBody creep then
+        partCount creep.Body RangedAttack
+    else
+        0
+
+/// Every creep not ours in sight, as `massDamage` reads it: a hostile we may
+/// strike by the one diplomacy rule (`Facts.mayStrike`, the reflex's rooms),
+/// and an ally never.
+let private bystanders (view: ColonyView) (fighting: Set<string>) (from: RoomPos) =
+    let near (h: HostileInfo) =
+        RoomPos.range from h.Pos |> Option.exists (fun r -> r <= Engine.rangedRange)
+
+    (view.Hostiles
+     |> List.filter near
+     |> List.map (fun h -> h.Pos, h.Hits, Facts.mayStrike view fighting h))
+    @ (view.Allies |> List.filter near |> List.map (fun h -> h.Pos, h.Hits, false))
+
 /// What a body strikes in a room off its Selector (`pickStrike` over
-/// `strikeOrder`), and whether it reaches it from where it stands.
+/// `strikeOrder`, beside the mass attack from where it stands).
 let private strikeOf
     (view: ColonyView)
     atlas
@@ -699,13 +799,31 @@ let private strikeOf
     (room: string)
     =
     let reach = reachOf creep
+    let tile = Atlas.creepTile atlas creep.Name
+    let guns = gunsOf creep
 
     let inReach (hostile: HostileInfo) =
-        Atlas.creepTile atlas creep.Name
+        tile
         |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
         |> Option.exists (fun r -> r <= reach)
 
-    strikeOrder view atlas targets fighting creep room |> pickStrike inReach
+    let mass =
+        match tile with
+        | Some from when guns > 0 ->
+            shields view from.Room
+            |> Option.bind (fun shields ->
+                massDamage guns from shields (bystanders view fighting from))
+        | _ -> None
+
+    strikeOrder view atlas targets fighting creep room
+    |> pickStrike inReach (fun h -> min h.Hits (guns * Engine.rangedAttackPower)) mass
+
+/// The intent of a strike `strikeOf` picks that the body reaches.
+let private strikeIntent (creep: CreepInfo) (strike: Strike<HostileInfo> option) =
+    match strike with
+    | Some(At(target, true)) -> Some(strikeAt creep target)
+    | Some Mass -> Some(RangedMassAttack creep.Name)
+    | _ -> None
 
 /// A Guard strikes the target `strikeOf` picks while it reaches it. Self-
 /// healing belongs to the colony-wide reflex, which reads damage and the same
@@ -736,8 +854,7 @@ let private guardIntent
             |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
 
     strikeOf view atlas targets fighting creep room
-    |> Option.filter snd
-    |> Option.map (fst >> strikeAt creep)
+    |> strikeIntent creep
     |> Option.orElseWith coreBeside
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
@@ -1140,6 +1257,30 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                 strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
             | _ -> [])
 
+/// Each aiming ranger's `Volley` (#537), for the light ticks' mass attack:
+/// a body that aims (`aims`) with a gun, in a room whose shields this view
+/// carries (`shields`).
+let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) =
+    match view.Hostiles with
+    | [] -> Map.empty
+    | _ ->
+        view.Creeps
+        |> List.choose (fun creep ->
+            match strikesBy atlas threats assigned creep, Atlas.creepRoom atlas creep.Name with
+            | Some(_, _, true), Some room when
+                gunsOf creep > 0 && not (mustering threats assigned creep)
+                ->
+                shields view room
+                |> Option.map (fun shields ->
+                    creep.Name,
+                    {
+                        Room = room
+                        Guns = gunsOf creep
+                        Shields = shields
+                    })
+            | _ -> None)
+        |> Map.ofList
+
 /// The weapon reflex beside any Task or none (#535): every body with a weapon
 /// that holds no fight of its own strikes the target `strikeOf` picks in its
 /// room while it reaches it, on a channel the plan leaves free — the heal
@@ -1161,12 +1302,12 @@ let strikeReflex
         ||> List.fold (fun plan creep ->
             match strikesBy atlas threats assigned creep with
             | Some(room, targets, false) ->
-                match strikeOf view atlas targets fighting creep room with
-                | Some(target, true) ->
-                    match Fabot.Core.IntentPlan.tryAdd (strikeAt creep target) plan with
+                match strikeOf view atlas targets fighting creep room |> strikeIntent creep with
+                | Some strike ->
+                    match Fabot.Core.IntentPlan.tryAdd strike plan with
                     | Ok joined -> joined
                     | Error _ -> plan
-                | _ -> plan
+                | None -> plan
             | _ -> plan)
 
 /// Each melee fighter's step onto the target it reaches (`glueStep`, #535):
@@ -1191,7 +1332,7 @@ let glue (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                     strikeOf view atlas targets fighting creep room,
                     Atlas.creepTile atlas creep.Name
                 with
-                | Some(target, true), Some from ->
+                | Some(At(target, true)), Some from ->
                     let melee =
                         view.Hostiles
                         |> List.filter (fun h ->

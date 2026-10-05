@@ -1014,6 +1014,15 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         |> Set.ofList
                     Roads = Set.empty
                     RivalSites = rivalSites |> List.map (fun site -> site.At) |> Set.ofList
+                    // Every structure another side owns (`World.factsOf`).
+                    Foreign =
+                        structures
+                        |> List.choose (fun (s, _) ->
+                            match s.Owner with
+                            | Some Side.Ours
+                            | None -> None
+                            | Some side -> Some(s.At, username side))
+                        |> Map.ofList
                 }
             Border = r.Capture.Border
             TargetKinds = targets |> List.map (fun (id, _, kind) -> id, kind) |> Map.ofList
@@ -2732,6 +2741,7 @@ let step (a: Arena) : Arena * TickTrace =
             | WithdrawFromStore(n, s, Energy, amount) -> Some(n, Act.Withdraw(s, amount))
             | AttackCreep(n, h) -> Some(n, Act.Attack h)
             | RangedAttackCreep(n, h) -> Some(n, Act.RangedAttack h)
+            | RangedMassAttack n -> Some(n, Act.RangedMassAttack)
             | HealCreep(n, t) -> Some(n, Act.Heal t)
             | RangedHealCreep(n, t) -> Some(n, Act.RangedHeal t)
             | MoveCreep(n, d) -> Some(n, Act.Move d)

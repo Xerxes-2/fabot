@@ -45,6 +45,9 @@ let findHostileCreeps = 103
 /// invader core: `FIND_STRUCTURES` sees it as `BuiltKind.Other`.
 let findHostileStructures = 109
 
+/// Screeps `FIND_HOSTILE_POWER_CREEPS` constant.
+let findHostilePowerCreeps = 121
+
 /// Screeps `FIND_DROPPED_RESOURCES` constant.
 let findDroppedResources = 106
 
@@ -115,6 +118,10 @@ type IEffect =
     /// `docs/research/remote-mining.md` speaks in that vocabulary).
     abstract ticksRemaining: int
 
+/// The `owner` sub-object every owned game object carries.
+type IOwner =
+    abstract username: string
+
 /// A mineral deposit standing in a room. Density and `ticksToRegeneration`
 /// are not bound: a Thorium deposit never regenerates.
 type IMineral =
@@ -130,6 +137,9 @@ type IStructure =
     abstract id: string
     /// Screeps STRUCTURE_* string, e.g. "spawn" or "extension".
     abstract structureType: string
+    /// Whose structure this is; undefined on an unowned one (a road, a
+    /// container, a wall).
+    abstract owner: IOwner
     abstract store: IStore
     abstract pos: IRoomPosition
     /// Current hit points.
@@ -181,9 +191,6 @@ type IConstructionSite =
     abstract progress: int
     abstract progressTotal: int
 
-/// The `owner` sub-object every owned game object carries.
-type IOwner =
-    abstract username: string
 
 /// The line somebody has written onto a controller. Undefined until one is,
 /// and it outlives every body in the room.
@@ -348,6 +355,8 @@ type ICreep =
     /// Hit one creep within range 3 for RANGED_ATTACK_POWER per RANGED_ATTACK
     /// part (#411).
     abstract rangedAttack: target: obj -> int
+    /// Hit every creep and structure not ours within range 3 (#537).
+    abstract rangedMassAttack: unit -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The only
     /// movement API the bot uses; moveTo is not bound.
     abstract move: direction: int -> int

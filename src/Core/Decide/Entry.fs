@@ -651,6 +651,7 @@ let decideUnarbitrated
         Steps = steps
         Next = nextPours @ arrivals
         Aims = aims view atlas threats assigned
+        Volleys = volleys view atlas threats assigned
         Drawn =
             view.Creeps
             |> List.choose (fun creep ->
