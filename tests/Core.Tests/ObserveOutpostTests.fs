@@ -1406,6 +1406,42 @@ let clocklessTests =
 
                 Expect.isEmpty home.RivalHeld "the room we own is not a room somebody took"
             }
+
+            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
+            // pre-world-layer behaviour, flips at S2 (one world danger log).
+            // Live t973,5xx: W18S26 was in W15S28's and W17S29's `rivalHeld`,
+            // looked into at 970,261 and 972,434.
+            test "two colonies that see one rival room each latch it, on a look stride of their own" {
+                let recheck = Tuning.defaults.RivalRecheck
+
+                let other =
+                    { quiet with
+                        Spatial =
+                            { quiet.Spatial with
+                                RoomName = Some "W13S28"
+                            }
+                    }
+
+                let first =
+                    RaidState.empty
+                    |> raidTick 100 (quiet |> ownedByRival outpostRoom)
+                    |> raidTick (100 + recheck) (quiet |> ownedByRival outpostRoom)
+
+                let second = RaidState.empty |> raidTick 300 (other |> ownedByRival outpostRoom)
+
+                Expect.equal
+                    (first.RivalHeld, second.RivalHeld)
+                    (Map.ofList
+                        [
+                            outpostRoom,
+                            {
+                                Since = 100
+                                LastLooked = 100 + recheck
+                            }
+                        ],
+                     Map.ofList [ outpostRoom, { Since = 300; LastLooked = 300 } ])
+                    "one room, two latches, each dated and strided by the colony that looked"
+            }
         ]
 
 [<Tests>]

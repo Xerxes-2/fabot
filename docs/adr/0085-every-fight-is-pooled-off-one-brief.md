@@ -1,6 +1,6 @@
 # Every fight is pooled off one Brief: a room's targets, the bodies fit for them, and the ground they hit from
 
-> **Status:** accepted
+> **Status:** accepted, amended by 0086
 
 > **Accepted 2026-10-05**, the user deciding (see *Answered*), on an audit of main 5afc1713. S0's characterisation tests are marked `Characterisation (the Brief's S0)`.
 

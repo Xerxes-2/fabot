@@ -2304,6 +2304,230 @@ let childOutpostTests =
             }
         ]
 
+/// One colony's view under every colony's shut rooms, its own gate the shut
+/// set it holds: the cut the shell makes (`ColonyView.ofWorldRecalling`).
+let private viewShutUnder colonies (shut: Map<string, Set<string>>) world home =
+    let colony = colonies |> List.find (fun colony -> colony.Home = home)
+
+    let holders =
+        World.creepColonies Tuning.defaults colonies (World.living colonies world) shut world
+
+    ColonyView.ofWorldRecalling
+        (JoinTable())
+        Tuning.defaults
+        colonies
+        HarassCasting.none
+        { StandDown.none with
+            Shut = Map.tryFind home shut |> Option.defaultValue Set.empty
+        }
+        shut
+        holders
+        world
+        colony
+
+/// A Trepidimous ranged harasser, Synapse673's body (13 RANGED_ATTACK,
+/// 7 MOVE, no heal), standing in a room.
+let private harasserIn room : HostileInfo =
+    {
+        Id = $"harasser-{room}"
+        Owner = "Trepidimous"
+        Pos = { Room = room; X = 25; Y = 20 }
+        Body = List.replicate 7 Move @ List.replicate 13 RangedAttack
+        Hits = 20 * Engine.partHits
+        TicksToLive = 1000
+    }
+
+/// A body of ours with the given parts, standing in a room.
+let private bodied name room (parts: (BodyPart * int) list) : WorldCreep =
+    let built = creep name room
+
+    { built with
+        Info =
+            { built.Info with
+                Body = Map.ofList parts
+                Hits =
+                    {
+                        Hits = Engine.partHits * List.sumBy snd parts
+                        HitsMax = Engine.partHits * List.sumBy snd parts
+                    }
+            }
+    }
+
+/// The world with these bodies added, each on its own tile of its room.
+let private standing (bodies: (WorldCreep * Pos) list) (world: World) : World =
+    { world with
+        Creeps = world.Creeps @ (bodies |> List.map fst)
+        Rooms =
+            (world.Rooms, bodies)
+            ||> List.fold (fun rooms (body, at) ->
+                rooms
+                |> Map.change
+                    body.Room
+                    (Option.map (fun facts ->
+                        { facts with
+                            Layer =
+                                { facts.Layer with
+                                    CreepPositions =
+                                        Map.add body.Info.Name at facts.Layer.CreepPositions
+                                }
+                        })))
+    }
+
+/// The world layer's S0 (`docs/adr/0086`): each case pins a seam where one
+/// world fact is held or concluded per colony. Every one pins pre-world-layer
+/// behaviour, and its comment names the stage that flips it.
+[<Tests>]
+let worldSeamTests =
+    testList
+        "pre-world-layer seams: a world fact cut or concluded per colony"
+        [
+            // Characterisation (the world layer's S0): pins pre-world-layer
+            // behaviour, flips at S1 (#534). Live t973,5xx: W13S28's observer
+            // looked into W18S25 while W17S25's stand-down held it shut; the
+            // look reached `World.Rooms` and no view.
+            test
+                "a stood-down outpost's hostiles, seen with no body of ours there, reach the world and no view" {
+                let raider =
+                    { harasserIn outpost with
+                        Id = "seen-by-observer"
+                    }
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.change
+                                outpost
+                                (Option.map (fun facts -> { facts with Hostiles = [ raider ] }))
+                    }
+
+                let shut = Map.ofList [ mother, Set.singleton outpost ]
+                let motherView = viewShutUnder declared shut world mother
+
+                Expect.isFalse
+                    (world.Creeps |> List.exists (fun body -> body.Room = outpost))
+                    "the premise: no body of ours stands there, the look is the observer's"
+
+                Expect.contains
+                    (World.roomOf world outpost).Hostiles
+                    raider
+                    "the world holds the look"
+
+                Expect.isFalse
+                    ([ mother; child ]
+                     |> List.exists (fun home ->
+                         (viewShutUnder declared shut world home).Hostiles
+                         |> List.exists (fun h -> h.Id = raider.Id)))
+                    "and no colony's view carries it"
+
+                let log =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        motherView
+                        (Planner.outpostFactsOf motherView).Declared
+
+                Expect.isEmpty log.Episodes "so the owner's raid log records nothing of it"
+            }
+
+            // Characterisation (the world layer's S0): pins pre-world-layer
+            // behaviour, flips at S1 (#534). Live: W17S25's stand-down shut
+            // W18S25, and the mother W15S28's `ChildOutposts` dropped it, so the
+            // trespasser there stood in no view at all.
+            test
+                "a child's shut outpost leaves the mother's ChildOutposts, and its hostile stands in no view" {
+                let world = withChildOutposts pairWorld
+                let trespasser = $"raptor-{childOutpost}"
+
+                // The child mining the bordering room alone, so no walk of hers
+                // to a farther outpost crosses it.
+                let colonies =
+                    childMining
+                    |> List.map (fun colony ->
+                        if colony.Home = child then
+                            { colony with
+                                Outposts = [ outpostAt childOutpost ]
+                            }
+                        else
+                            colony)
+
+                let seenBy shut home =
+                    (viewShutUnder colonies shut world home).Hostiles
+                    |> List.exists (fun h -> h.Id = trespasser)
+
+                Expect.equal
+                    (viewShutUnder colonies noneShut world mother).Borrowed.ChildOutposts
+                    [ childOutpost ]
+                    "the premise: open, the mother projects it for her residents"
+
+                let shut = Map.ofList [ child, Set.singleton childOutpost ]
+
+                Expect.isEmpty
+                    (viewShutUnder colonies shut world mother).Borrowed.ChildOutposts
+                    "shut by the child, it leaves the mother's ChildOutposts"
+
+                Expect.contains
+                    ((World.roomOf world childOutpost).Hostiles |> List.map (fun h -> h.Id))
+                    trespasser
+                    "while the world still holds the trespasser"
+
+                Expect.isFalse
+                    (seenBy shut mother || seenBy shut child)
+                    "and neither colony's view carries it"
+            }
+
+            // Characterisation (the world layer's S0): pins pre-world-layer
+            // behaviour, flips at S3 (one verdict per room). The live shape:
+            // W18S25, priced by W17S25 and by its mother W15S28 apart.
+            test
+                "one world, one room, two verdicts: the child's rangers win it, the mother's resident loses it" {
+                let ranger name room =
+                    bodied name room [ Move, 21; RangedAttack, 14; Heal, 7 ]
+
+                let world =
+                    { withChildOutposts pairWorld with
+                        Rooms =
+                            (withChildOutposts pairWorld).Rooms
+                            |> Map.change
+                                childOutpost
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        Hostiles = [ harasserIn childOutpost ]
+                                    }))
+                    }
+                    |> standing
+                        [
+                            bodied "ranger-960-Spawn1" child [ Move, 10; RangedAttack, 7; Heal, 3 ],
+                            { X = 5; Y = 2 }
+                            ranger "ranger-961-Spawn2" child, { X = 5; Y = 3 }
+                            ranger "ranger-962-Spawn2" child, { X = 6; Y = 3 }
+                        ]
+
+                let motherView = viewUnder childMining world mother
+                let childView = viewUnder childMining world child
+
+                Expect.contains
+                    motherView.Borrowed.ChildOutposts
+                    childOutpost
+                    "the premise: the mother projects the child's outpost"
+
+                Expect.isTrue
+                    (motherView.Hostiles |> List.exists (fun h -> h.Pos.Room = childOutpost))
+                    "and sees its harasser"
+
+                Expect.equal
+                    (Facts.answer childView childOutpost)
+                    Facts.Answer.Win
+                    "the child prices her own rangers a Win"
+
+                Expect.equal
+                    (Facts.answer motherView childOutpost)
+                    Facts.Answer.Lose
+                    "and the mother, who cannot see them, prices the same room a Lose"
+            }
+        ]
+
 let private defenderNames (view: ColonyView) room =
     Map.tryFind room view.Defenders
     |> Option.defaultValue []

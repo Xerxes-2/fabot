@@ -2671,6 +2671,9 @@ let childOutpostTests =
             // Lose, and nobody covered the outpost. The child now prices the
             // residents lent from next door as the mother does, apart from her
             // own: the mother calls, or the child shuts, never neither.
+            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
+            // pre-world-layer behaviour, flips at S3, where the room's one
+            // verdict prices both colonies' bodies and the raid is a Win.
             test
                 "a raid only the child's ranger and the mother's resident win together: the mother calls nobody, and the child stands it down" {
                 let harasser room =

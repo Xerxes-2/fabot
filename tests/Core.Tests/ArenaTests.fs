@@ -1878,6 +1878,511 @@ let private twoRaidsBesideW17S25 () : Arena =
             }
     }
 
+// ---- arena capture shut-outpost-cripple (#534, the world layer's S0) -------
+// `npm run capture -- W18S25 973320 --rooms W17S25,W15S28,W17S26 --name shutOutpostCripple`.
+// The room-history replay at t973,320, the state after that tick ran: arena
+// tick 0 runs as t973,321.
+//   W18S25  https://screeps.com/room-history/shardSeason/W18S25/973300.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/973300.json
+//   W15S28  https://screeps.com/room-history/shardSeason/W15S28/973300.json
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/973300.json
+// Read at live t974,751, too late for live Memory: W17S25's stand-down of
+// W18S25 is seated by hand off #534's "Why" (opened t973,265 on a Lose while
+// Shade461 healed Idol768, held to t973,465). Healers, ExitWatches and
+// Sightings start empty. W18S25's and W17S26's reservations, roads and
+// tombstones are not placed; spawning bodies (a defender and a ranger due
+// t973,355, a hauler t973,409) are not placed. The Transition log held no
+// verdict that far back: the resident's and W17S26's guard's Tasks are
+// seated off the t972,617 capture, every other body starts idle.
+
+/// W18S25 at t973,320 (#534's "Why"): the healer gone, Idol768 stands alone
+/// at 818 hits with 8 live ATTACK and 1 live MOVE in the child W17S25's
+/// outpost, which W17S25's stand-down holds shut; the mother W15S28's
+/// resident ranger-972663-Spawn3 stands in W17S25 next door.
+let private shutOutpostCripple () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+    let odiodin = Side.Player "Odiodin"
+
+    let w18s25 =
+        room "W18S25"
+        |> withStructures
+            [
+                { structureOf "container" None 120_100 250_000 { X = 31; Y = 5 } with
+                    Energy = 796
+                }
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 4 2
+        |> withSafeModeCooldown 981_420
+        |> withControllerClocks 0 0 38_258 70_919
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_300
+        |> withStructures
+            [
+                for x, y in [ 10, 24; 12, 30; 13, 31; 14, 30 ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        13, 25
+                        14, 26
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        17, 29
+                        17, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 66_200 250_000 { X = 16; Y = 34 } with
+                    Energy = 100
+                }
+                { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 348
+                }
+                { structureOf "rampart" (Some Side.Ours) 90_721 3_000_000 { X = 2; Y = 15 } with
+                    NextDecay = 973_323
+                }
+                { structureOf "rampart" (Some Side.Ours) 90_661 3_000_000 { X = 2; Y = 16 } with
+                    NextDecay = 973_403
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_711 3_000_000 { X = 2; Y = 17 } with
+                    NextDecay = 973_406
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_031 3_000_000 { X = 2; Y = 18 } with
+                    NextDecay = 973_411
+                }
+                { structureOf "rampart" (Some Side.Ours) 92_971 3_000_000 { X = 2; Y = 19 } with
+                    NextDecay = 973_383
+                }
+                { structureOf "rampart" (Some Side.Ours) 98_231 3_000_000 { X = 2; Y = 20 } with
+                    NextDecay = 973_385
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_221 3_000_000 { X = 2; Y = 23 } with
+                    NextDecay = 973_410
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_201 3_000_000 { X = 2; Y = 24 } with
+                    NextDecay = 973_372
+                }
+                { structureOf "rampart" (Some Side.Ours) 89_801 3_000_000 { X = 2; Y = 25 } with
+                    NextDecay = 973_389
+                }
+                { structureOf "rampart" (Some Side.Ours) 90_561 3_000_000 { X = 2; Y = 26 } with
+                    NextDecay = 973_404
+                }
+                { structureOf "rampart" (Some Side.Ours) 91_061 3_000_000 { X = 2; Y = 27 } with
+                    NextDecay = 973_353
+                }
+                { structureOf "rampart" (Some Side.Ours) 8_501 3_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 973_388
+                }
+                { structureOf "rampart" (Some Side.Ours) 1_201 3_000_000 { X = 14; Y = 28 } with
+                    NextDecay = 973_364
+                }
+                { structureOf "rampart" (Some Side.Ours) 92_421 3_000_000 { X = 16; Y = 44 } with
+                    NextDecay = 973_352
+                }
+                { structureOf "rampart" (Some Side.Ours) 32_301 3_000_000 { X = 17; Y = 20 } with
+                    NextDecay = 973_409
+                }
+                { structureOf "rampart" (Some Side.Ours) 92_401 3_000_000 { X = 17; Y = 44 } with
+                    NextDecay = 973_354
+                }
+                { structureOf "rampart" (Some Side.Ours) 96_401 3_000_000 { X = 18; Y = 44 } with
+                    NextDecay = 973_350
+                }
+                { structureOf "rampart" (Some Side.Ours) 91_171 3_000_000 { X = 32; Y = 31 } with
+                    NextDecay = 973_363
+                }
+                { structureOf "rampart" (Some Side.Ours) 91_781 3_000_000 { X = 32; Y = 32 } with
+                    NextDecay = 973_381
+                }
+                towerOf Side.Ours { X = 13; Y = 29 } 940
+            ]
+        |> withSite Side.Ours "storage" None 13_863 { X = 13; Y = 27 }
+
+    let w15s28 =
+        room "W15S28"
+        |> withController Ownership.Ours None 7 5
+        |> withControllerClocks 0 0 150_000 5_753_992
+        |> withSpawn "Spawn3" { X = 18; Y = 30 } 5_600
+        |> withSpawn "Spawn8" { X = 17; Y = 35 } 5_600
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 24
+                        12, 30
+                        13, 25
+                        13, 31
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 30
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                        Id = $"extension-{x}-{y}-W15S28"
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 26
+                        12, 32
+                        12, 34
+                        12, 36
+                        13, 27
+                        13, 29
+                        13, 33
+                        13, 35
+                        14, 28
+                        14, 32
+                        14, 34
+                        15, 25
+                        15, 33
+                        15, 35
+                        16, 26
+                        16, 32
+                        16, 34
+                        17, 25
+                        17, 27
+                        17, 33
+                        18, 26
+                        18, 28
+                        18, 32
+                        18, 34
+                        19, 27
+                        19, 31
+                        19, 33
+                        20, 26
+                        20, 28
+                        20, 30
+                        20, 32
+                        21, 27
+                        21, 29
+                        21, 31
+                        21, 33
+                        21, 35
+                        22, 26
+                        23, 25
+                        23, 27
+                        23, 35
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 17, 31; 19, 29; 20, 34 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 125_100 250_000 { X = 6; Y = 29 } with
+                    Energy = 792
+                }
+                { structureOf "container" None 125_100 250_000 { X = 11; Y = 18 } with
+                    Energy = 756
+                }
+                structureOf "container" None 148_100 250_000 { X = 23; Y = 29 }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 29; Y = 12 }
+                { structureOf "rampart" (Some Side.Ours) 102_001 100_000_000 { X = 6; Y = 29 } with
+                    NextDecay = 973_334
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_501 100_000_000 { X = 11; Y = 18 } with
+                    NextDecay = 973_393
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_701 100_000_000 { X = 16; Y = 28 } with
+                    NextDecay = 973_352
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_101 100_000_000 { X = 17; Y = 29 } with
+                    NextDecay = 973_384
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_401 100_000_000 { X = 17; Y = 31 } with
+                    NextDecay = 973_394
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_901 100_000_000 { X = 17; Y = 35 } with
+                    NextDecay = 973_348
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_401 100_000_000 { X = 18; Y = 30 } with
+                    NextDecay = 973_369
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_801 100_000_000 { X = 19; Y = 29 } with
+                    NextDecay = 973_417
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_201 100_000_000 { X = 20; Y = 34 } with
+                    NextDecay = 973_410
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 17; Y = 29 } with
+                    Energy = 28_361
+                    Thorium = 41_977
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 } with
+                    Energy = 346
+                }
+            ]
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 125_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 480
+                }
+            ]
+
+    // Today's declarations, not the tick's: spell them out if the test must outlive a roster change.
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S25"; "W15S28" ])
+
+    let bodies: Body list =
+        [
+            // Idol768: live: 8 ATTACK, 1 MOVE; it wanders W18S25 until a
+            // resident kills it after t973,430, so it holds here.
+            { body
+                  "Idol768"
+                  trepidimous
+                  (parts [ Move, 17; Attack, 17; Move, 1 ])
+                  (at "W18S25" 44 13)
+                  (Some Hold) with
+                Hits = 818
+                TicksToLive = 1_051
+                Fatigue = 13
+            }
+            { body
+                  "hauler-971818-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 14; Move, 7 ])
+                  (at "W17S25" 18 30)
+                  None with
+                TicksToLive = 59
+            }
+            { body
+                  "worker-971946-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 5; Carry, 7; Move, 6 ])
+                  (at "W17S25" 29 34)
+                  None with
+                TicksToLive = 178
+                Energy = 325
+            }
+            { body
+                  "worker-972000-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 5; Carry, 7; Move, 6 ])
+                  (at "W17S25" 29 33)
+                  None with
+                TicksToLive = 232
+                Fatigue = 86
+                Energy = 285
+            }
+            { body
+                  "anchor-972054-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 16 42)
+                  None with
+                TicksToLive = 262
+                Energy = 50
+            }
+            { body
+                  "worker-972372-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 7; Move, 7 ])
+                  (at "W17S25" 24 35)
+                  None with
+                TicksToLive = 610
+                Energy = 314
+            }
+            { body
+                  "anchor-972458-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 666
+                Energy = 50
+            }
+            { body
+                  "guard-972528-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                  (at "W17S25" 17 45)
+                  None with
+                TicksToLive = 736
+            }
+            { body
+                  "ranger-972663-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 21; RangedAttack, 14; Heal, 7 ])
+                  (at "W17S25" 16 35)
+                  None with
+                TicksToLive = 967
+            }
+            { body
+                  "hauler-972861-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 16; Move, 8 ])
+                  (at "W17S25" 9 24)
+                  None with
+                TicksToLive = 1_111
+                Energy = 552
+            }
+            { body
+                  "guard-973227-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                  (at "W17S25" 19 30)
+                  None with
+                TicksToLive = 1_435
+            }
+            // scout-W17S22-972936: live: no act
+            { body "scout-W17S22-972936" odiodin (parts [ Move, 1 ]) (at "W17S25" 13 24) (Some Hold) with
+                TicksToLive = 1_117
+            }
+            { body
+                  "anchor-972488-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 3 18)
+                  None with
+                TicksToLive = 696
+                Energy = 50
+            }
+            { body
+                  "hauler-971764-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 18 29)
+                  None with
+                TicksToLive = 86
+            }
+            { body
+                  "anchor-971904-Spawn8"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W15S28" 6 29)
+                  None with
+                TicksToLive = 106
+                Energy = 50
+            }
+            { body
+                  "worker-972250-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 16; Carry, 17; Move, 17 ])
+                  (at "W15S28" 22 28)
+                  None with
+                TicksToLive = 578
+                Energy = 594
+            }
+            { body
+                  "upgrader-972317-Spawn8"
+                  Side.Ours
+                  (parts [ Work, 24; Carry, 1; Move, 24 ])
+                  (at "W15S28" 19 24)
+                  None with
+                TicksToLive = 642
+            }
+            { body
+                  "hauler-972400-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 37 16)
+                  None with
+                TicksToLive = 722
+            }
+            { body
+                  "anchor-972544-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W15S28" 11 18)
+                  None with
+                TicksToLive = 746
+                Energy = 50
+            }
+            { body
+                  "hauler-972938-Spawn8"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 11 28)
+                  None with
+                TicksToLive = 1_260
+            }
+            { body
+                  "anchor-972558-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 27 9)
+                  None with
+                TicksToLive = 766
+                Energy = 50
+            }
+            { body
+                  "reserver-973148-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S26" 9 22)
+                  None with
+                TicksToLive = 438
+            }
+        ]
+
+    let a = arena 973_321 [ w18s25; w17s25; w15s28; w17s26 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments =
+                    Map.ofList
+                        [
+                            "ranger-972663-Spawn3", "guard:W17S25"
+                            "guard-972528-Spawn11", "guard:W17S26"
+                        ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W17S25",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            RoomName = "W18S25"
+                                            Opened = 973_265
+                                            LastSeen = 973_265
+                                            Expiry = 973_465
+                                            Basis = StandDownBasis.PlayerRaidHold
+                                            Stronghold = false
+                                            Raiders = set [ "Idol768"; "Shade461" ]
+                                            PlayerSince = Some 973_265
+                                            Chased = false
+                                        }
+                                    ]
+                            }
+                        ]
+            }
+    }
+
 [<Tests>]
 let arenaBorderTests =
     testList
@@ -2150,6 +2655,35 @@ let arenaBorderTests =
                     $"the other is lent to W18S25\n{failure}"
 
                 Expect.isSome (diedOn "Crunchy047" trace) $"and kills Crunchy047\n{failure}"
+            }
+
+            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
+            // pre-world-layer behaviour, flips at S1 (#534). As live
+            // (t973,321-973,405): the room W17S25's stand-down holds is in no
+            // view, so the cripple standing in it alone, in sight (the arena
+            // sees every room, as W13S28's observer did), is answered by nobody
+            // and the log's last sighting stays the one that shut it.
+            test
+                "#534 capture t973,320: a cripple alone in the child's shut outpost is answered by nobody, as live" {
+                let final, trace = shutOutpostCripple () |> run 85
+                let failure = describe trace
+
+                Expect.isNone (diedOn "Idol768" trace) $"Idol768 lives\n{failure}"
+
+                Expect.isFalse
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Bodies
+                         |> List.exists (fun s -> s.Side = Side.Ours && s.At.Room = "W18S25")))
+                    $"no body of ours enters W18S25, the resident included\n{failure}"
+
+                Expect.equal
+                    (Map.tryFind "W17S25" final.Carried.Raids
+                     |> Option.bind (fun raids ->
+                         raids.Outposts |> List.tryFind (fun row -> row.RoomName = "W18S25"))
+                     |> Option.map (fun row -> row.LastSeen, row.Expiry))
+                    (Some(973_265, 973_465))
+                    "the stand-down stands, last seen the tick it shut"
             }
         ]
 

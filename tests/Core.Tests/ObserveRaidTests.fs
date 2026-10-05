@@ -186,6 +186,30 @@ let rosterTests =
                     ]
                     "the first sighting wins: the roster answers what came, not what survived"
             }
+
+            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
+            // pre-world-layer behaviour, flips at S5 (the roster a world fact)
+            // with S1-S2 pricing the room. Live t973,5xx: W17S29's 105.8 KB of
+            // `episodes` were W17S25's siege, seen only in its transit rooms.
+            test
+                "a raid seen in a room the colony only crosses is enrolled, and no stand-down opens for it" {
+                let transit = "W13S27"
+
+                let crossing =
+                    { quiet with
+                        Crossed = Set.singleton transit
+                        Hostiles = [ armedIn transit ]
+                    }
+
+                let state = RaidState.empty |> raidTick 10 crossing
+
+                Expect.equal
+                    (rosters state |> List.map fst)
+                    [ "raid-1" ]
+                    "the transit room's raider is on this colony's roster"
+
+                Expect.isEmpty state.Outposts "and the colony prices no stand-down there"
+            }
         ]
 
 [<Tests>]
