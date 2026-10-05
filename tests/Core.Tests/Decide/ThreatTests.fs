@@ -737,6 +737,25 @@ let rampartDefenderTests =
                     "the bank waits for the ranger as for the defender"
             }
 
+            test "a raider on the exit tile, or a healer alone outside the line, is at the line" {
+                // Live t981,1xx, W17S25: Trepidimous' pair swapped on the exit
+                // tile 0,15, then the healer tanked the tower there alone; the
+                // flood of the outside left out the ring and a healer was no
+                // raider, so no Defend was pooled and the defender stood idle.
+                let onExit = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 0; Y = 34 } ] []
+
+                Expect.isNonEmpty (defendAsks onExit) "the melee on the exit tile is answered"
+
+                let medic =
+                    { raidMeleeAt "h-1" { X = 0; Y = 34 } with
+                        Body = List.replicate 7 Heal @ List.replicate 7 Move
+                    }
+
+                Expect.isNonEmpty
+                    (defendAsks (defenderHome defendedLine [ medic ] []))
+                    "so is the healer alone there"
+            }
+
             test "a ranger at home takes the Defend and shoots the shooter from its rampart" {
                 let colony =
                     defenderHome

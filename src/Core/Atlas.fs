@@ -926,6 +926,9 @@ let outsideLine (atlas: Atlas) (perimeter: Pos list) : Set<Pos> =
             |> Option.defaultValue Map.empty
             |> Map.iter (fun exit ground ->
                 if ground <> Wall then
+                    // The exit tile is outside too, though no ground: a
+                    // raider bouncing on it was nobody's (live t981,1xx).
+                    reached.Add exit |> ignore
                     tilesWithin 1 exit |> List.iter visit)
 
             while frontier.Count > 0 do

@@ -409,8 +409,9 @@ let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
         weak, sites
 
 /// The raid bodies at the home's line this tick (#504): a hostile, no
-/// keeper's, standing outside the line (`Atlas.outsideLine`) that fights with
-/// an ATTACK or RANGED_ATTACK, or works with a WORK beside a perimeter
+/// keeper's, standing outside the line (`Atlas.outsideLine`, the exit tiles
+/// included) that fights with an ATTACK or RANGED_ATTACK, heals the raid,
+/// or works with a WORK beside a perimeter
 /// rampart (`HostileInfo.effectiveParts`). A body inside
 /// the line — a breach, or at the Keep — is the towers' and the relief's,
 /// never a [[defender]]'s.
@@ -442,6 +443,7 @@ let internal raidAtLine (view: ColonyView) atlas : Set<Pos> * HostileInfo list =
         |> List.filter (fun hostile ->
             Set.contains (RoomPos.pos hostile.Pos) outside
             && (HostileInfo.armed view.Hostiles hostile
+                || HostileInfo.heals view.Hostiles hostile
                 || HostileInfo.works view.Hostiles hostile && besideLine hostile))
 
 /// Whether any Keep structure of this colony stands below full hits: the
