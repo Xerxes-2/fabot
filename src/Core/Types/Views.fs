@@ -418,7 +418,8 @@ type ColonyView =
         /// The raid healers seen in the home room within the last
         /// `Tuning.HealMemoryTicks` ticks and not standing there now, at the
         /// tile last seen (`World.Healers`, #480): one that stepped out across
-        /// the exit is back next tick.
+        /// the exit is back next tick. And in each child's home this colony
+        /// raises (#552), whose line its garrison holds.
         RecalledHealers: HostileInfo list
         /// Whether safe mode is running in any room of ours this tick
         /// (`World.safeModeRunning`), the same answer handed to every colony:
@@ -451,6 +452,9 @@ type ColonyView =
         /// cannot move. A hostile or ally that stepped since the full tick
         /// before stands on the tile it left as well (`World.HostileSteps`).
         Foreign: Set<RoomPos>
+        /// The hostiles in sight standing on the tile they stood on the full
+        /// tick before (`HostileStep.Since`, #552): parked, not walking in.
+        Parked: Set<string>
         /// For a child, its mother's bodies standing in its home, and where:
         /// the residents she keeps there (#447), whom a raid beside the home
         /// calls as its own (`Facts.rangersWin`). Priced, never moved.
@@ -1425,8 +1429,9 @@ module ColonyView =
                     | towers -> Some(room, towers))
                 |> Fresh.mapOfList
             RecalledHealers =
-                Map.tryFind home world.Healers
-                |> Option.defaultValue []
+                home :: bootstrap @ scan.Garrisoned
+                |> List.collect (fun room ->
+                    Map.tryFind room world.Healers |> Option.defaultValue [])
                 |> List.filter (fun seen -> seen.Tick < world.Time)
                 |> List.map (fun seen -> seen.Healer)
             SafeModeRunning = World.safeModeRunning world
@@ -1456,6 +1461,13 @@ module ColonyView =
                         | Some { Left = Some left } -> [ h.Pos; left ]
                         | _ -> [ h.Pos ])
                 )
+                |> Set.ofList
+            Parked =
+                collected (fun facts -> facts.Hostiles)
+                |> List.filter (fun h ->
+                    Map.tryFind h.Id world.HostileSteps
+                    |> Option.exists (fun step -> step.At = h.Pos && step.Since < world.Time))
+                |> List.map (fun h -> h.Id)
                 |> Set.ofList
             Lendable =
                 match colony.Mother with

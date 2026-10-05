@@ -756,6 +756,132 @@ let rampartDefenderTests =
                     "so is the healer alone there"
             }
 
+            test
+                "a raid bouncing on the exit stands at the line on the tick it is across: on the far exit tile, or a healer remembered off ours" {
+                // #552, live t981,106: the pair swapped on W17S25's 0,15 every
+                // tick, so the Defend held only every other tick.
+                let across =
+                    { raidMeleeAt "h-1" { X = 0; Y = 0 } with
+                        Pos = RoomPos.at "W2N1" { X = 49; Y = 34 }
+                    }
+
+                Expect.isNonEmpty
+                    (defendAsks (defenderHome defendedLine [ across ] []))
+                    "the melee on W2N1's exit tile, carried onto ours next tick"
+
+                let remembered =
+                    { defenderHome defendedLine [] [] with
+                        RecalledHealers =
+                            [
+                                { raidMeleeAt "h-1" { X = 0; Y = 34 } with
+                                    Body = List.replicate 7 Heal @ List.replicate 7 Move
+                                }
+                            ]
+                    }
+
+                Expect.isNonEmpty (defendAsks remembered) "the healer remembered off the exit tile"
+
+                Expect.isEmpty
+                    (defendAsks
+                        { remembered with
+                            RecalledHealers =
+                                remembered.RecalledHealers
+                                |> List.map (fun h ->
+                                    { h with
+                                        Pos = RoomPos.at "W1N1" { X = 10; Y = 34 }
+                                    })
+                        })
+                    "one remembered off another tile walked away"
+            }
+
+            test
+                "a melee parked two from the ramparts, out of every swing: the defender waits on its rampart, a ranger shoots it from its own" {
+                // #552: from W17S25's 2,15 a swing does not reach the exit
+                // tile 0,15, a shot does.
+                let colony = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 18; Y = 34 } ] []
+
+                Expect.equal
+                    (defendAsks colony)
+                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    "walking in, it is the defender's alone: no ranger holds the economy for it"
+
+                Expect.equal
+                    (defendAsks
+                        { colony with
+                            Parked = Set.singleton "h-1"
+                        })
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "parked there, both rows: the melee may come to the defender, the ranger reaches it now"
+
+                Expect.equal
+                    (defendAsks (
+                        defenderHome defendedLine [ raidMeleeAt "h-1" { X = 19; Y = 34 } ] []
+                        |> fun c -> { c with Parked = Set.singleton "h-1" }
+                    ))
+                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    "parked in the defender's swing, the ranger is not asked"
+            }
+
+            test "a healer alone at the line: the defender holds its rampart, a ranger shoots it" {
+                // #552: the healer passed the defender's row test (no gun to
+                // keep its range with), so the ranger row stayed empty.
+                let medic =
+                    { raidMeleeAt "h-1" { X = 17; Y = 34 } with
+                        Body = List.replicate 7 Heal @ List.replicate 7 Move
+                    }
+
+                Expect.equal
+                    (defendAsks (defenderHome defendedLine [ medic ] []))
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "both rows"
+            }
+
+            test
+                "the mother's resident holding the home's Guard answers the ranger row: the home casts no ranger for it, whatever its bank" {
+                // #552: W15S28's residents stood in W17S25 while the child
+                // was asked for a ranger of her own.
+                let lent colony =
+                    { colony with
+                        Lendable = [ homeRanger, RoomPos.at "W1N1" { X = 25; Y = 30 } ]
+                    }
+
+                let asksHeld (holders: string list) colony =
+                    let held =
+                        { HeldTaskFacts.empty with
+                            Holders = Map.ofList [ taskId (Guard "W1N1"), holders ]
+                        }
+
+                    let threats = threatsOfHeld colony (Atlas.ofView colony) held
+
+                    match Threats.briefFor threats (Defend "W1N1") with
+                    | Some brief ->
+                        brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+                    | None -> []
+
+                let shooter = defenderHome defendedLine [ shooterAt { X = 17; Y = 34 } ] []
+                let thin = { shooter with Bank = bank 550 550 }
+
+                Expect.equal
+                    (asksHeld [ homeRanger.Name ] (lent shooter))
+                    [ CastRow.Defender, 0; CastRow.Ranger, 0 ]
+                    "the kiter is the resident's"
+
+                Expect.equal
+                    (asksHeld [ homeRanger.Name ] (lent thin))
+                    [ CastRow.Defender, 0; CastRow.Ranger, 0 ]
+                    "and stays the ranger row's where the bank casts no ranger"
+
+                Expect.equal
+                    (asksHeld [] (lent shooter))
+                    [ CastRow.Defender, 0; CastRow.Ranger, 1 ]
+                    "one passing through, holding nothing there, suppresses no cast"
+
+                Expect.equal
+                    (asksHeld [] (lent thin))
+                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    "nor keeps a kiter no ranger answers off the defender"
+            }
+
             test "a ranger at home takes the Defend and shoots the shooter from its rampart" {
                 let colony =
                     defenderHome

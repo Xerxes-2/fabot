@@ -824,16 +824,58 @@ module Brief =
         | _ when List.isEmpty (perimeterRamparts view) -> 0
         | raid -> min view.Tuning.DefenderCap (List.length raid)
 
-    /// The rows the home's Defend asks (#546), each with the bodies of the
-    /// raid at the line it answers: the defender those its swing reaches
-    /// (`Facts.defenderReaches`), the ranger the rest — a shooter keeping its
-    /// range. Where the bank casts no ranger block (`Facts.castable`), the
-    /// defender answers them all.
-    let internal defendSplit (view: ColonyView) (atLine: HostileInfo list) =
-        let reached, rest = atLine |> List.partition (defenderReaches view.Hostiles)
+    /// The mother's ranger-row residents holding the home's ground (#552,
+    /// `ColonyView.Lendable`): standing in the home with its Guard or its
+    /// Defend held (`holders`, the shard's table), not passing through. They
+    /// answer its raid from its ramparts, and the home casts none for them.
+    let internal lentRangers (view: ColonyView) (holders: Set<string>) : int =
+        let home = SpatialInfo.homeName view.Spatial
 
-        if castable view rangerPattern then
-            [ CastRow.Defender, reached; CastRow.Ranger, rest ]
+        view.Lendable
+        |> List.filter (fun (creep, at) ->
+            at.Room = home && isRangerRowBody creep && Set.contains creep.Name holders)
+        |> List.length
+
+    /// The rows the home's Defend asks (#546), each with the bodies of the
+    /// raid at the line it answers: the defender those it meets
+    /// (`Facts.defenderMeets`), waiting on its rampart for the ones not yet
+    /// in its swing; the ranger those the defender never strikes from the
+    /// line (#552) — a shooter keeping its range, a healer, and a body out
+    /// of every perimeter rampart's swing that is parked (`ColonyView.Parked`)
+    /// or on the exit tile, never one walking in. Where no ranger is cast
+    /// (`Facts.castable`), held — holding the Defend or standing in the home
+    /// — or lent (`lentRangers`), the defender answers them all.
+    let internal defendSplit (view: ColonyView) (holders: Set<string>) (atLine: HostileInfo list) =
+        let home = SpatialInfo.homeName view.Spatial
+        let ramparts = perimeterRamparts view |> List.map (fun (_, tile, _) -> tile)
+
+        let inSwing (hostile: HostileInfo) =
+            ramparts
+            |> List.exists (fun tile ->
+                RoomPos.range tile hostile.Pos
+                |> Option.exists (fun r -> r <= Engine.meleeRange))
+
+        let met = atLine |> List.filter (defenderMeets view.Hostiles)
+
+        let neverStruck (hostile: HostileInfo) =
+            not (defenderMeets view.Hostiles hostile)
+            || not (
+                HostileInfo.armed view.Hostiles hostile
+                || HostileInfo.works view.Hostiles hostile
+            )
+            || not (inSwing hostile)
+               && (Set.contains hostile.Id view.Parked || Seam.isExit (RoomPos.pos hostile.Pos))
+
+        let held =
+            view.Creeps
+            |> List.exists (fun creep ->
+                isRangerRowBody creep
+                && (Set.contains creep.Name holders
+                    || SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                       |> Option.exists (fun at -> at.Room = home)))
+
+        if castable view rangerPattern || held || lentRangers view holders > 0 then
+            [ CastRow.Defender, met; CastRow.Ranger, atLine |> List.filter neverStruck ]
         else
             [ CastRow.Defender, atLine; CastRow.Ranger, [] ]
 
@@ -848,6 +890,7 @@ module Brief =
     /// Guard's is.
     let internal defending
         (answered: (CastRow * HostileInfo list) list)
+        (lent: int)
         (ground: Set<RoomPos> option)
         (stances: Map<string, Set<RoomPos>>)
         (avoid: Set<Pos>)
@@ -864,7 +907,12 @@ module Brief =
             |> List.map (fun (row, raid) ->
                 {
                     Row = row
-                    Wanted = fun view _ -> defendersWanted raid view
+                    Wanted =
+                        fun view _ ->
+                            if row = CastRow.Ranger then
+                                max 0 (defendersWanted raid view - lent)
+                            else
+                                defendersWanted raid view
                     Blocks =
                         fun view ->
                             if row = CastRow.Ranger then
@@ -977,7 +1025,7 @@ module Brief =
 
         match task with
         | Guard room -> Some(unclaimed room)
-        | Defend _ -> Some(defending [] None Map.empty Set.empty (lazy Answer.Win))
+        | Defend _ -> Some(defending [] 0 None Map.empty Set.empty (lazy Answer.Win))
         | Fight _ -> unformed Duty.Fight
         | Assault _ -> unformed Duty.Assault
         | _ -> None
@@ -1918,9 +1966,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         |> Set.ofSeq
         |> Set.union (view.ChasedOutposts |> Set.filter (raided view >> not))
 
+    // A resident room's raid (#552): every body we shoot there that fights
+    // or heals, or bounces on its exit (`Facts.bouncingInto`), which stands
+    // at the room's line on the tick it is across too.
+    let residentRaid room =
+        Facts.bouncingInto view room
+        |> List.filter (fun hostile ->
+            (HostileInfo.armed view.Hostiles hostile
+             || HostileInfo.heals view.Hostiles hostile)
+            && guardShoots view resident Set.empty hostile)
+
     // The ranger rooms an armed raid, or a rival's claimer, stands in, the
-    // chased rooms a raid stands in, and the raided rooms a ranger answers
-    // (#535).
+    // chased rooms a raid stands in, the raided rooms a ranger answers
+    // (#535), and the resident rooms a raid stands at (#552).
     let contested =
         (view.Hostiles
          |> List.filter (fun hostile ->
@@ -1932,6 +1990,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         @ (ring.Keys
            |> Seq.filter (fun room -> not (Set.contains room rangers) && answeredByRanger room)
            |> List.ofSeq)
+        @ (match view.Hostiles, view.RecalledHealers with
+           | [], [] -> []
+           | _ -> resident |> Set.filter (residentRaid >> List.isEmpty >> not) |> Set.toList)
         |> List.distinct
 
     let kite =
@@ -1959,15 +2020,21 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             // Under an armed raid, our standing ramparts within three of the
             // head (#467): a creep on its own rampart takes no damage, so
-            // they are safe ground whatever the melee reaches.
+            // they are safe ground whatever the melee reaches. In a resident
+            // room with no head to read, within three of its raid (#552).
             let onRamparts () =
-                match head with
-                | Some target when Map.containsKey room ring ->
+                let near (raid: HostileInfo list) =
                     Atlas.ourRampartTilesIn atlas room
                     |> Set.filter (fun tile ->
-                        range tile (RoomPos.pos target.Pos) <= Engine.rangedRange
+                        raid
+                        |> List.exists (fun target ->
+                            range tile (RoomPos.pos target.Pos) <= Engine.rangedRange)
                         && not (Set.contains tile standing))
                     |> RoomPos.setAt room
+
+                match head with
+                | Some target when Map.containsKey room ring -> near [ target ]
+                | _ when Set.contains room resident -> near (residentRaid room)
                 | _ -> Set.empty
 
             // The safe set, two thousand tiles (#371), is the outmatched
@@ -2326,7 +2393,12 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             // Each row's ground off the raiders it answers (#546), and each
             // body of either row held to its own row's.
-            let answered = Brief.defendSplit view atLine
+            let holders =
+                HeldTaskFacts.holdersOf held (taskId (Guard home))
+                @ HeldTaskFacts.holdersOf held (taskId (Defend home))
+                |> Set.ofList
+
+            let answered = Brief.defendSplit view holders atLine
 
             let grounds =
                 answered
@@ -2348,7 +2420,13 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             Map.add
                 (Defend home)
-                (Brief.defending answered ground stances defendAvoid verdict)
+                (Brief.defending
+                    answered
+                    (Brief.lentRangers view holders)
+                    ground
+                    stances
+                    defendAvoid
+                    verdict)
                 briefs
 
     {

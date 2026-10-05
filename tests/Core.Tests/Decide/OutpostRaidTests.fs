@@ -2705,6 +2705,30 @@ let residentChaseTests =
                     (Some(taskId (Guard "W1N3")))
                     "a raid at home calls it back off the chase"
             }
+
+            test
+                "a healer bouncing on the home's exit keeps the resident home on the tick it is across" {
+                // #552, live t981,3xx: the resident was called to W18S25 each
+                // tick the pair stood across the border from W17S25, and
+                // released `task-gone` the next.
+                let bouncing =
+                    { raisingBeyond [ crippledAt { X = 25; Y = 10 } ] with
+                        RecalledHealers =
+                            [
+                                { hostileIn "W1N3" { X = 25; Y = 49 } [ Heal; Move ] with
+                                    Id = "med-1"
+                                    Owner = "Trepidimous"
+                                }
+                            ]
+                    }
+
+                let held = decide bouncing residentHeld Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" held.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "the home is not quiet: no lend"
+            }
         ]
 
 /// `raisingBeyond` with W1N4 beyond the child's home: the child's outpost,

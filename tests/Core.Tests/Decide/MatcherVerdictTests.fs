@@ -407,6 +407,7 @@ let fullMineContainerTests =
                                             Hits = 300
                                             Inward = None
                                             Heals = 0
+                                            Strikes = 0
                                         }
                                     ]
                             Hostiles = []

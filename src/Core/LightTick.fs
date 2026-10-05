@@ -16,6 +16,9 @@ type GlanceCreep =
         Inward: Direction option
         /// Its HEAL parts with hits left: what it heals a tick.
         Heals: int
+        /// Its ATTACK and RANGED_ATTACK parts with hits left: a fighter's
+        /// weapons (#552).
+        Strikes: int
     }
 
 /// One hostile creep in a visible room, asked `HostileInfo`'s questions
@@ -136,7 +139,8 @@ type LastFull =
 [<RequireQualifiedAccess>]
 type LightForce =
     /// A raider (a live weapon or heal, no keeper) in a room we own: a home
-    /// is decided every tick it stands there, by its own colony.
+    /// is decided every tick it stands there, by its own colony and by each
+    /// colony with a fighter standing there (#552: the mother's residents).
     | Home of room: string * owner: string
     /// A body that can strike something of ours, now or after a step, that
     /// it could not as the plans were made, and that is not fighting a creep
@@ -751,12 +755,17 @@ let deciders
         |> List.map fst
         |> Set.ofList
 
-    let standingIn room =
+    let standingWhere (stands: GlanceCreep -> bool) room =
         now.Creeps
         |> Map.toSeq
-        |> Seq.filter (fun (_, creep) -> creep.Tile.Room = room)
+        |> Seq.filter (fun (_, creep) -> creep.Tile.Room = room && stands creep)
         |> Seq.choose (fun (name, _) -> Map.tryFind name holders)
         |> Set.ofSeq
+
+    let standingIn = standingWhere (fun _ -> true)
+
+    // A body with a live weapon or HEAL: a resident, never a worker passing.
+    let fightingIn = standingWhere (fun creep -> creep.Strikes > 0 || creep.Heals > 0)
 
     let holderOf name =
         match Map.tryFind name holders with
@@ -770,7 +779,8 @@ let deciders
     let scope reason =
         let own =
             match reason with
-            | LightForce.Home(room, _) when Set.contains room homes -> Set.singleton room
+            | LightForce.Home(room, _) when Set.contains room homes ->
+                Set.add room (fightingIn room)
             | LightForce.Home(room, _) -> answering room
             | LightForce.Hostile(room, _) -> answering room + standingIn room
             | LightForce.Fought home -> Set.singleton home

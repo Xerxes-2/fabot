@@ -2610,6 +2610,46 @@ let raisedHomeGarrisonTests =
             }
 
             test
+                "a healer alone on the home's exit, there or remembered off it, keeps the garrison on our ramparts within three of it" {
+                // #552, live t981,106: Trepidimous' healer bounced on W17S25's
+                // exit tile, its melee across the border; with no armed
+                // Threat in the room the garrison went back to the
+                // controller's ring every other tick, and never reached the
+                // line.
+                let medic =
+                    { hostileIn
+                          "W1N2"
+                          { X = 0; Y = 30 }
+                          (List.replicate 7 Heal @ List.replicate 11 Move) with
+                        Id = "med-1"
+                        Owner = "Trepidimous"
+                    }
+
+                let ramparts = [ { X = 2; Y = 30 }; { X = 3; Y = 32 }; { X = 4; Y = 30 } ]
+
+                let ground colony =
+                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+                    |> Option.map (Set.map RoomPos.pos)
+
+                let within = Some(Set.ofList [ { X = 2; Y = 30 }; { X = 3; Y = 32 } ])
+
+                Expect.equal
+                    (ground (openGarrison [] [] [ medic ] |> withOurRamparts ramparts))
+                    within
+                    "standing on the exit tile"
+
+                let quiet = openGarrison [] [] [] |> withOurRamparts ramparts
+
+                Expect.equal
+                    (ground
+                        { quiet with
+                            RecalledHealers = [ medic ]
+                        })
+                    within
+                    "carried across the border this tick, remembered on it"
+            }
+
+            test
                 "the garrison shoots the raid's healer before a full-hits melee, and a tapper at the controller first" {
                 // #451: `guardShoots` counted only armed bodies, so the 11M7H
                 // healers keeping W17S25's raid alive were never targets.

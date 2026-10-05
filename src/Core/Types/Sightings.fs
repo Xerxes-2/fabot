@@ -666,8 +666,15 @@ type ExitWatch =
 type HealerSeen = { Healer: HostileInfo; Tick: int }
 
 /// Where a hostile stands, and the tile of its room it stood on the full tick
-/// before when it has stepped off it since (`World.recallHostiles`, #551).
-type HostileStep = { At: RoomPos; Left: RoomPos option }
+/// before when it has stepped off it since (`World.recallHostiles`, #551),
+/// and the first full tick it was seen on `At` (#552): one seen there on two
+/// is parked.
+type HostileStep =
+    {
+        At: RoomPos
+        Left: RoomPos option
+        Since: int
+    }
 
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
@@ -1059,6 +1066,10 @@ module World =
                             Map.tryFind h.Id previous
                             |> Option.map (fun step -> step.At)
                             |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+                        Since =
+                            match Map.tryFind h.Id previous with
+                            | Some step when step.At = h.Pos -> step.Since
+                            | _ -> world.Time
                     })
                 |> Fresh.mapOfSeq
         }

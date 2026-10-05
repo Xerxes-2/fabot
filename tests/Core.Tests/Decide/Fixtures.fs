@@ -189,6 +189,7 @@ let bareRespawn =
         // child, declares no errand, and every tick has vision. "W1N2"
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
+        Parked = Set.empty
         Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []

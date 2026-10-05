@@ -210,6 +210,16 @@ let private glance () : LightTick.Glance =
                         c.body
                         |> Array.sumBy (fun part ->
                             if part.``type`` = "heal" && part.hits > 0 then 1 else 0)
+                    Strikes =
+                        c.body
+                        |> Array.sumBy (fun part ->
+                            if
+                                (part.``type`` = "attack" || part.``type`` = "ranged_attack")
+                                && part.hits > 0
+                            then
+                                1
+                            else
+                                0)
                 }
                 : LightTick.GlanceCreep))
             |> Fresh.mapOfArray

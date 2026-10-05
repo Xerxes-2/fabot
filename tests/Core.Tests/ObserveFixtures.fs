@@ -63,6 +63,7 @@ let quiet: ColonyView =
         Declared = []
         Stages = Map.empty
         Foreign = Set.empty
+        Parked = Set.empty
         Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []

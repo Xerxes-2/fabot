@@ -16,6 +16,7 @@ let private creepAt x y hits : GlanceCreep =
         Hits = hits
         Inward = None
         Heals = 0
+        Strikes = 0
     }
 
 /// The room our controller stands in: not `room`, whose forcing rules are the
@@ -820,6 +821,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 
@@ -886,6 +888,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                             |> Map.add
                                 "anchor"
@@ -894,6 +897,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 
@@ -956,6 +960,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                             |> Map.add
                                 "ranger"
@@ -964,6 +969,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 
@@ -1000,6 +1006,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 
@@ -1369,6 +1376,7 @@ let forcedTests =
                                         Hits = 500
                                         Inward = None
                                         Heals = 0
+                                        Strikes = 0
                                     }
                         }
 
@@ -1392,6 +1400,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = Some Right
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 
@@ -1920,6 +1929,7 @@ let private split: Glance =
                     Hits = 1000
                     Inward = None
                     Heals = 0
+                    Strikes = 0
                 }
             |> Map.add
                 "ranger"
@@ -1928,6 +1938,7 @@ let private split: Glance =
                     Hits = 500
                     Inward = None
                     Heals = 0
+                    Strikes = 0
                 }
     }
 
@@ -1984,6 +1995,58 @@ let decidersTests =
                     "a room nobody answers for, where W3N1's ranger stands"
             }
 
+            test
+                "a raider at a home decides its colony and every colony with a fighter standing there" {
+                // #552: W15S28's residents in W17S25 replayed a plan made
+                // before the healer bounced back in.
+                let standing strikes =
+                    { split with
+                        Creeps =
+                            split.Creeps
+                            |> Map.add
+                                "ranger"
+                                {
+                                    Tile = RoomPos.at "W1N1" { X = 10; Y = 10 }
+                                    Hits = 500
+                                    Inward = None
+                                    Heals = 0
+                                    Strikes = strikes
+                                }
+                    }
+
+                let resident = standing 14
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        (standing 0)
+                        [ LightForce.Home("W1N1", "Trepidimous") ])
+                    (Set.ofList [ "W1N1" ])
+                    "a body with no weapon and no HEAL there decides nothing of W3N1's"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        split
+                        [ LightForce.Home("W1N1", "Trepidimous") ])
+                    (Set.ofList [ "W1N1" ])
+                    "the home alone"
+
+                Expect.equal
+                    (LightTick.deciders
+                        pair
+                        holders
+                        planned
+                        resident
+                        [ LightForce.Home("W1N1", "Trepidimous") ])
+                    (Set.ofList [ "W1N1"; "W3N1" ])
+                    "and W3N1, whose ranger stands in it"
+            }
+
             test "a creep's fact decides its holder, wherever it stands" {
                 Expect.equal
                     (LightTick.deciders pair holders planned split [ LightForce.OnBorder "miner" ])
@@ -2001,6 +2064,7 @@ let decidersTests =
                                     Hits = 900
                                     Inward = None
                                     Heals = 0
+                                    Strikes = 0
                                 }
                     }
 

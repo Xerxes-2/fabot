@@ -300,7 +300,7 @@ let internal buildFloor (view: ColonyView) : int option =
 
     let raidedLately =
         raided view home
-        || not (List.isEmpty view.RecalledHealers)
+        || view.RecalledHealers |> List.exists (fun h -> h.Pos.Room = home)
         || view.HomeRaided
            |> Option.exists (fun tick -> view.Time - tick < view.Tuning.BuildFloorRaidTicks)
 
@@ -408,11 +408,39 @@ let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
 
         weak, sites
 
+/// The hostiles in a room, the bounce on its border included (#552): each on
+/// an exit tile of a room beside it at the tile it lands on in this one, and
+/// each healer remembered off an exit tile of this one
+/// (`ColonyView.RecalledHealers`). The engine carries a body on an exit tile
+/// across every tick, so one bouncing on the border stands in the room every
+/// other tick and answers for it on both, seen across or not.
+let internal bouncingInto (view: ColonyView) (room: string) : HostileInfo list =
+    let seen =
+        view.Hostiles
+        |> List.choose (fun hostile ->
+            if hostile.Pos.Room = room then
+                Some hostile
+            else
+                RoomName.offsetOf hostile.Pos.Room room
+                |> Option.bind (fun offset -> Seam.landingOf offset (RoomPos.pos hostile.Pos))
+                |> Option.map (fun landing ->
+                    { hostile with
+                        Pos = RoomPos.at room landing
+                    }))
+
+    seen
+    @ (view.RecalledHealers
+       |> List.filter (fun healer ->
+           healer.Pos.Room = room
+           && Seam.isExit (RoomPos.pos healer.Pos)
+           && not (seen |> List.exists (fun hostile -> hostile.Id = healer.Id))))
+
 /// The raid bodies at the home's line this tick (#504): a hostile, no
 /// keeper's, standing outside the line (`Atlas.outsideLine`, the exit tiles
 /// included) that fights with an ATTACK or RANGED_ATTACK, heals the raid,
 /// or works with a WORK beside a perimeter
-/// rampart (`HostileInfo.effectiveParts`). A body inside
+/// rampart (`HostileInfo.effectiveParts`); one bouncing on the home's exit
+/// across the border at the exit tile (`bouncingInto`). A body inside
 /// the line — a breach, or at the Keep — is the towers' and the relief's,
 /// never a [[defender]]'s.
 ///
@@ -422,9 +450,8 @@ let internal raidAtLine (view: ColonyView) atlas : Set<Pos> * HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
 
     match
-        view.Hostiles
-        |> List.filter (fun hostile ->
-            hostile.Pos.Room = home && not (HostileInfo.isKeeper hostile))
+        bouncingInto view home
+        |> List.filter (fun hostile -> not (HostileInfo.isKeeper hostile))
     with
     | [] -> Set.empty, []
     | _ when List.isEmpty view.Perimeter -> Set.empty, []
@@ -548,6 +575,16 @@ let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
            HostileInfo.armed view.Hostiles other
            && within Engine.rangedRange other.Pos hostile.Pos)
 
+/// Whether a hostile is a healer in a room we own (#552), whatever stands
+/// beside it, as at the home's line (`raidAtLine`): one bouncing on the exit
+/// while its melee waits across the border, or one tanking the towers
+/// alone. Whose it may be is `mayStrike`'s.
+let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
+    not (HostileInfo.armed view.Hostiles hostile)
+    && HostileInfo.heals view.Hostiles hostile
+    && Map.tryFind hostile.Pos.Room view.RoomControl
+       |> Option.exists (fun control -> control.Owner = Ownership.Ours)
+
 /// Whether a hostile's body trespasses wherever it stands (#516), among
 /// `side`: unarmed in effect, and shot disarmed — a weapon on paper and none
 /// in effect (#528, any owner's since #535), so it strikes nothing back — or
@@ -623,7 +660,9 @@ let internal guardShoots
     && mayStrike view (Set.union residentRooms fighting) hostile
     || claimsAFlag view.Hostiles residentRooms hostile
     || harassTarget view hostile
-    || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
+    || Set.contains hostile.Pos.Room residentRooms
+       && (raidHealer view hostile
+           || healerAtHome view hostile && mayStrike view residentRooms hostile)
     || Set.contains hostile.Pos.Room fighting
        && HostileInfo.heals view.Hostiles hostile
        && mayStrike view fighting hostile
@@ -638,7 +677,9 @@ let internal disturbs (view: ColonyView) (residentRooms: Set<string>) (hostile: 
     HostileInfo.armed view.Hostiles hostile
     || claimsAFlag view.Hostiles residentRooms hostile
     || harassTarget view hostile
-    || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
+    || Set.contains hostile.Pos.Room residentRooms
+       && (raidHealer view hostile
+           || healerAtHome view hostile && mayStrike view residentRooms hostile)
     || trespasser view Set.empty hostile
 
 /// Whether a ranged body of these part counts holds the range on a hostile
@@ -769,12 +810,16 @@ let private borneDamage (side: HostileInfo list) (raid: HostileInfo list) (ours:
 
     swing + Engine.rangedAttackPower * ours RangedAttack
 
-/// Whether the [[defender]]'s swing reaches one body of the raid at the
-/// home's line (#546), by the row rule (`swingBorneOn`): the defender row
-/// answers the ones it reaches, the ranger row the rest — a shooter keeping
-/// its range.
-let internal defenderReaches (side: HostileInfo list) (hostile: HostileInfo) : bool =
-    swingBorneOn side (partCountIn defenderPattern.Block) hostile
+/// Whether the [[defender]] meets one body of the raid at the home's line
+/// (#546, #552): a raider its swing reaches (`swingReaches`), which must
+/// close to hurt our work and so comes to the defender's rampart, a body
+/// working with a WORK beside it, or a healer, which comes with its melee. A
+/// shooter keeping its range never comes.
+let internal defenderMeets (side: HostileInfo list) (hostile: HostileInfo) : bool =
+    if HostileInfo.raider side hostile then
+        swingReaches side (partCountIn defenderPattern.Block) hostile
+    else
+        HostileInfo.works side hostile || HostileInfo.heals side hostile
 
 /// Whether the guard's swing catches a [[trespasser]] (#550): one rooted at
 /// its work (`rootedAtWork`), or one slower than the guard on plain. A hauler
@@ -1173,10 +1218,12 @@ let private homeHolds (view: ColonyView) (home: string) (arriving: HostileInfo l
 /// keeps beats every raider but the kill's own that reaches it before the
 /// garrison is back (`arrivesWithin`, `homeHolds`).
 let private residentQuiet (view: ColonyView) (resident: Set<string>) (kill: string) (home: string) =
-    let inHome, arriving =
-        view.Hostiles
-        |> List.filter (fun h -> h.Pos.Room <> kill)
-        |> List.partition (fun h -> h.Pos.Room = home)
+    // One bouncing on the home's exit is in the home (#552), though it
+    // stands in the kill's room this tick.
+    let inHome = bouncingInto view home
+
+    let arriving =
+        view.Hostiles |> List.filter (fun h -> h.Pos.Room <> kill && h.Pos.Room <> home)
 
     inHome |> List.forall (disturbs view resident >> not)
     && (match arriving |> List.filter (arrivesWithin view home) with

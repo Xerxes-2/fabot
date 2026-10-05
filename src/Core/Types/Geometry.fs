@@ -552,6 +552,24 @@ module Seam =
         | 1, 0 -> eastPairs
         | _ -> []
 
+    /// The tile a body on this exit tile lands on across the border `offset`
+    /// names (`pairsAcross`, one tile of it): None for a tile on no exit of
+    /// that border.
+    let landingOf (dx: int, dy: int) (tile: Pos) : Pos option =
+        let across value step =
+            match step with
+            | 0 -> Some value
+            | 1 when value = exitEdge -> Some 0
+            | -1 when value = 0 -> Some exitEdge
+            | _ -> None
+
+        if abs dx + abs dy = 1 && isExit tile then
+            match across tile.X dx, across tile.Y dy with
+            | Some x, Some y -> Some { X = x; Y = y }
+            | _ -> None
+        else
+            None
+
     /// ADR-0062
     /// Whether a body the engine puts down on a landing tile has anywhere to go:
     /// one tile of the far room's own **ground** beside it. The border ring is
