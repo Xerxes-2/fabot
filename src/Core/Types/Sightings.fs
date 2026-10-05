@@ -192,7 +192,7 @@ module HostileInfo =
     /// its side's budget is spent once — on the body of its owner's within
     /// ranged heal, itself included, short of the most hits (the least id
     /// on a tie). None while every one is whole.
-    let private healTargetOf (side: HostileInfo list) (healer: HostileInfo) : string option =
+    let healTargetOf (side: HostileInfo list) (healer: HostileInfo) : string option =
         side
         |> List.filter (fun ally ->
             ally.Owner = healer.Owner

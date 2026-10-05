@@ -378,7 +378,7 @@ let decideUnarbitrated
     let outpostSiteIntents = outpostContainers @ planFirstSpawns view atlas
 
     let defenseIntents =
-        planSafeMode view atlas
+        planSafeMode view atlas held
         @ planFire view atlas
         @ planTowerHeal view atlas
         @ planRampartDoors view

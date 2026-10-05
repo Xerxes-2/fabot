@@ -151,6 +151,10 @@ module Engine =
     /// range 1.
     let dismantlePower = 50
 
+    /// EXTENSION_HITS: an extension's hits, which the projection does not
+    /// carry (it is no repairable kind).
+    let extensionHits = 1000
+
     /// What one RANGED_ATTACK part's `rangedMassAttack` takes off each target
     /// at this range (`RANGED_MASS_ATTACK` distance rates 1 / 0.4 / 0.1):
     /// 10, 4, 1 to range 3, nothing past it.

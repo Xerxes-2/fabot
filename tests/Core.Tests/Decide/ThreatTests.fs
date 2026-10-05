@@ -1009,6 +1009,95 @@ let rampartDefenderTests =
             }
         ]
 
+/// #545's home: its tower at (25,20) holding `energy`, the spawn at (25,25)
+/// under a 100k rampart of ours, six bare extensions in a row at (33..38,
+/// 30), and a perimeter rampart at (10,40). The Keep stands whole.
+let private economyHome (energy: int) =
+    let colony =
+        wholeKeep
+        |> withHits "ram-s" BuiltKind.Rampart 100_000 3_000_000
+        |> withHits "ram-p" BuiltKind.Rampart 100_000 3_000_000
+
+    { colony with
+        Refillables =
+            {
+                Id = "tower-1"
+                FreeCapacity = Engine.towerCapacity - energy
+                Kind = BuiltKind.Tower
+            }
+            :: colony.Refillables
+        Spatial =
+            colony.Spatial
+            |> withTargets (
+                [
+                    "tower-1", { X = 25; Y = 20 }, Structure BuiltKind.Tower
+                    "spawn-1", { X = 25; Y = 25 }, Structure BuiltKind.Spawn
+                    "ram-s", { X = 25; Y = 25 }, Structure BuiltKind.Rampart
+                    "ram-p", { X = 10; Y = 40 }, Structure BuiltKind.Rampart
+                ]
+                @ [
+                    for x in 33..38 -> $"ext-{x}", { X = x; Y = 30 }, Structure BuiltKind.Extension
+                ]
+            )
+    }
+
+/// The same home with empty bodies of ours of `carry` CARRY and half as
+/// much MOVE on these tiles, `refiller-1` on.
+let private withCarriersAt (carry: int) (tiles: Pos list) (colony: ColonyView) =
+    let named = tiles |> List.mapi (fun i pos -> $"refiller-{i + 1}", pos)
+
+    { colony with
+        Creeps =
+            (named
+             |> List.map (fun (name, _) ->
+                 creepWith
+                     name
+                     0
+                     (50 * carry)
+                     (List.replicate carry Carry @ List.replicate (carry / 2) Move)))
+            @ colony.Creeps
+        Spatial = colony.Spatial |> withCreepsAt named
+    }
+
+/// 16C8M refillers (2,400 hits each): two of them are the refilling floor.
+let private withRefillersAt = withCarriersAt 16
+
+/// The tick decided with every `refiller-…` body of the colony holding the
+/// spawn's Refill: the bodies that refill this home.
+let private decideRefilling (colony: ColonyView) =
+    let held =
+        colony.Creeps
+        |> List.filter (fun c -> c.Name.StartsWith "refiller-")
+        |> List.map (fun c -> c.Name, taskId (Refill("spawn-1", Energy)))
+        |> Map.ofList
+
+    let { Intents = intents } = decideFrom held colony
+    activations intents
+
+/// The spawn's rampart worn to 1,000: the spawn falls to two shooters inside
+/// the horizon.
+let private wornSpawn (colony: ColonyView) =
+    colony |> withHits "ram-s" BuiltKind.Rampart 1_000 3_000_000
+
+/// MeowKittyWow's largest WhatIsAShooter: 1T + (M R M H) x 11, 4,600 hits,
+/// 110 a tick at range 3 and 132 of its own heal.
+let private meowShooterNamed id (pos: Pos) =
+    hostileAt id pos (Tough :: List.concat (List.replicate 11 [ Move; RangedAttack; Move; Heal ]))
+
+/// The same, alone in the room.
+let private meowShooter (pos: Pos) = meowShooterNamed "h-1" pos
+
+/// Three of them abreast at (34..36, 33), every extension in their reach.
+let private meowPack =
+    [ for x in 34..36 -> meowShooterNamed $"h-{x}" { X = x; Y = 33 } ]
+
+/// Two shooters at the spawn's rampart.
+let private spawnPair =
+    [
+        meowShooterNamed "h-s1" { X = 25; Y = 28 }
+        meowShooterNamed "h-s2" { X = 26; Y = 28 }
+    ]
+
 [<Tests>]
 let safeModeTests =
     testList
@@ -1494,6 +1583,376 @@ let safeModeTests =
 
                 let { Intents = intents } = decideOn raided
                 Expect.equal (activations intents) [ "ctrl-1" ] "the home's, and only it"
+            }
+
+            test
+                "half the extensions razed under a rampart-covered Keep fires; one extension never does" {
+                // #545: the Keep stands whole behind its rampart, so the Keep
+                // arm is silent, and the extensions are not of the Keep. Three
+                // shooters heal the one the tower shoots for 396 a tick, as much
+                // as it deals from range 11, and take an extension every three
+                // ticks: half of the six fall with all three standing.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                Expect.equal
+                    (fires (economyHome 1000 |> facing meowPack))
+                    [ "ctrl-1" ]
+                    "half the bank is being razed faster than the tower kills"
+
+                Expect.isEmpty
+                    (fires (economyHome 0 |> facing [ meowShooter { X = 41; Y = 30 } ]))
+                    "a shooter that reaches one extension, even past a dry tower, spends nothing"
+
+                Expect.isEmpty
+                    (fires (
+                        economyHome 1000
+                        |> facing
+                            [
+                                { skirmisher with
+                                    Pos = RoomPos.at "" { X = 35; Y = 33 }
+                                }
+                            ]
+                    ))
+                    "a striker the tower kills before half the extensions fall spends nothing"
+            }
+
+            test "a lone poke at a rampart spends nothing while the tower holds a shot" {
+                // #545 keeps the Keep's rejected proximity trigger rejected:
+                // the rampart absorbs the fire, and the loaded tower keeps it.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                Expect.isEmpty
+                    (fires (economyHome 1000 |> facing [ meowShooter { X = 10; Y = 43 } ]))
+                    "at the perimeter rampart"
+
+                Expect.isEmpty
+                    (fires (economyHome 1000 |> facing [ meowShooter { X = 25; Y = 28 } ]))
+                    "at the spawn's rampart"
+            }
+
+            test "a dry tower with a shooter inside reaching the spawn or the refillers fires" {
+                // #545: Meow enters the tick the tower hits 0. With no shot
+                // left and nobody carrying a refill, two shooters take the
+                // worn rampart and the spawn (6,000 hits at 220 a tick) in 28
+                // ticks; a tower holding less than one shot is dry.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                Expect.equal
+                    (fires (economyHome 0 |> wornSpawn |> facing spawnPair))
+                    [ "ctrl-1" ]
+                    "the spawn, with the tower empty"
+
+                Expect.equal
+                    (fires (economyHome 5 |> wornSpawn |> facing spawnPair))
+                    [ "ctrl-1" ]
+                    "and with the tower short of one shot"
+
+                Expect.isEmpty
+                    (fires (economyHome 1000 |> wornSpawn |> facing spawnPair))
+                    "the loaded tower kills both before the spawn falls"
+
+                Expect.isEmpty
+                    (fires (economyHome 0 |> facing spawnPair))
+                    "a spawn behind 100k of rampart does not fall inside the horizon"
+
+                let shooter = meowShooter { X = 20; Y = 33 }
+                let twoRefillers = withRefillersAt [ { X = 20; Y = 30 }; { X = 21; Y = 30 } ]
+
+                Expect.equal
+                    (decideRefilling (economyHome 0 |> twoRefillers |> facing [ shooter ]))
+                    [ "ctrl-1" ]
+                    "both refillers under fire with the tower empty, 44 ticks"
+
+                Expect.isEmpty
+                    (decideRefilling (
+                        economyHome 0
+                        |> withRefillersAt [ { X = 20; Y = 30 }; { X = 40; Y = 10 } ]
+                        |> facing [ shooter ]
+                    ))
+                    "one refiller of two is never enough"
+
+                Expect.isEmpty
+                    (decideRefilling (economyHome 1000 |> twoRefillers |> facing [ shooter ]))
+                    "the same shooter with the tower loaded is the tower's"
+            }
+
+            test "the cripple, the lone melee and the poor pair past a low tower spend nothing" {
+                // #545 re-review C2-C5 on W17S25's t974,040 shape: a 1-RANGED
+                // cripple at the spawn takes it at t+571, past the horizon; a
+                // lone melee or a melee and healer beside a worn spawn with the
+                // tower at 50 or 60 die to the shots a hauler's 800 refills
+                // before the spawn falls.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                let cripple = hostileAt "c-1" { X = 27; Y = 27 } [ Move; RangedAttack ]
+
+                let melee =
+                    hostileAt
+                        "m-1"
+                        { X = 25; Y = 26 }
+                        (List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ])
+
+                let healer =
+                    hostileAt
+                        "m-2"
+                        { X = 26; Y = 27 }
+                        (List.replicate 11 Move @ List.replicate 7 Heal)
+
+                let haulerAt (energy: int) (colony: ColonyView) =
+                    { colony with
+                        Creeps =
+                            creepWith
+                                "hauler-1"
+                                energy
+                                (800 - energy)
+                                (List.replicate 16 Carry @ List.replicate 8 Move)
+                            :: colony.Creeps
+                        Spatial = colony.Spatial |> withCreepsAt [ "hauler-1", { X = 30; Y = 22 } ]
+                    }
+
+                Expect.isEmpty
+                    (fires (economyHome 0 |> wornSpawn |> facing [ cripple ]))
+                    "C2: the cripple, tower at 0"
+
+                Expect.isEmpty
+                    (fires (economyHome 5 |> wornSpawn |> facing [ cripple ]))
+                    "C3: the cripple, tower at 5"
+
+                // The hauler holds the tower's Refill, eight ticks' walk off.
+                let refilling colony =
+                    let { Intents = intents } =
+                        decideFrom
+                            (Map.ofList [ "hauler-1", taskId (Refill("tower-1", Energy)) ])
+                            colony
+
+                    activations intents
+
+                Expect.isEmpty
+                    (refilling (economyHome 50 |> wornSpawn |> haulerAt 800 |> facing [ melee ]))
+                    "C4: a lone melee, tower at 50, its refiller holding 800"
+
+                Expect.isEmpty
+                    (refilling (
+                        economyHome 60 |> wornSpawn |> haulerAt 800 |> facing [ melee; healer ]
+                    ))
+                    "C5: the pair, tower at 60, its refiller holding 800"
+
+                Expect.equal
+                    (fires (economyHome 0 |> wornSpawn |> haulerAt 800 |> facing [ melee; healer ]))
+                    [ "ctrl-1" ]
+                    "C with a hauler refilling nothing here: its 800 buys the dry tower no shot"
+
+                Expect.equal
+                    (fires (economyHome 0 |> wornSpawn |> facing [ melee; healer ]))
+                    [ "ctrl-1" ]
+                    "C: the pair, the tower at 0 and the carriers dead"
+            }
+
+            test "two cheap bodies, or haulers in transit, are never the refillers" {
+                // #545 re-review D4: two 10C5M haulers beside a melee and a
+                // healer at the west gate, the tower full. 20 CARRY is under
+                // the floor even holding the spawn's Refill, and bodies holding
+                // none are in transit, not refilling.
+                let raid =
+                    [
+                        hostileAt
+                            "m-1"
+                            { X = 20; Y = 33 }
+                            (List.replicate 17 Move @ List.replicate 17 Attack @ [ Move ])
+                        hostileAt
+                            "m-2"
+                            { X = 19; Y = 34 }
+                            (List.replicate 11 Move @ List.replicate 7 Heal)
+                    ]
+
+                let cheap =
+                    economyHome 1000
+                    |> withCarriersAt 10 [ { X = 20; Y = 32 }; { X = 21; Y = 32 } ]
+                    |> facing raid
+
+                let big =
+                    economyHome 0
+                    |> withRefillersAt [ { X = 20; Y = 32 }; { X = 21; Y = 32 } ]
+                    |> facing raid
+
+                Expect.isEmpty (decideRefilling cheap) "two 10-CARRY refillers are under the floor"
+
+                let { Intents = transit } = decideOn big
+
+                Expect.isEmpty
+                    (activations transit)
+                    "16-CARRY bodies holding no Refill are in transit"
+
+                Expect.equal
+                    (decideRefilling big)
+                    [ "ctrl-1" ]
+                    "the same bodies refilling, the tower dry, are the economy"
+            }
+
+            test "a dry tower refills from its refiller once it has walked there" {
+                // #545: a tower between loads reads 0 while the hauler holding
+                // its Refill walks the energy in. Beside the tower, its 1,000
+                // kills both shooters before the worn spawn falls; 15 tiles
+                // off at a loaded gait of two, it lands too late; holding no
+                // Refill of this home, it buys nothing.
+                let dry = economyHome 0 |> wornSpawn |> facing spawnPair
+
+                let carrying (at: Pos) =
+                    { dry with
+                        Creeps =
+                            creepWith
+                                "hauler-1"
+                                1000
+                                0
+                                (List.replicate 20 Carry @ List.replicate 10 Move)
+                            :: dry.Creeps
+                        Spatial = dry.Spatial |> withCreepsAt [ "hauler-1", at ]
+                    }
+
+                let refill = Map.ofList [ "hauler-1", taskId (Refill("tower-1", Energy)) ]
+
+                let fired assigned colony =
+                    activations (decideFrom assigned colony).Intents
+
+                Expect.isEmpty (fired refill (carrying { X = 26; Y = 21 })) "its refiller beside it"
+
+                Expect.equal
+                    (fired refill (carrying { X = 40; Y = 20 }))
+                    [ "ctrl-1" ]
+                    "its refiller 15 tiles off arrives after the spawn is lost"
+
+                Expect.equal
+                    (fired Map.empty (carrying { X = 26; Y = 21 }))
+                    [ "ctrl-1" ]
+                    "a body refilling nothing here buys no shot"
+
+                Expect.equal
+                    (fired Map.empty dry)
+                    [ "ctrl-1" ]
+                    "and nobody at all: the tower is dry"
+            }
+
+            test "the refillers being killed in the home while the tower cannot stop it fire" {
+                // #545: three shooters heal the focus as fast as the loaded
+                // tower hurts it, and both refillers fall in 15 ticks.
+                Expect.equal
+                    (decideRefilling (
+                        economyHome 1000
+                        |> withRefillersAt [ { X = 35; Y = 35 }; { X = 36; Y = 35 } ]
+                        |> facing meowPack
+                    ))
+                    [ "ctrl-1" ]
+                    "the hands that refill are dying"
+            }
+
+            test "a refiller on the exit ring is its walk's to save, not the stock's" {
+                // #545: W17S25 t963,615 and t965,317, a lone melee killing a
+                // hauler on the west exit, held without safe mode.
+                Expect.isEmpty
+                    (decideRefilling (
+                        economyHome 0
+                        |> withRefillersAt [ { X = 20; Y = 0 }; { X = 21; Y = 0 } ]
+                        |> facing [ meowShooter { X = 20; Y = 2 } ]
+                    ))
+                    "the ring's bodies are not counted"
+            }
+
+            test "an Invader razing the economy never spends the stock" {
+                // #545: Invaders recur; 20k ticks of safe mode for what one
+                // raid takes is a bad trade. The same pack, the NPC's.
+                let { Intents = intents } =
+                    decideOn (
+                        economyHome 1000
+                        |> facing (meowPack |> List.map (fun h -> { h with Owner = "Invader" }))
+                    )
+
+                Expect.isEmpty (activations intents) "the NPC's raid is the towers'"
+            }
+
+            test "Meow's entry on a drained tower, shooters on the spawn and the extensions, fires" {
+                // #545's real need, W24S23 at t909,500: the tower bled to three
+                // shots over the edge dance, no Refill held, and four shooters
+                // walk in on the spawn and the extensions.
+                let entry = meowShooterNamed "h-s" { X = 25; Y = 28 } :: meowPack
+
+                let { Intents = intents } = decideOn (economyHome 30 |> facing entry)
+                Expect.equal (activations intents) [ "ctrl-1" ] "nothing stops the raze in time"
+            }
+
+            test "every gate holds over the razing arm" {
+                // #545 adds an arm, never a way past a gate: the stock, safe
+                // mode running here or in another room, the cooldown, the home
+                // room alone (#201), and a towerless home is the undefended
+                // arm's (#448: a winning garrison holds it there).
+                let razed = economyHome 0 |> wornSpawn |> facing spawnPair
+
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                let governed change =
+                    razed |> governedBy (change (controllerAt 1))
+
+                Expect.equal (fires razed) [ "ctrl-1" ] "the premise: the arm fires on its own"
+
+                Expect.isEmpty
+                    (fires (governed (fun c -> { c with SafeModeAvailable = 0 })))
+                    "an empty stock"
+
+                Expect.isEmpty
+                    (fires (governed (fun c -> { c with SafeModeActive = true })))
+                    "already running here"
+
+                Expect.isEmpty
+                    (fires (
+                        governed (fun c ->
+                            { c with
+                                SafeModeCooldownUntil = razed.Time + 1
+                            })
+                    ))
+                    "the controller's cooldown"
+
+                Expect.isEmpty
+                    (fires { razed with SafeModeRunning = true })
+                    "running in another room of ours"
+
+                Expect.isEmpty
+                    (fires
+                        { razed with
+                            Hostiles =
+                                [
+                                    { meowShooter { X = 25; Y = 28 } with
+                                        Pos = RoomPos.at "W1N2" { X = 25; Y = 28 }
+                                    }
+                                ]
+                        })
+                    "the same shooter in another room"
+
+                Expect.isEmpty
+                    (fires (
+                        { razed with
+                            Spatial =
+                                { razed.Spatial with
+                                    TargetKinds = Map.remove "tower-1" razed.Spatial.TargetKinds
+                                }
+                        }
+                        |> garrisoned
+                        |> facing
+                            [
+                                { skirmisher with
+                                    Pos = RoomPos.at "" { X = 25; Y = 28 }
+                                }
+                            ]
+                    ))
+                    "no tower, and a garrison that wins the skirmisher: the undefended arm's call"
             }
 
             test "across colonies the first activation is the one issued" {

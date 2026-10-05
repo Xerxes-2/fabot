@@ -5344,9 +5344,15 @@ let arenaDefenceTests =
                 }
 
             test
-                "scenario 2 (#448): the raid inside a towered home dents the Keep, which fires safe mode the next tick, and nothing lands after" {
+                "scenario 2 (#448): the raid inside a towered home at its bare spawn fires safe mode on the first tick, and nothing lands after" {
                 // The tower takes the undefended arm away, and no tapper
-                // comes: the dented Keep is the only arm that can fire.
+                // comes. Two 17-ATTACK melee beside the bare spawn, the
+                // home's only one, raze it in five ticks; the tower and the
+                // residents kill the first only at t10. The spawn is lost
+                // before the defence stops the raid, so the economy arm
+                // (#545) fires on the first tick, before the Keep arm's dent
+                // (the Keep arm's own case is the safe-mode reflex's "a dented
+                // Keep with a hostile in the room fires").
                 let _, trace = sealedChild 50_000 500 1 (residents @ insideRaid) |> run 80
                 let failure = describe trace
 
@@ -5354,18 +5360,16 @@ let arenaDefenceTests =
                     [ "spawn-Spawn10"; $"tower-{childTower.X}-{childTower.Y}" ]
                     |> List.sumBy (fun id -> Map.tryFind id t.Structures |> Option.defaultValue 0)
 
-                let whole = 5000 + 3000
-
-                match trace |> List.tryFind (fun t -> keep t < whole), safeModeOn trace with
-                | Some dented, Some fired ->
-                    Expect.equal fired (dented.Tick + 1) $"fired the tick after the dent\n{failure}"
+                match safeModeOn trace with
+                | Some fired ->
+                    Expect.equal fired 0 $"fired on the first tick\n{failure}"
 
                     let after = trace |> List.filter (fun t -> t.Tick >= fired)
 
                     Expect.isTrue
                         (after |> List.forall (fun t -> keep t = keep (List.head after)))
                         $"nothing landed on the Keep after\n{failure}"
-                | outcome -> failtest $"a dent and a safe mode: {outcome}\n{failure}"
+                | None -> failtest $"no safe mode\n{failure}"
             }
 
             test
@@ -5944,6 +5948,323 @@ let arenaDefenceTests =
                         Engine.rangedRange
                         $"its rampart within three of the shooter\n{failure}"
                 | None -> failtest $"a ranger shoots from a perimeter rampart\n{failure}"
+            }
+        ]
+
+/// W17S25 as captured at t974,040 (`npm run capture -- W17S25 974040`, #545's
+/// re-review): RCL4, its tower at 13,29 full, Spawn11 at 14,28 under a
+/// 701-hit rampart, twenty extensions, two 16C haulers, and no hostile. The
+/// safe-mode cooldown is cleared so the arms alone decide, and the mother
+/// W15S28 is left out: the safe-mode reflex reads this room alone.
+let private w17s25At974040 () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 4 2
+        |> withSafeModeCooldown 0
+        |> withControllerClocks 0 0 40_000 74_238
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_300
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        10, 24
+                        10, 28
+                        10, 30
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 25
+                        13, 31
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        17, 29
+                        17, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                yield
+                    { structureOf "container" None 96_200 250_000 { X = 16; Y = 34 } with
+                        Energy = 1_781
+                    }
+                yield
+                    { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                        Energy = 46
+                    }
+                yield
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 10; Y = 26 } with
+                        Energy = 22
+                    }
+                for (x, y), hits in
+                    [
+                        (2, 15), 98_521
+                        (2, 16), 99_361
+                        (2, 17), 97_611
+                        (2, 18), 90_931
+                        (2, 19), 90_871
+                        (2, 20), 96_131
+                        (2, 23), 97_121
+                        (2, 24), 91_101
+                        (2, 25), 99_601
+                        (2, 26), 99_261
+                        (2, 27), 99_761
+                        (13, 29), 6_401
+                        (14, 28), 701
+                        (16, 44), 90_321
+                        (17, 20), 30_201
+                        (17, 44), 90_301
+                        (18, 44), 94_301
+                        (32, 31), 99_871
+                        (32, 32), 98_881
+                    ] -> structureOf "rampart" (Some Side.Ours) hits 3_000_000 { X = x; Y = y }
+                yield towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withSite Side.Ours "storage" None 15_711 { X = 13; Y = 27 }
+
+    let colonies = Colony.declared |> List.filter (fun c -> c.Home = "W17S25")
+
+    let bodies: Body list =
+        [
+            { body
+                  "guard-972528-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                  (at "W17S25" 17 40)
+                  None with
+                TicksToLive = 16
+            }
+            { body
+                  "ranger-972663-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 21; RangedAttack, 14; Heal, 7 ])
+                  (at "W17S25" 16 37)
+                  None with
+                TicksToLive = 247
+            }
+            { body
+                  "hauler-972861-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 16; Move, 8 ])
+                  (at "W17S25" 11 24)
+                  None with
+                TicksToLive = 391
+            }
+            { body
+                  "guard-973227-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                  (at "W17S25" 19 30)
+                  None with
+                TicksToLive = 715
+            }
+            { body
+                  "ranger-973229-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 21; RangedAttack, 14; Heal, 7 ])
+                  (at "W17S25" 5 20)
+                  None with
+                TicksToLive = 813
+            }
+            { body
+                  "defender-973295-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 10; Attack, 10 ])
+                  (at "W17S25" 26 31)
+                  None with
+                TicksToLive = 813
+            }
+            { body
+                  "upgrader-973563-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 8; Carry, 1; Move, 8 ])
+                  (at "W17S25" 16 34)
+                  None with
+                TicksToLive = 1_072
+                Energy = 42
+            }
+            { body
+                  "anchor-973966-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 1_454
+                Energy = 50
+            }
+            { body
+                  "hauler-973355-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 16; Move, 8 ])
+                  (at "W17S25" 17 34)
+                  None with
+                TicksToLive = 885
+                Energy = 800
+            }
+        ]
+
+    arena 974_041 [ w17s25 ] colonies bodies
+
+[<Tests>]
+let arenaEconomyArmTests =
+    let trep = Side.Player "Trepidimous"
+    let w (x: int) (y: int) = RoomPos.at "W17S25" { X = x; Y = y }
+
+    let melee id x y =
+        body id trep trepMelee (w x y) (Some Hold)
+
+    let healer id x y =
+        body id trep trepHealer (w x y) (Some Hold)
+
+    let mapRoom (f: ArenaRoom -> ArenaRoom) (a: Arena) =
+        { a with
+            Rooms = a.Rooms |> Map.change "W17S25" (Option.map f)
+        }
+
+    let towerAt (energy: int) (a: Arena) =
+        a
+        |> mapRoom (fun r ->
+            { r with
+                Structures =
+                    r.Structures
+                    |> List.map (fun s ->
+                        if s.Kind = "tower" then { s with Energy = energy } else s)
+            })
+
+    let withBodies bodies (a: Arena) = { a with Bodies = a.Bodies @ bodies }
+
+    let carriersDead (a: Arena) =
+        { a with
+            Bodies =
+                a.Bodies
+                |> List.filter (fun b -> not (b.Side = Side.Ours && List.contains Carry b.Parts))
+        }
+
+    let fires (a: Arena) =
+        let _, trace = a |> run 1
+        safeModeOn trace
+
+    testList
+        "the economy arm on W17S25's t974,040 layout (#545)"
+        [
+            test
+                "two melee pairs beside the worn spawn, the tower full, fire: the spawn falls in six ticks" {
+                let a =
+                    w17s25At974040 ()
+                    |> withBodies
+                        [ melee "m1" 15 28; healer "h1" 16 29; melee "m2" 13 28; healer "h2" 12 29 ]
+
+                Expect.equal (fires a) (Some 0) "B"
+            }
+
+            test "a pair beside the spawn, the tower dry and the carriers dead, fires" {
+                let a =
+                    w17s25At974040 ()
+                    |> towerAt 0
+                    |> carriersDead
+                    |> withBodies [ melee "m1" 15 28; healer "h1" 16 29 ]
+
+                Expect.equal (fires a) (Some 0) "C"
+            }
+
+            test
+                "the same with the upgrader and the anchor alive: their crumbs refill nothing, and it fires" {
+                // A Meow drain with the upgraders standing: a body holding no
+                // Refill of this home buys a dry tower no shot.
+                let a =
+                    w17s25At974040 ()
+                    |> towerAt 0
+                    |> fun a ->
+                        { a with
+                            Bodies =
+                                a.Bodies |> List.filter (fun b -> not (b.Id.StartsWith "hauler-"))
+                        }
+                    |> withBodies [ melee "m1" 15 28; healer "h1" 16 29 ]
+
+                Expect.equal (fires a) (Some 0) "C with upgraders"
+            }
+
+            for name, energy, raid in
+                [
+                    "C2: a 1-RANGED cripple at range 3 of the spawn, the tower at 0",
+                    0,
+                    [ body "c1" trep (parts [ Move, 1; RangedAttack, 1 ]) (w 17 26) (Some Hold) ]
+                    "C3: the same cripple, the tower at 5",
+                    5,
+                    [ body "c1" trep (parts [ Move, 1; RangedAttack, 1 ]) (w 17 26) (Some Hold) ]
+                    "C4: a lone melee beside the spawn, the tower at 50", 50, [ melee "m1" 15 28 ]
+                    "C5: a pair beside the spawn, the tower at 60",
+                    60,
+                    [ melee "m1" 15 28; healer "h1" 16 29 ]
+                ] do
+                test $"{name}, its 800-energy hauler holding the tower's Refill, spends nothing" {
+                    let a = w17s25At974040 () |> towerAt energy |> withBodies raid
+
+                    let a =
+                        { a with
+                            Carried =
+                                { a.Carried with
+                                    Assignments =
+                                        Map.ofList
+                                            [
+                                                "hauler-973355-Spawn11",
+                                                Fabot.Core.Decide.Facts.taskId (
+                                                    Refill("tower-13-29", Energy)
+                                                )
+                                            ]
+                                }
+                        }
+
+                    Expect.isNone (fires a) name
+                }
+
+            test
+                "D4: two 10-CARRY haulers refilling beside a pair at the west gate, the tower full, spend nothing" {
+                let cheap (id: string) (x: int) (y: int) (a: Arena) =
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            |> List.map (fun b ->
+                                if b.Id = id then
+                                    { b with
+                                        Parts = parts [ Carry, 10; Move, 5 ]
+                                        Hits = 1_500
+                                        At = w x y
+                                    }
+                                else
+                                    b)
+                    }
+
+                let refill = Fabot.Core.Decide.Facts.taskId (Refill("spawn-Spawn11", Energy))
+
+                let a =
+                    w17s25At974040 ()
+                    |> cheap "hauler-972861-Spawn11" 4 18
+                    |> cheap "hauler-973355-Spawn11" 4 17
+                    |> withBodies [ melee "m1" 3 18; healer "h1" 2 17 ]
+
+                let a =
+                    { a with
+                        Carried =
+                            { a.Carried with
+                                Assignments =
+                                    Map.ofList
+                                        [
+                                            "hauler-972861-Spawn11", refill
+                                            "hauler-973355-Spawn11", refill
+                                        ]
+                            }
+                    }
+
+                Expect.isNone (fires a) "two cheap bodies are under the refilling floor"
             }
         ]
 

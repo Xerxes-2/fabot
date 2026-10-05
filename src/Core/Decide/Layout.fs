@@ -31,13 +31,437 @@ let private hostilesAtHome (view: ColonyView) : HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
     view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = home)
 
-/// The safe-mode reflex over one room of ours and its controller, three arms
+/// A tower's energy this tick; one the projection holds no store for is read
+/// as empty.
+let private towerEnergy (view: ColonyView) (towerId: string) =
+    view.Refillables
+    |> List.tryFind (fun r -> r.Id = towerId)
+    |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
+    |> Option.defaultValue 0
+
+/// Each hostile's live parts by id (#544), the ones acting this tick: the
+/// engine destroys parts from the head.
+let private liveCounts (hostiles: HostileInfo list) : Map<string, BodyPart -> int> =
+    hostiles
+    |> List.map (fun h ->
+        let counts = Engine.liveParts h.Body h.Hits |> List.countBy id |> Map.ofList
+        h.Id, (fun part -> Map.tryFind part counts |> Option.defaultValue 0))
+    |> Map.ofList
+
+/// What a hostile of these live parts deals one tile of ours in `home` this
+/// tick: its weapons at their reach, or beside a structure its dismantle.
+let private strikeOn
+    (home: string)
+    (parts: BodyPart -> int)
+    (h: HostileInfo)
+    (structure: bool)
+    (tile: Pos)
+    =
+    match RoomPos.range (RoomPos.at home tile) h.Pos with
+    | None -> 0
+    | Some r ->
+        let dismantle =
+            if structure && r <= Engine.meleeRange then
+                Engine.dismantlePower * parts Work
+            else
+                0
+
+        max (damageAt parts r) dismantle
+
+/// One part of the home's means to recover (#545): a spawn, an extension, or
+/// the CARRY of a body that refills them.
+type private Holding =
+    | Spawning
+    | Banking
+    | Refilling
+
+/// The fewest refilling CARRY whose loss is the economy's (#545): 32, two
+/// 16-CARRY haulers, the 1,600 energy a trip that refills an RCL5 bank once.
+/// Two cheap bodies under it are two casts, which the home makes itself.
+let private refillingFloor = 32
+
+/// How far ahead the economy arm reckons (#545): 50 ticks, a hauler's trip
+/// to the store and back or the cast of a refiller, inside which the home
+/// cannot answer a loss itself. A loss further off is asked again every tick
+/// as it nears (an armed raider at home forces every tick full), so the cap
+/// costs no warning, and it bounds the reckoning's CPU.
+let private economyHorizon = 50
+
+/// The share of one part of the economy whose loss before the defence stops
+/// the raid fires the economy arm (#545): half, and never a single extension
+/// or body. Half the extensions is half the bank every body is cast from, and
+/// half the CARRY half the hands refilling the spawn and the towers; less, the
+/// home rebuilds, and a stock of three with a 50k cooldown is not for that.
+/// Half the spawns is the only one of one or two.
+let private economyShareLost (part: Holding) (lost: int) (bodies: int) (whole: int) =
+    whole > 0
+    && 2 * lost >= whole
+    && match part with
+       | Spawning -> true
+       | Banking -> lost >= 2
+       | Refilling -> bodies >= 2 && lost >= refillingFloor
+
+/// Whether the home's means to recover is being razed and its defence will
+/// not stop it in time (#545): the safe-mode reflex's economy arm, the
+/// economy priced as a whole. A tick-by-tick reckoning, every body where it
+/// stands: each raider strikes the softest part of the economy its live
+/// parts reach (a refiller, then a spawn, then an extension; a rampart of
+/// ours over one is hit first), while the towers and our armed creeps, each
+/// striking one raider, shoot the striker with the fewest hits; every healer
+/// heals the one body `HostileInfo.healTargetOf` gives it. A tower out of
+/// energy refills from what a refiller of this home carries, once it has
+/// walked to the tower, while it stands. It fires when `economyShareLost` falls within
+/// `economyHorizon` and before every striker is dead, aged out or out of
+/// anything to strike. A refiller is a body holding a Refill of a spawn, an
+/// extension or a tower here this tick, inside the line and off the exit
+/// ring: a hauler in transit is its walk's to save, not the stock's. A
+/// player's raid only: an Invader recurs, and 20k ticks of safe mode for
+/// what one raid takes is a bad trade. A home with no tower is the
+/// undefended arm's.
+let private economyRazed (view: ColonyView) atlas (held: HeldTaskFacts) : bool =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let raiders =
+        hostilesAtHome view
+        |> List.filter (fun h -> h.Owner <> "Invader" && not (HostileInfo.isKeeper h))
+        |> Array.ofList
+
+    match Atlas.placedTowers atlas with
+    | [] -> false
+    | _ when Array.isEmpty raiders -> false
+    | placed ->
+        let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+        let living = view.Creeps |> List.map (fun c -> c.Name, c) |> Map.ofList
+
+        let towers =
+            placed
+            |> List.map (fun (id, tile) -> tile, towerEnergy view id / Engine.towerEnergyCost)
+            |> Array.ofList
+
+        let rampartHits =
+            SpatialInfo.structureHits view.Spatial
+            |> List.choose (fun (id, kind, hits) ->
+                match kind, Map.tryFind id tiles with
+                | BuiltKind.Rampart, Some tile -> Some(tile, hits.Hits)
+                | _ -> None)
+            |> Map.ofList
+
+        let hitsOf =
+            SpatialInfo.structureHits view.Spatial
+            |> List.map (fun (id, _, hits) -> id, hits.Hits)
+            |> Map.ofList
+
+        // (part, tile, structure, hits, carry): a rampart's hits stand in
+        // front of what it covers.
+        let structures =
+            view.Spatial.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, kind) ->
+                match kind, Map.tryFind id tiles with
+                | Structure(BuiltKind.Extension | BuiltKind.Spawn as built), Some tile ->
+                    let own =
+                        if built = BuiltKind.Extension then
+                            Engine.extensionHits
+                        else
+                            Map.tryFind id hitsOf |> Option.defaultValue 0
+
+                    let covering = Map.tryFind tile rampartHits |> Option.defaultValue 0
+                    let part = if built = BuiltKind.Spawn then Spawning else Banking
+                    Some(part, tile, true, own + covering, 0)
+                | _ -> None)
+
+        let outside = Atlas.outsideLine atlas view.Perimeter
+
+        // The bodies of ours carrying inside the line, off the exit ring:
+        // what refills a tower, and of them the refillers.
+        let carriers =
+            Atlas.placedCreeps atlas
+            |> List.choose (fun (name, at) ->
+                let tile = RoomPos.pos at
+
+                match Map.tryFind name living with
+                | Some creep when
+                    at.Room = home
+                    && partCount creep.Body Carry > 0
+                    && not (Seam.onRing tile)
+                    && not (Set.contains tile outside)
+                    ->
+                    Some(name, tile, creep)
+                | _ -> None)
+
+        let refilling =
+            view.Spatial.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, kind) ->
+                match kind with
+                | Structure(BuiltKind.Extension | BuiltKind.Spawn | BuiltKind.Tower) when
+                    Map.containsKey id tiles
+                    ->
+                    Some(taskId (Refill(id, Energy)))
+                | _ -> None)
+            |> List.collect (HeldTaskFacts.holdersOf held)
+            |> Set.ofList
+
+        let hands =
+            carriers
+            |> List.choose (fun (name, tile, creep) ->
+                if Set.contains name refilling && not (Map.containsKey tile rampartHits) then
+                    Some(Refilling, tile, false, creep.Hits.Hits, partCount creep.Body Carry)
+                else
+                    None)
+
+        let holdings = structures @ hands |> Array.ofList
+        let standing = holdings |> Array.map (fun (_, _, _, hits, _) -> hits)
+
+        // The energy each carrier holds for a dry tower, and the holding it
+        // dies with when it is a refiller.
+        // A dry tower refills from a refiller of this home only, and only
+        // once it has walked there: its range to the tower less the transfer's
+        // one tile, at its loaded gait off road (a tile a tick per MOVE
+        // matching every other part, else slower). Bodies that refill nothing
+        // here, an upgrader's crumbs or a hauler passing through, buy no shot.
+        let pool =
+            carriers
+            |> List.choose (fun (name, tile, creep) ->
+                if Set.contains name refilling then
+                    let moves = max 1 (partCount creep.Body Move)
+
+                    let laden =
+                        creep.Body
+                        |> Map.toList
+                        |> List.sumBy (fun (part, n) -> if part = Move then 0 else n)
+
+                    let gait = max 1 ((laden + moves - 1) / moves)
+
+                    let owner =
+                        holdings
+                        |> Array.tryFindIndex (fun (part, at, _, _, _) ->
+                            part = Refilling && at = tile)
+
+                    Some(owner, tile, gait, creep.Energy)
+                else
+                    None)
+            |> Array.ofList
+
+        // What each raider reaches, at what range: every body holds where it
+        // stands, so the reach is found once.
+        let reach =
+            raiders
+            |> Array.map (fun h ->
+                holdings
+                |> Array.indexed
+                |> Array.choose (fun (j, (_, tile, _, _, _)) ->
+                    RoomPos.range (RoomPos.at home tile) h.Pos
+                    |> Option.filter (fun r -> r <= Engine.rangedRange)
+                    |> Option.map (fun r -> j, r)))
+
+        if reach |> Array.forall Array.isEmpty then
+            false
+        else
+            let whole part =
+                holdings
+                |> Array.sumBy (fun (p, _, _, _, carry) ->
+                    if p <> part then 0
+                    elif part = Refilling then carry
+                    else 1)
+
+            let wholes =
+                [ Spawning, whole Spawning; Banking, whole Banking; Refilling, whole Refilling ]
+
+            let hp = raiders |> Array.map (fun h -> h.Hits)
+            let ttl = raiders |> Array.map (fun h -> h.TicksToLive)
+            let shots = towers |> Array.map snd
+            let alive i = hp[i] > 0 && ttl[i] > 0
+
+            let partsAt i =
+                let counts = Engine.liveParts raiders[i].Body hp[i] |> List.countBy id |> Map.ofList
+
+                fun part -> Map.tryFind part counts |> Option.defaultValue 0
+
+            let fighters =
+                Atlas.placedCreeps atlas
+                |> List.choose (fun (name, at) ->
+                    match Map.tryFind name living with
+                    | Some creep when
+                        at.Room = home
+                        && (partCount creep.Body Attack > 0
+                            || partCount creep.Body RangedAttack > 0)
+                        ->
+                        Some(at, partCount creep.Body)
+                    | _ -> None)
+
+            // A raider strikes a refiller first, then a spawn, then an
+            // extension, each the softest standing: Meow's order.
+            let order (part, _, _, _, _) =
+                match part with
+                | Refilling -> 0
+                | Spawning -> 1
+                | Banking -> 2
+
+            let fuel = pool |> Array.map (fun (_, _, _, energy) -> energy)
+
+            // Tower t's next shot on this tick, out of what a standing
+            // refiller arrived beside it holds.
+            let refuel t tick =
+                let at = fst towers[t]
+
+                pool
+                |> Array.indexed
+                |> Array.tryFind (fun (k, (owner, tile, gait, _)) ->
+                    fuel[k] >= Engine.towerEnergyCost
+                    && owner |> Option.forall (fun j -> standing[j] > 0)
+                    && RoomPos.range at (RoomPos.at home tile)
+                       |> Option.exists (fun r -> tick > max 0 (r - 1) * gait))
+                |> Option.map (fun (k, _) -> fuel[k] <- fuel[k] - Engine.towerEnergyCost)
+                |> Option.isSome
+
+            let rec reckon tick =
+                // Each raider's live parts, once a tick.
+                let partsOf =
+                    Array.init raiders.Length (fun i -> if alive i then partsAt i else fun _ -> 0)
+
+                // What raider i's live parts deal holding j at range r.
+                let strike i (j, r) =
+                    let parts = partsOf[i]
+                    let _, _, structure, _, _ = holdings[j]
+
+                    let dismantle =
+                        if structure && r <= Engine.meleeRange then
+                            Engine.dismantlePower * parts Work
+                        else
+                            0
+
+                    max (damageAt parts r) dismantle
+
+                let strikes =
+                    [ 0 .. raiders.Length - 1 ]
+                    |> List.choose (fun i ->
+                        if alive i then
+                            reach[i]
+                            |> Array.filter (fun (j, r) -> standing[j] > 0 && strike i (j, r) > 0)
+                            |> function
+                                | [||] -> None
+                                | struck ->
+                                    let j, r =
+                                        struck
+                                        |> Array.minBy (fun (j, _) ->
+                                            order holdings[j], standing[j], j)
+
+                                    Some(i, j, strike i (j, r))
+                        else
+                            None)
+
+                let strikers = strikes |> List.map (fun (i, _, _) -> i)
+
+                if List.isEmpty strikes || tick > economyHorizon then
+                    false
+                else
+                    // The raid's strikes on the economy.
+                    for _, j, damage in strikes do
+                        standing[j] <- standing[j] - damage
+
+                    let razed =
+                        wholes
+                        |> List.exists (fun (part, whole) ->
+                            let lost =
+                                holdings
+                                |> Array.indexed
+                                |> Array.filter (fun (j, (p, _, _, _, _)) ->
+                                    p = part && standing[j] <= 0)
+
+                            let share =
+                                lost
+                                |> Array.sumBy (fun (_, (_, _, _, _, carry)) ->
+                                    if part = Refilling then carry else 1)
+
+                            economyShareLost part share lost.Length whole)
+
+                    if razed then
+                        true
+                    else
+                        // The defence: the towers on the striker with the
+                        // fewest hits, each armed body of ours on one raider.
+                        let dealt = Array.zeroCreate raiders.Length
+                        let focus = strikers |> List.minBy (fun i -> hp[i], raiders[i].Id)
+
+                        for t in 0 .. towers.Length - 1 do
+                            if shots[t] > 0 || refuel t tick then
+                                shots[t] <- max 0 (shots[t] - 1)
+
+                                match RoomPos.range (fst towers[t]) raiders[focus].Pos with
+                                | Some r -> dealt[focus] <- dealt[focus] + Engine.towerAttackAt r
+                                | None -> ()
+
+                        for at, parts in fighters do
+                            let inReach =
+                                [ 0 .. raiders.Length - 1 ]
+                                |> List.choose (fun i ->
+                                    if alive i then
+                                        RoomPos.range at raiders[i].Pos
+                                        |> Option.filter (fun r -> damageAt parts r > 0)
+                                        |> Option.map (fun r -> i, r)
+                                    else
+                                        None)
+
+                            match inReach |> List.tryFind (fun (i, _) -> i = focus) with
+                            | Some(i, r) -> dealt[i] <- dealt[i] + damageAt parts r
+                            | None ->
+                                match inReach with
+                                | [] -> ()
+                                | _ ->
+                                    let i, r =
+                                        inReach |> List.minBy (fun (i, r) -> r, raiders[i].Id)
+
+                                    dealt[i] <- dealt[i] + damageAt parts r
+
+                        // Each healer heals once, the body its heal picks.
+                        let side =
+                            [ 0 .. raiders.Length - 1 ]
+                            |> List.filter alive
+                            |> List.map (fun i -> { raiders[i] with Hits = hp[i] })
+
+                        let healed = Array.zeroCreate raiders.Length
+
+                        for i in 0 .. raiders.Length - 1 do
+                            let heals = if alive i then partsOf[i]Heal else 0
+
+                            if heals > 0 then
+                                match
+                                    HostileInfo.healTargetOf side { raiders[i] with Hits = hp[i] }
+                                with
+                                | Some target ->
+                                    match
+                                        raiders |> Array.tryFindIndex (fun h -> h.Id = target)
+                                    with
+                                    | Some k ->
+                                        let power =
+                                            match RoomPos.range raiders[i].Pos raiders[k].Pos with
+                                            | Some r when r <= Engine.meleeRange -> Engine.healPower
+                                            | _ -> Engine.rangedHealPower
+
+                                        healed[k] <- healed[k] + power * heals
+                                    | None -> ()
+                                | None -> ()
+
+                        for i in 0 .. raiders.Length - 1 do
+                            if alive i then
+                                let top = Engine.partHits * List.length raiders[i].Body
+                                hp[i] <- min top (hp[i] - dealt[i] + healed[i])
+                                ttl[i] <- ttl[i] - 1
+
+                        reckon (tick + 1)
+
+            reckon 1
+
+/// The safe-mode reflex over one room of ours and its controller, four arms
 /// and one pair of gates — stock remaining, safe mode not already running.
 /// The CLAIM arm holds until a claimer stands within reach of the range-1
 /// tap; an unplaceable controller falls back to firing on sight. The Keep
 /// arm: `keepDented` while any hostile stands in the room — any hostile and
 /// not only a Threat, a WORK-only dismantler hurting a structure without ever
-/// qualifying as one. The undefended arm (#217): no tower standing and an
+/// qualifying as one. The economy arm: `razed` (`economyRazed`, #545), a
+/// Keep behind its ramparts says nothing while the extensions and the
+/// refillers die. The undefended arm (#217): no tower standing and an
 /// armed hostile in the room, unless one armed body of ours there wins the
 /// exchange alone (`Quota.homeHolds`, #448), and only while `guarded` — a
 /// Nursery's is a begun site, so a squad crossing an empty claimed room does
@@ -51,6 +475,7 @@ let private safeModeIn
     atlas
     (room: string)
     (keepDented: bool)
+    (razed: Lazy<bool>)
     (guarded: bool)
     (controller: ControllerInfo)
     : Intent list =
@@ -87,7 +512,9 @@ let private safeModeIn
             && here |> List.exists (HostileInfo.armed here)
             && not (Quota.homeHolds view room)
 
-        if claimerInReach || dentedKeepUnderHostiles || undefended then
+        // Last: the economy's reckoning is the dearest question, asked only
+        // past the gates and when no cheaper arm already fires.
+        if claimerInReach || dentedKeepUnderHostiles || undefended || razed.Value then
             [ ActivateSafeMode controller.Id ]
         else
             []
@@ -98,16 +525,23 @@ let private safeModeIn
 /// the colony's own home, and over each [[nursery]] it raises (#449), which
 /// runs no tick of its own. The home's Keep half is `keepDamaged`'s, off the
 /// same projected hits the Repair pool walks; the Posts and the ramparts are
-/// hungry on their own lines and are not of the Keep. A Nursery has no Keep
+/// hungry on their own lines and are not of the Keep; its economy half is
+/// `economyRazed`'s. A Nursery has no Keep or economy
 /// standing — a spawn is what ends it — and its mother projects no hits there;
 /// what it guards is a site of ours with energy already built into it. One
 /// activation at most, the home's first: the engine takes one per shard.
-let internal planSafeMode (view: ColonyView) atlas : Intent list =
+let internal planSafeMode (view: ColonyView) atlas (held: HeldTaskFacts) : Intent list =
     let home =
         view.Controller
         |> Option.toList
         |> List.collect (
-            safeModeIn view atlas (SpatialInfo.homeName view.Spatial) (keepDamaged view) true
+            safeModeIn
+                view
+                atlas
+                (SpatialInfo.homeName view.Spatial)
+                (keepDamaged view)
+                (lazy (economyRazed view atlas held))
+                true
         )
 
     let begunIn room =
@@ -120,7 +554,7 @@ let internal planSafeMode (view: ColonyView) atlas : Intent list =
         view.NurseryControllers
         |> Map.toList
         |> List.collect (fun (room, controller) ->
-            safeModeIn view atlas room false (begunIn room) controller)
+            safeModeIn view atlas room false (lazy false) (begunIn room) controller)
 
     List.truncate 1 (home @ nurseries)
 
@@ -248,14 +682,6 @@ let internal planAid (view: ColonyView) (sending: Set<string>) : Intent list =
         |> List.choose ship
     | _ -> []
 
-/// A tower's energy this tick; one the projection holds no store for is read
-/// as empty.
-let private towerEnergy (view: ColonyView) (towerId: string) =
-    view.Refillables
-    |> List.tryFind (fun r -> r.Id = towerId)
-    |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
-    |> Option.defaultValue 0
-
 /// The fire reflex's held hand (#477): with no hostile worth a shot, each tower
 /// still holding `Tuning.TowerRepairReserve` after the act repairs the rampart
 /// of ours under attack (`rampartsUnderAttack`, #467) with the fewest hits,
@@ -372,33 +798,13 @@ let internal planFire (view: ColonyView) atlas : Intent list =
             |> Set.ofList
             |> Set.union keep
 
-        // What each hostile strikes ours with this tick: its live parts, the
-        // ones acting now.
-        let strikers =
-            hostiles
-            |> List.map (fun h ->
-                let counts = Engine.liveParts h.Body h.Hits |> List.countBy id |> Map.ofList
-                h.Id, (fun part -> Map.tryFind part counts |> Option.defaultValue 0))
-            |> Map.ofList
-
-        // What a hostile deals one tile of ours this tick: its weapons at
-        // their reach, or beside a structure its dismantle.
-        let strikeOn (h: HostileInfo) (structure: bool) (tile: Pos) =
-            match RoomPos.range (RoomPos.at home tile) h.Pos with
-            | None -> 0
-            | Some r ->
-                let parts = strikers[h.Id]
-
-                let dismantle =
-                    if structure && r <= Engine.meleeRange then
-                        Engine.dismantlePower * parts Work
-                    else
-                        0
-
-                max (damageAt parts r) dismantle
+        let strikers = liveCounts hostiles
 
         let hardest (h: HostileInfo) structure (tiles: Set<Pos>) =
-            tiles |> Seq.fold (fun most tile -> max most (strikeOn h structure tile)) 0
+            tiles
+            |> Seq.fold
+                (fun most tile -> max most (strikeOn home strikers[h.Id] h structure tile))
+                0
 
         // What it deals the one creep or structure of ours it strikes
         // hardest (a creep strikes one target a tick), which the threat
