@@ -66,7 +66,7 @@ type Formation =
 
 /// Which flavour one room's `guard:<room>` Task is this tick: classified once
 /// (`threatsHeldBy`), and read in place of the room's class. One kind a room,
-/// the first in `BriefKind.order` to claim it.
+/// the first in `BriefKind.order` whose claim pools a Task this tick.
 [<RequireQualifiedAccess>]
 type BriefKind =
     /// The melee guard on a raid's ring, or walked to a threatened outpost
@@ -92,11 +92,13 @@ type Duty =
 module BriefKind =
     /// The order a room's flavour is read in, written once: a resident room,
     /// a [[harassment room]], a chase (#510), a raid's ring, a held exit
-    /// (#450), a level-0 core (#487), a trespass's kill (#516). The first to
-    /// claim a room is its kind; a kind claims only a room still open to it
-    /// (`opens`), so a held exit, a core and a trespass lay no ground under a
-    /// kind ahead of them (`threatsHeldBy`); and a Guard's ground is the first
-    /// laid in its room from its kind down (`Brief.Ground`).
+    /// (#450), a level-0 core (#487), a trespass's kill (#516). The order
+    /// decides only among claims that pool a Task this tick (#542): the first
+    /// of those is the room's kind, and a claim that pools nothing shuts no
+    /// kind out. A kind claims only a room still open to it (`opens`), so a
+    /// held exit, a core and a trespass lay no ground under a pooling kind
+    /// ahead of them (`threatsHeldBy`); and a Guard's ground is the first laid
+    /// in its room from its kind down (`Brief.Ground`).
     let order =
         [
             BriefKind.Resident
@@ -116,8 +118,8 @@ module BriefKind =
         | BriefKind.Core -> true
         | _ -> false
 
-    /// Whether a room a kind ahead claims is still open to `kind`: only a ring
-    /// kind under a chase. Two halves. Load-bearing: a chase in sight is
+    /// Whether a room a pooling kind ahead claims is still open to `kind`:
+    /// only a ring kind under a chase. Two halves. Load-bearing: a chase in sight is
     /// always a raid's room, so the raid still claims it as `Outpost`, and
     /// that claim shuts the held exit, the core and the trespass out of it.
     /// Quirk, kept (the Brief's S0): out of sight no raid claims it, so a held
@@ -246,9 +248,9 @@ type Brief =
     {
         Duty: Duty
         /// A Guard's: every kind that claimed the room, down
-        /// `BriefKind.order`, its own first. A held exit (#450) among them is
-        /// where the Planner keeps a living guard's Guard pooled, and hires
-        /// for none. None for a Task of its own.
+        /// `BriefKind.order`, those that pool first (#542), its own first. A
+        /// held exit (#450) among them is where the Planner keeps a living
+        /// guard's Guard pooled, and hires for none. None for a Task of its own.
         Claims: BriefKind list
         /// What its holder shoots (`Emitter.guardTarget`); a defender, the
         /// raid at the line, fewest hits first (`Emitter.defendIntent`).
@@ -2033,10 +2035,31 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             else
                 Some(room, RoomPos.setAt room ground))
 
+    // Whether a kind's claim on a room pools a Task this tick, as `planTasks`
+    // pools it (#542): a kill always; any kind where the room's Guard is
+    // pooled whatever claims it (`Facts.guardedRooms`), or where a body of
+    // ours holds that Guard beside a hostile (`engaged`, the held fight); a
+    // held exit where a body holds its Guard. `engaged` is a superset of the
+    // Planner's `fought` (which also asks `holdsFight` — circular here, as it
+    // reads the Brief): where they differ the kill pools a tick later, never
+    // stalls. The guarded rooms are derived
+    // only where a claim ahead would otherwise shut a later one out.
+    let guarded =
+        lazy
+            (Facts.guardedRooms view (Facts.declaredOutposts view) (Facts.fuelledErrands view)
+             |> Set.ofList)
+
+    let pools kind room =
+        BriefKind.isKill kind
+        || Set.contains room engaged
+        || kind = BriefKind.ExitHold && Set.contains (taskId (Guard room)) held.All
+        || Set.contains room guarded.Value
+
     // Each kind's claim, down `BriefKind.order`, on the rooms still open to
     // it: the first four claim their rooms outright, a held exit, a core and
-    // a trespass only the rooms they lay ground in. Per room, its claimants
-    // in that order, the first its kind; per kind, the ground it laid.
+    // a trespass only the rooms they lay ground in. A claim that pools nothing
+    // shuts nobody out. Per room, its claimants in that order; per kind, the
+    // ground it laid.
     let claimants, laid =
         let outright rooms open' =
             rooms |> Seq.filter open' |> Seq.map (fun room -> room, Set.empty) |> List.ofSeq
@@ -2055,7 +2078,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         ||> List.fold (fun (claimants: Map<string, BriefKind list>, laid) kind ->
             let open' room =
                 Map.tryFind room claimants
-                |> Option.forall (List.forall (fun ahead -> BriefKind.opens ahead kind))
+                |> Option.forall (
+                    List.forall (fun ahead -> BriefKind.opens ahead kind || not (pools ahead room))
+                )
 
             let claims = claimOf kind open'
 
@@ -2068,6 +2093,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         claimants)
 
             claimants, Map.add kind claims laid)
+
+    // A room's claims, those that pool first, so its kind is the first in
+    // order that pools; where none does, the first, which pools nothing.
+    let claimsIn room =
+        match Map.tryFind room claimants with
+        | Some(_ :: _ :: _ as claims) ->
+            let pooling, idle = claims |> List.partition (fun kind -> pools kind room)
+            pooling @ idle
+        | Some claims -> claims
+        | None -> []
 
     let laidBy kind = Map.find kind laid
 
@@ -2108,7 +2143,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 verdict
                 winners
                 (lazy (answeredByRanger room))
-                (Map.tryFind room claimants |> Option.defaultValue [])
+                (claimsIn room)
                 {
                     Kite = Map.tryFind room kite
                     Resident = Map.tryFind room residentRing

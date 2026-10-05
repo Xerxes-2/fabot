@@ -3394,6 +3394,17 @@ let private precedenceBasis =
     |> westField
     |> withGuards [ guard "g-1", { X = 3; Y = 43 }; ranger "r-1", { X = 28; Y = 42 } ]
 
+/// One room's Guard Brief as a colony whose creeps hold these Tasks reads it.
+let private heldBriefOf (holding: (string * Task) list) (room: string) (colony: ColonyView) =
+    let atlas = Atlas.ofView colony
+
+    let held =
+        heldTaskFacts
+            colony
+            (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+
+    Threats.briefOf (threatsOfHeld colony atlas held) room
+
 /// What one mix of flavours answers for a room's Guard.
 type private GuardAnswer =
     {
@@ -3464,14 +3475,26 @@ let guardPrecedenceTests =
             // Guard and a ranger, and reads whether the Planner pools the Guard,
             // its ground (named by the flavour whose ground alone it equals, and
             // by the `Threats` field that supplies it), its rank and capacity, and
-            // who holds it after the tick.
+            // who holds it after the tick. The ground is read as that colony
+            // reads it, the guard holding the Guard (#542: a held exit's claim
+            // pools only for its holder).
             test "the ground, rank, capacity and taker of each mix of flavours" {
                 let held = [ "g-1", Guard "W1N2" ]
 
                 let read flavours =
                     let colony = List.fold withFlavour precedenceBasis flavours
                     let atlas = Atlas.ofView colony
-                    let threats = threatsOf colony atlas
+
+                    let threats =
+                        threatsOfHeld
+                            colony
+                            atlas
+                            (heldTaskFacts
+                                colony
+                                (held
+                                 |> List.map (fun (name, task) -> name, taskId task)
+                                 |> Map.ofList))
+
                     let ground = Threats.guardGroundIn threats "W1N2"
 
                     let groundAlone flavour =
@@ -3561,11 +3584,13 @@ let guardPrecedenceTests =
                         [ Hold; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Core; Trespasser ], row [ Core ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold; Core; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        // A ranger room's declared ground before all three. The
-                        // hold and the trespass pool nothing there; the core
-                        // pools the Guard, and the garrison takes it on the
-                        // Reactor's ring, the core unhit.
-                        [ Resident; Hold ], unpooled [ Resident ] [ "ResidentRing" ]
+                        // A ranger room's declared ground before all three,
+                        // where it pools. Moved by #542: an errand with no ore
+                        // pools nothing, so the held exit its guard holds is the
+                        // room's (it was the resident's, pooled for nobody).
+                        [ Resident; Hold ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
+                        // The core pools the Guard, and the garrison takes it
+                        // on the Reactor's ring, the core unhit.
                         [ Resident; Core ],
                         row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "r-1" ]
                         // The guard holding it holds the trespass's fight (#535).
@@ -3745,6 +3770,9 @@ let guardPrecedenceTests =
                         [ Raid; Resident ], BriefKind.Resident
                         [ Raid; Harassed ], BriefKind.Harass
                         [ Hold; Core; Trespasser ], BriefKind.ExitHold
+                        // #542: nobody holds the exit, so its claim pools
+                        // nothing and the trespass's kill is the room's.
+                        [ Hold; Trespasser ], BriefKind.Trespass
                         [ Core; Trespasser ], BriefKind.Core
                         [ Resident; Core ], BriefKind.Resident
                         [ Harassed; Trespasser ], BriefKind.Harass
@@ -3759,6 +3787,63 @@ let guardPrecedenceTests =
                     (rows |> List.map (fun (flavours, _) -> flavours, kindOf flavours))
                     (rows |> List.map (fun (flavours, kind) -> flavours, Duty.Guard kind))
                     "each mix's kind"
+            }
+
+            // #542 (live t976,867-976,972, Specter836 in W17S26): a kind
+            // claims a room only where it pools a Task this tick; precedence
+            // decides among those claims alone.
+            test
+                "a held exit nobody holds claims nothing, so the trespasser beside it is the room's kill" {
+                let colony = List.fold withFlavour precedenceBasis [ Hold; Trespasser ]
+
+                Expect.equal
+                    (heldBriefOf [] "W1N2" colony).Duty
+                    (Duty.Guard BriefKind.Trespass)
+                    "the trespass's Guard"
+
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N2") colony)
+                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
+                    "pooled as its kill"
+            }
+
+            // #542, the same rule in the home: no Guard is pooled for a raid
+            // there (the home's is the Defend), so the raid's claim gives way
+            // to the digger's kill, where before it pooled nothing.
+            test "a raid in the home pools no Guard, so the trespasser beside it is the home's kill" {
+                let colony =
+                    declaredRaid
+                        [
+                            diggerAt "W1N1" { X = 25; Y = 5 }
+                            { hostileIn "W1N1" { X = 25; Y = 8 } smallMelee with
+                                Id = "h-2"
+                            }
+                        ]
+
+                Expect.equal
+                    (heldBriefOf [] "W1N1" colony).Claims
+                    [ BriefKind.Trespass; BriefKind.Outpost ]
+                    "the kill first, the raid's claim after it"
+
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N1") colony)
+                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
+                    "pooled as the kill"
+            }
+
+            test "a held exit a guard holds keeps the room over the trespasser" {
+                let colony = List.fold withFlavour precedenceBasis [ Hold; Trespasser ]
+                let holding = [ "g-1", Guard "W1N2" ]
+
+                Expect.equal
+                    (heldBriefOf holding "W1N2" colony).Duty
+                    (Duty.Guard BriefKind.ExitHold)
+                    "the held exit's Guard"
+
+                Expect.equal
+                    (pooledHolding holding (Guard "W1N2") colony)
+                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
+                    "pooled on the tier for its holder"
             }
         ]
 
@@ -4065,17 +4150,6 @@ let killAdmissionTests =
                     "and its step keeps out of the Reach"
             }
         ]
-
-/// One room's Guard Brief as a colony whose creeps hold these Tasks reads it.
-let private heldBriefOf (holding: (string * Task) list) (room: string) (colony: ColonyView) =
-    let atlas = Atlas.ofView colony
-
-    let held =
-        heldTaskFacts
-            colony
-            (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
-
-    Threats.briefOf (threatsOfHeld colony atlas held) room
 
 /// The W11S28 invasion's shape (#535, live t973,670): a small mixed body
 /// that closes, two shooters that keep range, a healer behind each.

@@ -2107,6 +2107,168 @@ let internal fuelledErrands (view: ColonyView) : Errand list =
 
     if fuelled then view.Errands else []
 
+/// Whether the named room carries an owner at all — one spelling for the two
+/// rules of the reserver's that read it. `reserveController` answers
+/// ERR_INVALID_TARGET on a controller with an owner, *whoever* it is, so the
+/// Reserve pool must not carry its controller and the row must not hire against
+/// it. A rival's counts too, because the stand-down reads the *previous* tick's
+/// raid log and the one tick between first sight and the withdrawal cast the
+/// bank's whole reserver body at a room the engine refuses.
+let private roomHasOwner (view: ColonyView) room =
+    view.RoomControl
+    |> Map.tryFind room
+    |> Option.exists (fun control -> control.Owner <> Ownership.Unowned)
+
+/// The candidate colonies' controllers, each with the room it stands in. A
+/// candidate colony is a declared home this colony does not own yet, and both
+/// halves are needed: the declaration, because no projected fact distinguishes
+/// a room we mean to own from a neighbour we merely mine; and the ownership,
+/// because the tick the claim lands this pool empties itself, with no state
+/// kept.
+let internal candidateControllers (view: ColonyView) : (string * string) list =
+    let takeable room =
+        match Map.tryFind room view.RoomControl with
+        | Some control ->
+            control.Owner = Ownership.Unowned
+            && RoomControlInfo.heldByOther control |> Option.isNone
+        | None -> false
+
+    let candidate room =
+        List.contains room view.Declared && takeable room
+
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.choose (fun id ->
+        match SpatialInfo.placementOf view.Spatial id with
+        | Some tile when candidate tile.Room -> Some(id, tile.Room)
+        | _ -> None)
+
+/// The controllers of the rooms this colony works as outposts: every controller
+/// the projection carries that is not this colony's home, stands in no room
+/// somebody owns, and is no candidate colony's. The engine refuses
+/// `reserveController` on an owned room, so an owned room's controller is one
+/// this colony is withdrawing from rather than mining.
+///
+/// Ids and not rooms, because a controller the projection does not place names
+/// no room and is still ours to reserve — it is the Reserve pool that reads it
+/// that way, while `declaredOutposts` takes the rooms and loses the unplaced
+/// one. One scan for all three readers, or the rows and the pool could
+/// disagree about which rooms are ours to work.
+let internal outpostControllers (view: ColonyView) : string list =
+    let home = view.Controller |> Option.map (fun c -> c.Id)
+    let claimed = candidateControllers view |> List.map fst |> Set.ofList
+
+    SpatialInfo.idsOfKind view.Spatial Controller
+    |> List.filter (fun id ->
+        Some id <> home
+        && not (Set.contains id claimed)
+        && not (SpatialInfo.roomOf view.Spatial id |> Option.exists (roomHasOwner view)))
+
+/// The rooms of `outpostControllers`' answer, each once.
+let internal declaredOf (view: ColonyView) (controllers: string list) : string list =
+    controllers |> List.choose (SpatialInfo.roomOf view.Spatial) |> List.distinct
+
+/// The declared outposts this colony works this tick — the rooms the guard row
+/// is hired per and the rooms the reserver row starts from, written once so
+/// the two cannot disagree. A room qualifies by carrying a controller of its
+/// own in the projection that is not this colony's home, unowned, and not a
+/// candidate colony's.
+///
+/// Declared and not posted (#131): gating on a standing container deadlocks
+/// the outpost chain, since the container needs vision, vision needs a creep,
+/// and the reserver is the only creep with a reason to go. The scan set is the
+/// gate that remains, narrowed inside `World.scanOf` by the stand-down and by
+/// `Outpost.withinHopBudget`; what *says* so is `Outpost.refused` on the
+/// layout record.
+///
+/// Off the projection itself (`SpatialInfo.placementOf`) and not off the
+/// Atlas's join of it: the Planner's first half is handed the view and no
+/// Atlas. The derivation itself is `outpostControllers`: this takes its rooms,
+/// the Reserve pool takes its ids once `reservableControllers` has dropped the
+/// controllers somebody else holds, and the reserver row takes the rooms of
+/// *that*.
+let internal declaredOutposts (view: ColonyView) : string list =
+    declaredOf view (outpostControllers view)
+
+/// The declared outposts a threat stands in this tick. A Threat and never "a
+/// hostile".
+///
+/// Vision is not the whole of what it reads (#366): the vision in an
+/// *unguarded* outpost is the anchor, the hauler and the reserver, which are
+/// precisely what a raid kills, and read off vision alone the Guard left the
+/// pool while the cast body stood idle at home. So a tick with vision decides
+/// the room either way, and a tick without reads the last look's record
+/// (`view.ThreatenedOutposts`), which ends by its own clock
+/// (`Tuning.ThreatMemory`) because nothing in the engine counts a raid down. A
+/// room never looked into is in neither half: this rule buys a body, not a look.
+let private guardedOutpostsOf (view: ColonyView) (declared: string list) : string list =
+    if List.isEmpty view.Hostiles && Set.isEmpty view.ThreatenedOutposts then
+        []
+    else
+        declared
+        |> List.filter (fun room ->
+            let seenArmed =
+                view.Hostiles
+                |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h)
+
+            // The union of the two halves and not a two-armed test on vision,
+            // so the blind half can never take a room the tick's own hostiles
+            // put in: the record is the previous tick's, and this tick's raid
+            // outranks it wherever both answer.
+            seenArmed
+            || (Set.contains room view.ThreatenedOutposts
+                && not (Map.containsKey room view.RoomControl)))
+
+/// The declared outposts a level-0 invader core stands in (#487): it holds the
+/// controller against the reserver for as long as it stands, and a guard
+/// kills it. Vision alone: a core never moves, so the room's own bodies see it.
+let private coredOutpostsOf (view: ColonyView) (declared: string list) : string list =
+    match expansionCores view with
+    | [] -> []
+    | cores ->
+        declared
+        |> List.filter (fun room -> cores |> List.exists (fun core -> core.RoomName = room))
+
+/// ADR-0077
+/// The errand rooms the ranger row keeps a body in: every one this colony works
+/// this tick, raid or none — the ranger stands on the Reactor's ring and meets
+/// what comes (`Laid.Resident`), while there is ore to burn in it
+/// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
+/// `view.Errands` before this reads it.
+let private guardedErrandsOf (fuelled: Errand list) : string list =
+    fuelled
+    |> List.map (fun errand -> errand.RoomName)
+    |> List.distinct
+    |> List.sort
+
+/// The children's homes this colony defends (`BorrowedWork.Defended`) that an
+/// armed hostile stands in this tick. The scan set already asked the harder
+/// question; this is the vision half every other guarded room is read by.
+let private defendedHomesOf (view: ColonyView) : string list =
+    view.Borrowed.Defended
+    |> List.filter (fun room ->
+        view.Hostiles
+        |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h))
+
+/// The rooms whose Guard `planTasks` pools whatever kind claims them, and the
+/// rooms the fighting rows cast for (`OutpostFacts.Guarded`), or a Guard is
+/// pooled with no body bought or a body cast with no Task: the declared
+/// outposts a threat or a level-0 core (#487) stands in, the errand rooms the
+/// ranger row keeps a body in (#414), the children's homes this colony raises
+/// (#447) or defends (#428), and the harassment rooms it casts (#432). Each
+/// room once: a raised home that is beaten is one Guard and one row's count,
+/// not two. The Brief reads it too (#542): a kind claims a room only where its
+/// claim pools something.
+let internal guardedRooms (view: ColonyView) (declared: string list) (fuelled: Errand list) =
+    guardedOutpostsOf view declared
+    @ coredOutpostsOf view declared
+    @ guardedErrandsOf fuelled
+    // Raid or none, as an errand room is kept.
+    @ (raisedHomes view |> Set.toList)
+    @ defendedHomesOf view
+    // Target or none, as an errand room is kept.
+    @ (harassRooms view |> Set.toList)
+    |> List.distinct
+
 /// Whether the season's delivery programme has all of its current ground
 /// facts (#319, narrowed by #361): a Storage holding a load, and a resident
 /// CLAIM body at a declared Reactor. No remembered switch — each fact closes
