@@ -3873,6 +3873,54 @@ let dyingRampartTests =
                          p.Task = Repair "rampart-1" && p.Priority >= priorityOfTier Surplus))
                     "over the dying line its Repair is surplus again"
             }
+
+            test
+                "the declared line under its floor, and a site on it, rank over every other Repair and Build" {
+                // W17S25, 2026-10-05: its west line lay broken and thin while a
+                // rescued road and an extension took both workers.
+                let rankIn colony task =
+                    poolOn colony
+                    |> List.tryFind (fun p -> p.Task = task)
+                    |> Option.map (fun p -> p.Priority)
+
+                let lined = defenderHome defendedLine [] []
+                let unlined = { lined with Perimeter = [] }
+
+                Expect.isTrue
+                    (Option.map2
+                        (<)
+                        (rankIn lined (Repair "ram-a"))
+                        (rankIn unlined (Repair "ram-a")) = Some true)
+                    "ram-a at 90,000 under the 100,000 floor: on the line it is lifted"
+
+                Expect.isNone
+                    (rankIn lined (Repair "ram-c"))
+                    "the premise: ram-c stands at its floor and pools no Repair"
+
+                let sited =
+                    let bare = defenderHome [] [] []
+
+                    { bare with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-r"
+                                    Left = 1
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            bare.Spatial
+                            |> withTargets [ "site-r", { X = 20; Y = 34 }, Site BuiltKind.Rampart ]
+                    }
+
+                let siteOn = rankIn sited (Build "site-r")
+                let siteOff = rankIn { sited with Perimeter = [] } (Build "site-r")
+
+                Expect.isTrue
+                    (Option.map2 (<) siteOn siteOff = Some true)
+                    $"a rampart site on the line is lifted the same way ({siteOn} vs {siteOff})"
+            }
         ]
 
 /// `defenderHome` with the room west of it, W2N1, joined to the home's

@@ -714,6 +714,40 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
 
     let underAttack = Facts.rampartsUnderAttack view
 
+    // The declared perimeter's ramparts under their floor, and the sites on
+    // its tiles: the line a raid breaks, rebuilt before roads and extensions.
+    let weakLine, lineSites =
+        if not (Facts.keepsRamparts view) || List.isEmpty view.Perimeter then
+            Set.empty, Set.empty
+        else
+            let home = SpatialInfo.homeName view.Spatial
+            let line = Set.ofList view.Perimeter
+
+            let floorAt tile =
+                Map.tryFind tile view.RampartFloors
+                |> Option.defaultValue view.Tuning.RampartFloor
+
+            let weak =
+                Facts.perimeterRamparts view
+                |> List.choose (fun (id, tile, hits) ->
+                    if hits < floorAt (RoomPos.pos tile) then Some id else None)
+                |> Set.ofList
+
+            let sites =
+                tasks
+                |> List.choose (function
+                    | Build siteId when
+                        Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Rampart)
+                        ->
+                        SpatialInfo.placementOf view.Spatial siteId
+                        |> Option.filter (fun tile ->
+                            tile.Room = home && Set.contains (RoomPos.pos tile) line)
+                        |> Option.map (fun _ -> siteId)
+                    | _ -> None)
+                |> Set.ofList
+
+            weak, sites
+
     // The emergency reserve (#505): under it the stock's draw is the
     // emergency sinks' — the refill cluster and the towers, and the Repairs
     // of a dying or a struck rampart.
@@ -1017,6 +1051,13 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
                    |> Option.exists (fun room -> Atlas.builtIn atlas room BuiltKind.Tower = 0)
                 ->
                 TwoRungsUp
+            // The declared line under its floor, and a site on it (user,
+            // 2026-10-05): W17S25's west line lay broken and thin while a
+            // rescued road and an extension took both workers, a rampart's
+            // floor rule never reading as a rescue. Above the home site's
+            // rung, which would otherwise answer first.
+            | Repair id when Set.contains id weakLine -> TwoRungsUp
+            | Build siteId when Set.contains siteId lineSites -> TwoRungsUp
             // A site outranks the controller inside the surplus tier (#234):
             // a worker that fills at the buffer is already standing in the
             // controller's Work Area, so Upgrade costs it nothing and never
