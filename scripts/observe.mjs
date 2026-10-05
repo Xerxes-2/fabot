@@ -82,6 +82,7 @@
 // which is declaration order because the loop writes in it.
 import { connect, fail } from "./screeps-api.mjs";
 import { gunzipSync } from "node:zlib";
+import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-history.mjs";
 import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
 
 const usage =
@@ -323,24 +324,6 @@ const gameTime = async () => {
 
 // Resolve after `ms` without the shell's `sleep`.
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// A body as counts by part, `16w 16c 16m`, in the order the parts first
-// appear; `tough` and `claim` keep enough letters to stay apart.
-const PART = { work: "w", carry: "c", move: "m", attack: "a", ranged_attack: "r", heal: "h", tough: "t", claim: "cl" };
-const bodySummary = (body) => {
-  const counts = new Map();
-  for (const part of body ?? []) counts.set(part.type, (counts.get(part.type) ?? 0) + 1);
-  return [...counts].map(([type, n]) => `${n}${PART[type] ?? type}`).join(" ");
-};
-
-// The actions a creep logged this tick, `attack→24,31 move`; the engine
-// writes every key and nulls the ones that did not happen. `say` is left
-// out: this bot says something every tick and it is never an action.
-const actionSummary = (log) =>
-  Object.entries(log ?? {})
-    .filter(([name, at]) => at && name !== "say")
-    .map(([name, at]) => (typeof at === "object" && "x" in at ? `${name}→${at.x},${at.y}` : name))
-    .join(" ");
 
 // ---- console: a bounded subscription, the one non-Memory command --------
 
@@ -641,61 +624,15 @@ if (command === "console") {
 } else if (command === "history") {
   // ---- history: the room-history replay at one tick -----------------------
 
-  // One file per hundred ticks, gzip, no auth: the first tick holds whole
-  // objects and every later tick a deep-merge diff, `null` for removed. So
-  // the tick asked for is the file's first tick with every diff up to it
-  // applied.
-  const base = Math.floor(historyTick / 100) * 100;
-  const href = `${new URL(url).origin}/room-history/${shard}/${roomName}/${base}.json`;
-  const res = await fetch(href).catch((err) => fail(`history fetch failed: ${err.message ?? err}`));
-  if (!res.ok) {
-    fail(`no history at ${href} (HTTP ${res.status}) — the newest 100-200 ticks are not written yet`);
-  }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  let text;
-  try {
-    text = gunzipSync(buffer).toString();
-  } catch {
-    text = buffer.toString();
-  }
-  const chunk = JSON.parse(text);
-  const deepMerge = (into, diff) => {
-    for (const [key, value] of Object.entries(diff)) {
-      if (value === null) delete into[key];
-      else if (value && typeof value === "object" && !Array.isArray(value) && into[key] && typeof into[key] === "object")
-        deepMerge(into[key], value);
-      else into[key] = value;
-    }
-  };
-  const state = {};
-  const ticks = Object.keys(chunk.ticks ?? {})
-    .map(Number)
-    .filter((t) => t <= historyTick)
-    .sort((a, b) => a - b);
-  for (const t of ticks) {
-    for (const [id, o] of Object.entries(chunk.ticks[t] ?? {})) {
-      if (o === null) delete state[id];
-      else if (!state[id]) state[id] = structuredClone(o);
-      else deepMerge(state[id], o);
-    }
-  }
-  if (!Object.hasOwn(chunk.ticks ?? {}, String(historyTick))) {
-    fail(`t${historyTick} is not in ${href}; it holds t${Object.keys(chunk.ticks ?? {}).join(", t")}`);
-  }
+  const { base, objects: state } = await readHistory({ url, shard, room: roomName, tick: historyTick }).catch((err) =>
+    fail(err.message),
+  );
   if (json) {
     console.log(JSON.stringify({ tick: historyTick, objects: state }, null, 2));
   } else {
     // The file names owners by id; the API turns the few ids into names.
     const objects = Object.values(state);
-    const ids = [...new Set(objects.map((o) => o.user).filter(Boolean))];
-    const usernames = new Map(
-      await Promise.all(
-        ids.map(async (id) => {
-          const found = await api.req("GET", "/api/user/find", { id }).catch(() => null);
-          return [id, found?.user?.username ?? id];
-        }),
-      ),
-    );
+    const usernames = await usernamesOf(api, objects.map((o) => o.user));
     const who = (id) => usernames.get(id) ?? id ?? "—";
     console.log(`${roomName} at t${historyTick} (replayed from t${base})`);
     const controller = objects.find((o) => o.type === "controller");

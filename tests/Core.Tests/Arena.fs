@@ -576,6 +576,29 @@ let withSafeModeCooldown (until: int) (r: ArenaRoom) : ArenaRoom =
         Controller = r.Controller |> Option.map (fun c -> { c with SafeModeCooldown = until })
     }
 
+/// The room's controller clocks as a live tick read them (#532): safe mode
+/// running to `safeModeUntil` (0 for none), upgrades blocked to
+/// `upgradeBlockedUntil`, `ticksToDowngrade` left and `progress` toward the
+/// next level. Placed after `withController`.
+let withControllerClocks
+    (safeModeUntil: int)
+    (upgradeBlockedUntil: int)
+    (ticksToDowngrade: int)
+    (progress: int)
+    (r: ArenaRoom)
+    : ArenaRoom =
+    { r with
+        Controller =
+            r.Controller
+            |> Option.map (fun c ->
+                { c with
+                    SafeModeUntil = safeModeUntil
+                    UpgradeBlockedUntil = upgradeBlockedUntil
+                    TicksToDowngrade = ticksToDowngrade
+                    Progress = progress
+                })
+    }
+
 /// CONSTRUCTION_COST (`constants.js`) of the kinds a site is placed for here.
 let private constructionCost (kind: string) =
     match kind with
