@@ -673,53 +673,18 @@ let errandDeclarationTests =
                 // three crossings out, joined only if W15S27's and W15S26's rings are
                 // both crossable.
                 //
-                // `linked` is built the way `World.linked` builds it, and a room no
-                // capture is loaded for is joined to nothing.
-                //
-                // NOTE: these rings and this ground are the **raw** captures, as a
-                // deliberate control: the keeper margin takes tiles out of W15S26's
-                // layers and is re-checked over the **masked** layer in `RoomSeamTests`
-                // and `ViewTests`. A red line here is the terrain moving and a red line
-                // there is the mask moving.
-                //
-                // The hand-rolled predicates below are #337's to delete: the outpost
-                // case above calls the shipped predicates, and this one cannot, because
-                // those take a margin and what is wanted here is no mask at all.
-                let rings =
-                    Colony.declared
-                    |> List.collect (fun colony ->
-                        Outpost.roomsProjected colony.Outposts colony.Home
-                        @ Errand.roomsProjected colony.Errands colony.Home)
-                    |> List.distinct
-                    |> List.map (fun room -> room, ((load room).Border, (load room).Terrain))
-                    |> Map.ofList
-
-                let linked fromRoom toRoom =
-                    let nonWall (layer: Map<Pos, Terrain>) tile =
-                        match Map.tryFind tile layer with
-                        | Some terrain -> terrain <> Wall
-                        | None -> false
-
-                    let walkableIn room tile =
-                        match Map.tryFind room rings with
-                        | Some(border, _) -> nonWall border tile
-                        | None -> false
-
-                    // The far room's ground beside the landing, raw like the ring above it.
-                    let groundIn room tile =
-                        match Map.tryFind room rings with
-                        | Some(_, terrain) ->
-                            match TerrainGrid.tryFind tile terrain with
-                            | Some ground -> ground <> Wall
-                            | None -> false
-                        | None -> false
-
-                    Seam.joinedBy
-                        (walkableIn fromRoom)
-                        (walkableIn toRoom)
-                        (groundIn toRoom)
-                        fromRoom
-                        toRoom
+                // The shipped predicates at the shipped keeper margin, as the outpost
+                // case above asks them (#337), so a margin change moves both halves
+                // alike. The mask's own premise over W15S26 — that the margin closes
+                // a crossing the raw rings leave open — is `ViewTests`'
+                // `scanSetMaskTests`.
+                let linked =
+                    shippedLinked (
+                        Colony.declared
+                        |> List.collect (fun colony ->
+                            Outpost.roomsProjected colony.Outposts colony.Home
+                            @ Errand.roomsProjected colony.Errands colony.Home)
+                    )
 
                 Expect.isNonEmpty
                     (Colony.declared |> List.collect (fun colony -> colony.Errands))
