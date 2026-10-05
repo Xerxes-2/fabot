@@ -105,6 +105,14 @@ let outpostDeclarationTests =
                 Expect.isEmpty
                     unreachable
                     $"""every declared outpost is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
+
+                // Next door both ways: no keeper room (W14S26) and no rival
+                // room is crossed (#444).
+                Expect.equal
+                    ([ "W13S26"; "W12S25" ]
+                     |> List.map (RoomName.routesBy linked Tuning.defaults.MaxHops "W12S26"))
+                    [ [ [ "W12S26"; "W13S26" ] ]; [ [ "W12S26"; "W12S25" ] ] ]
+                    "W12S26's west and north outposts are one crossing out, straight over the seam"
             }
 
             test "a chain of real border rings joins every declared salvage room to its home" {

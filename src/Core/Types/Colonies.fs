@@ -452,6 +452,26 @@ module Outpost =
             Controller = "6a8caa71dd4872bccd318b29", { Room = "W18S25"; X = 16; Y = 9 }
         }
 
+    /// W12S26's west outpost, declared 2026-10-06 (user, #547): one crossing,
+    /// unowned and unreserved, one source (35,23) two tiles from the
+    /// controller. Ids and tiles are the committed capture's.
+    let w13s26: Outpost =
+        {
+            RoomName = "W13S26"
+            Sources = [ "6a8caaaddd4872bccd31935c", { Room = "W13S26"; X = 35; Y = 23 } ]
+            Controller = "6a8caaaddd4872bccd31935b", { Room = "W13S26"; X = 33; Y = 23 }
+        }
+
+    /// W12S26's north outpost, declared 2026-10-06 (user, #547): one
+    /// crossing, unowned and unreserved, one source (3,7). Ids and tiles are
+    /// the committed capture's.
+    let w12s25: Outpost =
+        {
+            RoomName = "W12S25"
+            Sources = [ "6a8caab9dd4872bccd31949f", { Room = "W12S25"; X = 3; Y = 7 } ]
+            Controller = "6a8caab9dd4872bccd3194a0", { Room = "W12S25"; X = 17; Y = 26 }
+        }
+
     /// W12S28's west outpost, declared 2026-09-16 off
     /// `docs/research/outpost-wave-2.md`: one hop, one source at a 210-tick
     /// round trip, about 6.25 energy a tick net, and the cheapest tick of the
@@ -1373,7 +1393,9 @@ module Colony =
             // replaced it the same day, in quiet ground no rival is near.
             {
                 Home = "W12S26"
-                Outposts = []
+                // West and north from 2026-10-06 (#547): next door both
+                // ways, no keeper or rival room on either walk.
+                Outposts = [ Outpost.w13s26; Outpost.w12s25 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W12S28"

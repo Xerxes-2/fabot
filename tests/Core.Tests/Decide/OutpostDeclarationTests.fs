@@ -1327,6 +1327,12 @@ let outpostTests =
                 | None -> failtest "W17S25 is declared a colony again from 2026-10-03"
 
                 Expect.equal
+                    (Colony.outpostsOf Colony.declared "W12S26"
+                     |> List.map (fun outpost -> outpost.RoomName))
+                    [ "W13S26"; "W12S25" ]
+                    "the seventh colony mines its west and north neighbours from 2026-10-06 (#547), each unowned and unreserved with one source"
+
+                Expect.equal
                     (Outpost.adr0042 |> List.map (fun outpost -> outpost.RoomName))
                     [ "W12S27"; "W13S28" ]
                     "while ADR 0042's measured pair is kept whole for the real-terrain fixtures"
