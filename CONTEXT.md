@@ -293,7 +293,7 @@ What one [[colony]] may take of another's, named on its [[colony view]] and boun
 _Avoid_: shared work, cross-colony pool
 
 ### Foreign bodies
-Where the creeps a [[colony]] does not hold stand in the rooms it works (`ColonyView.Foreign`): priced around by the [[occupancy surcharge]] and treated as walls by a colony arbitrating alone. ADR-0052, ADR-0070.
+Where the creeps a [[colony]] does not hold stand in the rooms it works (`ColonyView.Foreign`): priced around by the [[occupancy surcharge]] and treated as walls by a colony arbitrating alone. ADR-0052, ADR-0070. A hostile's or ally's body counts as well, rooted or not (#536), and one that stepped since the full tick before also stands on the tile it left (`World.HostileSteps`, #551): a body swaying between two tiles enters the one it is not on.
 _Avoid_: other creeps, outsiders, hostiles
 
 ### Pioneer

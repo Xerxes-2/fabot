@@ -292,6 +292,7 @@ type Carried =
         Towered: Set<string>
         ExitWatches: Map<string, ExitWatch>
         Healers: Map<string, HealerSeen list>
+        HostileSteps: Map<string, HostileStep>
         ArmedSeen: Map<string, int>
         LastPositions: Map<string, RoomPos>
         /// The store each body's load was drawn from (#530).
@@ -759,6 +760,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Towered = Set.empty
                 ExitWatches = Map.empty
                 Healers = Map.empty
+                HostileSteps = Map.empty
                 ArmedSeen = Map.empty
                 LastPositions = Map.empty
                 Drawn = Map.empty
@@ -1219,6 +1221,7 @@ let worldOf (a: Arena) : World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        HostileSteps = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
     }
@@ -1226,6 +1229,7 @@ let worldOf (a: Arena) : World =
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
+    |> World.recallHostiles a.Carried.HostileSteps
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
 
@@ -1359,6 +1363,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Towered = world.Towered
         ExitWatches = world.ExitWatches
         Healers = world.Healers
+        HostileSteps = world.HostileSteps
         ArmedSeen = world.ArmedSeen
         Raids = raids
         Danger =

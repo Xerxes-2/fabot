@@ -950,6 +950,8 @@ let ofGame
         ExitWatches = Map.empty
         // And the healer memory `World.recallHealers`' (#480).
         Healers = Map.empty
+        // And each hostile's last step `World.recallHostiles`' (#551).
+        HostileSteps = Map.empty
         // And the armed-room memory `World.recallArmed`' (#485).
         ArmedSeen = Map.empty
         // And the rival controllers `World.recallRivalControllers`' (#489).

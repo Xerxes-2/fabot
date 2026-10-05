@@ -228,6 +228,7 @@ let private world: World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        HostileSteps = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
     }

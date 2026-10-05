@@ -329,6 +329,7 @@ let private pairWorld: World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        HostileSteps = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
     }
@@ -1078,6 +1079,59 @@ let colonyViewTests =
                     (viewOf world child).Foreign
                     (Set.ofList [ RoomPos.at child pioneerTile; invader.Pos; ally.Pos ])
                     "the mother's pioneer, the invader and the ally alike"
+            }
+
+            test "a hostile that stepped since the last full tick also stands on the tile it left" {
+                // #551: a trespasser swaying between two tiles every tick was
+                // entering the tile our hauler stepped into, every tick.
+                let stranger id (x, y) : HostileInfo =
+                    {
+                        Id = id
+                        Owner = "Trepidimous"
+                        Pos = RoomPos.at child { X = x; Y = y }
+                        Body = [ Move ]
+                        Hits = Engine.partHits
+                        TicksToLive = 1000
+                    }
+
+                let seeing time hostiles =
+                    { pairWorld with
+                        Time = time
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.change
+                                child
+                                (Option.map (fun facts -> { facts with Hostiles = hostiles }))
+                    }
+
+                let before =
+                    seeing 1000 [ stranger "sway" (10, 10); stranger "still" (20, 20) ]
+                    |> World.recallHostiles Map.empty
+
+                let now =
+                    seeing 1001 [ stranger "sway" (11, 10); stranger "still" (20, 20) ]
+                    |> World.recallHostiles before.HostileSteps
+
+                Expect.equal
+                    (viewOf now child).Foreign
+                    (Set.ofList
+                        [
+                            RoomPos.at child pioneerTile
+                            RoomPos.at child { X = 11; Y = 10 }
+                            RoomPos.at child { X = 10; Y = 10 }
+                            RoomPos.at child { X = 20; Y = 20 }
+                        ])
+                    "the swaying one on both its tiles, the still one on its own"
+
+                Expect.equal
+                    (viewOf before child).Foreign
+                    (Set.ofList
+                        [
+                            RoomPos.at child pioneerTile
+                            RoomPos.at child { X = 10; Y = 10 }
+                            RoomPos.at child { X = 20; Y = 20 }
+                        ])
+                    "first seen, each on its own tile"
             }
 
             // The Brief's S7: what a raid beside the child's home may call.

@@ -665,6 +665,10 @@ type ExitWatch =
 /// (`World.recallHealers`, #480).
 type HealerSeen = { Healer: HostileInfo; Tick: int }
 
+/// Where a hostile stands, and the tile of its room it stood on the full tick
+/// before when it has stepped off it since (`World.recallHostiles`, #551).
+type HostileStep = { At: RoomPos; Left: RoomPos option }
+
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
 /// **shell's**: one table for the life of the process, because every answer
@@ -726,6 +730,10 @@ type World =
         /// healer bouncing across the exit heals on every other tick. Heap
         /// state in the shell, never Memory.
         Healers: Map<string, HealerSeen list>
+        /// Every hostile in sight by id, and the tile it left since the full
+        /// tick before (`World.recallHostiles`, #551). Heap state in the
+        /// shell, never Memory.
+        HostileSteps: Map<string, HostileStep>
         /// The last tick an armed rival — not an ally, not a Source Keeper —
         /// stood in each room, kept for `Tuning.HostileRoomMemory` ticks
         /// (`World.recallArmed`, #485): the rooms a non-fighter's walk goes
@@ -750,6 +758,7 @@ module World =
             Towered = Set.empty
             ExitWatches = Map.empty
             Healers = Map.empty
+            HostileSteps = Map.empty
             ArmedSeen = Map.empty
             RivalControllers = Map.empty
         }
@@ -1024,6 +1033,29 @@ module World =
 
         { world with
             Healers = world.Rooms |> Map.toSeq |> Seq.choose remember |> Fresh.mapOfSeq
+        }
+
+    /// This tick's world with each hostile's last step laid under it (#551):
+    /// every hostile standing in a room this tick, and the tile of that room
+    /// it stood on the full tick before when that is not where it stands.
+    /// Bounded by this tick's hostiles, and built by `Fresh`, the map being
+    /// carried to the next tick.
+    let recallHostiles (previous: Map<string, HostileStep>) (world: World) : World =
+        { world with
+            HostileSteps =
+                world.Rooms
+                |> Map.toSeq
+                |> Seq.collect (fun (_, facts) -> facts.Hostiles)
+                |> Seq.map (fun h ->
+                    h.Id,
+                    {
+                        At = h.Pos
+                        Left =
+                            Map.tryFind h.Id previous
+                            |> Option.map (fun step -> step.At)
+                            |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+                    })
+                |> Fresh.mapOfSeq
         }
 
     /// This tick's world with the armed-room memory laid under it (#485):

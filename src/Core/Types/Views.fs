@@ -445,7 +445,8 @@ type ColonyView =
         Stages: Map<string, ColonyStage>
         /// Where every creep this colony does not hold stands in the rooms it
         /// works — other colonies' of ours, hostiles' and allies': bodies it
-        /// cannot move.
+        /// cannot move. A hostile or ally that stepped since the full tick
+        /// before stands on the tile it left as well (`World.HostileSteps`).
         Foreign: Set<RoomPos>
         /// For a child, its mother's bodies standing in its home, and where:
         /// the residents she keeps there (#447), whom a raid beside the home
@@ -1436,9 +1437,15 @@ module ColonyView =
                     |> List.filter (fun (name, _) -> not (Set.contains name names))
                     |> List.map (snd >> RoomPos.at room))
                 // Hostiles and allies alike (#536): a body rooted on a step is
-                // one the engine refuses every tick, armed or not.
+                // one the engine refuses every tick, armed or not. One that
+                // stepped stands on the tile it left too (#551): a body
+                // swaying between two tiles enters the one it is not on.
                 |> List.append (
-                    collected (fun facts -> facts.Hostiles) |> List.map (fun h -> h.Pos)
+                    collected (fun facts -> facts.Hostiles)
+                    |> List.collect (fun h ->
+                        match Map.tryFind h.Id world.HostileSteps with
+                        | Some { Left = Some left } -> [ h.Pos; left ]
+                        | _ -> [ h.Pos ])
                 )
                 |> Set.ofList
             Lendable =
