@@ -172,6 +172,63 @@ let invaderCoreTests =
 
                 Expect.isNonEmpty (moveIntentsFor "g-1" walking.Intents) "and walks to the core"
             }
+
+            // Characterisation (the Brief's S0): the core's Guard whole. Its swing
+            // and its row are pinned above and by `the guard row`, its stand-down
+            // by `raid fold: outpost episodes`.
+            test
+                "a level-0 core's Guard is the guard row's body on the core's ring, on the tier, for one" {
+                let colony =
+                    { declaredRaid [] with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                    }
+                    |> withGuards
+                        [
+                            guard "g-1", beside
+                            creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 800),
+                            { X = 21; Y = 47 }
+                        ]
+
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N2") colony)
+                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
+                    "one Guard on the Safety tier, for one body"
+
+                Expect.equal
+                    (Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
+                    (Some(
+                        set
+                            [
+                                for x in 24..26 do
+                                    for y in 41..43 do
+                                        if (x, y) <> (25, 42) then
+                                            RoomPos.at "W1N2" { X = x; Y = y }
+                            ]
+                    ))
+                    "its ground is the core's ring"
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard takes it"
+
+                let alone =
+                    { declaredRaid [] with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                    }
+                    |> withGuards
+                        [
+                            creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 800),
+                            { X = 21; Y = 47 }
+                        ]
+
+                Expect.notEqual
+                    ((decideOn alone).Assignments |> Map.tryFind "r-1")
+                    (Some(taskId (Guard "W1N2")))
+                    "and a ranger is refused it, the only body there"
+            }
         ]
 
 [<Tests>]

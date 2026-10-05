@@ -200,6 +200,54 @@ let harassGuardTests =
                     "the ranged body holds it; a melee one is an outpost's"
             }
 
+            // Characterisation (the Brief's S0): the harassment Guard's rank,
+            // capacity and rows, beside the takers, ground and act pinned around it.
+            test "its Guard ranks on the tier, a miner there or none, for one ranger and its relief" {
+                let quiet =
+                    { (bareHome |> harassing) with
+                        Bank = bank 2100 2100
+                    }
+
+                let worked =
+                    { quiet with
+                        Hostiles = [ miner "miner" { X = 19; Y = 11 } ]
+                    }
+
+                // Nine 17-ATTACK bodies: a raid no ranger of any size wins. The
+                // harassment room still wants its one: `rangersWanted` asks the
+                // harassment before it asks `outmatched`.
+                let overrun =
+                    { quiet with
+                        Hostiles =
+                            [
+                                for i in 1..9 ->
+                                    theirs
+                                        $"melee-{i}"
+                                        enemy
+                                        { X = 20 + i; Y = 30 }
+                                        (List.replicate 17 Move @ List.replicate 17 Attack)
+                            ]
+                    }
+
+                for label, colony in
+                    [
+                        "quiet", quiet
+                        "a miner at the source", worked
+                        "a raid no ranger wins", overrun
+                    ] do
+                    Expect.equal
+                        (pooledHolding [] (Guard harassRoom) colony)
+                        (Some(safetyRank OnTheTier, Capacity.fighters 1 |> Capacity.relieving))
+                        $"{label}: on the Safety tier, never a kill's rung, one ranger and a relief"
+
+                    Expect.equal
+                        (rowOf "ranger" colony |> Option.map (fun row -> row.Quota))
+                        (Some 1)
+                        $"{label}: the ranger row casts its one"
+
+                    Expect.equal (guardQuotaOf colony) (Some 0) $"{label}: and the guard row none"
+            }
+
             test
                 "the ranger shoots the enemy's unarmed miner, and never a third player's or a keeper's" {
                 let here = { X = 20; Y = 20 }
@@ -639,5 +687,40 @@ let diggerFirstTests =
                         })
                     (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
                     "the miner, wherever it digs; the hauler only when no digger is caught"
+            }
+
+            // Quirk, kept (the Brief's S0): the shot is `guardTarget`'s kill order,
+            // nearest first, and not the ground's digger-first order; a later
+            // stage makes the shot follow the ground.
+            test "quirk: the ranger stands on the miner's ground and shoots the nearer hauler" {
+                let here = { X = 22; Y = 12 }
+                let shooter = ranger "ranger-r"
+                let minerTile = { X = 19; Y = 11 }
+                let haulerTile = { X = 21; Y = 10 }
+
+                let colony =
+                    { (bareHome |> harassing) with
+                        Hostiles =
+                            [
+                                miner "miner" minerTile
+                                theirs "hauler" enemy haulerTile [ Carry; Move ]
+                            ]
+                    }
+                    |> standingThere [ shooter, here ]
+
+                Expect.equal
+                    (Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom)
+                    (Some(
+                        within Engine.rangedRange minerTile (Set.ofList [ minerTile; haulerTile ])
+                    ))
+                    "the ground is the miner's"
+
+                Expect.equal
+                    (emitOn colony [ shooter.Name, Guard harassRoom ]
+                     |> List.choose (function
+                         | RangedAttackCreep(name, id) when name = shooter.Name -> Some id
+                         | _ -> None))
+                    [ "hauler" ]
+                    "the shot is the hauler's, two tiles off where the miner is three"
             }
         ]

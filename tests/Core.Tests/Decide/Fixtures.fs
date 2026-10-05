@@ -2393,3 +2393,28 @@ let casting (declaration: Harass) (colony: ColonyView) =
         Harass = [ declaration ]
         HarassCast = Set.singleton declaration.RoomName
     }
+
+/// Where a Safety-tier Task ranks at one rung: every combat Task's priority
+/// (the Brief's `Rung`), on the tier or a kill's one up.
+let safetyRank rung = priorityOfTier Safety + rankOfRung rung
+
+/// One Task's rank and capacity as `decide` pools it for a colony whose
+/// creeps hold these Tasks, or None where it is not pooled: the half of a
+/// combat Task's configuration the pool carries (the Brief's).
+let pooledHolding (holding: (string * Task) list) (task: Task) (colony: ColonyView) =
+    let atlas = Atlas.ofView colony
+
+    let held =
+        heldTaskFacts
+            colony
+            (holding |> List.map (fun (name, held) -> name, taskId held) |> Map.ofList)
+
+    let threats = threatsOfHeld colony atlas held
+
+    planPool
+        colony
+        atlas
+        threats
+        (Planner.planTasks colony atlas threats held (Planner.outpostFactsOf colony))
+    |> List.tryFind (fun entry -> entry.Task = task)
+    |> Option.map (fun entry -> entry.Priority, entry.Capacity)

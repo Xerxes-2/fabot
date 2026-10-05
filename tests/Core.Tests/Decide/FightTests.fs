@@ -140,6 +140,27 @@ let pooledTests =
                     "the cheapest winning squad is the duo: a brawler's slot and a medic's"
             }
 
+            // Characterisation (the Brief's S0): the one part of the Fight's pool
+            // entry the cases around it leave unpinned.
+            test "the Fight and the residents' Guard beside it rank alike, on the Safety tier" {
+                let mother = fightingMother (w17s25RaidIn "W1N2") []
+                let atlas = Atlas.ofView mother
+
+                let rankOf task =
+                    planPool
+                        mother
+                        atlas
+                        (threatsHolding mother (heldOn mother []))
+                        (planHolding mother [])
+                    |> List.tryFind (fun entry -> entry.Task = task)
+                    |> Option.map (fun entry -> entry.Priority)
+
+                Expect.equal
+                    (rankOf (Fight "W1N2"), rankOf (Guard "W1N2"))
+                    (Some(safetyRank OnTheTier), Some(safetyRank OnTheTier))
+                    "neither is a kill's rung up"
+            }
+
             test "no catalogue squad wins, and no Fight is pooled" {
                 // Nine melee bodies: a field no squad of ours prices inside
                 // its ten bodies, so every entry loses.
@@ -1007,6 +1028,23 @@ let assaultTests =
                     ([ "sapper"; "medic"; "brawler"; "kiter" ] |> List.map (quotaHolding colony []))
                     [ Some 2; Some 2; Some 0; Some 0 ]
                     "and the rows cast them"
+            }
+
+            // Characterisation (the Brief's S0): its rank, the one part of its pool
+            // entry the cases around it leave unpinned.
+            test "the Assault ranks on the Safety tier" {
+                let colony = assaulting []
+
+                Expect.equal
+                    (planPool
+                        colony
+                        (Atlas.ofView colony)
+                        (assaultThreats colony)
+                        (planHolding colony [])
+                     |> List.tryFind (fun entry -> entry.Task = Assault "W1N2")
+                     |> Option.map (fun entry -> entry.Priority))
+                    (Some(safetyRank OnTheTier))
+                    "on the tier, no rung"
             }
 
             test

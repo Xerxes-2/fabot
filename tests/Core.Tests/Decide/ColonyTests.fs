@@ -2438,6 +2438,57 @@ let raisedHomeGarrisonTests =
                     "the ground is the controller's walkable ring, inside any perimeter"
             }
 
+            // Characterisation (the Brief's S0): the garrison's Guard in peace, its
+            // rank, capacity, takers and act; its row and ground are pinned
+            // around it, its raid grounds below.
+            test
+                "the garrison's Guard ranks on the tier for the residents and a relief each, admits a ranger alone, and shoots the tapper" {
+                let resident =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+
+                let melee = creepWith "guard-1" 0 0 Bodies.guardPattern.Block
+
+                let tapper =
+                    { hostileIn "W1N2" { X = 11; Y = 47 } [ BodyPart.Claim; BodyPart.Claim; Move ] with
+                        Id = "tapper"
+                    }
+
+                let colony =
+                    openGarrison
+                        []
+                        [ resident, { X = 12; Y = 46 }; melee, { X = 8; Y = 44 } ]
+                        [ tapper ]
+
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N2") colony)
+                    (Some(
+                        safetyRank OnTheTier,
+                        Capacity.fighters (2 * Tuning.defaults.RangerResidents)
+                    ))
+                    "on the Safety tier, for the garrison and a relief each"
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "ranger-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the ranger takes it"
+
+                Expect.notEqual
+                    (Map.tryFind "guard-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "a melee guard is refused a resident room's Guard"
+
+                Expect.contains
+                    decision.Intents
+                    (RangedAttackCreep("ranger-1", "tapper"))
+                    "and the ranger shoots the CLAIM body at the controller"
+            }
+
             test
                 "under an armed raid the garrison's ground is the threats' ring, as #428's guard's was" {
                 // A Guard takes the resident ring where there is one and the

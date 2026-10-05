@@ -812,6 +812,40 @@ let rampartDefenderTests =
                          | _ -> false))
                     "off a rampart it does not swing"
             }
+
+            // Characterisation (the Brief's S0): the Defend's pool entry and its
+            // takers; its row, ground and act are pinned above.
+            test
+                "the home's Defend ranks on the tier, one a raid body at the line, and admits the defender row's cast by name" {
+                let colony =
+                    defenderHome
+                        defendedLine
+                        [
+                            raidMeleeAt "h-1" { X = 19; Y = 33 }
+                            raidMeleeAt "h-2" { X = 19; Y = 35 }
+                        ]
+                        [
+                            defender "defender-1-Spawn1", { X = 20; Y = 34 }
+                            defender "guard-1-Spawn1", { X = 22; Y = 34 }
+                        ]
+
+                Expect.equal
+                    (pooledHolding [] (Defend "W1N1") colony)
+                    (Some(safetyRank OnTheTier, Capacity.fighters 2))
+                    "one Defend for the home, on the Safety tier, capped at the raid at its line"
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "defender-1-Spawn1" decision.Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "the defender takes it"
+
+                Expect.notEqual
+                    (Map.tryFind "guard-1-Spawn1" decision.Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "and the same body under another row's name is refused it"
+            }
         ]
 
 [<Tests>]

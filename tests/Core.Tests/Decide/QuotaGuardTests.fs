@@ -473,6 +473,39 @@ let guardRowTests =
                     "and a raid in each hires one apiece"
             }
 
+            test "every cast carries the blocks of the worst guarded outpost" {
+                // A lone melee in one room takes one block; the same melee in
+                // the other, two healers behind it, takes two. The cast is
+                // sized for the second whichever room it walks to.
+                let colony =
+                    { reserverColony
+                          [ northOutpost true; westOutpost false ]
+                          (surplusFleet 3)
+                          [ "W1N2", reservedRoom true 5000; "W2N2", reservedRoom true 5000 ] with
+                        Hostiles =
+                            [
+                                hostileIn "W1N2" raidTile smallMelee
+                                { hostileIn "W2N2" { X = 20; Y = 41 } smallMelee with
+                                    Id = "h-2"
+                                }
+                            ]
+                            @ [
+                                for i in 1..2 ->
+                                    { hostileIn "W2N2" { X = 21; Y = 41 } smallHealer with
+                                        Id = $"heal-{i}"
+                                    }
+                            ]
+                    }
+
+                let casts = guardCasts (decideOn colony).Intents
+
+                Expect.isNonEmpty casts "the premise: the row casts"
+
+                Expect.isTrue
+                    (casts |> List.forall (fun body -> body = bodyFor guardPattern 1500))
+                    "two blocks, the healed room's, in every cast"
+            }
+
             test "the healing the second guard is priced against is the raided room's own" {
                 // The conjunct that keeps the count room-local: the healing term
                 // filters the raid by the room the threat stands in, and without it
