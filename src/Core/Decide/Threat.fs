@@ -79,9 +79,8 @@ type AssaultGround =
 /// ADR-0085
 /// Which flavour one room's `guard:<room>` Task is this tick: classified once
 /// (`threatsHeldBy`, `Threats.Kinds`), and read by every Guard reader in place
-/// of the room's class. One kind a room, the first that holds of: a resident
-/// room, a [[harassment room]], a chase (#510), a trespass's kill (#516), a
-/// raid's ring, a held exit (#450), a level-0 core (#487).
+/// of the room's class. One kind a room, the first in `BriefKind.order` to
+/// claim it.
 [<RequireQualifiedAccess>]
 type BriefKind =
     /// The melee guard on a raid's ring, or walked to a threatened outpost
@@ -96,6 +95,42 @@ type BriefKind =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module BriefKind =
+    /// The order a room's flavour is read in, written once: a resident room,
+    /// a [[harassment room]], a chase (#510), a raid's ring, a held exit
+    /// (#450), a level-0 core (#487), a trespass's kill (#516). The first to
+    /// claim a room is its kind; a kind claims only a room still open to it
+    /// (`opens`), so a held exit, a core and a trespass lay no ground under a
+    /// kind ahead of them (`threatsHeldBy`); and a Guard's ground is the first
+    /// laid in its room from its kind down (`Threats.guardGroundIn`).
+    let order =
+        [
+            BriefKind.Resident
+            BriefKind.Harass
+            BriefKind.Chase
+            BriefKind.Outpost
+            BriefKind.ExitHold
+            BriefKind.Core
+            BriefKind.Trespass
+        ]
+
+    /// The kinds whose ground is the room's `Ring`.
+    let laysRing (kind: BriefKind) =
+        match kind with
+        | BriefKind.Outpost
+        | BriefKind.ExitHold
+        | BriefKind.Core -> true
+        | _ -> false
+
+    /// Whether a room a kind ahead claims is still open to `kind`: only a ring
+    /// kind under a chase. Two halves. Load-bearing: a chase in sight is
+    /// always a raid's room, so the raid still claims it as `Outpost`, and
+    /// that claim shuts the held exit, the core and the trespass out of it.
+    /// Quirk, kept (the Brief's S0): out of sight no raid claims it, so a held
+    /// exit or a core lays its ring there, and the chase, with no kite
+    /// ground, takes that melee guard's ring.
+    let opens (ahead: BriefKind) (kind: BriefKind) =
+        ahead = BriefKind.Chase && laysRing kind
+
     /// The ranger row's kinds (`Facts.rangerRooms`): every other is the guard's.
     let isRangers (kind: BriefKind) =
         match kind with
@@ -298,31 +333,27 @@ module Threats =
     let harassRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
         Map.tryFind room threats.HarassRing
 
-    /// A Guard's ground in one room, by its kind, or None where the room has
-    /// none and the pool falls back to the source ring (#366). A ranger's
-    /// kite ground (#451) first, then its declared ground (the resident's
-    /// before the harassment's), then the threats' ring; a trespass's own
-    /// (#516); every other kind the threats' ring. A ranger room's Guard is a
-    /// ranger's alone, so its kite ground is never handed to a melee guard.
+    /// A Guard's ground in one room, or None where the room has none and the
+    /// pool falls back to the source ring (#366): the first ground laid in the
+    /// room from its kind down `BriefKind.order`. A ranger's kind and a
+    /// chase hold their kite ground (#451) first, so a melee guard's kind is
+    /// never handed it; a ranger's declared ground next; a ring kind the
+    /// room's `Ring`; a trespass its own (#516).
     let guardGroundIn (threats: Threats) (room: string) : Set<RoomPos> option =
         let kite () = Map.tryFind room threats.Kite
 
-        let ring () =
-            Some(ringIn threats room) |> Option.filter (Set.isEmpty >> not)
+        let own kind =
+            match kind with
+            | BriefKind.Resident -> kite () |> Option.orElse (residentRingIn threats room)
+            | BriefKind.Harass -> kite () |> Option.orElse (harassRingIn threats room)
+            | BriefKind.Chase -> kite ()
+            | BriefKind.Outpost
+            | BriefKind.ExitHold
+            | BriefKind.Core -> Some(ringIn threats room) |> Option.filter (Set.isEmpty >> not)
+            | BriefKind.Trespass -> Map.tryFind room threats.Trespass
 
-        match kindOf threats room with
-        | BriefKind.Resident ->
-            kite ()
-            |> Option.orElse (residentRingIn threats room)
-            |> Option.orElse (harassRingIn threats room)
-            |> Option.orElse (ring ())
-        | BriefKind.Harass ->
-            kite () |> Option.orElse (harassRingIn threats room) |> Option.orElse (ring ())
-        | BriefKind.Chase -> kite () |> Option.orElse (ring ())
-        | BriefKind.Trespass -> Map.tryFind room threats.Trespass
-        | BriefKind.Outpost
-        | BriefKind.Core
-        | BriefKind.ExitHold -> ring ()
+        let kind = kindOf threats room
+        BriefKind.order |> List.skipWhile ((<>) kind) |> List.tryPick own
 
     /// The role a body holds a room's Fight in, or None where the Fight does
     /// not admit it.
@@ -918,19 +949,12 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // The held exits' ground (#450): the tiles within a melee guard's reach of
     // the run its room's last armed Threat left by, less the ring, whose exit
-    // tiles the engine carries a body standing on across the border. Only in a
-    // room whose Guard has no declared ground: a resident room keeps the ring a
-    // CLAIM tapper is stopped at, and a harassment room its ambush. A hold
+    // tiles the engine carries a body standing on across the border. A hold
     // with no ground is no hold.
-    let holds =
+    let holdsIn (open': string -> bool) =
         view.ExitHolds
         |> Map.toList
-        |> List.filter (fun (room, _) ->
-            not (
-                Map.containsKey room armed.Ring
-                || Set.contains room resident
-                || Map.containsKey room harassRing
-            ))
+        |> List.filter (fst >> open')
         |> List.choose (fun (room, hold) ->
             let ground =
                 hold.Run
@@ -943,18 +967,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             else
                 Some(room, RoomPos.setAt room ground))
 
-    // A level-0 core's ring (#487), the tiles a guard swings at it from, in a
-    // room no Threat, held exit or declared ground answers for first: the
-    // raid is fought before the core.
-    let cores =
+    // A level-0 core's ring (#487), the tiles a guard swings at it from.
+    let coresIn (open': string -> bool) =
         Facts.expansionCores view
-        |> List.filter (fun core ->
-            not (
-                Map.containsKey core.RoomName armed.Ring
-                || Set.contains core.RoomName resident
-                || Map.containsKey core.RoomName harassRing
-                || List.exists (fun (room, _) -> room = core.RoomName) holds
-            ))
+        |> List.filter (fun core -> open' core.RoomName)
         |> List.map (fun core -> ringAround core.RoomName core.Tile)
 
     let outside, atLine = raidAtLine view atlas
@@ -998,8 +1014,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         else
             Map.empty
 
-    // The trespassers' ground (#516), off the exits, in a room whose Guard no
-    // Threat, ranger row, chase, held exit or core answers for first.
+    // The trespassers' ground (#516), off the exits.
     //
     // A digger or a claimer stands at its work: the tiles beside it. A hauler
     // keeps a ranger's pace, so it is waited for, not chased: within
@@ -1010,15 +1025,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // A trespasser on the exit row of a room beside one we mine is carried
     // into it next tick, and back if it is bouncing: keyed to that room, the
     // tiles beside where it lands, so the kill holds across the bounce.
-    let trespass =
-        let answered = holds @ cores |> List.map fst |> Set.ofList
-
-        let open' room =
-            not (Map.containsKey room armed.Ring)
-            && not (Set.contains room rangers)
-            && not (Set.contains room chasedRooms)
-            && not (Set.contains room answered)
-
+    let trespassIn (open': string -> bool) =
         let haulGround = 2
         let storeReach = 5
 
@@ -1082,26 +1089,52 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 None
             else
                 Some(room, RoomPos.setAt room ground))
-        |> Map.ofList
 
-    // Each room's flavour, the first that holds (`BriefKind`). The sets are
-    // the ones the grounds above were laid off, so a room's kind and its
-    // ground cannot disagree: the trespass, the holds and the cores already
-    // stand aside for a raid and every kind listed after them. A raid's room
-    // is the default, `Outpost`, and is not written.
+    // Each kind's claim, down `BriefKind.order`, on the rooms still open to
+    // it: the first four claim their rooms outright, a held exit, a core and
+    // a trespass only the rooms they lay ground in. Per room, its claimants
+    // in that order, the first its kind; per kind, the ground it laid.
+    let claimants, laid =
+        let outright rooms open' =
+            rooms |> Seq.filter open' |> Seq.map (fun room -> room, Set.empty) |> List.ofSeq
+
+        let claimOf kind =
+            match kind with
+            | BriefKind.Resident -> outright resident
+            | BriefKind.Harass -> outright (harassRooms view)
+            | BriefKind.Chase -> outright chasedRooms
+            | BriefKind.Outpost -> outright armed.Ring.Keys
+            | BriefKind.ExitHold -> holdsIn
+            | BriefKind.Core -> coresIn
+            | BriefKind.Trespass -> trespassIn
+
+        ((Map.empty, Map.empty), BriefKind.order)
+        ||> List.fold (fun (claimants: Map<string, BriefKind list>, laid) kind ->
+            let open' room =
+                Map.tryFind room claimants
+                |> Option.forall (List.forall (fun ahead -> BriefKind.opens ahead kind))
+
+            let claims = claimOf kind open'
+
+            let claimants =
+                (claimants, claims)
+                ||> List.fold (fun claimants (room, _) ->
+                    Map.change
+                        room
+                        (fun prior -> Some(Option.defaultValue [] prior @ [ kind ]))
+                        claimants)
+
+            claimants, Map.add kind claims laid)
+
+    let laidBy kind = Map.find kind laid
+    let holds = laidBy BriefKind.ExitHold
+    let cores = laidBy BriefKind.Core
+
+    // A raid's room is the default kind, `Outpost`, and is not written.
     let kinds =
-        [
-            BriefKind.Core, cores |> List.map fst
-            BriefKind.ExitHold, holds |> List.map fst
-            BriefKind.Trespass, trespass |> Map.keys |> List.ofSeq
-            BriefKind.Chase, Set.toList chasedRooms
-            BriefKind.Harass, Set.toList (harassRooms view)
-            BriefKind.Resident, Set.toList resident
-        ]
-        |> List.collect (fun (kind, rooms) -> rooms |> List.map (fun room -> room, kind))
-        // Later entries overwrite earlier ones: the list is written last
-        // kind first.
-        |> Map.ofList
+        claimants
+        |> Map.map (fun _ ahead -> List.head ahead)
+        |> Map.filter (fun _ kind -> kind <> BriefKind.Outpost)
 
     { armed with
         AtLine = atLine
@@ -1120,7 +1153,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Kite = kite
         Held = holds |> List.map fst |> Set.ofList
         Chased = chasedRooms
-        Trespass = trespass
+        Trespass = laidBy BriefKind.Trespass |> Map.ofList
         Kinds = kinds
     }
 

@@ -2710,6 +2710,11 @@ let guardPrecedenceTests =
                         // Quirk, kept: a chase out of sight over a held exit takes
                         // the melee guard's range-1 exit ground, a rung up.
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
+                        [ ChaseDark; Core ], row [ Core ] [ "Ring" ] OneRungUp one [ "r-1" ]
+                        // Shut on a chase on the record, a raid that can close seen
+                        // there after all: the raid's claim shuts the held exit
+                        // out, and no ranger the chase admits takes the kill.
+                        [ ChaseDark; Raid; Hold ], row [] [ "Kite" ] OneRungUp one []
                         // And a chase out of sight shuts the trespasser's kill out.
                         [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "r-1" ]
                     ]
@@ -2753,6 +2758,75 @@ let guardPrecedenceTests =
                      |> Map.tryFind "r-1")
                     (Some(taskId (Guard "W1N2")))
                     "and the ranger takes it"
+            }
+
+            // Quirk, kept (the Brief's S3): `Planner.coredOutpostsOf` pools a
+            // declared outpost's core whatever kind claims the room first, so an
+            // errand room with no ore to burn, pooled for nothing else, is
+            // pooled for its core and held on the Reactor's ring.
+            test "quirk: an unfuelled errand room with a core pools its Guard as the resident's" {
+                let colony = List.fold withFlavour precedenceBasis [ Resident; Core ]
+                let threats = threatsOf colony (Atlas.ofView colony)
+
+                Expect.equal
+                    (Threats.kindOf threats "W1N2", Threats.guardGroundIn threats "W1N2")
+                    (BriefKind.Resident, Some(besideIn { X = 6; Y = 46 }))
+                    "read as the resident's, on the Reactor's ring"
+
+                Expect.equal
+                    (pooledHolding [] (Guard "W1N2") (withFlavour precedenceBasis Resident))
+                    None
+                    "the errand alone pools nothing"
+
+                Expect.isSome
+                    (pooledHolding [] (Guard "W1N2") colony)
+                    "the core beside it pools the Guard"
+            }
+
+            // The Brief's S3: a chase leaves its room open to the ring kinds alone.
+            // Each chase mix's `Held` and `Ring`, so a hold or a core laid under
+            // a raid cannot hide behind the kite ground the Guard reads.
+            test "a chase's room keeps the ring a raid, a held exit or a core lays there" {
+                let laid flavours =
+                    let colony = List.fold withFlavour precedenceBasis flavours
+                    let threats = threatsOf colony (Atlas.ofView colony)
+                    Set.contains "W1N2" threats.Held, Map.tryFind "W1N2" threats.Ring
+
+                let ringOf flavours = snd (laid flavours)
+
+                Expect.equal
+                    ([
+                        [ ChaseSeen; Hold ]
+                        [ ChaseSeen; Core ]
+                        [ ChaseDark; Hold ]
+                        [ ChaseDark; Core ]
+                        [ ChaseDark; Raid; Hold ]
+                        [ ChaseDark; Trespasser ]
+                     ]
+                     |> List.map (fun flavours -> flavours, laid flavours))
+                    [
+                        [ ChaseSeen; Hold ], (false, ringOf [ ChaseSeen ])
+                        [ ChaseSeen; Core ], (false, ringOf [ ChaseSeen ])
+                        [ ChaseDark; Hold ], (true, ringOf [ Hold ])
+                        [ ChaseDark; Core ], (false, ringOf [ Core ])
+                        [ ChaseDark; Raid; Hold ], (false, ringOf [ Raid ])
+                        [ ChaseDark; Trespasser ], (false, None)
+                    ]
+                    "each chase mix's held flag and ring"
+
+                Expect.isSome (ringOf [ ChaseSeen ]) "the chase in sight stands in a raid's ring"
+            }
+
+            test "the order a room's flavour is read in lists every kind once" {
+                let cases =
+                    Reflection.FSharpType.GetUnionCases typeof<BriefKind>
+                    |> Array.map (fun case -> case.Name)
+                    |> Set.ofArray
+
+                Expect.equal
+                    (BriefKind.order |> List.map string |> List.sort)
+                    (Set.toList cases)
+                    "every BriefKind case, none twice"
             }
 
             // The Brief's S2: each room's flavour is classified once, and every
