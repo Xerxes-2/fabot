@@ -1331,10 +1331,15 @@ module ColonyView =
                         |> Seq.collect (fun (_, facts) -> facts.PublicRamparts)
                         |> Fresh.setOfSeq
                     Owners = mergedBy (fun facts -> facts.Owners)
+                    // A stronghold's room is entered by no chain either, a
+                    // fighter's included: its towers reach every tile (live
+                    // t980,650: two rangers crossing W16S26 to a Guard died).
+                    // Whether or not this projection carries it.
                     RivalRooms =
                         worked
                         |> List.map fst
                         |> List.filter (World.rivalHeld world)
+                        |> Seq.append gate.Impassable
                         |> Fresh.setOfSeq
                     AvoidRooms =
                         let avoided = World.avoidedRooms tuning world

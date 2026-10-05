@@ -4058,6 +4058,11 @@ let errandTests =
                     (bunkered.Refused |> List.map (fun refusal -> refusal.RoomName))
                     errandRoom
                     "and the refusal is named, or a declaration would vanish with nothing said about why"
+
+                Expect.isTrue
+                    (Set.contains errandCrossed bunkered.Spatial.RivalRooms
+                     && not (Set.contains errandCrossed ordinary.Spatial.RivalRooms))
+                    "and the bunker's room is entered by no chain, a fighter's included: its towers reach every tile (live t980,650)"
             }
 
             test "an errand no chain reaches leaves the scan set and is named, with its kind" {
