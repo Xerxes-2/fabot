@@ -351,6 +351,10 @@ smoke("arena-skeleton writes the arena idiom off a replay", () => {
       body: [part("move"), part("ranged_attack")],
     },
     d1: { _id: "d1", type: "road", x: 3, y: 3, hits: 5000, hitsMax: 5000 },
+    k4: {
+      _id: "k4", type: "creep", name: "invader_W17S25_1", x: 20, y: 20, user: "2", hits: 100, hitsMax: 100, ageTime: 2500,
+      body: [part("move")], actionLog: { rangedAttack: { x: 8, y: 23 } },
+    },
   };
   // The ranger's task at t1000 is the match at t990, not the release after.
   const { known, unknown } = assignmentsAt(
@@ -394,6 +398,8 @@ smoke("arena-skeleton writes the arena idiom off a replay", () => {
     "            // Crunchy047: live: 1 ATTACK, 1 MOVE",
     "            // Crunchy047: TODO script; live: attack→1,15",
     "            // Isolate093 died at t1000 (hits -5/200): not placed.",
+    '            // invader_W17S25_1: live: rangedAttack→8,23',
+    '            { body "invader_W17S25_1" (Side.Npc "Invader") (parts [ Move, 1 ]) (at "W17S25" 20 20) (Some Invader)',
     '            { body "ranger-1-Spawn11" Side.Ours (parts [ Move, 1; RangedAttack, 1 ]) (at "W17S25" 8 23) None',
     '                            "ranger-1-Spawn11", "refill:tower-13-29"',
     "                // TODO gone-1: the log holds no task verdict for it that early (or it has died since).",
@@ -402,6 +408,7 @@ smoke("arena-skeleton writes the arena idiom off a replay", () => {
   ]) {
     assert.ok(text.includes(line), `missing:\n${line}\n---\n${text}`);
   }
+  assert.ok(!text.includes("invader_W17S25_1: TODO"), "the engine's invader AI is the arena's: no script to write");
   assert.ok(!text.includes("road-3-3"), "a road is not placed");
   assert.ok(!text.includes("cast by"), "every caster captured");
 });

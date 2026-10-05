@@ -299,6 +299,98 @@ let arenaPhysicsTests =
             }
         ]
 
+/// The W11S28 invasion's shooter and healer (#535).
+let private invaderShooter = parts [ Tough, 2; Move, 4; RangedAttack, 3; Move, 1 ]
+let private invaderHealer = parts [ Move, 4; Heal, 5; Move, 1 ]
+let private npc = Side.Npc "Invader"
+
+/// The engine's invader AI (#541, `invaders/pretick.js`), as the #540
+/// xxscreeps spike watched it.
+[<Tests>]
+let arenaInvaderTests =
+    testList
+        "arena NPC invaders"
+        [
+            test
+                "an invader shooter flees a melee nearer than 3, keeping it off and shooting it as it chases" {
+                let shooter = body "shooter" npc invaderShooter (at 20 13) (Some Invader)
+
+                let chaser =
+                    body
+                        "chaser"
+                        red
+                        (parts [ Move, 5; Attack, 5 ])
+                        (at 18 13)
+                        (Some(Chase(Nearest, None)))
+
+                let _, trace = physics [ shooter; chaser ] |> run 12
+                let failure = describe trace
+
+                for tick, s in pathOf "shooter" trace do
+                    let c = pathOf "chaser" trace |> List.find (fst >> (=) tick) |> snd
+
+                    Expect.isGreaterThan
+                        (RoomPos.range s.At c.At |> Option.defaultValue 99)
+                        1
+                        $"t{tick}: never beside it\n{failure}"
+
+                Expect.equal (snapshotOf "shooter" trace).Hits 1000 $"never struck\n{failure}"
+
+                Expect.isLessThan
+                    (snapshotOf "chaser" trace).Hits
+                    1000
+                    $"and shooting it\n{failure}"
+            }
+
+            test "an invader shooter shoots the lowest-hits hostile in reach, not the nearest" {
+                let shooter = body "shooter" npc invaderShooter (at 20 13) (Some Invader)
+
+                let near = doing "near" red (parts [ Move, 2 ]) (at 22 13) []
+
+                let hurt =
+                    { doing "hurt" red (parts [ Move, 2 ]) (at 17 13) [] with
+                        Hits = 150
+                    }
+
+                let _, trace = physics [ shooter; near; hurt ] |> run 1
+
+                Expect.contains
+                    trace.Head.Theirs
+                    ("shooter", Act.RangedAttack "hurt")
+                    $"the hurt one, at 3, over the one at 2\n{describe trace}"
+            }
+
+            test
+                "an invader healer walks to the hurt invader, beside a healthy one it was standing by" {
+                let healer = body "healer" npc invaderHealer (at 20 13) (Some Invader)
+                let healthy = body "healthy" npc invaderShooter (at 19 13) (Some Invader)
+
+                let hurt =
+                    { body "hurt" npc invaderShooter (at 26 13) (Some Invader) with
+                        Hits = 500
+                    }
+
+                let _, trace = physics [ healer; healthy; hurt ] |> run 4
+                let failure = describe trace
+
+                Expect.equal
+                    (RoomPos.range (snapshotOf "healer" trace).At (at 26 13))
+                    (Some 2)
+                    $"four steps toward it\n{failure}"
+
+                Expect.isGreaterThan
+                    (snapshotOf "hurt" trace).Hits
+                    500
+                    $"healing it in reach\n{failure}"
+            }
+
+            test "an unhurt invader healer with no invader but healers beside it suicides" {
+                let healer = body "healer" npc invaderHealer (at 20 13) (Some Invader)
+                let _, trace = physics [ healer ] |> run 1
+                Expect.equal (diedOn "healer" trace) (Some 0) $"it suicides\n{describe trace}"
+            }
+        ]
+
 /// The plain room with these structures standing in it.
 let private built (structures: ArenaStructure list) (bodies: Body list) =
     arena 1000 [ room plainRoom |> withStructures structures; room "W17S25" ] [] bodies
@@ -960,8 +1052,9 @@ let private pouredBack (trace: TickTrace list) =
 /// each followed by a 5M5H healer, and a small mixed body — answered by two
 /// 30-part melee guards cast at W12S28, one at the east exit and one by the
 /// spawns. Live, the first fought alone, had its MOVE shot off and sat rooted.
-/// The shooters keep range (`Kite`), the healers follow them, the small one
-/// walks in (`Invade`).
+/// All five run the engine's invader AI (`Invader`, #541): the shooters flee
+/// a guard nearer than 3 and shoot the lowest hits, the healers go to the
+/// hurt, the small one walks in.
 let private w11s28Invasion () : Arena =
     let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
 
@@ -1002,29 +1095,19 @@ let private w11s28Invasion () : Arena =
                   invader
                   (parts [ Tough, 2; Move, 4; RangedAttack, 1; Work, 1; Attack, 1; Move, 1 ])
                   (at "W11S28" 10 22)
-                  (Some Invade) with
+                  (Some Invader) with
                 TicksToLive = 1_373
             }
-            { body "invader_W11S28_768" invader shooter (at "W11S28" 11 19) (Some(Kite(Nearest, 3))) with
+            { body "invader_W11S28_768" invader shooter (at "W11S28" 11 19) (Some Invader) with
                 TicksToLive = 1_373
             }
-            { body "invader_W11S28_779" invader shooter (at "W11S28" 10 19) (Some(Kite(Nearest, 3))) with
+            { body "invader_W11S28_779" invader shooter (at "W11S28" 10 19) (Some Invader) with
                 TicksToLive = 1_373
             }
-            { body
-                  "invader_W11S28_495"
-                  invader
-                  healer
-                  (at "W11S28" 12 18)
-                  (Some(Follow "invader_W11S28_768")) with
+            { body "invader_W11S28_495" invader healer (at "W11S28" 12 18) (Some Invader) with
                 TicksToLive = 1_373
             }
-            { body
-                  "invader_W11S28_657"
-                  invader
-                  healer
-                  (at "W11S28" 12 19)
-                  (Some(Follow "invader_W11S28_779")) with
+            { body "invader_W11S28_657" invader healer (at "W11S28" 12 19) (Some Invader) with
                 TicksToLive = 1_373
             }
             { body "guard-973545-Spawn1" Side.Ours guard (at "W12S28" 47 33) None with
@@ -1095,10 +1178,14 @@ let arenaScenarioTests =
             // so a guard's swing reaches them as `canStrike` reads them (the
             // review's decision): the room stays the guard row's. The nearer
             // guard walks in (#366) and, stepping onto each target it swings
-            // at, runs the shooters into the room's edges; with the second it
-            // kills the whole invasion, neither shot rooted, and no ranger is
-            // cast. A player's shooters as quick as the guard are the ranger
-            // row's (`engagementTests`).
+            // at, runs the shooters into the room's walls and edges; with the
+            // second it kills the whole invasion, neither shot rooted, and no
+            // ranger is cast. Under the engine's invader AI (#541) the
+            // shooters flee rather than kite and the healers go to the hurt:
+            // deaths move from t8/79/24/38/19 to t8/70/15/40/33 (735, 768,
+            // 779, 495, 657), 779 cornered in the west wall pocket among its
+            // own, the verdict the same. A player's shooters as quick as the
+            // guard are the ranger row's (`engagementTests`).
             test
                 "#535 capture t973,670: the W11S28 invasion is run down by the two guards, penned Invaders being in a melee's reach" {
                 let _, trace = w11s28Invasion () |> withCasts [ "guard"; "ranger" ] |> run 300
@@ -1210,7 +1297,7 @@ let arenaScenarioTests =
                         (Side.Npc "Invader")
                         Fabot.Core.Tests.Decide.Fixtures.smallMelee
                         (RoomPos.at "W12S27" { X = 8; Y = 48 })
-                        (Some Invade)
+                        (Some Invader)
 
                 let _, trace = outpostRaid invader |> run 40
 
@@ -2970,13 +3057,14 @@ let private rootedInvaderOnAnchorStep () : Arena =
     let bodies: Body list =
         [
             // Live: 1 MOVE; it swung at the anchor on (5,37), which the arena's
-            // hits-ordered parts leave it no ATTACK to do.
+            // hits-ordered parts leave it no ATTACK to do. The invader AI
+            // walks it no nearer than 3 to a hostile without one (#541).
             { body
                   "invader_W15S27_250"
                   (Side.Npc "Invader")
                   (parts [ Tough, 2; Move, 4; RangedAttack, 1; Work, 1; Attack, 1; Move, 1 ])
                   (at "W15S27" 6 36)
-                  (Some Hold) with
+                  (Some Invader) with
                 Hits = 10
                 TicksToLive = 1_287
             }
@@ -3679,7 +3767,7 @@ let arenaBorderTests =
                         (Side.Npc "Invader")
                         Fabot.Core.Tests.Decide.Fixtures.smallMelee
                         (RoomPos.at "W12S27" { X = 8; Y = 48 })
-                        (Some Invade)
+                        (Some Invader)
 
                 let _, trace = outpostRaid invader |> run 30
                 let guard = "guard-1-Spawn1"
@@ -4033,7 +4121,10 @@ let arenaBorderTests =
                             a.Bodies
                             |> List.map (fun b ->
                                 if b.Id = "invader_W15S27_250" then
-                                    { b with Side = Side.Player "Odiodin" }
+                                    { b with
+                                        Side = Side.Player "Odiodin"
+                                        Script = Some Hold
+                                    }
                                 else
                                     b)
                     }

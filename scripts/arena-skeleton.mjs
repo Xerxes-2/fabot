@@ -294,8 +294,13 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
         .filter(([name, at]) => at && name !== "say")
         .map(([name, at]) => (typeof at === "object" && "x" in at ? `${name}→${at.x},${at.y}` : name))
         .join(" ");
-      if (!ours) comments.push(`TODO script; live: ${acts || "no act"}`);
-      const head = `body ${fsString(c.name)} ${side} (${partsOf(body)}) (at ${fsString(r.name)} ${c.x} ${c.y}) ${ours ? "None" : "(Some Hold)"}`;
+      // The engine drives user '2' itself (`invaders/pretick.js`): the arena's
+      // `Invader` is that AI, so an invader needs no hand-written script.
+      const invader = String(c.user) === "2";
+      if (!ours && !invader) comments.push(`TODO script; live: ${acts || "no act"}`);
+      if (invader && acts) comments.push(`live: ${acts}`);
+      const script = ours ? "None" : invader ? "(Some Invader)" : "(Some Hold)";
+      const head = `body ${fsString(c.name)} ${side} (${partsOf(body)}) (at ${fsString(r.name)} ${c.x} ${c.y}) ${script}`;
       bodies.push(...comments.map((text) => `            // ${c.name}: ${text}`), withFields(head, fields, "            "));
     }
   }

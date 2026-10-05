@@ -91,10 +91,12 @@ type Act =
     /// Energy out of a structure's store, as much as the body has room for
     /// or `amount` (`creeps/withdraw.js`).
     | Withdraw of store: string * amount: int option
+    /// `suicide` (`creeps/suicide.js`): the body dies at the tick's end.
+    | Suicide
 
 /// A scripted body's plan, re-read every tick from the start-of-tick state.
-/// Every behaviour but `Do` also fights what stands in reach of it
-/// (`fightInReach`).
+/// Every behaviour but `Do` and `Invader` also fights what stands in reach
+/// of it (`fightInReach`).
 type Behaviour =
     /// Exactly these acts every tick and nothing else: the physics tests'
     /// hand on the engine.
@@ -113,8 +115,9 @@ type Behaviour =
     /// Keep every enemy melee at range 2 or more and the focused enemy at
     /// `keep`, shooting it.
     | Kite of Focus * keep: int
-    /// The NPC: walk at the nearest enemy and hit it with whatever it has.
-    | Invade
+    /// The NPC raid creep, as the engine drives user '2' (`invaderActs`): a
+    /// body with a HEAL part heals, one without attacks, and either shoots.
+    | Invader
     /// Walk to a tile, across rooms if it is in another one.
     | GoTo of RoomPos
     /// Each behaviour until the arena tick beside it (exclusive); the last
@@ -1762,6 +1765,447 @@ let private kiteStep (a: Arena) (b: Body) (target: Body) (keep: int) : Direction
     else
         None
 
+// ---------------------------------------------------------------------------
+// The NPC Invader: `@screeps/engine` `src/processor/intents/creeps/invaders/`
+// ---------------------------------------------------------------------------
+
+/// The cost matrix options the invader AI passes to a search
+/// (`common/fake-runtime.js` `defaultCostMatrix`).
+type private InvaderPathing =
+    {
+        IgnoreCreeps: bool
+        /// `findAttack.js` `costCallbackIgnoreRamparts`: every rampart and
+        /// wall walked at its terrain's cost.
+        IgnoreFortifications: bool
+        IgnoreDestructibleStructures: bool
+    }
+
+let private invaderPathing =
+    {
+        IgnoreCreeps = false
+        IgnoreFortifications = false
+        IgnoreDestructibleStructures = false
+    }
+
+/// The kinds `ignoreDestructibleStructures` takes off the obstacles
+/// (`defaultCostMatrix`).
+let private destructibleKinds =
+    set
+        [
+            "constructedWall"
+            "rampart"
+            "spawn"
+            "extension"
+            "link"
+            "storage"
+            "observer"
+            "tower"
+            "powerBank"
+            "powerSpawn"
+            "lab"
+            "terminal"
+        ]
+
+/// CONTROLLER_STRUCTURES' kinds but the spawn: what `findAttack.js` breaks
+/// on the next tile of its path.
+let private raidTargetKinds =
+    set
+        [
+            "extension"
+            "road"
+            "constructedWall"
+            "rampart"
+            "link"
+            "storage"
+            "tower"
+            "observer"
+            "powerSpawn"
+            "extractor"
+            "lab"
+            "terminal"
+            "container"
+            "nuker"
+            "factory"
+        ]
+
+/// `utils.dist`: the range between two tiles of one room.
+let private dist (p: RoomPos) (q: RoomPos) = max (abs (p.X - q.X)) (abs (p.Y - q.Y))
+
+/// `fake-runtime.js` `findPath`: a PathFinder search held to the mover's
+/// room (`maxRooms: 1`, and `defaultCostMatrix` refuses any other), toward
+/// a tile within a goal's range, or with `flee` out of every goal's range.
+/// The matrix bars terrain walls, rocks, the controller, obstacle
+/// structures, others' closed ramparts, the mover's side's obstacle sites
+/// and, unless ignored, creeps; an exit tile is walkable, an NPC never being
+/// carried off it. Plain 1, swamp 5 (`ignoreRoads`; the 2 and 10 without it
+/// keep the ratio, roads not being modelled). A goal out of reach gives the
+/// path to the nearest tile reached, as PathFinder's incomplete result does.
+/// Dijkstra where PathFinder runs A* at heuristic weight 1.2: the two can
+/// break a tie between equal paths differently. The path leaves the start
+/// out.
+let private roomPath
+    (a: Arena)
+    (mover: Body)
+    (opts: InvaderPathing)
+    (flee: bool)
+    (goals: (RoomPos * int) list)
+    : RoomPos list =
+    let r = Map.find mover.At.Room a.Rooms
+    let side = Engine.roomSide
+    let index (p: Pos) = p.X * side + p.Y
+
+    let terrainCost =
+        Array.init (side * side) (fun n ->
+            match terrainAt r { X = n / side; Y = n % side } with
+            | Wall -> -1
+            | Swamp -> 5
+            | _ -> 1)
+
+    let cost = Array.copy terrainCost
+    let block (p: Pos) = cost[index p] <- -1
+
+    for _, p in r.Capture.Rocks @ Option.toList r.Capture.RealController do
+        block p
+
+    for s in r.Structures do
+        let ignored =
+            opts.IgnoreDestructibleStructures && Set.contains s.Kind destructibleKinds
+
+        if
+            Set.contains s.Kind obstacleKinds && not ignored
+            || not opts.IgnoreDestructibleStructures
+               && s.Kind = "rampart"
+               && not s.IsPublic
+               && s.Owner <> Some mover.Side
+        then
+            block s.At
+
+    if not opts.IgnoreDestructibleStructures then
+        for site in r.Sites do
+            if site.Owner = mover.Side && Set.contains site.Kind obstacleKinds then
+                block site.At
+
+    if not opts.IgnoreCreeps then
+        for o in a.Bodies do
+            if o.Id <> mover.Id && o.At.Room = mover.At.Room then
+                block (RoomPos.pos o.At)
+
+    if opts.IgnoreFortifications then
+        for s in r.Structures do
+            if s.Kind = "rampart" || s.Kind = "constructedWall" then
+                cost[index s.At] <- terrainCost[index s.At]
+
+    // How far a tile is from done: to the nearest goal's range, or with
+    // `flee` into the deepest one's.
+    let h (n: int) =
+        let x, y = n / side, n % side
+        let d (g: RoomPos) = max (abs (x - g.X)) (abs (y - g.Y))
+
+        if flee then
+            goals |> List.fold (fun acc (g, reach) -> max acc (reach - d g)) 0
+        else
+            goals
+            |> List.fold (fun acc (g, reach) -> min acc (max 0 (d g - reach))) System.Int32.MaxValue
+
+    let start = index (RoomPos.pos mover.At)
+    let distTo = Array.create (side * side) System.Int32.MaxValue
+    let parent = Array.create (side * side) -1
+    let queue = PriorityQueue<int, struct (int * int)>()
+    let mutable order = 0
+    let mutable best = start
+    let mutable bestH = h start
+    distTo[start] <- 0
+    queue.Enqueue(start, struct (0, 0))
+
+    while bestH > 0 && queue.Count > 0 do
+        let mutable n = start
+        let mutable priority = struct (0, 0)
+        queue.TryDequeue(&n, &priority) |> ignore
+        let struct (g, _) = priority
+
+        if g = distTo[n] then
+            let hn = h n
+
+            if hn < bestH then
+                best <- n
+                bestH <- hn
+
+            if hn > 0 then
+                let x, y = n / side, n % side
+
+                for dx in -1 .. 1 do
+                    for dy in -1 .. 1 do
+                        let nx, ny = x + dx, y + dy
+
+                        if (dx <> 0 || dy <> 0) && nx >= 0 && ny >= 0 && nx < side && ny < side then
+                            let m = nx * side + ny
+                            let c = cost[m]
+
+                            if c > 0 && g + c < distTo[m] then
+                                distTo[m] <- g + c
+                                parent[m] <- n
+                                order <- order + 1
+                                queue.Enqueue(m, struct (g + c, order))
+
+    let rec unwind (n: int) (acc: RoomPos list) =
+        if n = start then
+            acc
+        else
+            unwind parent[n] (RoomPos.at mover.At.Room { X = n / side; Y = n % side } :: acc)
+
+    unwind best []
+
+/// `fake-runtime.js` `moveTo` toward a body or tile: the first step of the
+/// path to within `reach`, beside that path; None where it already stands
+/// in reach or no step leads closer. The engine keeps a path `reusePath` (5)
+/// ticks while its destination holds; the arena paths afresh every tick.
+let private invaderMove
+    (a: Arena)
+    (b: Body)
+    (opts: InvaderPathing)
+    (target: RoomPos)
+    (reach: int)
+    : (Direction * RoomPos list) option =
+    if dist b.At target <= reach then
+        None
+    else
+        match roomPath a b opts false [ target, reach ] with
+        | first :: _ as path ->
+            directionTo (RoomPos.pos b.At) (RoomPos.pos first)
+            |> Option.map (fun d -> d, path)
+        | [] -> None
+
+/// `fake-runtime.js` `findClosestByPath`: one standing on the body's tile,
+/// else the last of `objects` beside the end of the search to range 1 of
+/// any (none when the search falls short).
+let private closestByPath (a: Arena) (b: Body) (opts: InvaderPathing) (objects: Body list) =
+    if List.isEmpty objects then
+        None
+    else
+        match objects |> List.tryFind (fun o -> dist b.At o.At = 0) with
+        | Some here -> Some here
+        | None ->
+            let last =
+                roomPath a b opts false (objects |> List.map (fun o -> o.At, 1))
+                |> List.tryLast
+                |> Option.defaultValue b.At
+
+            objects |> List.filter (fun o -> dist last o.At <= 1) |> List.tryLast
+
+/// `invaders/flee.js`: with any hostile nearer than `reach`, the first step
+/// of `fake-runtime.js` `flee` out to `reach` of every one of them, creeps
+/// in the way.
+let private invaderFlee (a: Arena) (b: Body) (hostiles: Body list) (reach: int) =
+    match hostiles |> List.filter (fun c -> dist b.At c.At < reach) with
+    | [] -> None
+    | near ->
+        roomPath a b invaderPathing true (near |> List.map (fun c -> c.At, reach))
+        |> List.tryHead
+        |> Option.bind (fun first -> directionTo (RoomPos.pos b.At) (RoomPos.pos first))
+
+/// One NPC invader's intents (`invaders/pretick.js`), read off the
+/// start-of-tick room. Its side's bodies in the room are the invaders
+/// (itself among them), every other body but a Source Keeper's the
+/// hostiles. A body with a HEAL part, live or not, runs `healer.js`, any
+/// other `findAttack.js`, and both then `shootAtWill.js`. The acts stand in
+/// the order the engine sets them, the last of a name winning (`admitted`),
+/// and the room is ordered by id where the engine's is its object order.
+let private invaderActs (a: Arena) (b: Body) : Act list =
+    let here =
+        a.Bodies
+        |> List.filter (fun o -> o.At.Room = b.At.Room)
+        |> List.sortBy (fun o -> o.Id)
+
+    let invaders = here |> List.filter (fun o -> o.Side = b.Side)
+    let healers = invaders |> List.filter (fun o -> activeCount o Heal > 0)
+
+    let hostiles =
+        here
+        |> List.filter (fun o -> o.Side <> b.Side && o.Side <> Side.Npc "Source Keeper")
+
+    let acts = ResizeArray<Act>()
+    let step (d: Direction) = acts.Add(Act.Move d)
+    // `creep.hits < creep.hitsMax / 2`
+    let halfDown (o: Body) = 2 * o.Hits < hitsMax o
+
+    if List.contains Heal b.Parts then
+        // healer.js: heal the most hurt invader within 3, itself included.
+        invaders
+        |> List.filter (fun c -> dist c.At b.At <= Engine.rangedRange)
+        |> List.sortBy (fun c -> -(hitsMax c - c.Hits))
+        |> List.tryHead
+        |> Option.iter (fun t ->
+            acts.Add(
+                if dist b.At t.At <= 1 then
+                    Act.Heal t.Id
+                else
+                    Act.RangedHeal t.Id
+            ))
+
+        if halfDown b then
+            // Below half: flee 4, else to the nearest other healer.
+            match invaderFlee a b hostiles 4 with
+            | Some d -> step d
+            | None ->
+                invaders
+                |> List.filter (fun c -> c.Id <> b.Id && activeCount c Heal > 0)
+                |> closestByPath a b invaderPathing
+                |> Option.bind (fun t -> invaderMove a b invaderPathing t.At 1)
+                |> Option.iter (fst >> step)
+        else
+            // To the nearest hurt invader; with none, flee 4, else to the
+            // nearest invader without HEAL; with none of those, suicide.
+            let target =
+                match
+                    closestByPath
+                        a
+                        b
+                        invaderPathing
+                        (invaders |> List.filter (fun c -> c.Hits < hitsMax c))
+                with
+                | Some t -> Choice1Of2(Some t)
+                | None ->
+                    match invaderFlee a b hostiles 4 with
+                    | Some d -> Choice2Of2 d
+                    | None ->
+                        invaders
+                        |> List.filter (fun c -> c.Id <> b.Id && activeCount c Heal = 0)
+                        |> closestByPath a b invaderPathing
+                        |> Choice1Of2
+
+            match target with
+            | Choice2Of2 d -> step d
+            | Choice1Of2 None -> acts.Add Act.Suicide
+            | Choice1Of2(Some t) when dist b.At t.At <= 1 ->
+                // Beside it: a step onto its tile, which lands if it moves off.
+                directionTo (RoomPos.pos b.At) (RoomPos.pos t.At) |> Option.iter step
+            | Choice1Of2(Some t) ->
+                invaderMove a b invaderPathing t.At 1 |> Option.iter (fst >> step)
+    else
+        // findAttack.js
+        let haveAttack = activeCount b Attack > 0
+
+        let fled =
+            if not haveAttack && activeCount b RangedAttack > 0 then
+                invaderFlee a b hostiles 3
+            else
+                None
+
+        match fled with
+        | Some d -> step d
+        | None ->
+            let mutable target: Body option = None
+            // The path `moveTo` walked this tick (`memory_move.path`).
+            let mutable path: RoomPos list = []
+
+            // A shooter below half walks to the nearest healer.
+            if halfDown b && not (List.isEmpty healers) && not haveAttack then
+                closestByPath a b invaderPathing healers
+                |> Option.iter (fun healer ->
+                    match invaderMove a b invaderPathing healer.At 0 with
+                    | Some(d, p) ->
+                        step d
+                        target <- Some healer
+                        path <- p
+                    | None -> ())
+
+            if haveAttack then
+                hostiles
+                |> List.tryFind (fun c -> dist b.At c.At <= 1)
+                |> Option.iter (fun c -> acts.Add(Act.Attack c.Id))
+
+            // The nearest hostile by path, through creeps, then through
+            // fortifications, then through every destructible structure;
+            // a melee walks onto it, a shooter only from beyond 3.
+            for opts in
+                [
+                    { invaderPathing with
+                        IgnoreCreeps = true
+                    }
+                    { invaderPathing with
+                        IgnoreFortifications = true
+                    }
+                    { invaderPathing with
+                        IgnoreDestructibleStructures = true
+                    }
+                ] do
+                if target.IsNone then
+                    target <- closestByPath a b opts hostiles
+
+                    match target with
+                    | Some t when haveAttack || dist b.At t.At > 3 ->
+                        invaderMove a b opts t.At 0
+                        |> Option.iter (fun (d, p) ->
+                            step d
+                            path <- p)
+                    | _ -> ()
+
+            let r = Map.find b.At.Room a.Rooms
+
+            match target with
+            | None ->
+                // No hostile anywhere: walk at a walled-off spawn, or with
+                // none in an owned room, suicide (`checkPath`: a spawn is
+                // reached when the walk ends beside it).
+                let reaches (at: RoomPos) =
+                    roomPath a b invaderPathing false [ at, 1 ]
+                    |> List.tryLast
+                    |> Option.defaultValue b.At
+                    |> fun last -> dist last at <= 1
+
+                let unreachable =
+                    r.Structures
+                    |> List.filter (fun s -> s.Kind = "spawn")
+                    |> List.map (fun s -> RoomPos.at b.At.Room s.At)
+                    |> List.filter (reaches >> not)
+
+                match unreachable with
+                | [] when r.Controller |> Option.exists (fun c -> c.Owner <> Ownership.Unowned) ->
+                    acts.Add Act.Suicide
+                | spawn :: _ ->
+                    invaderMove
+                        a
+                        b
+                        { invaderPathing with
+                            IgnoreDestructibleStructures = true
+                        }
+                        spawn
+                        0
+                    |> Option.iter (fst >> step)
+                | [] -> ()
+            | Some t ->
+                // The engine sets this attack whatever the body carries; one
+                // with no ATTACK lands nothing, and no body here has a HEAL
+                // it could suppress, so it is left out.
+                if haveAttack then
+                    acts.Add(Act.Attack t.Id)
+
+                // A melee or WORK body breaks what stands on its path's next
+                // tile.
+                if haveAttack || activeCount b Work > 0 then
+                    match path with
+                    | next :: _ ->
+                        r.Structures
+                        |> List.tryFind (fun s ->
+                            s.At = RoomPos.pos next && Set.contains s.Kind raidTargetKinds)
+                        |> Option.iter (fun s ->
+                            if activeCount b RangedAttack > 0 then
+                                acts.Add(Act.RangedAttack s.Id)
+
+                            if activeCount b Work > 0 then
+                                acts.Add(Act.Dismantle s.Id)
+                            else
+                                acts.Add(Act.Attack s.Id))
+                    | [] -> ()
+
+    // shootAtWill.js: the lowest-hits hostile within 3.
+    if activeCount b RangedAttack > 0 then
+        match hostiles |> List.filter (fun c -> dist b.At c.At <= Engine.rangedRange) with
+        | [] -> ()
+        | targets -> acts.Add(Act.RangedAttack (targets |> List.minBy (fun c -> c.Hits)).Id)
+
+    List.ofSeq acts
+
 /// The behaviour in force this tick, `Phases` and `Retreat` resolved.
 let rec private current (tick: int) (b: Body) (behaviour: Behaviour) : Behaviour =
     match behaviour with
@@ -1898,25 +2342,7 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
                     []
 
             shoot @ heal @ move (kiteStep a b target keep)
-    | Invade ->
-        let fights = fightInReach a Nearest b
-
-        let goal =
-            match focusOf Nearest b enemies with
-            | Some target ->
-                if List.contains Attack (live b) || not (List.contains RangedAttack (live b)) then
-                    ringAround 1 target.At |> Set.remove target.At
-                else
-                    ringAround Engine.rangedRange target.At
-            | None -> Set.empty
-
-        let engaged =
-            fights
-            |> List.exists (function
-                | Act.Attack _ -> true
-                | _ -> false)
-
-        fights @ (if engaged then [] else move (stepToward a b goal))
+    | Invader -> invaderActs a b
     | Breach goal ->
         match firstBarrier a b goal with
         | Some(target, s) ->
@@ -2047,6 +2473,7 @@ let private actName (act: Act) =
     | Act.UpgradeController _ -> "upgradeController"
     | Act.Build _ -> "build"
     | Act.Withdraw _ -> "withdraw"
+    | Act.Suicide -> "suicide"
 
 /// `creeps/intents.js` `priorities`: the acts that suppress each act.
 let private suppressedBy (name: string) : string list =
@@ -3187,7 +3614,9 @@ let step (a: Arena) : Arena * TickTrace =
 
             let hits = min (hitsMax b) (b.Hits - damage + healing)
 
-            if hits <= 0 || b.TicksToLive <= 1 then
+            let suicided = Map.tryFind b.Id actsOf |> Option.exists (List.contains Act.Suicide)
+
+            if hits <= 0 || b.TicksToLive <= 1 || suicided then
                 events.Add(Died b.Id)
                 None
             else
