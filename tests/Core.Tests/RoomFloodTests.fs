@@ -485,9 +485,9 @@ let boundedBandTests =
 [<Tests>]
 let roadGateTests =
     /// One captured room planned from one fixed spawn at a level, through
-    /// the sweep's own `colonyOf` and projection. The spawn is the live one
-    /// where `AlsoSweep` carries it — a pair read off the stride's first
-    /// tile would be a real pair about an imaginary mother — and the
+    /// the sweep's own `colonyOf` and projection. The spawn is the colony's
+    /// own where `colonySpawns` carries one — a pair read off the stride's
+    /// first tile would be a real pair about an imaginary mother — and the
     /// stride's first tile otherwise, which only has to be the same in both
     /// runs.
     let colonyAt roomName level =
@@ -495,9 +495,9 @@ let roadGateTests =
         let capture = load roomName
 
         let spawn =
-            match room.AlsoSweep with
-            | live :: _ -> live
-            | [] -> spawnTiles room capture |> List.head
+            match colonySpawnIn roomName with
+            | Some live -> live
+            | None -> spawnTiles room capture |> List.head
 
         colonyOf (project capture spawn room.FallbackController) level
 

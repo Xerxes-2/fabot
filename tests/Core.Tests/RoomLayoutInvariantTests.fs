@@ -27,11 +27,20 @@ let invariantTests =
                     (rooms |> List.map (fun room -> room.Name) |> List.sort)
                     "every captured room is planned"
 
-                Expect.isTrue
-                    (cases
-                     |> List.exists (fun case ->
-                         case.Room.Name = "W12S28" && case.Spawn = { X = 12; Y = 40 }))
-                    "W12S28's own spawn tile is swept"
+                // #345: a colony whose own spawn was never swept is a colony
+                // whose real plan nobody checked, as W13S28's was until then.
+                // A declared colony with no spawn yet has no tile to ask about.
+                Expect.equal
+                    (colonySpawns
+                     |> List.filter (fun (home, tile) ->
+                         not (
+                             cases
+                             |> List.exists (fun case ->
+                                 case.Room.Name = home && case.Spawn = tile)
+                         ))
+                     |> List.map fst)
+                    []
+                    "every declared colony with a spawn is swept from the tile it stands on"
             }
 
             test "only paved-buffer fallbacks leave their controller Link footing unserved" {
@@ -72,7 +81,7 @@ let invariantTests =
                     || List.length (tilesOfKind Storage case.Placed) <> 1
 
                 Expect.isEmpty
-                    (violations miscounts)
+                    (violations (fun case -> not (cutOff case) && miscounts case))
                     "a room whose footing targets its sources do not explain"
             }
 
@@ -172,6 +181,7 @@ let invariantTests =
                 Expect.isEmpty
                     (violations (fun case ->
                         not (List.contains case.Spawn case.Room.SealedDoorsteps)
+                        && not (cutOff case)
                         && not (trunksCarryEverySource case)))
                     "a source with no paved line home"
             }
@@ -306,6 +316,40 @@ let knownLossTests =
                         case.Unrouted
                         |> List.forall (fun trunk -> trunk.Goal = TrunkGoal.Spawn case.SpawnId))
                     "and names the spawn alone: the controller's trunk is routed and paved"
+            }
+
+            test
+                "a sealed corridor cuts a source off whole: no container, no trunk to either goal (#345)" {
+                // W12S26 from its west channel: the cluster closes the one way
+                // out to the room's only source, so the pick that rides the
+                // trunk is never placed and both trunks are recorded dropped.
+                // Found the first time the room was swept; the colony's own
+                // spawn is clean.
+                let cutOffCases = sweep.Value |> List.filter cutOff
+
+                Expect.equal
+                    (cutOffCases |> List.map describe |> List.sort)
+                    (rooms
+                     |> List.collect (fun room ->
+                         room.SealedCorridors
+                         |> List.map (fun tile -> $"%s{room.Name} from %d{tile.X},%d{tile.Y}"))
+                     |> List.sort)
+                    "every recorded corridor is still in the sweep"
+
+                Expect.all
+                    cutOffCases
+                    (fun case -> List.length case.Containers < case.SourceCount + 1)
+                    "the cut-off source is still planned no container"
+
+                Expect.all
+                    cutOffCases
+                    (fun case ->
+                        case.Sources
+                        |> List.exists (fun (source, _) ->
+                            [ TrunkGoal.Spawn case.SpawnId; TrunkGoal.UpgradeArea ]
+                            |> List.forall (fun goal ->
+                                case.Unrouted |> List.contains { Source = source; Goal = goal })))
+                    "and the layout record names both of its trunks"
             }
 
             test "the doorstep 32,2 is sealed at every level, and no level-up pays for it (#105)" {

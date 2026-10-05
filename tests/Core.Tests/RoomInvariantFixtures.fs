@@ -51,6 +51,12 @@ type internal Room =
         /// invariant and asserted to be *still* broken, so the pin cannot
         /// outlive its cause.
         SealedDoorsteps: Pos list
+        /// Spawn tiles whose clustered reservation closes the one corridor
+        /// between the spawn and a source, so the source is cut off whole: no
+        /// container pick and no trunk to either goal (#345). Excluded from
+        /// the trunk and footing-count invariants and asserted *still* broken,
+        /// as `SealedDoorsteps` is.
+        SealedCorridors: Pos list
     }
 
 let internal noLosses =
@@ -60,20 +66,43 @@ let internal noLosses =
         AlsoSweep = []
         PavedBuffer = Never
         SealedDoorsteps = []
+        SealedCorridors = []
     }
 
-/// Our three rooms, two ordinary claimable neighbours (#83's remote targets),
-/// and a three-source sector centre. The third home joined the sweep with
-/// #331, which is how that ticket's loss turned out to be one spawn's and not
-/// the room's.
+/// The tile each declared colony's first spawn stands on: its declared
+/// `FirstSpawn`, or for the three colonies older than that field, the tile
+/// written here. A declaration with neither has no spawn yet, which is that
+/// intent and not a mistake, so it has no tile to sweep. Every tile here is
+/// swept on top of the stride, and the sweep asserted to cover its room (#345).
+let internal colonySpawns: (string * Pos) list =
+    let standing =
+        [
+            "W12S28", { X = 12; Y = 40 }
+            "W13S28", { X = 16; Y = 12 }
+            "W15S28", { X = 18; Y = 30 }
+        ]
+
+    Colony.declared
+    |> List.choose (fun colony ->
+        colony.FirstSpawn
+        |> Option.orElse (standing |> List.tryFind (fst >> (=) colony.Home) |> Option.map snd)
+        |> Option.map (fun tile -> colony.Home, tile))
+
+/// The tile a room's colony stands on, where one is declared.
+let internal colonySpawnIn (roomName: string) : Pos option =
+    colonySpawns |> List.tryFind (fst >> (=) roomName) |> Option.map snd
+
+/// Every declared colony's room, each swept from the tile its spawn stands
+/// on as well as the stride; two ordinary claimable neighbours (#83's remote
+/// targets), a three-source sector centre, and W17S28, kept for the losses
+/// the fourth-colony survey found there (#351). A room joining the sweep is
+/// how its losses are found at all: #331's turned out to be one spawn's and
+/// not the room's.
 let internal rooms =
     [
-        // The one room whose plan can be compared against a live colony,
-        // so it is swept over the tile that colony actually stands on.
-        { noLosses with
-            Name = "W12S28"
-            AlsoSweep = [ { X = 12; Y = 40 } ]
-        }
+        // A colony's room is swept over the tile its spawn stands on
+        // (`colonySpawns`) without listing that tile here.
+        { noLosses with Name = "W12S28" }
         // 32,2 is swept on top of the stride because the reservation seals
         // it: one of three tiles in this room — 31,1 and 33,1 are the others
         // — whose corridor out the clustered window closes. A loss the suite
@@ -85,12 +114,32 @@ let internal rooms =
             SealedDoorsteps = [ { X = 6; Y = 18 }; { X = 32; Y = 2 } ]
         }
         { noLosses with Name = "W13S28" }
+        // 48,18 and 48,42 are the fourth-colony survey's (#351): both drop
+        // both sources' spawn trunks. Neither is the colony's spawn.
+        { noLosses with
+            Name = "W17S29"
+            SealedDoorsteps = [ { X = 48; Y = 18 }; { X = 48; Y = 42 } ]
+        }
+        // Clean from its spawn. From the west channel (6,42 and 6,48) the
+        // cluster closes the way out to the one source, which loses its
+        // container and both trunks; 6,6 and 36,6 drop the spawn trunk alone.
+        { noLosses with
+            Name = "W12S26"
+            SealedDoorsteps = [ { X = 6; Y = 6 }; { X = 36; Y = 6 } ]
+            SealedCorridors = [ { X = 6; Y = 42 }; { X = 6; Y = 48 } ]
+        }
+        { noLosses with Name = "W17S25" }
+        // Undeclared; swept for the three spawn trunks the fourth-colony
+        // survey found it drops (#351).
+        { noLosses with
+            Name = "W17S28"
+            SealedDoorsteps = [ { X = 6; Y = 30 }; { X = 12; Y = 12 }; { X = 18; Y = 12 } ]
+        }
         // From the live spawn tile alone its strict buffer set is empty, so
         // the paved-swamp fallback applies and its controller Link footing
         // is the one accepted unserved target in the sweep (#331).
         { noLosses with
             Name = "W15S28"
-            AlsoSweep = [ { X = 18; Y = 30 } ]
             PavedBuffer = From [ { X = 18; Y = 30 } ]
         }
         // The plain tile nearest the centroid of its three sources.
@@ -121,6 +170,7 @@ let internal spawnTiles (room: Room) (capture: RoomCapture) =
             then
                 yield tile
     ]
+    @ Option.toList (colonySpawnIn room.Name)
     @ room.AlsoSweep
     |> List.distinct
     |> List.sortBy (fun tile -> tile.X, tile.Y)
@@ -469,6 +519,10 @@ let internal describe (case: Case) =
 
 let internal violations pick =
     sweep.Value |> List.filter pick |> List.map describe
+
+/// Whether a case is one of its room's recorded `SealedCorridors`.
+let internal cutOff (case: Case) =
+    List.contains case.Spawn case.Room.SealedCorridors
 
 /// The (source, goal) pairs a case's road plan does *not* carry, derived
 /// from the paved tiles alone: the road tiles beside the source must reach
