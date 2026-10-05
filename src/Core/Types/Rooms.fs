@@ -290,7 +290,7 @@ module RoomControlInfo =
     /// **clocks**, which the two holds disagree about, and this one derives a
     /// **refusal**, which they do not. `Observe.foldRaids` records it in
     /// `RaidState.Holds`; what the reserver row reads off it is
-    /// `refusesReserver`'s.
+    /// `refusesReserver`'s; `Layout.planOutpostContainers` asks no site under it.
     let heldByOther (control: RoomControlInfo) : ReservationInfo option =
         control.Reservation
         |> Option.filter (fun held -> held.Holder <> ReservationHolder.Ours)

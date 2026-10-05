@@ -70,6 +70,33 @@ let outpostContainerTests =
                     "and the same tick with the room unseen plans nothing at all"
             }
 
+            test
+                "a room anybody but us reserves is planned nothing, the Invader's hold as a rival's" {
+                // `createConstructionSite` is refused on a controller anybody else
+                // holds (#334): asked anyway, it is `ERR_INVALID_TARGET` a tick per
+                // rock for as long as the colony can see the room.
+                let seen =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+
+                let heldAs control =
+                    containerSites
+                        { seen with
+                            RoomControl = Map.add "W1N2" control seen.RoomControl
+                        }
+
+                Expect.equal
+                    (heldAs (reservedRoom true 4000))
+                    [ "W1N2", { X = 11; Y = 43 } ]
+                    "the premise: under our own reservation the rock is planned its container"
+
+                Expect.isEmpty
+                    (heldAs (reservedRoom false 4000))
+                    "under a rival's reservation nothing is asked"
+
+                Expect.isEmpty (heldAs (coreReservedRoom 4000)) "nor under the Invader's"
+            }
+
             test "a source with one Seat is the same rule with one candidate" {
                 // W13S28's `16,7` is a single-Seat rock, and "the shortest"
                 // has to answer where there is nothing to be shorter than.

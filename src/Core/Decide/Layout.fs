@@ -1314,9 +1314,12 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
         match Atlas.positionOf atlas s.Id with
         // Not a nursery's rock its pioneers dig (#473): a container is a
         // third of a spawn, and the child plans its own once it casts.
+        // Nor into a room anybody but us reserves (#334): the engine refuses
+        // the site there, the reserver row's refusal one act over.
         | Some tile when
             tile.Room <> home
-            && Map.containsKey tile.Room view.RoomControl
+            && Map.tryFind tile.Room view.RoomControl
+               |> Option.exists (RoomControlInfo.heldByOther >> Option.isNone)
             && not (List.contains tile.Room view.Borrowed.Rooms)
             ->
             Some(s.Id, tile)
