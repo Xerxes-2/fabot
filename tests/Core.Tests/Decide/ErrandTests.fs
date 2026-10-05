@@ -317,7 +317,16 @@ let errandStandDownTests =
                 let garrisoned =
                     { errand with
                         Bank = bank 5_600 5_600
-                        Fought = Map.ofList [ errandRoom, { Seen = errand.Time - 1; Squad = None } ]
+                        Fought =
+                            Map.ofList
+                                [
+                                    errandRoom,
+                                    {
+                                        Seen = errand.Time - 1
+                                        Squad = None
+                                        Raiders = Set.empty
+                                    }
+                                ]
                         Hostiles =
                             [
                                 { hostileIn
@@ -587,9 +596,14 @@ let errandStandDownTests =
 
                 let guard = creepWith "ranger-1" 0 0 Bodies.rangerPattern.Block
 
+                // The Brief's S7, rule 2: the verdict weighs the ranger the bank
+                // buys, so a bank that buys the largest one, which wins the
+                // longbow; at the fixture's 300 none is bought, the room is
+                // outmatched and the ranger keeps to safe ground.
                 let colony =
                     { (bareHome |> errandColony (Some Ownership.Ours) []) with
                         Hostiles = [ bow; claimer ]
+                        Bank = bank 5600 5600
                     }
                     |> withErrandCreep { X = 25; Y = 41 } guard
 

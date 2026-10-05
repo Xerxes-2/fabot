@@ -2248,6 +2248,110 @@ let childOutpostTests =
                     (pooledOf colony |> entryFor (Guard "W1N4"))
                     "a room crossed is mined by nobody of ours"
             }
+
+            // The Brief's S7, rule 2, the live case (#518, t964,802): Synapse673,
+            // 13 RANGED_ATTACK 7 MOVE and no heal, in the child's outpost beside
+            // her home, where the mother (bank 5,600) keeps two 21M14R7H
+            // residents; the child's bank is 850. Neither colony's guard row
+            // answers it: the mother's casts for no child's outpost, the
+            // child's one block loses. The one verdict counts the residents in
+            // both views: the mother calls them, and the child does not stand
+            // the outpost down.
+            test
+                "a ranged harasser in the child's outpost: the mother calls her residents and the child stays open" {
+                let harasser room =
+                    { hostileIn
+                          room
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let shut (colony: ColonyView) =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony).Declared
+                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+                    |> fun gate -> gate.Shut
+
+                // The mother's view: W1N3 the child's home she keeps the
+                // residents in, W1N4 the child's outpost beside it.
+                let mother =
+                    { watchingBeyond [ harasser "W1N4" ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                Expect.isTrue
+                    (guardBlocksBeat mother "W1N4" (guardBlocksReach mother))
+                    "the premise: the mother's guard row would win it, were the room hers"
+
+                Expect.equal
+                    (Facts.answer mother "W1N4")
+                    Facts.Answer.Win
+                    "answered by the residents"
+
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N3"); "r-2", taskId (Guard "W1N3") ]
+
+                let called = decide mother held Set.empty None
+
+                Expect.isTrue
+                    ([ "r-1"; "r-2" ]
+                     |> List.exists (fun name ->
+                         Map.tryFind name called.Assignments = Some(taskId (Guard "W1N4"))))
+                    "a resident takes the harasser"
+
+                // The child's view: her home W1N1, her outpost W1N2, the
+                // mother's residents standing at home (`ColonyView.Lendable`).
+                let child lendable =
+                    { declaredRaid [ harasser "W1N2" ] with
+                        Bank = bank 850 850
+                        Lendable =
+                            if lendable then
+                                [
+                                    resident "r-1", RoomPos.at "W1N1" { X = 25; Y = 26 }
+                                    resident "r-2", RoomPos.at "W1N1" { X = 27; Y = 26 }
+                                ]
+                            else
+                                []
+                    }
+
+                Expect.isFalse
+                    (guardBlocksBeat (child true) "W1N2" (guardBlocksReach (child true)))
+                    "the premise: the child's guard row loses it"
+
+                Expect.equal
+                    (Facts.answer (child true) "W1N2")
+                    Facts.Answer.Win
+                    "the child counts her mother's residents"
+
+                Expect.isEmpty (shut (child true)) "and does not stand the outpost down"
+                Expect.equal (guardQuotaOf (child true)) (Some 0) "nor casts a guard for it"
+
+                Expect.equal
+                    (shut (child false))
+                    (Set.singleton "W1N2")
+                    "with no resident at home it is stood down"
+            }
         ]
 
 /// The tiles beside one tile of W1N2, the tile itself left out.
@@ -2369,13 +2473,14 @@ let guardFlavourTests =
                 Expect.equal (guardQuotaOf colony) (Some 0) "nor the guard row"
             }
 
-            // Quirk, kept: "armed" is read off the body's parts here and off its
-            // live parts by the stand-down (`raid fold: outpost episodes`, a body
-            // whose weapons are shot off neither opens nor holds a row).
-            test
-                "quirk: a raider whose weapons are shot off keeps its Reach and its Guard, priced on its paper" {
+            // The Brief's S7, rule 1: a hostile no heal reaches is read live. This
+            // was the quirk "a raider whose weapons are shot off keeps its Reach
+            // and its Guard, priced on its paper", where the stand-down already
+            // read it live and reopened the room.
+            test "a raider whose weapons are shot off, alone, has no Reach and no Guard" {
                 let disarmed =
                     { hostileIn "W1N2" { X = 25; Y = 42 } smallMelee with
+                        Id = "disarmed"
                         Hits = 50
                     }
 
@@ -2385,35 +2490,55 @@ let guardFlavourTests =
                     "the premise: its last MOVE alone still acts"
 
                 let colony =
-                    declaredRaid [ disarmed ]
+                    { declaredRaid [ disarmed ] with
+                        Bank = bank 800 800
+                    }
                     |> withGuards
                         [ ranger "r-1", { X = 22; Y = 47 }; guard "g-1", { X = 20; Y = 41 } ]
 
-                Expect.isNonEmpty
+                Expect.isEmpty
                     (Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
-                    "it keeps a Reach"
+                    "no Reach"
 
-                // Priced on paper, whole parts and whole hits, a bank that buys
-                // a guard block wins it: the outpost's Guard, on the tier.
-                Expect.equal
-                    (pooledHolding [] (Guard "W1N2") { colony with Bank = bank 800 800 })
-                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
-                    "the room's Guard is pooled for it"
-
-                // At 700 no block is bought, so the guard loses on paper; with
-                // no live RANGED_ATTACK and dead weight on its one MOVE it cannot
-                // close on a ranger, so the room is a chase.
-                Expect.equal
-                    (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
-                    "below a guard block it is pooled as a kill, a rung up"
+                Expect.isNone (pooledHolding [] (Guard "W1N2") colony) "no Guard is pooled for it"
 
                 let decision = decideOn colony
 
                 Expect.equal
                     (Map.tryFind "r-1" decision.Assignments, Map.tryFind "g-1" decision.Assignments)
-                    (Some(taskId (Guard "W1N2")), None)
-                    "the ranger's, and the melee guard is sent nowhere"
+                    (None, None)
+                    "and neither body is sent to it"
+            }
+
+            // The Brief's S7, rule 1: healing reaches it, so its parts come back
+            // and it is read on paper, whole.
+            test "the same raider beside its side's healer is still a threat, priced whole" {
+                let disarmed =
+                    { hostileIn "W1N2" { X = 25; Y = 42 } smallMelee with
+                        Id = "disarmed"
+                        Hits = 50
+                    }
+
+                let medic =
+                    { hostileIn "W1N2" { X = 27; Y = 43 } smallHealer with
+                        Id = "medic"
+                    }
+
+                let colony =
+                    { declaredRaid [ disarmed; medic ] with
+                        Bank = bank 800 800
+                    }
+                    |> withGuards [ guard "g-1", { X = 20; Y = 41 } ]
+
+                Expect.isNonEmpty
+                    (Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
+                    "it keeps a Reach"
+
+                Expect.isTrue
+                    (HostileInfo.armed colony.Hostiles disarmed)
+                    "and is armed, its ATTACK and RANGED_ATTACK healed back"
+
+                Expect.isSome (pooledHolding [] (Guard "W1N2") colony) "the room's Guard is pooled"
             }
         ]
 
@@ -2507,7 +2632,12 @@ let private withFlavour (colony: ColonyView) flavour =
 /// `westField`'s outpost with a guard and a ranger of ours standing in it,
 /// apart from every flavour's tiles.
 let private precedenceBasis =
-    declaredRaid []
+    { declaredRaid [] with
+        // An RCL5 bank: two ranger blocks, which win the smallMelee the
+        // verdict (the Brief's S7) weighs them against, and two guard blocks,
+        // which lose the plodder, so it stays a chase.
+        Bank = bank 1800 1800
+    }
     |> westField
     |> withGuards [ guard "g-1", { X = 3; Y = 43 }; ranger "r-1", { X = 28; Y = 42 } ]
 
@@ -2712,9 +2842,10 @@ let guardPrecedenceTests =
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
                         [ ChaseDark; Core ], row [ Core ] [ "Ring" ] OneRungUp one [ "r-1" ]
                         // Shut on a chase on the record, a raid that can close seen
-                        // there after all: the raid's claim shuts the held exit
-                        // out, and no ranger the chase admits takes the kill.
-                        [ ChaseDark; Raid; Hold ], row [] [ "Kite" ] OneRungUp one []
+                        // there after all. The Brief's S7, rule 2: its verdict is the
+                        // guard's win, so it is the raid's Guard and the guard
+                        // takes it (it was pooled as a kill nobody took).
+                        [ ChaseDark; Raid; Hold ], row [ Raid ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         // And a chase out of sight shuts the trespasser's kill out.
                         [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "r-1" ]
                     ]

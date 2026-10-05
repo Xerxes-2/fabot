@@ -290,6 +290,10 @@ type ColonyView =
         /// Where **other colonies'** creeps stand in the rooms this colony
         /// works: bodies it does not hold and cannot move.
         Foreign: Set<RoomPos>
+        /// For a child, its mother's bodies standing in its home, and where:
+        /// the residents she keeps there (#447), whom a raid beside the home
+        /// calls as its own (`Facts.rangersWin`). Priced, never moved.
+        Lendable: (CreepInfo * RoomPos) list
         /// What this colony may take of a neighbour's, explicitly and
         /// bounded.
         Borrowed: BorrowedWork
@@ -1239,6 +1243,22 @@ module ColonyView =
                     |> List.filter (fun (name, _) -> not (Set.contains name names))
                     |> List.map (snd >> RoomPos.at room))
                 |> Set.ofList
+            Lendable =
+                match colony.Mother with
+                | None -> []
+                | Some _ ->
+                    let standing =
+                        worked
+                        |> List.tryFind (fst >> (=) home)
+                        |> Option.map (fun (_, facts) -> facts.Layer.CreepPositions)
+                        |> Option.defaultValue Map.empty
+
+                    world.Creeps
+                    |> List.filter (fun creep ->
+                        creep.Room = home && not (Set.contains creep.Info.Name names))
+                    |> List.choose (fun creep ->
+                        Map.tryFind creep.Info.Name standing
+                        |> Option.map (fun tile -> creep.Info, RoomPos.at home tile))
             Borrowed =
                 {
                     Rooms = bootstrap

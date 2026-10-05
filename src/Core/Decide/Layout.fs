@@ -65,7 +65,7 @@ let private safeModeIn
         let here = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
 
         let withinReach (h: HostileInfo) =
-            HostileInfo.claimsOnPaper h
+            HostileInfo.claims here h
             && match Atlas.positionOf atlas controller.Id with
                // Across a border there is no range to measure, so None here is
                // "not in reach", where an unplaced controller below is still
@@ -84,7 +84,7 @@ let private safeModeIn
         let undefended =
             guarded
             && Atlas.builtIn atlas room BuiltKind.Tower = 0
-            && here |> List.exists HostileInfo.armedOnPaper
+            && here |> List.exists (HostileInfo.armed here)
             && not (Quota.homeHolds view room)
 
         if claimerInReach || dentedKeepUnderHostiles || undefended then
@@ -349,9 +349,9 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                 RoomPos.range (RoomPos.at home at) h.Pos |> Option.exists (fun r -> r <= reach))
 
         let hurting (h: HostileInfo) =
-            match HostileInfo.weaponRangeOnPaper h with
+            match HostileInfo.weaponRange hostiles h with
             | Some reach -> within ours reach h
-            | None -> HostileInfo.worksOnPaper h && within keep Engine.meleeRange h
+            | None -> HostileInfo.works hostiles h && within keep Engine.meleeRange h
 
         // A tower over its reserve (#480): only these take a shot that is
         // not urgent, so only these are counted in the damage it must beat.
@@ -391,7 +391,7 @@ let internal planFire (view: ColonyView) atlas : Intent list =
 
         let urgent =
             hostiles
-            |> List.filter (fun h -> claimsAFlag (Set.singleton home) h || hurting h)
+            |> List.filter (fun h -> claimsAFlag hostiles (Set.singleton home) h || hurting h)
 
         let worth =
             urgent

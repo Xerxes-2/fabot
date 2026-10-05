@@ -104,10 +104,13 @@ type HostileInfo =
     }
 
 /// The one set of questions asked of a hostile, every rule reading
-/// these and spelling none of its own. Each part-question is asked one of two
-/// ways, and its name says which: **on paper**, of every part in `Body`, shot
-/// off or not; or **live**, of the parts still acting (`Engine.liveParts`).
-/// The owner-questions (`isKeeper`, `crossesExits`) read no parts.
+/// these and spelling none of its own. Each part-question is asked of the
+/// hostile **in effect**, beside the side it stands among
+/// (`effectiveParts`): live, of the parts still acting
+/// (`Engine.liveParts`), unless healing reaches it (`healReaches`), and then
+/// on paper, every part in `Body` at full hits, since healed parts come back.
+/// The `...Of` questions read a part list the caller hands them; the
+/// owner-questions (`isKeeper`, `crossesExits`) read no parts.
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module HostileInfo =
     /// A Source Keeper's owner, as the engine spells it.
@@ -139,89 +142,108 @@ module HostileInfo =
             | ranges -> Some(List.max ranges)
 
     /// Whether a list of parts can take down a structure or a controller:
-    /// WORK or CLAIM (`breaksLive`).
+    /// WORK or CLAIM.
     let breaksOf (parts: BodyPart list) : bool =
         parts |> List.exists (fun part -> part = Work || part = BodyPart.Claim)
 
-    /// Whether a list of parts holds an ATTACK, RANGED_ATTACK or HEAL: what
-    /// the light tick's glance calls armed, a healer included.
-    let armedOrHealsOf (parts: BodyPart list) : bool =
-        parts
-        |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Heal)
-
     /// The parts of a hostile still acting.
-    let liveParts (hostile: HostileInfo) : BodyPart list =
+    let private liveParts (hostile: HostileInfo) : BodyPart list =
         Engine.liveParts hostile.Body hostile.Hits
 
-    /// How many of one part still act.
-    let activeCount (hostile: HostileInfo) (part: BodyPart) : int =
-        partCountIn (liveParts hostile) part
+    /// Whether every part of a hostile still acts: what it is in effect
+    /// whatever reaches it, the common case asked first.
+    let private whole (hostile: HostileInfo) : bool =
+        hostile.Hits > Engine.partHits * (List.length hostile.Body - 1)
 
-    /// `weaponRangeOf` its body, on paper.
-    let weaponRangeOnPaper (hostile: HostileInfo) : int option = weaponRangeOf hostile.Body
+    /// Whether a HEAL of its own still acts.
+    let private healsItself (hostile: HostileInfo) : bool = liveParts hostile |> List.contains Heal
 
-    /// ADR-0033. Whether its body carries an ATTACK or RANGED_ATTACK, on
-    /// paper: a [[threat]] (`weaponRangeOnPaper` asked as a yes/no).
-    let armedOnPaper (hostile: HostileInfo) : bool =
-        weaponRangeOnPaper hostile |> Option.isSome
+    /// Whether healing reaches a hostile among `side`, the hostiles
+    /// it stands beside: a HEAL of its owner's still acting within ranged heal
+    /// of it, its own included.
+    let healReaches (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        healsItself hostile
+        || side
+           |> List.exists (fun healer ->
+               healer.Owner = hostile.Owner
+               && healer.Id <> hostile.Id
+               && RoomPos.range healer.Pos hostile.Pos
+                  |> Option.exists (fun r -> r <= Engine.rangedRange)
+               && healsItself healer)
 
-    /// Whether an ATTACK or RANGED_ATTACK still acts.
-    let armedLive (hostile: HostileInfo) : bool =
-        liveParts hostile
-        |> List.exists (fun part -> part = Attack || part = RangedAttack)
+    /// The parts a hostile fights with among `side`: every part where healing
+    /// reaches it (`healReaches`), else the ones still acting.
+    let effectiveParts (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
+        if whole hostile || healReaches side hostile then
+            hostile.Body
+        else
+            liveParts hostile
 
-    /// Whether it raids, on paper: `armedOnPaper`, and not a Source Keeper.
-    let raiderOnPaper (hostile: HostileInfo) : bool =
-        armedOnPaper hostile && not (isKeeper hostile)
+    /// Its hits in effect: whole where healing reaches it, else what it has.
+    let effectiveHits (side: HostileInfo list) (hostile: HostileInfo) : int =
+        if not (whole hostile) && healReaches side hostile then
+            Engine.partHits * List.length hostile.Body
+        else
+            hostile.Hits
 
-    /// Whether an ATTACK still acts: a melee body, what a step and a swing is
-    /// kept from.
-    let meleeLive (hostile: HostileInfo) : bool = activeCount hostile Attack > 0
+    /// How many of one part it fights with (`effectiveParts`).
+    let private count (side: HostileInfo list) (hostile: HostileInfo) (part: BodyPart) : int =
+        partCountIn (effectiveParts side hostile) part
 
-    /// Whether a RANGED_ATTACK still acts.
-    let shootsLive (hostile: HostileInfo) : bool = activeCount hostile RangedAttack > 0
+    /// `weaponRangeOf` the parts it fights with.
+    let weaponRange (side: HostileInfo list) (hostile: HostileInfo) : int option =
+        weaponRangeOf (effectiveParts side hostile)
 
-    /// Whether its body carries a WORK, on paper.
-    let worksOnPaper (hostile: HostileInfo) : bool = List.contains Work hostile.Body
+    /// ADR-0033. Whether it fights with an ATTACK or RANGED_ATTACK: a
+    /// [[threat]] (`weaponRange` asked as a yes/no).
+    let armed (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        weaponRange side hostile |> Option.isSome
 
-    /// Whether a WORK still acts.
-    let worksLive (hostile: HostileInfo) : bool = activeCount hostile Work > 0
+    /// Whether it raids: `armed`, and not a Source Keeper.
+    let raider (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        armed side hostile && not (isKeeper hostile)
 
-    /// Whether its body carries a CLAIM, on paper.
-    let claimsOnPaper (hostile: HostileInfo) : bool =
-        List.contains BodyPart.Claim hostile.Body
+    /// Whether it fights with an ATTACK: a melee body, what a step and a
+    /// swing is kept from.
+    let melee (side: HostileInfo list) (hostile: HostileInfo) : bool = count side hostile Attack > 0
 
-    /// Whether a WORK or CLAIM still acts (`breaksOf`).
-    let breaksLive (hostile: HostileInfo) : bool = breaksOf (liveParts hostile)
+    /// Whether it fights with a RANGED_ATTACK.
+    let shoots (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        count side hostile RangedAttack > 0
 
-    /// Whether a live part damages a creep or a structure: ATTACK,
-    /// RANGED_ATTACK or WORK. A scout, a claimer, a hauler and a body whose
-    /// weapons are all shot off have none.
-    let hurtsLive (hostile: HostileInfo) : bool =
-        liveParts hostile
+    /// Whether it works with a WORK.
+    let works (side: HostileInfo list) (hostile: HostileInfo) : bool = count side hostile Work > 0
+
+    /// Whether it works with a CLAIM.
+    let claims (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        count side hostile BodyPart.Claim > 0
+
+    /// Whether it works with a WORK or a CLAIM (`breaksOf`).
+    let breaks (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        breaksOf (effectiveParts side hostile)
+
+    /// Whether a part it fights or works with damages a creep or a structure:
+    /// ATTACK, RANGED_ATTACK or WORK. A scout, a claimer, a hauler and a body
+    /// whose weapons are shot off with no heal reaching it have none.
+    let hurts (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        effectiveParts side hostile
         |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Work)
 
-    /// What it heals a tick, on paper, its HEAL parts priced unboosted: the
-    /// projection carries no boosts.
-    let healingOnPaper (hostile: HostileInfo) : int =
-        Engine.healPower * partCountIn hostile.Body Heal
+    /// What it heals a tick, its HEAL parts priced unboosted: the projection
+    /// carries no boosts.
+    let healing (side: HostileInfo list) (hostile: HostileInfo) : int =
+        Engine.healPower * count side hostile Heal
 
-    /// What its live HEAL parts heal a tick, unboosted.
-    let healingLive (hostile: HostileInfo) : int =
-        Engine.healPower * activeCount hostile Heal
+    /// Whether it heals with a HEAL.
+    let heals (side: HostileInfo list) (hostile: HostileInfo) : bool = count side hostile Heal > 0
 
-    /// Whether its body carries a HEAL, on paper.
-    let healsOnPaper (hostile: HostileInfo) : bool = healingOnPaper hostile > 0
-
-    /// Whether a HEAL still acts.
-    let healsLive (hostile: HostileInfo) : bool = activeCount hostile Heal > 0
-
-    /// A hostile's gait (#510): its weight on paper, its MOVE live.
-    let gait (hostile: HostileInfo) : Gait =
-        Gait.ofBody hostile.Body (liveParts hostile)
+    /// A hostile's gait (#510): its weight on paper, the MOVE it walks with.
+    let gait (side: HostileInfo list) (hostile: HostileInfo) : Gait =
+        Gait.ofBody hostile.Body (effectiveParts side hostile)
 
     /// Whether a hostile is as good as rooted (`Gait.stationary`).
-    let stationary (hostile: HostileInfo) : bool = Gait.stationary (gait hostile)
+    let stationary (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        Gait.stationary (gait side hostile)
 
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
@@ -712,8 +734,8 @@ module World =
 
         facts.Control
         |> Option.exists (fun control -> control.Owner = Ownership.Ours && not control.SafeMode)
-        && List.exists HostileInfo.armedOnPaper raid
-        && List.sumBy HostileInfo.healingOnPaper raid
+        && List.exists (HostileInfo.armed facts.Hostiles) raid
+        && List.sumBy (HostileInfo.healing facts.Hostiles) raid
            >= towers * Engine.towerAttackAt Engine.towerFalloffRange
 
     /// Every spawn's name beside the room it stands in: what `Colony.castBy`
@@ -854,7 +876,8 @@ module World =
         let watch (room, facts: RoomFacts) =
             let armed =
                 facts.Hostiles
-                |> List.filter (fun h -> HostileInfo.armedOnPaper h && not (Colony.isAlly h.Owner))
+                |> List.filter (fun h ->
+                    HostileInfo.armed facts.Hostiles h && not (Colony.isAlly h.Owner))
 
             match seen room, armed, Map.tryFind room previous with
             | true, _ :: _, _ ->
@@ -905,7 +928,8 @@ module World =
         let remember (room, facts: RoomFacts) =
             let now =
                 facts.Hostiles
-                |> List.filter (fun h -> HostileInfo.healsOnPaper h && not (Colony.isAlly h.Owner))
+                |> List.filter (fun h ->
+                    HostileInfo.heals facts.Hostiles h && not (Colony.isAlly h.Owner))
 
             let standing = now |> List.map (fun h -> h.Id) |> Set.ofList
 
@@ -937,7 +961,7 @@ module World =
             |> Seq.filter (fun (_, facts) ->
                 facts.Hostiles
                 |> List.exists (fun h ->
-                    HostileInfo.raiderOnPaper h && not (Colony.isAlly h.Owner)))
+                    HostileInfo.raider facts.Hostiles h && not (Colony.isAlly h.Owner)))
             |> Seq.map (fun (room, _) -> room, world.Time)
 
         let kept =
@@ -1025,7 +1049,8 @@ module World =
 
             let raided () =
                 facts.Hostiles
-                |> List.exists (fun h -> HostileInfo.armedOnPaper h && not (Colony.isAlly h.Owner))
+                |> List.exists (fun h ->
+                    HostileInfo.armed facts.Hostiles h && not (Colony.isAlly h.Owner))
                 || match Map.tryFind name world.ExitWatches with
                    | Some(ExitWatch.Seen _) -> true
                    | Some(ExitWatch.Held hold) -> ExitHold.stands world.Time hold

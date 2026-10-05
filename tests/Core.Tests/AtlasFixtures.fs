@@ -42,6 +42,7 @@ let snapshotWith creeps spatial =
         Declared = []
         Stages = Map.empty
         Foreign = Set.empty
+        Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []

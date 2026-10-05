@@ -907,13 +907,16 @@ let squadExchangeTests =
             }
 
             test "the report's ranger answer counts a home's loaded towers, as the stand-down does" {
-                // Half the raid: one melee, one healer and the tapper.
+                // Half the raid: one melee, one healer and the tapper. The
+                // Brief's S7, rule 2: the verdict weighs the ranger the bank
+                // buys, so a bank that buys the largest one.
                 let half towers =
                     { w17s25Raid with
                         Hostiles =
                             w17s25Raid.Hostiles
                             |> List.filter (fun h -> h.Id <> "Prime803" && h.Id <> "Paragon722")
                         LoadedTowers = Map.ofList [ room, towers ]
+                        Bank = bank 5600 5600
                     }
 
                 let ranger towers =

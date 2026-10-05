@@ -188,9 +188,9 @@ let internal rampartsUnderAttack (view: ColonyView) : Set<string> =
         let strikes (tile: RoomPos) (hostile: HostileInfo) =
             match RoomPos.range hostile.Pos tile with
             | Some r ->
-                HostileInfo.weaponRangeOnPaper hostile
+                HostileInfo.weaponRange hostiles hostile
                 |> Option.exists (fun reach -> r <= reach)
-                || r <= Engine.meleeRange && HostileInfo.worksOnPaper hostile
+                || r <= Engine.meleeRange && HostileInfo.works hostiles hostile
             | None -> false
 
         SpatialInfo.structureHits view.Spatial
@@ -301,8 +301,9 @@ let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
         weak, sites
 
 /// The raid bodies at the home's line this tick (#504): a hostile, no
-/// keeper's, standing outside the line (`Atlas.outsideLine`) with a live ATTACK or
-/// RANGED_ATTACK, or with WORK and beside a perimeter rampart. A body inside
+/// keeper's, standing outside the line (`Atlas.outsideLine`) that fights with
+/// an ATTACK or RANGED_ATTACK, or works with a WORK beside a perimeter
+/// rampart (`HostileInfo.effectiveParts`). A body inside
 /// the line — a breach, or at the Keep — is the towers' and the relief's,
 /// never a [[defender]]'s.
 ///
@@ -332,8 +333,8 @@ let internal raidAtLine (view: ColonyView) atlas : Set<Pos> * HostileInfo list =
         hostiles
         |> List.filter (fun hostile ->
             Set.contains (RoomPos.pos hostile.Pos) outside
-            && (HostileInfo.armedLive hostile
-                || HostileInfo.worksLive hostile && besideLine hostile))
+            && (HostileInfo.armed view.Hostiles hostile
+                || HostileInfo.works view.Hostiles hostile && besideLine hostile))
 
 /// Whether any Keep structure of this colony stands below full hits: the
 /// safe-mode reflex's own question. Its own predicate and not a filter over
@@ -382,8 +383,12 @@ let internal harassTarget (view: ColonyView) (hostile: HostileInfo) : bool =
 /// Whether a hostile is a rival's CLAIM body standing in one of these
 /// resident rooms: unarmed, and the thing that takes the flag (#406, #414) or
 /// attacks a raised child's controller (#447).
-let internal claimsAFlag (residentRooms: Set<string>) (hostile: HostileInfo) =
-    Set.contains hostile.Pos.Room residentRooms && HostileInfo.claimsOnPaper hostile
+let internal claimsAFlag
+    (side: HostileInfo list)
+    (residentRooms: Set<string>)
+    (hostile: HostileInfo)
+    =
+    Set.contains hostile.Pos.Room residentRooms && HostileInfo.claims side hostile
 
 /// The children's homes this colony is raising (#447): its borrowed rooms at
 /// `Nursery`, `Bootstrapping` or `Weaning`, `Colony.bootstrapping`'s half of
@@ -422,28 +427,29 @@ let internal expansionCores (view: ColonyView) : InvaderCoreInfo list =
 let private within (reach: int) (a: RoomPos) (b: RoomPos) =
     RoomPos.range a b |> Option.exists (fun r -> r <= reach)
 
-/// Whether a hostile is a raid's healer (#451): unarmed, with a HEAL part
-/// still acting, and standing within three of an armed hostile — part of the
-/// raid, which it keeps alive.
+/// Whether a hostile is a raid's healer (#451): unarmed, healing, and
+/// standing within three of an armed hostile — part of the raid, which it
+/// keeps alive.
 let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
-    not (HostileInfo.armedOnPaper hostile)
-    && HostileInfo.healsLive hostile
+    not (HostileInfo.armed view.Hostiles hostile)
+    && HostileInfo.heals view.Hostiles hostile
     && view.Hostiles
        |> List.exists (fun other ->
-           HostileInfo.armedOnPaper other
+           HostileInfo.armed view.Hostiles other
            && within Engine.rangedRange other.Pos hostile.Pos)
 
-/// Whether a hostile's body trespasses wherever it stands (#516): a declared
-/// enemy's (`Colony.enemies`) with a live WORK, CARRY or CLAIM and no live
-/// weapon. A hauler carries our dug energy off; a bare scout takes nothing.
-let internal trespassingBody (hostile: HostileInfo) =
+/// Whether a hostile's body trespasses wherever it stands (#516), among
+/// `side`: a declared enemy's (`Colony.enemies`) working or carrying with a
+/// WORK, CARRY or CLAIM, and unarmed. A hauler carries our dug energy off; a
+/// bare scout takes nothing.
+let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
     let takes part =
         part = Work || part = Carry || part = BodyPart.Claim
 
     List.exists takes hostile.Body
     && Colony.isEnemy hostile.Owner
-    && List.exists takes (HostileInfo.liveParts hostile)
-    && not (HostileInfo.armedLive hostile)
+    && List.exists takes (HostileInfo.effectiveParts side hostile)
+    && not (HostileInfo.armed side hostile)
 
 /// Whether this colony mines a room: its home, or a room of its sources.
 let internal minesRoom (view: ColonyView) (room: string) =
@@ -461,7 +467,7 @@ let internal trespassRooms (view: ColonyView) (room: string) =
 /// room this colony kills trespassers in. The body is asked first, so a
 /// tick with no such body walks no source.
 let internal trespasser (view: ColonyView) (hostile: HostileInfo) =
-    trespassingBody hostile && trespassRooms view hostile.Pos.Room
+    trespassingBody view.Hostiles hostile && trespassRooms view hostile.Pos.Room
 
 /// What a Guard in its room may shoot: an armed hostile, a rival's claimer or
 /// a raid's healer (#451) in a resident room, and the declared enemy's creep
@@ -475,11 +481,12 @@ let internal guardShoots
     (fighting: Set<string>)
     (hostile: HostileInfo)
     =
-    HostileInfo.armedOnPaper hostile
-    || claimsAFlag residentRooms hostile
+    HostileInfo.armed view.Hostiles hostile
+    || claimsAFlag view.Hostiles residentRooms hostile
     || harassTarget view hostile
     || Set.contains hostile.Pos.Room residentRooms && raidHealer view hostile
-    || Set.contains hostile.Pos.Room fighting && HostileInfo.healsLive hostile
+    || Set.contains hostile.Pos.Room fighting
+       && HostileInfo.heals view.Hostiles hostile
     || trespasser view hostile
 
 /// Whether a resident room is quiet enough to lend its garrison to a kill
@@ -497,7 +504,7 @@ let internal residentQuiet
             not (guardShoots view resident Set.empty h)
         else
             h.Pos.Room = kill
-            || not (RoomName.neighbouring home h.Pos.Room && HostileInfo.raiderOnPaper h))
+            || not (RoomName.neighbouring home h.Pos.Room && HostileInfo.raider view.Hostiles h))
 
 /// Whether a ranger standing in a room may hold a kill in `room`, a chase's
 /// or a trespass's (#510, #516). Nothing a ranger carries says whose
@@ -523,7 +530,7 @@ let internal rangerMayKill (view: ColonyView) (room: string) (standing: string o
 let internal underRaid (view: ColonyView) =
     view.Hostiles
     |> List.exists (fun h ->
-        HostileInfo.raiderOnPaper h
+        HostileInfo.raider view.Hostiles h
         && (let room = h.Pos.Room
 
             Set.contains room (residentRooms view)
@@ -549,10 +556,10 @@ let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) 
 /// Whether a ranged body of these part counts holds the range on a hostile
 /// for as long as it likes (#510): the hostile shoots nothing, and falls
 /// behind ours on road and plain alike (`Gait.fallsBehind`), ours read off
-/// its live parts. Paper strength is not asked.
-let internal cannotClose (ours: BodyPart -> int) (hostile: HostileInfo) =
-    not (HostileInfo.shootsLive hostile)
-    && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait hostile)
+/// its live parts, the hostile's among `side` (`HostileInfo.effectiveParts`).
+let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
+    not (HostileInfo.shoots side hostile)
+    && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait side hostile)
 
 /// What a body deals a tick, off its part counts: melee and ranged, unboosted.
 let private damageOf (parts: BodyPart -> int) =
@@ -629,24 +636,28 @@ let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int
     // on the exit is never carried off it, and heals every tick.
     let present =
         view.Hostiles
-        |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healsOnPaper h)
-        |> List.map (fun h -> h, Seam.onRing (RoomPos.pos h.Pos) && HostileInfo.crossesExits h)
+        |> List.filter (fun h -> h.Pos.Room = room)
+        |> List.map (fun h ->
+            HostileInfo.healing view.Hostiles h,
+            h,
+            Seam.onRing (RoomPos.pos h.Pos) && HostileInfo.crossesExits h)
 
     let remembered =
         view.RecalledHealers
-        |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.healsOnPaper h)
-        |> List.map (fun h -> h, true)
+        |> List.filter (fun h -> h.Pos.Room = room)
+        |> List.map (fun h -> HostileInfo.healing view.RecalledHealers h, h, true)
 
-    let healers = present @ remembered
+    let healers =
+        present @ remembered |> List.filter (fun (healing, _, _) -> healing > 0)
 
     fun hostile ->
         healers
-        |> List.sumBy (fun (healer, bouncing) ->
+        |> List.sumBy (fun (healing, healer, bouncing) ->
             let rate =
                 match RoomPos.range healer.Pos hostile.Pos with
-                | Some r when r <= Engine.meleeRange -> HostileInfo.healingOnPaper healer
+                | Some r when r <= Engine.meleeRange -> healing
                 | Some r when r <= Engine.rangedRange ->
-                    HostileInfo.healingOnPaper healer * Engine.rangedHealPower / Engine.healPower
+                    healing * Engine.rangedHealPower / Engine.healPower
                 | _ -> 0
 
             if bouncing then rate / 2 else rate)
@@ -676,7 +687,11 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
     if not (Set.contains room (rangerRooms view)) then
         fun hostile ->
             {
-                Tier = (if HostileInfo.armedOnPaper hostile then Raid else Bystander)
+                Tier =
+                    (if HostileInfo.armed view.Hostiles hostile then
+                         Raid
+                     else
+                         Bystander)
                 EffectiveHits = 0
             }
     else
@@ -692,9 +707,9 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
                 Tier =
                     killTier
                         {
-                            ClaimsAFlag = claimsAFlag resident hostile
+                            ClaimsAFlag = claimsAFlag view.Hostiles resident hostile
                             RaidHealer = raidHealer view hostile
-                            Armed = HostileInfo.armedOnPaper hostile
+                            Armed = HostileInfo.armed view.Hostiles hostile
                             HealOn = heal
                             DamageOn = damage
                         }
@@ -705,8 +720,8 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
 /// against the raid standing in one room: two clocks compared,
 /// cross-multiplied to stay in whole numbers. A raid that out-heals our damage
 /// is never killed. Healers are priced in the healing and never in the hits.
-/// The raid's durability is priced at full off its parts; over-stating what
-/// it can take is the safe direction.
+/// Each raider is priced as it fights (`HostileInfo.effectiveParts`): what is
+/// left of it, or the whole body at full hits where healing reaches it.
 let internal exchangeWon
     (view: ColonyView)
     (room: string)
@@ -716,14 +731,16 @@ let internal exchangeWon
     : bool =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
-    let raidDamage = raid |> List.sumBy (fun h -> damageOf (partCountIn h.Body))
+    let raidDamage =
+        raid
+        |> List.sumBy (fun h -> damageOf (partCountIn (HostileInfo.effectiveParts view.Hostiles h)))
 
-    let raidHealing = raid |> List.sumBy HostileInfo.healingOnPaper
+    let raidHealing = raid |> List.sumBy (HostileInfo.healing view.Hostiles)
 
     let raidHits =
         raid
-        |> List.filter HostileInfo.armedOnPaper
-        |> List.sumBy (fun h -> Engine.partHits * List.length h.Body)
+        |> List.filter (HostileInfo.armed view.Hostiles)
+        |> List.sumBy (HostileInfo.effectiveHits view.Hostiles)
 
     if raidDamage = 0 then
         true
@@ -797,11 +814,13 @@ let rangerBlocksReach (view: ColonyView) : int =
 let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string) : bool =
     let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
-    let healing = inRoom |> List.sumBy HostileInfo.healingLive
+    let healing = inRoom |> List.sumBy (HostileInfo.healing view.Hostiles)
 
-    match inRoom |> List.filter HostileInfo.raiderOnPaper with
+    match inRoom |> List.filter (HostileInfo.raider view.Hostiles) with
     | [] -> false
-    | raid -> raid |> List.forall (cannotClose parts) && damageOf parts > healing
+    | raid ->
+        raid |> List.forall (cannotClose view.Hostiles parts)
+        && damageOf parts > healing
 
 /// `kitedDown` for the biggest ranger body the bank buys: the room-level
 /// answer the stand-down, `outmatched` and the chase read.
@@ -809,29 +828,125 @@ let internal kitedByRanger (view: ColonyView) (room: string) : bool =
     let blocks = max 1 (rangerBlocksReach view)
     kitedDown view (fun part -> blocks * partCountIn rangerPattern.Block part) room
 
-/// Whether a guarded room no ranger row serves is a ranger's chase (#510):
-/// a ranger kites its raid down (`kitedByRanger`), and the biggest melee body
-/// the bank buys loses to it. Read once a tick into the chase's `Brief`.
-let internal chased (view: ColonyView) (room: string) : bool =
-    room <> SpatialInfo.homeName view.Spatial
-    && not (Set.contains room (rangerRooms view))
-    && kitedByRanger view room
-    && not (guardBlocksBeat view room (guardBlocksReach view))
-
 /// What a room's loaded towers land a tick on one target, priced at the
 /// falloff range: a raised home's, beside whatever body of ours fights there.
 let private towerDamageIn (view: ColonyView) (room: string) =
     let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
     towers * Engine.towerAttackAt Engine.towerFalloffRange
 
-/// Whether no ranger body of any size wins the raid standing in a room alone
-/// (#451): a raid the ranger row casts nobody into, and the residents already
-/// there hold the room's safe ground against. A raised home's loaded towers
-/// fight beside it, priced at the falloff range. Never a raid the ranger
-/// kites down (`kitedByRanger`, #510), whatever its paper.
-let internal outmatched (view: ColonyView) (room: string) : bool =
-    not (kitedByRanger view room)
-    && not (blocksBeat rangerPattern.Block (towerDamageIn view room) view room rangerBlocksMost)
+/// Whether a raider stands in a room (`HostileInfo.raider`).
+let internal raided (view: ColonyView) (room: string) : bool =
+    view.Hostiles
+    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
+
+/// Whether the biggest body a room's own row casts wins its raid alone: the
+/// ranger's in a ranger room or one the colony harasses, beside a raised
+/// home's loaded towers, at least one block as for the kite; the melee
+/// guard's anywhere else (#417, #411). Never in a child's outpost, which no
+/// row of this colony casts for (#517).
+let private rowWins (view: ColonyView) (room: string) : bool =
+    if List.contains room view.Borrowed.ChildOutposts then
+        false
+    elif Set.contains room (rangerRooms view) || Set.contains room view.HarassCast then
+        blocksBeat
+            rangerPattern.Block
+            (towerDamageIn view room)
+            view
+            room
+            (max 1 (rangerBlocksReach view))
+    else
+        guardBlocksBeat view room (guardBlocksReach view)
+
+/// The fewest rangers that win the raid in `room` together, None where all of
+/// them lose: ours standing in the room, its garrison among them, then ours
+/// and, for a child, its mother's residents (`ColonyView.Lendable`) standing
+/// beside it, lent to it (`rangerMayKill`) out of a room where nothing its
+/// Guard would shoot stands. Taken in that order, by name within each.
+let internal rangersWin (view: ColonyView) (room: string) : int option =
+    let resident = residentRooms view
+
+    let quiet (here: string) =
+        view.Hostiles
+        |> List.forall (fun h -> h.Pos.Room <> here || not (guardShoots view resident Set.empty h))
+
+    let rangers =
+        (view.Creeps
+         |> List.choose (fun creep ->
+             SpatialInfo.creepPlacementOf view.Spatial creep.Name
+             |> Option.map (fun at -> creep, at.Room)))
+        @ (view.Lendable |> List.map (fun (creep, at) -> creep, at.Room))
+        |> List.filter (fst >> isRangerRowBody)
+        |> List.filter (fun (_, here) ->
+            here = room
+            || RoomName.neighbouring here room
+               && quiet here
+               && rangerMayKill view room (Some here))
+        |> List.sortBy (fun (creep, here) -> here <> room, creep.Name)
+        |> List.map fst
+
+    let rec wins (damage, healing, hits) count rest =
+        match rest with
+        | [] -> None
+        | (creep: CreepInfo) :: rest ->
+            let parts = partCount creep.Body
+            let damage = damage + damageOf parts
+            let healing = healing + selfHealOf parts
+            let hits = hits + creep.Hits.Hits
+
+            if exchangeWon view room damage healing hits then
+                Some(count + 1)
+            else
+                wins (damage, healing, hits) (count + 1) rest
+
+    wins (0, 0, 0) 0 rangers
+
+/// How the colony answers the raid standing in a room, one verdict
+/// that the stand-down, the rows, the chase and the call all read.
+[<RequireQualifiedAccess>]
+type Answer =
+    /// The bodies that could answer it win: its own row's biggest cast, or
+    /// the rangers standing in it or called to it (`rangersWin`). A room with
+    /// no raider in it.
+    | Win
+    /// A ranger kites it down (`kitedByRanger`, #510): it cannot close.
+    | Kite
+    /// Nothing of ours wins it: the [[stand-down]]'s.
+    | Lose
+
+/// One room's verdict and whether its own row gives it: its row's biggest
+/// cast first, then the kite, then the rangers standing in it or called.
+let internal answered (view: ColonyView) (room: string) : Answer * bool =
+    if not (raided view room) || rowWins view room then
+        Answer.Win, true
+    elif kitedByRanger view room then
+        Answer.Kite, false
+    elif Option.isSome (rangersWin view room) then
+        Answer.Win, false
+    else
+        Answer.Lose, false
+
+/// One room's verdict (`answered`).
+let answer (view: ColonyView) (room: string) : Answer = fst (answered view room)
+
+/// Whether a room no ranger row serves is a ranger's chase (#510): its raid
+/// in sight is answered, by rangers kiting it or called to it and not by its
+/// own row; or, where a ranger already holds the room's Guard (`kept`), by
+/// rangers at all, so a raid worn down to what the row's cast would win is
+/// not handed from the ranger at it to a body still to be cast. Read once a
+/// tick into the chase's `Brief`, off the room's `verdict` (`answered`).
+let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
+    room <> SpatialInfo.homeName view.Spatial
+    && not (Set.contains room (rangerRooms view))
+    && raided view room
+    && (match verdict with
+        | Answer.Lose, _ -> false
+        | _, false -> true
+        | _, true -> kept && (kitedByRanger view room || Option.isSome (rangersWin view room)))
+
+/// Whether nothing of ours wins the raid standing in a room (`Answer.Lose`):
+/// in a ranger room, the raid its row casts nobody into, and the residents
+/// already there hold the room's safe ground against.
+let internal outmatched (view: ColonyView) (room: string) : bool = answer view room = Answer.Lose
 
 /// One body in `squadFight`: its parts, head first, and the hits it has
 /// left, which is the engine's whole account of which parts still act.
@@ -955,7 +1070,11 @@ let squadFight
     let raid =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
-        |> List.map (fun h -> combatant h.Body h.Hits (claimsAFlag resident h))
+        |> List.map (fun h ->
+            combatant
+                h.Body
+                (HostileInfo.effectiveHits view.Hostiles h)
+                (claimsAFlag view.Hostiles resident h))
         |> Array.ofList
 
     let ours =
@@ -1105,8 +1224,8 @@ let kiteHolds
     let raidMelee =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
-        |> List.filter HostileInfo.meleeLive
-        |> List.map HostileInfo.liveParts
+        |> List.filter (HostileInfo.melee view.Hostiles)
+        |> List.map (HostileInfo.effectiveParts view.Hostiles)
 
     not (Set.isEmpty safe)
     && not (List.isEmpty members)
@@ -1115,17 +1234,31 @@ let kiteHolds
         || (members |> List.map plainTicks |> List.max)
            <= (raidMelee |> List.map plainTicks |> List.min))
 
-/// Whether the resident garrison's size loses the raid standing in a room
-/// beside its loaded towers: what pools a Fight there.
+/// Whether the resident garrison loses the raid standing in a room beside its
+/// loaded towers: what pools a Fight there. Both the garrison's size and the
+/// rangers actually standing there, priced together, lose.
 let internal residentsLose (view: ColonyView) (room: string) : bool =
-    not (
-        blocksBeat
-            rangerPattern.Block
-            (towerDamageIn view room)
+    let towers = towerDamageIn view room
+
+    let standing =
+        view.Creeps
+        |> List.filter (fun creep ->
+            isRangerRowBody creep
+            && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+               |> Option.exists (fun at -> at.Room = room))
+
+    let standingWin =
+        not (List.isEmpty standing)
+        && exchangeWon
             view
             room
-            view.Tuning.RangerResidentBlocks
-    )
+            (towers
+             + List.sumBy (fun (creep: CreepInfo) -> damageOf (partCount creep.Body)) standing)
+            (List.sumBy (fun (creep: CreepInfo) -> selfHealOf (partCount creep.Body)) standing)
+            (List.sumBy (fun (creep: CreepInfo) -> creep.Hits.Hits) standing)
+
+    not standingWin
+    && not (blocksBeat rangerPattern.Block towers view room view.Tuning.RangerResidentBlocks)
 
 /// The squad a room's fight record latched (`FightLatch.Squad`), or None.
 let private latchedSquad (view: ColonyView) (room: string) : Squad option =
@@ -1158,8 +1291,7 @@ let internal fightCooling (view: ColonyView) (room: string) : bool =
 /// `Tuning.FightConfirmTicks`, its first on the record: what first pools its
 /// Fight, and what the record latches its squad on.
 let private fightConfirmed (view: ColonyView) (room: string) : bool =
-    view.Hostiles
-    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raiderOnPaper h)
+    raided view room
     && Map.tryFind room view.Fought
        |> Option.exists (fun latch -> view.Time - latch.Seen <= view.Tuning.FightConfirmTicks)
     && residentsLose view room
@@ -1184,7 +1316,7 @@ let internal pricedSquad (view: ColonyView) (room: string) : Squad option =
 let private fightSquadIn (view: ColonyView) (holders: Map<string, string list>) (room: string) =
     let resident = residentRooms view
     let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let raided = inRoom |> List.exists HostileInfo.raiderOnPaper
+    let raided = raided view room
 
     let held =
         Map.tryFind (taskId (Fight room)) holders |> Option.exists (List.isEmpty >> not)
@@ -1195,7 +1327,7 @@ let private fightSquadIn (view: ColonyView) (holders: Map<string, string list>) 
         raided && residentsLose view room && Option.isSome latched
         || fightConfirmed view room
         || fightHeld view room
-        || held && (raided || inRoom |> List.exists (claimsAFlag resident))
+        || held && (raided || inRoom |> List.exists (claimsAFlag view.Hostiles resident))
 
     if Set.contains room resident && pooled then
         latched |> Option.orElse (pricedSquad view room)
@@ -1265,7 +1397,8 @@ let internal errandRoomsRaided (view: ColonyView) : Set<string> =
     view.Hostiles
     |> List.filter (fun hostile ->
         Set.contains hostile.Pos.Room rooms
-        && (HostileInfo.raiderOnPaper hostile || claimsAFlag rooms hostile))
+        && (HostileInfo.raider view.Hostiles hostile
+            || claimsAFlag view.Hostiles rooms hostile))
     |> List.map (fun hostile -> hostile.Pos.Room)
     |> Set.ofList
 
@@ -1277,7 +1410,7 @@ let internal errandRoomsContested (view: ColonyView) : Set<string> =
     let rooms = errandRooms view
 
     view.Hostiles
-    |> List.filter (claimsAFlag rooms)
+    |> List.filter (claimsAFlag view.Hostiles rooms)
     |> List.map (fun hostile -> hostile.Pos.Room)
     |> Set.ofList
 

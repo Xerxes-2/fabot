@@ -264,10 +264,7 @@ let internal busyReasons (view: ColonyView) (tasks: Task list) (aidSent: bool) :
         // More than one hauler load: a smaller backlog is one trip, not a queue.
         if homeOwed > carryCapacityOf (bodyFor haulerPattern view.Bank.Capacity) then
             SitesOwed
-        if
-            view.Hostiles
-            |> List.exists (fun h -> HostileInfo.raiderOnPaper h && h.Pos.Room = home)
-        then
+        if Facts.raided view home then
             Raided
         if ferrying then
             FeedingChild
@@ -412,7 +409,7 @@ let private guardedOutpostsOf (view: ColonyView) (declared: string list) : strin
         |> List.filter (fun room ->
             let seenArmed =
                 view.Hostiles
-                |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armedOnPaper h)
+                |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h)
 
             // The union of the two halves and not a two-armed test on vision,
             // so the blind half can never take a room the tick's own hostiles
@@ -451,7 +448,7 @@ let private defendedHomesOf (view: ColonyView) : string list =
     view.Borrowed.Defended
     |> List.filter (fun room ->
         view.Hostiles
-        |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armedOnPaper h))
+        |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h))
 
 /// The outpost chain's answers for this tick, derived once and carried (#383):
 /// re-entered per reader, the `Controller` census was walked nineteen times a

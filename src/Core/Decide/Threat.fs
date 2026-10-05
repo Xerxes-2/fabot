@@ -269,6 +269,9 @@ type Brief =
         /// How many bodies it admits, off the row's own count, the colony and
         /// the tick's Threats given.
         Capacity: ColonyView -> Threats -> Capacity
+        /// The room's verdict (`Facts.answer`), priced once a tick on first
+        /// read; `Win` in a room no raider stands in.
+        Verdict: Lazy<Answer>
     }
 
 /// What one room's Guard asks its row for: the row, how many bodies, and the
@@ -445,6 +448,7 @@ module Brief =
     let private admitsOf
         (kind: BriefKind)
         (room: string)
+        (verdict: Lazy<Answer>)
         (view: ColonyView)
         (atlas: Atlas.Atlas)
         (creep: CreepInfo)
@@ -452,16 +456,16 @@ module Brief =
         match kind with
         | BriefKind.Resident
         | BriefKind.Harass -> isRangerRowBody creep
-        // A ranger every raider there falls behind (#510): kited down by this
-        // body's own live parts, or out of sight; and a ranger the resident
-        // rule lends (#516).
+        // A ranger the resident rule lends (#516): under a kite (#510), one
+        // that kites the raid down with its own live parts; to a raid the
+        // rangers there and beside it win together (`Facts.rangersWin`), or
+        // one out of sight, any.
         | BriefKind.Chase ->
             isRangerRowBody creep
-            && (Facts.kitedDown view (partCount creep.Body) room
-                || not (
-                    view.Hostiles
-                    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raiderOnPaper h)
-                ))
+            && (match verdict.Value with
+                | Answer.Kite -> Facts.kitedDown view (partCount creep.Body) room
+                | Answer.Win
+                | Answer.Lose -> true)
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
         // A trespass's kill (#516), defence first: the guard row's body, or a
         // ranger the resident rule lends. A child's outpost is the child's
@@ -486,7 +490,12 @@ module Brief =
     /// launched squad is the relief: none is cast beside it, and none is held
     /// back while it musters.
     let private residentsWanted (room: string) (view: ColonyView) (threats: Threats) : int =
-        if outmatched view room then
+        let lost =
+            match Map.tryFind room threats.Briefs with
+            | Some brief -> brief.Verdict.Value = Answer.Lose
+            | None -> outmatched view room
+
+        if lost then
             0
         elif Map.tryFind room threats.Fight |> Option.exists (fun ground -> ground.Launched) then
             view.Tuning.RangerResidents
@@ -561,6 +570,8 @@ module Brief =
     /// against are one number.
     let private capacityOf
         (kind: BriefKind)
+        (verdict: Lazy<Answer>)
+        (rangers: Lazy<int option>)
         (ask: RowAsk option)
         (view: ColonyView)
         (threats: Threats)
@@ -580,8 +591,13 @@ module Brief =
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
         | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
-        // One ranger kites what cannot close on it (#510).
-        | BriefKind.Chase -> Capacity.fighters 1
+        // One ranger kites what cannot close on it (#510); a raid the rangers
+        // there and beside it win together takes as many as win it.
+        | BriefKind.Chase ->
+            match verdict.Value with
+            | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
+            | Answer.Kite
+            | Answer.Lose -> Capacity.fighters 1
         // One body kills a trespasser, which strikes nothing back (#516), and
         // never fewer than the room's own guards.
         | BriefKind.Trespass -> Capacity.fighters (max 1 (wanted ()))
@@ -592,8 +608,16 @@ module Brief =
     /// One room's Brief, off the kinds that claimed it down `BriefKind.order`
     /// and the ground each source laid there. A kill (#510, #516) is stepped a
     /// rung up — its kill is the room's whole income back, and a quiet holder
-    /// is let go for it — and calls that holder off within its walk.
-    let internal claimed (room: string) (claims: BriefKind list) (laid: Laid) : Brief =
+    /// is let go for it — and calls that holder off within its walk. The
+    /// room's verdict and the rangers that win it (`Facts.rangersWin`) come
+    /// priced lazily, once a tick.
+    let internal claimed
+        (room: string)
+        (verdict: Lazy<Answer>)
+        (rangers: Lazy<int option>)
+        (claims: BriefKind list)
+        (laid: Laid)
+        : Brief =
         let kind = List.tryHead claims |> Option.defaultValue BriefKind.Outpost
         let kill = BriefKind.isKill kind
         let ask = askOf kind room
@@ -602,7 +626,7 @@ module Brief =
             Kind = kind
             Claims = claims
             Targets = guardTargets
-            Admits = admitsOf kind room
+            Admits = admitsOf kind room verdict
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind laid
@@ -614,13 +638,15 @@ module Brief =
                 | _ -> Avoid.Runner
             Rung = if kill then OneRungUp else OnTheTier
             Asks = ask
-            Capacity = capacityOf kind ask
+            Capacity = capacityOf kind verdict rangers ask
+            Verdict = verdict
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
     /// on no ground, the one a remembered raid pools in a room the colony is
-    /// blind in (#366).
-    let unclaimed (room: string) : Brief = claimed room [] bare
+    /// blind in (#366). No raider stands in it, so its verdict is `Win`.
+    let unclaimed (room: string) : Brief =
+        claimed room (lazy Answer.Win) (lazy None) [] bare
 
     /// The same Brief on this kite ground: a launched squad's (`withFights`).
     let internal kitingOn (ground: Set<RoomPos>) (brief: Brief) : Brief =
@@ -778,7 +804,7 @@ let private kiteGroundIn
     =
     let melee =
         inRoom
-        |> List.filter HostileInfo.meleeLive
+        |> List.filter (HostileInfo.melee inRoom)
         |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
 
     let standing =
@@ -946,12 +972,12 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 // range (#510): with its fatigue spent it steps once, then
                 // waits out the weight of that step.
                 let margin =
-                    if HostileInfo.stationary hostile then
+                    if HostileInfo.stationary view.Hostiles hostile then
                         Engine.meleeRange
                     else
                         view.Tuning.ReachMargin
 
-                HostileInfo.weaponRangeOnPaper hostile
+                HostileInfo.weaponRange view.Hostiles hostile
                 |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r + margin))
         with
         | [] -> Map.empty, Map.empty
@@ -1066,7 +1092,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let armedTargets, unarmedTargets =
                 inRoom
                 |> List.filter (guardShoots view resident Set.empty)
-                |> List.partition HostileInfo.armedOnPaper
+                |> List.partition (HostileInfo.armed inRoom)
 
             // A room we mine keeps its source's seats for our miners: the
             // ranger stands off them, within reach of every one (W17S26,
@@ -1091,17 +1117,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             // A body off the work spots is chased when the ranger catches it
             // (user, 2026-10-04): slower than a ranger's step a tick on plain
-            // (its Carry read empty), or already a step from a shooter's
-            // reach, where a chase at one pace keeps it under fire.
+            // (`HostileInfo.gait`), or already a step from a shooter's reach,
+            // where a chase at one pace keeps it under fire.
             let catchable (hostile: HostileInfo) =
-                let moves = hostile.Body |> List.filter ((=) Move) |> List.length
-
-                let weighed =
-                    hostile.Body
-                    |> List.filter (fun part -> part <> Move && part <> Carry)
-                    |> List.length
-
-                weighed > moves
+                Gait.ticks Gait.plain (HostileInfo.gait inRoom hostile)
+                |> Option.forall (fun ticks -> ticks > 1)
                 || shooters
                    |> List.exists (fun tile -> within tile (Engine.rangedRange + 1) hostile)
 
@@ -1118,7 +1138,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             // the room's other source every few ticks, the ranger caught
             // between the two (W19S25, t943,777).
             let atSource = unarmedTargets |> List.filter (within h.Stand 2)
-            let digs = HostileInfo.worksOnPaper
+            let digs = HostileInfo.works inRoom
 
             let reachOf targets =
                 targets
@@ -1154,15 +1174,36 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let rangers = rangerRooms view
 
-    // The rooms a ranger chases a raid in (#510): in sight, `chased`'s; out
-    // of it, an outpost shut on a raid a ranger kites down.
-    let chasedRooms =
+    // Each room a hostile stands in, its verdict (`Facts.answered`) and the
+    // rangers that win it, priced on first read and at most once this tick.
+    // Any other room has no raider, and is `Win`.
+    let verdicts =
         view.Hostiles
         |> List.map (fun hostile -> hostile.Pos.Room)
         |> List.distinct
-        |> List.filter (chased view)
-        |> Set.ofList
-        |> Set.union view.ChasedOutposts
+        |> List.map (fun room -> room, (lazy (answered view room), lazy (rangersWin view room)))
+        |> Map.ofList
+
+    let verdictOf room =
+        Map.tryFind room verdicts
+        |> Option.map (fun (verdict, _) -> verdict.Value)
+        |> Option.defaultValue (Answer.Win, true)
+
+    // The rooms a ranger chases a raid in (#510): in sight, `chased`'s; out
+    // of it, an outpost shut on a raid a ranger kites down, while no raid
+    // is seen there that its own row answers.
+    let chasedRooms =
+        let kept room =
+            let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+
+            view.Creeps
+            |> List.exists (fun creep -> Set.contains creep.Name holders && isRangerRowBody creep)
+
+        verdicts
+        |> Map.keys
+        |> Seq.filter (fun room -> chased view (verdictOf room) (kept room) room)
+        |> Set.ofSeq
+        |> Set.union (view.ChasedOutposts |> Set.filter (raided view >> not))
 
     // The ranger rooms an armed raid, or a rival's claimer, stands in, and
     // the chased rooms a raid stands in.
@@ -1170,7 +1211,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         (view.Hostiles
          |> List.filter (fun hostile ->
              Set.contains hostile.Pos.Room rangers
-             && (Map.containsKey hostile.Pos.Room ring || claimsAFlag resident hostile))
+             && (Map.containsKey hostile.Pos.Room ring
+                 || claimsAFlag view.Hostiles resident hostile))
          |> List.map (fun hostile -> hostile.Pos.Room))
         @ (chasedRooms |> Set.filter ring.ContainsKey |> Set.toList)
         |> List.distinct
@@ -1182,7 +1224,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let melee =
                 inRoom
-                |> List.filter HostileInfo.meleeLive
+                |> List.filter (HostileInfo.melee inRoom)
                 |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
 
             let standing =
@@ -1257,9 +1299,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     else
                         ground |> Set.filter (fun tile -> gap tile = widest) |> RoomPos.setAt room
 
-            let claimerLeads = head |> Option.exists (claimsAFlag resident)
+            let claimerLeads = head |> Option.exists (claimsAFlag inRoom resident)
 
-            let outmatchedHere = Set.contains room resident && outmatched view room
+            let outmatchedHere =
+                Set.contains room resident && fst (verdictOf room) = Answer.Lose
 
             [
                 onRamparts
@@ -1309,7 +1352,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // swing: what a defender's walk keeps off (#504). Inside the line a
     // melee outside it reaches nothing but the rampart it strikes.
     let defendAvoid =
-        match atLine |> List.filter HostileInfo.meleeLive with
+        match atLine |> List.filter (HostileInfo.melee view.Hostiles) with
         | [] -> Map.empty
         | melee ->
             let home = SpatialInfo.homeName view.Spatial
@@ -1335,7 +1378,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             |> List.exists (fun hostile ->
                 beside hostile.Pos.Room
                 && not (shielded hostile.Pos.Room)
-                && HostileInfo.armedOnPaper hostile)
+                && HostileInfo.armed view.Hostiles hostile)
             || Set.exists beside view.RaidedOutposts
 
         if nextDoor && not (shielded home) then
@@ -1359,7 +1402,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         let haulGround = 2
         let storeReach = 5
 
-        let hauls (hostile: HostileInfo) = not (HostileInfo.breaksLive hostile)
+        let hauls (hostile: HostileInfo) =
+            not (HostileInfo.breaks view.Hostiles hostile)
 
         let storesIn room =
             [ Structure BuiltKind.Container; Dropped Energy; Dropped Thorium; Tombstone ]
@@ -1390,7 +1434,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         beside ()
 
                 [ room, tiles ]
-            elif Seam.onRing at && trespassingBody hostile then
+            elif Seam.onRing at && trespassingBody view.Hostiles hostile then
                 reachAcross atlas room at 1
                 |> List.filter (fst >> trespassRooms view)
                 |> List.map (fun (next, landings) ->
@@ -1483,9 +1527,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         |> Seq.concat
         |> Set.ofSeq
         |> Seq.map (fun room ->
+            let verdict, winners =
+                match Map.tryFind room verdicts with
+                | Some(verdict, winners) -> lazy (fst verdict.Value), winners
+                | None -> lazy Answer.Win, lazy None
+
             room,
             Brief.claimed
                 room
+                verdict
+                winners
                 (Map.tryFind room claimants |> Option.defaultValue [])
                 {
                     Kite = Map.tryFind room kite
@@ -1867,7 +1918,7 @@ let private withFights (view: ColonyView) atlas (held: HeldTaskFacts) (threats: 
                     let clearBy reach (pos: RoomPos) =
                         view.Hostiles
                         |> List.forall (fun h ->
-                            not (HostileInfo.meleeLive h)
+                            not (HostileInfo.melee view.Hostiles h)
                             || RoomPos.range pos h.Pos |> Option.forall (fun r -> r > reach))
 
                     let around = besideIn tile

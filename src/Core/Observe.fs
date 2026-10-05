@@ -526,7 +526,7 @@ let private approachAt (view: ColonyView) : Approach option =
     let armed =
         view.Hostiles
         |> List.filter (fun hostile ->
-            HostileInfo.armedOnPaper hostile
+            HostileInfo.armed view.Hostiles hostile
             && not (Set.contains hostile.Pos.Room view.HarassCast)
             && not (Set.contains hostile.Pos.Room assaulted))
 
@@ -623,11 +623,14 @@ let private rivalDeadlines (view: ColonyView) =
 /// The tick a room stands down to when the raid in it is one the colony has
 /// decided not to fight: the raid's own life, since an Invader in a room
 /// nobody owns never suicides (the engine's suicide branch wants a controller
-/// owner). Only a raid the fighting row's reach cannot beat (#417, the biggest
-/// body the bank buys; the ranger's in an errand room, #411): a withdrawal and a
-/// garrison are the same room's two answers, told apart here — for an outpost
-/// and, since the ranger row fights for it (#414, #411), for an errand room, whose
-/// Source Keepers are terrain and neither open nor extend the clock. A transit
+/// owner). Only a raid nothing of ours wins (`Facts.answer` is `Lose`: neither
+/// the row's biggest body the bank buys, #417, the ranger's in an errand room,
+/// #411, nor a ranger kiting it, #510, nor the rangers standing in it with
+/// those called from beside it): a withdrawal
+/// and a garrison are the same room's two answers, told apart here — for an
+/// outpost and, since the ranger row fights for it (#414, #411), for an
+/// errand room, whose Source Keepers are terrain and neither open nor extend
+/// the clock. A transit
 /// room is neither answer. A harassment room is read as an errand room is
 /// (#432): its ranger is weighed against the armed squad standing there, in
 /// every room the colony casts, shut or not, and it is clocked off the
@@ -645,26 +648,20 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
     let outpostRooms = Set.ofList declared
 
     // The raid is the bodies that still hurt something, the one predicate
-    // `strikeGone` enrols on (#513): a body whose weapons are shot off
-    // neither opens a row nor holds one.
+    // `strikeGone` enrols on (#513): a body whose weapons are shot off, and
+    // no heal reaches, neither opens a row nor holds one.
     view.Hostiles
     |> List.filter (fun h ->
         h.Pos.Room <> SpatialInfo.homeName view.Spatial
-        && HostileInfo.hurtsLive h
+        && HostileInfo.hurts view.Hostiles h
         && not (HostileInfo.isKeeper h)
         // A body that can barely move opens nothing by itself (#510): it
         // harms only what stands about it, and its tiles are the Reach's.
-        && not (HostileInfo.stationary h))
+        && not (HostileInfo.stationary view.Hostiles h))
     |> List.groupBy (fun h -> h.Pos.Room)
     |> List.filter (fun (room, _) ->
-        if Set.contains room rangerRooms then
-            not (Decide.Facts.rangerBlocksBeat view room (Decide.Facts.rangerBlocksReach view))
-            // A raid the ranger out-walks is kited, not withdrawn from.
-            && not (Decide.Facts.kitedByRanger view room)
-        else if Set.contains room outpostRooms then
-            not (Decide.Facts.guardBlocksBeat view room (Decide.Facts.guardBlocksReach view))
-        else
-            false)
+        (Set.contains room rangerRooms || Set.contains room outpostRooms)
+        && Decide.Facts.answer view room = Decide.Facts.Answer.Lose)
     |> List.map (fun (room, raid) ->
         if Set.contains room view.HarassCast then
             room, (view.Time + view.Tuning.HarassClearTicks, StandDownBasis.HarassSighting)
@@ -784,11 +781,12 @@ let private bounceFloor
         view.Time
 
 /// Keep every standing raid row's bodies, and end its clock on the tick the
-/// last one is gone (#507). A body standing in the room that can hurt
-/// something (`HostileInfo.hurtsLive`) is (re-)enrolled, beaten or not; a scout
-/// never holds a row. One is struck when seen with nothing left that hurts, or
-/// absent from the room and seen dead anywhere the colony sees or, a player's,
-/// standing in another room. Never
+/// last one is gone (#507). A raider standing in the room, and a body that can
+/// hurt something (`HostileInfo.hurts`, a dismantler) while a raider stands
+/// beside it, is (re-)enrolled, beaten or not; a scout never holds a row, nor
+/// a WORK body left alone with no weapon, which no Guard answers. One is
+/// struck when seen as neither, or absent from the room and seen dead
+/// anywhere the colony sees or, a player's, standing in another room. Never
 /// on an absence, so a raid nobody sees go keeps its life; an Invader seen
 /// elsewhere is not gone, its clock being its life. A player's raid in a
 /// declared outpost is cut to its first sighting plus `Tuning.PlayerRaidHold`
@@ -805,12 +803,23 @@ let private strikeGone
     let whereNow =
         view.Hostiles |> List.map (fun hostile -> hostile.Id, hostile) |> Fresh.mapOfSeq
 
+    let raided =
+        view.Hostiles
+        |> List.filter (HostileInfo.raider view.Hostiles)
+        |> List.map (fun hostile -> hostile.Pos.Room)
+        |> Set.ofList
+
+    // Still the raid: a raider, or a body that hurts beside one.
+    let raiding (hostile: HostileInfo) =
+        HostileInfo.raider view.Hostiles hostile
+        || HostileInfo.hurts view.Hostiles hostile && Set.contains hostile.Pos.Room raided
+
     let gone room id =
         match Map.tryFind id whereNow with
-        // A body with nothing left that hurts is no raid, wherever it stands;
-        // a heal that brings a weapon back is a fresh sighting.
+        // A body that is no raid any more is gone, wherever it stands; a heal
+        // that brings a weapon back is a fresh sighting.
         | Some hostile ->
-            not (HostileInfo.hurtsLive hostile)
+            not (raiding hostile)
             || hostile.Pos.Room <> room && HostileInfo.crossesExits hostile
         | None -> Set.contains id fallen
 
@@ -839,7 +848,7 @@ let private strikeGone
                 |> List.filter (fun hostile ->
                     hostile.Pos.Room = room
                     && not (HostileInfo.isKeeper hostile)
-                    && HostileInfo.hurtsLive hostile)
+                    && raiding hostile)
 
             let raiders =
                 Seq.append episode.Raiders (standing |> Seq.map (fun hostile -> hostile.Id))
@@ -902,7 +911,13 @@ let private strikeGone
                 | [] -> windowed
                 | _ ->
                     { windowed with
-                        Chased = List.contains room declared && Decide.Facts.chased view room
+                        Chased =
+                            List.contains room declared
+                            && Decide.Facts.chased
+                                view
+                                (Decide.Facts.answered view room)
+                                false
+                                room
                     }
 
             if
@@ -1040,29 +1055,50 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
 /// (`Facts.fightConfirmed`); an unlatched record no raid confirms in time is
 /// dropped. A latched record is moved on by every tick a raid stands there
 /// while it still holds the Fight, left alone while it bars a second cast
-/// (`Facts.fightCooling`), and dropped once that bar runs out. Rooms the
-/// colony cannot see this tick keep what they had.
+/// (`Facts.fightCooling`), and dropped once that bar runs out. A record
+/// whose room holds no raider, and every one of whose last-seen raiders lies
+/// dead, is dropped at once: the raid was killed there, and the hold is for
+/// one that left. Rooms the colony cannot see this tick keep what they had.
 let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string, FightLatch> =
     let hold = view.Tuning.FightHoldTicks
 
+    let raiders =
+        view.Hostiles
+        |> List.filter (HostileInfo.raider view.Hostiles)
+        |> List.groupBy (fun hostile -> hostile.Pos.Room)
+        |> Map.ofList
+
+    let fallen = Set.ofList view.Fallen
+
+    let killed room (latch: FightLatch) =
+        not (Map.containsKey room raiders)
+        && not (Set.isEmpty latch.Raiders)
+        && Set.isSubset latch.Raiders fallen
+
     let standing =
         prior
-        |> Map.filter (fun _ latch ->
+        |> Map.filter (fun room latch ->
             let since = view.Time - latch.Seen
 
-            match latch.Squad with
-            | Some _ -> since < 2 * hold
-            | None -> since <= view.Tuning.FightConfirmTicks)
+            not (killed room latch)
+            && match latch.Squad with
+               | Some _ -> since < 2 * hold
+               | None -> since <= view.Tuning.FightConfirmTicks)
 
-    let seen squad = { Seen = view.Time; Squad = squad }
+    let resident = Decide.Facts.residentRooms view
 
-    view.Hostiles
-    |> List.filter HostileInfo.raiderOnPaper
-    |> List.map (fun hostile -> hostile.Pos.Room)
-    |> List.distinct
-    |> List.filter (fun room -> Set.contains room (Decide.Facts.residentRooms view))
+    raiders
+    |> Map.filter (fun room _ -> Set.contains room resident)
+    |> Map.toList
     |> List.fold
-        (fun rooms room ->
+        (fun rooms (room, raid) ->
+            let seen squad =
+                {
+                    Seen = view.Time
+                    Squad = squad
+                    Raiders = raid |> Seq.map (fun hostile -> hostile.Id) |> Fresh.setOfSeq
+                }
+
             match Map.tryFind room rooms with
             | Some({ Squad = Some _ } as latch) when view.Time - latch.Seen <= hold ->
                 Map.add room (seen latch.Squad) rooms
@@ -1325,7 +1361,7 @@ let foldRaids
             let armedIn room =
                 view.Hostiles
                 |> List.exists (fun hostile ->
-                    hostile.Pos.Room = room && HostileInfo.armedOnPaper hostile)
+                    hostile.Pos.Room = room && HostileInfo.armed view.Hostiles hostile)
 
             (standing, view.RoomControl)
             ||> Map.fold (fun rooms room _ ->

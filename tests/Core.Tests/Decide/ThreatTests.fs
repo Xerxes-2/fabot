@@ -2111,6 +2111,7 @@ let rampartDoorTests =
                                     {
                                         Seen = open'.Time - ago
                                         Squad = None
+                                        Raiders = Set.empty
                                     }
                                 ]
                     }
@@ -3765,12 +3766,10 @@ let raidPartTests =
             test "a hostile's active parts are the tail its hits still cover" {
                 let body = [ Tough; Tough; Heal; Attack; Move ]
 
+                // The engine's own account; a hostile in effect is
+                // `HostileInfo.effectiveParts` (the Brief's S7, rule 1).
                 let active hits part =
-                    HostileInfo.activeCount
-                        { hostileAt "h" { X = 1; Y = 1 } body with
-                            Hits = hits
-                        }
-                        part
+                    partCountIn (Engine.liveParts body hits) part
 
                 Expect.equal (active 500 Heal, active 500 Tough) (1, 2) "whole, every part acts"
                 Expect.equal (active 300 Heal, active 300 Tough) (1, 0) "the head goes first"
@@ -3825,10 +3824,16 @@ let rangerGroundTests =
                 // whole corridor. The threats' ring is beside them.
                 let brawlers = [ 21; 24; 27 ] |> List.map (fun x -> { X = x; Y = 43 })
 
+                // The Brief's S7, rule 2: the verdict weighs the ranger the bank
+                // buys, so a bank that buys the largest one, which wins this
+                // raid; at the fixture's 300 none is bought and the room is
+                // outmatched.
                 let colony =
-                    errandCorridor (
-                        brawlers |> List.mapi (fun i pos -> $"b{i}", pos, [ Attack; Move ])
-                    )
+                    { errandCorridor (
+                          brawlers |> List.mapi (fun i pos -> $"b{i}", pos, [ Attack; Move ])
+                      ) with
+                        Bank = bank 5600 5600
+                    }
 
                 let room = reactorErrand.RoomName
                 let threats = threatsOf colony (Atlas.ofView colony)

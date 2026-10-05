@@ -89,7 +89,15 @@ let private fightingMotherAt time raid bodies =
 /// The child's home's fight record: its raid last seen on this tick, and the
 /// squad it latched, if any.
 let private recordAt squad seen =
-    Map.ofList [ "W1N2", { Seen = seen; Squad = squad } ]
+    Map.ofList
+        [
+            "W1N2",
+            {
+                Seen = seen
+                Squad = squad
+                Raiders = Set.empty
+            }
+        ]
 
 /// The same, the duo latched.
 let private foughtAt seen = recordAt (Some "duo") seen

@@ -154,19 +154,6 @@ let private shotBy (shooters: string list) (target: string) (trace: TickTrace li
             | RangedAttackCreep(n, h) -> List.contains n shooters && h = target
             | _ -> false))
 
-/// The squad rows' casts over a run.
-let private squadCasts (trace: TickTrace list) =
-    trace
-    |> List.collect (fun t ->
-        t.Ours
-        |> List.choose (function
-            | SpawnCreep(_, _, name) when
-                [ "brawler-"; "medic-"; "kiter-" ]
-                |> List.exists (fun row -> name.StartsWith row)
-                ->
-                Some name
-            | _ -> None))
-
 [<Tests>]
 let reactorPhysicsTests =
     testList
@@ -382,75 +369,16 @@ let reactorHoldTests =
                 Expect.equal (reactorOf lost).Owner (Some shibdib) "theirs at the end"
             }
 
+            // #469, settled by the Brief's S7, rule 2 (one verdict off the bodies
+            // that could answer): three longbows lose to the two-body garrison
+            // standing there (280 a tick and 168 heal against 240 and 72), and
+            // the verdict prices the pair together (`Facts.rangersWin`), so the
+            // stand-down never shuts the room. Until S7 it weighed one 8-block
+            // ranger, shut the room on t5, and the claimer took the Reactor on
+            // t11 while the residents walked home (the pinned "today" case,
+            // retired).
             test
-                "scenario 3, today: three longbows outmatch the largest ranger, the stand-down shuts the errand room, and the idle garrison walks home out of it" {
-                let final, trace =
-                    reactorWorld (Some Side.Ours) 500 (residents @ stealSquad 3 2) |> run 600
-
-                let failure = describe trace
-
-                // The gate: the raid one 8-block ranger loses, on the tick the
-                // third longbow is seen, clocked to the raid's life.
-                Expect.contains
-                    (Observe.standDown Tuning.defaults final.Time final.Carried.Raids["W15S28"])
-                        .Shut
-                    "W15S25"
-                    "the room is shut"
-
-                // A shut room is no resident room, so no Fight is pooled and
-                // no squad is cast for it.
-                Expect.isEmpty (squadCasts trace) "no squad"
-
-                // Unassigned (`NoneApplicable`) from the shut on: no shot, only
-                // the heal reflex. Until #512 the shut room left the projection
-                // and both stood there till they died (t39, t65); now it stays
-                // a transit room while they stand in it, and they walk home.
-                let afterShut = trace |> List.filter (fun t -> t.Tick >= 6)
-
-                for id in residentIds do
-                    Expect.isFalse
-                        (shotBy [ id ] "Longbow1" afterShut
-                         || shotBy [ id ] "Longbow2" afterShut
-                         || shotBy [ id ] "Longbow3" afterShut)
-                        $"{id} never shoots after the shut\n{failure}"
-
-                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
-
-                    Expect.isFalse
-                        (pathOf id trace |> List.last |> (fun (_, body) -> body.At.Room = "W15S25"))
-                        $"{id} has left the room\n{failure}"
-
-                // The claim lands on t11 and every T after it is theirs.
-                match claimsIn trace with
-                | (tick, _) :: _ ->
-                    Expect.equal
-                        final.Scores
-                        (Map.ofList
-                            [
-                                "fabot", streakScore tick
-                                "Shibdib", streakScore 500 - streakScore tick
-                            ])
-                        "13 ours, 1,379 theirs"
-                | [] -> failtest $"a claim lands\n{failure}"
-
-                Expect.equal (reactorOf final).Owner (Some shibdib) "theirs at the end"
-            }
-
-            // #469's defect, live: `Observe.raidDeadlines` weighs an errand
-            // room's raid against the largest single ranger the bank buys
-            // (`Facts.rangerBlocksReach`, 8 blocks), never the two-body
-            // garrison standing there (14 blocks). Three longbows lose to the
-            // pair (280 a tick and 168 heal against 240 and 72) and beat the
-            // one body, so the gate shuts the room on t5, the residents fall
-            // to `NoneApplicable` and stand under fire unshooting, and the
-            // claimer takes the Reactor on t11 (the test above). With the
-            // gate held open (Raid log cleared every tick, measured once) the
-            // residents still price the raid one body at a time
-            // (`Facts.outmatched`), kite off the ring to safe ground, let the
-            // claimer land on t11, then kill both claimers (t32, t35); the
-            // re-claimer retakes on t222: 847 ours, 545 theirs.
-            ptest
-                "scenario 3, as it should be: the garrison that wins three longbows together keeps the room and the Reactor" {
+                "scenario 3: the garrison that wins three longbows together keeps the room and the Reactor" {
                 let final, trace =
                     reactorWorld (Some Side.Ours) 500 (residents @ stealSquad 3 2) |> run 600
 

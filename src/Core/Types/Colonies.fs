@@ -886,6 +886,10 @@ type FightLatch =
         /// squad until the record drops. None until the raid is seen a second
         /// time inside `Tuning.FightConfirmTicks`, which is what pools it.
         Squad: string option
+        /// The ids of the raiders standing there when it was last seen: a
+        /// raid every one of whose bodies then lies dead was killed in the
+        /// room, not stepped out of it, and holds the Fight no longer.
+        Raiders: Set<string>
     }
 
 /// The hauler row's **haul overflow** reading (#508): the colony's fullest

@@ -753,7 +753,11 @@ let arenaScenarioTests =
     testList
         "arena scenarios"
         [
-            test "an outpost guard walks in and kills a smallMelee invader, as live" {
+            // The Brief's S7, rule 1 (a hostile no heal reaches is read live): the
+            // guard swings the invader down to its last part, a MOVE, and
+            // leaves it there unarmed, its room's Guard gone; it no longer
+            // kills it.
+            test "an outpost guard walks in and disarms a smallMelee invader, as live" {
                 let invader =
                     body
                         "invader-1"
@@ -763,7 +767,12 @@ let arenaScenarioTests =
                         (Some Invade)
 
                 let _, trace = outpostRaid invader |> run 40
-                Expect.isSome (diedOn "invader-1" trace) $"the invader dies\n{describe trace}"
+
+                Expect.equal
+                    (hitsOf "invader-1" trace |> List.tryLast)
+                    (Some Engine.partHits)
+                    $"the invader is left its last part, a MOVE\n{describe trace}"
+
                 Expect.isNone (diedOn "guard-1-Spawn1" trace) "the guard lives"
             }
 
@@ -1247,6 +1256,7 @@ let arenaScenarioTests =
                                                             {
                                                                 Seen = start.Time - 1
                                                                 Squad = Some "duo"
+                                                                Raiders = Set.empty
                                                             }
                                                         ]
                                             }

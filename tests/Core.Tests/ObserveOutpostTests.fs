@@ -525,7 +525,8 @@ let outpostTests =
                     "the squad's first sighting plus 200"
             }
 
-            test "a body whose weapons are shot off neither opens nor holds a row" {
+            test
+                "a body whose weapons are shot off neither opens nor holds a row, unless a heal reaches it" {
                 // Five 3A3M bodies at three parts' hits: the head (every ATTACK) is gone.
                 let disarmed (colony: ColonyView) =
                     { colony with
@@ -561,6 +562,54 @@ let outpostTests =
                     (standDowns state)
                     [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
                     "four dead and the fifth disarmed in the room is a raid gone"
+
+                // The Brief's S7, rule 1: beside a healer of its owner's its parts
+                // come back, so it is still the raid, and the row holds.
+                let medic =
+                    { raiderIn outpostRoom 9 [ Heal; Move ] with
+                        Owner = "Trepidimous"
+                    }
+
+                let healed =
+                    RaidState.empty
+                    |> raidTick 100 trep
+                    |> raidTick
+                        110
+                        { disarmed trep with
+                            Hostiles = ((disarmed trep).Hostiles |> List.take 1) @ [ medic ]
+                            Fallen =
+                                trep.Hostiles |> List.skip 1 |> List.map (fun hostile -> hostile.Id)
+                        }
+
+                Expect.equal
+                    (shutAt 111 healed)
+                    (Set.singleton outpostRoom)
+                    "the fifth disarmed beside a healer holds the row"
+
+                // The Brief's S7, rule 1: a WORK left and its weapons shot off,
+                // alone in the room, is no raid a Guard answers, so it holds no
+                // row (a dismantler beside raiders still does, below).
+                let worker =
+                    { raiderIn outpostRoom 0 [ Attack; Attack; Work; Move ] with
+                        Owner = "Trepidimous"
+                        Hits = 2 * Engine.partHits
+                    }
+
+                let workerLeft =
+                    RaidState.empty
+                    |> raidTick 100 trep
+                    |> raidTick
+                        110
+                        { trep with
+                            Hostiles = [ worker ]
+                            Fallen =
+                                trep.Hostiles |> List.skip 1 |> List.map (fun hostile -> hostile.Id)
+                        }
+
+                Expect.equal
+                    (standDowns workerLeft)
+                    [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
+                    "a disarmed WORK body alone is a raid gone"
             }
 
             test "a dismantler beside the armed bodies is waited on" {
@@ -647,15 +696,18 @@ let outpostTests =
                     [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
                     "the whole body walks, and the one block the bank buys loses to it, as before"
 
-                // #510 review: a body with no MOVE acting may yet be pulled.
-                Expect.equal
+                // #510 review: a body with no MOVE acting may yet be pulled, so
+                // it is weighed as a raid. The Brief's S7, rule 2 (shut on Lose
+                // only): a ranger kites it down, so it opens no stand-down.
+                Expect.isEmpty
                     (standDowns (RaidState.empty |> raidTick 100 (raidOf 1_400 [])))
-                    [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
-                    "fourteen ATTACK and no MOVE is no stationary body: it is weighed as a raid"
+                    "fourteen ATTACK and no MOVE is no stationary body, and a ranger kites it: no stand-down"
             }
 
-            // #510: the economy still leaves, but the room stays the ranger's.
-            test "a raid a ranger kites down still shuts the outpost, and the shut row is a chase" {
+            // #510, changed by the Brief's S7, rule 2 (shut on Lose only): a raid
+            // a ranger kites down is answered, so the room stays open.
+            test
+                "a raid a ranger kites down opens no stand-down; one that closes on it shuts the outpost" {
                 let raidOf body =
                     { (quiet |> withDeclaredOutpost outpostRoom) with
                         Hostiles = [ raiderIn outpostRoom 1 body ]
@@ -670,21 +722,24 @@ let outpostTests =
 
                 Expect.equal
                     ((gate plodder).Shut, (gate plodder).ChasedOutposts)
-                    (Set.singleton outpostRoom, Set.singleton outpostRoom)
-                    "twelve ATTACK on five MOVE shuts the room and is chased in it"
+                    (Set.empty, Set.empty)
+                    "twelve ATTACK on five MOVE is kited: the room stays open"
 
                 Expect.equal
                     ((gate runner).Shut, (gate runner).ChasedOutposts)
                     (Set.singleton outpostRoom, Set.empty)
                     "the same blows on a MOVE a part shut it and are no chase"
 
+                // A room shut on a raid that is then seen kitable is the
+                // ranger's chase, through the ticks nothing sees it.
                 let thenDark =
                     RaidState.empty
-                    |> raidTick 100 (raidOf plodder)
-                    |> raidTick 101 { (raidOf plodder) with Hostiles = [] }
+                    |> raidTick 100 (raidOf runner)
+                    |> raidTick 101 (raidOf plodder)
+                    |> raidTick 102 { (raidOf plodder) with Hostiles = [] }
 
                 Expect.equal
-                    (standDown Tuning.defaults 102 thenDark).ChasedOutposts
+                    (standDown Tuning.defaults 103 thenDark).ChasedOutposts
                     (Set.singleton outpostRoom)
                     "and stays a chase through the ticks nothing sees it"
             }

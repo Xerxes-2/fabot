@@ -202,34 +202,33 @@ let private glance () : LightTick.Glance =
         Hostiles =
             [
                 for room in rooms do
-                    for hostile in room.find findHostileCreeps |> Array.map unbox<ICreep> do
-                        let body =
-                            hostile.body
-                            |> Array.map (fun part -> World.bodyPartOf part.``type``)
-                            |> List.ofArray
+                    // Each read beside the room's other hostiles
+                    // (`LightTick.glanceOf`).
+                    let side =
+                        room.find findHostileCreeps
+                        |> Array.map (fun o ->
+                            let hostile = unbox<ICreep> o
 
-                        let live =
-                            hostile.body
-                            |> Array.filter (fun part -> part.hits > 0)
-                            |> Array.map (fun part -> World.bodyPartOf part.``type``)
-                            |> List.ofArray
-
-                        yield
                             ({
-                                Tile = tileOf room.name hostile.pos
+                                Id = hostile.id
                                 Owner =
                                     if isNull (box hostile.owner) then
                                         ""
                                     else
                                         hostile.owner.username
-                                // A wrong "armed" costs a full tick, a wrong
-                                // "unarmed" a shot undecided.
-                                Armed = HostileInfo.armedOrHealsOf body
-                                Weapon = HostileInfo.weaponRangeOf live
-                                Breaks = HostileInfo.breaksOf live
-                                Gait = Gait.ofBody body live
+                                Pos = tileOf room.name hostile.pos
+                                Body =
+                                    hostile.body
+                                    |> Array.map (fun part -> World.bodyPartOf part.``type``)
+                                    |> List.ofArray
+                                Hits = hostile.hits
+                                TicksToLive = hostile.ticksToLive
                             }
-                            : LightTick.GlanceHostile)
+                            : HostileInfo))
+                        |> List.ofArray
+
+                    for hostile in side do
+                        yield LightTick.glanceOf side hostile
             ]
         Structures =
             objectValues<IStructure> Game.structures

@@ -16,10 +16,8 @@ type GlanceCreep =
         Inward: Direction option
     }
 
-/// One hostile creep in a visible room, asked `HostileInfo`'s questions off
-/// the engine's body: `Armed`, `armedOrHealsOf` on paper, a healer included
-/// where the full tick's `armedOnPaper` counts none; `Weapon`,
-/// `weaponRangeOf` live; `Breaks`, `breaksOf` live; `Gait`, `Gait.ofBody`.
+/// One hostile creep in a visible room, asked `HostileInfo`'s questions
+/// (`glanceOf`).
 type GlanceHostile =
     {
         Tile: RoomPos
@@ -28,6 +26,21 @@ type GlanceHostile =
         Weapon: int option
         Breaks: bool
         Gait: Gait
+    }
+
+/// A hostile as the glance reads it, beside its room's other hostiles
+/// (`side`), the full tick's questions asked the full tick's way: `Armed` is
+/// `HostileInfo.armed`, which a healer is not; `Weapon`, `weaponRange`;
+/// `Breaks`, `breaks`; `Gait`, `gait`. A wrong "armed" costs a full tick, a
+/// wrong "unarmed" a shot undecided.
+let glanceOf (side: HostileInfo list) (hostile: HostileInfo) : GlanceHostile =
+    {
+        Tile = hostile.Pos
+        Owner = hostile.Owner
+        Armed = HostileInfo.armed side hostile
+        Weapon = HostileInfo.weaponRange side hostile
+        Breaks = HostileInfo.breaks side hostile
+        Gait = HostileInfo.gait side hostile
     }
 
 /// What a tick reads off `Game` directly, before any World is built: our

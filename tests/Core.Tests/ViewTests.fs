@@ -1043,6 +1043,17 @@ let colonyViewTests =
                     "and is carried as another colony's occupant instead (#220)"
             }
 
+            // The Brief's S7: what a raid beside the child's home may call.
+            test "a child carries her mother's bodies at home as lendable, a mother none" {
+                Expect.equal
+                    ((viewOf pairWorld child).Lendable
+                     |> List.map (fun (creep, at) -> creep.Name, at))
+                    [ "pioneer-900-Spawn1", RoomPos.at child pioneerTile ]
+                    "the mother's pioneer in the child's home, priced and never moved"
+
+                Expect.isEmpty (viewOf pairWorld mother).Lendable "the mother has no mother"
+            }
+
             test "a colony alone in its rooms carries no foreign body" {
                 let motherView = viewOf pairWorld mother
 

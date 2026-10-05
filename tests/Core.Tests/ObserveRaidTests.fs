@@ -1217,6 +1217,25 @@ let private meleeOf n =
             (List.replicate n Move @ List.replicate n Attack)
     ]
 
+/// The ids of a raid's raiders, as a fight record keeps them.
+let private raidersOf (raid: HostileInfo list) =
+    raid
+    |> List.filter (HostileInfo.raider raid)
+    |> List.map (fun hostile -> hostile.Id)
+    |> Set.ofList
+
+/// One record of the child's home.
+let private recordOf seen squad raid =
+    Map.ofList
+        [
+            "W1N2",
+            {
+                Seen = seen
+                Squad = squad
+                Raiders = raidersOf raid
+            }
+        ]
+
 [<Tests>]
 let fightRecordTests =
     testList
@@ -1231,7 +1250,7 @@ let fightRecordTests =
 
                 Expect.equal
                     opened
-                    (Map.ofList [ "W1N2", { Seen = 1_000; Squad = None } ])
+                    (recordOf 1_000 None lost)
                     "a raid the residents lose opens it, latching nothing"
 
                 Expect.isEmpty
@@ -1240,19 +1259,12 @@ let fightRecordTests =
 
                 Expect.equal
                     (foldFights (fightRecordAt (1_000 + confirm) lost) opened)
-                    (Map.ofList
-                        [
-                            "W1N2",
-                            {
-                                Seen = 1_000 + confirm
-                                Squad = Some "duo"
-                            }
-                        ])
+                    (recordOf (1_000 + confirm) (Some "duo") lost)
                     "seen again inside FightConfirmTicks, it latches the squad the Fight is pooled with"
 
                 Expect.equal
                     (foldFights (fightRecordAt (1_001 + confirm) lost) opened)
-                    (Map.ofList [ "W1N2", { Seen = 1_001 + confirm; Squad = None } ])
+                    (recordOf (1_001 + confirm) None lost)
                     "seen again later, it opens afresh"
 
                 Expect.isEmpty
@@ -1265,10 +1277,10 @@ let fightRecordTests =
                 let hold = Tuning.defaults.FightHoldTicks
                 let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
 
-                let latched = Map.ofList [ "W1N2", { Seen = 1_000; Squad = Some "3×kiter" } ]
+                let latched = recordOf 1_000 (Some "3×kiter") lost
 
                 let at seen =
-                    Map.ofList [ "W1N2", { Seen = seen; Squad = Some "3×kiter" } ]
+                    recordOf seen (Some "3×kiter") (meleeOf 2)
 
                 Expect.equal
                     (foldFights (fightRecordAt 1_100 []) latched)
@@ -1288,6 +1300,73 @@ let fightRecordTests =
                 Expect.isEmpty
                     (foldFights (fightRecordAt (1_000 + 2 * hold) []) latched)
                     "and it is dropped once the bar runs out"
+            }
+
+            // The Brief's S7 (live t970,260, W17S25): an invader the residents
+            // and the tower killed in the room within a few ticks held the duo's
+            // Fight pooled for FightHoldTicks, and the duo walked there for
+            // nothing. The hold is for a raid that left.
+            test "a raid killed in the room drops its record at once; one that stepped out keeps it" {
+                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
+                let latched = recordOf 1_000 (Some "duo") lost
+                let dead = raidersOf lost |> Set.toList
+
+                Expect.isEmpty
+                    (foldFights
+                        { fightRecordAt 1_003 [] with
+                            Fallen = dead
+                        }
+                        latched)
+                    "every raider of its last sighting lies dead there: no hold"
+
+                Expect.equal
+                    (foldFights (fightRecordAt 1_003 []) latched)
+                    latched
+                    "gone with no body seen dead: the hold stands"
+
+                Expect.equal
+                    (foldFights
+                        { fightRecordAt 1_003 [] with
+                            Fallen = List.take 1 dead
+                        }
+                        latched)
+                    latched
+                    "one dead and the rest gone: it may yet come back"
+            }
+
+            // The Brief's S7 (the same live case): the record opens only on a
+            // raid the residents lose, and the residents standing in the room are
+            // priced together, where one body of the garrison's size was.
+            test "a raid one resident loses but the two standing in the room win opens no record" {
+                let raid = meleeOf 12
+
+                let resident name x =
+                    Decide.Fixtures.creepWith
+                        name
+                        0
+                        0
+                        (Fabot.Core.Decide.Bodies.bodyFor
+                            Fabot.Core.Decide.Bodies.rangerPattern
+                            4900),
+                    RoomPos.at "W1N2" { X = x; Y = 36 }
+
+                let at bodies =
+                    { Decide.Fixtures.fightingMother raid bodies with
+                        Time = 1_000
+                        LoadedTowers = Map.empty
+                    }
+
+                Expect.isNonEmpty
+                    (foldFights (at []) Map.empty)
+                    "the premise: one garrison-sized body loses it"
+
+                Expect.isNonEmpty
+                    (foldFights (at [ resident "r-1" 24 ]) Map.empty)
+                    "and so does one resident standing there"
+
+                Expect.isEmpty
+                    (foldFights (at [ resident "r-1" 24; resident "r-2" 26 ]) Map.empty)
+                    "the two standing there win it together: no Fight"
             }
         ]
 

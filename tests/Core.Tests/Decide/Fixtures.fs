@@ -187,6 +187,7 @@ let bareRespawn =
         // child, declares no errand, and every tick has vision. "W1N2"
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
+        Lendable = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []
@@ -2280,7 +2281,12 @@ let fightingMother raid (bodies: (CreepInfo * RoomPos) list) =
     let seenBefore =
         raid
         |> List.map (fun (hostile: HostileInfo) ->
-            hostile.Pos.Room, { Seen = colony.Time - 1; Squad = None })
+            hostile.Pos.Room,
+            {
+                Seen = colony.Time - 1
+                Squad = None
+                Raiders = Set.empty
+            })
         |> Map.ofList
 
     let placedIn room =

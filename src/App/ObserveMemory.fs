@@ -557,9 +557,10 @@ let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
                 None)
         |> Map.ofArray
 
-// One fought room on the wire: `{ seen, squad }`, the tick its raid was last
-// seen and the catalogue name of the squad it latched, `squad` absent while
-// it latched none. An object for `encodeThreat`'s reason.
+// One fought room on the wire: `{ seen, squad, raiders }`, the tick its raid
+// was last seen, the catalogue name of the squad it latched, `squad` absent
+// while it latched none, and the ids standing at that sighting, `raiders`
+// absent while none are known. An object for `encodeThreat`'s reason.
 let private encodeFight (latch: FightLatch) =
     let o = createEmpty<obj>
     o?seen <- latch.Seen
@@ -567,6 +568,11 @@ let private encodeFight (latch: FightLatch) =
     match latch.Squad with
     | Some name -> o?squad <- name
     | None -> ()
+
+    // Written only while known, so a legacy row reads as none: a hold that
+    // runs its clock, as before.
+    if not (Set.isEmpty latch.Raiders) then
+        o?raiders <- latch.Raiders |> Set.toArray
 
     o
 
@@ -595,6 +601,7 @@ let private fightMapOf (raw: obj) : Map<string, FightLatch> =
                         {
                             Seen = numberOf value "seen"
                             Squad = squad
+                            Raiders = idsOf value?raiders |> Fresh.setOfSeq
                         }
                     )
             with _ ->

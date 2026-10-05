@@ -118,7 +118,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     rivalHeld: { W1N3: { since: 100, lastLooked: 150 } },
     holds: { W1N4: { holder: "invader", until: 900 } },
     threatened: { W1N5: { until: 800 } },
-    fought: { W1N6: { seen: 700, squad: "duo" }, W1N7: { seen: 690 } },
+    fought: { W1N6: { seen: 700, squad: "duo", raiders: ["inv-1", "inv-2"] }, W1N7: { seen: 690 } },
     probes: { W18S26: probeOut, W17S24: probeProbing },
     taken: { W18S26: 930_120 },
     reserveShort: true,
@@ -164,6 +164,22 @@ wire("raids: a fought room with no squad, or one that is no name, reads unlatche
   assert.equal(
     stable(written.fought),
     stable({ W1N6: { seen: 700 }, W1N7: { seen: 690 }, W1N8: { seen: 680, squad: "duo" } }),
+  );
+});
+
+wire("raids: a fought room's raiders (the Brief's S7) that are no list, or no ids, read as none known", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    fought: {
+      W1N6: { seen: 700, raiders: "inv-1" },
+      W1N7: { seen: 690, raiders: [3, "", "inv-2"] },
+      W1N8: { seen: 680, raiders: [] },
+    },
+  });
+
+  assert.equal(
+    stable(written.fought),
+    stable({ W1N6: { seen: 700 }, W1N7: { seen: 690, raiders: ["inv-2"] }, W1N8: { seen: 680 } }),
   );
 });
 

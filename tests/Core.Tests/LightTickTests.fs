@@ -225,6 +225,41 @@ let forcedTests =
                     "combat at home is decided"
             }
 
+            // The Brief's S7, rule 3: the glance asks "armed" as the full tick
+            // does, so a healer is not; it used to count one and force a full
+            // tick that then found nothing armed.
+            test "a heal-only body at home, glanced, forces no full tick; a shooter beside it does" {
+                let medic: HostileInfo =
+                    {
+                        Id = "medic"
+                        Owner = "Trepidimous"
+                        Pos = tile 45 45
+                        Body = [ Move; Move; Heal; Heal ]
+                        Hits = 400
+                        TicksToLive = 1000
+                    }
+
+                let shooter =
+                    { medic with
+                        Id = "shooter"
+                        Pos = tile 46 45
+                        Body = [ Move; RangedAttack ]
+                        Hits = 200
+                    }
+
+                let glanced side =
+                    { stepped with
+                        Hostiles = side |> List.map (LightTick.glanceOf side)
+                    }
+
+                Expect.equal (LightTick.forced last (glanced [ medic ])) None "the healer alone"
+
+                Expect.equal
+                    (LightTick.forced last (glanced [ medic; shooter ]))
+                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    "the shooter beside it is decided"
+            }
+
             test "an armed hostile beside ours in a room under our safe mode forces nothing" {
                 // Live t931,466: Trepidimous' pair in W17S25 under its safe mode
                 // held every tick full at 95 ms.
