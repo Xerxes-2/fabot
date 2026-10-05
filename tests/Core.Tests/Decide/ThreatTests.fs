@@ -1658,7 +1658,9 @@ let fireReflexTests =
             test
                 "a shot that is not urgent is taken only when the energy over the reserve sees the kill through; else the struck rampart is repaired" {
                 // Trepidimous' melee, 3,500 hits, at range 20 (150 a shot)
-                // beside one 7-HEAL healer (84): 66 a shot net.
+                // beside one 7-HEAL healer (84, 1,800 hits): 66 a shot net
+                // on either. The melee swinging at our rampart is first in the
+                // threat order.
                 let at energy =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
@@ -1674,7 +1676,7 @@ let fireReflexTests =
                     "70 shots × 66 = 4,620 over 3,500: fire"
 
                 let low = (decideOn (at 500)).Intents
-                Expect.isEmpty (shots low) "20 shots × 66 = 1,320 short of 3,500: no shot"
+                Expect.isEmpty (shots low) "20 shots × 66 = 1,320 short of 1,800 and 3,500: no shot"
 
                 Expect.equal
                     (towerRepairs low)
@@ -1694,6 +1696,117 @@ let fireReflexTests =
                     (shots (decideOn besideOurs).Intents)
                     [ "tower-1", "h-1" ]
                     "a raider swinging at our creep is shot though 20 shots cannot kill it"
+            }
+
+            test "a shooter behind two nearer smokers is shot: threat outranks range (#544)" {
+                // Meow's 1-MOVE 50-energy bait stands in front of the shooter
+                // to soak the shots: both killable, both nearer.
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [
+                            hostileAt "smoker-1" { X = 12; Y = 40 } [ Move ]
+                            hostileAt "smoker-2" { X = 13; Y = 40 } [ Move ]
+                            hostileAt
+                                "shooter"
+                                { X = 20; Y = 40 }
+                                [ RangedAttack; RangedAttack; Move; Move ]
+                        ]
+
+                Expect.equal
+                    (shots (decideOn snapshot).Intents)
+                    [ "tower-1", "shooter" ]
+                    "the shooter"
+            }
+
+            test "three towers on one 100-hit smoker spend one shot: no overkill (#544)" {
+                let snapshot =
+                    towerColony
+                        [ for y in [ 38; 40; 42 ] -> $"tower-{y}", { X = 10; Y = y } ]
+                        [ hostileAt "smoker" { X = 15; Y = 40 } [ Move ] ]
+
+                Expect.equal
+                    (shots (decideOn snapshot).Intents |> List.length)
+                    1
+                    "one shot kills it; the other two keep their energy"
+            }
+
+            test
+                "under the reserve a tower holds on a drain dancer it cannot kill and that kills nothing of ours, and shoots one it kills (#544)" {
+                // A healed shooter on the exit ring whose 50 reaches a whole
+                // creep of ours: urgent, but no shot this tick kills it or
+                // saves anything.
+                let dancer =
+                    hostileAt
+                        "dancer"
+                        { X = 48; Y = 40 }
+                        (List.replicate 5 RangedAttack
+                         @ List.replicate 5 Heal
+                         @ List.replicate 10 Move)
+
+                let at hostile =
+                    woundedAt
+                        [ "tower-1", { X = 29; Y = 40 } ]
+                        [ hostile ]
+                        [ "ours", { X = 46; Y = 40 }, 0 ]
+                    |> holdingTower "tower-1" 200
+
+                Expect.isEmpty (shots (decideOn (at dancer)).Intents) "the floor kept"
+
+                Expect.equal
+                    (shots
+                        (decideOn (at (hostileAt "h-1" { X = 47; Y = 40 } [ RangedAttack ])))
+                            .Intents)
+                    [ "tower-1", "h-1" ]
+                    "a 100-hit shooter dies to the 210 shot: fired from under the floor"
+            }
+
+            test
+                "under the reserve a creep of ours about to die draws a shot only at a striker the shot kills: a strike lands at the end of the tick (#544)" {
+                let dancer =
+                    hostileAt
+                        "dancer"
+                        { X = 48; Y = 40 }
+                        (List.replicate 5 RangedAttack
+                         @ List.replicate 5 Heal
+                         @ List.replicate 10 Move)
+
+                let at hostile =
+                    woundedAt
+                        [ "tower-1", { X = 29; Y = 40 } ]
+                        [ hostile ]
+                        [ "ours", { X = 46; Y = 40 }, 960 ]
+                    |> holdingTower "tower-1" 200
+
+                Expect.isEmpty
+                    (shots (decideOn (at dancer)).Intents)
+                    "its 50 kills our 40 hits whatever the tower does: the floor kept"
+
+                Expect.equal
+                    (shots
+                        (decideOn (at (hostileAt "h-1" { X = 47; Y = 40 } [ RangedAttack ])))
+                            .Intents)
+                    [ "tower-1", "h-1" ]
+                    "a striker the 210 shot kills"
+            }
+
+            test
+                "a melee breaking a perimeter rampart outranks a healer that touches nothing (#544)" {
+                // The rampart at 31,40 is no Keep's: the swing is not urgent,
+                // but it is damage dealt to ours. Both killable.
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [
+                            hostileAt "breaker" { X = 30; Y = 40 } [ Attack; Attack; Move ]
+                            hostileAt "med-1" { X = 15; Y = 40 } [ Heal; Move ]
+                        ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 10_000 300_000
+
+                Expect.equal
+                    (shots (decideOn snapshot).Intents)
+                    [ "tower-1", "breaker" ]
+                    "the breaker"
             }
 
             test
@@ -1753,10 +1866,11 @@ let fireReflexTests =
             }
 
             test "a shot is taken whatever the energy when our creeps already out-damage the heal" {
-                // A 14-RANGED_ATTACK resident at range 3 of the melee: 140
-                // against the healer's 84, every shot sticks. The tower's 10
-                // shots over its reserve, at 150 + 140 − 84 = 206 a tick,
-                // would not see 3,500 through.
+                // A 14-RANGED_ATTACK resident at range 3 of the melee and its
+                // healer: 140 against the healer's 84, every shot sticks. The
+                // tower's 10 shots over its reserve, at 150 + 140 − 84 = 206 a
+                // tick, would see neither 3,500 nor 1,800 through. The healer
+                // is first in the threat order.
                 let snapshot =
                     { towerColony [ "tower-1", { X = 10; Y = 40 } ] trepPair with
                         Creeps =
@@ -1769,13 +1883,16 @@ let fireReflexTests =
                         }
                     |> holdingTower "tower-1" 400
 
-                Expect.equal (shots (decideOn snapshot).Intents) [ "tower-1", "h-1" ] "fire"
+                Expect.equal (shots (decideOn snapshot).Intents) [ "tower-1", "med-1" ] "fire"
             }
 
             test
                 "a player's healer on the exit heals at half its rate; an Invader's, never carried off it, in full" {
                 // A raider at 48,40 and a 20-HEAL healer beside it on the
-                // exit at 49,40; the tower at range 19 lands 180.
+                // exit at 49,40; the tower at range 19 lands 180, and 150 on
+                // the healer at range 20. The healer, first in the threat
+                // order, is worth the shot only while its own heal reads
+                // halved: 70 shots × (150 − 120) see its 2,100 through.
                 let raider = hostileAt "h-1" { X = 48; Y = 40 } [ Attack; Move ]
 
                 let healerOf owner =
@@ -1792,8 +1909,8 @@ let fireReflexTests =
 
                 Expect.equal
                     (fired "raider")
-                    [ "tower-1", "h-1" ]
-                    "a bouncer's 240 reads 120: the 180 shot gains"
+                    [ "tower-1", "med-1" ]
+                    "a bouncer's 240 reads 120: the shot gains"
 
                 Expect.isEmpty
                     (fired "Invader")
@@ -1801,7 +1918,7 @@ let fireReflexTests =
             }
 
             test
-                "a shot that is not urgent keeps the reserve; a claimer or a raider at our creeps is shot from it (#480)" {
+                "a shot that is not urgent keeps the reserve; a claimer, or a raider at our creep that the shot kills, is shot from it (#480, #544)" {
                 let tower = [ "tower-1", { X = 10; Y = 40 } ]
 
                 let at energy hostile =
@@ -1835,14 +1952,18 @@ let fireReflexTests =
                     [ "tower-1", "h-1" ]
                     "a claimer is shot from the reserve"
 
-                let besideOurs =
-                    woundedAt tower [ raider ] [ "ours", { X = 31; Y = 40 }, 0 ]
+                let besideOurs hostile =
+                    woundedAt tower [ hostile ] [ "ours", { X = 31; Y = 40 }, 980 ]
                     |> holdingTower "tower-1" reserve
 
                 Expect.equal
-                    (fired besideOurs)
+                    (fired (besideOurs (hostileAt "h-1" { X = 30; Y = 40 } [ Attack ])))
                     [ "tower-1", "h-1" ]
-                    "and a raider swinging at our creep"
+                    "and a raider swinging at our creep that the 150 shot kills"
+
+                Expect.isEmpty
+                    (fired (besideOurs raider))
+                    "but not one it cannot, though the swing kills our 20 hits (#544)"
             }
 
             test

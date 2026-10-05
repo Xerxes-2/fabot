@@ -1,6 +1,8 @@
 # Fire reflex — towers attack only, nearest hostile, no gate
 
-> **Status:** amended by #466, #477, #480, the kill check (2026-10-04), #504
+> **Status:** amended by #466, #477, #480, the kill check (2026-10-04), #504, #544
+
+> **Amended by #544**: "nearest-first" and "per-tower, no focus fire" are reversed, and #480's ungated urgent shot gains a floor. Each tower in turn shoots the worthy hostile first in one threat order — a claimer; then the damage its live parts deal a creep or any structure of ours this tick (the perimeter too, though only a strike on a creep or the Keep is urgent); then the healing it does; then its weapons' damage; bait with neither last — range and id breaking ties, and a target is passed over once this tick's shots on it reach its hits plus the heal reaching it. A tower under `Tuning.TowerRepairReserve` shoots only an urgent claimer, or an urgent target the towers and our creeps kill this tick: a strike lands at the end of the tick, so shooting a striker that survives saves nothing it strikes. A tower short of one shot's energy fires nothing. MeowKittyWow razed Shibdib by emptying the towers: 1-MOVE "Smoker" bait in front of the shooters soaked every tower's nearest-first shot, and a shooter whose reach touched one creep of ours drew every tower's fire to 0 though no shot could kill it.
 
 > **Amended by #504**: a creep of ours standing on our own rampart is not hurt — the swing lands on the rampart — so a raider beside only such creeps is no urgent target, and the kill check decides its shot. A [[defender]] on the struck rampart otherwise drained the reserve kept for the tapper to 0–110 on the arena.
 

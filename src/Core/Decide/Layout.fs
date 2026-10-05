@@ -299,20 +299,32 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
                     let _, _, target = List.min reachable
                     Some(RepairWithTower(towerId, target)))
 
-/// Colony reflex beside the pipeline (ADR-0014): every tower shoots the
-/// hostile worth a shot nearest to itself. Worth one (#466): a hostile our
-/// damage reaching it this tick — every tower's over its reserve at its
-/// range, as if all fired on it, and our creeps' — out-damages the heal
-/// reaching it (`healReaching`, the last few ticks' healers counted, #480)
-/// by enough that the energy over the reserve kills it before it runs out;
-/// or an urgent one — whose weapon reaches our Keep or creeps, or a
-/// dismantler beside the Keep, hurting something now; or a claimer, whose
-/// whole approach is the window (`claimsAFlag`, #451). Not a rampart: it is
-/// there to absorb the hits, and a shot healed back is waste. A tower under
-/// `Tuning.TowerRepairReserve` shoots only the urgent (#480). With none worth
-/// one, the towers repair (`planTowerRepair`). No energy gate on an urgent
-/// shot: a dry tower's Intent fails harmlessly. Equal ranges tie-break by hostile id. `placedTowers`
-/// has always answered home alone, and the hostiles are narrowed to match;
+/// The fire reflex's one threat order (#544), first first: a claimer, whose
+/// whole approach is the window; then what it deals a creep or structure of
+/// ours this tick (`dealt`); then what it heals, sustaining the raid; then
+/// what its weapons could deal. Bait, no weapon and no heal, comes last;
+/// range only breaks a tie.
+let private threatRank (claimer: bool) (dealt: int) (healing: int) (weapons: int) =
+    (if claimer then 0 else 1), -dealt, -healing, -weapons
+
+/// Colony reflex beside the pipeline (ADR-0014): each tower in turn shoots
+/// the hostile worth a shot first in the threat order (`threatRank`), then
+/// nearest, then by id, while the towers' shots this tick already on it fall
+/// short of its hits and the heal reaching it (#544: no overkill). Worth one
+/// (#466): a hostile our damage reaching it this tick — every tower's over
+/// its reserve at its range, as if all fired on it, and our creeps' —
+/// out-damages the heal reaching it (`healReaching`, the last few ticks'
+/// healers counted, #480) by enough that the energy over the reserve kills
+/// it before it runs out; or an urgent one — whose weapon reaches our Keep
+/// or creeps, or a dismantler beside the Keep, hurting something now; or a
+/// claimer (`claimsAFlag`, #451). Not a rampart: it is there to absorb the
+/// hits, and a shot healed back is waste. A tower under
+/// `Tuning.TowerRepairReserve` shoots only an urgent claimer, or an urgent
+/// one the towers and our creeps kill this tick (#480, #544): a strike lands
+/// at the end of the tick, so only a kill saves what it strikes. A tower
+/// short of one shot's energy fires nothing. With none
+/// worth one, the towers repair (`planTowerRepair`). `placedTowers` has
+/// always answered home alone, and the hostiles are narrowed to match;
 /// `RoomPos.range` answers None across a border.
 let internal planFire (view: ColonyView) atlas : Intent list =
     match hostilesAtHome view with
@@ -332,31 +344,84 @@ let internal planFire (view: ColonyView) atlas : Intent list =
         // raider beside either alone is the kill check's.
         let ramparts = Atlas.ourRampartTilesIn atlas home
 
-        let ours =
+        let creepTiles =
             Atlas.placedCreeps atlas
             |> List.choose (fun (name, at) ->
-                if at.Room = home && not (isNamedFor defenderPattern name) then
+                if
+                    at.Room = home
+                    && not (isNamedFor defenderPattern name)
+                    && not (Set.contains (RoomPos.pos at) ramparts)
+                then
                     Some(RoomPos.pos at)
                 else
                     None)
-            |> List.filter (fun tile -> not (Set.contains tile ramparts))
+            |> Set.ofList
+
+        // Every structure of ours at home a strike takes hits off (#544): the
+        // perimeter as much as the Keep. Not a road or a container, which
+        // anything walking by stands beside.
+        let structureTiles =
+            let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+
+            SpatialInfo.structureHits view.Spatial
+            |> List.choose (fun (id, kind, _) ->
+                match kind with
+                | BuiltKind.Road
+                | BuiltKind.Container -> None
+                | _ -> Map.tryFind id tiles)
             |> Set.ofList
             |> Set.union keep
 
-        let within (tiles: Set<Pos>) reach (h: HostileInfo) =
-            tiles
-            |> Set.exists (fun at ->
-                RoomPos.range (RoomPos.at home at) h.Pos |> Option.exists (fun r -> r <= reach))
+        // What each hostile strikes ours with this tick: its live parts, the
+        // ones acting now.
+        let strikers =
+            hostiles
+            |> List.map (fun h ->
+                let counts = Engine.liveParts h.Body h.Hits |> List.countBy id |> Map.ofList
+                h.Id, (fun part -> Map.tryFind part counts |> Option.defaultValue 0))
+            |> Map.ofList
+
+        // What a hostile deals one tile of ours this tick: its weapons at
+        // their reach, or beside a structure its dismantle.
+        let strikeOn (h: HostileInfo) (structure: bool) (tile: Pos) =
+            match RoomPos.range (RoomPos.at home tile) h.Pos with
+            | None -> 0
+            | Some r ->
+                let parts = strikers[h.Id]
+
+                let dismantle =
+                    if structure && r <= Engine.meleeRange then
+                        Engine.dismantlePower * parts Work
+                    else
+                        0
+
+                max (damageAt parts r) dismantle
+
+        let hardest (h: HostileInfo) structure (tiles: Set<Pos>) =
+            tiles |> Seq.fold (fun most tile -> max most (strikeOn h structure tile)) 0
+
+        // What it deals the one creep or structure of ours it strikes
+        // hardest (a creep strikes one target a tick), which the threat
+        // order reads; and whether it strikes a creep or the Keep, which is
+        // urgent.
+        let dealt =
+            hostiles
+            |> List.map (fun h ->
+                h.Id, max (hardest h false creepTiles) (hardest h true structureTiles))
+            |> Map.ofList
 
         let hurting (h: HostileInfo) =
-            match HostileInfo.weaponRange hostiles h with
-            | Some reach -> within ours reach h
-            | None -> HostileInfo.works hostiles h && within keep Engine.meleeRange h
+            hardest h false creepTiles > 0 || hardest h true keep > 0
 
         // A tower over its reserve (#480): only these take a shot that is
         // not urgent, so only these are counted in the damage it must beat.
-        let spare =
+        // A tower short of one shot fires nothing, and counts in no kill.
+        let able =
             towers
+            |> List.filter (fun (towerId, _) -> towerEnergy view towerId >= Engine.towerEnergyCost)
+
+        let spare =
+            able
             |> List.filter (fun (towerId, _) ->
                 towerEnergy view towerId - Engine.towerEnergyCost
                 >= view.Tuning.TowerRepairReserve)
@@ -389,34 +454,77 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                 let longest = budgets |> List.map snd |> List.max
                 towersDeal + creepNet * longest >= int64 h.Hits
 
-        let urgent =
-            hostiles
-            |> List.filter (fun h -> claimsAFlag hostiles (Set.singleton home) h || hurting h)
+        let claimer h =
+            claimsAFlag hostiles (Set.singleton home) h
+
+        let urgent = hostiles |> List.filter (fun h -> claimer h || hurting h)
 
         let worth =
             urgent
             @ (hostiles |> List.filter (fun h -> not (List.contains h urgent) && killable h))
 
-        let nearest (tile: RoomPos) (targets: HostileInfo list) =
-            targets
-            |> List.choose (fun h -> RoomPos.range tile h.Pos |> Option.map (fun r -> r, h))
-            |> function
-                | [] -> None
-                | reachable -> Some(snd (reachable |> List.minBy (fun (r, h) -> r, h.Id)))
+        // The urgent a tower under its reserve shoots (#544): a claimer, or
+        // one every able tower and our creeps kill this tick.
+        let belowFloor =
+            lazy
+                (let killedNow (h: HostileInfo) =
+                    let towersDeal =
+                        able
+                        |> List.sumBy (fun (_, tile) ->
+                            RoomPos.range tile h.Pos
+                            |> Option.map Engine.towerAttackAt
+                            |> Option.defaultValue 0)
+
+                    towersDeal + damageOn h - healOn h >= h.Hits
+
+                 urgent
+                 |> List.filter (fun h -> claimer h || killedNow h)
+                 |> List.map (fun h -> h.Id)
+                 |> Set.ofList)
+
+        let ranked =
+            worth
+            |> List.map (fun h ->
+                h,
+                threatRank
+                    (claimer h)
+                    dealt[h.Id]
+                    (HostileInfo.healing hostiles h)
+                    (damageAt strikers[h.Id] Engine.meleeRange))
 
         match worth with
         | [] -> planTowerRepair view towers
         | _ ->
-            towers
-            |> List.choose (fun (towerId, tile) ->
-                // Under its reserve a tower keeps its energy for the urgent.
-                let targets =
-                    if List.contains (towerId, tile) spare then
-                        worth
-                    else
-                        urgent
+            able
+            |> List.mapFold
+                (fun (landed: Map<string, int>) (towerId, tile) ->
+                    let spareTower = List.contains (towerId, tile) spare
 
-                nearest tile targets |> Option.map (fun target -> FireTower(towerId, target.Id)))
+                    let pick =
+                        ranked
+                        |> List.choose (fun (h, rank) ->
+                            let onIt = Map.tryFind h.Id landed |> Option.defaultValue 0
+
+                            if
+                                onIt >= h.Hits + healOn h
+                                || not (spareTower || Set.contains h.Id belowFloor.Value)
+                            then
+                                None
+                            else
+                                RoomPos.range tile h.Pos
+                                |> Option.map (fun r ->
+                                    (rank, r, h.Id), h, onIt + Engine.towerAttackAt r))
+                        |> function
+                            | [] -> None
+                            | reachable -> Some(reachable |> List.minBy (fun (key, _, _) -> key))
+
+                    match pick with
+                    | None -> None, landed
+                    | Some(_, target, onIt) ->
+                        Some(FireTower(towerId, target.Id)), Map.add target.Id onIt landed)
+                Map.empty
+            |> fst
+            |> List.choose id
 
 /// The rampart door (#482): each rampart of ours at home is public while an
 /// ally stands within `Tuning.AllyPassRange` of it, no other hostile but a

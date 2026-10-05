@@ -147,6 +147,10 @@ module Engine =
     /// buys one.
     let rangedAttackPower = 10
 
+    /// DISMANTLE_POWER: the hits one WORK part takes off a structure at
+    /// range 1.
+    let dismantlePower = 50
+
     /// What one RANGED_ATTACK part's `rangedMassAttack` takes off each target
     /// at this range (`RANGED_MASS_ATTACK` distance rates 1 / 0.4 / 0.1):
     /// 10, 4, 1 to range 3, nothing past it.

@@ -840,8 +840,18 @@ let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int
 
             if bouncing then rate / 2 else rate)
 
-/// Our creeps' damage that reaches a hostile this tick: a swing one tile, a
-/// shot three. A closure over our placed creeps, found once.
+/// What a body of these part counts deals one target at this range a tick: a
+/// swing one tile, a shot three.
+let internal damageAt (parts: BodyPart -> int) (range: int) =
+    if range <= Engine.meleeRange then
+        damageOf parts
+    elif range <= Engine.rangedRange then
+        Engine.rangedAttackPower * parts RangedAttack
+    else
+        0
+
+/// Our creeps' damage that reaches a hostile this tick (`damageAt`). A
+/// closure over our placed creeps, found once.
 let internal damageReaching (view: ColonyView) : HostileInfo -> int =
     let fighters =
         view.Creeps
@@ -852,11 +862,9 @@ let internal damageReaching (view: ColonyView) : HostileInfo -> int =
     fun hostile ->
         fighters
         |> List.sumBy (fun (at, parts) ->
-            match RoomPos.range at hostile.Pos with
-            | Some r when r <= Engine.meleeRange -> damageOf parts
-            | Some r when r <= Engine.rangedRange ->
-                damageOf (fun part -> if part = Attack then 0 else parts part)
-            | _ -> 0)
+            RoomPos.range at hostile.Pos
+            |> Option.map (damageAt parts)
+            |> Option.defaultValue 0)
 
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's
