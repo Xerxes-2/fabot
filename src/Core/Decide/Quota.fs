@@ -427,26 +427,40 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
 /// melee guard. A chased room (#510) asks neither row.
-let private asksFor
+let private guardedAsks
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : (string * RowAsk) list =
     outposts.Guarded
-    |> List.choose (fun room ->
+    |> List.collect (fun room ->
         (Threats.briefOf threats room).Asks
-        |> Option.filter (fun ask -> ask.Row = row)
-        |> Option.map (fun ask -> room, ask))
+        |> List.filter (fun ask -> ask.Row = row)
+        |> List.map (fun ask -> room, ask))
 
-/// A fighting row's quota: its guarded rooms' asks' counts, summed.
+/// Every other Brief's ask of a row — the home's Defend's (#504), each
+/// Fight's and Assault's per squad role —: a Brief exists only while its
+/// Task is pooled, so each is read whole.
+let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
+    threats.Briefs
+    |> Map.toList
+    |> List.collect (fun (task, brief) ->
+        match task with
+        | Guard _ -> []
+        | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
+
+/// A fighting row's asks: its guarded rooms' and every other Brief's.
+let private asksFor (threats: Threats) (outposts: OutpostFacts) (row: CastRow) : RowAsk list =
+    (guardedAsks threats outposts row |> List.map snd) @ briefAsks threats row
+
+/// A fighting row's quota: its asks' counts, summed.
 let internal rowQuota
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    asksFor threats outposts row
-    |> List.sumBy (fun (_, ask) -> ask.Wanted view threats)
+    asksFor threats outposts row |> List.sumBy (fun ask -> ask.Wanted view threats)
 
 /// The blocks a fighting row casts this tick: the worst of its guarded rooms'
 /// answers, the row's floor where none is guarded — one guard block, the
@@ -459,11 +473,13 @@ let internal rowBlocksWanted
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    match asksFor threats outposts row |> List.map (fun (_, ask) -> ask.Blocks view) with
+    match asksFor threats outposts row |> List.map (fun ask -> ask.Blocks view) with
     | [] ->
         match row with
-        | CastRow.Guard -> 1
         | CastRow.Ranger -> view.Tuning.RangerResidentBlocks
+        | CastRow.Guard
+        | CastRow.Defender
+        | CastRow.Squad _ -> 1
     | blocks -> List.max blocks
 
 /// The squad exchange beside the single-body one, for `observe quotas` alone
@@ -534,48 +550,18 @@ let private castRowStands
     : bool =
     fightingRowStands view (CastRow.cut row) (rowQuota view threats outposts row)
 
-/// One squad role's row quota: every pooled Fight's slots of the role, less
-/// the residents already filling them, in each room whose Fight is not
-/// barred from a cast (`Facts.fightCooling`) and has a rally ground to wait
-/// on; and every pooled Assault's slots of it.
+/// One squad role's row quota: every pooled Fight's and Assault's ask of the
+/// role (`Brief.formed`).
 let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) : int =
-    let fights =
-        threats.Fight
-        |> Map.toList
-        |> List.filter (fun (room, ground) ->
-            not (fightCooling view room) && not (Set.isEmpty ground.Rally))
-        |> List.sumBy (fun (_, ground) ->
-            SquadRole.slots role (squadRoles ground.Squad)
-            - (ground.Residents |> Map.filter (fun _ held -> held = role) |> Map.count)
-            |> max 0)
-
-    // Each assault's slots, on the same rally rule; it has no residents. None
-    // while safe mode runs in its room: a squad bought then waits it out; nor
-    // once its targets are down (#496).
-    let moded =
-        view.Assaults
-        |> List.filter (fun facts -> facts.SafeMode || facts.Taken)
-        |> List.map (fun facts -> facts.Assault.RoomName)
-        |> Set.ofList
-
-    let assaults =
-        threats.Assault
-        |> Map.toList
-        |> List.filter (fun (room, ground) ->
-            not (Set.isEmpty ground.Rally) && not (Set.contains room moded))
-        |> List.sumBy (fun (_, ground) -> SquadRole.slots role ground.Slots)
-
-    fights + assaults
+    briefAsks threats (CastRow.Squad role)
+    |> List.sumBy (fun ask -> ask.Wanted view threats)
 
 /// Whether the squad rows are filled: every role's casts standing or in an
 /// oven.
 let private squadStands (view: ColonyView) (threats: Threats) : bool =
     SquadRole.all
     |> List.forall (fun role ->
-        fightingRowStands
-            view
-            (fun name _ -> squadRoleByName name = Some role)
-            (squadQuota view threats role))
+        fightingRowStands view (CastRow.cut (CastRow.Squad role)) (squadQuota view threats role))
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -638,7 +624,7 @@ let internal reserverClaimsOf
     // flips once and not every cast.
     let withheld =
         let castFor row =
-            asksFor threats outposts row |> List.map fst |> Set.ofList
+            guardedAsks threats outposts row |> List.map fst |> Set.ofList
 
         Set.union
             (if castRowStands view threats outposts CastRow.Guard then
@@ -919,7 +905,7 @@ type QuotaRows =
         /// One entry per room the reserver row hires for: the length is the
         /// addend, the largest entry prices every cast.
         Reserver: int list
-        /// The home's [[defender]]s (`Threats.defendersWanted`, #504).
+        /// The home's [[defender]]s, its Defend's ask (#504).
         Defender: int
         Guard: int
         /// One resident ranger per worked errand room, two where one loses (#411).
@@ -1020,7 +1006,7 @@ let internal quotaRowsOf
 
     {
         Reserver = sizing.ReserverClaims
-        Defender = Threats.defendersWanted view threats
+        Defender = rowQuota view threats outposts CastRow.Defender
         Guard = rowQuota view threats outposts CastRow.Guard
         Ranger = rowQuota view threats outposts CastRow.Ranger
         Squad =

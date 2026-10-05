@@ -279,10 +279,11 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
                     |> Set.filter (Seam.onRing >> not)
                     |> RoomPos.setAt room
                 | ring -> ring)
-        // The member's own ground, rally or fight (`Threats.fightGroundIn`).
-        | Fight room -> Threats.fightGroundIn threats room creep
+        // The member's own ground, rally or fight, by its role
+        // (`Threats.squadGroundIn`).
+        | Fight _
+        | Assault _ -> Threats.squadGroundIn threats task creep
         | Defend room -> Threats.defendGroundIn threats room
-        | Assault room -> Threats.assaultGroundIn threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with
@@ -1068,9 +1069,12 @@ let planPool
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
             // A kill over a quiet holder's own Guard (#510, #516), and a raid's
             // Guard over a kill (#528): its Brief's. The room's Fight ranks
-            // alike, a resident in a squad slot taking either.
-            | Guard room
-            | Fight room -> (Threats.briefOf threats room).Rung
+            // alike (`withFights`), a resident in a squad slot taking either.
+            | Guard _
+            | Fight _ ->
+                Threats.briefFor threats task
+                |> Option.map (fun brief -> brief.Rung)
+                |> Option.defaultValue OnTheTier
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
             | _ -> OnTheTier
@@ -1126,18 +1130,14 @@ let planPool
                  |> Option.filter (fun _ -> posts > 0)
                  |> Option.map (fun n -> max 0 (n - posts)))
             |> Capacity.garrisoning postTiles
-        // The bodies the room's Brief admits, off the row's own count.
-        | Guard room -> (Threats.briefOf threats room).Capacity view threats
-        // The defender row's own count, read a second time as the guard's is.
-        | Defend _ -> Capacity.fighters (Threats.defendersWanted view threats)
-        // The squad's slots, one cap per role.
-        | Fight room ->
-            Map.tryFind room threats.Fight
-            |> Option.map (fun ground -> Capacity.roles (squadRoles ground.Squad))
-            |> Option.defaultValue (Capacity.roles [])
-        | Assault room ->
-            Map.tryFind room threats.Assault
-            |> Option.map (fun ground -> Capacity.roles ground.Slots)
+        // The bodies the Task's Brief admits: a Guard's and a Defend's off
+        // their row's own count, a squad's its slots, one cap per role.
+        | Guard _
+        | Defend _
+        | Fight _
+        | Assault _ ->
+            Threats.briefFor threats task
+            |> Option.map (fun brief -> brief.Capacity view threats)
             |> Option.defaultValue (Capacity.roles [])
         // One holder per controller: a second body there buys nothing.
         | Reserve _

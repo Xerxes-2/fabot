@@ -436,7 +436,8 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
 
     let within reach (tile: RoomPos) (creeps: HostileInfo list) =
         creeps
-        |> List.exists (fun h -> rangeAcross tile h.Pos |> Option.exists (fun r -> r <= reach))
+        |> List.exists (fun h ->
+            Formation.rangeAcross tile h.Pos |> Option.exists (fun r -> r <= reach))
 
     SpatialInfo.structureHits view.Spatial
     |> List.choose (fun (id, kind, _) ->

@@ -210,7 +210,7 @@ A body of a declared enemy (`Colony.enemies`, user 2026-10-05) with no weapon in
 _Avoid_: thief, intruder
 
 ### Brief
-The per-tick configuration behind one combat Task (#518): which hostiles or structures to hit, the bodies fit for it, the ground they hit from, its rung, capacity, row ask (`RowAsk`: which fighting row, how many bodies, what blocks) and win verdict, derived each tick and never stored. Its flavour is a `BriefKind` (outpost raid, level-0 core, held exit, resident, harassment, [[chase]], [[trespasser]]'s kill), classified once per room. Each tick `Threats.Briefs` holds one per room a source claims, read through `Threats.briefOf`. ADR-0085.
+The per-tick configuration behind one combat Task (#518): which hostiles or structures to hit, the bodies fit for it, the ground they hit from, its rung, capacity, row ask (`RowAsk`: which fighting row, how many bodies, what blocks) and win verdict, derived each tick and never stored. Its `Duty` says which Task: a room's Guard, of a flavour (`BriefKind`: outpost raid, level-0 core, held exit, resident, harassment, [[chase]], [[trespasser]]'s kill) classified once per room; the home's Defend; a [[fight]]; or an [[assault]], whose squads both launch through one `Formation`. Each tick `Threats.Briefs` holds one per combat Task a source claims, keyed by the Task, read through `Threats.briefOf` (a room's Guard) and `Threats.briefFor`. ADR-0085.
 _Avoid_: engagement (a Fight's avoid word)
 
 ### Squad

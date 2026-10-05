@@ -2795,12 +2795,13 @@ let arenaDefenceTests =
                     $"no rival's room on the way: {chain}"
 
                 let rally =
-                    (Fabot.Core.Decide.Threat.threatsOfHeld
-                        view
-                        atlas
-                        Fabot.Core.Decide.Facts.HeldTaskFacts.empty)
-                        .Assault
-                    |> Map.find "W18S26"
+                    Fabot.Core.Decide.Threat.Threats.formationOf
+                        (Fabot.Core.Decide.Threat.threatsOfHeld
+                            view
+                            atlas
+                            Fabot.Core.Decide.Facts.HeldTaskFacts.empty)
+                        (Assault "W18S26")
+                    |> Option.get
                     |> fun ground -> ground.Rally
 
                 Expect.isNonEmpty rally "a rally ground"

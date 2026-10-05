@@ -550,12 +550,7 @@ let internal guardShoots
 /// Whether a resident room is quiet enough to lend its garrison to a kill
 /// in `kill` (#516): nothing its Guard shoots stands in it, and no armed
 /// hostile next door but the kill's own target.
-let internal residentQuiet
-    (view: ColonyView)
-    (resident: Set<string>)
-    (kill: string)
-    (home: string)
-    =
+let private residentQuiet (view: ColonyView) (resident: Set<string>) (kill: string) (home: string) =
     view.Hostiles
     |> List.forall (fun h ->
         if h.Pos.Room = home then
@@ -564,33 +559,42 @@ let internal residentQuiet
             h.Pos.Room = kill
             || not (RoomName.neighbouring home h.Pos.Room && HostileInfo.raider view.Hostiles h))
 
-/// Whether a ranger standing in a room may hold a kill in `room`, a chase's
-/// or a trespass's (#510, #516). Nothing a ranger carries says whose
-/// resident it is, so every resident room beside the kill is quiet, or no
-/// ranger may — a harassment ranger or a fresh cast as much as the
-/// garrison: a raid arriving there calls its garrison back off the kill at
-/// once. And one standing in a resident room is its garrison, lent only to
-/// a room beside it.
-let internal rangerMayKill (view: ColonyView) (room: string) (standing: string option) =
-    let resident = residentRooms view
-
+/// Whether a ranger standing in a room may be lent to a kill in `kill`, a
+/// chase's or a trespass's (#510, #516): one rule, its lender's, whichever
+/// colony asks (#518). `resident` is the lender's resident rooms: a colony's
+/// own for its own bodies, and for a child pricing her mother's residents
+/// (`ColonyView.Lendable`) her own with the home they stand in. Nothing a
+/// ranger carries says whose resident it is, so every resident room beside
+/// the kill is quiet (`residentQuiet`), or no ranger may — a harassment
+/// ranger or a fresh cast as much as the garrison: a raid arriving there
+/// calls its garrison back off the kill at once. And one standing in a
+/// resident room is its garrison, lent only to a room beside it.
+let internal mayLend
+    (view: ColonyView)
+    (resident: Set<string>)
+    (kill: string)
+    (standing: string option)
+    =
     resident
     |> Set.forall (fun home ->
-        not (RoomName.neighbouring home room) || residentQuiet view resident room home)
+        not (RoomName.neighbouring home kill) || residentQuiet view resident kill home)
     && standing
        |> Option.forall (fun here ->
-           not (Set.contains here resident) || RoomName.neighbouring here room)
+           not (Set.contains here resident) || RoomName.neighbouring here kill)
+
+/// `mayLend` for this colony's own bodies.
+let internal rangerMayKill (view: ColonyView) (room: string) (standing: string option) =
+    mayLend view (residentRooms view) room standing
 
 /// Whether the holder of a room's Guard may be called off it for a kill in
 /// another (#510, #516), the bodies the kill admits being the gate's to say.
-/// A resident only for a kill in a room beside its home, while that home is
-/// quiet (`residentQuiet`); any other holder while nothing its Guard shoots
-/// stands in its room, and never off another kill.
+/// A resident only as it may be lent (`mayLend`); any other holder while
+/// nothing its Guard shoots stands in its room, and never off another kill.
 let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) (kill: string) =
     let resident = residentRooms view
 
     if Set.contains held resident then
-        RoomName.neighbouring held kill && residentQuiet view resident kill held
+        mayLend view resident kill (Some held)
     else
         not (Set.contains held kills)
         && view.Hostiles
@@ -898,30 +902,46 @@ let private rowWins (view: ColonyView) (room: string) : bool =
 
 /// The fewest rangers that win the raid in `room` together, None where all of
 /// them lose: ours standing in the room, its garrison among them, then ours
-/// and, for a child, its mother's residents (`ColonyView.Lendable`) standing
-/// beside it, lent to it (`rangerMayKill`) out of a room where nothing its
-/// Guard would shoot stands. Taken in that order, by name within each.
+/// standing beside it, lent to it by their lender's rule (`mayLend`) out of
+/// a room where nothing its Guard would shoot stands. Taken in that order, by
+/// name within each. A child counts her mother's residents
+/// (`ColonyView.Lendable`) too: standing in the room, as its garrison beside
+/// ours; lent from beside it, apart from ours and by the mother's rule — the
+/// home they stand in a resident room — as the mother prices them, hers
+/// alone. So a child's outpost is answered by one priced verdict in both
+/// views: won by the child's bodies, which she sends, or by the residents,
+/// whom the mother calls, and never by the two together, which neither
+/// colony sends whole.
 let internal rangersWin (view: ColonyView) (room: string) : int option =
     let resident = residentRooms view
 
-    let quiet (here: string) =
-        view.Hostiles
-        |> List.forall (fun h -> h.Pos.Room <> here || not (guardShoots view resident Set.empty h))
+    // Each body beside the room by its lender's resident rooms.
+    let eligible (lenders: string -> Set<string>) (standing: (CreepInfo * string) list) =
+        let quiet (here: string) =
+            view.Hostiles
+            |> List.forall (fun h ->
+                h.Pos.Room <> here || not (guardShoots view (lenders here) Set.empty h))
 
-    let rangers =
-        (view.Creeps
-         |> List.choose (fun creep ->
-             SpatialInfo.creepPlacementOf view.Spatial creep.Name
-             |> Option.map (fun at -> creep, at.Room)))
-        @ (view.Lendable |> List.map (fun (creep, at) -> creep, at.Room))
+        standing
         |> List.filter (fst >> isRangerRowBody)
         |> List.filter (fun (_, here) ->
             here = room
             || RoomName.neighbouring here room
                && quiet here
-               && rangerMayKill view room (Some here))
+               && mayLend view (lenders here) room (Some here))
         |> List.sortBy (fun (creep, here) -> here <> room, creep.Name)
         |> List.map fst
+
+    let ours =
+        view.Creeps
+        |> List.choose (fun creep ->
+            SpatialInfo.creepPlacementOf view.Spatial creep.Name
+            |> Option.map (fun at -> creep, at.Room))
+
+    let lent = view.Lendable |> List.map (fun (creep, at) -> creep, at.Room)
+
+    let own _ = resident
+    let mothers here = Set.add here resident
 
     let rec wins (damage, healing, hits) count rest =
         match rest with
@@ -937,7 +957,13 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
             else
                 wins (damage, healing, hits) (count + 1) rest
 
-    wins (0, 0, 0) 0 rangers
+    let winning lenders rangers =
+        wins (0, 0, 0) 0 (eligible lenders rangers)
+
+    if lent |> List.exists (fun (_, here) -> here <> room) then
+        winning own ours |> Option.orElse (winning mothers lent)
+    else
+        winning own (ours @ lent)
 
 /// How the colony answers the raid standing in a room, one verdict
 /// that the stand-down, the rows, the chase and the call all read.

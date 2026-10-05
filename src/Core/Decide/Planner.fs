@@ -552,9 +552,19 @@ let planTasks
     let guards =
         let briefed (claimed: Brief -> bool) =
             threats.Briefs
-            |> Map.filter (fun _ brief -> claimed brief)
-            |> Map.keys
+            |> Map.toSeq
+            |> Seq.choose (fun (task, brief) ->
+                match task with
+                | Guard room when claimed brief -> Some room
+                | _ -> None)
             |> Set.ofSeq
+
+        // Every Brief of a Task of its own, by its Task.
+        let briefedAs duty =
+            threats.Briefs
+            |> Map.toList
+            |> List.filter (fun (_, brief) -> brief.Duty = duty)
+            |> List.map fst
 
         let holding =
             briefed (fun brief -> List.contains BriefKind.ExitHold brief.Claims)
@@ -567,20 +577,18 @@ let planTasks
             [ BriefKind.Chase; BriefKind.Trespass ]
             |> List.collect (fun kind ->
                 Set.difference
-                    (briefed (fun brief -> brief.Kind = kind))
+                    (briefed (fun brief -> brief.Duty = Duty.Guard kind))
                     (Set.ofList (outposts.Guarded @ holding))
                 |> Set.toList)
 
         (outposts.Guarded @ holding @ killing |> List.map Guard)
-        @ (held.Fights |> Map.keys |> Seq.map Fight |> List.ofSeq)
+        @ briefedAs Duty.Fight
         // And one Assault per assault this colony pools (#490, #491).
-        @ (threats.Assault |> Map.keys |> Seq.map Assault |> List.ofSeq)
+        @ briefedAs Duty.Assault
         // And the home's Defend while it wants a defender (#504): the row
         // hires against the same number.
-        @ (if Threats.defendersWanted view threats > 0 then
-               [ Defend(SpatialInfo.homeName view.Spatial) ]
-           else
-               [])
+        @ (briefedAs Duty.Defend
+           |> List.filter (fun task -> Threats.wants view threats task > 0))
 
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —

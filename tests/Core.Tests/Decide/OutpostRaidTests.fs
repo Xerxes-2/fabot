@@ -2198,8 +2198,8 @@ let trespassTests =
                 let atlas = Atlas.ofView colony
 
                 Expect.equal
-                    ((Threats.briefOf (threatsOf colony atlas) "W1N2").Kind)
-                    BriefKind.Trespass
+                    ((Threats.briefOf (threatsOf colony atlas) "W1N2").Duty)
+                    (Duty.Guard BriefKind.Trespass)
                     "its Guard is the trespass's kill"
 
                 Expect.isSome (pooledOf colony |> entryFor (Guard "W1N2")) "pooled"
@@ -2502,6 +2502,188 @@ let childOutpostTests =
                     (shut (child false))
                     (Set.singleton "W1N2")
                     "with no resident at home it is stood down"
+            }
+
+            // The Brief's S8 (#518, follow-up 1): the child priced her mother's
+            // residents beside her own rangers, the mother hers alone, so a raid
+            // only the two together win was the child's Win and the mother's
+            // Lose, and nobody covered the outpost. The child now prices the
+            // residents lent from next door as the mother does, apart from her
+            // own: the mother calls, or the child shuts, never neither.
+            test
+                "a raid only the child's ranger and the mother's resident win together: the mother calls nobody, and the child stands it down" {
+                let harasser room =
+                    { hostileIn
+                          room
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 10 Move
+                         @ List.replicate 7 RangedAttack
+                         @ List.replicate 3 Heal)
+
+                let shut (colony: ColonyView) =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony).Declared
+                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+                    |> fun gate -> gate.Shut
+
+                // The mother's view: one resident in the child's home W1N3.
+                let mother =
+                    { watchingBeyond [ harasser "W1N4" ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1" ]
+                        }
+
+                Expect.equal
+                    (Facts.answer mother "W1N4")
+                    Facts.Answer.Lose
+                    "the mother's resident loses it alone: she calls nobody"
+
+                // The child's view: her own ranger at home W1N1, beside her
+                // outpost W1N2, and the mother's resident standing there too.
+                let child (theirs: (CreepInfo * Pos) list) =
+                    let colony =
+                        { declaredRaid [ harasser "W1N2" ] with
+                            Bank = bank 850 850
+                            Lendable =
+                                theirs
+                                |> List.map (fun (creep, pos) -> creep, RoomPos.at "W1N1" pos)
+                        }
+
+                    { colony with
+                        Creeps = colony.Creeps @ [ ranger "r-own" ]
+                    }
+                    |> standingIn "W1N1" ("r-own", { X = 24; Y = 26 })
+
+                let both = child [ resident "r-1", { X = 25; Y = 26 } ]
+
+                Expect.equal
+                    (Facts.answer (child []) "W1N2")
+                    Facts.Answer.Lose
+                    "the premise: the child's ranger loses it alone"
+
+                let hers =
+                    { child [] with
+                        Creeps = (child []).Creeps @ [ resident "r-1" ]
+                    }
+                    |> standingIn "W1N1" ("r-1", { X = 25; Y = 26 })
+
+                Expect.equal
+                    (Facts.answer hers "W1N2")
+                    Facts.Answer.Win
+                    "the premise: the two together win it, were both hers"
+
+                Expect.equal
+                    (Facts.answer both "W1N2")
+                    Facts.Answer.Lose
+                    "the child prices the lent resident apart from her ranger"
+
+                Expect.equal (shut both) (Set.singleton "W1N2") "and stands the outpost down"
+            }
+
+            // The Brief's S8 (#518): whether a resident may be lent to a kill is
+            // its lender's rule whichever colony asks (`Facts.mayLend`). Raids
+            // in two rooms beside the child's home: to the mother each breaks
+            // the home's quiet for the other, so she calls nobody; the child,
+            // whose own resident rooms leave her home out, read it quiet, called
+            // the residents a Win and stood nothing down.
+            test
+                "raids beside the child's home on two sides: the mother lends nobody, and the child stands her outpost down" {
+                let harasser room id =
+                    { hostileIn
+                          room
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = id
+                        Owner = "Trepidimous"
+                    }
+
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let shut (colony: ColonyView) =
+                    Observe.RaidState.empty
+                    |> Observe.foldRaids
+                        Observe.capEpisodes
+                        Set.empty
+                        colony
+                        (Planner.outpostFactsOf colony).Declared
+                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+                    |> fun gate -> gate.Shut
+
+                // The mother's view: the child's home W1N3 between W1N4, her
+                // outpost, and W2N3.
+                let mother hostiles =
+                    { watchingBeyond hostiles with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                Expect.equal
+                    (Facts.answer (mother [ harasser "W1N4" "h-a" ]) "W1N4")
+                    Facts.Answer.Win
+                    "the premise: one raid, and the residents answer it"
+
+                Expect.equal
+                    (Facts.answer (mother [ harasser "W1N4" "h-a"; harasser "W2N3" "h-b" ]) "W1N4")
+                    Facts.Answer.Lose
+                    "two, and the mother lends nobody to either"
+
+                // The child's view: her home W1N1 between W1N2, her outpost,
+                // and W2N1; the mother's residents standing at home.
+                let child hostiles =
+                    { declaredRaid hostiles with
+                        Bank = bank 850 850
+                        Lendable =
+                            [
+                                resident "r-1", RoomPos.at "W1N1" { X = 25; Y = 26 }
+                                resident "r-2", RoomPos.at "W1N1" { X = 27; Y = 26 }
+                            ]
+                    }
+
+                Expect.equal
+                    (Facts.answer (child [ harasser "W1N2" "h-a" ]) "W1N2")
+                    Facts.Answer.Win
+                    "the premise: one raid, and the child counts the residents"
+
+                let both = child [ harasser "W1N2" "h-a"; harasser "W2N1" "h-b" ]
+
+                Expect.equal
+                    (Facts.answer both "W1N2")
+                    Facts.Answer.Lose
+                    "two, and the child reads the mother's rule: nobody is lent"
+
+                Expect.contains (shut both) "W1N2" "and she stands her outpost down"
             }
         ]
 
@@ -3053,8 +3235,8 @@ let guardPrecedenceTests =
                 let threats = threatsOf colony (Atlas.ofView colony)
 
                 Expect.equal
-                    ((Threats.briefOf threats "W1N2").Kind, Threats.guardGroundIn threats "W1N2")
-                    (BriefKind.Resident, Some(besideIn { X = 6; Y = 46 }))
+                    ((Threats.briefOf threats "W1N2").Duty, Threats.guardGroundIn threats "W1N2")
+                    (Duty.Guard BriefKind.Resident, Some(besideIn { X = 6; Y = 46 }))
                     "read as the resident's, on the Reactor's ring"
 
                 Expect.equal
@@ -3121,7 +3303,7 @@ let guardPrecedenceTests =
             test "each mix of flavours is read as one kind" {
                 let kindOf flavours =
                     let colony = List.fold withFlavour precedenceBasis flavours
-                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Kind
+                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty
 
                 let rows =
                     [
@@ -3151,7 +3333,7 @@ let guardPrecedenceTests =
 
                 Expect.equal
                     (rows |> List.map (fun (flavours, _) -> flavours, kindOf flavours))
-                    rows
+                    (rows |> List.map (fun (flavours, kind) -> flavours, Duty.Guard kind))
                     "each mix's kind"
             }
         ]

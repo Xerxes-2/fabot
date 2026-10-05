@@ -65,7 +65,8 @@ let private planHolding (colony: ColonyView) (holding: (string * Task) list) =
 
     Planner.planTasks colony atlas (threatsHolding colony held) held (Planner.outpostFactsOf colony)
 
-let private groundOf (threats: Threats) = Map.find "W1N2" threats.Fight
+let private groundOf (threats: Threats) =
+    Threats.formationOf threats (Fight "W1N2") |> Option.get
 
 /// One row's quota as the colony decides it with these Tasks held.
 let private quotaHolding (colony: ColonyView) (holding: (string * Task) list) (row: string) =
@@ -211,7 +212,7 @@ let pooledTests =
                     (Planner.planTasks
                         quiet
                         (Atlas.ofView quiet)
-                        noThreats
+                        (threatsHolding quiet held)
                         held
                         (Planner.outpostFactsOf quiet)
                      |> fightsIn)
@@ -400,7 +401,10 @@ let rallyTests =
                 let mother = fightingMother (w17s25RaidIn "W1N2") [ brawler "brawler-1", home 10 8 ]
 
                 let ground =
-                    Threats.fightGroundIn (fightThreats mother [ "brawler-1" ]) "W1N2" "brawler-1"
+                    Threats.squadGroundIn
+                        (fightThreats mother [ "brawler-1" ])
+                        (Fight "W1N2")
+                        "brawler-1"
 
                 Expect.isNonEmpty ground "the premise: somewhere to muster"
 
@@ -416,22 +420,24 @@ let rallyTests =
             test
                 "the rally room steps back past a Source Keeper's room and a rival's, to home at the last" {
                 Expect.equal
-                    (rallyHop Set.empty [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ])
+                    (Formation.rallyHop Set.empty [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ])
                     (Some("W15S27", "W15S26"))
                     "W15S26 is a keeper room: the squad waits short of it"
 
                 Expect.equal
-                    (rallyHop (Set.singleton "W15S27") [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ])
+                    (Formation.rallyHop
+                        (Set.singleton "W15S27")
+                        [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ])
                     (Some("W15S28", "W15S27"))
                     "and short of a rival's, at home, by the exit toward the target"
 
                 Expect.equal
-                    (rallyHop Set.empty [ "W15S28"; "W15S27" ])
+                    (Formation.rallyHop Set.empty [ "W15S28"; "W15S27" ])
                     (Some("W15S28", "W15S27"))
                     "beside the raid's own room where nothing stands between"
 
                 Expect.isNone
-                    (rallyHop Set.empty [ "W15S28" ])
+                    (Formation.rallyHop Set.empty [ "W15S28" ])
                     "and a chain of one room has no crossing"
             }
 
@@ -493,8 +499,8 @@ let launchTests =
                         [ brawler "brawler-1", home 10 8; medic "medic-1", home 11 8 ]
 
                 let threats = fightThreats mother [ "brawler-1"; "medic-1" ]
-                let front = Threats.fightGroundIn threats "W1N2" "brawler-1"
-                let behind = Threats.fightGroundIn threats "W1N2" "medic-1"
+                let front = Threats.squadGroundIn threats (Fight "W1N2") "brawler-1"
+                let behind = Threats.squadGroundIn threats (Fight "W1N2") "medic-1"
 
                 Expect.isNonEmpty front "the premise: ground at the head"
 
@@ -519,9 +525,9 @@ let launchTests =
                         [ brawler "brawler-1", home 4 8; medic "medic-1", home 40 8 ]
 
                 let ground =
-                    Threats.fightGroundIn
+                    Threats.squadGroundIn
                         (fightThreats mother [ "brawler-1"; "medic-1" ])
-                        "W1N2"
+                        (Fight "W1N2")
                         "medic-1"
 
                 Expect.isTrue
@@ -671,11 +677,11 @@ let residentTests =
                 Expect.equal (guardsIn tasks) [ Guard "W1N2" ] "the residents' Guard stays pooled"
 
                 Expect.isNone
-                    (Threats.fightRoleOf threats "W1N2" "ranger-1")
+                    (Threats.squadRoleOf threats (Fight "W1N2") "ranger-1")
                     "no resident is pulled into the Fight"
 
                 Expect.equal
-                    (Threats.fightRoleOf threats "W1N2" "brawler-1")
+                    (Threats.squadRoleOf threats (Fight "W1N2") "brawler-1")
                     (Some Brawler)
                     "the cast is"
 
@@ -722,7 +728,7 @@ let residentTests =
                     "no relief beside it"
 
                 Expect.isNone
-                    (Threats.fightRoleOf threats "W1N2" "ranger-1")
+                    (Threats.squadRoleOf threats (Fight "W1N2") "ranger-1")
                     "a seven-block ranger fits no slot"
 
                 Expect.equal
@@ -796,7 +802,7 @@ let residentTests =
                 Expect.isTrue (groundOf threats).Launched "the premise: the squad has launched"
 
                 Expect.isNone
-                    (Threats.fightRoleOf threats "W1N2" "ranger-9")
+                    (Threats.squadRoleOf threats (Fight "W1N2") "ranger-9")
                     "a ranger holding nothing there is no resident"
             }
         ]
@@ -945,7 +951,8 @@ let private assaultThreats (colony: ColonyView) =
         colony
         (heldOn colony (colony.Creeps |> List.map (fun creep -> creep.Name, Assault "W1N2")))
 
-let private assaultGroundOf (threats: Threats) = Map.find "W1N2" threats.Assault
+let private assaultGroundOf (threats: Threats) =
+    Threats.formationOf threats (Assault "W1N2") |> Option.get
 
 /// The default squad standing in W2N1, a room on neither end of its walk,
 /// one cast on each of these tiles.
@@ -1117,7 +1124,7 @@ let assaultTests =
 
             test
                 "a file strung past two of its leader walks on in a room between home and the rival's, and holds for a broken file; at home and in the rival's room the leader holds for the rest" {
-                let holds (ground: AssaultGround) (leader: RoomPos) =
+                let holds (ground: Formation) (leader: RoomPos) =
                     Set.contains leader ground.Front
                     && ground.Front
                        |> Set.forall (fun tile ->
@@ -1404,10 +1411,12 @@ let assaultTests =
                                 })
                     }
 
-                let launched = assaultThreats inside |> fun threats -> threats.Assault
+                let launched =
+                    assaultThreats inside
+                    |> fun threats -> Threats.formationOf threats (Assault "W1N2")
 
                 Expect.isTrue
-                    (launched |> Map.tryFind "W1N2" |> Option.exists (fun ground -> ground.Launched))
+                    (launched |> Option.exists (fun ground -> ground.Launched))
                     "launched, with 100 ticks of window left: pooled until it closes"
 
                 let open' = barred (Some(now + lead + 1))

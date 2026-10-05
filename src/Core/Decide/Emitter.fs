@@ -305,15 +305,16 @@ let internal applicable
     | Dismantle _ -> isDismantlerParts heavy creep.Body && not (isSapperBody creep)
     // Spelled through the row predicates the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree; which row is the Brief's.
-    | Guard room -> (Threats.briefOf threats room).Admits view atlas creep
-    // A squad cast, or once the squad launches a resident of the room whose
-    // parts fit a slot (`FightGround.Roles`); how many of each role is the
-    // capacity's.
-    | Fight room -> Option.isSome (Threats.fightRoleOf threats room creep.Name)
-    // The defender row's casts and no other body (#504).
-    | Defend _ -> isNamedFor defenderPattern creep.Name
-    // A squad cast of a role the assault's squad casts (`AssaultGround.Roles`).
-    | Assault room -> Option.isSome (Threats.assaultRoleOf threats room creep.Name)
+    // A Fight admits a squad cast, or once the squad launches a resident of
+    // the room whose parts fit a slot; an Assault a cast of a role its squad
+    // casts (`Formation.Roles`), how many of each role being the capacity's.
+    // A Defend admits the defender row's casts and no other body (#504).
+    | Guard _
+    | Fight _
+    | Defend _
+    | Assault _ ->
+        Threats.briefFor threats task
+        |> Option.exists (fun brief -> brief.Admits view atlas creep)
     // Without the Fighter exemption a guard on the ring is offered both
     // Safety-tier Tasks and kept in the fight by travel cost alone, so the tick
     // a raid steps toward it the body bought to stand still walks away.
@@ -324,7 +325,7 @@ let internal applicable
         standsInReach threats atlas creep.Name
         && (runsFromThreats view atlas creep
             || isNamedFor defenderPattern creep.Name
-               && Threats.defendersWanted view threats = 0)
+               && Threats.wants view threats (Defend(SpatialInfo.homeName view.Spatial)) = 0)
 
 /// Whether a controller stands in a room nobody owns: the claim party's
 /// (#471), the one Upgrade pooled on such a controller. Read off the room's
@@ -787,11 +788,12 @@ let private topUp (view: ColonyView) atlas (creep: CreepInfo) : Intent list =
 /// A [[defender]]'s swing (#504), and only from a rampart of ours: off one, a
 /// swing at an ATTACK body takes its strike-back. At the body of the raid at
 /// the line beside it with the fewest hits, else at any hostile beside it,
-/// ties by id.
+/// ties by id: its Defend's `Brief.Targets`.
 let private defendIntent
     (view: ColonyView)
     atlas
     (threats: Threats)
+    (room: string)
     (creep: CreepInfo)
     : Intent option =
     match SpatialInfo.creepPlacementOf view.Spatial creep.Name with
@@ -800,14 +802,15 @@ let private defendIntent
             RoomPos.range here hostile.Pos
             |> Option.exists (fun r -> r <= Engine.meleeRange)
 
-        let pick (targets: HostileInfo list) =
-            targets
-            |> List.filter beside
-            |> List.sortBy (fun hostile -> hostile.Hits, hostile.Id)
-            |> List.tryHead
+        Threats.briefFor threats (Defend room)
+        |> Option.bind (fun brief ->
+            let line = brief.Targets
 
-        pick threats.AtLine
-        |> Option.orElse (pick view.Hostiles)
+            let pick (targets: HostileInfo list) =
+                targets |> List.filter beside |> line.Head view here.Room (fun _ -> 0)
+
+            pick (view.Hostiles |> List.filter (line.Shoots view Set.empty Set.empty))
+            |> Option.orElse (pick view.Hostiles))
         |> Option.map (fun target -> AttackCreep(creep.Name, target.Id))
     | _ -> None
 
@@ -838,21 +841,21 @@ let private actionIntents
         |> Option.toList
     // A medic's act is the heal reflex's; a brawler swings and a kiter shoots
     // as a guard and a ranger do, at the room's Guard's targets.
-    | Fight room when Threats.fightRoleOf threats room creep.Name = Some Medic -> []
+    | Fight _ when Threats.squadRoleOf threats task creep.Name = Some Medic -> []
     | Fight room ->
         guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
         |> Option.toList
-    | Defend _ -> defendIntent view atlas threats creep |> Option.toList
+    | Defend room -> defendIntent view atlas threats room creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
     // medic's act is the heal reflex's.
-    | Assault room ->
-        match Map.tryFind room threats.Assault with
-        | Some ground when
-            ground.Launched
-            && Threats.assaultRoleOf threats room creep.Name
+    | Assault _ ->
+        match Threats.formationOf threats task with
+        | Some formation when
+            formation.Launched
+            && Threats.squadRoleOf threats task creep.Name
                |> Option.exists SquadRole.dismantles
             ->
-            ground.Target
+            formation.Target
             |> Option.filter (fun (_, tile) ->
                 SpatialInfo.creepPlacementOf view.Spatial creep.Name
                 |> Option.bind (RoomPos.range tile)
@@ -917,7 +920,9 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
         |> List.choose (fun creep ->
             match Map.tryFind creep.Name assigned with
             | Some(Guard room) -> Some room
-            | Some(Fight room) when Threats.fightRoleOf threats room creep.Name <> Some Medic ->
+            | Some(Fight room as task) when
+                Threats.squadRoleOf threats task creep.Name <> Some Medic
+                ->
                 Some room
             | _ -> None
             |> Option.bind (fun room ->
