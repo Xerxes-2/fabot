@@ -308,6 +308,7 @@ let sentinelMemo snapshot =
         SeamWalks = SeamWalkTable()
         FarFields = FarFieldTable()
         Narrowed = NarrowedFieldTable()
+        Lines = LineTable()
     }
 
 /// Two rooms whose coordinates collide on purpose. At home:

@@ -244,6 +244,7 @@ let decideUnarbitrated
                 SeamWalks = m.SeamWalks
                 PerCensus = m.FarFields
                 Narrowed = m.Narrowed
+                Lines = m.Lines
             }
         | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
@@ -308,6 +309,7 @@ let decideUnarbitrated
                     SeamWalks = farFields.SeamWalks
                     FarFields = farFields.PerCensus
                     Narrowed = farFields.Narrowed
+                    Lines = farFields.Lines
                 }
             | None ->
                 let deferred =
@@ -317,6 +319,7 @@ let decideUnarbitrated
                         farFields.SeamWalks
                         farFields.PerCensus
                         farFields.Narrowed
+                        farFields.Lines
 
                 { deferred with
                     RivalRooms = rivals
@@ -345,6 +348,7 @@ let decideUnarbitrated
                 SeamWalks = farFields.SeamWalks
                 FarFields = farFields.PerCensus
                 Narrowed = farFields.Narrowed
+                Lines = farFields.Lines
             }
 
     // The narrow facts the Planner reads about the colony's own decisions:

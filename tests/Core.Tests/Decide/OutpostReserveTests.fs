@@ -717,6 +717,7 @@ let standDownGateTests =
                                 SeamWalks = withoutLook.Memo.SeamWalks
                                 FarFields = withoutLook.Memo.FarFields
                                 Narrowed = withoutLook.Memo.Narrowed
+                                Lines = withoutLook.Memo.Lines
                             }
                     }
                     withoutLook

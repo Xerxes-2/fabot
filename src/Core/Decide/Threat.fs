@@ -472,26 +472,13 @@ let private reachAcross atlas (room: string) (pos: Pos) (r: int) : (string * Pos
 let private shelterDepth = 5
 
 /// The home's shelter (#514): its walkable tiles behind the declared
-/// perimeter (`Colony.Perimeter`) — neither outside the line (`outsideLine`)
-/// nor on it — else those at least `shelterDepth` from every exit tile; in
-/// either case less `hot` and every tile beside a spawn, which a cast needs
-/// free to step out onto.
-let private shelterOf (view: ColonyView) atlas (home: string) (hot: Set<Pos>) : Set<RoomPos> =
-    let walkable = Atlas.walkableTilesIn atlas home
-
-    let ground =
-        match view.Perimeter with
-        | [] ->
-            let nearExit =
-                Map.tryFind home view.Spatial.Borders
-                |> Option.defaultValue Map.empty
-                |> Map.toList
-                |> List.filter (fun (exit, terrain) -> terrain <> Wall && Seam.isExit exit)
-                |> List.collect (fun (exit, _) -> tilesWithin (shelterDepth - 1) exit)
-                |> Set.ofList
-
-            Set.difference walkable nearExit
-        | line -> Set.difference walkable (Set.union (outsideLine view) (Set.ofList line))
+/// perimeter (`Colony.Perimeter`) — neither outside the line nor on it —
+/// else those at least `shelterDepth` from every exit tile
+/// (`Atlas.shelterGround`); in either case less `hot` and every tile beside a
+/// spawn, which a cast needs free to step out onto. The home is the Atlas's
+/// own, the one `shelterGround` is laid for.
+let private shelterOf (view: ColonyView) atlas (hot: Set<Pos>) : Set<RoomPos> =
+    let home = SpatialInfo.homeName view.Spatial
 
     let besideSpawns =
         view.Spawns
@@ -500,7 +487,9 @@ let private shelterOf (view: ColonyView) atlas (home: string) (hot: Set<Pos>) : 
         |> List.collect (RoomPos.pos >> tilesWithin 1)
         |> Set.ofList
 
-    Set.difference ground (Set.union hot besideSpawns) |> RoomPos.setAt home
+    Set.difference
+        (Atlas.shelterGround atlas view.Perimeter shelterDepth)
+        (Set.union hot besideSpawns |> RoomPos.setAt home)
 
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
 /// room: weapon range plus the margin in Chebyshev tiles, and across a border
@@ -912,7 +901,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             ))
         |> List.map (fun core -> ringAround core.RoomName core.Tile)
 
-    let outside, atLine = raidAtLine view
+    let outside, atLine = raidAtLine view atlas
 
     // The tiles outside the line a raid melee there reaches in a step and a
     // swing: what a defender's walk keeps off (#504). Inside the line a
@@ -952,7 +941,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
         if nextDoor && not (shielded home) then
             let hot = Threats.reachIn armed home
-            Map.ofList [ home, lazy (shelterOf view atlas home hot) ]
+            Map.ofList [ home, lazy (shelterOf view atlas hot) ]
         else
             Map.empty
 

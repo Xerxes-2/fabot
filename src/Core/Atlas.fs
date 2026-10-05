@@ -855,6 +855,99 @@ let walkableTilesExcept (atlas: Atlas) (room: string) (except: Set<Pos>) : Set<R
                     RoomPos.at room (posAt index)
         ]
 
+/// The home's line entry for `perimeter` (#519): the memo's while it was laid
+/// for that perimeter, else a fresh one in its place.
+let private homeLine (atlas: Atlas) (perimeter: Pos list) : HomeLine =
+    match atlas.FarFields.Lines.TryGetValue atlas.Home with
+    | true, line when line.Perimeter = perimeter -> line
+    | _ ->
+        let line =
+            {
+                Perimeter = perimeter
+                Outside = None
+                Ground = None
+            }
+
+        atlas.FarFields.Lines.[atlas.Home] <- line
+        line
+
+/// The home's tiles outside `perimeter`: what a walk in from the exits reaches
+/// over the terrain without crossing a perimeter tile. Empty for no
+/// perimeter. Laid once per census and perimeter (#519).
+let outsideLine (atlas: Atlas) (perimeter: Pos list) : Set<Pos> =
+    match perimeter with
+    | [] -> Set.empty
+    | _ ->
+        let entry = homeLine atlas perimeter
+
+        match entry.Outside with
+        | Some outside -> outside
+        | None ->
+            let home = atlas.Home
+            let terrain = (layerOf atlas home).Terrain
+            let line = Set.ofList perimeter
+
+            let open' (tile: Pos) =
+                not (Set.contains tile line)
+                && (match TerrainGrid.tryFind tile terrain with
+                    | Some ground -> ground <> Wall
+                    | None -> false)
+
+            let reached = System.Collections.Generic.HashSet<Pos>()
+            let frontier = System.Collections.Generic.Queue<Pos>()
+
+            let visit (tile: Pos) =
+                if open' tile && reached.Add tile then
+                    frontier.Enqueue tile
+
+            Map.tryFind home atlas.Spatial.Borders
+            |> Option.defaultValue Map.empty
+            |> Map.iter (fun exit ground ->
+                if ground <> Wall then
+                    tilesWithin 1 exit |> List.iter visit)
+
+            while frontier.Count > 0 do
+                tilesWithin 1 (frontier.Dequeue()) |> List.iter visit
+
+            // Held past the tick, so built where nothing is captured (#401).
+            let outside = Fresh.setOfSeq reached
+            entry.Outside <- Some outside
+            outside
+
+/// The home's walkable tiles behind `perimeter` — neither outside it nor on
+/// it — else, for no perimeter, those at least `depth` from every exit tile;
+/// joined to the home. The Shelter's ground before a tick's Reach and spawns
+/// come off it (`Threat.shelterOf`), laid once per census, perimeter and
+/// depth (#519).
+let shelterGround (atlas: Atlas) (perimeter: Pos list) (depth: int) : Set<RoomPos> =
+    let entry = homeLine atlas perimeter
+
+    match entry.Ground with
+    | Some(laidAt, ground) when laidAt = depth -> ground
+    | _ ->
+        let home = atlas.Home
+        let walkable = walkableTilesIn atlas home
+
+        let behind =
+            match perimeter with
+            | [] ->
+                let nearExit =
+                    Map.tryFind home atlas.Spatial.Borders
+                    |> Option.defaultValue Map.empty
+                    |> Map.toList
+                    |> List.filter (fun (exit, terrain) -> terrain <> Wall && Seam.isExit exit)
+                    |> List.collect (fun (exit, _) -> tilesWithin (depth - 1) exit)
+                    |> Set.ofList
+
+                Set.difference walkable nearExit
+            | line ->
+                Set.difference walkable (Set.union (outsideLine atlas perimeter) (Set.ofList line))
+
+        // Held past the tick, so built where nothing is captured (#401).
+        let ground = behind |> Seq.map (RoomPos.at home) |> Fresh.setOfSeq
+        entry.Ground <- Some(depth, ground)
+        ground
+
 /// The tile a creep stands on; None for a creep the projection does not
 /// place — as `positionOf` is the same question about a target — and, like
 /// it, room and tile in one.
@@ -1650,14 +1743,14 @@ let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep:
         table.Remove key |> ignore
 
 /// ADR-0032
-/// Drop, from the four census-keyed tables this Atlas was handed, every
+/// Drop, from the five census-keyed tables this Atlas was handed, every
 /// entry that read a room whose census moved — in place, because the tables
 /// are the plan memo's. A spawn walk reads home and every room of every chain
 /// `routes` answers to its goal; since `routes` answers a chain only while the
 /// projection carries every room of it, a departed room drops every
 /// cross-room spawn walk. A Seam walk reads its first room and is evicted on
 /// either, over-invalidating being the cheap error. A far field reads exactly
-/// its chain.
+/// its chain, and a home's line its home.
 let evictRooms (atlas: Atlas) (wasRival: Set<string>) (moved: Set<string>) : unit =
     let touches (rooms: string list) = rooms |> List.exists moved.Contains
 
@@ -1682,6 +1775,7 @@ let evictRooms (atlas: Atlas) (wasRival: Set<string>) (moved: Set<string>) : uni
     retain atlas.SeamWalks (fun (fromRoom, toRoom) -> not (touches [ fromRoom; toRoom ]))
     retain atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
     retain atlas.FarFields.Narrowed (fun (chain, _, _, _, _) -> not (touches chain))
+    retain atlas.FarFields.Lines (fun home -> not (moved.Contains home))
 
 /// Drop every far field whose Task is not in `live` (#392): a Task carries an
 /// object id, so a quiet census leaks one field per Task that ever priced a

@@ -261,50 +261,15 @@ let internal perimeterRamparts (view: ColonyView) : (string * RoomPos * int) lis
             else
                 None)
 
-/// The home's tiles outside its line: what a walk in from the exits reaches
-/// over the terrain without crossing a declared perimeter tile. Empty for a
-/// home that declares no perimeter.
-let internal outsideLine (view: ColonyView) : Set<Pos> =
-    match view.Perimeter with
-    | [] -> Set.empty
-    | perimeter ->
-        let home = SpatialInfo.homeName view.Spatial
-        let terrain = (SpatialInfo.layerOf view.Spatial home).Terrain
-        let line = Set.ofList perimeter
-
-        let open' (tile: Pos) =
-            not (Set.contains tile line)
-            && (match TerrainGrid.tryFind tile terrain with
-                | Some ground -> ground <> Wall
-                | None -> false)
-
-        let reached = System.Collections.Generic.HashSet<Pos>()
-        let frontier = System.Collections.Generic.Queue<Pos>()
-
-        let visit (tile: Pos) =
-            if open' tile && reached.Add tile then
-                frontier.Enqueue tile
-
-        Map.tryFind home view.Spatial.Borders
-        |> Option.defaultValue Map.empty
-        |> Map.iter (fun exit ground ->
-            if ground <> Wall then
-                tilesWithin 1 exit |> List.iter visit)
-
-        while frontier.Count > 0 do
-            tilesWithin 1 (frontier.Dequeue()) |> List.iter visit
-
-        Set.ofSeq reached
-
 /// The raid bodies at the home's line this tick (#504): a hostile, no
-/// keeper's, standing outside the line (`outsideLine`) with a live ATTACK or
+/// keeper's, standing outside the line (`Atlas.outsideLine`) with a live ATTACK or
 /// RANGED_ATTACK, or with WORK and beside a perimeter rampart. A body inside
 /// the line — a breach, or at the Keep — is the towers' and the relief's,
 /// never a [[defender]]'s.
 ///
 /// Beside it the tiles outside the line, which the defender's walk reads;
 /// both empty on a tick no hostile stands in the home.
-let internal raidAtLine (view: ColonyView) : Set<Pos> * HostileInfo list =
+let internal raidAtLine (view: ColonyView) atlas : Set<Pos> * HostileInfo list =
     let home = SpatialInfo.homeName view.Spatial
 
     match
@@ -315,7 +280,7 @@ let internal raidAtLine (view: ColonyView) : Set<Pos> * HostileInfo list =
     | [] -> Set.empty, []
     | _ when List.isEmpty view.Perimeter -> Set.empty, []
     | hostiles ->
-        let outside = outsideLine view
+        let outside = Atlas.outsideLine atlas view.Perimeter
         let ramparts = perimeterRamparts view |> List.map (fun (_, tile, _) -> tile)
 
         let besideLine (hostile: HostileInfo) =

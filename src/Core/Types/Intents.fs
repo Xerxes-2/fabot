@@ -196,11 +196,31 @@ type NarrowedFieldTable =
 /// signature signs.
 type SeamWalkTable = System.Collections.Generic.Dictionary<string * string, int[]>
 
+/// A home's line under one census and one declared perimeter (#519): the
+/// tiles outside it (`Atlas.outsideLine`) and the Shelter's ground before
+/// this tick's Reach and spawns come off it (`Atlas.shelterGround`), each
+/// laid on its first ask. Every input either reads is the home's terrain,
+/// its walking grid — which the home's census signature signs — and the
+/// perimeter the entry carries; a raid tick rebuilt both off ~2,000 tiles.
+type HomeLine =
+    {
+        Perimeter: Pos list
+        mutable Outside: Set<Pos> option
+        /// Beside the depth from the exits it was laid at, for a home that
+        /// declares no perimeter.
+        mutable Ground: (int * Set<RoomPos>) option
+    }
+
+/// The home's line per home room, on `WalkTable`'s terms: held on the plan
+/// memo and evicted with the home's census (`Atlas.evictRooms`). A perimeter
+/// other than the entry's replaces it.
+type LineTable = System.Collections.Generic.Dictionary<string, HomeLine>
+
 /// The tables an Atlas prices its cross-room legs out of and the census memo
-/// recalls: the far fields, and beside them the Seam walks. One lifetime
-/// between them, the census's. A record, because it is the one name the whole
-/// far side of a cross-room price is handed around under
-/// (`docs/research/cpu-headroom.md` §5.1, §5.3).
+/// recalls: the far fields, and beside them the Seam walks — and the home's
+/// line, which rides with them for their lifetime, the census's. A record,
+/// because it is the one name the whole far side of a cross-room price is
+/// handed around under (`docs/research/cpu-headroom.md` §5.1, §5.3).
 type FarFieldMemo =
     {
         /// The Seam walks flooded under this census signature. Laid per Atlas
@@ -215,6 +235,8 @@ type FarFieldMemo =
         PerCensus: FarFieldTable
         /// The narrowed asks' fields, a slot apiece, on the census's terms.
         Narrowed: NarrowedFieldTable
+        /// The home's line (#519), on the census's terms.
+        Lines: LineTable
     }
 
 [<RequireQualifiedAccess>]
@@ -225,7 +247,7 @@ module FarFieldMemo =
     /// `decideUnarbitrated` would keep that tick's view and Atlas alive.
     let walks () : WalkTable = WalkTable()
 
-    /// Two empty tables: the Atlas of a caller holding no memo at all — a
+    /// Empty tables: the Atlas of a caller holding no memo at all — a
     /// test, or a one-off. A function and never a value, because a table
     /// shared by two parallel test lists is two threads writing one
     /// `Dictionary` (#310, `AGENTS.md` § Code hygiene).
@@ -234,6 +256,7 @@ module FarFieldMemo =
             SeamWalks = SeamWalkTable()
             PerCensus = FarFieldTable()
             Narrowed = NarrowedFieldTable()
+            Lines = LineTable()
         }
 
 /// What a Link footing is held beside: each planned source container, the
@@ -380,6 +403,8 @@ type PlanMemo =
         FarFields: FarFieldTable
         /// The narrowed far fields, on the same terms.
         Narrowed: NarrowedFieldTable
+        /// The home's line (#519), on the same terms.
+        Lines: LineTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -411,7 +436,7 @@ module PlanMemo =
     /// stamped with the signature it declined to plan against would be served
     /// forever.
     ///
-    /// The four tables are handed in and not defaulted: a deferred colony
+    /// The five tables are handed in and not defaulted: a deferred colony
     /// declines to plan, not to price. The per-room signatures come with them
     /// because they say which census the tables were filled under, and that
     /// is this tick's, whatever the plan's is (#372).
@@ -421,6 +446,7 @@ module PlanMemo =
         (seamWalks: SeamWalkTable)
         (farFields: FarFieldTable)
         (narrowed: NarrowedFieldTable)
+        (lines: LineTable)
         : PlanMemo =
         {
             Signature = ""
@@ -440,4 +466,5 @@ module PlanMemo =
             SeamWalks = seamWalks
             FarFields = farFields
             Narrowed = narrowed
+            Lines = lines
         }

@@ -4306,4 +4306,102 @@ let acrossTheBorderTests =
                      && not (List.isEmpty step))
                     $"and the body beside the exit walks in: {step}"
             }
+
+            test
+                "two ticks under one census share one line and one shelter ground; a moved census or perimeter lays them again" {
+                // #519, live 2026-10-05: the line's flood and the shelter's ground
+                // were rebuilt off ~2,000 tiles on every raid tick.
+                let colony = borderHome true defendedLine [ meleeWestAt { X = 48; Y = 34 } ] []
+
+                let held = FarFieldMemo.empty ()
+
+                let tick () =
+                    Atlas.ofViewRecalling (FarFieldMemo.walks ()) held colony
+
+                let first = tick ()
+                let second = tick ()
+                let outside = Atlas.outsideLine first colony.Perimeter
+                let ground = Atlas.shelterGround first colony.Perimeter 5
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(outside, Atlas.outsideLine second colony.Perimeter))
+                    "one flood across the two ticks"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(ground, Atlas.shelterGround second colony.Perimeter 5))
+                    "one ground across them"
+
+                Expect.equal
+                    (Threats.shelterIn (threatsOf colony second) "W1N1")
+                    (Threats.shelterIn (threatsOf colony (Atlas.ofView colony)) "W1N1")
+                    "the recalled ground lays the shelter a fresh one does"
+
+                let moved = tick ()
+                Atlas.evictRooms moved Set.empty (Set.singleton "W1N1")
+                let relaid = Atlas.outsideLine moved colony.Perimeter
+
+                Expect.isFalse
+                    (obj.ReferenceEquals(outside, relaid))
+                    "the home's census moved: laid again"
+
+                Expect.equal relaid outside "to the same tiles"
+
+                let shorter = List.tail colony.Perimeter
+
+                Expect.equal
+                    (Atlas.outsideLine moved shorter)
+                    (Atlas.outsideLine (Atlas.ofView colony) shorter)
+                    "a perimeter other than the one it was laid for is laid for its own"
+            }
+
+            test
+                "an obstacle site placed behind the line lays the shelter ground again through the decide seam" {
+                // #519: the site moves the home's census signature, which evicts the
+                // home's line, so the next tick's ground is laid off the new grid.
+                let site = { X = 30; Y = 30 }
+
+                let colony =
+                    borderHome
+                        true
+                        defendedLine
+                        [ meleeWestAt { X = 48; Y = 34 } ]
+                        [ reserverAt { X = 35; Y = 30 } ]
+
+                let sited =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "site-1", site, Site BuiltKind.Extension ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Obstacles = Set.add site layer.Obstacles
+                                })
+                    }
+
+                // Read off each tick as it lands: the tables are one `Dictionary`
+                // handed on, which the next tick writes in place.
+                let groundOf (decision: Decision) =
+                    decision.Memo.Lines.["W1N1"].Ground |> Option.map snd
+
+                let first = decide colony Map.empty Set.empty None
+                let firstGround = groundOf first
+                let held = decide colony Map.empty Set.empty (Some first.Memo)
+                let heldGround = groundOf held
+                let next = decide sited Map.empty Set.empty (Some held.Memo)
+
+                Expect.isTrue
+                    (firstGround |> Option.exists (Set.contains (RoomPos.at "W1N1" site)))
+                    "the premise: the reserver idling at home forced a ground holding the tile"
+
+                Expect.isTrue
+                    (match firstGround, heldGround with
+                     | Some a, Some b -> obj.ReferenceEquals(a, b)
+                     | _ -> false)
+                    "an unchanged census recalls the ground"
+
+                Expect.equal
+                    (groundOf next)
+                    (Some(Atlas.shelterGround (Atlas.ofView sited) sited.Perimeter 5))
+                    "the moved census lays it off the new grid, the site's tile gone"
+            }
         ]

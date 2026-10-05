@@ -80,6 +80,7 @@ let invaderCoreTests =
                                     SeamWalks = untroubled.Memo.SeamWalks
                                     FarFields = untroubled.Memo.FarFields
                                     Narrowed = untroubled.Memo.Narrowed
+                                    Lines = untroubled.Memo.Lines
                                 }
                         }
                         untroubled
