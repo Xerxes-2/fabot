@@ -68,12 +68,14 @@ let postGarrisonTests =
                     } =
                     decideOn colony
 
+                // Of the two bodies the cap admits one, and the colony matches
+                // its best pair first (#530): the body a tile off.
                 Expect.equal
                     (harvesters assignments "src-a")
-                    [ "a1" ]
+                    [ "g1" ]
                     "a Post with nobody standing on it is a Post the cap admits"
 
-                Expect.isNonEmpty (moveIntentsFor "a1" intents) "and the body offered it sets out"
+                Expect.isNonEmpty (moveIntentsFor "g1" intents) "and the body offered it sets out"
             }
 
             test "an expiring garrison still hands its Post on" {

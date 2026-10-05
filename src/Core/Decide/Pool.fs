@@ -516,6 +516,14 @@ let priorityOfTier =
 /// Exported for `Tier`'s reason (#237).
 let deadlineRank = -tierRungs
 
+/// The urgent band's rank (#530): the refill cluster while the colony is
+/// starved at it, the towers while the home is raided and a struck rampart's
+/// Repair (a rung over the band), over every intake's lift — a body with a
+/// load delivers these before it tops up. Half a tier over Feeding, the most a
+/// rung may lift and still round to Feeding's push weight; the struck rampart's
+/// rung over it pushes as the deadline tier does, as befits a breaking line.
+let urgentRank = priorityOfTier Feeding - tierRungs / 2
+
 /// The step a Task is moved by when it is ordered against another inside one
 /// tier: one rung of ten, so it never crosses a tier.
 let priorityStep = 1
@@ -575,8 +583,11 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
 /// capacity on it. `planTasks` says what is pooled; this says where each
 /// entry ranks and how many bodies it admits, and between them they are
 /// everything the Matcher knows about a Task. Every exception the colony has
-/// learned about ordering and crowding lands here and nowhere else.
-let planPool
+/// learned about ordering and crowding lands here and nowhere else. `held` is
+/// what the colony's bodies hold: the loads already committed to a sink, which
+/// a draw for that sink is capped less (#530).
+let planPoolHolding
+    (held: HeldTaskFacts)
     (view: ColonyView)
     atlas
     (threats: Threats)
@@ -649,7 +660,8 @@ let planPool
 
     // A raid at home inside the deadline (#525): attackController sinks the
     // timer mid-siege, and the towers and struck ramparts still come first.
-    let raidedInDeadline = List.contains Raided busy && insideDowngradeDeadline view
+    let raided = List.contains Raided busy
+    let raidedInDeadline = raided && insideDowngradeDeadline view
 
     let isTower id =
         view.Refillables |> List.exists (fun r -> r.Id = id && r.Kind = BuiltKind.Tower)
@@ -682,6 +694,86 @@ let planPool
         |> Map.ofList
 
     let stored id = SpatialInfo.storedIn view.Spatial id
+
+    // The one supply cap a draw on the stock is read through (#530): the loads
+    // its sinks still have room for — that room less what the carriers already
+    // have aboard, a loaded body being a sink's next delivery — and never more
+    // than the store holds. A load drawn past it has one sink left, the store
+    // it came from.
+    let drawLoads stock room aboard =
+        ceilDiv (min stock (max 0 (room - aboard))) haulerLoad
+
+    // What is already aboard for these sinks: the resource the holders of a
+    // Refill to one of them carry, supply committed there. A convoy rooms off
+    // or a courier bound for the Reactor holds no such Refill and counts for
+    // nothing.
+    let carriersAboard resource (sinks: string -> bool) =
+        let carried =
+            view.Creeps
+            |> List.map (fun creep ->
+                creep.Name,
+                match resource with
+                | Energy -> creep.Energy
+                | Thorium -> creep.Thorium)
+            |> Map.ofList
+
+        tasks
+        |> List.sumBy (function
+            | Refill(id, r) as task when r = resource && sinks id ->
+                HeldTaskFacts.holdersOf held (taskId task)
+                |> List.sumBy (fun name -> Map.tryFind name carried |> Option.defaultValue 0)
+            | _ -> 0)
+
+    // The terminal's energy is kept at the larger of the consignment's fee and
+    // the aid's load (`Planner.terminalEnergyRefills`).
+    let terminalTarget =
+        max
+            (if Option.isSome view.Consignee then
+                 view.Tuning.TerminalEnergy
+             else
+                 0)
+            (if Facts.givesAid view then
+                 view.Tuning.AidTerminalEnergy
+             else
+                 0)
+
+    // The room one energy sink has left, by what bounds its own Refill below.
+    let sinkRoom id =
+        if cluster |> Option.exists (fun c -> c.Spawn = id) then
+            clusterRoom
+        else
+            match view.Refillables |> List.tryFind (fun r -> r.Id = id) with
+            | Some r -> r.FreeCapacity
+            | None ->
+                let lent = Map.tryFind id ferryShare |> Option.map (fun share -> share * haulerLoad)
+
+                match Map.tryFind id view.Spatial.TargetKinds with
+                | Some(Structure BuiltKind.Terminal) -> terminalTarget - stored id
+                | Some(Structure BuiltKind.Container) ->
+                    let room = Engine.containerCapacity - SpatialInfo.heldIn view.Spatial Energy id
+                    lent |> Option.fold min room
+                | _ -> lent |> Option.defaultValue 0
+
+    // Every pooled energy sink but the stock's own, which would open the stock
+    // against itself. Lazy, like the terminals' below: only a colony with a
+    // stock reads either.
+    let stockSinkRoom =
+        lazy
+            (tasks
+             |> List.sumBy (function
+                 | Refill(id, Energy) when not (isStorage id) -> max 0 (sinkRoom id)
+                 | _ -> 0))
+
+    // The consignor's ore sink: the room its terminals have left.
+    let terminalOreRoom =
+        lazy
+            (Atlas.idsOfKind atlas (Structure BuiltKind.Terminal)
+             |> List.sumBy (fun id ->
+                 max
+                     0
+                     (Engine.terminalCapacity
+                      - stored id
+                      - SpatialInfo.heldIn view.Spatial Thorium id)))
 
     // The rescue budget (#284): the decaying structures this colony has let
     // fall so far below their own trigger that a repair is no longer surplus
@@ -962,10 +1054,11 @@ let planPool
             // distance). And a pile worth a trip of its own (#242): half a
             // hauler load, read off the row's cast and never the candidate's
             // carry — the creep-blind mirror of `applicable`'s `worthTheTrip`.
-            // Below a bank of 450 half a load is `Tuning.PickupThreshold`
-            // itself, so every energy pile takes the rung. Smaller piles stay
-            // on the tier: one hundred energy forty tiles off is no reason to
-            // leave the 1,500 under a body's feet. `drawableTiles` holds only
+            // The line is floored at twice `Tuning.PickupThreshold` (#249):
+            // under a bank of 450 half a load is the threshold itself, and
+            // every pooled pile took the rung. Smaller piles stay on the tier:
+            // one hundred energy forty tiles off is no reason to leave the
+            // 1,500 under a body's feet. `drawableTiles` holds only
             // Feeding-tier Withdraws, so the ore's arm below inherits neither
             // clause.
             | Pickup(pileId, Energy) ->
@@ -973,12 +1066,20 @@ let planPool
                     SpatialInfo.placementOf view.Spatial pileId
                     |> Option.exists (fun tile -> Set.contains tile drawableTiles)
 
-                let worthATripOfItsOwn = stored pileId * 2 >= haulerLoad
+                let worthATripOfItsOwn =
+                    stored pileId * 2 >= max haulerLoad (4 * view.Tuning.PickupThreshold)
 
                 if overADrawableStore || worthATripOfItsOwn then
                     OneRungUp
                 else
                     OnTheTier
+            // A tombstone or a ruin decays as a pile does (#250), so its
+            // energy is drawn on the pile's rung: a pile a rung over it sent a
+            // hauler past a store about to go.
+            | Withdraw(storeId, Energy) when
+                Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient
+                ->
+                OneRungUp
             // A full source container, whose income is going away: two rungs,
             // above the pile, because with the pile above the full container
             // the haulers chased fifty-energy piles all day and never drew the
@@ -1060,10 +1161,6 @@ let planPool
             // Over the home site as well (#284): a structure a quarter from
             // destruction is work the colony has already paid for.
             | Repair id when Set.contains id rescued || Set.contains id dying -> TwoRungsUp
-            // A rampart under attack (#467) over a tower's Refill: the
-            // rampart is the room's defence while it stands, and the tower's
-            // energy is no use once the raid is through it.
-            | Repair id when Set.contains id underAttack -> TwoRungsUp
             // The claim party over the home's Feeding work (#471): on the
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
@@ -1091,6 +1188,15 @@ let planPool
         | Refill(id, Energy) when raidedInDeadline && isTower id -> deadlineRank - priorityStep
         | Repair id when raidedInDeadline && Set.contains id underAttack ->
             deadlineRank - priorityStep
+        // The raided home's towers and the starved cluster share the band, and
+        // the walk decides between them.
+        | Refill(id, Energy) when raided && isTower id -> urgentRank
+        | Refill(id, Energy) when clusterStarved && cluster |> Option.exists (fun c -> c.Spawn = id) ->
+            urgentRank
+        // A rampart under attack (#467), a rung over both: the room's defence
+        // while it stands, and the tower's energy is no use once the raid is
+        // through the line.
+        | Repair id when Set.contains id underAttack -> urgentRank - priorityStep
         | _ -> priorityOfTier tier + rankOfRung step
 
     let isBorrowedSite siteId =
@@ -1164,7 +1270,11 @@ let planPool
         // loads too, or the spawn and the towers would go unfed.
         | Withdraw(storeId, Energy) when reserveShort && isStorage storeId ->
             let room = view.Refillables |> List.sumBy (fun r -> r.FreeCapacity)
-            let carried = ceilDiv room haulerLoad
+
+            let refillable id =
+                view.Refillables |> List.exists (fun r -> r.Id = id)
+
+            let carried = drawLoads (stored storeId) room (carriersAboard Energy refillable)
 
             let noCarrier =
                 view.Creeps
@@ -1181,7 +1291,34 @@ let planPool
         // the energy column otherwise. At least one, or the lift would be a
         // rank on a Task nobody may hold.
         | Withdraw(storeId, Energy) when clusterStarved && isStorage storeId ->
-            Capacity.total (max 1 (ceilDiv clusterRoom haulerLoad))
+            let ring id =
+                cluster |> Option.exists (fun c -> c.Spawn = id)
+
+            Capacity.total (
+                max 1 (drawLoads (stored storeId) clusterRoom (carriersAboard Energy ring))
+            )
+        // Otherwise the carriers draw for the room the stock's sinks have left
+        // (#530), and the Work bodies for their own spending, which the
+        // Upgrade keeps open: the stock over a load.
+        | Withdraw(storeId, Energy) when isStorage storeId ->
+            let stock = stored storeId
+
+            Capacity.unbounded
+            |> Capacity.capping
+                CapScope.Carriers
+                (drawLoads stock stockSinkRoom.Value (carriersAboard Energy (isStorage >> not)))
+            |> Capacity.capping CapScope.Workers (ceilDiv stock haulerLoad)
+        // A consignor's ore draw, for the room its terminal has left.
+        | Withdraw(storeId, Thorium) when isStorage storeId && Option.isSome view.Consignee ->
+            Capacity.total (
+                drawLoads
+                    (SpatialInfo.heldIn view.Spatial Thorium storeId)
+                    terminalOreRoom.Value
+                    (carriersAboard Thorium (fun id ->
+                        Map.tryFind id view.Spatial.TargetKinds = Some(
+                            Structure BuiltKind.Terminal
+                        )))
+            )
         // One body fetches what is lying beside the Reactor: the errand room
         // is three crossings out and the ore is a finite remainder. Above the
         // general arm, which would divide a tombstone's holding into loads.
@@ -1303,3 +1440,14 @@ let planPool
                     Atlas.targetRoom atlas id |> Option.map RecallPolicy.Struck
                 | _ -> None
         })
+
+/// `planPoolHolding` over a colony whose bodies hold nothing: every load
+/// aboard is uncommitted.
+let planPool
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (busy: BusyReason list)
+    (tasks: Task list)
+    =
+    planPoolHolding HeldTaskFacts.empty view atlas threats busy tasks

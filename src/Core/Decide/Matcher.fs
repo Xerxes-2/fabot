@@ -500,16 +500,24 @@ let matchCreeps
     // scored on the full key where a holder is merely kept, and with no escape
     // from the capacity gate. The key's rank is `matchRank`'s, which reads the
     // creep's cheapest intake, so the pool is gated before any row is scored.
-    let judge acc loads (creep: CreepInfo) =
-        let gated =
-            pool |> List.map (fun pooled -> pooled, gate (lazy false) acc creep pooled)
+    // Each pooled Task beside its id, worked out once for the tick.
+    let ids = pool |> List.map (fun pooled -> taskId pooled.Task, pooled)
 
+    let gateAll acc (creep: CreepInfo) =
+        ids
+        |> List.map (fun (tid, pooled) -> tid, pooled, gate (lazy false) acc creep pooled)
+
+    let score
+        loads
+        (creep: CreepInfo)
+        (gated: (string * PooledTask * Result<int, RejectReason>) list)
+        =
         let nearest =
             if workBy creep.Name = 0 then
                 None
             else
                 gated
-                |> List.choose (fun (pooled, result) ->
+                |> List.choose (fun (_, pooled, result) ->
                     match result with
                     | Ok cost when isIntake pooled.Task -> Some cost
                     | _ -> None)
@@ -519,18 +527,16 @@ let matchCreeps
         // share a tier with and would take on travel cost or pool order.
         let fights =
             gated
-            |> List.exists (fun (pooled, result) ->
+            |> List.exists (fun (_, pooled, result) ->
                 pooled.Task <> Flee && safetyTier pooled.Task && Result.isOk result)
 
         gated
-        |> List.map (fun (pooled, result) ->
+        |> List.map (fun (tid, pooled, result) ->
             let result =
                 if fights && pooled.Task = Flee then
                     Error RejectReason.Inapplicable
                 else
                     result
-
-            let tid = taskId pooled.Task
 
             pooled,
             match result with
@@ -543,100 +549,224 @@ let matchCreeps
                     load loads tid
                 ))
 
-    let assignOne (acc, loads, verdicts) (creep: CreepInfo) =
-        let verdicts =
-            if Set.contains creep.Name verbose then
-                // The creep's own claim is set aside for its scoring: a held
-                // single-Seat Task must read as the winning row, never as
-                // capacity-full against its own holder's seat. The crowding
-                // table is set aside with it, the two being one fact (#95).
-                let without =
-                    match Map.tryFind creep.Name acc with
-                    | Some tid -> Map.add tid (max 0 (load loads tid - 1)) loads
-                    | None -> loads
+    // The scored rows' keys: the Matcher's key beside the Task and its rank.
+    let keyedOf (rows: (PooledTask * Candidate) list) =
+        rows
+        |> List.choose (function
+            | p, Candidate.Scored(_, rank, cost, load) ->
+                Some((rank, cost, load), p.Task, p.Priority)
+            | _ -> None)
 
-                let rows = judge (Map.remove creep.Name acc) without creep |> List.map snd
-                Verdict.Scoring(creep.Name, rows) :: verdicts
+    // How far the best Task got through the gates is why a creep sits idle,
+    // deepest gate first: a creep whose only rejection is the arrival gate is
+    // waiting out a restock, and saying nothing fit its body would be a lie.
+    let idleReason (rows: (PooledTask * Candidate) list) =
+        let rejectedWith wanted =
+            rows
+            |> List.exists (function
+                | _, Candidate.Rejected(_, reason) -> wanted reason
+                | _ -> false)
+
+        // The arrival gate's reason carries the numbers it compared (#88), so
+        // the depth question asks after the case rather than after a value it
+        // would have to invent to compare to.
+        let isTooEarly =
+            function
+            | RejectReason.TooEarly _ -> true
+            | _ -> false
+
+        if List.isEmpty pool then
+            IdleReason.NoTasks
+        elif rejectedWith isTooEarly then
+            IdleReason.NoneInTime
+        elif rejectedWith ((=) RejectReason.Unreachable) then
+            IdleReason.NoneReachable
+        elif rejectedWith ((=) RejectReason.CapacityFull) then
+            IdleReason.NoneFree
+        else
+            IdleReason.NoneApplicable
+
+    // The deciding factor: the first component separating the winner from its
+    // closest rival, or the pool-order tie-break when the whole key ties. A
+    // rank the pooled ranks do not order the same way was turned by travel.
+    let factorOf keyed (bestKey, task, bestPooled) =
+        match keyed |> List.filter (fun (_, t, _) -> t <> task) with
+        | [] -> MatchFactor.OnlyCandidate
+        | rivals ->
+            let bestRank, bestCost, bestLoad = bestKey
+
+            let (rivalRank, rivalCost, rivalLoad), _, rivalPooled =
+                rivals |> List.minBy (fun (key, _, _) -> key)
+
+            if rivalRank <> bestRank then
+                if bestPooled < rivalPooled then
+                    MatchFactor.Rank
+                else
+                    MatchFactor.TravelCost
+            elif rivalCost <> bestCost then
+                MatchFactor.TravelCost
+            elif rivalLoad <> bestLoad then
+                MatchFactor.Load
             else
-                verdicts
+                MatchFactor.PoolOrder
 
-        match Map.tryFind creep.Name acc with
-        | Some tid -> acc, loads, Verdict.Kept(creep.Name, tid) :: verdicts
-        | None ->
-            let judged = judge acc loads creep
+    // The fresh assignments (#530): the pair the colony ranks best is matched
+    // first, whichever body it is, so a contested Task goes to the body that
+    // ranks it best and reaches it cheapest, and a far body is not sent past a
+    // near one because the view named it first. Ties go to the view's order.
+    // A match moves one Task's holders, so only the bodies that could still
+    // take that Task are gated again, and only on it.
+    let entryOf loads i (creep: CreepInfo) gated =
+        let rows = score loads creep gated
+        let keyed = keyedOf rows
 
-            let keyed =
-                judged
-                |> List.choose (function
-                    | p, Candidate.Scored(_, rank, cost, load) ->
-                        Some((rank, cost, load), p.Task, p.Priority)
-                    | _ -> None)
-
+        let top =
             match keyed with
-            | [] ->
-                // How far the best Task got through the gates is why the creep
-                // sits idle, deepest gate first: a creep whose only rejection
-                // is the arrival gate is waiting out a restock, and saying
-                // nothing fit its body would be a lie.
-                let rejectedWith wanted =
-                    judged
-                    |> List.exists (function
-                        | _, Candidate.Rejected(_, reason) -> wanted reason
-                        | _ -> false)
+            | [] -> None
+            | _ -> Some(keyed |> List.minBy (fun (key, _, _) -> key))
 
-                // The arrival gate's reason carries the numbers it compared
-                // (#88), so the depth question asks after the case rather
-                // than after a value it would have to invent to compare to.
-                let isTooEarly =
-                    function
-                    | RejectReason.TooEarly _ -> true
-                    | _ -> false
+        i, creep, gated, rows, keyed, top
 
-                let reason =
-                    if List.isEmpty pool then
-                        IdleReason.NoTasks
-                    elif rejectedWith isTooEarly then
-                        IdleReason.NoneInTime
-                    elif rejectedWith ((=) RejectReason.Unreachable) then
-                        IdleReason.NoneReachable
-                    elif rejectedWith ((=) RejectReason.CapacityFull) then
-                        IdleReason.NoneFree
-                    else
-                        IdleReason.NoneApplicable
+    let rec fresh acc loads pending decided =
+        let best =
+            pending
+            |> List.choose (fun ((i, _, _, _, _, top) as entry) ->
+                top |> Option.map (fun (key, _, _) -> (key, i), entry))
 
-                acc, loads, Verdict.Unassigned(creep.Name, reason) :: verdicts
-            | keyed ->
-                let bestKey, task, bestPooled = keyed |> List.minBy (fun (key, _, _) -> key)
+        match best with
+        | [] ->
+            let idle =
+                pending
+                |> List.map (fun (_, creep: CreepInfo, _, rows, _, _) ->
+                    creep.Name, (Verdict.Unassigned(creep.Name, idleReason rows), rows))
 
-                // The deciding factor: the first component separating the
-                // winner from its closest rival, or the pool-order tie-break
-                // when the whole key ties. A rank the pooled ranks do not
-                // order the same way was turned by travel.
-                let factor =
-                    match keyed |> List.filter (fun (_, t, _) -> t <> task) with
-                    | [] -> MatchFactor.OnlyCandidate
-                    | rivals ->
-                        let bestRank, bestCost, bestLoad = bestKey
+            acc, loads, (decided, idle) ||> List.fold (fun m (name, entry) -> Map.add name entry m)
+        | _ ->
+            let _, (i, creep, _, rows, keyed, top) = best |> List.minBy fst
+            let (_, task, _) as top = Option.get top
+            let tid = taskId task
+            let acc = Map.add creep.Name tid acc
+            let loads = hold loads tid
 
-                        let (rivalRank, rivalCost, rivalLoad), _, rivalPooled =
-                            rivals |> List.minBy (fun (key, _, _) -> key)
-
-                        if rivalRank <> bestRank then
-                            if bestPooled < rivalPooled then
-                                MatchFactor.Rank
+            // A body that could take the Task is gated on it again and its row
+            // rewritten in place. Only two readings reach past the row: the
+            // Task was its best (its top is read again), or the Task just
+            // closed to it and was its nearest intake or its one fight —
+            // `matchRank` and Flee read those — and then its rows are scored
+            // again whole.
+            let rest =
+                pending
+                |> List.filter (fun (j, _, _, _, _, _) -> j <> i)
+                |> List.map (fun ((j, other, gated, rows, _, otherTop) as entry) ->
+                    match
+                        gated
+                        |> List.tryPick (fun (id, pooled, result) ->
+                            match result with
+                            | Ok cost when id = tid -> Some(pooled, cost)
+                            | _ -> None)
+                    with
+                    | None -> entry
+                    | Some(pooled, cost) ->
+                        let result =
+                            if Capacity.isBounded pooled.Capacity then
+                                gate (lazy false) acc other pooled
                             else
-                                MatchFactor.TravelCost
-                        elif rivalCost <> bestCost then
-                            MatchFactor.TravelCost
-                        elif rivalLoad <> bestLoad then
-                            MatchFactor.Load
+                                Ok cost
+
+                        let gated =
+                            gated
+                            |> List.map (fun ((id, p, _) as row) ->
+                                if id = tid then id, p, result else row)
+
+                        let wasTop = otherTop |> Option.exists (fun (_, t, _) -> t = pooled.Task)
+
+                        let reaches =
+                            match result with
+                            | Ok _ -> false
+                            | Error _ ->
+                                let okCosts wanted =
+                                    gated
+                                    |> List.choose (fun (_, p, r) ->
+                                        match r with
+                                        | Ok c when wanted p.Task -> Some c
+                                        | _ -> None)
+
+                                let nearestIntake =
+                                    workBy other.Name > 0
+                                    && isIntake pooled.Task
+                                    && okCosts isIntake |> List.forall (fun c -> c > cost)
+
+                                let onlyFight =
+                                    pooled.Task <> Flee
+                                    && safetyTier pooled.Task
+                                    && okCosts (fun t -> t <> Flee && safetyTier t) |> List.isEmpty
+
+                                nearestIntake || onlyFight
+
+                        if reaches then
+                            entryOf loads j other gated
                         else
-                            MatchFactor.PoolOrder
+                            let rows =
+                                rows
+                                |> List.map (fun ((p, candidate) as row) ->
+                                    match candidate, result with
+                                    | Candidate.Scored(id, rank, c, _), Ok _ when id = tid ->
+                                        p, Candidate.Scored(id, rank, c, load loads tid)
+                                    | Candidate.Scored(id, _, _, _), Error reason when id = tid ->
+                                        p, Candidate.Rejected(id, reason)
+                                    | _ -> row)
 
-                Map.add creep.Name (taskId task) acc,
-                hold loads (taskId task),
-                Verdict.Matched(creep.Name, taskId task, factor) :: verdicts
+                            let keyed = keyedOf rows
 
-    let next, _, statuses = view.Creeps |> List.fold assignOne (kept, keptLoads, [])
+                            let top =
+                                if wasTop then
+                                    match keyed with
+                                    | [] -> None
+                                    | _ -> Some(keyed |> List.minBy (fun (key, _, _) -> key))
+                                else
+                                    otherTop
 
-    next, (released |> List.sortBy fst |> List.map snd) @ List.rev statuses
+                            j, other, gated, rows, keyed, top)
+
+            fresh
+                acc
+                loads
+                rest
+                (Map.add
+                    creep.Name
+                    (Verdict.Matched(creep.Name, tid, factorOf keyed top), rows)
+                    decided)
+
+    let next, nextLoads, decided =
+        view.Creeps
+        |> List.mapi (fun i creep -> i, creep)
+        |> List.filter (fun (_, creep) -> not (Map.containsKey creep.Name kept))
+        |> List.map (fun (i, creep) -> entryOf keptLoads i creep (gateAll kept creep))
+        |> fun pending -> fresh kept keptLoads pending Map.empty
+
+    // One status Verdict per living creep in view order, a verbose creep's
+    // Scoring before it: a fresh creep's rows are the ones it was matched on,
+    // its own claim not yet among them; a kept creep's are the whole pool
+    // judged against the match with its own claim and crowding set aside
+    // (#95), so a held single-Seat Task reads as the winning row.
+    let statuses =
+        view.Creeps
+        |> List.collect (fun creep ->
+            let status, rows =
+                match Map.tryFind creep.Name kept with
+                | Some tid ->
+                    Verdict.Kept(creep.Name, tid),
+                    lazy
+                        (let without = Map.add tid (max 0 (load nextLoads tid - 1)) nextLoads
+
+                         score without creep (gateAll (Map.remove creep.Name next) creep))
+                | None ->
+                    let status, rows = Map.find creep.Name decided
+                    status, lazy rows
+
+            if Set.contains creep.Name verbose then
+                [ Verdict.Scoring(creep.Name, rows.Value |> List.map snd); status ]
+            else
+                [ status ])
+
+    next, (released |> List.sortBy fst |> List.map snd) @ statuses

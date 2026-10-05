@@ -2274,6 +2274,22 @@ let consignmentTests =
                     "stocked to the tuned figure it takes no more: energy in a terminal buys no body"
             }
 
+            test "the consignor's draw admits the loads the terminal has room for" {
+                // #530: a load drawn for a terminal that cannot take it has
+                // one sink left, the Storage it came from. The draw is capped
+                // by its sink's room, not by the 20,000 banked.
+                let capOf room =
+                    poolOn (consigningColony (Engine.terminalCapacity - 10_000 - room) 10_000)
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = Withdraw("sto-1", Thorium) then
+                            Capacity.capOf CapScope.Everyone entry.Capacity
+                        else
+                            None)
+
+                Expect.equal (capOf 150) (Some 1) "a hundred and fifty of room is one load"
+                Expect.equal (capOf 450) (Some 3) "and four hundred and fifty three"
+            }
+
             test
                 "a colony that declares no consignee walks arriving ore out of its terminal instead" {
                 let arriving = planTasksOn (receivingColony 5_000) noThreats

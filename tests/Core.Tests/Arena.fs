@@ -288,6 +288,8 @@ type Carried =
         Healers: Map<string, HealerSeen list>
         ArmedSeen: Map<string, int>
         LastPositions: Map<string, RoomPos>
+        /// The store each body's load was drawn from (#530).
+        Drawn: Map<string, DrawRecord>
         /// Each colony's Raid log (`Observe.foldRaids`), by home.
         Raids: Map<string, Observe.RaidState>
         /// Every rival controller as last seen (`World.recallRivalControllers`).
@@ -747,6 +749,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Healers = Map.empty
                 ArmedSeen = Map.empty
                 LastPositions = Map.empty
+                Drawn = Map.empty
                 Raids = Map.empty
                 RivalControllers = Map.empty
             }
@@ -928,6 +931,7 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
             match Map.tryFind b.Id a.Carried.LastPositions with
             | Some last -> last <> b.At
             | None -> false
+        DrawnFrom = Map.tryFind b.Id a.Carried.Drawn
     }
 
 /// One room's facts, seen or blind, as `World.factsOf` builds them.
@@ -1282,6 +1286,9 @@ let private decideOurs (a: Arena) : Intent list * Carried =
     intents,
     { a.Carried with
         Assignments = assignments
+        Drawn =
+            (Map.empty, decisions)
+            ||> List.fold (fun acc (_, d) -> Map.fold (fun m k v -> Map.add k v m) acc d.Drawn)
         Memos =
             (a.Carried.Memos, decisions)
             ||> List.fold (fun memos (home, d) -> Map.add home d.Memo memos)

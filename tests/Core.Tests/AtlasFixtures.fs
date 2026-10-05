@@ -81,6 +81,7 @@ let worker name =
         Thorium = 0
         FreeCapacity = 50
         Moved = false
+        DrawnFrom = None
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
     }
 
@@ -99,6 +100,7 @@ let creepWith name energy body =
         Thorium = 0
         FreeCapacity = 50
         Moved = false
+        DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
     }
 

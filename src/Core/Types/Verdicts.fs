@@ -527,4 +527,8 @@ type Decision =
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`): what the light ticks after issue again.
         Aims: Intent list
+        /// The store each living creep's energy was drawn from, while any is
+        /// aboard (#530): the Memory the next tick's `CreepInfo.DrawnFrom`
+        /// is read off.
+        Drawn: Map<string, DrawRecord>
     }

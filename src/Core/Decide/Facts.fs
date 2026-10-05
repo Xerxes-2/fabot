@@ -60,6 +60,52 @@ let private taskTarget (tid: string) : string option =
         | -1 -> Some rest
         | next -> Some(rest.Substring(0, next))
 
+/// The store a creep's energy came from (#530): the store of the energy
+/// Withdraw it held last tick, once it has any aboard, else the one Memory
+/// recorded, and nothing once it carries none. Read off the assignment and not
+/// the act, so a draw a light tick made is recorded on the next full one.
+let internal drawnFrom
+    (view: ColonyView)
+    (assignments: Assignments)
+    (creep: CreepInfo)
+    : DrawRecord option =
+    // Beside the store it holds a Withdraw of: a body still walking there has
+    // drawn nothing from it yet.
+    let beside store =
+        match
+            SpatialInfo.creepPlacementOf view.Spatial creep.Name,
+            SpatialInfo.placementOf view.Spatial store
+        with
+        | Some at, Some tile -> RoomPos.range at tile |> Option.exists (fun r -> r <= 1)
+        | _ -> false
+
+    // What last tick's Task says about the load: a draw beside a store records
+    // it, any other intake mixes the load and clears the record, and anything
+    // else leaves the record as it was.
+    let held =
+        Map.tryFind creep.Name assignments
+        |> Option.map (fun tid ->
+            match taskTarget tid with
+            | Some store when tid = taskId (Withdraw(store, Energy)) ->
+                if beside store then
+                    Some(Some { Store = store; Tick = view.Time })
+                else
+                    None
+            | _ when tid.StartsWith "pickup:" || tid.StartsWith "harvest:" -> Some None
+            | _ -> None)
+        |> Option.flatten
+
+    if creep.Energy = 0 then
+        None
+    else
+        match held with
+        | Some record -> record
+        // The record expires: it breaks the flip, and must never strand a body
+        // whose only sink is the store it drew from.
+        | None ->
+            creep.DrawnFrom
+            |> Option.filter (fun record -> view.Time - record.Tick <= view.Tuning.DrawnHold)
+
 /// The vision grace's one question (#151): the room a held Task's target was
 /// last seen standing in, when that room has gone **dark** inside
 /// `Tuning.VisionGrace` and not longer. `None` is every other answer — the room

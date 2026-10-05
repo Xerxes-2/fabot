@@ -675,9 +675,54 @@ let intakeWorthTests =
                     "half the body's free capacity standing in the store is worth the trip"
             }
 
+            test "with no stock to fall to, the line is the pooling threshold" {
+                // #236: at RCL3 with no Storage, a 10C/5M hauler (500 free,
+                // line 250) idled `NoneApplicable` beside 350 energy in two
+                // small containers while the spawn stood empty. The line buys
+                // the fall to the stock; with no stock there is nothing to fall
+                // to, so a store at the pile's threshold is worth the trip.
+                let lane stock =
+                    let body = List.replicate 10 Carry @ List.replicate 5 Move
+
+                    { bareRespawn with
+                        Bank = bank 0 800
+                        Sources = []
+                        Controller = None
+                        Refillables = [ refillable "spawn-1" 300 BuiltKind.Spawn ]
+                        Creeps = [ creepWith "h" 0 500 body ]
+                        Spatial =
+                            { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
+                                Stores = Map.ofList [ "can-a", stock ]
+                            }
+                            |> withTargets
+                                [
+                                    "spawn-1", { X = 8; Y = 10 }, Structure BuiltKind.Spawn
+                                    "can-a", { X = 12; Y = 10 }, Structure BuiltKind.Container
+                                ]
+                            |> withObstacles [ { X = 8; Y = 10 } ]
+                            |> withCreepsAt [ "h", { X = 13; Y = 10 } ]
+                    }
+
+                let matched stock =
+                    let { Verdicts = verdicts } = decideOn (lane stock)
+
+                    verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h", task, _) -> Some task
+                        | _ -> None)
+
+                Expect.equal
+                    (matched 200)
+                    (Some(taskId (Withdraw("can-a", Energy))))
+                    "two hundred beside it is drawn: nothing deeper stands"
+
+                Expect.isNone (matched 99) "a store under the pile's threshold is still no trip"
+            }
+
             test "the line is the asking body's free capacity and not one row's load" {
                 // The gate reads the pair and not the Task: the same store that is too
                 // thin for a twelve-hundred hauler is worth a 450-carry generalist's trip.
+                // A stocked Storage stands, so the line has somewhere to fall (#236).
                 let lane stock =
                     let body =
                         List.replicate 9 Work @ List.replicate 9 Carry @ List.replicate 9 Move
@@ -689,10 +734,13 @@ let intakeWorthTests =
                         Creeps = [ creepWith "w" 0 450 body ]
                         Spatial =
                             { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
-                                Stores = Map.ofList [ "can-src", stock ]
+                                Stores = Map.ofList [ "can-src", stock; "stock-1", 10_000 ]
                             }
                             |> withTargets
-                                [ "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container ]
+                                [
+                                    "can-src", { X = 12; Y = 10 }, Structure BuiltKind.Container
+                                    "stock-1", { X = 24; Y = 10 }, Structure BuiltKind.Storage
+                                ]
                             |> withCreepsAt [ "w", { X = 13; Y = 10 } ]
                     }
 
@@ -725,7 +773,8 @@ let intakeDecayTests =
                 // not the Task's name.
                 //
                 // Pairwise on the target's kind alone: one store, one body, a hundred and
-                // fifty in it at every reading.
+                // fifty in it at every reading, and a stocked Storage for the line to fall
+                // to (#236), which no sink opens.
                 let lane kind =
                     let body = List.replicate 24 Carry @ List.replicate 12 Move
 
@@ -736,9 +785,13 @@ let intakeDecayTests =
                         Creeps = [ creepWith "h" 0 1200 body ]
                         Spatial =
                             { spatial [] [ for x in 8..18 -> { X = x; Y = 10 }, Plain ] with
-                                Stores = Map.ofList [ "store-1", 150 ]
+                                Stores = Map.ofList [ "store-1", 150; "stock-1", 10_000 ]
                             }
-                            |> withTargets [ "store-1", { X = 12; Y = 10 }, kind ]
+                            |> withTargets
+                                [
+                                    "store-1", { X = 12; Y = 10 }, kind
+                                    "stock-1", { X = 18; Y = 10 }, Structure BuiltKind.Storage
+                                ]
                             |> withCreepsAt [ "h", { X = 16; Y = 10 } ]
                     }
 
@@ -771,7 +824,8 @@ let intakeDecayTests =
                 // four hundred against a 1,200-carry hauler is the colony's last intake.
                 //
                 // Pairwise on the store's kind alone: the same four hundred in a source
-                // container is exactly the refusal above.
+                // container is exactly the refusal above, with a second Storage at the
+                // lane's far end to fall to (#236).
                 let lane kind =
                     let body = List.replicate 24 Carry @ List.replicate 12 Move
 
@@ -782,12 +836,13 @@ let intakeDecayTests =
                         Creeps = [ creepWith "h" 0 1200 body ]
                         Spatial =
                             { spatial [] [ for x in 8..24 -> { X = x; Y = 10 }, Plain ] with
-                                Stores = Map.ofList [ "store-1", 400 ]
+                                Stores = Map.ofList [ "store-1", 400; "stock-2", 10_000 ]
                             }
                             |> withTargets
                                 [
                                     "ext-1", { X = 8; Y = 10 }, Structure BuiltKind.Extension
                                     "store-1", { X = 12; Y = 10 }, kind
+                                    "stock-2", { X = 24; Y = 10 }, Structure BuiltKind.Storage
                                 ]
                             |> withCreepsAt [ "h", { X = 16; Y = 10 } ]
                     }
@@ -805,8 +860,9 @@ let intakeDecayTests =
                     (Some(taskId (Withdraw("store-1", Energy))))
                     "the deepest intake in the colony draws whatever body asks it"
 
-                Expect.isNone
+                Expect.equal
                     (matched (Structure BuiltKind.Container))
+                    (Some(taskId (Withdraw("stock-2", Energy))))
                     "the same four hundred in a container is left for the tier below it"
             }
         ]

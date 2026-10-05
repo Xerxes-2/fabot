@@ -211,6 +211,7 @@ let private creep name room : WorldCreep =
                 Thorium = 0
                 FreeCapacity = 50
                 Moved = false
+                DrawnFrom = None
                 Body = body
             }
     }

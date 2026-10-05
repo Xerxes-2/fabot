@@ -217,6 +217,191 @@ let stockGateTests =
                     "the stocked buffer's intake, and one draw on the stock"
             }
 
+            test "a buffer thirty short opens the stock to one hauler, not three" {
+                // Live 2026-10-05 (#530): W12S28's and W13S28's haulers drew
+                // the Storage for a sink thirty short, found it full and
+                // poured the load back, every tick or two. A draw admits the
+                // loads its sinks have room for, not the loads the stock
+                // divides into.
+                let colony =
+                    let one =
+                        drawColony
+                            (Map.ofList [ "can-src", 0; "can-ctrl", 1_970; "sto-1", 50_000 ])
+                            (hauler "h1" 0 100)
+                            { X = 16; Y = 10 }
+
+                    { one with
+                        Creeps = [ hauler "h1" 0 100; hauler "h2" 0 100; hauler "h3" 0 100 ]
+                        Spatial =
+                            one.Spatial
+                            |> withCreepsAt
+                                [
+                                    "h1", { X = 16; Y = 10 }
+                                    "h2", { X = 15; Y = 10 }
+                                    "h3", { X = 16; Y = 11 }
+                                ]
+                    }
+
+                Expect.equal
+                    (holdersOf (Withdraw("sto-1", Energy)) (decideOn colony).Assignments
+                     |> List.length)
+                    1
+                    "thirty of room is one load: one hauler draws, two stay put"
+            }
+
+            test "a load drawn from the Storage never goes back into it" {
+                // The other half of #530's flip: the sink filled under the
+                // hauler, and the one sink left was the store it had just
+                // emptied. Pairwise with "the accepted churn" below on where
+                // the load came from alone.
+                let stores = Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ]
+                let beside = { X = 16; Y = 10 }
+
+                let drawn =
+                    decideFrom
+                        (Map.ofList [ "h1", taskId (Withdraw("sto-1", Energy)) ])
+                        (drawColony stores (hauler "h1" 100 0) beside)
+
+                Expect.equal
+                    (Map.tryFind "h1" drawn.Assignments)
+                    None
+                    "the store it drew from is no sink for the load"
+
+                Expect.equal
+                    (Map.tryFind "h1" drawn.Drawn)
+                    (Some
+                        {
+                            Store = "sto-1"
+                            Tick = bareRespawn.Time
+                        })
+                    "and the draw is recorded for the ticks after"
+
+                let recorded tick energy free =
+                    decideOn (
+                        drawColony
+                            stores
+                            { hauler "h1" energy free with
+                                DrawnFrom = Some { Store = "sto-1"; Tick = tick }
+                            }
+                            beside
+                    )
+
+                Expect.equal
+                    (Map.tryFind "h1" (recorded (bareRespawn.Time - 12) 100 0).Assignments)
+                    None
+                    "a few ticks on, the record still keeps it out"
+
+                Expect.isEmpty
+                    (recorded bareRespawn.Time 0 100).Drawn
+                    "an empty body carries no record"
+            }
+
+            test "only a load bound for the stock's sinks shrinks its draw" {
+                // #530: the supply already committed to the sinks is what a
+                // holder of their Refill carries. A convoy two rooms off holds
+                // no such Refill, and its thousand aboard must not shut the
+                // stock to the buffer thirty short.
+                let carriersCap (held: (string * int) list) =
+                    let colony =
+                        let one =
+                            drawColony
+                                (Map.ofList [ "can-src", 0; "can-ctrl", 1_970; "sto-1", 50_000 ])
+                                (hauler "h1" 0 100)
+                                { X = 16; Y = 10 }
+
+                        { one with
+                            Creeps =
+                                hauler "h1" 0 100
+                                :: hauler "convoy" 1_000 0
+                                :: [ for name, energy in held -> hauler name energy (100 - energy) ]
+                        }
+
+                    let holding =
+                        { HeldTaskFacts.empty with
+                            Holders =
+                                Map.ofList
+                                    [ taskId (Refill("can-ctrl", Energy)), List.map fst held ]
+                        }
+
+                    planPoolHolding
+                        holding
+                        colony
+                        (Atlas.ofView colony)
+                        noThreats
+                        []
+                        (planTasksOn colony noThreats)
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = Withdraw("sto-1", Energy) then
+                            Capacity.capOf CapScope.Carriers entry.Capacity
+                        else
+                            None)
+
+                Expect.equal (carriersCap []) (Some 1) "the convoy's load is not the buffer's"
+                Expect.equal (carriersCap [ "near", 30 ]) (Some 0) "a holder carrying the thirty is"
+            }
+
+            test "the draw record breaks the flip and strands nobody" {
+                // #530's backstop stops the immediate pour-back; it must not
+                // keep a load out of its store for ever, nor stand for a load
+                // that is no longer the store's.
+                let stores = Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ]
+                let beside = { X = 16; Y = 10 }
+                let record tick = Some { Store = "sto-1"; Tick = tick }
+
+                let expired =
+                    decideOn (
+                        drawColony
+                            stores
+                            { hauler "h1" 100 0 with
+                                DrawnFrom =
+                                    record (bareRespawn.Time - Tuning.defaults.DrawnHold - 1)
+                            }
+                            beside
+                    )
+
+                Expect.equal
+                    (Map.tryFind "h1" expired.Assignments)
+                    (Some(taskId (Refill("sto-1", Energy))))
+                    "past the hold, a body whose only sink is the store pours back"
+
+                // A load topped up off a 600 pile is the pile's as much as the
+                // store's: any other intake clears the record.
+                let piled =
+                    let colony =
+                        drawColony
+                            (Map.add "pile-a" 550 stores)
+                            { hauler "h1" 100 0 with
+                                DrawnFrom = record bareRespawn.Time
+                            }
+                            beside
+
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "pile-a", { X = 15; Y = 10 }, Dropped Energy ]
+                    }
+
+                let mixed =
+                    decideFrom (Map.ofList [ "h1", taskId (Pickup("pile-a", Energy)) ]) piled
+
+                Expect.isEmpty mixed.Drawn "the pickup clears the record"
+
+                Expect.equal
+                    (Map.tryFind "h1" mixed.Assignments)
+                    (Some(taskId (Refill("sto-1", Energy))))
+                    "and the mixed load may go into the store"
+
+                // A Withdraw held but not yet drawn records nothing.
+                let walking =
+                    decideFrom
+                        (Map.ofList [ "h1", taskId (Withdraw("sto-1", Energy)) ])
+                        (drawColony stores (hauler "h1" 40 60) { X = 10; Y = 10 })
+
+                Expect.isEmpty
+                    walking.Drawn
+                    "a body still walking to the store has drawn nothing from it"
+            }
+
             test "the upgrade buffer counts as a sink: the stock feeds it" {
                 // Every refillable full and only the buffer with room: the
                 // buffer's Refill is the whole reason the stock opens.
@@ -630,8 +815,8 @@ let stockDrawTests =
 
             test "with only the buffer hungry, the stock flows to it and never back" {
                 // The buffer's hunger opens the stock, and the tick the
-                // hauler fills the buffer outranks the store it just
-                // emptied: alternation, not a cycle.
+                // hauler fills, the store it just emptied is no sink for the
+                // load at all (#530): alternation, not a cycle.
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 800; "sto-1", 500 ]
                 let beside = { X = 16; Y = 10 }
 
@@ -663,8 +848,12 @@ let stockDrawTests =
 
                 Expect.contains
                     filled.Verdicts
-                    (Verdict.Matched("h1", taskId (Refill("can-ctrl", Energy)), MatchFactor.Rank))
-                    "and the load goes on to the buffer, not back into the stock"
+                    (Verdict.Matched(
+                        "h1",
+                        taskId (Refill("can-ctrl", Energy)),
+                        MatchFactor.OnlyCandidate
+                    ))
+                    "and the load goes on to the buffer, the stock no rival for it"
             }
 
             test "beside a stock that is both its intake and its sink, a hauler idles" {
@@ -865,7 +1054,8 @@ let stockDrawTests =
 
             test "under the emergency reserve the draw admits the loads the emergency sinks take" {
                 // Fifty of room in the ring and a 200 load at the 300 bank,
-                // with the fixture's carrier alive: one carrier, and no Work
+                // with the fixture's carrier alive and holding no Refill, so
+                // nothing aboard is committed (#530): one carrier, and no Work
                 // body at all with no emergency Repair.
                 let capOf colony =
                     poolOn colony
@@ -899,8 +1089,8 @@ let stockDrawTests =
 
                 Expect.equal
                     (capOf (colony 50_000))
-                    (Some(None, None, Some 250))
-                    "over the reserve: the stock over a load, for anybody"
+                    (Some(Some 1, Some 250, None))
+                    "over the reserve: the sinks' room for a carrier, the stock over a load for a Work body"
             }
 
             test "the tick the last other sink fills, the holder is released task-gone" {

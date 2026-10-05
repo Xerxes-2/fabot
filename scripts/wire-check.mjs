@@ -1072,6 +1072,45 @@ wire("positions: what savePositions writes is what loadPositions reads", async (
   assert.equal(loadPositions().size, 1, "and it reads back as the tile it was");
 });
 
+// ---- the draw record (#530) ----------------------------------------------
+
+// Each loaded creep's draw: the store and the tick it drew, `{ s, t }`. A row
+// that will not read costs itself: read as no record, the load may go to any
+// sink, the old behaviour. A tick that is not a number is dropped, never read
+// as tick 0 (an expired record would only be harmless by luck).
+const drawnThrough = async (value) => {
+  const { loadDrawn, saveDrawn } = await import(MODULE);
+  globalThis.Memory = rootMemoryWith("drawn", value);
+  saveDrawn(loadDrawn());
+  return globalThis.Memory.fabot.observe.drawn;
+};
+
+wire("drawn: load then save keeps every good row", async () => {
+  const leaf = { h1: { s: "sto-1", t: 972170 }, h2: { s: "can-a", t: 972160 } };
+  assert.equal(stable(await drawnThrough(leaf)), stable(leaf));
+});
+
+wire("drawn: an absent or off-shape leaf reads empty, and a bad row costs its row", async () => {
+  assert.equal(stable(await drawnThrough(undefined)), stable({}), "an absent leaf reads empty");
+  assert.equal(stable(await drawnThrough("Incorrect memory path")), stable({}), "so does a wrong type");
+
+  const good = { s: "sto-1", t: 972170 };
+
+  for (const [what, bad] of [
+    ["a null row", null],
+    ["a bare id, the shape before the tick", "sto-1"],
+    ["an empty id", { s: "", t: 972170 }],
+    ["a tick that is not a number", { s: "sto-1", t: {} }],
+    ["a row with no tick", { s: "sto-1" }],
+  ]) {
+    assert.equal(
+      stable(await drawnThrough({ h1: bad, h2: good })),
+      stable({ h2: good }),
+      `${what} is dropped and the row beside it kept`,
+    );
+  }
+});
+
 // ---- the room latches (#444, #445) --------------------------------------
 
 // Who owns each rival room, and the homes a tower of ours has stood full in:

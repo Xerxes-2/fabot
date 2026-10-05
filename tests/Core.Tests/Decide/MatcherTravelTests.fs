@@ -16,6 +16,63 @@ let travelCostTests =
     testList
         "travel-cost matching"
         [
+            test "a contested draw goes to the body beside it, not the body judged first" {
+                // Live 2026-10-05 (#530): worker-971252-Spawn11 walked
+                // through swamp to the second tombstone while the hauler
+                // beside it walked through swamp to a quiet tower — each
+                // body took its best Task in turn, so the near one fell to
+                // whichever far body came first. The worker is first in the
+                // view here; the pair the colony ranks best is matched first.
+                let tiles =
+                    [
+                        for x in 5..40 do
+                            for y in 5..15 ->
+                                { X = x; Y = y }, (if x >= 16 && x <= 26 then Swamp else Plain)
+                    ]
+
+                let colony =
+                    { bareRespawn with
+                        Sources = []
+                        Refillables =
+                            [
+                                refillable "spawn-1" 0 BuiltKind.Spawn
+                                refillable "tower-1" 500 BuiltKind.Tower
+                            ]
+                        Creeps =
+                            [
+                                worker "w1" 0 50
+                                creepWith
+                                    "h1"
+                                    235
+                                    465
+                                    (List.replicate 14 Carry @ List.replicate 7 Move)
+                            ]
+                        Spatial =
+                            { spatial [] tiles with
+                                Stores = Map.ofList [ "tomb-2", 193 ]
+                            }
+                            |> withTargets
+                                [
+                                    "tomb-2", { X = 13; Y = 10 }, Tombstone
+                                    "tower-1", { X = 29; Y = 10 }, Structure BuiltKind.Tower
+                                ]
+                            |> withObstacles [ { X = 29; Y = 10 } ]
+                            |> withCreepsAt [ "w1", { X = 28; Y = 12 }; "h1", { X = 14; Y = 10 } ]
+                    }
+
+                let { Assignments = assigned } = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "h1" assigned)
+                    (Some(taskId (Withdraw("tomb-2", Energy))))
+                    "the hauler beside the tombstone takes it, and the tower after"
+
+                Expect.equal
+                    (Map.tryFind "w1" assigned)
+                    None
+                    "the worker across the swamp is not sent"
+            }
+
             test
                 "live-bug regression: a fresh creep takes the near source regardless of ColonyView order" {
                 // The creep stands three steps from the near source, seven

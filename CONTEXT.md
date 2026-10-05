@@ -35,7 +35,7 @@ The thin imperative shell that turns Intents into Screeps API calls — the only
 A unit of work in the task pool (e.g. "deliver 300 energy to spawn") that interchangeable creeps are matched to; a creep has no fixed role. In the pool it carries a [[priority]] and a [[capacity]] the [[planner]] sets and the [[matcher]] reads.
 
 ### Priority
-Where a pooled Task ranks against every other, lower first — the first component of the [[matcher]]'s key, set by the [[planner]] off the tier ladder (Safety, the [[downgrade deadline]]'s Upgrade, Feeding, the [[storage]]'s draw, surplus, the [[buffer]]'s Refill, the stock's). Tiers stand ten rungs apart so a Task can step up inside its tier by a `Rung` of at most half a tier, and the [[resolver]]'s push weight rounds a rank back to its nearest tier. For a body with Work the [[matcher]] alone gives back an intake's lift above its tier, a rung per `Tuning.IntakeTravelPerRung` of travel past the body's cheapest intake (#501). ADR-0002, ADR-0007, ADR-0010, ADR-0012, ADR-0023, ADR-0052, ADR-0057, ADR-0061.
+Where a pooled Task ranks against every other, lower first — the first component of the [[matcher]]'s key, set by the [[planner]] off the tier ladder (Safety, the [[downgrade deadline]]'s Upgrade, the urgent band — a starved [[refill cluster]] or a raided home's towers, and a rung over them a struck rampart (#530) — Feeding, the [[storage]]'s draw, surplus, the [[buffer]]'s Refill, the stock's). Tiers stand ten rungs apart so a Task can step up inside its tier by a `Rung` of at most half a tier, and the [[resolver]]'s push weight rounds a rank back to its nearest tier. For a body with Work the [[matcher]] alone gives back an intake's lift above its tier, a rung per `Tuning.IntakeTravelPerRung` of travel past the body's cheapest intake (#501). ADR-0002, ADR-0007, ADR-0010, ADR-0012, ADR-0023, ADR-0052, ADR-0057, ADR-0061.
 _Avoid_: rank (for the tier itself), weight, urgency
 
 ### Capacity
@@ -48,14 +48,14 @@ Which of four shapes a body is, as far as a [[capacity]] is concerned, read off 
 The Task of digging a source or a [[thorium]] deposit, in the [[home room]] or an [[outpost]], pooled for every placed source and judged at [[arrival]] against the [[restock]] wait. Capped by the source's [[seat]]s and, for a [[work-heavy body]], by its [[post]]s; a light body must be half empty, not a [[standing body]] and find rate spare beyond the standing Posts, while a heavy one keeps its Post through the empty window and a store-less [[miner]] digs the deposit alone. ADR-0013, ADR-0016, ADR-0020, ADR-0021, ADR-0024, ADR-0025, ADR-0041, ADR-0042, ADR-0045, ADR-0048, ADR-0051, ADR-0057.
 
 ### Refill
-The Task of delivering a resource to a store that will take it — the [[refill cluster]], a tower, the [[buffer]], the [[storage]], a [[ferry]]'s sink — with its rank layered by target and the resource carried on the Task. ADR-0010, ADR-0012, ADR-0023, ADR-0054, ADR-0057.
+The Task of delivering a resource to a store that will take it — the [[refill cluster]], a tower, the [[buffer]], the [[storage]], a [[ferry]]'s sink — with its rank layered by target and the resource carried on the Task. Not to the store an energy load was drawn from, for `Tuning.DrawnHold` ticks after the draw (`CreepInfo.DrawnFrom`, #530). ADR-0010, ADR-0012, ADR-0023, ADR-0054, ADR-0057.
 
 ### Refill cluster
 The colony's spawn and every extension of it as one [[refill]] Task, keyed by the spawn's id and standing while any member has room; its [[work area]] is the hungry members' rings, the [[emitter]] picks the member at arrival, and its [[capacity]] is a budget of the ring's free energy over the holders' loads. ADR-0054, ADR-0071.
 _Avoid_: extension cluster, the spawn ring, anchor
 
 ### Withdraw
-The Task of taking a resource out of a stocked [[container]], a tombstone or a ruin, or — one tier lower and only while another sink is hungry, an emergency one under the [[emergency reserve]] — the [[storage]]. Applicable to a body with a Carry part, half its store free, no more Work than Move and (at the [[buffer]]) a Work part, to a store that can half fill it; capped by the store's stock over the drawing row's load. ADR-0012, ADR-0016, ADR-0019, ADR-0023, ADR-0026, ADR-0046, ADR-0057, ADR-0071.
+The Task of taking a resource out of a stocked [[container]], a tombstone or a ruin, or — one tier lower and only while another sink is hungry, an emergency one under the [[emergency reserve]] — the [[storage]]. Applicable to a body with a Carry part, half its store free — or, past half, a store within `Tuning.TopUpReach` whose whole holding fits (the **top-up**, #530) — no more Work than Move and (at the [[buffer]]) a Work part, to a store that can half fill it, or any store at the [[pickup]] threshold where no stocked Storage stands; capped by the store's stock over the drawing row's load, and the Storage's carriers by the room its sinks have left less what their Refills' holders already carry. ADR-0012, ADR-0016, ADR-0019, ADR-0023, ADR-0026, ADR-0046, ADR-0057, ADR-0071.
 
 ### Pickup
 The Task of walking to a dropped pile and taking it, pooled from a threshold of a hundred and capped by the pile's amount over one [[hauler unit]] load; a pile carries one resource, and a [[thorium]] pile ranks at the [[storage]]'s draw tier. ADR-0010, ADR-0016, ADR-0026, ADR-0057.
@@ -90,7 +90,7 @@ The Task of getting out of a [[reach]]: applicable to any creep standing inside 
 The pure step that reads a [[colony view]] and generates this tick's full Task pool from scratch, setting each entry's [[priority]] and [[capacity]] off the [[atlas]]. ADR-0052.
 
 ### Matcher
-The pure step that assigns creeps to Tasks by greedy matching, remembering only current assignments between ticks (anti-thrash). It knows no kinds of Task: it compares [[priority]] and [[travel cost]] and counts holders against [[capacity]]. ADR-0052.
+The pure step that assigns creeps to Tasks by greedy matching — the best pair of any idle body first, so a contested Task goes to the nearest body that ranks it there (#530) — remembering only current assignments between ticks (anti-thrash). It knows no kinds of Task: it compares [[priority]] and [[travel cost]] and counts holders against [[capacity]]. ADR-0052.
 
 ### Emitter
 The pure step that turns the tick's assigned Tasks into each creep's action Intent and [[chat bubble]], judged from tick-start geometry off the same [[atlas]] as the Matcher and Resolver.
@@ -380,7 +380,7 @@ The reflex that writes `Colony.signature`, a human's line, onto any controller t
 _Avoid_: room sign
 
 ### Pickup reflex
-The colony reflex that emits a pickup Intent for every creep with free capacity and no [[thorium]] aboard standing within range 1 of a dropped energy pile (`Atlas.droppedEnergyIn`), paired one room at a time and deduplicated against the [[pickup]] Task's own act. No movement, no matching, no threshold. ADR-0041, ADR-0057.
+The colony reflex that emits a pickup Intent for every creep with free capacity, no [[thorium]] aboard and no ore-bound Task held (#314) standing within range 1 of a dropped energy pile (`Atlas.droppedEnergyIn`), paired one room at a time and deduplicated against the [[pickup]] Task's own act. No movement, no matching, no threshold. ADR-0041, ADR-0057.
 
 ### Fire reflex
 The colony reflex that has every tower shoot the [[hostile]] nearest to itself among those worth a shot, each tick one stands in the [[home room]], per tower and with no focus fire. Worth one: an urgent hostile — a claimer, or one whose weapon reaches our [[keep]] or a creep of ours not standing on our own rampart — shot from any energy; or one the towers' energy over `Tuning.TowerRepairReserve` can kill through the heal reaching it (a player's healer on the exit counted at half, as it is carried out every other tick). With none worth a shot, a tower over its reserve repairs the [[rampart]] under attack. ADR-0014.

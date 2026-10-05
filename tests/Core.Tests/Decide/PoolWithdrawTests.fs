@@ -113,10 +113,12 @@ let withdrawCapacityTests =
                     "the near store names the cap and no gate before it — not the body, not the price; the Upgrade it has no Work for is the pool's only other loss"
             }
 
-            test "the Storage is not special-cased: the same formula, and at 130k no cap" {
+            test "the Storage admits the loads its sinks can take, however deep the stock" {
                 // A Storage down to one trip's worth admits one drawer, as a
-                // container does; a real stock divides into hundreds of
-                // trips, so the cap never binds.
+                // container does. A real stock divides into hundreds of
+                // trips, and divided by them every idle hauler drew for a
+                // spawn three hundred short and poured the rest back (#530):
+                // the carriers draw for the room the sinks have left.
                 let { Assignments = thin } = decideOn (stockCrowdColony 400)
 
                 Expect.equal
@@ -128,8 +130,8 @@ let withdrawCapacityTests =
 
                 Expect.equal
                     (drawersOf full "sto-c")
-                    [ "h1"; "h2"; "h3" ]
-                    "and a colony's real stock caps at 325 trips, which is no cap at all"
+                    [ "h1" ]
+                    "and 130,000 admits the one load the spawn's three hundred takes"
             }
 
             test "the upgrade buffer divides by the worker row that draws from it" {
@@ -201,11 +203,110 @@ let private withTombOre units (colony: ColonyView) =
             }
     }
 
+/// The haul trip ground (#530): a plain field x = 5..40, y = 5..15, two
+/// tombstones three apart at (10,10) and (13,10) holding what the case says,
+/// and a tower at (30,10) with room in it. No source, no placed controller and
+/// a full spawn, so a loaded Carry body's choice is the draws against the
+/// tower.
+let private tripColony (tombs: (string * int) list) (creep: CreepInfo) pos =
+    { bareRespawn with
+        Sources = []
+        Refillables =
+            [
+                refillable "spawn-1" 0 BuiltKind.Spawn
+                refillable "tower-1" 500 BuiltKind.Tower
+            ]
+        Creeps = [ creep ]
+        Spatial =
+            { spatial
+                  []
+                  [
+                      for x in 5..40 do
+                          for y in 5..15 -> { X = x; Y = y }, Plain
+                  ] with
+                Stores = Map.ofList tombs
+            }
+            |> withTargets
+                [
+                    "tomb-1", { X = 10; Y = 10 }, Tombstone
+                    "tomb-2", { X = 13; Y = 10 }, Tombstone
+                    "tower-1", { X = 30; Y = 10 }, Structure BuiltKind.Tower
+                ]
+            |> withObstacles [ { X = 30; Y = 10 } ]
+            |> withCreepsAt [ creep.Name, pos ]
+    }
+
+/// The live hauler's body: 700 of carry.
+let private tripHauler energy =
+    creepWith "h1" energy (700 - energy) (List.replicate 14 Carry @ List.replicate 7 Move)
+
 [<Tests>]
 let pickupTaskTests =
     testList
         "the pile and the tombstone"
         [
+            test "a body past half tops up from the tombstones beside it before a quiet tower" {
+                // Live 2026-10-05 t972,757 (#530): hauler-971755-Spawn11
+                // emptied one tombstone, took the tower's Refill by rank and
+                // left a second three tiles off, decaying. A delivery that
+                // can wait waits for the draw within reach.
+                let first =
+                    decideOn (
+                        tripColony
+                            [ "tomb-1", 100; "tomb-2", 150 ]
+                            (tripHauler 400)
+                            { X = 11; Y = 10 }
+                    )
+
+                Expect.equal
+                    (Map.tryFind "h1" first.Assignments)
+                    (Some(taskId (Withdraw("tomb-1", Energy))))
+                    "four hundred of seven aboard: the tombstone at its feet first"
+
+                let second =
+                    decideFrom
+                        first.Assignments
+                        (tripColony
+                            [ "tomb-1", 0; "tomb-2", 150 ]
+                            (tripHauler 500)
+                            { X = 11; Y = 10 })
+
+                Expect.equal
+                    (Map.tryFind "h1" second.Assignments)
+                    (Some(taskId (Withdraw("tomb-2", Energy))))
+                    "then the second, three tiles off, still before the tower"
+
+                let far =
+                    decideOn (
+                        tripColony
+                            [ "tomb-1", 0; "tomb-2", 150 ]
+                            (tripHauler 500)
+                            { X = 25; Y = 10 }
+                    )
+
+                Expect.equal
+                    (Map.tryFind "h1" far.Assignments)
+                    (Some(taskId (Refill("tower-1", Energy))))
+                    "out of reach the load goes on: a top-up is a short walk or none"
+            }
+
+            test "with the home raided the tower is filled before the top-up" {
+                // The urgent sinks go first (#530): a tower while the home is
+                // raided. Pairwise with the case above on the raider alone.
+                let raided =
+                    { tripColony
+                          [ "tomb-1", 100; "tomb-2", 150 ]
+                          (tripHauler 400)
+                          { X = 11; Y = 10 } with
+                        Hostiles = [ hostileAt "raider" { X = 38; Y = 14 } [ Attack; Move ] ]
+                    }
+
+                Expect.equal
+                    (Map.tryFind "h1" (decideOn raided).Assignments)
+                    (Some(taskId (Refill("tower-1", Energy))))
+                    "the tower first while a raider stands at home"
+            }
+
             test "a pile worth a whole trip outbids the container underfoot; a smaller one does not" {
                 // Nothing but travel cost separates a pile from a half-full
                 // container once apart, so the ground kept its energy until
@@ -270,25 +371,26 @@ let pickupTaskTests =
                     (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
                     "one energy under the line the spawn is the near Task again"
 
-                // A tombstone is a Withdraw like any other and only a full
-                // container carries a rung.
+                // A tombstone decays as a pile does, so it carries the
+                // pile's rung (#250): a pile a tier-wide rung over it sent a
+                // hauler nineteen tiles past a store about to go.
                 Expect.equal
                     (matched (pileAgainstATombstone 600))
-                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
-                    "and it outranks a tombstone's 1,500 one tile away"
+                    (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.TravelCost))
+                    "a whole trip's pile and a tombstone one tile away share a rung: travel cost decides"
 
                 Expect.equal
                     (matched (pileAgainstATombstone 599))
-                    (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.TravelCost))
-                    "which under the line is travel cost's again"
+                    (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.Rank))
+                    "and under the line the tombstone's rung is the pile's to lose"
             }
 
-            test
-                "under a bank of 450 the line is the pooling threshold and every pile takes the rung" {
+            test "under a bank of 450 the whole trip's line stays at twice the threshold" {
                 // `haulerLoad` is `100 * (bank / 150)`, so half a load is a
                 // hundred at RCL1's bank of 300 — `Tuning.PickupThreshold`
-                // itself — and the smallest pooled pile is already a whole
-                // trip. The distance-only rung begins at RCL2.
+                // itself — and read off the load alone every pooled pile took
+                // the rung in the poorest colonies (#249). The line is
+                // floored at twice the threshold.
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -299,13 +401,18 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 300 100))
+                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
+                    "at RCL1 a threshold-sized pile nineteen tiles off takes no rung"
+
+                Expect.equal
+                    (matched (pileAgainstAHungrySpawn 300 200))
                     (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
-                    "at RCL1 a threshold-sized pile nineteen tiles off takes the rung"
+                    "twice the threshold does"
 
                 Expect.equal
                     (matched (pileAgainstAHungrySpawn 550 100))
                     (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
-                    "and at RCL2, where the cast has outgrown twice the threshold, it does not"
+                    "and at RCL2 nothing moved"
             }
 
             test "a pile on a container's own tile is taken before the container" {

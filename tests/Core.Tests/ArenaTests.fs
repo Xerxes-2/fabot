@@ -748,11 +748,218 @@ let private caughtBeside (melee: string list) (ours: string) (trace: TickTrace l
 let private raidIds =
     [ "Eternity536"; "Prime803"; "Prism305"; "Paragon722"; "Rune908" ]
 
+/// `npm run capture -- W12S28 972170 --name storageFlip`: W12S28 at t972,170,
+/// in the middle of #530's flip (hauler-970894/970938-Spawn6 drew the Storage
+/// and poured it back eight times over t972,169-185). Roads (130) are not
+/// placed; every body starts idle, the Transition log holding nothing that
+/// early.
+let private storageFlip () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let w12s28 =
+        room "W12S28"
+        |> withController Ownership.Ours None 7 6
+        |> withControllerClocks 0 0 149_982 10_696_734
+        |> withSpawn "Spawn1" { X = 12; Y = 40 } 5_600
+        |> withSpawn "Spawn6" { X = 18; Y = 34 } 5_600
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        7, 37
+                        8, 34
+                        8, 36
+                        9, 33
+                        9, 35
+                        9, 37
+                        9, 39
+                        9, 41
+                        10, 34
+                        10, 38
+                        10, 42
+                        11, 33
+                        11, 37
+                        11, 39
+                        11, 41
+                        12, 34
+                        12, 38
+                        12, 42
+                        12, 44
+                        13, 33
+                        13, 35
+                        13, 37
+                        13, 39
+                        13, 41
+                        13, 43
+                        14, 34
+                        14, 38
+                        14, 40
+                        14, 44
+                        15, 33
+                        15, 35
+                        15, 37
+                        15, 39
+                        15, 43
+                        15, 45
+                        16, 34
+                        16, 38
+                        17, 33
+                        17, 35
+                        17, 37
+                        17, 43
+                        17, 45
+                        18, 42
+                        18, 44
+                        18, 46
+                        19, 33
+                        19, 35
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 10, 36; 10, 40; 16, 46 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 133_100 250_000 { X = 7; Y = 39 }
+                { structureOf "container" None 136_500 250_000 { X = 10; Y = 43 } with
+                    Energy = 576
+                }
+                { structureOf "container" None 158_200 250_000 { X = 16; Y = 39 } with
+                    Energy = 348
+                }
+                structureOf "container" None 180_300 250_000 { X = 25; Y = 6 }
+                { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 14; Y = 36 } with
+                    Energy = 88
+                }
+                structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 16; Y = 36 }
+                structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 16; Y = 44 }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 26; Y = 5 }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 14; Y = 42 } with
+                    Energy = 30_569
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 11; Y = 43 } with
+                    Energy = 4_000
+                }
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W12S28" ])
+
+    let bodies: Body list =
+        [
+            { body
+                  "worker-970554-Spawn1"
+                  Side.Ours
+                  (parts [ Work, 16; Carry, 17; Move, 17 ])
+                  (at "W12S28" 12 43)
+                  None with
+                TicksToLive = 32
+                Energy = 450
+            }
+            { body
+                  "worker-970746-Spawn1"
+                  Side.Ours
+                  (parts [ Work, 16; Carry, 17; Move, 17 ])
+                  (at "W12S28" 13 44)
+                  None with
+                TicksToLive = 224
+                Energy = 236
+            }
+            { body
+                  "hauler-970894-Spawn6"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W12S28" 13 42)
+                  None with
+                TicksToLive = 366
+            }
+            { body
+                  "hauler-970938-Spawn1"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W12S28" 43 25)
+                  None with
+                TicksToLive = 410
+            }
+            { body
+                  "upgrader-971328-Spawn1"
+                  Side.Ours
+                  (parts [ Work, 24; Carry, 1; Move, 24 ])
+                  (at "W12S28" 5 37)
+                  None with
+                TicksToLive = 803
+            }
+            { body
+                  "anchor-971374-Spawn6"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W12S28" 10 43)
+                  None with
+                TicksToLive = 732
+                Energy = 50
+            }
+            { body
+                  "anchor-971427-Spawn6"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W12S28" 16 39)
+                  None with
+                TicksToLive = 785
+                Energy = 50
+            }
+            { body
+                  "hauler-970592-Spawn6"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W12S28" 14 41)
+                  None with
+                TicksToLive = 64
+            }
+        ]
+
+    arena 972_171 [ w12s28 ] colonies bodies
+
+/// Each body's draws from a store and pours back into it with nothing poured
+/// anywhere else between: the flip #530 is about, as (body, store, tick) rows.
+let private pouredBack (trace: TickTrace list) =
+    trace
+    |> List.collect (fun t ->
+        t.Ours
+        |> List.choose (function
+            | WithdrawFromStore(creep, store, Energy, _) -> Some(creep, (t.Tick, Choice1Of2 store))
+            | TransferEnergyToStructure(creep, target, Energy) ->
+                Some(creep, (t.Tick, Choice2Of2 target))
+            | _ -> None))
+    |> List.groupBy fst
+    |> List.collect (fun (creep, acts) ->
+        acts
+        |> List.map snd
+        |> List.pairwise
+        |> List.choose (function
+            | (_, Choice1Of2 drawn), (tick, Choice2Of2 poured) when drawn = poured ->
+                Some(creep, drawn, tick)
+            | _ -> None))
+
 [<Tests>]
 let arenaScenarioTests =
     testList
         "arena scenarios"
         [
+            // #530 capture t972,170: live, W12S28's haulers drew the Storage for
+            // sinks other loads already covered and poured the energy straight
+            // back, every tick or two.
+            test "#530 capture t972,170: no hauler pours a Storage draw back into the Storage" {
+                let _, trace = storageFlip () |> run 40
+
+                Expect.isEmpty
+                    (pouredBack trace)
+                    $"a load goes on to a sink, never back where it came from\n{describe trace}"
+            }
+
             // The Brief's S7, rule 1 (a hostile no heal reaches is read live): the
             // guard swings the invader down to its last part, a MOVE, and
             // leaves it there unarmed, its room's Guard gone; it no longer

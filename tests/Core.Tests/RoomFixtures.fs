@@ -525,6 +525,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
         Thorium = 0
         FreeCapacity = capacity - carried
         Moved = false
+        DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
     }
 

@@ -416,6 +416,10 @@ type StandDownBasis =
     /// room again on sight. The printed reason; the fact is the row's.
     | PlayerRaidHold
 
+/// Where a body's energy load was drawn from, and the tick it drew there
+/// (#530).
+type DrawRecord = { Store: string; Tick: int }
+
 /// What the decision layer knows about one owned creep this tick.
 type CreepInfo =
     {
@@ -453,6 +457,11 @@ type CreepInfo =
         /// this tick and in every hand-built fixture. The one reader is the
         /// occupancy surcharge (#225).
         Moved: bool
+        /// The store the energy aboard was drawn from, and when (#530): the
+        /// shell's reading of Memory's draw record, None in every hand-built
+        /// fixture that does not say otherwise. The one reader is the Refill
+        /// gate, so a load does not go straight back where it came from.
+        DrawnFrom: DrawRecord option
     }
 
 /// A creep already paid for and still in a spawn's oven. Its generated name is

@@ -387,7 +387,12 @@ let private fullTick
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch, exit watch and healer memory laid under it.
     let world =
-        World.ofGame Tuning.defaults Colony.declared harassment (ObserveMemory.loadPositions ())
+        World.ofGame
+            Tuning.defaults
+            Colony.declared
+            harassment
+            (ObserveMemory.loadPositions ())
+            (ObserveMemory.loadDrawn ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
         |> World.watchExits Tuning.defaults exitWatches
@@ -685,6 +690,24 @@ let private fullTick
         ||> List.fold (fun acc (_, _, decision, _, _) ->
             (acc, decision.Assignments)
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
+    )
+
+    // The draw record (#530) on the same terms: a waiting colony's creeps keep
+    // what they were read with.
+    let keptDrawn =
+        views
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home waiting)
+        |> List.collect (fun (_, view) ->
+            view.Creeps
+            |> List.choose (fun creep ->
+                creep.DrawnFrom |> Option.map (fun store -> creep.Name, store)))
+        |> Map.ofList
+
+    ObserveMemory.saveDrawn (
+        (keptDrawn, decisions)
+        ||> List.fold (fun acc (_, _, decision, _, _) ->
+            (acc, decision.Drawn)
+            ||> Map.fold (fun acc creep store -> Map.add creep store acc))
     )
 
     // One world-wide aliveness set for the fold, the Raid logs and the memory

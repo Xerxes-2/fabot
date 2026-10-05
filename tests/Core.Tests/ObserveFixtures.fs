@@ -115,6 +115,7 @@ let ours name : CreepInfo =
         Thorium = 0
         FreeCapacity = 50
         Moved = false
+        DrawnFrom = None
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
     }
 

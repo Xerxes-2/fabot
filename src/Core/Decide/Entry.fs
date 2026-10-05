@@ -219,6 +219,17 @@ let decideUnarbitrated
     (memo: PlanMemo option)
     (turn: ReplanTurn)
     : Decision =
+    // Where each body's load came from, settled before anything reads a body.
+    let view =
+        { view with
+            Creeps =
+                view.Creeps
+                |> List.map (fun creep ->
+                    { creep with
+                        DrawnFrom = drawnFrom view assignments creep
+                    })
+        }
+
     let signedRooms, signature = signaturesOf view
     // The signature is read before the Atlas is built, because the Atlas is
     // one of the things it decides: the plan is recalled whole on the flat
@@ -404,7 +415,7 @@ let decideUnarbitrated
 
     // Every entry's priority and capacity, set once here and read by the
     // Matcher and the mover.
-    let pool = planPool view atlas threats busy tasks
+    let pool = planPoolHolding held view atlas threats busy tasks
 
     // A far field whose Task is not in the tick's list is dead weight the
     // census never evicts (#392). Every far leg priced this tick — by the
@@ -476,7 +487,7 @@ let decideUnarbitrated
         |> Set.ofList
 
     let pickupIntents =
-        planPickups view atlas
+        planPickups view atlas assigned
         |> List.filter (function
             | PickupPile(name, _) -> not (Set.contains name taskPickers)
             | _ -> true)
@@ -611,6 +622,11 @@ let decideUnarbitrated
         Steps = steps
         Next = nextPours @ arrivals
         Aims = aims view atlas threats assigned
+        Drawn =
+            view.Creeps
+            |> List.choose (fun creep ->
+                creep.DrawnFrom |> Option.map (fun store -> creep.Name, store))
+            |> Map.ofList
     }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:

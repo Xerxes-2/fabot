@@ -48,6 +48,42 @@ let pickupReflexTests =
                     "room in the store is not hunger while the season's ore is in it"
             }
 
+            test "an empty body holding an ore-bound Task leaves the energy pile it crosses" {
+                // #314: the reflex asks nothing of `applicable`, so an empty
+                // hauler walking to the mineral container scooped fifty energy
+                // on the way, was released `inapplicable` the tick after, and
+                // the walk was spent for nothing. Pairwise on the ore Task
+                // alone: the same body on the same pile.
+                let colony thorium =
+                    { mineHaulColony with
+                        Creeps = [ hauler "h1" 0 100 ]
+                        Spatial =
+                            { mineHaulColony.Spatial with
+                                Thorium = Map.add "can-min" thorium mineHaulColony.Spatial.Thorium
+                                Stores = Map.add "pile-e" 50 mineHaulColony.Spatial.Stores
+                            }
+                            |> withTargets [ "pile-e", { X = 13; Y = 10 }, Dropped Energy ]
+                            |> withCreepsAt [ "h1", { X = 13; Y = 10 } ]
+                    }
+
+                let held =
+                    decideFrom
+                        (Map.ofList [ "h1", taskId (Withdraw("can-min", Thorium)) ])
+                        (colony 600)
+
+                Expect.equal
+                    (Map.tryFind "h1" held.Assignments)
+                    (Some(taskId (Withdraw("can-min", Thorium))))
+                    "it holds the ore haul"
+
+                Expect.isEmpty (pickups held.Intents) "and the energy underfoot is not its to take"
+
+                Expect.equal
+                    (pickups (decideOn (colony 0)).Intents)
+                    [ "h1", "pile-e" ]
+                    "the same body with no ore-bound Task picks the pile up"
+            }
+
             test "a pile of the season's ore is no reflex's, whoever is standing on it" {
                 // The mirror of the case above: the reflex cannot ask whether
                 // the body is carrying anything, so the census it reads is

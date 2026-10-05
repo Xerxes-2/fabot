@@ -813,6 +813,7 @@ let ofGame
     (colonies: Colony list)
     (harass: Harassment)
     (lastPositions: Map<string, RoomPos>)
+    (drawn: Map<string, DrawRecord>)
     : World =
     let spawns = objectValues<ISpawn> Game.spawns
 
@@ -957,6 +958,7 @@ let ofGame
                                 match Map.tryFind c.name lastPositions with
                                 | Some last -> last <> tileOf c
                                 | None -> false
+                            DrawnFrom = Map.tryFind c.name drawn
                         }
                 }
                 : WorldCreep)

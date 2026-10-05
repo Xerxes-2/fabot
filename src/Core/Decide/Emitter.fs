@@ -83,9 +83,9 @@ let internal applicable
     let heavy = Atlas.workHeavy atlas creep.Name
 
     // An intake is for a body with at least half its store free (#235): a body
-    // past half full is a delivery. A standing body's one Carry is a trip's
-    // worth, so for it this is "empty". For a light body's Harvest this prices
-    // the walk alone; see the Harvest arm.
+    // past half full is a delivery, but for a top-up (`tops`). A standing
+    // body's one Carry is a trip's worth, so for it this is "empty". For a
+    // light body's Harvest this prices the walk alone; see the Harvest arm.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
     // Thorium aboard shuts every energy intake: a mixed load pours energy into a
@@ -100,6 +100,22 @@ let internal applicable
     // A delivery of Work. Refill carries rather than works, so it keeps its own
     // `has Carry`.
     let spending = has Work && creep.Energy > 0
+
+    // The top-up (#530): a body past half full still draws a store whose whole
+    // holding fits in the room it has left, within `Tuning.TopUpReach` ticks of
+    // its walk, before the delivery that can wait: the store is emptied, and
+    // one that decays is gone with nothing left to rot. Range first, so only a
+    // near store pays for a walk.
+    let tops storeId stock =
+        stock > 0
+        && stock <= creep.FreeCapacity
+        && (match Atlas.creepTile atlas creep.Name, Atlas.positionOf atlas storeId with
+            | Some at, Some store ->
+                RoomPos.range at store
+                |> Option.exists (fun r -> r <= view.Tuning.TopUpReach + 1)
+                && Atlas.walkTicks atlas creep.Name task
+                   |> Option.exists (fun walk -> walk <= view.Tuning.TopUpReach)
+            | _ -> false)
 
     match task with
     // The miner's gate: a Work part and no Carry at all. A body with a Carry is
@@ -198,6 +214,12 @@ let internal applicable
             // the Reactor burns down.
             || deliveryDraw
             || (buffer && standing)
+            // And with no stock to fall to (#236), a store at the pile's
+            // threshold: what the line buys is the fall, and a colony with no
+            // stocked Storage has nowhere to fall.
+            || (stock >= view.Tuning.PickupThreshold
+                && Atlas.idsOfKind atlas (Structure BuiltKind.Storage)
+                   |> List.forall (fun id -> SpatialInfo.storedIn view.Spatial id = 0))
 
         // The Thorium arm asks for an *empty* body and not a half-empty one, and
         // drops the two clauses about the controller's container.
@@ -251,7 +273,7 @@ let internal applicable
             && (not deliveryDraw || (carriesOnly && outlivesTheLoadedLeg))
         | Energy ->
             has Carry
-            && halfEmpty
+            && (halfEmpty || tops storeId stock)
             && not carryingThorium
             && worthTheTrip
             && not heavy
@@ -268,7 +290,7 @@ let internal applicable
     // upgrade with, and never a hauler's to carry back out.
     | Pickup(pileId, Energy) ->
         has Carry
-        && halfEmpty
+        && (halfEmpty || tops pileId (SpatialInfo.heldIn view.Spatial Energy pileId))
         && not carryingThorium
         && not heavy
         && not standing
@@ -283,6 +305,12 @@ let internal applicable
     // it has to put down.
     // The nursery drop is a hauler's (#473): a pioneer carrying energy to
     // the site builds with it.
+    //
+    // A load never goes back into the store it was drawn from (#530).
+    | Refill(targetId, Energy) when
+        creep.DrawnFrom |> Option.exists (fun drawn -> drawn.Store = targetId)
+        ->
+        false
     | Refill(targetId, Energy) when isFerryDrop view targetId ->
         has Carry && creep.Energy > 0 && not standing && not (has Work)
     | Refill(_, Energy) -> has Carry && creep.Energy > 0 && not standing

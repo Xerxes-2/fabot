@@ -1,6 +1,8 @@
 # The refill cluster's capacity is a budget the holders' loads are counted against, and a starved cluster draws the stock
 
-> **Status:** accepted
+> **Status:** accepted, amended by #530
+
+> **Amended by #530**: the starved cluster's draw on the stock admits the ring's room less the energy its own Refill's holders carry (still at least one), through the one supply cap every stock draw reads (ADR 0023's #530 banner); and the cluster's own Refill, while starved, ranks in the urgent band over every intake (ADR 0010's #530 banner), at the same rank as the towers while the home is raided: between the two the walk decides.
 
 > **Accepted 2026-09-18** on #374, the decision the user's ("同意，就这样做" on options A + C). Implemented by the change that accepted it.
 

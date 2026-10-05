@@ -1462,6 +1462,49 @@ let savePositions (creeps: (string * RoomPos) list) =
         p)
     |> writeObserveLeaf "positions"
 
+let private nonEmptyString (value: obj) =
+    jsTypeof value = "string" && (unbox<string> value).Length > 0
+
+/// The store each loaded creep's energy was drawn from and the tick it drew
+/// (#530), the fact `CreepInfo.DrawnFrom` is read off: one flat leaf of
+/// `{ s: id, t: tick }` rows, rewritten every full tick. A missing or
+/// malformed row reads as no record, which only lets a load go to any sink.
+let loadDrawn () : Map<string, DrawRecord> =
+    leafOr Map.empty (fun () -> observeLeaf "drawn") (fun drawn ->
+        if jsTypeof drawn <> "object" then
+            Map.empty
+        else
+            JS.Constructors.Object.keys drawn
+            |> Seq.choose (fun name ->
+                let row = drawn?(name)
+
+                if
+                    isNull row
+                    || jsTypeof row <> "object"
+                    || not (nonEmptyString row?s)
+                    || jsTypeof row?t <> "number"
+                then
+                    None
+                else
+                    Some(
+                        name,
+                        {
+                            Store = unbox<string> row?s
+                            Tick = unbox<int> row?t
+                        }
+                    ))
+            |> Map.ofSeq)
+
+let saveDrawn (drawn: Map<string, DrawRecord>) =
+    drawn
+    |> Map.toList
+    |> hashOf (fun (record: DrawRecord) ->
+        let row = createEmpty<obj>
+        row?s <- record.Store
+        row?t <- record.Tick
+        row)
+    |> writeObserveLeaf "drawn"
+
 /// The two room facts the heap keeps that a global reset must not forget
 /// (`Memory.fabot.observe.rooms`): who owns each rival room as last seen
 /// (`RoomSighting.Rival`, #444), dark rooms included, and the homes a tower
@@ -1476,9 +1519,6 @@ type RoomLatches =
         Armed: Map<string, int>
         Controllers: Map<string, RivalController>
     }
-
-let private nonEmptyString (value: obj) =
-    jsTypeof value = "string" && (unbox<string> value).Length > 0
 
 /// One rival controller off the wire, or None for an entry that is not the
 /// shape: the owner a non-empty string, every other key a number.

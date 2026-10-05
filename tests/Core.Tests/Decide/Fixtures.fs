@@ -239,6 +239,7 @@ let creepWith name energy freeCapacity body =
         Thorium = 0
         FreeCapacity = freeCapacity
         Moved = false
+        DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
     }
 

@@ -376,6 +376,14 @@ type Tuning =
         /// stage for W15S28's `16W 17C 17M` worker, the 3,300 body its pioneers
         /// are; half-ticks at fatigue parity, so bank-free as written.
         IntakeTravelPerRung: int
+        /// The **top-up reach** (#530): the ticks of walk within which a body
+        /// past half full still draws before it delivers. Ticks of the body's
+        /// own walk, so a swamp tile costs its five; bank-free as written.
+        TopUpReach: int
+        /// How long a draw record keeps a load out of the store it came from
+        /// (#530): long enough to stop the draw-and-pour-back flip, short
+        /// enough that a body whose only sink is that store is never stranded.
+        DrawnHold: int
         /// The Reach margin: the tiles a Threat's weapon range is widened by —
         /// one for the hostile's next step, one for our own tick of lag.
         /// Tiles of lag, so the same at every stage and bank.
@@ -735,6 +743,15 @@ module Tuning =
             PickupThreshold = 100
             // 37 plain tiles: a detour inside one room spends one rung at most.
             IntakeTravelPerRung = 75
+            // Live 2026-10-05: the second tombstone three tiles off. Ticks of
+            // the body's *loaded* walk (`Atlas.walkTicks` on the body as it
+            // is): a hauler past half full is slower than its empty self, so
+            // five ticks is a few plain tiles and one swamp.
+            TopUpReach = 5
+            // Fifty ticks: a hauler's round trip across a home room, so the
+            // flip is broken and a body whose only sink is the store it drew
+            // from pours back after at most one trip's wait.
+            DrawnHold = 50
             ReachMargin = 2
             StandingCarryPerWork = 4
             PioneerCount = 3

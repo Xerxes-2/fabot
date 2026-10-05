@@ -1403,10 +1403,18 @@ let internal planSignatures (view: ColonyView) atlas (textFor: string -> string)
 /// would draw a pickup the engine answers ERR_NOT_IN_RANGE. A body already
 /// carrying Thorium is not hungry (#262): the reflex asks nothing of
 /// `applicable`, so free capacity alone let it scoop energy into a mixed load.
-let internal planPickups (view: ColonyView) atlas : Intent list =
+/// Nor is an empty body holding an ore-bound Task (#314): one scoop and its
+/// ore Withdraw or Pickup is inapplicable, and the walk was spent for nothing.
+let internal planPickups (view: ColonyView) atlas (assigned: Map<string, Task>) : Intent list =
+    let oreBound name =
+        match Map.tryFind name assigned with
+        | Some(Withdraw(_, Thorium))
+        | Some(Pickup(_, Thorium)) -> true
+        | _ -> false
+
     let hungry =
         view.Creeps
-        |> List.filter (fun c -> c.FreeCapacity > 0 && c.Thorium = 0)
+        |> List.filter (fun c -> c.FreeCapacity > 0 && c.Thorium = 0 && not (oreBound c.Name))
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
