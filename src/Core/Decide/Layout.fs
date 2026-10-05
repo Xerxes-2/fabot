@@ -729,9 +729,23 @@ let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list)
 /// whole approach is the window; then what it deals a creep or structure of
 /// ours this tick (`dealt`); then what it heals, sustaining the raid; then
 /// what its weapons could deal. Bait, no weapon and no heal, comes last;
-/// range only breaks a tie.
-let private threatRank (claimer: bool) (dealt: int) (healing: int) (weapons: int) =
-    (if claimer then 0 else 1), -dealt, -healing, -weapons
+/// range only breaks a tie. A healer our damage breaks, within heal range of
+/// a body it keeps alive, goes straight after a claimer, as in the kill order
+/// (`Facts.KillTier.BrokenHealer`): shooting the body it sustains only hands
+/// it back healed (live t981,040, W17S25).
+let private threatRank
+    (claimer: bool)
+    (brokenHealer: bool)
+    (dealt: int)
+    (healing: int)
+    (weapons: int)
+    =
+    (if claimer then 0
+     elif brokenHealer then 1
+     else 2),
+    -dealt,
+    -healing,
+    -weapons
 
 /// Colony reflex beside the pipeline (ADR-0014): each tower in turn shoots
 /// the hostile worth a shot first in the threat order (`threatRank`), then
@@ -894,6 +908,13 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                 h,
                 threatRank
                     (claimer h)
+                    (HostileInfo.healing hostiles h > 0
+                     && killable h
+                     && hostiles
+                        |> List.exists (fun other ->
+                            other.Id <> h.Id
+                            && RoomPos.range other.Pos h.Pos
+                               |> Option.exists (fun r -> r <= Engine.rangedRange)))
                     dealt[h.Id]
                     (HostileInfo.healing hostiles h)
                     (damageAt strikers[h.Id] Engine.meleeRange))

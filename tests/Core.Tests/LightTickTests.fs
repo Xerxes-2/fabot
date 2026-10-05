@@ -73,6 +73,7 @@ let private hostile x y owner armed : GlanceHostile =
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
+        Heals = false
         Hits = 1000
     }
 
@@ -692,10 +693,11 @@ let forcedTests =
                     "combat at home is decided"
             }
 
-            // The Brief's S7, rule 3: the glance asks "armed" as the full tick
-            // does, so a healer is not; it used to count one and force a full
-            // tick that then found nothing armed.
-            test "a heal-only body at home, glanced, forces no full tick; a shooter beside it does" {
+            // Moved 2026-10-06 (live t981,05x, W17S25): the Brief's S7 rule 3
+            // let a healer alone at home force nothing, but the towers shoot a
+            // healer they break (#466), and one left between its pair's swaps
+            // on the exit healed back every light tick's silence.
+            test "a heal-only body at home forces a full tick, as a shooter does" {
                 let medic: HostileInfo =
                     {
                         Id = "medic"
@@ -719,7 +721,10 @@ let forcedTests =
                         Hostiles = side |> List.map (LightTick.glanceOf side)
                     }
 
-                Expect.equal (LightTick.forced last (glanced [ medic ])) None "the healer alone"
+                Expect.equal
+                    (LightTick.forced last (glanced [ medic ]))
+                    (Some(LightForce.ArmedHostile(room, "Trepidimous")))
+                    "the healer alone"
 
                 Expect.equal
                     (LightTick.forced last (glanced [ medic; shooter ]))
@@ -790,6 +795,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
+                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -859,6 +865,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = true
+                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -1241,6 +1248,7 @@ let forcedTests =
                                     Weapon = Some Engine.meleeRange
                                     Gait = mobile
                                     Breaks = false
+                                    Heals = false
                                     Hits = 1000
                                 }
                             ]
@@ -1552,6 +1560,7 @@ let private hostileIn roomName x y owner armed : GlanceHostile =
         Weapon = if armed then Some Engine.meleeRange else None
         Gait = mobile
         Breaks = false
+        Heals = false
         Hits = 1000
     }
 

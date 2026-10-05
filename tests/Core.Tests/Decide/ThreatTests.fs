@@ -2279,8 +2279,9 @@ let fireReflexTests =
                 "a shot that is not urgent is taken only when the energy over the reserve sees the kill through; else the struck rampart is repaired" {
                 // Trepidimous' melee, 3,500 hits, at range 20 (150 a shot)
                 // beside one 7-HEAL healer (84, 1,800 hits): 66 a shot net
-                // on either. The melee swinging at our rampart is first in the
-                // threat order.
+                // on either. The healer beside it, which the shots break, is
+                // first in the threat order (moved 2026-10-06 from the melee:
+                // live t981,040 every shot on it was healed back).
                 let at energy =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
@@ -2292,8 +2293,8 @@ let fireReflexTests =
 
                 Expect.equal
                     (shots full)
-                    [ "tower-1", "h-1" ]
-                    "70 shots × 66 = 4,620 over 3,500: fire"
+                    [ "tower-1", "med-1" ]
+                    "70 shots × 66 = 4,620 over 1,800: fire, at the healer"
 
                 let low = (decideOn (at 500)).Intents
                 Expect.isEmpty (shots low) "20 shots × 66 = 1,320 short of 1,800 and 3,500: no shot"
@@ -2427,6 +2428,23 @@ let fireReflexTests =
                     (shots (decideOn snapshot).Intents)
                     [ "tower-1", "breaker" ]
                     "the breaker"
+            }
+
+            test
+                "a healer beside the melee it sustains is shot before the melee breaking our rampart" {
+                // Live t981,040, W17S25: Trepidimous' 17-ATTACK at the line
+                // with its 7-HEAL beside it; every shot on the melee was healed
+                // back the tick it stepped out. Before #544 the healer died.
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [
+                            hostileAt "breaker" { X = 30; Y = 40 } [ Attack; Attack; Move ]
+                            hostileAt "med-1" { X = 30; Y = 41 } [ Heal; Move ]
+                        ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 10_000 300_000
+
+                Expect.equal (shots (decideOn snapshot).Intents) [ "tower-1", "med-1" ] "the healer"
             }
 
             test

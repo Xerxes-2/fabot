@@ -27,6 +27,8 @@ type GlanceHostile =
         Armed: bool
         Weapon: int option
         Breaks: bool
+        /// Whether it heals: a raid's healer at home is a fight too.
+        Heals: bool
         Gait: Gait
         /// Hits left: what a mass attack's damage is capped by (#537).
         Hits: int
@@ -45,6 +47,7 @@ let glanceOf (side: HostileInfo list) (hostile: HostileInfo) : GlanceHostile =
         Armed = HostileInfo.armed side hostile
         Weapon = HostileInfo.weaponRange side hostile
         Breaks = HostileInfo.breaks side hostile
+        Heals = HostileInfo.heals side hostile
         Gait = HostileInfo.gait side hostile
         Hits = hostile.Hits
     }
@@ -512,13 +515,15 @@ let forced (last: LastFull) (now: Glance) : LightForce option =
 
     // Only in a room where we own a structure: an armed body standing off in
     // a remote or harassment room is the near rule's to answer (#461), and in
-    // a `loose` room the lost-hits rule's.
+    // a `loose` room the lost-hits rule's. A healer counts: one alone at home
+    // between its pair's swaps on the exit healed back what the light ticks'
+    // silent towers let it (live t981,05x, W17S25).
     let armed =
         let homes = now.Structures |> List.map (fun tile -> tile.Room) |> Set.ofList
 
         hostiles
         |> List.tryFind (fun hostile ->
-            hostile.Armed
+            (hostile.Armed || hostile.Heals)
             && not (HostileInfo.isKeeperOwner hostile.Owner)
             && Set.contains hostile.Tile.Room homes)
         |> Option.map (fun hostile -> LightForce.ArmedHostile(hostile.Tile.Room, hostile.Owner))
