@@ -638,11 +638,12 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
 
     // A healer counts: one alone at home between its pair's swaps on the exit
     // healed back what the light ticks' silent towers let it (live t981,05x,
-    // W17S25).
+    // W17S25). So does a dismantler: one working a structure while the towers
+    // are drained fights nothing that would force a tick.
     let home =
         hostiles
         |> List.filter (fun hostile ->
-            (hostile.Armed || hostile.Heals)
+            (hostile.Armed || hostile.Heals || hostile.Breaks)
             && not (HostileInfo.isKeeperOwner hostile.Owner)
             && Map.containsKey hostile.Tile.Room now.Controllers)
         |> List.distinctBy (fun hostile -> hostile.Tile.Room)

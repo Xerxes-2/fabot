@@ -751,6 +751,17 @@ let forcedTests =
 
                 Expect.equal (LightTick.forced last (glanced [ medic ])) home "the healer alone"
 
+                let breaker =
+                    { medic with
+                        Id = "breaker"
+                        Body = [ Move; Work ]
+                    }
+
+                Expect.equal
+                    (LightTick.forced last (glanced [ breaker ]))
+                    home
+                    "a dismantler alone, as the towers may be drained"
+
                 Expect.equal
                     (LightTick.forced last (glanced [ medic; shooter ]))
                     home
