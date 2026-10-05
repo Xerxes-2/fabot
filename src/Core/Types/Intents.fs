@@ -171,6 +171,53 @@ type Pricing =
     /// difference on traffic and nothing else.
     | Baseline
 
+/// A Dijkstra flood the readers advance rather than a finished pair of arrays:
+/// the distance and predecessor grids, plus the heap and the live length the
+/// loop left off at. Dijkstra settles a tile for good the moment it leaves the
+/// heap, so a flood may stop anywhere and be resumed, and every settled tile
+/// holds the number the whole flood would have left there — the invariant this
+/// shape rests on. Declared here and not in `Grid`, which advances it, for
+/// `Pricing`'s reason: the host holds a still creep's flood across ticks
+/// (`CreepFloodTable`).
+type Flood =
+    internal
+        {
+            /// Cheapest cost to each settled tile, and `unreached` elsewhere
+            /// — a tile nothing reaches and a tile nobody has asked about are
+            /// one value here, parted only by whether the heap is empty.
+            Dist: int[]
+            /// Predecessor index on a cheapest path, -1 where there is none.
+            /// Final for every tile whose distance is final.
+            Parents: int[]
+            /// The three read-only inputs the relaxation prices over, held so
+            /// a resumed flood charges exactly what the interrupted one did.
+            Weights: int[]
+            Occupied: bool[]
+            StepPrices: int[]
+            /// The binary min-heap of dist-then-index keys, and the live length
+            /// within it: the heap only grows, so a pop is a decrement rather
+            /// than a splice, and every slot at or past `Size` is stale.
+            Heap: ResizeArray<int>
+            mutable Size: int
+        }
+
+/// Each placed creep's own flood out of its tile (#553), kept across ticks
+/// while the creep stands there and the grids it was laid on stand: keyed by
+/// room, tile index, fatigue factor and pricing, beside each room's walking
+/// grid and standing traffic as the kept floods were laid on them. A
+/// `TravelCost` flood reads both grids, the other two the walking grid alone
+/// (`Grid.pricingOf`). Resumed rather than re-flooded, which moves no answer:
+/// a resumed flood pops exactly what a fresh one would (`Flood`). Bounded by
+/// the placed creeps: `Atlas.ofViewRecalling` keeps an entry only for a
+/// creep that still stands on its tile. One Atlas per table per tick: the
+/// grids are stamped when the Atlas is built and a flood is filed when first
+/// read, so a second Atlas off another view would file it under its grids.
+type CreepFloodTable =
+    {
+        Floods: System.Collections.Generic.Dictionary<string, Flood>
+        Grids: System.Collections.Generic.Dictionary<string, int[] * bool[]>
+    }
+
 /// ADR-0070. Far fields flooded under one census signature
 /// (`docs/research/cpu-headroom.md` §5.1): the cost from every tile of the
 /// first room of a chain to the origins the walk ends at, carried across the
@@ -262,6 +309,8 @@ type FarFieldMemo =
         Lines: LineTable
         /// The outpost roads' floods, on their own key's terms.
         RoadFloods: RoadFloodTable
+        /// The placed creeps' own floods, on their own key's terms.
+        CreepFloods: CreepFloodTable
     }
 
 [<RequireQualifiedAccess>]
@@ -271,6 +320,14 @@ module FarFieldMemo =
     /// the memo's tables outlive the tick, and one built in
     /// `decideUnarbitrated` would keep that tick's view and Atlas alive.
     let walks () : WalkTable = WalkTable()
+
+    /// An empty creep flood table, built where nothing is captured, on
+    /// `walks`'s terms.
+    let creepFloods () : CreepFloodTable =
+        {
+            Floods = System.Collections.Generic.Dictionary()
+            Grids = System.Collections.Generic.Dictionary()
+        }
 
     /// Empty tables: the Atlas of a caller holding no memo at all — a
     /// test, or a one-off. A function and never a value, because a table
@@ -283,6 +340,7 @@ module FarFieldMemo =
             Narrowed = NarrowedFieldTable()
             Lines = LineTable()
             RoadFloods = RoadFloodTable()
+            CreepFloods = creepFloods ()
         }
 
 /// What a Link footing is held beside: each planned source container, the
@@ -478,6 +536,8 @@ type PlanMemo =
         Lines: LineTable
         /// The outpost roads' floods (#548), on their own key's terms.
         RoadFloods: RoadFloodTable
+        /// The placed creeps' own floods (#553), on their own key's terms.
+        CreepFloods: CreepFloodTable
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -509,7 +569,7 @@ module PlanMemo =
     /// stamped with the signature it declined to plan against would be served
     /// forever.
     ///
-    /// The six tables are handed in and not defaulted: a deferred colony
+    /// The seven tables are handed in and not defaulted: a deferred colony
     /// declines to plan, not to price. The per-room signatures come with them
     /// because they say which census the tables were filled under, and that
     /// is this tick's, whatever the plan's is (#372).
@@ -521,6 +581,7 @@ module PlanMemo =
         (narrowed: NarrowedFieldTable)
         (lines: LineTable)
         (roadFloods: RoadFloodTable)
+        (creepFloods: CreepFloodTable)
         : PlanMemo =
         {
             Signature = ""
@@ -543,4 +604,5 @@ module PlanMemo =
             Narrowed = narrowed
             Lines = lines
             RoadFloods = roadFloods
+            CreepFloods = creepFloods
         }

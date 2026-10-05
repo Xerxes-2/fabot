@@ -427,3 +427,86 @@ let stepPriceTableTests =
                     "and swamp is the dearest of them — the table's last slot is swamp's own"
             }
         ]
+
+[<Tests>]
+let keptFloodTests =
+    // One tick's Atlas over the corridor, recalling `held`: the creeps
+    // standing where `creeps` puts them, the roads `roads` lays.
+    let tick held roads creeps =
+        corridor creeps
+        |> withHome (fun layer -> { layer with Roads = roads })
+        |> snapshotWith (creeps |> List.map (fun (name, _) -> worker name))
+        |> ofViewRecalling (WalkTable()) held
+
+    let keptOf (held: FarFieldMemo) =
+        held.CreepFloods.Floods.Values |> List.ofSeq
+
+    let still = [ "w", { X = 10; Y = 15 } ]
+
+    testList
+        "atlas kept creep floods"
+        [
+            test "a creep standing still prices off the flood an earlier tick laid" {
+                let held = FarFieldMemo.empty ()
+                let first = tick held Set.empty still
+                Expect.equal (travelCost first "w" (Harvest "src-a")) (Some 4) "the premise"
+                let laid = keptOf held |> List.exactlyOne
+
+                let second = tick held Set.empty still
+
+                Expect.equal (travelCost second "w" (Harvest "src-a")) (Some 4) "the same price"
+
+                Expect.isTrue
+                    (obj.ReferenceEquals(keptOf held |> List.exactlyOne, laid))
+                    "off the same flood, resumed rather than laid again"
+            }
+
+            test "a creep that moved re-floods, and its old tile's flood drops" {
+                let held = FarFieldMemo.empty ()
+                travelCost (tick held Set.empty still) "w" (Harvest "src-a") |> ignore
+
+                let moved = tick held Set.empty [ "w", { X = 10; Y = 14 } ]
+
+                Expect.isEmpty (keptOf held) "the flood out of the tile it left is gone"
+
+                Expect.equal
+                    (travelCost moved "w" (Harvest "src-a"))
+                    (Some 2)
+                    "priced from the tile it stands on now"
+            }
+
+            test "a changed room re-floods a creep standing still" {
+                let held = FarFieldMemo.empty ()
+                travelCost (tick held Set.empty still) "w" (Harvest "src-a") |> ignore
+
+                let paved = tick held (Set.singleton { X = 11; Y = 13 }) still
+
+                Expect.isEmpty (keptOf held) "a flood laid on the old walking grid is gone"
+
+                Expect.equal
+                    (travelCost paved "w" (Harvest "src-a"))
+                    (Some 3)
+                    "priced over the road: a plain step and a road step"
+            }
+
+            test "standing traffic that moved re-floods the travel cost" {
+                let held = FarFieldMemo.empty ()
+                travelCost (tick held Set.empty still) "w" (Harvest "src-a") |> ignore
+
+                let crowded = tick held Set.empty (still @ [ "b", { X = 11; Y = 13 } ])
+
+                Expect.equal
+                    (travelCost crowded "w" (Harvest "src-a"))
+                    (Some 12)
+                    "the body now standing on the plain Seat prices it dearer"
+            }
+
+            test "a dead creep's flood drops" {
+                let held = FarFieldMemo.empty ()
+                travelCost (tick held Set.empty still) "w" (Harvest "src-a") |> ignore
+
+                tick held Set.empty [] |> ignore
+
+                Expect.isEmpty (keptOf held) "nothing stands on the tile to price from it"
+            }
+        ]

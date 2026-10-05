@@ -269,6 +269,7 @@ let decideUnarbitrated
                 Narrowed = m.Narrowed
                 Lines = m.Lines
                 RoadFloods = m.RoadFloods
+                CreepFloods = m.CreepFloods
             }
         | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
@@ -335,6 +336,7 @@ let decideUnarbitrated
                     Narrowed = farFields.Narrowed
                     Lines = farFields.Lines
                     RoadFloods = farFields.RoadFloods
+                    CreepFloods = farFields.CreepFloods
                 }
             | None ->
                 let deferred =
@@ -346,6 +348,7 @@ let decideUnarbitrated
                         farFields.Narrowed
                         farFields.Lines
                         farFields.RoadFloods
+                        farFields.CreepFloods
 
                 { deferred with
                     RivalRooms = rivals
@@ -383,6 +386,7 @@ let decideUnarbitrated
                 Narrowed = farFields.Narrowed
                 Lines = farFields.Lines
                 RoadFloods = farFields.RoadFloods
+                CreepFloods = farFields.CreepFloods
             }
 
     // The narrow facts the Planner reads about the colony's own decisions:

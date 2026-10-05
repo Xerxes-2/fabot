@@ -83,8 +83,10 @@ type Atlas =
             /// pricing, forced at most once per tick and shared by every query pricing
             /// from it. Bodies of the same factor at the same tile share one flood;
             /// one entry per pricing, laid lazily, so a tick that asks for one pays
-            /// for one. Each is a seeded, unadvanced `Flood` that each reader pushes
-            /// out only as far as the tile it asks about.
+            /// for one. Each is a resumable `Flood` that each reader pushes out only
+            /// as far as the tile it asks about — recalled, as far as an earlier
+            /// tick left it, from the kept table while its creep stands still
+            /// (`CreepFloodTable`).
             Floods: Map<string, Map<Pos * FatigueFactor * Pricing, Lazy<Flood>>>
             /// Memoised flood *into* a Seam band — the walk out of every tile of one
             /// room onto the crossings joining it to a named neighbour. One flood per
@@ -195,13 +197,52 @@ type Atlas =
             RefillableIds: Set<string>
         }
 
+/// The three pricings a placed creep's own flood is laid under.
+let private pricings = [ TravelCost; Walk; Baseline ]
+
+/// The key a placed creep's own flood is kept under across ticks
+/// (`CreepFloodTable`): everything the flood reads but the grids, which the
+/// table stamps per room.
+let private creepFloodKey (room: string) (pos: Pos) (factor: FatigueFactor) (pricing: Pricing) =
+    let tag =
+        match pricing with
+        | TravelCost -> "t"
+        | Walk -> "w"
+        | Baseline -> "b"
+
+    room
+    + ":"
+    + string (indexOf pos)
+    + ":"
+    + string factor.FatigueParts
+    + "/"
+    + string factor.MoveParts
+    + tag
+
+/// Whether two grids of one room hold the same value on every tile. Inline,
+/// so each call site compares its own primitive and never through a generic
+/// equality call per tile.
+let inline private sameGrid (kept: 'T[]) (now: 'T[]) =
+    let mutable same = obj.ReferenceEquals(kept, now)
+    let mutable index = 0
+
+    if not same then
+        same <- true
+
+        while same && index < tileCount do
+            same <- kept.[index] = now.[index]
+            index <- index + 1
+
+    same
+
 /// The Atlas over a view, recalling the tables the census keys rather than
 /// laying empty ones: the spawn walk table, the Seam walks, and the far
 /// fields beside them (`docs/research/cpu-headroom.md` §5.1). The caller
 /// hands in the plan memo's tables while the census signature is unchanged,
 /// and fresh ones when it moved: every entry in any of them is a pure
-/// function of the census and of nothing else. Every other table is laid
-/// empty: they key on this tick's creeps.
+/// function of the census and of nothing else. The placed creeps' own floods
+/// are recalled on their own key (`CreepFloodTable`, cut here). Every other
+/// table is laid empty: they key on this tick's creeps.
 let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyView) : Atlas =
     let spatial = view.Spatial
 
@@ -351,6 +392,50 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     let occupied = grids |> Map.map (fun _ (_, _, standing) -> standing)
     let rings = spatial.Borders |> Map.map ringOf
 
+    let weightsIn room =
+        Map.tryFind room weights |> Option.defaultValue noGround
+
+    let occupiedIn room =
+        Map.tryFind room occupied |> Option.defaultValue noTraffic
+
+    // The kept creep floods (#553), cut to what this tick can still read: a
+    // flood whose creep stands on its tile under the same factor, in a room
+    // whose walking grid — and, for `TravelCost`, whose standing traffic — is
+    // the one it was laid on. Everything else goes, so the table never holds
+    // more than the placed creeps' floods.
+    let kept = farFields.CreepFloods
+
+    let stillLaid =
+        System.Collections.Generic.Dictionary<string, struct (bool * bool)>()
+
+    for KeyValue(room, (keptWeights, keptOccupied)) in kept.Grids do
+        let walking = sameGrid keptWeights (weightsIn room)
+        stillLaid.[room] <- struct (walking, walking && sameGrid keptOccupied (occupiedIn room))
+
+    let survivors = ResizeArray<string * Flood>()
+
+    for name, room, pos in placed do
+        let factor = Map.find name factors
+
+        for pricing in pricings do
+            let key = creepFloodKey room pos factor pricing
+
+            if kept.Floods.ContainsKey key && stillLaid.ContainsKey room then
+                let struct (walking, standing) = stillLaid.[room]
+
+                if walking && (standing || pricing <> TravelCost) then
+                    survivors.Add((key, kept.Floods.[key]))
+
+    kept.Floods.Clear()
+
+    for key, flood in survivors do
+        kept.Floods.[key] <- flood
+
+    kept.Grids.Clear()
+
+    for _, room, _ in placed do
+        kept.Grids.[room] <- (weightsIn room, occupiedIn room)
+
     {
         Spatial = spatial
         Home = home
@@ -369,18 +454,32 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
             |> List.fold
                 (fun table (name, room, pos) ->
                     let factor = Map.find name factors
-                    let roomWeights = Map.tryFind room weights |> Option.defaultValue noGround
-                    let roomOccupied = Map.tryFind room occupied |> Option.defaultValue noTraffic
+                    let roomWeights = weightsIn room
+                    let roomOccupied = occupiedIn room
                     let inRoom = Map.tryFind room table |> Option.defaultValue Map.empty
 
                     let laid =
-                        [ TravelCost; Walk; Baseline ]
+                        pricings
                         |> List.fold
                             (fun entries pricing ->
+                                let key = creepFloodKey room pos factor pricing
+
                                 Map.add
                                     (pos, factor, pricing)
                                     (lazy
-                                        (floodPriced roomWeights roomOccupied factor pricing pos))
+                                        (if kept.Floods.ContainsKey key then
+                                             kept.Floods.[key]
+                                         else
+                                             let flood =
+                                                 floodPriced
+                                                     roomWeights
+                                                     roomOccupied
+                                                     factor
+                                                     pricing
+                                                     pos
+
+                                             kept.Floods.[key] <- flood
+                                             flood))
                                     entries)
                             inRoom
 

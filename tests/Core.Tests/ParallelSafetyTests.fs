@@ -53,15 +53,18 @@ open System.Reflection
 open Expecto
 
 /// The shared-mutable roots that are *named* rather than recognised by shape.
-/// `Atlas` reaches its own tables and the resumable `Flood`s it hands out
-/// through its own fields, so those need no entry of their own — `Flood` could
-/// not have one anyway: it is `internal` to Core with no `InternalsVisibleTo`,
-/// so `typeof<_>` cannot spell it from here. This list is therefore not a
-/// census of what is shared, but the part of it a name can reach. `WalkTable`
-/// is named beside `Atlas` because the plan memo carries one without an Atlas
-/// around it, and a memo held as a fixture would share it the same way.
+/// `Atlas` reaches its own tables through its own fields, so those need no
+/// entry of their own. This list is therefore not a census of what is shared,
+/// but the part of it a name can reach. `WalkTable` and the resumable `Flood`
+/// are named beside `Atlas` because the plan memo carries both without an
+/// Atlas around them (the kept creep floods, #553), and a memo held as a
+/// fixture would share them the same way.
 let private mutableRoots =
-    [ typeof<Fabot.Core.Atlas.Atlas>; typeof<Fabot.Core.Types.Intents.WalkTable> ]
+    [
+        typeof<Fabot.Core.Atlas.Atlas>
+        typeof<Fabot.Core.Types.Intents.WalkTable>
+        typeof<Fabot.Core.Types.Intents.Flood>
+    ]
 
 /// The roots recognised by shape instead: the mutable containers a fixture
 /// rolls a memo out of by hand, which no list of names could anticipate. Every

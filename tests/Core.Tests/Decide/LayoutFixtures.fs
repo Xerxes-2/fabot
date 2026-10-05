@@ -302,6 +302,7 @@ let sentinelMemo snapshot =
         Narrowed = NarrowedFieldTable()
         Lines = LineTable()
         RoadFloods = RoadFloodTable()
+        CreepFloods = FarFieldMemo.creepFloods ()
     }
 
 /// Two rooms whose coordinates collide on purpose. At home:

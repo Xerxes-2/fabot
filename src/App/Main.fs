@@ -127,6 +127,7 @@ let private sizes () =
                     "seams" ==> memo.SeamWalks.Count
                     "far" ==> memo.FarFields.Count
                     "narrowed" ==> memo.Narrowed.Count
+                    "floods" ==> memo.CreepFloods.Floods.Count
                     "sites" ==> List.length memo.SiteIntents
                     "demand" ==> List.length memo.HaulerDemand
                 ])

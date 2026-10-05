@@ -7,33 +7,6 @@ module Fabot.Core.Grid
 open Fabot.Core.Types
 open Fable.Core
 
-/// A Dijkstra flood the readers advance rather than a finished pair of arrays:
-/// the distance and predecessor grids, plus the heap and the live length the
-/// loop left off at. Dijkstra settles a tile for good the moment it leaves the
-/// heap, so a flood may stop anywhere and be resumed, and every settled tile
-/// holds the number the whole flood would have left there — the invariant this
-/// shape rests on.
-type internal Flood =
-    {
-        /// Cheapest cost to each settled tile, and `unreached` elsewhere
-        /// — a tile nothing reaches and a tile nobody has asked about are
-        /// one value here, parted only by whether the heap is empty.
-        Dist: int[]
-        /// Predecessor index on a cheapest path, -1 where there is none.
-        /// Final for every tile whose distance is final.
-        Parents: int[]
-        /// The three read-only inputs the relaxation prices over, held so
-        /// a resumed flood charges exactly what the interrupted one did.
-        Weights: int[]
-        Occupied: bool[]
-        StepPrices: int[]
-        /// The binary min-heap of dist-then-index keys, and the live length
-        /// within it: the heap only grows, so a pop is a decrement rather
-        /// than a splice, and every slot at or past `Size` is stale.
-        Heap: ResizeArray<int>
-        mutable Size: int
-    }
-
 /// Unreached marker in a flood's distance array.
 let internal unreached = System.Int32.MaxValue
 
