@@ -161,6 +161,8 @@ type ColonyView =
         ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`StandDown.Fought`).
         Fought: Map<string, FightLatch>
+        /// The last tick a raider stood in the home (`StandDown.HomeRaided`).
+        HomeRaided: int option
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one.
         ConstructionSites: ConstructionSiteInfo list
@@ -1094,6 +1096,7 @@ module ColonyView =
             RaidedOutposts = gate.RaidedOutposts
             ChasedOutposts = gate.ChasedOutposts
             Fought = gate.Fought
+            HomeRaided = gate.HomeRaided
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             Creeps = mine |> List.map (fun creep -> creep.Info)
             Unprojected =

@@ -308,6 +308,13 @@ type Tuning =
         /// whole at it — the ticks the room must hold times the damage per
         /// tick. No hysteresis, one Repair visit clearing the line. ADR-0034
         RampartFloor: int
+        /// The floor a quiet room's ramparts are raised to while its
+        /// extension or Storage sites stand (`Facts.buildFloor`, #526): the
+        /// full floor waits for the level's bank and stock.
+        BuildRampartFloor: int
+        /// How long after a raider last stood in the home the full floors
+        /// hold over the build floor (#526).
+        BuildFloorRaidTicks: int
         /// The hits under which a rampart of ours is **dying**: two of the
         /// engine's decays (300 a 100 ticks) from gone. A fresh rampart is
         /// built at 1 hit, so a dying one is repaired before every site, by
@@ -347,6 +354,10 @@ type Tuning =
         /// stand a full Storage yet (#343). The worker row's backlog term
         /// (#364) draws on the same remainder; this floor bounds the overlap.
         UpgradeStockBodies: int
+        /// The ticks of the colony's whole income its home sites must owe
+        /// for a **site backlog** (#526), under which the upgrader row casts
+        /// nothing outside the downgrade deadline.
+        SiteBacklogTicks: int
         /// The pile a Pickup is worth walking for: a dropped pile enters the
         /// pool at this many units and never below it. A hundred, derived at
         /// the **300 bank** — two Carry parts' worth, the smallest load that
@@ -685,6 +696,14 @@ module Tuning =
             RepairRescueLine = 0.25
             RepairRescues = 2
             RampartFloor = 100_000
+            // Ten thousand ticks of decay (300 a 100), so a rampart raised to it
+            // outlasts the build phase unwatched, for 300 energy where the full
+            // floor costs 1,000; a raid lifts it back.
+            BuildRampartFloor = 30_000
+            // A creep's life: a raider gone home is recast and back inside it
+            // (Trepidimous hit W17S25 every few hundred ticks), so a raided
+            // line is raised whole between visits and never wears to the cap.
+            BuildFloorRaidTicks = Engine.creepLifetime
             // Live 2026-10-04: W17S25's 13 fresh ramparts decayed away at 1 hit.
             RampartDying = 600
             // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
@@ -705,6 +724,11 @@ module Tuning =
             // leaves the rest of the observer's ticks to the lower tiers.
             ObserveStaleTicks = 100
             UpgradeStockBodies = 20
+            // A third of a body's life: over it an upgrader cast now drinks
+            // what the sites wait on for most of its life (W17S25: 57,000
+            // owed on 23 a tick, ~2,500 ticks); under it the sites are gone
+            // before the body has paid for itself.
+            SiteBacklogTicks = 500
             PickupThreshold = 100
             // 37 plain tiles: a detour inside one room spends one rung at most.
             IntakeTravelPerRung = 75

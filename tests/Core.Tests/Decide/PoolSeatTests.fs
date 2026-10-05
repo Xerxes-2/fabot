@@ -897,6 +897,143 @@ let repairTests =
                     "half of a rampart's max is far over the floor: nothing to do"
             }
 
+            test "in the build phase a quiet room raises its ramparts to the build floor alone" {
+                // #526: W17S25 spent 22% of its energy raising fresh ramparts
+                // to 100,000 while its extensions and Storage stood as sites.
+                let buildFloor = Tuning.defaults.BuildRampartFloor
+                let max = 3_000_000
+
+                let building (colony: ColonyView) =
+                    { colony with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-ext"
+                                    Left = 3_000
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "site-ext", { X = 30; Y = 30 }, Site BuiltKind.Extension ]
+                    }
+
+                let at hits colony =
+                    colony |> withLevel 4 |> withHits "ram-1" BuiltKind.Rampart hits max
+
+                let quiet = bareRespawn |> building
+
+                Expect.equal
+                    (repairTasks (planTasksOn (quiet |> at (buildFloor - 1)) noThreats))
+                    [ "ram-1" ]
+                    "under the build floor: hungry"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (quiet |> at buildFloor) noThreats))
+                    "at the build floor the rampart waits for the extensions"
+
+                Expect.equal
+                    (repairTasks (planTasksOn (bareRespawn |> at buildFloor) noThreats))
+                    [ "ram-1" ]
+                    "no extension or Storage site: the full floor again"
+
+                let raided = quiet |> facing [ hostileAt "h-1" { X = 40; Y = 40 } [ Attack; Move ] ]
+
+                Expect.equal
+                    (repairTasks (planTasksOn (raided |> at buildFloor) noThreats))
+                    [ "ram-1" ]
+                    "a raider in the home: the full floor"
+
+                let healed =
+                    { quiet with
+                        RecalledHealers = [ hostileAt "med-1" { X = 40; Y = 40 } [ Heal; Move ] ]
+                    }
+
+                Expect.equal
+                    (repairTasks (planTasksOn (healed |> at buildFloor) noThreats))
+                    [ "ram-1" ]
+                    "a raid healer just stepped out: the full floor"
+
+                let raidedAt ago =
+                    { quiet with
+                        HomeRaided = Some(quiet.Time - ago)
+                    }
+
+                let window = Tuning.defaults.BuildFloorRaidTicks
+
+                Expect.equal
+                    (repairTasks (planTasksOn (raidedAt (window - 1) |> at buildFloor) noThreats))
+                    [ "ram-1" ]
+                    "a raider stood at home inside the window: the full floor"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (raidedAt window |> at buildFloor) noThreats))
+                    "a raid a whole window gone: the build floor again"
+            }
+
+            test "the build floor is set by a Storage site alone too" {
+                let storing =
+                    { bareRespawn with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-sto"
+                                    Left = 30_000
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withTargets
+                                [ "site-sto", { X = 30; Y = 30 }, Site BuiltKind.Storage ]
+                    }
+                    |> withLevel 4
+                    |> withHits
+                        "ram-1"
+                        BuiltKind.Rampart
+                        Tuning.defaults.BuildRampartFloor
+                        3_000_000
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn storing noThreats))
+                    "at the build floor with the Storage a site: whole"
+            }
+
+            test "under the build floor a struck rampart is still hungry to its max" {
+                // A dismantler is no raider (it carries no weapon), so the cap
+                // stands, and the rampart it works on is struck all the same.
+                let struck =
+                    { bareRespawn with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-ext"
+                                    Left = 3_000
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            bareRespawn.Spatial
+                            |> withTargets
+                                [
+                                    "site-ext", { X = 30; Y = 30 }, Site BuiltKind.Extension
+                                    "ram-1", { X = 28; Y = 25 }, Structure BuiltKind.Rampart
+                                ]
+                    }
+                    |> withLevel 4
+                    |> withHits "ram-1" BuiltKind.Rampart 200_000 3_000_000
+                    // Unplaced, so out of the dismantler's reach: what the cap
+                    // reads for a rampart nothing strikes.
+                    |> withHits "ram-2" BuiltKind.Rampart 50_000 3_000_000
+                    |> facing [ hostileAt "h-1" { X = 29; Y = 25 } [ Work; Move ] ]
+
+                Expect.equal
+                    (repairTasks (planTasksOn struck noThreats))
+                    [ "ram-1" ]
+                    "200,000 hits, far over both floors: struck, it is hungry to its max; the unstruck 50,000 waits under the cap"
+            }
+
             test "below the bootstrap level a rampart has no floor: it decays away unrepaired" {
                 // A child at RCL2 raised three ramparts and held four loaded
                 // workers repairing them toward the home's floor. Below
@@ -1177,6 +1314,35 @@ let firstTowerTests =
                     (matchOf (towerAndExtension [ "tower-1", { X = 6; Y = 10 } ]) |> Option.map fst)
                     (Some(taskId (Build "site-ext")))
                     "with a tower standing, the nearer site again"
+            }
+
+            test "a room builds its extension sites before its Storage site" {
+                // #526: the extensions are the bank — bigger bodies, the
+                // two-CLAIM reserver at 1,300 — and the Storage only stock.
+                let storageNear =
+                    let colony = towerAndExtension [ "tower-1", { X = 6; Y = 10 } ]
+
+                    { colony with
+                        ConstructionSites =
+                            colony.ConstructionSites
+                            |> List.map (fun site ->
+                                if site.Id = "site-tower" then
+                                    { site with Id = "site-sto" }
+                                else
+                                    site)
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [
+                                    "site-sto", { X = 13; Y = 10 }, Site BuiltKind.Storage
+                                    "site-ext", { X = 24; Y = 10 }, Site BuiltKind.Extension
+                                ]
+                    }
+
+                Expect.equal
+                    (matchOf storageNear |> Option.map fst)
+                    (Some(taskId (Build "site-ext")))
+                    "the extension twelve tiles off over the Storage one off"
             }
         ]
 

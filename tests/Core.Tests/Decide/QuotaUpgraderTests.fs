@@ -1366,6 +1366,78 @@ let busyColonyTests =
                     "the income's body stays as downgrade insurance; the stock's waits"
             }
 
+            // Two posted rocks at ten a tick: `Tuning.SiteBacklogTicks` of
+            // that income is 10,000, so 60,000 owed is a backlog and the
+            // 5,000 above is not.
+            test "a site backlog keeps no upgrader outside the deadline" {
+                let backlog = owing [ 60_000 ] rich
+
+                Expect.contains (busyOf backlog) SitesOwed "the premise: the sites make it busy"
+
+                Expect.equal
+                    (upgraderQuotaOf backlog)
+                    0
+                    "a full timer: every body of the row waits for the sites"
+            }
+
+            test "a colony with no income priced reads no backlog" {
+                let unpriced =
+                    { owing [ 60_000 ] rich with
+                        Sources = []
+                    }
+
+                Expect.contains (busyOf unpriced) SitesOwed "the premise: the sites make it busy"
+
+                Expect.equal
+                    (upgraderQuotaOf unpriced)
+                    1
+                    "no posted rock: the busy colony's one stock body, as before"
+            }
+
+            test "in the build phase the line is weak under nine tenths of the build floor" {
+                let building (colony: ColonyView) =
+                    { colony with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-ext"
+                                    Left = 1
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets
+                                [ "site-ext", { X = 22; Y = 9 }, Site BuiltKind.Extension ]
+                    }
+
+                let broken colony =
+                    List.contains LineBroken (busyOf colony)
+
+                Expect.isFalse (broken (building (lineAt 50_000))) "50,000 of a 30,000 build floor"
+                Expect.isTrue (broken (building (lineAt 26_000))) "26,000: under nine tenths of it"
+                Expect.isTrue (broken (lineAt 50_000)) "no extension site: the full floor's line"
+
+                Expect.isTrue
+                    (broken
+                        { building (lineAt 50_000) with
+                            HomeRaided = Some rich.Time
+                        })
+                    "raided this tick's window: the full floor's line"
+            }
+
+            test "inside its deadline a backlog colony keeps one upgrader" {
+                let pressed =
+                    { owing [ 60_000 ] rich with
+                        Controller = Some(controllerAt 5)
+                    }
+
+                Expect.equal
+                    (upgraderQuotaOf pressed)
+                    1
+                    "20,000 of an 80,000 timer: one body for the controller, the rest for the sites"
+            }
+
             test "the downgrade guard still raises a busy colony's row" {
                 let nearDowngrade =
                     { owing [ 5_000 ] rich with

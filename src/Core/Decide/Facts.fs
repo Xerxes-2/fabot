@@ -210,15 +210,66 @@ let internal isDyingRampart (view: ColonyView) (id: string) =
     | Some(Structure BuiltKind.Rampart), Some hits -> hits.Hits < view.Tuning.RampartDying
     | _ -> false
 
+/// The construction sites standing in the home, an unplaced one reading as
+/// home as the surplus rung's does.
+let private homeSites (view: ColonyView) =
+    let home = SpatialInfo.homeName view.Spatial
+
+    view.ConstructionSites
+    |> List.filter (fun site ->
+        SpatialInfo.roomOf view.Spatial site.Id
+        |> Option.forall (fun room -> room = home))
+
+/// The progress the home's sites still owe.
+let internal homeSitesOwed (view: ColonyView) =
+    homeSites view |> List.sumBy (fun site -> site.Left)
+
+/// Whether a site of this kind stands in the home.
+let internal homeSiteStands (view: ColonyView) (kind: BuiltKind) =
+    homeSites view
+    |> List.exists (fun site -> Map.tryFind site.Id view.Spatial.TargetKinds = Some(Site kind))
+
+/// Whether a raider stands in a room (`HostileInfo.raider`).
+let internal raided (view: ColonyView) (room: string) : bool =
+    view.Hostiles
+    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
+
+/// The **build floor** (#526): `Tuning.BuildRampartFloor`, capping every
+/// rampart floor while an extension or Storage site stands in a quiet home;
+/// None, the full floors, while a raider stands at home or its healers are
+/// remembered there, and for `Tuning.BuildFloorRaidTicks` after a raider
+/// last stood there (`ColonyView.HomeRaided`).
+let internal buildFloor (view: ColonyView) : int option =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let building =
+        homeSiteStands view BuiltKind.Extension || homeSiteStands view BuiltKind.Storage
+
+    let raidedLately =
+        raided view home
+        || not (List.isEmpty view.RecalledHealers)
+        || view.HomeRaided
+           |> Option.exists (fun tick -> view.Time - tick < view.Tuning.BuildFloorRaidTicks)
+
+    if building && not raidedLately then
+        Some view.Tuning.BuildRampartFloor
+    else
+        None
+
+/// A floor under the build floor's cap, when there is one.
+let private capped (cap: int option) floor =
+    cap |> Option.fold (fun floor cap -> min floor cap) floor
+
 /// The floor a structure of the home is whole at: its tile's declared one
-/// (`ColonyView.RampartFloors`), else `Tuning.RampartFloor`.
-let private floorOf (view: ColonyView) (id: string) =
+/// (`ColonyView.RampartFloors`), else `Tuning.RampartFloor`, under `cap`.
+let private floorOf (view: ColonyView) (cap: int option) (id: string) =
     if Map.isEmpty view.RampartFloors then
-        view.Tuning.RampartFloor
+        capped cap view.Tuning.RampartFloor
     else
         homeTile view id
         |> Option.bind (fun tile -> Map.tryFind (RoomPos.pos tile) view.RampartFloors)
         |> Option.defaultValue view.Tuning.RampartFloor
+        |> capped cap
 
 /// Every structure the projection carries hits for that stands below its kind's
 /// line, with its kind, in id order — the Repair pool's own walk. The
@@ -226,6 +277,7 @@ let private floorOf (view: ColonyView) (id: string) =
 let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string * BuiltKind) list =
     let ramparts = keepsRamparts view
     let attacked = rampartsUnderAttack view
+    let cap = buildFloor view
 
     SpatialInfo.structureHits view.Spatial
     |> List.choose (fun (id, kind, hits) ->
@@ -239,7 +291,7 @@ let internal hungryStructures (view: ColonyView) (held: Set<string>) : (string *
         | BuiltKind.Rampart when not ramparts -> None
         // Nor is a child's: the mother carries it as ground, not work.
         | _ when
-            isHungry view.Tuning (floorOf view id) held id kind hits
+            isHungry view.Tuning (floorOf view cap id) held id kind hits
             && not (kind = BuiltKind.Rampart && SpatialInfo.placedAway view.Spatial id)
             ->
             Some(id, kind)
@@ -273,9 +325,12 @@ let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
         let home = SpatialInfo.homeName view.Spatial
         let line = Set.ofList view.Perimeter
 
+        let cap = buildFloor view
+
         let floorAt tile =
             Map.tryFind tile view.RampartFloors
             |> Option.defaultValue view.Tuning.RampartFloor
+            |> capped cap
 
         // Nine tenths: decay and the repair that stops at the floor keep a
         // maintained line just under it (live W12S28: 99,401-99,901).
@@ -833,11 +888,6 @@ let internal kitedByRanger (view: ColonyView) (room: string) : bool =
 let private towerDamageIn (view: ColonyView) (room: string) =
     let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
     towers * Engine.towerAttackAt Engine.towerFalloffRange
-
-/// Whether a raider stands in a room (`HostileInfo.raider`).
-let internal raided (view: ColonyView) (room: string) : bool =
-    view.Hostiles
-    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
 
 /// Whether the biggest body a room's own row casts wins its raid alone: the
 /// ranger's in a ranger room or one the colony harasses, beside a raised

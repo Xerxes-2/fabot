@@ -988,6 +988,10 @@ type StandDown =
         /// The last decided tick's haul overflow reading
         /// (`RaidState.HaulOverflow`, #508): what this tick smooths on from.
         HaulOverflow: HaulOverflow
+        /// The last tick a raider stood in the home (`RaidState.HomeRaided`,
+        /// #526), None for never: what holds the full rampart floors through
+        /// the gaps between a raid's visits.
+        HomeRaided: int option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1007,6 +1011,7 @@ module StandDown =
             Taken = Set.empty
             ReserveShort = false
             HaulOverflow = HaulOverflow.none
+            HomeRaided = None
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

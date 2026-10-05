@@ -450,6 +450,10 @@ type RaidState =
         /// (`Decision.HaulOverflow`, #508): next tick's base to smooth on
         /// from. Set by the loop off the decision; the fold leaves it alone.
         HaulOverflow: HaulOverflow
+        /// The last tick a raider stood in the home (`Facts.raided`, #526),
+        /// None for never: what holds the full rampart floors over the build
+        /// floor between a raid's visits.
+        HomeRaided: int option
         /// The owned creep names the previous tick projected, less the ones
         /// whose life ran out on it: the baseline this tick's losses are read
         /// against. Carried only while an episode is open. This colony's names,
@@ -485,6 +489,7 @@ module RaidState =
             Taken = Map.empty
             ReserveShort = false
             HaulOverflow = HaulOverflow.none
+            HomeRaided = None
             Living = Set.empty
             Placed = Map.empty
             Hits = Map.empty
@@ -1046,6 +1051,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         Taken = state.Taken |> Map.keys |> Set.ofSeq
         ReserveShort = state.ReserveShort
         HaulOverflow = state.HaulOverflow
+        HomeRaided = state.HomeRaided
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened,
@@ -1382,6 +1388,11 @@ let foldRaids
         Taken = foldTaken view prior.Taken
         ReserveShort = Decide.Facts.belowReserve view
         HaulOverflow = prior.HaulOverflow
+        HomeRaided =
+            if Decide.Facts.raided view (SpatialInfo.homeName view.Spatial) then
+                Some view.Time
+            else
+                prior.HomeRaided
         Living = if Option.isSome episode then surviving else Set.empty
         Placed = if Option.isSome episode then placedNow else Map.empty
         // The damage baseline, carried on the condition the damage is charged

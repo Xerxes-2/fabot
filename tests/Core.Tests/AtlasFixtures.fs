@@ -31,6 +31,7 @@ let snapshotWith creeps spatial =
         RaidedOutposts = Set.empty
         ChasedOutposts = Set.empty
         Fought = Map.empty
+        HomeRaided = None
         ConstructionSites = []
         Creeps = creeps
         Unprojected = Set.empty

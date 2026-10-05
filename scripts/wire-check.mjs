@@ -224,6 +224,17 @@ wire("raids: the reserve latch (#505) is true only as a boolean, and a legacy le
   assert.equal((await raidsThrough(legacy)).reserveShort, false);
 });
 
+wire("raids: the home's last raided tick (#526) round-trips as a number, and anything else or a legacy leaf reads never", async () => {
+  assert.equal((await raidsThrough({ ...emptyRaids, homeRaided: 968_300 })).homeRaided, 968_300);
+
+  for (const value of ["968300", {}, null, true]) {
+    const written = await raidsThrough({ ...emptyRaids, homeRaided: value });
+    assert.equal("homeRaided" in written, false, `homeRaided ${JSON.stringify(value)}`);
+  }
+
+  assert.equal("homeRaided" in (await raidsThrough(emptyRaids)), false);
+});
+
 wire("raids: the haul overflow (#508) owes only as a boolean, its fill reads 0 off a number and clamps into 0..1, and a legacy leaf reads empty", async () => {
   for (const value of [1, "true", {}, null]) {
     const written = await raidsThrough({ ...emptyRaids, haulOwed: value });

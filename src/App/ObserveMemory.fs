@@ -984,6 +984,8 @@ let loadRaids (home: string) : RaidState =
                             0.0
                     Owed = jsTypeof raids?haulOwed = "boolean" && unbox<bool> raids?haulOwed
                 }
+            // The home's last raided tick (#526): a non-number reads never.
+            HomeRaided = numberValue raids?homeRaided
             // `unbox` is erased: without the filter a number under `living`
             // becomes a creep that "dies" next tick and charges the episode a
             // loss nobody suffered, and a string walks character by character
@@ -1039,6 +1041,8 @@ let saveRaids (home: string) (state: RaidState) =
     // The haul overflow reading (#508).
     raids?haulFill <- state.HaulOverflow.Fill
     raids?haulOwed <- state.HaulOverflow.Owed
+    // The home's last raided tick (#526), absent for never.
+    state.HomeRaided |> Option.iter (fun tick -> raids?homeRaided <- tick)
     raids?living <- state.Living |> Set.toArray
 
     raids?placed <- state.Placed |> Map.toSeq |> hashOf (roomPosObject >> box)

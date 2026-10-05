@@ -731,6 +731,8 @@ let planPool
     // its tiles: the line a raid breaks, rebuilt before roads and extensions.
     let weakLine, lineSites = Facts.brokenLine view
 
+    let extensionSited = lazy (Facts.homeSiteStands view BuiltKind.Extension)
+
     // The emergency reserve (#505): under it the stock's draw is the
     // emergency sinks' — the refill cluster and the towers, and the Repairs
     // of a dying or a struck rampart.
@@ -1039,6 +1041,15 @@ let planPool
             // rung, which would otherwise answer first.
             | Repair id when Set.contains id weakLine -> TwoRungsUp
             | Build siteId when Set.contains siteId lineSites -> TwoRungsUp
+            // The Storage under the home site's rung while an extension site
+            // stands (#526): the extensions are the bank — bigger bodies, the
+            // two-CLAIM reserver — and the Storage only stock.
+            | Build siteId when
+                tier = Surplus
+                && Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Storage)
+                && extensionSited.Force()
+                ->
+                OnTheTier
             // A site outranks the controller inside the surplus tier (#234):
             // a worker that fills at the buffer is already standing in the
             // controller's Work Area, so Upgrade costs it nothing and never

@@ -235,14 +235,7 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
 /// (`Quota.quotaRowsOf`) and the buffer's rank (`Pool.planPool`).
 let internal busyReasons (view: ColonyView) (tasks: Task list) (aidSent: bool) : BusyReason list =
     let home = SpatialInfo.homeName view.Spatial
-
-    // An unplaced site reads as home, as the surplus rung's does.
-    let homeOwed =
-        view.ConstructionSites
-        |> List.filter (fun site ->
-            SpatialInfo.roomOf view.Spatial site.Id
-            |> Option.forall (fun room -> room = home))
-        |> List.sumBy (fun site -> site.Left)
+    let homeOwed = Facts.homeSitesOwed view
 
     let lineBroken =
         let weak, sites = Facts.brokenLine view

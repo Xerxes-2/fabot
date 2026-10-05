@@ -763,6 +763,13 @@ let internal rowSizingOf
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
 
+/// The colony's income a tick: summed over the posted sources at each one's
+/// own output, never a count times a constant.
+let private incomeOf (view: ColonyView) atlas =
+    view.Sources
+    |> List.filter (isPosted atlas)
+    |> List.sumBy (fun s -> sourceOutputOf view atlas s.Id |> Option.defaultValue 0)
+
 /// The colony's surplus over one creep's lifetime: the income the two upgrade
 /// rows are hired out of, written once because both read it. Income is counted
 /// per posted source at that source's own output; a source the colony cannot
@@ -815,14 +822,7 @@ let internal surplusOverLifetime (view: ColonyView) atlas (sizing: RowSizing) ha
         + minerCost * view.Tuning.MineContactAgeing
         + courierCost
 
-    // Summed over the posted sources at each one's own output, never a count
-    // times a constant.
-    let income =
-        view.Sources
-        |> List.filter (isPosted atlas)
-        |> List.sumBy (fun s -> sourceOutputOf view atlas s.Id |> Option.defaultValue 0)
-
-    income * Engine.creepLifetime - amortization
+    incomeOf view atlas * Engine.creepLifetime - amortization
 
 /// Whether a living body is a standing body: `Carry * 4 < Work`. A fact about
 /// a body, not a row: the upgrader row's `11W/1C/11M` is one, and so is the
@@ -992,18 +992,29 @@ let internal quotaRowsOf
     let floored =
         pressed && uncapped + onStockUncapped = 0 && rowStands view atlas sizing
 
+    // A site backlog (#526): the home's sites owe more than
+    // `Tuning.SiteBacklogTicks` of the whole income. None while no posted
+    // rock prices an income: zero ticks of nothing is no measure.
+    let backlog =
+        List.contains SitesOwed busy
+        && (let income = incomeOf view atlas
+
+            income > 0 && Facts.homeSitesOwed view >= income * view.Tuning.SiteBacklogTicks)
+
+    let atMostOne =
+        let onIncome = min uncapped 1
+        onIncome, min onStockUncapped (1 - onIncome)
+
     // A busy colony keeps one body as downgrade insurance, and the
-    // downgrade guard lifts the cap (#523).
+    // downgrade guard lifts the cap (#523). A backlog keeps none, and one
+    // inside the deadline.
     let onIncome, onStock =
-        if floored then
-            0, 1
-        elif pressed then
-            uncapped, onStockUncapped
-        elif not (List.isEmpty busy) then
-            let onIncome = min uncapped 1
-            onIncome, min onStockUncapped (1 - onIncome)
-        else
-            uncapped, onStockUncapped
+        if floored then 0, 1
+        elif backlog && pressed then atMostOne
+        elif backlog then 0, 0
+        elif pressed then uncapped, onStockUncapped
+        elif not (List.isEmpty busy) then atMostOne
+        else uncapped, onStockUncapped
 
     let charged = if busyAtWork busy then onIncome else uncapped
 
