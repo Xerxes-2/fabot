@@ -323,6 +323,20 @@ type DeferredContainer =
         Serving: RoomPos
     }
 
+/// An unserved outpost source whose every Seat another construction site
+/// holds, so `planOutpostContainers` places it no container (#247): the Seats
+/// our own sites hold, which free once the builders reach them, and the ones
+/// another player's hold, which never free on their own. A wait with any Seat
+/// of ours ends by itself; one with none is a wait on a rival. Every Seat is
+/// in the source's own room.
+type WaitingContainer =
+    {
+        Source: string
+        Room: string
+        Ours: Pos list
+        Rival: Pos list
+    }
+
 /// One sink group the hauler quota priced a container's flow to: the
 /// spawn cluster, an upgrade buffer or the Storage, and the round trip in
 /// ticks — None where no place of that group was reachable, which is a

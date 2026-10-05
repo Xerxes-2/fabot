@@ -1292,8 +1292,8 @@ let internal planLayout
 /// tick for ever — no container, no Post, no income. A Seat holding another
 /// site, ours or anyone's (`Atlas.collidingSiteTilesIn`), is no candidate, and
 /// a source whose every Seat is taken waits; our own sites clear once the
-/// builders' queue reaches them (#266), a rival's never, and no record says so
-/// — an outpost shortfall entry is its own ticket. A standing road is not
+/// builders' queue reaches them (#266), a rival's never, and the second list
+/// records whose sites each wait is on (#247). A standing road is not
 /// subtracted: a container site goes down on a built road.
 ///
 /// Only into a room the colony can see: planning off a blind room's empty
@@ -1302,7 +1302,7 @@ let internal planLayout
 /// reads would throw the whole Layout away the tick an outpost site appears,
 /// and what the memo would buy is one flood a room a tick — 4.84 ms without
 /// this rule against 5.35 with it.
-let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
+let internal planOutpostContainers (view: ColonyView) atlas : Intent list * WaitingContainer list =
     let home = SpatialInfo.homeName view.Spatial
 
     // Every rock the projection places in a room that is not home and that
@@ -1334,17 +1334,42 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list =
         if served then
             None
         else
-            // Three Seats all of swamp can price identically, so the lowest
-            // (X, Y) answers. Over the Seats a site of another kind has not
-            // already taken (#244).
-            Set.difference
-                (Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room)
-                (Atlas.collidingSiteTilesIn atlas room)
-            |> Set.toList
-            |> List.choose (fun seat ->
-                Atlas.seamWalkTicks atlas room home seat |> Option.map (fun walk -> walk, seat))
-            |> cheapest fst snd
-            |> Option.map (fun (_, seat) -> PlaceConstructionSite(RoomPos.at room seat, Container)))
+            let seats = Atlas.seatTilesOf atlas sourceId |> RoomPos.inRoom room
+            let taken = Set.intersect seats (Atlas.collidingSiteTilesIn atlas room)
+
+            if not (Set.isEmpty seats) && taken = seats then
+                let rival = Set.intersect taken (Atlas.rivalSiteTilesIn atlas room)
+
+                Some(
+                    Choice2Of2
+                        {
+                            Source = sourceId
+                            Room = room
+                            Ours = Set.difference taken rival |> Set.toList
+                            Rival = Set.toList rival
+                        }
+                )
+            else
+                // Three Seats all of swamp can price identically, so the lowest
+                // (X, Y) answers. Over the Seats a site of another kind has not
+                // already taken (#244).
+                Set.difference seats taken
+                |> Set.toList
+                |> List.choose (fun seat ->
+                    Atlas.seamWalkTicks atlas room home seat
+                    |> Option.map (fun walk -> walk, seat))
+                |> cheapest fst snd
+                |> Option.map (fun (_, seat) ->
+                    Choice1Of2(PlaceConstructionSite(RoomPos.at room seat, Container))))
+    |> fun picks ->
+        picks
+        |> List.choose (function
+            | Choice1Of2 site -> Some site
+            | Choice2Of2 _ -> None),
+        picks
+        |> List.choose (function
+            | Choice2Of2 waiting -> Some waiting
+            | Choice1Of2 _ -> None)
 
 /// Each [[nursery]]'s declared first spawn (#476), placed by its mother: a
 /// nursery runs no decide, and before this a human placed it. Only while the

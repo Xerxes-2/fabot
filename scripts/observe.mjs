@@ -23,8 +23,10 @@
 //                                  stands on — mined, not reserved, withheld
 //                                  from nothing
 //   observe.mjs layout             what this colony could not deliver this tick:
-//                                  the Layout's losses, and the declared outposts
-//                                  that do not border this home
+//                                  the Layout's losses, the declared outposts
+//                                  that do not border this home, and the
+//                                  outpost sources waiting on sites over
+//                                  every Seat
 //   observe.mjs breaches           what is broken right now: one row per live
 //                                  invariant violation, oldest first, each with
 //                                  how long it has stood
@@ -1695,8 +1697,9 @@ if (command === "console") {
   //   { unserved: [{ x, y, kind }],
   //     unrouted: [{ source, goal, spawn? }],
   //     deferred: [{ target, source?, pick: { x, y }, serving: { x, y } }],
-  //     refused: [{ room, kind }] }
-  // Four lists in one leaf, the colony's losses of this tick: the footing
+  //     refused: [{ room, kind }],
+  //     waiting: [{ source, room, ours: [{ x, y }], rival: [{ x, y }] }] }
+  // Five lists in one leaf, the colony's losses of this tick: the footing
   // targets the fold found no tile for (#77), the trunks the router found
   // no path for (#107), the container picks the plan gave up because
   // something already serves their target (ADR 0040), and the declarations
@@ -1739,6 +1742,7 @@ if (command === "console") {
   const unrouted = listOrFail("unrouted");
   const deferred = listOrFail("deferred");
   const refused = listOrFail("refused");
+  const waiting = listOrFail("waiting");
   // A refusal used to be a bare room name and is now `{ room, kind }` (ADR
   // 0060 decision 1). A bundle that predates the kind writes strings here,
   // and printing one as "(no kind)" beside a room would be this channel
@@ -1793,7 +1797,7 @@ if (command === "console") {
   // `unserved` array, back when the leaf held one list; a reader of the
   // old shape wants `.unserved`.
   if (json) {
-    console.log(JSON.stringify({ unserved, unrouted, deferred, refused }, null, 2));
+    console.log(JSON.stringify({ unserved, unrouted, deferred, refused, waiting }, null, 2));
   } else {
     console.log(`colony ${home}`);
     console.log("");
@@ -1854,6 +1858,28 @@ if (command === "console") {
         console.log(
           `  ${entry.room}  ${entry.kind} — no chain of Seams reaches it, ` +
             "so it is worked by nobody",
+        );
+      }
+    }
+
+    // A row here is an outpost source planned no container because another
+    // construction site holds every one of its Seats (#244, #247). A Seat
+    // under a site of ours frees once the builders reach it; one under
+    // another player's site never frees on its own, so a row with no Seat
+    // of ours is a wait on a rival and wants a human.
+    if (waiting.length === 0) {
+      console.log("no outpost source waits on sites over every Seat");
+    } else {
+      console.log(
+        `${waiting.length} outpost source${waiting.length === 1 ? "" : "s"} with every Seat under a site:`,
+      );
+      const tiles = (list) => (Array.isArray(list) ? list.map(tileOf).join(" ") : "(no tiles)");
+      for (const w of waiting) {
+        const ours = Array.isArray(w.ours) ? w.ours.length : 0;
+        console.log(
+          `  ${w.source} in ${w.room ?? "(no room)"}  ours ${tiles(w.ours) || "none"}, ` +
+            `rival ${tiles(w.rival) || "none"} — ` +
+            (ours > 0 ? "clears when the builders reach ours" : "a rival's sites: never clears on its own"),
         );
       }
     }

@@ -763,6 +763,10 @@ let collidingSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 
     Set.union ours (layerOf atlas room).RivalSites
 
+/// The tiles of `collidingSiteTilesIn` another player's sites hold: the half
+/// no builder of ours will ever clear.
+let rivalSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> = (layerOf atlas room).RivalSites
+
 /// Tiles holding a built Storage — the tile a Link footing is anchored on
 /// once the reservation has become a structure.
 let storageTilesIn (atlas: Atlas) (room: string) : Set<Pos> =

@@ -373,8 +373,9 @@ let decideUnarbitrated
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
-    let outpostSiteIntents =
-        planOutpostContainers view atlas @ planFirstSpawns view atlas
+    let outpostContainers, waitingContainers = planOutpostContainers view atlas
+
+    let outpostSiteIntents = outpostContainers @ planFirstSpawns view atlas
 
     let defenseIntents =
         planSafeMode view atlas
@@ -646,6 +647,7 @@ let decideUnarbitrated
             }
         HaulOverflow = overflow
         OutpostRooms = outposts.Declared
+        WaitingContainers = waitingContainers
         Steps = steps
         Next = nextPours @ arrivals
         Aims = aims view atlas threats assigned

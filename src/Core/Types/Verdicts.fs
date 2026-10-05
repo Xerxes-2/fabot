@@ -514,6 +514,9 @@ type Decision =
         /// them for this tick's decision: the Raid-log fold reads them after
         /// it rather than deriving the chain a second time.
         OutpostRooms: string list
+        /// The outpost sources whose container waits on other sites over
+        /// every Seat this tick (#247), for the Layout channel.
+        WaitingContainers: WaitingContainer list
         /// Each walking creep's step plan, as the mover's flood laid it this
         /// tick: the tile it asked to step onto and the one after it, both in
         /// the room it stands in. What a light tick walks it on along.

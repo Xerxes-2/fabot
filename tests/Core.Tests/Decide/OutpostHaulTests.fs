@@ -252,6 +252,74 @@ let outpostContainerTests =
                 Expect.isEmpty
                     (containerSites bothTaken)
                     "both Seats hold a site, so this rock is planned no container this tick"
+
+                // #247: and the wait is recorded, each Seat under whose site holds it.
+                Expect.equal
+                    (decideOn bothTaken).WaitingContainers
+                    [
+                        {
+                            Source = "src-out"
+                            Room = "W1N2"
+                            Ours = [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ]
+                            Rival = []
+                        }
+                    ]
+                    "the rock waits on two sites of ours, which the builders' queue clears"
+            }
+
+            test "a wait on a rival's sites is recorded apart from one on ours" {
+                // #247: our own site on a Seat clears once the builders reach it, a
+                // rival's never does, so the record says whose site each Seat holds.
+                let waiting colony = (decideOn colony).WaitingContainers
+
+                let rivalAndOurs =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround
+                        "W1N2"
+                        detourGround
+                        [
+                            "src-out", outpostSource, Source
+                            "road-a", { X = 11; Y = 43 }, Site BuiltKind.Road
+                        ]
+                    |> rivalSites "W1N2" [ { X = 10; Y = 45 } ]
+
+                Expect.equal
+                    (waiting rivalAndOurs)
+                    [
+                        {
+                            Source = "src-out"
+                            Room = "W1N2"
+                            Ours = [ { X = 11; Y = 43 } ]
+                            Rival = [ { X = 10; Y = 45 } ]
+                        }
+                    ]
+                    "one Seat under our site, one under a rival's"
+
+                let rivalOnly =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+                    |> rivalSites "W1N2" [ { X = 11; Y = 43 }; { X = 10; Y = 45 } ]
+
+                Expect.equal
+                    (waiting rivalOnly)
+                    [
+                        {
+                            Source = "src-out"
+                            Room = "W1N2"
+                            Ours = []
+                            Rival = [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ]
+                        }
+                    ]
+                    "every Seat a rival's: a wait nothing of ours ends"
+
+                let oneFree =
+                    northBorderColony { X = 10; Y = 38 }
+                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
+                    |> rivalSites "W1N2" [ { X = 11; Y = 43 } ]
+
+                Expect.isEmpty
+                    (waiting oneFree)
+                    "a free Seat takes the container, and nothing waits"
             }
 
             test "a Seat a rival's site holds is no candidate either, whatever it is building" {

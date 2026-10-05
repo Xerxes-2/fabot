@@ -1385,17 +1385,47 @@ wire("quotas: a fight row writes the room, the ranger answer and each squad's pr
   );
 });
 
-wire("layout: four empty channels write four empty arrays", async () => {
+wire("layout: five empty channels write five empty arrays", async () => {
   const { saveLayout } = await import(MODULE);
   const { empty } = await import(LIST);
 
   globalThis.Memory = memoryWith("layout", undefined);
-  saveLayout(home, empty(), empty(), empty(), empty());
+  saveLayout(home, empty(), empty(), empty(), empty(), empty());
 
+  const layout = globalThis.Memory.fabot.observe.colonies[home].layout;
   assert.deepEqual(
-    Object.keys(globalThis.Memory.fabot.observe.colonies[home].layout).sort(),
-    ["deferred", "refused", "unrouted", "unserved"],
-    "the four channels ADR 0028 keeps side by side",
+    Object.keys(layout).sort(),
+    ["deferred", "refused", "unrouted", "unserved", "waiting"],
+    "the channels ADR 0028 keeps side by side, and the outpost waits beside them (#247)",
+  );
+  assert.ok(Object.values(layout).every((list) => Array.isArray(list) && list.length === 0));
+});
+
+wire("layout: a waiting outpost source (#247) writes its room and whose site holds each Seat", async () => {
+  const { saveLayout } = await import(MODULE);
+  const { WaitingContainer } = await import("../build/fable/Core/Types/Intents.js");
+  const { Pos } = await import("../build/fable/Core/Types/Geometry.js");
+  const { empty, ofArray } = await import(LIST);
+  const waiting = new WaitingContainer(
+    "src-1",
+    "W1N2",
+    ofArray([new Pos(11, 43)]),
+    ofArray([new Pos(10, 45)]),
+  );
+
+  globalThis.Memory = memoryWith("layout", undefined);
+  saveLayout(home, empty(), empty(), empty(), empty(), ofArray([waiting]));
+
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.colonies[home].layout.waiting),
+    stable([
+      {
+        source: "src-1",
+        room: "W1N2",
+        ours: [{ x: 11, y: 43 }],
+        rival: [{ x: 10, y: 45 }],
+      },
+    ]),
   );
 });
 

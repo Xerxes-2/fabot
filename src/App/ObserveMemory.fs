@@ -1143,7 +1143,7 @@ let saveQuotas (home: string) (quotas: Quotas) =
     writeColonyLeaf home "quotas" o
 
 /// Write one colony's losses this tick under `observe.colonies.<home>.layout`:
-/// four lists in one leaf, written every tick, empty lists included, so
+/// five lists in one leaf, written every tick, empty lists included, so
 /// `observe.mjs layout` can tell "nothing is lost" from "not recorded".
 let saveLayout
     (home: string)
@@ -1151,6 +1151,7 @@ let saveLayout
     (unrouted: UnroutedTrunk list)
     (deferred: DeferredContainer list)
     (refused: RefusedDeclaration list)
+    (waiting: WaitingContainer list)
     =
     let layout = createEmpty<obj>
 
@@ -1208,6 +1209,25 @@ let saveLayout
             let o = createEmpty<obj>
             o?room <- entry.RoomName
             o?kind <- declarationKindName entry.Kind
+            o)
+        |> List.toArray
+
+    // The outpost room rides once per row, every Seat of a source being in
+    // its room; `ours` and `rival` say whose site holds each Seat (#247).
+    let seatObject (seat: Pos) =
+        let o = createEmpty<obj>
+        o?x <- seat.X
+        o?y <- seat.Y
+        o
+
+    layout?waiting <-
+        waiting
+        |> List.map (fun entry ->
+            let o = createEmpty<obj>
+            o?source <- entry.Source
+            o?room <- entry.Room
+            o?ours <- entry.Ours |> List.map seatObject |> List.toArray
+            o?rival <- entry.Rival |> List.map seatObject |> List.toArray
             o)
         |> List.toArray
 

@@ -769,6 +769,7 @@ let private fullTick
             decision.Memo.UnroutedTrunks
             decision.Memo.DeferredContainers
             view.Refused
+            decision.WaitingContainers
 
         // The cascade's own numbers, for `observe.mjs quotas`.
         ObserveMemory.saveQuotas colony.Home decision.Quotas
