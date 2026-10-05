@@ -2714,6 +2714,27 @@ let refillTarget
                     first
             )
 
+/// The first step of a walk the mover takes, read off its flood, with the
+/// tile after it filed as the creep's step plan (`Steps`) — the plan dropped
+/// where the first step is the goal itself.
+let private planned
+    (atlas: Atlas)
+    (creep: string)
+    (room: string)
+    near
+    (pos: Pos)
+    (goal: Pos)
+    : RoomPos =
+    let struct (first, second) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
+    let step = RoomPos.at room (posAt first)
+
+    if second < 0 then
+        atlas.Steps.Remove creep |> ignore
+    else
+        atlas.Steps.[creep] <- (step, RoomPos.at room (posAt second))
+
+    step
+
 /// First step toward a set of goal tiles under one pricing: the in-room half
 /// of `firstStep`'s contract, whose doc governs the floods, the tie-breaking
 /// and the totality here. Only that half — the border-crossing fallback is
@@ -2740,16 +2761,11 @@ let private firstStepVia
 
             cheapestReached (reachedBy near) goals
             |> Option.map (fun (_, goal) ->
-                let struct (first, second) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
-                let step = RoomPos.at room (posAt first)
-
                 if pricing = TravelCost then
-                    if second < 0 then
-                        atlas.Steps.Remove creep |> ignore
-                    else
-                        atlas.Steps.[creep] <- (step, RoomPos.at room (posAt second))
-
-                step)
+                    planned atlas creep room near pos goal
+                else
+                    let struct (first, _) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
+                    RoomPos.at room (posAt first))
 
 /// The step toward the near side of a crossing already won: the exit tile is
 /// the creep's *own* room's border tile, so aiming at it asks nothing of the
@@ -2852,8 +2868,9 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 
 /// `firstStepWithin` over a path that never enters `avoid`, tiles of the
 /// creep's own room (#472): a Reach a body Flee applies to walks round.
-/// Flooded fresh and never memoised or recorded for the light tick, being
-/// asked only of a room a Reach lies in. None where every goal in the
+/// Flooded fresh and never memoised, being asked only of a room a Reach lies
+/// in; its plan is filed as `firstStepVia`'s is, so the light tick replays the
+/// walk round and not a plain one (#522). None where every goal in the
 /// creep's room lies in `avoid` or behind it.
 let firstStepAvoiding
     (atlas: Atlas)
@@ -2882,9 +2899,7 @@ let firstStepAvoiding
                 floodPriced weights (occupiedOf atlas room) (factorOf atlas creep) TravelCost pos
 
             cheapestReached (reachedBy near) goals
-            |> Option.map (fun (_, goal) ->
-                let struct (first, _) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
-                RoomPos.at room (posAt first))
+            |> Option.map (fun (_, goal) -> planned atlas creep room near pos goal)
 
 /// The step a creep takes toward a **room**, with nothing placed in it to aim
 /// at: `stepAcross` without its far leg, the exit being the one this room's
@@ -3032,6 +3047,10 @@ let withoutRecording (atlas: Atlas) (creep: string) (read: unit -> 'a) : 'a =
 /// step for this tick, standing on the first tile and stepping to the second.
 let recordStep (atlas: Atlas) (creep: string) (plan: RoomPos * RoomPos) =
     atlas.Steps.[creep] <- plan
+
+/// Drops a creep's step plan: a body the mover walks nowhere this tick,
+/// whatever an earlier reading filed for it.
+let dropStep (atlas: Atlas) (creep: string) = atlas.Steps.Remove creep |> ignore
 
 /// Every creep's step plan as the mover left it this tick (`Atlas.Steps`),
 /// in creep-name order.

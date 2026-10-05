@@ -26,6 +26,45 @@ let private twoLaneAtlas midTerrain creeps =
     |> snapshotWith (creeps |> List.map (fst >> worker))
     |> ofView
 
+/// A room floored plain from (1,1) to (48,48), one body "w" standing in it.
+let private floorWalker (start: Pos) =
+    spatial
+        []
+        [
+            for x in 1..48 do
+                for y in 1..48 -> { X = x; Y = y }, Plain
+        ]
+    |> withCreepsAt [ "w", start ]
+    |> snapshotWith [ worker "w" ]
+    |> ofView
+
+/// The tiles of a rectangle.
+let private block (xs: int list) (ys: int list) : Set<Pos> =
+    Set.ofList
+        [
+            for x in xs do
+                for y in ys -> { X = x; Y = y }
+        ]
+
+/// The ground beside a body at (27,1) on the room's first row.
+let private diggerGround =
+    Set.ofList
+        [
+            { X = 26; Y = 1 }
+            { X = 26; Y = 2 }
+            { X = 27; Y = 2 }
+            { X = 28; Y = 1 }
+            { X = 28; Y = 2 }
+        ]
+
+/// `firstStepAvoiding` from a start on the floor, tiles in and out as grid
+/// coordinates.
+let private avoidingStep (start: Pos) (avoid: Set<Pos>) (goals: Set<Pos>) : Pos option =
+    let atlas = floorWalker start
+
+    firstStepAvoiding atlas "w" avoid (RoomPos.setAt (atlasHome atlas) goals)
+    |> stepOf atlas "w"
+
 [<Tests>]
 let walkTests =
     testList
@@ -370,5 +409,116 @@ let stepPlanTests =
 
                 Expect.isSome (firstStepFor atlas "w" (Harvest "src-a")) "the step is taken"
                 Expect.isEmpty (stepPlans atlas) "and there is nothing beyond it to plan"
+            }
+
+            test "a walk round an avoid set files its own plan, both tiles off the set" {
+                // The light tick replays the second tile: a plan left by a
+                // plain flood would walk the body into the Reach it went round.
+                let atlas = floorWalker { X = 20; Y = 1 }
+                let home = atlasHome atlas
+
+                // The plain walk east files its plan first, straight through.
+                firstStepWithin atlas "w" (RoomPos.setAt home diggerGround) |> ignore
+
+                firstStepAvoiding
+                    atlas
+                    "w"
+                    (block [ 21..23 ] [ 1..2 ])
+                    (RoomPos.setAt home diggerGround)
+                |> ignore
+
+                Expect.equal
+                    (stepPlans atlas)
+                    [ "w", (at home { X = 20; Y = 2 }, at home { X = 21; Y = 3 }) ]
+                    "the step under the block and the one past its corner"
+            }
+
+            test "a walk round whose first step is the goal leaves no plan" {
+                let atlas = floorWalker { X = 20; Y = 3 }
+                let home = atlasHome atlas
+
+                firstStepAvoiding
+                    atlas
+                    "w"
+                    (block [ 21..23 ] [ 1..2 ])
+                    (RoomPos.setAt home (Set.singleton { X = 21; Y = 4 }))
+                |> ignore
+
+                Expect.isEmpty (stepPlans atlas) "nothing beyond the goal to plan"
+            }
+        ]
+
+[<Tests>]
+let firstStepAvoidingTests =
+    testList
+        "atlas firstStepAvoiding"
+        [
+            test
+                "round a 3x2 block on the edge rows to the ground beside a digger, from every tile west of it" {
+                // #522's shape: the block touches the room's first rows and
+                // the goal ground lies just past it.
+                let avoid = block [ 21..23 ] [ 1..2 ]
+
+                let misses =
+                    [
+                        for x in 15..20 do
+                            for y in 1..4 do
+                                let start = { X = x; Y = y }
+
+                                match avoidingStep start avoid diggerGround with
+                                | Some step when not (Set.contains step avoid) -> ()
+                                | step -> yield start, step
+                    ]
+
+                Expect.isEmpty misses "every start steps, and never into the block"
+
+                Expect.equal
+                    (avoidingStep { X = 20; Y = 1 } avoid diggerGround)
+                    (Some { X = 20; Y = 2 })
+                    "the edge start steps down, under the block"
+            }
+
+            test "round every small shape, to near ground and to far" {
+                let shapes =
+                    [
+                        "one tile", block [ 21 ] [ 1 ]
+                        "2x2 on the edge", block [ 21..22 ] [ 1..2 ]
+                        "3x3 on the edge", block [ 21..23 ] [ 1..3 ]
+                        "3x2 off the edge", block [ 21..23 ] [ 2..3 ]
+                        "a wall five high", block [ 21 ] [ 1..5 ]
+                    ]
+
+                let goals = [ "near", diggerGround; "far", Set.singleton { X = 40; Y = 40 } ]
+
+                let misses =
+                    [
+                        for shape, avoid in shapes do
+                            for goal, tiles in goals do
+                                match avoidingStep { X = 20; Y = 1 } avoid tiles with
+                                | Some step when not (Set.contains step avoid) -> ()
+                                | step -> yield shape, goal, step
+                    ]
+
+                Expect.isEmpty misses "a step round each, never into it"
+            }
+
+            test "to a goal tile touching the avoid set" {
+                Expect.equal
+                    (avoidingStep
+                        { X = 20; Y = 1 }
+                        (block [ 21..23 ] [ 1..2 ])
+                        (Set.singleton { X = 24; Y = 1 }))
+                    (Some { X = 20; Y = 2 })
+                    "under the block and up its far side"
+            }
+
+            test "none where the set walls the goal off, or covers it" {
+                Expect.isNone
+                    (avoidingStep { X = 20; Y = 1 } (block [ 21 ] [ 1..48 ]) diggerGround)
+                    "a wall of it from edge to edge"
+
+                Expect.isNone
+                    (avoidingStep { X = 20; Y = 1 } (block [ 25..29 ] [ 1..3 ]) diggerGround)
+                    "every goal tile inside it"
             }
         ]

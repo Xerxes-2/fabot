@@ -99,8 +99,8 @@ let private moveIntentFor
 
     // A body standing outside its room's `reach` walks round it (#472): the
     // step that never enters it, else the plain one where that stays out of
-    // it, else none — it waits at the edge. Inside it, or with none, the
-    // plain step.
+    // it, else none — it waits at the edge, planning no step for the light
+    // tick to replay. Inside it, or with none, the plain step.
     let round (reach: Set<Pos>) (avoiding: unit -> RoomPos option) (plain: unit -> RoomPos option) =
         if Set.isEmpty reach || Set.contains pos reach then
             plain ()
@@ -108,9 +108,15 @@ let private moveIntentFor
             match avoiding () with
             | Some step -> Some step
             | None ->
-                plain ()
-                |> Option.filter (fun tile ->
-                    not (tile.Room = room && Set.contains (RoomPos.pos tile) reach))
+                let step =
+                    plain ()
+                    |> Option.filter (fun tile ->
+                        not (tile.Room = room && Set.contains (RoomPos.pos tile) reach))
+
+                if step.IsNone then
+                    Atlas.dropStep atlas creep
+
+                step
 
     // The graced holder's crossing (#151), asked before the Task branches
     // because it is the one body with neither. No Seam to that room — it is

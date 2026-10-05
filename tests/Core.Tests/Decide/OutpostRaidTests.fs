@@ -2778,6 +2778,18 @@ let private beyond hostiles =
             |> withNeighbour "W1N3" { RoomLayer.empty with Terrain = floor }
     }
 
+/// A digger in the outpost and a raider beyond its north border whose Reach
+/// spans (21..29, 0..2), our guard `g-1` at (20,1) just west of it.
+let private trespassPastAReach digger =
+    beyond
+        [
+            diggerAt "W1N2" digger
+            { hostileIn "W1N3" { X = 25; Y = 47 } smallMelee with
+                Id = "h-2"
+            }
+        ]
+    |> withGuards [ guard "g-1", { X = 20; Y = 1 } ]
+
 [<Tests>]
 let killAdmissionTests =
     testList
@@ -2891,19 +2903,11 @@ let killAdmissionTests =
                     "a kill, for the two guards the raid prices"
             }
 
-            test "a trespass's killer walks round a Reach on its way" {
-                // A raider beyond the border reaches (21..23, 0..2) of the
-                // outpost; the straight walk east from (20,1) crosses it.
-                let colony =
-                    beyond
-                        [
-                            diggerAt "W1N2" { X = 27; Y = 1 }
-                            { hostileIn "W1N3" { X = 25; Y = 47 } smallMelee with
-                                Id = "h-2"
-                            }
-                        ]
-                    |> withGuards [ guard "g-1", { X = 20; Y = 1 } ]
-
+            test "a trespass's killer walks round a Reach on its way, and plans the step it takes" {
+                // A raider beyond the border reaches (21..29, 0..2) of the
+                // outpost; the straight walk east from (20,1) to the digger
+                // past it crosses it.
+                let colony = trespassPastAReach { X = 32; Y = 1 }
                 let reach = Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
 
                 Expect.contains
@@ -2923,10 +2927,36 @@ let killAdmissionTests =
                     |> List.filter (fst >> (=) "g-1")
                     |> List.map (snd >> stepFrom { X = 20; Y = 1 })
 
-                // Quirk, kept: today the walk round finds no way to this kill's
-                // ground (`Atlas.firstStepAvoiding` answers None, though one
-                // runs below the Reach), so the guard waits at the Reach's edge.
-                Expect.isEmpty steps "it waits at the edge rather than step in"
+                Expect.equal steps [ { X = 20; Y = 2 } ] "it steps down, under the Reach"
+
+                // The light tick replays the plan's second tile from its first.
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Steps)
+                    (Some(RoomPos.at "W1N2" { X = 20; Y = 2 }, RoomPos.at "W1N2" { X = 21; Y = 3 }))
+                    "its step plan is the step it issued, and the next one round"
+            }
+
+            test "a trespass's killer waits at the edge of a Reach that covers the kill's ground" {
+                // The same raider reaches every tile beside a digger at (27,1):
+                // the kill's ground less the Reach is empty, so there is no
+                // way round to it.
+                let colony = trespassPastAReach { X = 27; Y = 1 }
+                let reach = Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the guard takes the kill"
+
+                let steps =
+                    moveIntents decision.Intents
+                    |> List.filter (fst >> (=) "g-1")
+                    |> List.map (snd >> stepFrom { X = 20; Y = 1 })
+
+                Expect.isEmpty steps "it waits rather than step in"
+                Expect.isNone (Map.tryFind "g-1" decision.Steps) "and plans no step"
 
                 Expect.isFalse
                     (steps |> List.exists (fun tile -> Set.contains tile reach))
