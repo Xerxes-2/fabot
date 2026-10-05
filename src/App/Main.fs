@@ -277,7 +277,9 @@ let private writeCpuLine (readings: Observe.CpuReadings) =
     // a key, and `observe.mjs cpu` refuses such a row).
     match cpuLine with
     | Some _ -> ObserveMemory.appendCpu line
-    | None -> ObserveMemory.saveCpu line
+    | None ->
+        ObserveMemory.saveCpu line
+        ObserveMemory.dropProbe ()
 
     cpuLine <- Some line
 

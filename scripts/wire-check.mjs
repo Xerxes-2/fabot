@@ -502,7 +502,7 @@ wire("cpu: a replan's row round-trips what moved each colony's signature, and an
   );
 });
 
-wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", async () => {
+wire("cpu: the coarse spans round-trip as positional arrays, and a leaf without them reads empty", async () => {
   const { loadCpu, saveCpu } = await import(MODULE);
 
   const sample = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
@@ -513,30 +513,103 @@ wire("cpu: the coarse spans round-trip, and a leaf without them reads empty", as
   saveCpu(loadCpu());
   assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a line written before the spans keeps its ticks");
 
-  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 0, w: 0, hmin: 0, x: 0, ss: 0, sd: 0, sv: 0, sx: 0 };
+  // [f, t, n, max, sum, b, r, p, h, w, hmin, x, ss, sd, sv, sx] (#538).
+  const span = [100, 199, 100, 480.5, 2000.25, 3400, 2, 91920, 140.5, 719, 65.7, 39.5, 728.969, 2105.733, 221.267, 490.671];
 
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [span] });
   saveCpu(loadCpu());
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span]), "and one that has them round-trips key for key");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span]), "and one that has them round-trips cell for cell");
+  assert.ok(Array.isArray(globalThis.Memory.fabot.observe.cpu.spans[0]), "a plain array, not a typed one");
 
-  // A span written before #389 has no `p`; it reads as zero pops and is
-  // written back with the key, which is what "no tick of it was counted" says.
-  const { p, ...older } = span;
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [older] });
+  // A short array and a cell that is not a number each cost that span alone.
+  const bad = [span.slice(0, 15), [...span.slice(0, 7), "x", ...span.slice(8)]];
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [...bad, span] });
   saveCpu(loadCpu());
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([{ ...older, p: 0 }]), "a span without pops reads as zero");
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans), stable([span]), "the off-shape spans are dropped, the good one kept");
+});
 
-  // Present and not a number costs the span, as every other span field does.
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [sample], spans: [{ ...older, p: "x" }] });
+wire("cpu: a keyed span written before #538 is read into the positional form, so a deploy keeps the record", async () => {
+  const { loadCpu, saveCpu } = await import(MODULE);
+
+  const keyed = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 140.5, w: 719, hmin: 65.7, x: 39.5, ss: 728.969, sd: 2105.733, sv: 221.267, sx: 490.671 };
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [keyed] });
   saveCpu(loadCpu());
-  assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a span whose pops will not read is dropped");
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.spans),
+    stable([[100, 199, 100, 480.5, 2000.25, 3400, 2, 91920, 140.5, 719, 65.7, 39.5, 728.969, 2105.733, 221.267, 490.671]]),
+    "every key lands in its cell",
+  );
+
+  // A span older than #389/#391 lacks the later keys; they read as zero.
+  const older = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [older] });
+  saveCpu(loadCpu());
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.cpu.spans),
+    stable([[100, 199, 100, 480.5, 2000.25, 3400, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]]),
+    "absent later keys are zeros",
+  );
+
+  // A required key missing, or any key present and not a number, costs the span.
+  for (const off of [{ ...keyed, f: undefined }, { ...keyed, r: undefined }, { ...keyed, h: "x" }]) {
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [off, keyed] });
+    saveCpu(loadCpu());
+    assert.equal(globalThis.Memory.fabot.observe.cpu.spans.length, 1, `${JSON.stringify(off)} is dropped, its neighbour kept`);
+  }
+});
+
+wire("cpu: only the newest rows keep the per-name splits; an older row keeps its pops (#538)", async () => {
+  const { loadCpu, saveCpu, appendCpu } = await import(MODULE);
+
+  const DETAIL = 20;
+  const bare = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
+  const whole = (t) => ({
+    ...bare(t),
+    colonies: { W1N1: 0.3 },
+    rooms: { W1N1: 0.1 },
+    projects: { W1N1: 0.05 },
+    floods: { W1N1: [2, 1, 40 + t] },
+    head: 0.02,
+  });
+  const aged = (t) => ({ ...bare(t), pops: 40 + t });
+
+  // A bare row carrying `pops` round-trips, and a row with floods does not
+  // grow the key.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [aged(1), whole(2)], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks), stable([aged(1), whole(2)]), "both shapes round-trip");
+
+  // The append rewrites the row that aged out of the detail window bare.
+  // The state is what Core's fold leaves: the aged row already bare.
+  // The leaf holds ticks 1..21, the newest twenty whole; the state adds
+  // tick 22, and tick 2 has aged out of the twenty.
+  const before = [aged(1), ...Array.from({ length: DETAIL }, (_, i) => whole(i + 2))];
+  const after = [aged(1), aged(2), ...Array.from({ length: DETAIL }, (_, i) => whole(i + 3))];
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: after, spans: [] });
+  const state = loadCpu();
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: before, spans: [] });
+  appendCpu(state);
+  const rows = globalThis.Memory.fabot.observe.cpu.ticks;
+  assert.equal(rows.length, DETAIL + 2, "the newest row is pushed");
+  assert.equal(stable(rows[1]), stable(aged(2)), "the row that aged out is rewritten bare, with its pops");
+  assert.equal(stable(rows[2]), stable(whole(3)), "the oldest of the newest twenty keeps its splits");
+  assert.equal(stable(rows[DETAIL + 1]), stable(whole(DETAIL + 2)), "and so does the newest");
+});
+
+wire("probe: the reset tick's drop clears a leftover Memory.__probe (#538)", async () => {
+  const { dropProbe } = await import(MODULE);
+
+  globalThis.Memory = { __probe: { ticks: 3, to: 9, window: 300, fns: {} }, fabot: {} };
+  dropProbe();
+  assert.equal(Object.hasOwn(globalThis.Memory, "__probe"), false, "the key is gone, not set to null");
+  assert.ok(globalThis.Memory.fabot, "and nothing beside it");
 });
 
 wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", async () => {
   const { loadCpu, appendCpu } = await import(MODULE);
 
   const row = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
-  const span = (f, t, n) => ({ f, t, n, max: 1.5, sum: 1.5 * n, b: 10000, r: 0, p: 0, h: 0, w: 0, hmin: 0, x: 0, ss: 0.2 * n, sd: 0.3 * n, sv: 0.4 * n, sx: 0.5 * n });
+  const span = (f, t, n) => [f, t, n, 1.5, 1.5 * n, 10000, 0, 0, 0, 0, 0, 0, 0.2 * n, 0.3 * n, 0.4 * n, 0.5 * n];
 
   // Each state is read off a leaf through `loadCpu`, so it has Core's own
   // types (an F# list is not a JS array); the leaf is then reset to what the
@@ -576,21 +649,21 @@ wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", as
   appendCpu(opened);
   const afterOpen = globalThis.Memory.fabot.observe.cpu.spans;
   assert.equal(afterOpen.length, CAP, "the leaf stays at the cap");
-  assert.equal(afterOpen[0].f, 101, "the oldest span left");
+  assert.equal(afterOpen[0][0], 101, "the oldest span left");
   assert.equal(stable(afterOpen[CAP - 2]), stable(full[CAP - 1]), "the last closed span is kept");
-  assert.equal(afterOpen[CAP - 1].f, CAP * 100 + 1, "and the one that opened is pushed after it");
+  assert.equal(afterOpen[CAP - 1][0], CAP * 100 + 1, "and the one that opened is pushed after it");
 
   const continued = stateOf([row(1), row(2), row(3)], [...full.slice(1), span(CAP * 100 + 1, CAP * 100 + 2, 2)]);
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2)], spans: afterOpen });
   appendCpu(continued);
   const afterContinue = globalThis.Memory.fabot.observe.cpu.spans;
   assert.equal(afterContinue.length, CAP, "a continuing span adds nothing");
-  assert.equal(afterContinue[CAP - 1].t, CAP * 100 + 2, "and is rewritten in place");
+  assert.equal(afterContinue[CAP - 1][1], CAP * 100 + 2, "and is rewritten in place");
   assert.equal(stable(afterContinue[CAP - 2]), stable(full[CAP - 1]), "with the closed span beside it untouched");
 
   // A leaf whose last span slot is null or off the shape disagrees and is
   // written whole — never a throw in the loop.
-  for (const bad of [null, 7, "x", {}, { f: "4" }]) {
+  for (const bad of [null, 7, "x", {}, { f: 20001 }, ["20001"]]) {
     globalThis.Memory = rootMemoryWith("cpu", { ticks: [row(1), row(2)], spans: [span(1, 3, 3), bad] });
     appendCpu(continued);
     assert.equal(globalThis.Memory.fabot.observe.cpu.spans.length, CAP, `a last span that is ${JSON.stringify(bad)} is rewritten whole`);
@@ -602,7 +675,7 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
   const { loadCpu, saveCpu } = await import(MODULE);
 
   const base = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
-  const span = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 55.3, w: 1400, hmin: 41.3, x: 27.5, ss: 900.5, sd: 2100.25, sv: 300, sx: 700 };
+  const span = [100, 199, 100, 480.5, 2000.25, 3400, 2, 91920, 55.3, 1400, 41.3, 27.5, 900.5, 2100.25, 300, 700];
 
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: 41.3, rows: 900, ext: 27.5 }], spans: [span] });
   saveCpu(loadCpu());
@@ -615,18 +688,11 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
   saveCpu(loadCpu());
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable({ ...base, heap: 41.3, rows: 900, ext: 0 }), "a row without the off-heap size reads it as zero");
 
-  // A legacy row and span carry none of the keys; they read as zero and a
-  // zero is not written back, so the row re-encodes as itself.
-  const older = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [older] });
+  // A legacy row carries none of the keys; it reads as zero and a zero is
+  // not written back, so the row re-encodes as itself.
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [] });
   saveCpu(loadCpu());
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks[0]), stable(base), "no heap, no key");
-  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.spans[0]), stable({ ...older, p: 0, h: 0, w: 0, hmin: 0, x: 0, ss: 0, sd: 0, sv: 0, sx: 0 }), "a legacy span reads its new keys as zero");
-
-  // Present and not a number costs the span, as every other span field does.
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [base], spans: [{ ...older, h: "x" }] });
-  saveCpu(loadCpu());
-  assert.deepEqual(globalThis.Memory.fabot.observe.cpu.spans, [], "a span whose heap will not read is dropped");
 
   // And the row alike: a non-number heap costs that row and no other.
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...base, heap: "x" }, { ...base, t: 11, heap: 41.3, rows: 0 }], spans: [] });
@@ -661,15 +727,16 @@ wire("cpu: the flood counts ride the row per colony, and a malformed triple is l
 wire("cpu: a span with a field off the shape costs its span and not the line", async () => {
   const { loadCpu, saveCpu } = await import(MODULE);
 
-  const good = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2 };
+  const good = [100, 199, 100, 480.5, 2000.25, 3400, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-  for (const key of ["f", "t", "n", "max", "sum", "b", "r"]) {
-    globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [{ ...good, [key]: {} }, good] });
+  for (let i = 0; i < good.length; i++) {
+    const bad = good.map((cell, j) => (j === i ? {} : cell));
+    globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [bad, good] });
     saveCpu(loadCpu());
     const spans = globalThis.Memory.fabot.observe.cpu.spans;
 
-    assert.equal(spans.length, 1, `a span whose ${key} is not a number is dropped`);
-    assert.equal(spans[0].f, 100, "and the well-formed one beside it is kept");
+    assert.equal(spans.length, 1, `a span whose cell ${i} is not a number is dropped`);
+    assert.equal(stable(spans[0]), stable(good), "and the well-formed one beside it is kept");
   }
 });
 

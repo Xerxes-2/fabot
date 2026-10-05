@@ -1297,6 +1297,28 @@ let saveBreaches (home: string) (state: BreachState) =
     breaches?rows <- state |> breachRows |> List.map encodeBreach |> List.toArray
     writeColonyLeaf home "breaches" breaches
 
+/// The keys a coarse span was written under before #538, in the order
+/// `encodeCpuSpan` now writes its cells.
+let private cpuSpanKeys =
+    [|
+        "f"
+        "t"
+        "n"
+        "max"
+        "sum"
+        "b"
+        "r"
+        "p"
+        "h"
+        "w"
+        "hmin"
+        "x"
+        "ss"
+        "sd"
+        "sv"
+        "sx"
+    |]
+
 /// The keys one CPU row's phase group is written under, each beside the
 /// reader that answers it. One list, so the guard that admits a group and the
 /// encoder that writes one cannot come to disagree about what "all six" is.
@@ -1587,6 +1609,8 @@ let loadCpu () : CpuState =
                     // so without the check a foreign row is built, not
                     // rejected, and crowds out the window.
                     if jsTypeof raw?t = "number" && jsTypeof raw?ms = "number" then
+                        let floods = decodeCpuFloods raw
+
                         Some
                             {
                                 Tick = unbox<int> raw?t
@@ -1595,7 +1619,14 @@ let loadCpu () : CpuState =
                                 Colonies = decodeCpuSplit raw "colonies"
                                 Rooms = decodeCpuSplit raw "rooms"
                                 Projects = decodeCpuSplit raw "projects"
-                                Floods = decodeCpuFloods raw
+                                Floods = floods
+                                // Read off the split while the row has one,
+                                // and off `pops` once it has aged out of it.
+                                Pops =
+                                    if List.isEmpty floods then
+                                        numberOrZero raw "pops"
+                                    else
+                                        FloodCounts.totalPops floods
                                 HeapMb = floatOrZero raw "heap"
                                 MemoRows = numberOrZero raw "rows"
                                 ExternalMb = floatOrZero raw "ext"
@@ -1622,40 +1653,48 @@ let loadCpu () : CpuState =
                     else
                         None)
             // The coarse spans, absent from a legacy leaf: the first tick
-            // after a deploy opens the first span.
+            // after a deploy opens the first span. A span is a positional
+            // array (`encodeCpuSpan`); a keyed span, written before #538, is
+            // read into the same cells, so the deploy keeps the record. Its
+            // keys past `r` were added later still, and absent reads zero.
             Spans =
                 cpu?spans
                 |> rowsOf (fun raw ->
+                    let cells: obj[] =
+                        if JS.Constructors.Array.isArray raw then
+                            unbox raw
+                        else
+                            cpuSpanKeys
+                            |> Array.mapi (fun i key ->
+                                if i > 6 && jsTypeof raw?(key) = "undefined" then
+                                    box 0
+                                else
+                                    raw?(key))
+
                     if
-                        jsTypeof raw?f = "number"
-                        && jsTypeof raw?t = "number"
-                        && jsTypeof raw?n = "number"
-                        && jsTypeof raw?max = "number"
-                        && jsTypeof raw?sum = "number"
-                        && jsTypeof raw?b = "number"
-                        && jsTypeof raw?r = "number"
+                        cells.Length = cpuSpanKeys.Length
+                        && cells |> Array.forall (fun cell -> jsTypeof cell = "number")
                     then
+                        let cells = unbox<float[]> cells
+
                         Some
                             {
-                                From = numberOf raw "f"
-                                To = numberOf raw "t"
-                                Ticks = numberOf raw "n"
-                                Max = unbox<float> raw?max
-                                Sum = unbox<float> raw?sum
-                                Bucket = numberOf raw "b"
-                                Replans = numberOf raw "r"
-                                // Absent from a legacy span, and zero is what
-                                // that says; present and not a number costs
-                                // the span.
-                                MaxPops = numberOrZero raw "p"
-                                MaxHeapMb = floatOrZero raw "h"
-                                MaxMemoRows = numberOrZero raw "w"
-                                MinHeapMb = floatOrZero raw "hmin"
-                                MaxExternalMb = floatOrZero raw "x"
-                                SnapshotSum = floatOrZero raw "ss"
-                                DecideSum = floatOrZero raw "sd"
-                                SaveSum = floatOrZero raw "sv"
-                                ExecuteSum = floatOrZero raw "sx"
+                                From = int cells.[0]
+                                To = int cells.[1]
+                                Ticks = int cells.[2]
+                                Max = cells.[3]
+                                Sum = cells.[4]
+                                Bucket = int cells.[5]
+                                Replans = int cells.[6]
+                                MaxPops = int cells.[7]
+                                MaxHeapMb = cells.[8]
+                                MaxMemoRows = int cells.[9]
+                                MinHeapMb = cells.[10]
+                                MaxExternalMb = cells.[11]
+                                SnapshotSum = cells.[12]
+                                DecideSum = cells.[13]
+                                SaveSum = cells.[14]
+                                ExecuteSum = cells.[15]
                             }
                     else
                         None)
@@ -1705,6 +1744,11 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 
         o?floods <- split
 
+    // A row aged out of `capCpuDetail` keeps the one flood number a reader
+    // prints for every row.
+    if List.isEmpty sample.Floods && sample.Pops > 0 then
+        o?pops <- sample.Pops
+
     if sample.SweepHead > 0.0 then
         o?head <- sample.SweepHead
 
@@ -1736,27 +1780,30 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 
     o
 
-/// One coarse span on the wire: sixteen numbers under short keys, because
-/// two hundred of these ride in the same leaf as the fine ring.
-let private encodeCpuSpan (span: CpuSpan) =
-    let o = createEmpty<obj>
-    o?f <- span.From
-    o?t <- span.To
-    o?n <- span.Ticks
-    o?max <- span.Max
-    o?sum <- span.Sum
-    o?b <- span.Bucket
-    o?r <- span.Replans
-    o?p <- span.MaxPops
-    o?h <- span.MaxHeapMb
-    o?w <- span.MaxMemoRows
-    o?hmin <- span.MinHeapMb
-    o?x <- span.MaxExternalMb
-    o?ss <- span.SnapshotSum
-    o?sd <- span.DecideSum
-    o?sv <- span.SaveSum
-    o?sx <- span.ExecuteSum
-    o
+/// One coarse span on the wire: sixteen numbers in a positional array, because
+/// two hundred of these ride in the same leaf as the fine ring and their keys
+/// were half of it (#538). The order is `observe.mjs`'s `SPAN_FIELDS`.
+let private encodeCpuSpan (span: CpuSpan) : obj =
+    // Boxed, so Fable emits a plain array and not a `Float64Array`.
+    box
+        [|
+            box span.From
+            box span.To
+            box span.Ticks
+            box span.Max
+            box span.Sum
+            box span.Bucket
+            box span.Replans
+            box span.MaxPops
+            box span.MaxHeapMb
+            box span.MaxMemoRows
+            box span.MinHeapMb
+            box span.MaxExternalMb
+            box span.SnapshotSum
+            box span.DecideSum
+            box span.SaveSum
+            box span.ExecuteSum
+        |]
 
 let saveCpu (state: CpuState) =
     let cpu = createEmpty<obj>
@@ -1812,6 +1859,15 @@ let appendCpu (state: CpuState) =
 
             emitJsStatement (rows, encodeCpuSample newest) "$0.push($1)"
 
+            // The row that aged out of `capCpuDetail` this tick is rewritten
+            // bare, as the fold left it; the rows before it already are.
+            let aged = count - capCpuDetail
+
+            if aged >= 0 then
+                emitJsStatement
+                    (rows, aged, encodeCpuSample (List.item aged state.Ticks))
+                    "$0[$1] = $2"
+
             // The coarse spans ride the same append: the open span is
             // rewritten every tick and a span that just opened is pushed.
             // Before this, `spans` was written by `saveCpu` alone, once per
@@ -1831,8 +1887,8 @@ let appendCpu (state: CpuState) =
                 let continues =
                     held > 0
                     && not (isNull rows.[held - 1])
-                    && jsTypeof rows.[held - 1]?f = "number"
-                    && unbox<int> rows.[held - 1]?f = open'.From
+                    && JS.Constructors.Array.isArray rows.[held - 1]
+                    && unbox<int> rows.[held - 1]?("0") = open'.From
 
                 if continues && held = count + 1 then
                     emitJsStatement (spans, held - 1, encodeCpuSpan open') "$0[$1] = $2"
@@ -1853,3 +1909,10 @@ let appendCpu (state: CpuState) =
         else
             saveCpu state
     | _ -> saveCpu state
+
+/// The live-probe tool's sums (`scripts/probe.mjs`), dropped on the tick after
+/// a global reset: a clean bundle never writes them again, and every tick's
+/// Memory parse paid for them after the probe was undone (#538). A probed
+/// bundle writes them after this, in the wrapper around `loop`.
+let dropProbe () =
+    emitJsStatement Memory "delete $0.__probe"

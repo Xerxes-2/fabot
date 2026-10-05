@@ -146,6 +146,81 @@ smoke("cpuprofile names a function it cannot find", () => {
   assert.ok(!crashed(err) && err.includes("no node named absent"), err);
 });
 
+// ---- observe.mjs cpu, offline -------------------------------------------
+
+// The CPU line as the bundle writes it since #538: only the newest twenty
+// rows carry the per-name splits, an older row keeps its `pops`, and a span
+// is a positional array. Read off a Memory dump (`OBSERVE_MEMORY`).
+const cpuRow = (t) => ({
+  t,
+  ms: 50 + t,
+  entry: 0.1,
+  snapshot: 10,
+  decide: 30,
+  save: 2,
+  execute: 8,
+  intents: 90,
+  bucket: 9000,
+  replans: 0,
+  heap: 80.5,
+  rows: 700,
+  ext: 39.2,
+});
+const cpuMemory = {
+  fabot: {
+    observe: {
+      cpu: {
+        ticks: [
+          ...Array.from({ length: 5 }, (_, i) => ({ ...cpuRow(i + 1), pops: 9001 + i })),
+          // One light tick among the newest twenty decides nothing and
+          // carries no split; the breakdowns count it.
+          ...Array.from({ length: 20 }, (_, i) =>
+            i === 10
+              ? { ...cpuRow(i + 6), light: true }
+              : {
+                  ...cpuRow(i + 6),
+                  colonies: { W1N1: 20.5 },
+                  rooms: { W1N1: 0.9, W1N2: 0.1 },
+                  projects: { W1N1: 1.2 },
+                  floods: { W1N1: [5, 5, 4000 + i] },
+                  head: 4.5,
+                },
+          ),
+        ],
+        spans: [
+          { f: 1, t: 100, n: 100, max: 90, sum: 5000, b: 9500, r: 0, p: 8000, h: 80, w: 700, hmin: 60, x: 39, ss: 1000, sd: 3000, sv: 200, sx: 800 },
+          [101, 125, 25, 480.5, 1875.25, 9000, 1, 9020, 80.5, 700, 65.7, 39.2, 250, 750, 50, 200],
+        ],
+      },
+    },
+  },
+};
+const cpuMemoryPath = join(dir, "cpu-memory.json");
+writeFileSync(cpuMemoryPath, JSON.stringify(cpuMemory));
+const runOffline = (args) => {
+  const res = spawnSync(process.execPath, [script("observe.mjs"), ...args], {
+    env: { ...process.env, SCREEPS_TOKEN: "", OBSERVE_MEMORY: cpuMemoryPath },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  return { code: res.status, out: res.stdout, err: res.stderr };
+};
+
+smoke("observe cpu reads the trimmed rows and the positional spans (#538)", () => {
+  const { code, out, err } = runOffline(["cpu", "--all"]);
+  assert.equal(code, 0, err);
+  assert.ok(!crashed(err), err);
+  assert.match(out, /^ {3}1 {4}51\.000 .* 9001 /m, "an aged row prints its pops");
+  assert.match(out, /mean ms over 25 split rows/);
+  assert.match(out, /snapshot split over 19 rows: head 4\.50 ms {2}rooms 1\.00 {2}projections 1\.20/);
+  assert.match(out, /decide by colony over 19 attributed rows \(of the newest 20 split rows\):\n {2}W1N1 {2}mean 20\.50 ms/);
+  assert.match(out, /snapshot by room over 19 attributed rows \(of the newest 20 split rows\)/);
+  assert.match(out, /floods by colony over 19 counted rows \(of the newest 20 split rows\)/);
+  assert.match(out, /the long record: 2 spans over 125 ticks, t1-125/, "a keyed span and a positional one both read");
+  assert.match(out, /worst single tick 480\.5 ms in t101-125/);
+  assert.match(out, /max {2}481 ms {2}mean {2}75 ms {2}bucket floor {3}9000 {2}replans 1 {2}max pops {3}9020/);
+});
+
 // ---- probe.mjs ----------------------------------------------------------
 
 // The anchors the wrapper needs, as esbuild writes top-level functions.

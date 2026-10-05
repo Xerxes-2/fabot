@@ -109,6 +109,18 @@ let cpuSpanTests =
                 | other -> failtest $"expected one open span, got %A{other}"
             }
 
+            test "a span's sums are kept to the microsecond, as its ticks are (#538)" {
+                // A float sum of microseconds carries noise digits Memory pays for two
+                // hundred times over.
+                let state = folded [ 1, costing 0.1; 2, costing 0.2 ]
+
+                match state.Spans with
+                | [ span ] ->
+                    Expect.equal span.Sum 0.3 "the total, not 0.30000000000000004"
+                    Expect.equal span.SnapshotSum 0.3 "and each phase's sum likewise"
+                | other -> failtest $"expected one open span, got %A{other}"
+            }
+
             test "a span keeps the lowest bucket it saw" {
                 // A span whose floor is the full 10,000 never spent more than the
                 // allowance; one whose floor is near zero is the shape an outage leaves
@@ -214,6 +226,49 @@ let cpuTests =
                     (line state)
                     [ 3, 3.0; 4, 4.0; 5, 5.0 ]
                     "the oldest rows fall off the front, the sibling channels' convention"
+            }
+
+            test
+                "only the newest rows keep the per-name splits, and an older row keeps its pops (#538)" {
+                // The per-room map was most of the leaf; a reader breaks a window down by
+                // name over the rows it prints, and reads the older rows' totals.
+                let detailed tick =
+                    { costing 20.0 with
+                        AtEntry = 1.0
+                        AtRooms = 2.0
+                        AtProjects = 10.0
+                        ColonyDecides = [ "W12S28", 18.0 ]
+                        RoomSnapshots = [ "W12S28", 3.0 ]
+                        ColonyProjects = [ "W12S28", 11.0 ]
+                        ColonyFloods =
+                            [
+                                "W12S28",
+                                {
+                                    Floods = 2
+                                    Free = 1
+                                    Pops = 100 + tick
+                                }
+                            ]
+                    }
+
+                let state = folded [ for tick in 1 .. capCpuDetail + 1 -> tick, detailed tick ]
+
+                let bare (sample: CpuSample) =
+                    List.isEmpty sample.Colonies
+                    && List.isEmpty sample.Rooms
+                    && List.isEmpty sample.Projects
+                    && List.isEmpty sample.Floods
+                    && sample.SweepHead = 0.0
+
+                Expect.equal
+                    (state.Ticks |> List.map bare)
+                    (true :: List.replicate capCpuDetail false)
+                    "the oldest row is bare and the newest capCpuDetail are whole"
+
+                Expect.equal
+                    (state.Ticks |> List.map (fun sample -> sample.Pops))
+                    [ for tick in 1 .. capCpuDetail + 1 -> 100 + tick ]
+                    "every row keeps its tick's total pops"
             }
 
             test "a cost is kept to the microsecond" {
@@ -620,6 +675,7 @@ let cpuTests =
                                     SweepHead = 0.0
                                     Projects = []
                                     Floods = []
+                                    Pops = 0
                                     HeapMb = 0.0
                                     ExternalMb = 0.0
                                     MemoRows = 0

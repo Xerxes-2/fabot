@@ -1641,6 +1641,9 @@ type CpuSample =
         /// What each colony's decision flooded, differenced the way `Colonies`
         /// is; empty for a legacy row.
         Floods: (string * FloodCounts) list
+        /// The tick's pops over every colony: what the row keeps of `Floods`
+        /// once it ages out of `capCpuDetail`.
+        Pops: int
         /// Used heap in MB and memo table rows as the tick ended (#391); zero
         /// for a legacy row.
         HeapMb: float
@@ -1724,6 +1727,11 @@ module CpuState =
 /// rows that is a twentieth of the mean, at a hundred it is a percent.
 let capCpuTicks = 100
 
+/// How many of the newest rows keep the per-name splits (colonies, rooms,
+/// projections, floods): the rows `observe cpu` prints by default. The
+/// per-room map on every row of the ring was most of the leaf (#538).
+let capCpuDetail = 20
+
 /// How many ticks one coarse span covers, and how many spans are kept: 20,000
 /// ticks, which at the live rate of about 1,120 ticks an hour is five hours.
 let spanTicks = 100
@@ -1735,6 +1743,37 @@ let capCpuSpans = 200
 /// microsecond is finer than the profiler's own 100µs sampling interval, so
 /// nothing a reader could act on is rounded away.
 let private toMicrosecond (ms: float) = floor (ms * 1000.0 + 0.5) / 1000.0
+
+/// Whether a row carries none of the per-name splits `capCpuDetail` keeps.
+let private isBare (sample: CpuSample) =
+    List.isEmpty sample.Colonies
+    && List.isEmpty sample.Rooms
+    && List.isEmpty sample.Projects
+    && List.isEmpty sample.Floods
+    && sample.SweepHead = 0.0
+
+/// The ring with the row that just left the newest `capCpuDetail` made bare.
+/// One row leaves a tick, and only it is rebuilt; a line loaded whole from an
+/// older leaf keeps its older rows' splits until the ring shifts them off.
+let private ageOutDetail (rows: CpuSample list) =
+    let leaving = List.length rows - capCpuDetail - 1
+
+    if leaving < 0 then
+        rows
+    else
+        match List.splitAt leaving rows with
+        | before, sample :: after when not (isBare sample) ->
+            let bare =
+                { sample with
+                    Colonies = []
+                    Rooms = []
+                    SweepHead = 0.0
+                    Projects = []
+                    Floods = []
+                }
+
+            before @ (bare :: after)
+        | _ -> rows
 
 /// The CPU line's fold: this tick's cost joins the ring and the newest `cap`
 /// rows survive. No change detection: a quiet tick still writes, the point
@@ -1817,7 +1856,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     To = tick
                     Ticks = open'.Ticks + 1
                     Max = max open'.Max ms
-                    Sum = open'.Sum + ms
+                    Sum = toMicrosecond (open'.Sum + ms)
                     Bucket = min open'.Bucket readings.Bucket
                     Replans = open'.Replans + readings.Replans
                     MaxPops = max open'.MaxPops pops
@@ -1825,10 +1864,10 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     MaxMemoRows = max open'.MaxMemoRows readings.MemoRows
                     MinHeapMb = floorOf open'.MinHeapMb heap
                     MaxExternalMb = max open'.MaxExternalMb external
-                    SnapshotSum = open'.SnapshotSum + phases.Snapshot
-                    DecideSum = open'.DecideSum + phases.Decide
-                    SaveSum = open'.SaveSum + phases.Save
-                    ExecuteSum = open'.ExecuteSum + phases.Execute
+                    SnapshotSum = toMicrosecond (open'.SnapshotSum + phases.Snapshot)
+                    DecideSum = toMicrosecond (open'.DecideSum + phases.Decide)
+                    SaveSum = toMicrosecond (open'.SaveSum + phases.Save)
+                    ExecuteSum = toMicrosecond (open'.ExecuteSum + phases.Execute)
                 }
             ]
         | _ ->
@@ -1868,6 +1907,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     SweepHead = toMicrosecond (readings.AtRooms - readings.AtEntry)
                     Projects = projects
                     Floods = floods
+                    Pops = pops
                     HeapMb = heap
                     MemoRows = readings.MemoRows
                     ExternalMb = external
@@ -1877,6 +1917,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                 }
             ]
             |> trim cap
+            |> ageOutDetail
         Spans = spans
     }
 

@@ -81,6 +81,7 @@
 // `Colony.declared`, so "first" is the first home the bot wrote a leaf for,
 // which is declaration order because the loop writes in it.
 import { connect, fail } from "./screeps-api.mjs";
+import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-history.mjs";
 import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
@@ -206,9 +207,14 @@ if (command === "health" && !(samples >= 2 && samples <= 30)) {
   fail("health --samples K takes an integer from 2 to 30: one sample cannot show a creep standing still");
 }
 
-const { api, shard, url } = await connect();
+// A Memory dump read in place of the server (`cli-smoke.mjs`): with
+// `OBSERVE_MEMORY=<file.json>` every Memory path is read off the file, so the
+// commands that read Memory alone (`cpu`, `probe`) print offline.
+const offline = process.env.OBSERVE_MEMORY;
+const { api, shard, url } = offline ? {} : await connect();
 
 const memoryGet = async (path) => {
+  if (offline) return path.split(".").reduce((node, key) => node?.[key], JSON.parse(readFileSync(offline, "utf8")));
   const res = await api.userMemoryGet(path, shard).catch((err) => {
     fail(`memory read failed: ${err.message ?? err}`);
   });
@@ -270,6 +276,10 @@ const raidLeaf = () => colonyLeaf("raids");
 
 // How many CPU rows `cpu` prints without `--all`.
 const CPU_ROWS = 20;
+
+// How many of the newest rows carry the per-name splits: Core's
+// `capCpuDetail` (#538).
+const CPU_DETAIL = 20;
 
 // The CPU line's rows that carry a tick and a total; `cpu` and `health`
 // read the same rows.
@@ -2060,7 +2070,11 @@ if (command === "console") {
   // ---- cpu: the per-tick CPU line ---------------------------------------
 
   // The wire shape written by ObserveMemory.fs:
-  //   { ticks: [{ t, ms, entry?, snapshot?, decide?, save?, execute?, intents? }] }
+  //   { ticks: [{ t, ms, entry?, snapshot?, decide?, save?, execute?, intents? }],
+  //     spans: [[f, t, n, max, sum, b, r, p, h, w, hmin, x, ss, sd, sv, sx]] }
+  // Only the newest twenty rows carry the per-name splits (`colonies`,
+  // `rooms`, `projects`, `floods`, `head`); an older row keeps `pops` (#538),
+  // so the breakdowns below are over the rows that carry them.
   // One row per tick the loop finished, oldest first, capped at the ring
   // Core keeps (ADR 0041). The tick number rides each row because the
   // window is only as long as the ticks in it: a tick that threw before
@@ -2199,9 +2213,11 @@ if (command === "console") {
     // shows in the mean. A legacy row has neither key and prints the dash.
     const numberCell = (row, key, digits) =>
       typeof row[key] === "number" ? row[key].toFixed(digits).padStart(8) : absent;
+    // A row older than the newest twenty carries its pops alone (#538).
     const popsCell = (row) => {
       const counted = floodsOf(row);
-      return counted ? String(counted.pops).padStart(8) : absent;
+      if (counted) return String(counted.pops).padStart(8);
+      return typeof row.pops === "number" ? String(row.pops).padStart(8) : absent;
     };
     const tail = (row) => [
       popsCell(row),
@@ -2317,15 +2333,17 @@ if (command === "console") {
       // measured on the wrong shape, #332's keeper mask reading 0.00% on the
       // one harness world with no keeper room.
       //
-      // The rows that carry no split are counted rather than dropped, for
-      // `KIND`'s reason: a reader that silently ignored them would report a
-      // window of four rows as a window of a hundred, and the deployed bundle
-      // predating this reading is the ordinary case for the first hundred ticks
-      // after every upload.
+      // Only the newest `CPU_DETAIL` rows can carry a per-name split (#538),
+      // so a breakdown is read against those: the rows among them that carry
+      // none (a light tick, or a bundle predating the reading) are counted
+      // rather than dropped, for `KIND`'s reason — a reader that silently
+      // ignored them would report a window of four rows as one of twenty.
       // One reader for both splits, because they are the same shape under two
       // keys: the colonies' share of `decide` and the rooms' share of
       // `snapshot` (#370). Written once rather than twice for the reason the
       // writer gives — a second copy is where the two drift apart.
+      const recent = ticks.slice(-CPU_DETAIL).filter(isSplit);
+      const ofRecent = (n) => (n < recent.length ? ` (of the newest ${recent.length} split rows)` : "");
       const attributedBy = (key) =>
         split.filter((row) => row[key] && Object.keys(row[key]).length);
       const report = (key, label, phase, footer) => {
@@ -2340,7 +2358,7 @@ if (command === "console") {
         const names = [...new Set(rows.flatMap((row) => Object.keys(row[key])))];
         console.log(
           `${phase} by ${label} over ${rows.length} attributed row${rows.length === 1 ? "" : "s"}` +
-            `${rows.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+            `${ofRecent(rows.length)}:`,
         );
         for (const name of names) {
           const ms = rows
@@ -2404,7 +2422,7 @@ if (command === "console") {
         const homes = [...new Set(counted.flatMap((row) => Object.keys(row.floods)))];
         console.log(
           `floods by colony over ${counted.length} counted row${counted.length === 1 ? "" : "s"}` +
-            `${counted.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+            `${ofRecent(counted.length)}:`,
         );
         for (const home of homes) {
           const triples = counted.map((row) => row.floods[home]).filter(isTriple);
@@ -2462,7 +2480,7 @@ if (command === "console") {
             .map((row) => row.colonies[home]);
         console.log(
           `decide by colony over ${attributed.length} attributed row${attributed.length === 1 ? "" : "s"}` +
-            `${attributed.length < split.length ? ` (of ${split.length} split)` : ""}:`,
+            `${ofRecent(attributed.length)}:`,
         );
         for (const home of homes) {
           const ms = spent(home);
@@ -2511,7 +2529,20 @@ if (command === "console") {
     // `max` leads because the engine's per-tick ceiling is a wall: a tick over
     // 500 ms is terminated whatever the bucket holds, so the first question is
     // never the average.
-    const spans = Array.isArray(stored.spans) ? stored.spans.filter((s) => s && typeof s.max === "number") : [];
+    //
+    // A span is a positional array (#538), in `SPAN_FIELDS` order, read here
+    // into the keyed shape the lines below were written against. A keyed
+    // span is what a bundle before #538 wrote, and still reads.
+    const SPAN_FIELDS = ["f", "t", "n", "max", "sum", "b", "r", "p", "h", "w", "hmin", "x", "ss", "sd", "sv", "sx"];
+    const spanOf = (s) =>
+      Array.isArray(s)
+        ? s.length === SPAN_FIELDS.length && s.every((cell) => typeof cell === "number")
+          ? Object.fromEntries(SPAN_FIELDS.map((key, i) => [key, s[i]]))
+          : null
+        : s;
+    const spans = Array.isArray(stored.spans)
+      ? stored.spans.map(spanOf).filter((s) => s && typeof s.max === "number")
+      : [];
 
     if (spans.length > 0) {
       const worst = spans.reduce((a, b) => (b.max > a.max ? b : a));
