@@ -4507,10 +4507,14 @@ let arenaBorderTests =
                         [ "W17S25" ]
                         $"{ranger} holds home while Wraith403 lives\n{failure}"
 
+                // Moved 2026-10-06 (#550's ranger row, live t981,500): the
+                // other resident is called to W17S26's 23C23M hauler the guard
+                // there cannot catch, where it used to stay home because the
+                // guard of W17S25's held the kill.
                 Expect.equal
                     (roomsOf "ranger-971130-Spawn3" trace)
-                    [ "W17S25" ]
-                    $"one resident never leaves\n{failure}"
+                    [ "W17S25"; "W17S26" ]
+                    $"the other resident is called to W17S26's hauler\n{failure}"
 
                 Expect.isNonEmpty
                     (crossingsInto "ranger-971410-Spawn3" "W18S25" trace)

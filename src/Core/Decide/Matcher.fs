@@ -411,9 +411,18 @@ let matchCreeps
                       Some creep -> Some(creep, pooled, room)
                     | _ -> None)
 
+            // Held by a body of this colony: the table is the shard's, and
+            // another colony's guard on the same room's kill — one that
+            // cannot catch what our ranger is called for — left our call
+            // unmade (live t981,500, W17S26's haulers).
             recalls
             |> List.filter (fun (kill, _, _) ->
-                not (assignments |> Map.exists (fun _ tid -> tid = taskId kill.Task)))
+                not (
+                    assignments
+                    |> Map.exists (fun name tid ->
+                        tid = taskId kill.Task
+                        && view.Creeps |> List.exists (fun c -> c.Name = name))
+                ))
             |> List.fold
                 (fun (taken: Set<string>) (chase, killRoom, recall) ->
                     holders
