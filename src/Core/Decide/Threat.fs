@@ -1298,8 +1298,9 @@ let private kiteGroundIn
 
 /// The [[defender]]'s ground in the home (#504), off this tick's raid at the
 /// line: every perimeter rampart of ours beside a raid body that no other
-/// creep of ours stands on — the mother's lent residents among them
-/// (`ColonyView.Foreign`) — or, with none beside one, those nearest the raid.
+/// body stands on — the mother's lent residents and an ally on a public
+/// rampart among them (`ColonyView.Foreign`) — or, with none beside one,
+/// those nearest the raid.
 let private defendGroundOf (view: ColonyView) (atLine: HostileInfo list) : Set<RoomPos> option =
     match atLine with
     | [] -> None

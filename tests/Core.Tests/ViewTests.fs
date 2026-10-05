@@ -1043,6 +1043,42 @@ let colonyViewTests =
                     "and is carried as another colony's occupant instead (#220)"
             }
 
+            test "a hostile's and an ally's creep are bodies no colony of ours can move" {
+                // #536: an invader rooted on an anchor's step was free ground
+                // to the flood and to arbitration, and the anchor stepped into
+                // it for 230 ticks. Every body not ours stands on occupied
+                // ground, an ally's as much as an enemy's.
+                let stranger id owner (x, y) : HostileInfo =
+                    {
+                        Id = id
+                        Owner = owner
+                        Pos = RoomPos.at child { X = x; Y = y }
+                        Body = [ Move ]
+                        Hits = Engine.partHits
+                        TicksToLive = 1000
+                    }
+
+                let invader = stranger "invader" "Invader" (10, 10)
+                let ally = stranger "ally" "Odiodin" (11, 10)
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.change
+                                child
+                                (Option.map (fun facts ->
+                                    { facts with
+                                        Hostiles = [ invader; ally ]
+                                    }))
+                    }
+
+                Expect.equal
+                    (viewOf world child).Foreign
+                    (Set.ofList [ RoomPos.at child pioneerTile; invader.Pos; ally.Pos ])
+                    "the mother's pioneer, the invader and the ally alike"
+            }
+
             // The Brief's S7: what a raid beside the child's home may call.
             test "a child carries her mother's bodies at home as lendable, a mother none" {
                 Expect.equal

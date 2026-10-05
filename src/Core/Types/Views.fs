@@ -289,8 +289,9 @@ type ColonyView =
         /// The [[stage]] of every room that is a colony of ours this tick
         /// (`World.stages`), the same map handed to every colony.
         Stages: Map<string, ColonyStage>
-        /// Where **other colonies'** creeps stand in the rooms this colony
-        /// works: bodies it does not hold and cannot move.
+        /// Where every creep this colony does not hold stands in the rooms it
+        /// works — other colonies' of ours, hostiles' and allies': bodies it
+        /// cannot move.
         Foreign: Set<RoomPos>
         /// For a child, its mother's bodies standing in its home, and where:
         /// the residents she keeps there (#447), whom a raid beside the home
@@ -1245,6 +1246,11 @@ module ColonyView =
                     |> Map.toList
                     |> List.filter (fun (name, _) -> not (Set.contains name names))
                     |> List.map (snd >> RoomPos.at room))
+                // Hostiles and allies alike (#536): a body rooted on a step is
+                // one the engine refuses every tick, armed or not.
+                |> List.append (
+                    collected (fun facts -> facts.Hostiles) |> List.map (fun h -> h.Pos)
+                )
                 |> Set.ofList
             Lendable =
                 match colony.Mother with
