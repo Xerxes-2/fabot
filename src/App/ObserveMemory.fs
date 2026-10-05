@@ -1022,9 +1022,12 @@ let loadRaids (home: string) : RaidState =
         })
 
 /// Write one colony's Raid log back under
-/// `Memory.fabot.observe.colonies.<home>.raids`.
-let saveRaids (home: string) (state: RaidState) =
+/// `Memory.fabot.observe.colonies.<home>.raids`, with the colony's declared
+/// outpost names beside it (#162): write-only, so `observe.mjs outposts` can
+/// name an outpost the log holds no row for.
+let saveRaids (home: string) (declared: string list) (state: RaidState) =
     let raids = createEmpty<obj>
+    raids?declared <- declared |> List.toArray
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
     raids?outposts <- state.Outposts |> List.map encodeOutpost |> List.toArray
     // The three per-room maps: none has a window, expiry or basis, so each

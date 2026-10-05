@@ -758,7 +758,7 @@ let private fullTick
             { state with
                 HaulOverflow = decision.HaulOverflow
             }
-        |> ObserveMemory.saveRaids colony.Home
+        |> ObserveMemory.saveRaids colony.Home (colony.Outposts |> List.map _.RoomName)
 
         // The Layout's channel, written every tick, empty or not. The refused
         // declarations come off the view and not the memo: they are the

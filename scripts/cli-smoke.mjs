@@ -221,6 +221,53 @@ smoke("observe cpu reads the trimmed rows and the positional spans (#538)", () =
   assert.match(out, /max {2}481 ms {2}mean {2}75 ms {2}bucket floor {3}9000 {2}replans 1 {2}max pops {3}9020/);
 });
 
+// ---- observe.mjs outposts, offline ---------------------------------------
+
+// #162: an outpost the log never shut is named off the declared list the
+// bundle writes beside the ring. `OBSERVE_TIME` stands in for the server clock.
+const raidsMemory = (raids) => {
+  const file = join(dir, `raids-${Math.random().toString(36).slice(2)}.json`);
+  writeFileSync(file, JSON.stringify({ fabot: { observe: { colonies: { W1N1: { raids } } } } }));
+  return file;
+};
+const runOutposts = (file, args = []) => {
+  const res = spawnSync(process.execPath, [script("observe.mjs"), "outposts", ...args], {
+    env: { ...process.env, SCREEPS_TOKEN: "", OBSERVE_MEMORY: file, OBSERVE_TIME: "1000" },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  return { code: res.status, out: res.stdout, err: res.stderr };
+};
+const quietRaids = { episodes: [], outposts: [], rivalHeld: {}, holds: {} };
+
+smoke("observe outposts names a declared outpost the log never shut (#162)", () => {
+  const file = raidsMemory({
+    ...quietRaids,
+    outposts: [{ room: "W2N1", opened: 10, last: 20, expiry: 5000, basis: "collapse-timer" }],
+    declared: ["W1N2", "W2N1"],
+  });
+  const { code, out, err } = runOutposts(file);
+  assert.equal(code, 0, err);
+  assert.match(out, /^W1N2 {2}open: declared/m, "the never-shut outpost has a line");
+  assert.doesNotMatch(out, /^W2N1 {2}open/m, "a shut outpost is not also called open");
+  assert.doesNotMatch(out, /is not named above/);
+  const json = JSON.parse(runOutposts(file, ["--json"]).out);
+  assert.deepEqual(json.declared, ["W1N2", "W2N1"]);
+});
+
+smoke("observe outposts on a leaf with no declared list says what it cannot name", () => {
+  const { code, out, err } = runOutposts(raidsMemory(quietRaids));
+  assert.equal(code, 0, err);
+  assert.match(out, /is not named above/);
+});
+
+smoke("observe outposts refuses a declared list off its shape", () => {
+  const { code, err } = runOutposts(raidsMemory({ ...quietRaids, declared: [7] }));
+  assert.equal(code, 1, err);
+  assert.ok(!crashed(err), err);
+  assert.ok(err.includes("declared"), err);
+});
+
 // ---- probe.mjs ----------------------------------------------------------
 
 // The anchors the wrapper needs, as esbuild writes top-level functions.

@@ -15,7 +15,7 @@
 //   observe.mjs raids              the Raid log's episodes, newest first, and each
 //                                  assault room's probe: safe mode raised at tick T
 //                                  after N dismantle hits, and its fate (#493)
-//   observe.mjs outposts           every outpost the Raid log knows: shut or
+//   observe.mjs outposts           every declared outpost (#162): shut or
 //                                  open right now, the tick a stand-down runs
 //                                  to, the deadline that tick was read off, the
 //                                  rooms another player took, shut by no clock,
@@ -209,7 +209,8 @@ if (command === "health" && !(samples >= 2 && samples <= 30)) {
 
 // A Memory dump read in place of the server (`cli-smoke.mjs`): with
 // `OBSERVE_MEMORY=<file.json>` every Memory path is read off the file, so the
-// commands that read Memory alone (`cpu`, `probe`) print offline.
+// commands that read Memory alone (`cpu`, `probe`) print offline, and
+// `outposts` too, its clock read off `OBSERVE_TIME`.
 const offline = process.env.OBSERVE_MEMORY;
 const { api, shard, url } = offline ? {} : await connect();
 
@@ -1158,13 +1159,31 @@ if (command === "console") {
   // game clock runs on — every stand-down would read as still running.
   // Unreadable is fatal, because "shut or open" has no answer without it
   // and the answer it would default to is "open".
-  const clock = await api.gameTime(shard).catch((err) => {
-    fail(`game time read failed: ${err.message ?? err}`);
-  });
-  if (clock.ok !== 1 || typeof clock.time !== "number") {
+  const clock = offline
+    ? { ok: 1, time: Number(process.env.OBSERVE_TIME) }
+    : await api.gameTime(shard).catch((err) => {
+        fail(`game time read failed: ${err.message ?? err}`);
+      });
+  if (clock.ok !== 1 || typeof clock.time !== "number" || Number.isNaN(clock.time)) {
     fail(`game time read failed: ${JSON.stringify(clock)}`);
   }
   const now = clock.time;
+
+  // The colony's declared outposts, written beside the ring since #162 so a
+  // room the log has never shut can still be named. Lenient on absence — a
+  // bundle before #162 writes none, and the footnote below says what that
+  // costs — and strict on shape, for the reason every family above is.
+  if (
+    stored.declared !== undefined &&
+    !(Array.isArray(stored.declared) && stored.declared.every((room) => typeof room === "string"))
+  ) {
+    fail(
+      `the Raid log at Memory.fabot.observe.colonies.${home}.raids carries a \`declared\` ` +
+        `entry that is not a list of room names: ${JSON.stringify(stored.declared)} — the leaf ` +
+        "was hand-edited, or its wire shape has moved.",
+    );
+  }
+  const declared = stored.declared ?? null;
 
   // The basis vocabulary exactly as `standDownBasisName` spells it on the
   // wire (Core's Types.fs), one clause each: "shut until 172,783" and "shut
@@ -1312,6 +1331,8 @@ if (command === "console") {
           // are different answers, and one of them means the guard row is
           // still reading vision alone.
           threatened: stored.threatened ?? null,
+          // `null` for a bundle before #162, which does not write the list.
+          declared,
         },
         null,
         2,
@@ -1539,19 +1560,32 @@ if (command === "console") {
       }
     }
 
-    // The rooms this command cannot name. The declared outposts are a
-    // constant in Core a human moves (ADR 0041) and no Memory leaf carries
-    // them, so a room that has never stood down has no row here and cannot
-    // be listed as open — said out loud rather than left to be read as
-    // "these are all of them".
-    console.log(
-      "rows are the stand-downs the log holds, and the holds beside them are the rooms last " +
-        "seen under somebody else's reservation;",
-    );
-    console.log(
-      "a declared outpost that has never been shut and is ours to reserve has neither, and " +
-        "is not named above.",
-    );
+    // Every declared outpost the lines above did not name: no stand-down
+    // row, no latch and no standing hold, so the room is open and ours to
+    // reserve (#162).
+    if (declared !== null) {
+      const named = new Set([...rows.map((row) => row.room), ...heldRooms, ...reservedRooms]);
+      const quiet = declared.filter((room) => !named.has(room)).sort();
+      for (const room of quiet) {
+        console.log(`${room}  open: declared, and the log holds no stand-down or hold for it`);
+      }
+      if (quiet.length > 0) console.log("");
+      console.log(
+        `every outpost ${home} declares is named above (${declared.length} declared).`,
+      );
+    } else {
+      // A bundle before #162 writes no declared list, so a room that has
+      // never stood down has no row here and cannot be listed as open — said
+      // out loud rather than left to be read as "these are all of them".
+      console.log(
+        "rows are the stand-downs the log holds, and the holds beside them are the rooms last " +
+          "seen under somebody else's reservation;",
+      );
+      console.log(
+        "a declared outpost that has never been shut and is ours to reserve has neither, and " +
+          "is not named above (the deployed bundle writes no declared list).",
+      );
+    }
     console.log("");
 
     console.log(

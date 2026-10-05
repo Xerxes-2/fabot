@@ -57,10 +57,11 @@ const wire = (name, run) => cases.push({ name, run });
 
 // Load a raids leaf and write it straight back: what comes out is what
 /// survived the read, in the encoder's own words.
-const raidsThrough = async (value) => {
+const raidsThrough = async (value, declared = []) => {
   const { loadRaids, saveRaids } = await import(MODULE);
+  const { ofArray } = await import(LIST);
   globalThis.Memory = memoryWith("raids", value);
-  saveRaids(home, loadRaids(home));
+  saveRaids(home, ofArray(declared), loadRaids(home));
   return globalThis.Memory.fabot.observe.colonies[home].raids;
 };
 
@@ -79,6 +80,7 @@ const emptyRaids = {
   living: [],
   placed: {},
   hits: {},
+  declared: [],
 };
 
 const episode = {
@@ -130,6 +132,11 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
   };
 
   assert.equal(stable(await raidsThrough(full)), stable(full));
+});
+
+wire("raids: the declared outposts (#162) are written beside the ring, the leaf's own never read back", async () => {
+  const written = await raidsThrough({ ...emptyRaids, declared: ["W9N9"] }, ["W1N2", "W2N1"]);
+  assert.deepEqual(written.declared, ["W1N2", "W2N1"]);
 });
 
 wire("raids: #275's null latch costs its own entry and not the state", async () => {
