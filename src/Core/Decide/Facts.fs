@@ -726,6 +726,12 @@ let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raid
     || not (HostileInfo.crossesExits raider)
     || slower
 
+/// Whether a body of these part counts brings its swing to bear on one
+/// hostile (#535): one that is no raider, or a raider its swing reaches
+/// (`swingReaches`).
+let internal swingBorneOn (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
+    not (HostileInfo.raider side hostile) || swingReaches side ours hostile
+
 /// What a body of these part counts brings to bear a tick on a raid (#535):
 /// its shot in full, and its swing only where it reaches every raider of the
 /// raid (`swingReaches`). A melee body that kills the ones that close and is
@@ -733,16 +739,19 @@ let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raid
 /// swing is priced at nothing: the named stand-in for a reach-aware exchange.
 let private borneDamage (side: HostileInfo list) (raid: HostileInfo list) (ours: BodyPart -> int) =
     let swing =
-        if
-            ours Attack > 0
-            && raid
-               |> List.forall (fun h -> not (HostileInfo.raider side h) || swingReaches side ours h)
-        then
+        if ours Attack > 0 && raid |> List.forall (swingBorneOn side ours) then
             Engine.attackPower * ours Attack
         else
             0
 
     swing + Engine.rangedAttackPower * ours RangedAttack
+
+/// Whether the [[defender]]'s swing reaches one body of the raid at the
+/// home's line (#546), by the row rule (`swingBorneOn`): the defender row
+/// answers the ones it reaches, the ranger row the rest — a shooter keeping
+/// its range.
+let internal defenderReaches (side: HostileInfo list) (hostile: HostileInfo) : bool =
+    swingBorneOn side (partCountIn defenderPattern.Block) hostile
 
 /// What a body of ours heals itself a tick while it fights: a ranged body's
 /// heal acts beside its shot (#411), and a melee body's is suppressed by its
@@ -1040,6 +1049,13 @@ let rangerBlocksBeat (view: ColonyView) (room: string) : int -> bool =
 let guardBlocksReach (view: ColonyView) : int =
     min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
 
+/// Whether the bank casts one block of a row's pattern (#546): a row whose
+/// block it cannot buy is never asked for an answer, which falls to the next
+/// row that can — a ranger's 700 on a 550 bank waits for ever, holding the
+/// economy that would raise the bank.
+let castable (view: ColonyView) (pattern: BodyPattern) =
+    bodyCost pattern.Block <= view.Bank.Capacity
+
 /// The ranger's twin of `guardBlocksReach` (#411): the biggest ranger body the
 /// bank buys, what an errand room's raid is weighed against.
 let rangerBlocksReach (view: ColonyView) : int =
@@ -1192,7 +1208,8 @@ type RowAnswer = { Ranger: bool; Wins: bool }
 /// A room's own row and its answer, the one reading `rangerAnswers` and the
 /// verdict share. A ranger room and one the colony harasses are the ranger's
 /// (#411). Any other is the melee guard's where the guard's borne damage wins
-/// (`guardBorneBeat`); else the ranger's where the biggest ranger wins; else
+/// (`guardBorneBeat`); else the ranger's where the biggest ranger wins; each
+/// only where the bank casts its block (`castable`, #546); else
 /// still the guard's, which holds the post (#531) and wins while it outlasts
 /// the raid, its swing priced in full (`guardBlocksBeat`): no new stand-down
 /// for a raid of quick shooters no ranger wins either. Never a win in a
@@ -1205,9 +1222,9 @@ let rowAnswer (view: ColonyView) (room: string) : RowAnswer =
             Ranger = true
             Wins = rangerRowWins view room
         }
-    elif guardBorneBeat view room (guardBlocksReach view) then
+    elif castable view guardPattern && guardBorneBeat view room (guardBlocksReach view) then
         { Ranger = false; Wins = true }
-    elif rangerRowWins view room then
+    elif castable view rangerPattern && rangerRowWins view room then
         { Ranger = true; Wins = true }
     else
         {

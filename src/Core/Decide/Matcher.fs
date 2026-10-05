@@ -56,6 +56,12 @@ let matchCreeps
 
     let roleOf name = Map.tryFind name roles
 
+    // Each living body's parts, for a Defend's per-row caps (#546).
+    let bodies = view.Creeps |> List.map (fun c -> c.Name, c.Body) |> Map.ofList
+
+    let inRow row name =
+        Map.tryFind name bodies |> Option.exists (CastRow.cut row name)
+
     // ADR-0002. The crowding component of the matching key: every holder,
     // counted at this tick, never at arrival — spreading creeps over Tasks is
     // a judgement about now.
@@ -210,7 +216,8 @@ let matchCreeps
                 // Counted by role or by parts and never by class (`capsHold`).
                 | CapScope.Workers
                 | CapScope.Carriers
-                | CapScope.Role _ -> fun _ -> false
+                | CapScope.Role _
+                | CapScope.Row _ -> fun _ -> false
 
             let counted =
                 function
@@ -226,6 +233,7 @@ let matchCreeps
                     holders |> List.filter (fun name -> workBy name = 0) |> List.length
                 | CapScope.Role role ->
                     holders |> List.filter (fun name -> roleOf name = Some role) |> List.length
+                | CapScope.Row row -> holders |> List.filter (inRow row) |> List.length
 
             // Every cap on the Task holds, or the candidate is refused. A cap
             // whose crowd the candidate's own class does not fall in is not its
@@ -247,6 +255,17 @@ let matchCreeps
                         | Some own when own = role -> counted scope < limit
                         | Some _ -> true
                         | None -> false
+                    // A row's cap is its own bodies'; a body of another capped
+                    // row passes it, and one of no capped row is refused.
+                    | CapScope.Row row ->
+                        if inRow row creep.Name then
+                            counted scope < limit
+                        else
+                            capacity.Caps
+                            |> Map.exists (fun other _ ->
+                                match other with
+                                | CapScope.Row own -> inRow own creep.Name
+                                | _ -> false)
                     | _ ->
                         match cls with
                         | Some c when appliesTo scope c -> counted scope < limit

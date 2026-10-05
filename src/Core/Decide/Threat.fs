@@ -166,15 +166,6 @@ type Avoid =
     /// walks round the Reach.
     | Line of Set<Pos>
 
-/// The fighting row a Brief asks: the melee guard's, the ranger's (#411), the
-/// home's defender's (#504), or one squad role's (#452).
-[<RequireQualifiedAccess>]
-type CastRow =
-    | Guard
-    | Ranger
-    | Defender
-    | Squad of SquadRole
-
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module CastRow =
     /// The row's own cut over a name and parts: who stands in it.
@@ -291,7 +282,9 @@ type Brief =
         Formation: Formation option
         /// A Guard's holders held off `Ground` this tick, each on its own:
         /// the muster ground while the holders that do not win alone wait
-        /// for the rest (`withMusters`, #535). Empty for every other Task.
+        /// for the rest (`withMusters`, #535). The home's Defend's: each body
+        /// of the rows it asks on its own row's ground (#546). Empty for every
+        /// other Task.
         Stances: Map<string, Set<RoomPos>>
     }
 
@@ -734,27 +727,59 @@ module Brief =
         | _ when List.isEmpty (perimeterRamparts view) -> 0
         | raid -> min view.Tuning.DefenderCap (List.length raid)
 
-    /// The home's Defend (#504), off the raid at its line (`Facts.raidAtLine`):
-    /// the defender row's casts and no other body, on its perimeter ground,
-    /// walking round the tiles its melee reach (`Avoid.Line`), striking the
-    /// body at the line with the fewest hits beside it. Its row ask is the
-    /// capacity too, read a second time as a Guard's is.
+    /// The rows the home's Defend asks (#546), each with the bodies of the
+    /// raid at the line it answers: the defender those its swing reaches
+    /// (`Facts.defenderReaches`), the ranger the rest — a shooter keeping its
+    /// range. Where the bank casts no ranger block (`Facts.castable`), the
+    /// defender answers them all.
+    let internal defendSplit (view: ColonyView) (atLine: HostileInfo list) =
+        let reached, rest = atLine |> List.partition (defenderReaches view.Hostiles)
+
+        if castable view rangerPattern then
+            [ CastRow.Defender, reached; CastRow.Ranger, rest ]
+        else
+            [ CastRow.Defender, atLine; CastRow.Ranger, [] ]
+
+    /// The home's Defend (#504), off the raid at its line (`Facts.raidAtLine`)
+    /// as `defendSplit` shares it between the rows: one ask a row, for the
+    /// raiders it answers, each row's bodies admitted under a cap of its own
+    /// (`CapScope.Row`) and no other body, each on its row's perimeter ground
+    /// (`stances`, by body), walking round the tiles the raid's melee reach
+    /// (`Avoid.Line`), striking the body at the line with the fewest hits in
+    /// reach. A ranger's is the one that wins the home's raid alone, as an
+    /// outpost's. Its row asks are the capacity too, read a second time as a
+    /// Guard's is.
     let internal defending
-        (atLine: HostileInfo list)
+        (answered: (CastRow * HostileInfo list) list)
         (ground: Set<RoomPos> option)
+        (stances: Map<string, Set<RoomPos>>)
         (avoid: Set<Pos>)
         (verdict: Lazy<Answer>)
         : Brief =
-        let line = atLine |> List.map (fun hostile -> hostile.Id) |> Set.ofList
+        let line =
+            answered
+            |> List.collect snd
+            |> List.map (fun hostile -> hostile.Id)
+            |> Set.ofList
 
         let asks =
-            [
+            answered
+            |> List.map (fun (row, raid) ->
                 {
-                    Row = CastRow.Defender
-                    Wanted = fun view _ -> defendersWanted atLine view
-                    Blocks = fun view -> view.Tuning.DefenderBlocks
-                }
-            ]
+                    Row = row
+                    Wanted = fun view _ -> defendersWanted raid view
+                    Blocks =
+                        fun view ->
+                            if row = CastRow.Ranger then
+                                rangerBlocksFor 1 view (SpatialInfo.homeName view.Spatial)
+                            else
+                                view.Tuning.DefenderBlocks
+                })
+
+        let capacity view threats =
+            (Capacity.fighters (asks |> List.sumBy (fun ask -> ask.Wanted view threats)), asks)
+            ||> List.fold (fun capacity ask ->
+                Capacity.capping (CapScope.Row ask.Row) (ask.Wanted view threats) capacity)
 
         {
             Duty = Duty.Defend
@@ -764,7 +789,9 @@ module Brief =
                     Shoots = fun _ _ _ hostile -> Set.contains hostile.Id line
                     Order = fun _ _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
                 }
-            Admits = fun _ _ creep -> isNamedFor defenderPattern creep.Name
+            Admits =
+                fun _ _ creep ->
+                    answered |> List.exists (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
             Recall = None
             Laid = bare
             Ground = ground
@@ -772,10 +799,10 @@ module Brief =
             Avoid = Avoid.Line avoid
             Rung = OnTheTier
             Asks = asks
-            Capacity = fun view _ -> Capacity.fighters (defendersWanted atLine view)
+            Capacity = capacity
             Verdict = verdict
             Formation = None
-            Stances = Map.empty
+            Stances = stances
         }
 
     /// A Fight's or an Assault's Brief on its squad's `Formation`: it admits
@@ -853,7 +880,7 @@ module Brief =
 
         match task with
         | Guard room -> Some(unclaimed room)
-        | Defend _ -> Some(defending [] None Set.empty (lazy Answer.Win))
+        | Defend _ -> Some(defending [] None Map.empty Set.empty (lazy Answer.Win))
         | Fight _ -> unformed Duty.Fight
         | Assault _ -> unformed Duty.Assault
         | _ -> None
@@ -1172,11 +1199,18 @@ module Threats =
         | Some(Avoid.Line tiles) -> tiles
         | _ -> Set.empty
 
-    /// The [[defender]]'s ground in one room; empty for a room it holds none
-    /// in (#504).
+    /// The home's Defend's ground in one room, every row's together; empty
+    /// for a room it holds none in (#504).
     let defendGroundIn (threats: Threats) (room: string) : Set<RoomPos> =
         briefFor threats (Defend room)
         |> Option.bind (fun brief -> brief.Ground)
+        |> Option.defaultValue Set.empty
+
+    /// One body's ground in a room's Defend: its own row's (#546), else
+    /// every row's.
+    let defendGroundFor (threats: Threats) (room: string) (creep: string) : Set<RoomPos> =
+        briefFor threats (Defend room)
+        |> Option.bind (fun brief -> Map.tryFind creep brief.Stances |> Option.orElse brief.Ground)
         |> Option.defaultValue Set.empty
 
     /// One room's Reach; empty for a room no Threat stands in or reaches
@@ -1386,18 +1420,29 @@ let private kiteGroundIn
         |> Set.ofList
         |> RoomPos.setAt room
 
-/// The [[defender]]'s ground in the home (#504), off this tick's raid at the
-/// line: every perimeter rampart of ours beside a raid body that no other
-/// body stands on — the mother's lent residents and an ally on a public
-/// rampart among them (`ColonyView.Foreign`) — or, with none beside one,
-/// those nearest the raid.
-let private defendGroundOf (view: ColonyView) (atLine: HostileInfo list) : Set<RoomPos> option =
+/// The home's Defend's ground (#504), off this tick's raid at the line: every
+/// perimeter rampart of ours within its row's reach of a raid body — a
+/// defender's swing, a ranger's shot (#546) — that no body but the row's
+/// stands on — the mother's lent residents and an ally on a public rampart
+/// among them (`ColonyView.Foreign`) — or, with none in reach, those nearest
+/// the raid.
+let private defendGroundOf
+    (view: ColonyView)
+    (row: CastRow)
+    (atLine: HostileInfo list)
+    : Set<RoomPos> option =
     match atLine with
     | [] -> None
     | raid ->
+        let reach =
+            if row = CastRow.Ranger then
+                Engine.rangedRange
+            else
+                Engine.meleeRange
+
         let taken =
             view.Creeps
-            |> List.filter (fun creep -> not (isNamedFor defenderPattern creep.Name))
+            |> List.filter (fun creep -> not (CastRow.cut row creep.Name creep.Body))
             |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name)
             |> Set.ofList
             |> Set.union view.Foreign
@@ -1413,14 +1458,14 @@ let private defendGroundOf (view: ColonyView) (atLine: HostileInfo list) : Set<R
             |> List.fold min System.Int32.MaxValue
 
         let ground =
-            match free |> List.filter (fun tile -> gapTo tile <= Engine.meleeRange) with
+            match free |> List.filter (fun tile -> gapTo tile <= reach) with
             | [] ->
                 match free with
                 | [] -> Set.empty
                 | _ ->
                     let nearest = free |> List.map gapTo |> List.min
                     free |> List.filter (fun tile -> gapTo tile = nearest) |> Set.ofList
-            | beside -> Set.ofList beside
+            | inReach -> Set.ofList inReach
 
         if Set.isEmpty ground then None else Some ground
 
@@ -2165,9 +2210,31 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 | Some(verdict, _) -> lazy (fst verdict.Value)
                 | None -> lazy Answer.Win
 
+            // Each row's ground off the raiders it answers (#546), and each
+            // body of either row held to its own row's.
+            let answered = Brief.defendSplit view atLine
+
+            let grounds =
+                answered
+                |> List.choose (fun (row, raid) ->
+                    defendGroundOf view row raid |> Option.map (fun ground -> row, ground))
+
+            let stances =
+                view.Creeps
+                |> List.choose (fun creep ->
+                    grounds
+                    |> List.tryFind (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
+                    |> Option.map (fun (_, ground) -> creep.Name, ground))
+                |> Map.ofList
+
+            let ground =
+                match grounds with
+                | [] -> None
+                | _ -> Some(grounds |> List.map snd |> Set.unionMany)
+
             Map.add
                 (Defend home)
-                (Brief.defending atLine (defendGroundOf view atLine) defendAvoid verdict)
+                (Brief.defending answered ground stances defendAvoid verdict)
                 briefs
 
     {

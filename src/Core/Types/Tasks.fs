@@ -51,6 +51,16 @@ module SquadRole =
     let slots (role: SquadRole) (roles: SquadRole list) =
         roles |> List.filter ((=) role) |> List.length
 
+/// The fighting row a Brief asks: the melee guard's, the ranger's (#411), the
+/// home's defender's (#504), or one squad role's (#452). Who stands in each
+/// is `Threat.CastRow.cut`'s.
+[<RequireQualifiedAccess>]
+type CastRow =
+    | Guard
+    | Ranger
+    | Defender
+    | Squad of SquadRole
+
 /// Which crowd a cap is a number about. Carried beside its number rather than
 /// spelled in a field name on one side and a class predicate on the other:
 /// the pairing is the whole of what a cap means.
@@ -81,6 +91,10 @@ type CapScope =
     /// held by role bodies alone: a candidate of a role with no slot, or of
     /// no role, is refused.
     | Role of SquadRole
+    /// Holders of one fighting row's cut (#546): the home's Defend asks two
+    /// rows, each for the raiders it can strike. A body of the row is
+    /// counted against its cap; a body of no capped row is refused.
+    | Row of CastRow
 
 /// ADR-0052. How many creeps a pooled Task admits at once, set by the Planner
 /// and counted by the Matcher, which knows no Task kinds: every seat rule

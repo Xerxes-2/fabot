@@ -167,7 +167,8 @@ type Task =
     /// Holding the home's perimeter with its own [[defender]]s (#504): one
     /// Task per home a raid stands outside the line of, keyed on the room for
     /// the Guard's reason. Its Work Area is the free perimeter ramparts beside
-    /// the raid, and it is held by defender casts alone.
+    /// the raid, and it is held by defender casts alone; for the raiders their
+    /// swing does not reach, by rangers too, within three of those (#546).
     | Defend of roomName: string
     /// Breaking into a rival's room with a [[squad]] (#490): one Task per
     /// declared [[assault]] a human has switched on, held by the role bodies

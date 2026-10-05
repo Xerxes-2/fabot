@@ -566,10 +566,29 @@ let private defenderHome ramparts hostiles (creeps: (CreepInfo * Pos) list) =
 let private defender name =
     creepWith name 0 0 (List.replicate 6 Move @ List.replicate 6 Attack)
 
+/// MeowKittyWow's 4M2R1H shooter (2026-10-06), at a tile of the home: as
+/// quick as a defender, it keeps its range and heals itself.
+let private shooterAt (pos: Pos) =
+    { hostileIn "W1N1" pos (List.replicate 4 Move @ List.replicate 2 RangedAttack @ [ Heal ]) with
+        Id = "h-1"
+        Owner = "MeowKittyWow"
+    }
+
+/// A one-block ranger of the row's, at home.
+let private homeRanger = creepWith "ranger-1-Spawn1" 0 0 rangerPattern.Block
+
 let private defenderCasts colony =
     (decideOn colony).Intents
     |> spawnIntents
     |> List.filter (fun (_, _, name) -> name.StartsWith "defender-")
+
+/// The home's Defend's asks, each row with the bodies it wants.
+let private defendAsks colony =
+    let threats = threatsOf colony (Atlas.ofView colony)
+
+    match Threats.briefFor threats (Defend "W1N1") with
+    | Some brief -> brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+    | None -> []
 
 let private defendGround colony =
     Threats.defendGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N1"
@@ -690,16 +709,153 @@ let rampartDefenderTests =
                     "the bank waits for the defender"
             }
 
-            test "a ranged raid body outside the line casts one too" {
-                let archer =
-                    { raidMeleeAt "h-1" { X = 10; Y = 34 } with
-                        Body = List.replicate 5 RangedAttack @ List.replicate 5 Move
+            test
+                "a shooter keeping range 3 of the line calls the ranger row, not the defender, onto the ramparts its gun reaches" {
+                let colony = defenderHome defendedLine [ shooterAt { X = 17; Y = 34 } ] []
+
+                Expect.isEmpty (defenderCasts colony) "a swing that never reaches it brings nothing"
+
+                Expect.equal
+                    (defendAsks colony)
+                    [ CastRow.Defender, 0; CastRow.Ranger, 1 ]
+                    "the ranger's ask alone"
+
+                Expect.equal
+                    (spawnIntents (decideOn colony).Intents
+                     |> List.filter (fun (_, _, name) -> name.StartsWith "ranger-")
+                     |> List.map (fun (_, body, _) -> body))
+                    [ rangerPattern.Block ]
+                    "one ranger, one block on 800"
+
+                Expect.equal
+                    (defendGround colony)
+                    (Set.ofList lineTiles)
+                    "every perimeter rampart within three of it"
+
+                Expect.isEmpty
+                    (spawnIntents (decideOn { colony with Bank = bank 300 800 }).Intents)
+                    "the bank waits for the ranger as for the defender"
+            }
+
+            test "a ranger at home takes the Defend and shoots the shooter from its rampart" {
+                let colony =
+                    defenderHome
+                        defendedLine
+                        [ shooterAt { X = 17; Y = 34 } ]
+                        [ homeRanger, { X = 20; Y = 34 } ]
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind homeRanger.Name decision.Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "the ranger row's body holds it"
+
+                Expect.contains
+                    decision.Intents
+                    (RangedAttackCreep(homeRanger.Name, "h-1"))
+                    "its shot from cover"
+
+                Expect.equal
+                    (defendGround colony)
+                    (Set.ofList lineTiles)
+                    "and it keeps its own tile in the ground"
+            }
+
+            test "a melee raider at the line is still the defender's, and calls no ranger" {
+                let colony = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 19; Y = 34 } ] []
+
+                Expect.equal (defenderCasts colony |> List.length) 1 "the melee defender"
+
+                Expect.isFalse
+                    (spawnIntents (decideOn colony).Intents
+                     |> List.exists (fun (_, _, name) -> name.StartsWith "ranger-"))
+                    "no ranger"
+
+                Expect.notEqual
+                    (Map.tryFind
+                        homeRanger.Name
+                        (decideOn (
+                            defenderHome
+                                defendedLine
+                                [ raidMeleeAt "h-1" { X = 19; Y = 34 } ]
+                                [ homeRanger, { X = 20; Y = 34 } ]
+                        ))
+                            .Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "nor does a ranger at home take its Defend"
+
+                Expect.equal
+                    (defendAsks colony)
+                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    "the defender's ask alone"
+            }
+
+            test
+                "a melee at the rampart beside a kiter: the defender answers the melee, a ranger the kiter, each on its own ground" {
+                let raid = [ raidMeleeAt "h-2" { X = 19; Y = 34 }; shooterAt { X = 17; Y = 33 } ]
+
+                Expect.equal
+                    (defendAsks (defenderHome defendedLine raid []))
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "one ask a row, each for the raider it can strike"
+
+                Expect.equal
+                    (defenderCasts (defenderHome defendedLine raid []) |> List.length)
+                    1
+                    "the defender first, the row ahead of every other"
+
+                let colony =
+                    defenderHome
+                        defendedLine
+                        raid
+                        [
+                            defender "defender-1-Spawn1", { X = 20; Y = 34 }
+                            homeRanger, { X = 22; Y = 30 }
+                        ]
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "defender-1-Spawn1" decision.Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "the living defender keeps the Defend while the melee stands at the line"
+
+                Expect.equal
+                    (Map.tryFind homeRanger.Name decision.Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "and the ranger takes it beside it"
+
+                let threats = threatsOf colony (Atlas.ofView colony)
+
+                Expect.equal
+                    (Threats.defendGroundFor threats "W1N1" "defender-1-Spawn1"
+                     |> Set.map RoomPos.pos)
+                    (Set.ofList lineTiles)
+                    "the defender's, beside the melee"
+
+                Expect.equal
+                    (Threats.defendGroundFor threats "W1N1" homeRanger.Name |> Set.map RoomPos.pos)
+                    (Set.ofList [ { X = 20; Y = 33 }; { X = 20; Y = 35 } ])
+                    "the ranger's, within three of the kiter, less the defender's tile"
+            }
+
+            test
+                "a bank that casts no ranger block hands the kiter to the defender, and the economy is not held for ever" {
+                let colony =
+                    { defenderHome defendedLine [ shooterAt { X = 17; Y = 34 } ] [] with
+                        Bank = bank 550 550
                     }
 
                 Expect.equal
-                    (defenderCasts (defenderHome defendedLine [ archer ] []) |> List.length)
-                    1
-                    "armed"
+                    (defendAsks colony)
+                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    "a ranger's 700 is out of a 550 bank"
+
+                Expect.equal
+                    (defenderCasts colony |> List.map (fun (_, body, _) -> body))
+                    [ List.replicate 4 Move @ List.replicate 4 Attack ]
+                    "four blocks on 550: the defender is cast"
             }
 
             test
@@ -831,8 +987,13 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (pooledHolding [] (Defend "W1N1") colony)
-                    (Some(safetyRank OnTheTier, Capacity.fighters 2))
-                    "one Defend for the home, on the Safety tier, capped at the raid at its line"
+                    (Some(
+                        safetyRank OnTheTier,
+                        Capacity.fighters 2
+                        |> Capacity.capping (CapScope.Row CastRow.Defender) 2
+                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 0
+                    ))
+                    "one Defend for the home, on the Safety tier, capped at the raid at its line, row by row (#546)"
 
                 let decision = decideOn colony
 

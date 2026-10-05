@@ -4217,6 +4217,17 @@ let engagementTests =
                      |> List.map (fun ask -> ask.Row))
                     [ CastRow.Guard ]
                     "a raid that closes on the guard is still the guard's"
+
+                let poor =
+                    { declaredRaid invasion with
+                        Bank = bank 550 550
+                    }
+
+                Expect.equal
+                    ((Threats.briefOf (threatsOf poor (Atlas.ofView poor)) "W1N2").Asks
+                     |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Guard ]
+                    "a bank that casts no ranger block is never asked for one (#546): the guard's"
             }
 
             test

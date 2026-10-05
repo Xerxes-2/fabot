@@ -378,7 +378,7 @@ let internal applicable
     // A Fight admits a squad cast, or once the squad launches a resident of
     // the room whose parts fit a slot; an Assault a cast of a role its squad
     // casts (`Formation.Roles`), how many of each role being the capacity's.
-    // A Defend admits the defender row's casts and no other body (#504).
+    // A Defend admits its row's bodies and no other (#504, #546).
     | Guard _
     | Fight _
     | Defend _
@@ -1109,6 +1109,10 @@ let private actionIntents
     | Fight room ->
         guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
         |> Option.toList
+    | Defend room when isRangerBody creep ->
+        Threats.briefFor threats task
+        |> Option.bind (fun brief -> guardIntent view atlas brief.Targets fighting creep room)
+        |> Option.toList
     | Defend room -> defendIntent view atlas threats room creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
     // medic's act is the heal reflex's.
@@ -1193,7 +1197,8 @@ let arrival
 /// or the weapon reflex. A Guard's or a Fight's holder, a medic aside, by its
 /// Task's room; any other body with a weapon — on Flee, idle, at work — by the
 /// room it stands in and that room's Guard's targets, as the heal reflex heals
-/// beside any Task. None for a defender, whose line is its own, a squad's
+/// beside any Task. A ranger holding the home's Defend by its line. None for
+/// a melee defender, whose swing from its rampart is its own, a squad's
 /// sapper, and a body with no weapon.
 let private strikesBy
     (atlas: Atlas.Atlas)
@@ -1226,6 +1231,11 @@ let private strikesBy
     | Some(Guard room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
     | Some(Fight _ as task) when Threats.squadRoleOf threats task creep.Name = Some Medic -> None
     | Some(Fight room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
+    // A ranger holding the home's Defend shoots its line as a Guard's
+    // holder its room's (#546).
+    | Some(Defend room as task) when isRangerBody creep ->
+        Threats.briefFor threats task
+        |> Option.map (fun brief -> room, brief.Targets, true)
     | Some(Defend _)
     | Some(Assault _) -> None
     | _ when armed -> reflex ()

@@ -225,7 +225,7 @@ let private moveIntentFor
             // A body that runs from a Threat, standing outside its room's
             // Reach, walks round it (#472), or waits at its edge where no way
             // round reaches the work. Flee's own walk is the way out of one.
-            // A defender walks round the tiles outside its line a raid melee
+            // A Defend's holder walks round the tiles outside its line a raid melee
             // reaches (#504), and waits inside it where no way round reaches
             // its rampart. A kiting ranger walks round its own set (#510),
             // across the border too.
@@ -244,10 +244,9 @@ let private moveIntentFor
                         plain
                 | None when runs && task <> Flee ->
                     let reach =
-                        if isNamedFor defenderPattern creep then
-                            Threats.defendAvoidIn threats room
-                        else
-                            Threats.reachIn threats room
+                        match task with
+                        | Defend _ -> Threats.defendAvoidIn threats room
+                        | _ -> Threats.reachIn threats room
 
                     round reach (fun () -> Atlas.firstStepAvoiding atlas creep reach area) plain
                 | None -> plain ()
@@ -503,9 +502,14 @@ let movementOf
             Set.empty
         else
             view.Creeps
-            // And a [[defender]], to its rampart (#504).
+            // And a [[defender]], to its rampart (#504), and any holder of the
+            // home's Defend (#546).
             |> List.filter (fun c ->
-                runsFromThreats view atlas c || isNamedFor defenderPattern c.Name)
+                runsFromThreats view atlas c
+                || isNamedFor defenderPattern c.Name
+                || (match Map.tryFind c.Name assigned with
+                    | Some(Defend _) -> true
+                    | _ -> false))
             |> List.map (fun c -> c.Name)
             |> Set.ofList
 

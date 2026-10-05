@@ -640,10 +640,33 @@ let internal planSpawns
         // A defender owed holds the economic rows (#504): a seat the bank
         // cannot pay yet is otherwise passed over for a cheaper one, and a
         // worker bought while the line falls is the bank the defender waited
-        // on. The fighting rows are never held.
+        // on. The fighting rows are never held. Owed is each of the home's
+        // Defend asks' own shortfall (#546): its count less its row's bodies
+        // standing at home or in the oven, never the whole row's gap, which a
+        // ranger an outpost asks for widens too.
         let defenderOwed =
-            filled
-            |> List.exists (fun (row, _, _, gap) -> row.Pattern = defenderPattern && gap > 0)
+            let home = SpatialInfo.homeName view.Spatial
+
+            match Map.tryFind (Defend home) threats.Briefs with
+            | None -> false
+            | Some brief ->
+                brief.Asks
+                |> List.exists (fun ask ->
+                    let pattern =
+                        if ask.Row = CastRow.Ranger then
+                            rangerPattern
+                        else
+                            defenderPattern
+
+                    let atHome =
+                        view.Creeps
+                        |> List.filter (fun creep ->
+                            CastRow.cut ask.Row creep.Name creep.Body
+                            && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                               |> Option.exists (fun at -> at.Room = home))
+                        |> List.length
+
+                    ask.Wanted view threats - atHome - castOf pattern > 0)
 
         let owed (row: SpecialistRow) =
             not defenderOwed || not (heldForDefender row.Pattern)

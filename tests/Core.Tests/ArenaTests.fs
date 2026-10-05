@@ -5115,6 +5115,37 @@ let private residents =
         body "ranger-879854-Spawn8" Side.Ours r7 (w17s25 19 39) None
     ]
 
+/// W17S25 as an RCL4 home of its own (W12S26's profile, the Meow doctrine
+/// §A): one tower, dry, the perimeter's ramparts at 300,000, a 1,300 bank,
+/// and MeowKittyWow's 4M2R1H shooter holding at range three of the south
+/// line, where no swing reaches it (#546).
+let private kitedHome () =
+    let home =
+        room "W17S25"
+        |> withController Ownership.Ours None 4 0
+        |> withSpawn "Spawn10" childSpawn 1300
+        |> withStructures [ towerOf Side.Ours childTower 0 ]
+        |> withRamparts Side.Ours 300_000 perimeter
+
+    let shooter =
+        body
+            "Meow"
+            (Side.Player "MeowKittyWow")
+            (parts [ Move, 4; RangedAttack, 2; Heal, 1 ])
+            (w17s25 17 47)
+            (Some Hold)
+
+    arena
+        880_341
+        [ home; room "W18S25" ]
+        [
+            { colony "W17S25" with
+                Perimeter = perimeter
+            }
+        ]
+        [ worker; shooter ]
+    |> withCasts [ "ranger"; "defender" ]
+
 [<Tests>]
 let arenaDefenceTests =
     testList
@@ -5872,6 +5903,45 @@ let arenaDefenceTests =
                     for b in start.Bodies do
                         Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
                 }
+
+            test
+                "a shooter at range three of the line: the home casts a ranger, not a defender, and it shoots from a rampart (#546)" {
+                let _, trace = kitedHome () |> run 80
+                let failure = describe trace
+
+                Expect.isFalse
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Bodies |> List.exists (fun b -> b.Id.StartsWith "defender-")))
+                    $"no melee defender\n{failure}"
+
+                // A shot decided on a tick, from where the shooter stood when
+                // the tick before ended.
+                let fromCover =
+                    trace
+                    |> List.pairwise
+                    |> List.tryPick (fun (before, t) ->
+                        t.Ours
+                        |> List.tryPick (function
+                            | RangedAttackCreep(name, "Meow") when name.StartsWith "ranger-" ->
+                                before.Bodies
+                                |> List.tryFind (fun b ->
+                                    b.Id = name && List.contains (RoomPos.pos b.At) perimeter)
+                                |> Option.map (fun b -> t.Tick, b.At)
+                            | _ -> None))
+
+                // Measured: cast at t0, shooting from the south line's 16,44
+                // at t29.
+                match fromCover with
+                | Some(tick, at) ->
+                    Expect.isLessThanOrEqual tick 40 $"cast and walked there\n{failure}"
+
+                    Expect.isLessThanOrEqual
+                        (RoomPos.range at (w17s25 17 47) |> Option.defaultValue 99)
+                        Engine.rangedRange
+                        $"its rampart within three of the shooter\n{failure}"
+                | None -> failtest $"a ranger shoots from a perimeter rampart\n{failure}"
+            }
         ]
 
 /// W13S28 at RCL8 with its observer, and W14S27 declared a colony of ours

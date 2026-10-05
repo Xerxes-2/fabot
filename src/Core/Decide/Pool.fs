@@ -286,7 +286,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // (`Threats.squadGroundIn`).
         | Fight _
         | Assault _ -> Threats.squadGroundIn threats task creep
-        | Defend room -> Threats.defendGroundIn threats room
+        | Defend room -> Threats.defendGroundFor threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
 
     match reachOnWork threats atlas task with
@@ -925,7 +925,7 @@ let planPoolHolding
         // fighter passes outranks Flee in the Matcher (#533), a Guard, a
         // Fight, a Defend and an Assault admit a Fighter alone, and a room's
         // Guard and its Fight admit different bodies until its squad
-        // launches; a Defend admits its defenders alone.
+        // launches; a Defend admits its row's bodies alone.
         | Guard _
         | Fight _
         | Defend _
