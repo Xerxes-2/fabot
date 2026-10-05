@@ -166,6 +166,9 @@ do
 // reset empties it and the next tick is full.
 let mutable private lastFull: (int * LightTick.LastFull) option = None
 
+// Light ticks since the last full one (0 on a full tick).
+let mutable private lightRun = 0
+
 // Full ticks run since the reset: the replan turn counts these, not
 // `Game.time`, which with light ticks between would hand an even count of
 // colonies half the turns and the other half none.
@@ -931,9 +934,21 @@ let loop () =
     else
         let seen = glance ()
 
+        // Lean (bucket short): a second light tick may follow the first, so a
+        // full tick costs one in three, not one in two (live t979,9xx: cadence
+        // full ticks at ~158 ms emptied the bucket). Forcing rules still apply.
+        let replayable tick =
+            tick = Game.time - 1 || (seen.Lean && tick = Game.time - 2 && lightRun = 1)
+
         match lastFull with
-        | Some(tick, last) when tick = Game.time - 1 ->
+        | Some(tick, last) when replayable tick ->
             match LightTick.forced last seen with
-            | None -> lightTick atEntry last { seen with Objects = standingOf last }
-            | forced -> fullTick atEntry (Some seen) forced
-        | _ -> fullTick atEntry (Some seen) None
+            | None ->
+                lightRun <- lightRun + 1
+                lightTick atEntry last { seen with Objects = standingOf last }
+            | forced ->
+                lightRun <- 0
+                fullTick atEntry (Some seen) forced
+        | _ ->
+            lightRun <- 0
+            fullTick atEntry (Some seen) None
