@@ -46,3 +46,46 @@ The arena starts at `tick + 1`. The replay holds the state after the tick ran, s
 6. Run `npm run format`.
 
 Example: `#532 capture t972,617` in `ArenaTests.fs`, "arena border play".
+
+## Cross-validating on xxscreeps
+
+The arena is our reading of the engine. `npm run xx` stands the same scenario on [xxscreeps](https://github.com/laverdet/xxscreeps) (#543), which runs vanilla engine rules and a line-by-line port of the vanilla invader AI. It then diffs the two traces tick by tick. The arena stays the regression gate; xxscreeps is a second opinion.
+
+```sh
+npm run xx -- run <slug> [--bot standin|replay|dist|<dir>] [--seed N] [--heap [tick]] [--ticks N]
+npm run xx -- run build/xxscreeps/<slug>/<slug>.scenario.json --bot replay   # reuse a dump
+npm run xx -- diff <arena.jsonl> <xxscreeps.jsonl>
+```
+
+- **Wiring a test in:** after its run, call `crossValidate "<slug>" start trace`, where `start` is the `Arena` it ran. Outside `npm run xx` it writes nothing. `run <slug>` runs the arena tests (`--filter`, default `arena`) with the dump on, then runs xxscreeps and writes the diff to `build/xxscreeps/<slug>/`. Example: `w11s28-invasion` (#535).
+- **Setup:** the first run installs xxscreeps and builds isolated-vm into `~/.cache/fabot-xxscreeps`, then imports a world. It uses Node 24 from `nix shell nixpkgs#nodejs_24` and never touches the system Node or the repo's `node_modules`.
+- **Who drives our bodies (`--bot`):**
+  - `standin` (default) is the #535 melee rule: chase, swing, step on.
+  - `replay` walks our bodies along the arena's path and casts the arena pipeline's attacks and heals. Only the other side's AI can part the traces, so the "first apart" column is where the arena's NPC rules leave vanilla. It is open-loop: once the NPCs stand elsewhere, the replayed swings miss.
+  - `dist` is our bundle (`npm run build` first). Memory is not seeded, so it decides from what it sees: no Raid log and no latches. Use it for heap snapshots, not for verdicts.
+- **Determinism:** xxscreeps breaks ties between moves at random. A seeded processor makes one `--seed` replay the same run every time. Run a few seeds and read the spread, not one run.
+- **Heap snapshot:** `--heap [tick]` writes `<slug>.<bot>.heapsnapshot` of our isolate, which loads in Chrome DevTools' Memory tab. Its limit is isolated-vm's 256 MB, not the MMO's. This replaces the screepsmod-inspector route.
+
+**When to cross-validate:** for any arena verdict that rests on how NPCs behave, and for any new combat rule in the arena's physics (`Arena.fs`) or the `Invader` script.
+
+**What it cannot tell you:**
+- CPU numbers: the engine and the sandbox both differ from the MMO.
+- Season mechanics: there are no Reactor, Thorium or score.
+- Market or inter-shard behaviour.
+- shardSeason's exact rules: xxscreeps is vanilla with small deviations. Its `flee` counts only armed hostiles, and its healer picks a target by range.
+- Anything outside the scenario's rooms: every border is sealed except the ones between scenario rooms. Roads, sites and the modern structures (observer, factory, nuker, power spawn) are left out, and the run names what it left out. A player's bodies have no code and stand still.
+- A pass or fail: it is too slow and too far from shardSeason to be a gate, so nothing in `npm test` runs it.
+
+**Calibration, #535 W11S28 (t973,670), arena with #541's invader AI against xxscreeps 0.2.1.** Death ticks are listed in the order 735 / 768 / 779 / 495 / 657:
+
+| | deaths | guard min hits |
+|---|---|---|
+| arena (fabot guards) | t8 / t70 / t15 / t40 / t33 | 2286 |
+| xxscreeps, stand-in, seeds 1-5 | t8 / t55-79 / t64-73 / t48-68 / t53-72 | 2670 (seed 1) |
+
+- **The verdict agrees:** every invader dies, and neither guard does.
+- **Under replay (seed 1), the bodies part from the arena early:**
+  - Healers at t2: both healers want tile 11,19 and the tie goes the other way.
+  - Shooter 779 at t4 and 768 at t7.
+  - The small body at t6: in the arena it stops beside the guard, while in xxscreeps it steps on into the guard's path.
+- **The shooters live 20-50 ticks longer:** shooter 779 dies at t15 in the arena, cornered in the west wall pocket, and at t64-73 under the stand-in. Part of that gap is the stand-in, which does not run it into the pocket the way our guards do.

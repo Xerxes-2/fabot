@@ -1188,7 +1188,9 @@ let arenaScenarioTests =
             // guard are the ranger row's (`engagementTests`).
             test
                 "#535 capture t973,670: the W11S28 invasion is run down by the two guards, penned Invaders being in a melee's reach" {
-                let _, trace = w11s28Invasion () |> withCasts [ "guard"; "ranger" ] |> run 300
+                let start = w11s28Invasion () |> withCasts [ "guard"; "ranger" ]
+                let _, trace = start |> run 300
+                crossValidate "w11s28-invasion" start trace
                 let failure = describe trace
 
                 let born =

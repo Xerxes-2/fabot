@@ -16,7 +16,8 @@
     "test": "npm run format:check --silent && npm run adr-check --silent && dotnet test && npm run wire --silent && node scripts/cli-smoke.mjs",
     "deploy": "npm run build && npm run upload",
     "capture-room": "node --env-file-if-exists=.env scripts/capture-room.mjs",
-    "capture": "node --env-file-if-exists=.env scripts/capture-tick.mjs"
+    "capture": "node --env-file-if-exists=.env scripts/capture-tick.mjs",
+    "xx": "node scripts/xxscreeps/xx.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

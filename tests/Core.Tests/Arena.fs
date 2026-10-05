@@ -3844,3 +3844,139 @@ let describe (trace: TickTrace list) : string =
         let events = t.Events |> List.map string |> String.concat "; "
         $"t{t.Tick} [{bodies}] {events}")
     |> String.concat "\n"
+
+// ---------------------------------------------------------------------------
+// Cross-validation on xxscreeps (#543)
+// ---------------------------------------------------------------------------
+
+let private sideName (side: Side) =
+    match side with
+    | Side.Ours -> "ours"
+    | Side.Player name -> $"player:{name}"
+    | Side.Npc name -> $"npc:{name}"
+
+/// One line, whatever `%A` would wrap.
+let private flat (value: obj) =
+    System.Text.RegularExpressions.Regex.Replace(sprintf "%A" value, @"\s+", " ")
+
+/// The run's start and its trace as JSON for `scripts/xxscreeps` to stand
+/// and diff, written under `$FABOT_ARENA_DUMP_DIR` when `$FABOT_ARENA_DUMP`
+/// names this run; a no-op otherwise, so the suite never writes.
+let crossValidate (name: string) (start: Arena) (trace: TickTrace list) : unit =
+    let wanted = System.Environment.GetEnvironmentVariable "FABOT_ARENA_DUMP"
+    let dir = System.Environment.GetEnvironmentVariable "FABOT_ARENA_DUMP_DIR"
+
+    if wanted = name && not (System.String.IsNullOrEmpty dir) then
+        let json (value: obj) =
+            System.Text.Json.JsonSerializer.Serialize value
+
+        let rooms =
+            [
+                for KeyValue(roomName, r) in start.Rooms ->
+                    {|
+                        name = roomName
+                        controller =
+                            r.Controller
+                            |> Option.map (fun c ->
+                                {|
+                                    x = c.At.X
+                                    y = c.At.Y
+                                    owner = string c.Owner
+                                    username = Option.toObj c.Username
+                                    level = c.Level
+                                    ticksToDowngrade = c.TicksToDowngrade
+                                    safeModeAvailable = c.SafeModeAvailable
+                                    safeModeUntil = c.SafeModeUntil
+                                    progress = c.Progress
+                                |})
+                            |> Option.toObj
+                        structures =
+                            [
+                                for s in r.Structures ->
+                                    {|
+                                        id = s.Id
+                                        kind = s.Kind
+                                        x = s.At.X
+                                        y = s.At.Y
+                                        owner = s.Owner |> Option.map sideName |> Option.toObj
+                                        hits = s.Hits
+                                        hitsMax = s.HitsMax
+                                        energy = s.Energy
+                                        isPublic = s.IsPublic
+                                        name = Option.toObj s.Name
+                                    |}
+                            ]
+                        sites = List.length r.Sites
+                    |}
+            ]
+
+        let bodies =
+            [
+                for b in start.Bodies ->
+                    {|
+                        id = b.Id
+                        side = sideName b.Side
+                        parts = b.Parts |> List.map partName
+                        hits = b.Hits
+                        room = b.At.Room
+                        x = b.At.X
+                        y = b.At.Y
+                        fatigue = b.Fatigue
+                        energy = b.Energy
+                        ticksToLive = b.TicksToLive
+                        script = b.Script |> Option.map (fun s -> flat (box s)) |> Option.toObj
+                    |}
+            ]
+
+        let scenario =
+            {|
+                name = name
+                time = start.Time
+                rooms = rooms
+                bodies = bodies
+            |}
+
+        let row (t: TickTrace) =
+            {|
+                t = t.Tick
+                time = t.Time
+                bodies =
+                    [
+                        for b in t.Bodies ->
+                            {|
+                                id = b.Id
+                                room = b.At.Room
+                                x = b.At.X
+                                y = b.At.Y
+                                hits = b.Hits
+                                fatigue = b.Fatigue
+                            |}
+                    ]
+                events = t.Events |> List.map (fun e -> flat (box e))
+                acts = t.Theirs |> List.map (fun (id, act) -> $"{id} {flat (box act)}")
+                // A site is planning, not the fight the two runs are diffed on.
+                ours =
+                    t.Ours
+                    |> List.filter (function
+                        | PlaceConstructionSite _
+                        | PlaceSpawnSite _ -> false
+                        | _ -> true)
+                    |> List.map (fun i -> flat (box i))
+            |}
+
+        System.IO.Directory.CreateDirectory dir |> ignore
+
+        System.IO.File.WriteAllText(
+            System.IO.Path.Combine(dir, $"{name}.scenario.json"),
+            json scenario
+        )
+
+        System.IO.File.WriteAllLines(
+            System.IO.Path.Combine(dir, $"{name}.arena.jsonl"),
+            trace |> List.map (row >> json)
+        )
+
+        System.IO.File.WriteAllText(
+            System.IO.Path.Combine(dir, $"{name}.arena.txt"),
+            describe trace + "\n"
+        )

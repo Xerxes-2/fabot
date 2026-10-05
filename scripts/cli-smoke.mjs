@@ -518,6 +518,31 @@ profileRefuses(["--stock", "1000001"], "--stock must be");
 // The `pair` child is the flagged colony and stands no Storage at RCL2.
 profileRefuses(["--scenario", "pair", "--stock", "0"], "stands none");
 
+// ---- xxscreeps (#543): refusals only, never the engine, nix or dotnet ------
+
+const xxRefuses = (args, says) =>
+  smoke(`xx ${args.join(" ") || "(no args)"} refuses`, () => {
+    const { code, err } = run("xxscreeps/xx.mjs", args);
+    assert.equal(code, 1, `exit ${code}; stderr: ${err}`);
+    assert.ok(!crashed(err), `crashed: ${err}`);
+    assert.ok(err.includes(says), `stderr does not say "${says}": ${err}`);
+  });
+
+xxRefuses([], "usage:");
+xxRefuses(["nope"], "usage:");
+xxRefuses(["setup", "extra"], "usage:");
+xxRefuses(["run"], "usage:");
+xxRefuses(["run", "a", "b"], "usage:");
+xxRefuses(["run", "Not_A_Slug"], "neither a scenario .json nor a slug");
+xxRefuses(["run", join(dir, "absent.scenario.json")], "no scenario at");
+xxRefuses(["run", "w11s28-invasion", "--ticks", "0"], "--ticks needs a positive whole number");
+xxRefuses(["run", "w11s28-invasion", "--seed", "1.5"], "--seed needs a whole number");
+xxRefuses(["run", "w11s28-invasion", "--bot", join(dir, "nowhere")], "is not standin, replay, dist");
+xxRefuses(["run", "w11s28-invasion", "--bot"], "--bot needs a value");
+xxRefuses(["run", "w11s28-invasion", "--bogus"], "usage:");
+xxRefuses(["diff", "a.jsonl"], "usage:");
+xxRefuses(["diff", join(dir, "a.jsonl"), join(dir, "b.jsonl")], "no trace at");
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;
