@@ -7,16 +7,57 @@ module Fabot.Core.Decide.Emitter
 open Fabot.Core
 open Fabot.Core.Types
 
-/// The bodies that run from a Threat: Flee's body gate, and the mover's, which
-/// walks them round a Reach (#472). A Fighter will not run, nor a Work-heavy
-/// body standing where it digs (the answer for its Post is a rampart); one
-/// walking anywhere runs like any other body (#515).
+/// The bodies that run from a Threat: the mover's gate, which walks them round
+/// a Reach to their work (#472), and Flee's beside a fighter's (#533). Not a
+/// Fighter, whose work is the fight, nor a Work-heavy body standing where it
+/// digs (the answer for its Post is a rampart); one walking anywhere runs like
+/// any other body (#515).
 let internal runsFromThreats (view: ColonyView) atlas (creep: CreepInfo) =
     not (isFighterBody creep)
     && not (
         Atlas.workHeavy atlas creep.Name
         && Atlas.standsWhereItDigs atlas (view.Sources |> List.map (fun s -> s.Id)) creep.Name
     )
+
+/// Whether the hostiles a body stands in the Reach of out-damage its own heal
+/// (#533): each armed one within its `reachRadius` of the tile, at its whole
+/// damage. Across a border a hostile counts where both stand that near an
+/// edge, a reading that errs toward running. A body with no HEAL is
+/// out-damaged by any, so the question costs it nothing. The heal of ours
+/// reaching it is left out: a healer's heal is its own fight's.
+let private outDamaged (view: ColonyView) atlas (creep: CreepInfo) =
+    let heal = Engine.healPower * partCount creep.Body Heal
+
+    heal = 0
+    || match Atlas.creepTile atlas creep.Name with
+       | None -> true
+       | Some tile ->
+           let at = RoomPos.pos tile
+           let neighbours = RoomName.adjacent tile.Room
+
+           let fromEdge (p: Pos) =
+               min (min p.X (Seam.exitEdge - p.X)) (min p.Y (Seam.exitEdge - p.Y))
+
+           let reaches (hostile: HostileInfo) r =
+               if hostile.Pos.Room = tile.Room then
+                   range at (RoomPos.pos hostile.Pos) <= r
+               else
+                   List.contains hostile.Pos.Room neighbours
+                   && fromEdge at <= r
+                   && fromEdge (RoomPos.pos hostile.Pos) <= r
+
+           let damage =
+               view.Hostiles
+               |> List.sumBy (fun hostile ->
+                   match reachRadius view hostile with
+                   | Some r when reaches hostile r ->
+                       let parts = partCountIn (HostileInfo.effectiveParts view.Hostiles hostile)
+
+                       Engine.attackPower * parts Attack
+                       + Engine.rangedAttackPower * parts RangedAttack
+                   | _ -> 0)
+
+           damage > heal
 
 /// Whether a creep can usefully work this Task right now: the body must be able
 /// to do it, and its energy state must call for it. Gates read part arithmetic,
@@ -315,17 +356,15 @@ let internal applicable
     | Assault _ ->
         Threats.briefFor threats task
         |> Option.exists (fun brief -> brief.Admits view atlas creep)
-    // Without the Fighter exemption a guard on the ring is offered both
-    // Safety-tier Tasks and kept in the fight by travel cost alone, so the tick
-    // a raid steps toward it the body bought to stand still walks away.
-    // A defender with no line to hold runs as a worker does (#504): off a
-    // rampart, with the raid through, it is only a target, and a raider
-    // beside it draws the towers' reserve.
+    // Any body standing where the Reach out-damages it runs, a fighter
+    // included (#533): one holding no fight Task fights nothing there, and a
+    // defender with no line to hold is only a target (#504). Which fighter
+    // holds a fight instead is the Matcher's: a fight Task it holds or is
+    // offered outranks Flee.
     | Flee ->
         standsInReach threats atlas creep.Name
-        && (runsFromThreats view atlas creep
-            || isNamedFor defenderPattern creep.Name
-               && Threats.wants view threats (Defend(SpatialInfo.homeName view.Spatial)) = 0)
+        && (isFighterBody creep || runsFromThreats view atlas creep)
+        && outDamaged view atlas creep
 
 /// Whether a controller stands in a room nobody owns: the claim party's
 /// (#471), the one Upgrade pooled on such a controller. Read off the room's

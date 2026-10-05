@@ -2891,6 +2891,38 @@ let hotCornerTests =
             }
         ]
 
+/// W1N2 north of a home whose top ten columns are open ground, as a transit
+/// room the colony works nothing in, with these bodies and hostiles in it.
+let private transitRoom (placed: (CreepInfo * Pos) list) (hostiles: HostileInfo list) =
+    let field x0 x1 y0 y1 =
+        TerrainGrid.ofList
+            [
+                for x in x0..x1 do
+                    for y in y0..y1 -> { X = x; Y = y }, Plain
+            ]
+
+    let home = OutpostFixtures.haulHome
+
+    { home with
+        Sources = []
+        Creeps = placed |> List.map fst
+        Hostiles = hostiles
+        Crossed = Set.singleton "W1N2"
+        Spatial =
+            home.Spatial
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = field 20 30 1 48
+                })
+            |> withNeighbour
+                "W1N2"
+                { RoomLayer.empty with
+                    Terrain = field 20 30 41 48
+                    CreepPositions =
+                        placed |> List.map (fun (creep, pos) -> creep.Name, pos) |> Map.ofList
+                }
+    }
+
 [<Tests>]
 let fleeTests =
     testList
@@ -3137,32 +3169,156 @@ let fleeTests =
             }
 
             test
-                "a Fighter does not run from its own target: an ATTACK part is inapplicable to Flee" {
-                // A body carrying an ATTACK part does not run from the creep it was
-                // cast to kill, the same part test the engine's own `findAttack.js`
-                // splits its invaders on. Read off the body class and not the row's
-                // name. Pairwise on the body alone, in the home room on purpose: no
-                // Guard is pooled for a raid at home, so the second reading shows Flee's
-                // own gate refusing and not a fight outbidding it on travel cost.
-                let assignmentOf body =
-                    (decide
-                        (laneColony [ body ] [ "c1", { X = 25; Y = 22 } ]
-                         |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ])
-                        Map.empty
-                        Set.empty
-                        None)
+                "an idle fighter runs from a Reach that out-damages its heal, and not from one it out-heals" {
+                // #533: a fighter holding no fight Task fights nothing, so what it
+                // stands beside is weighed as it is weighed for any body: the
+                // damage reaching its tile against its own heal. In the home room
+                // on purpose: no Guard is pooled for a raid at home.
+                let assignmentOf body hostile =
+                    (decideOn (
+                        laneColony [ body ] [ "c1", { X = 25; Y = 22 } ]
+                        |> facing [ hostileAt "h-1" { X = 25; Y = 20 } hostile ]
+                    ))
                         .Assignments
                     |> Map.tryFind "c1"
 
                 Expect.equal
-                    (assignmentOf (creepWith "c1" 0 100 [ Carry; Carry; Move ]))
+                    (assignmentOf
+                        (creepWith "c1" 0 100 [ Carry; Carry; Move ])
+                        [ RangedAttack; Move ])
                     (Some(taskId Flee))
-                    "the premise: a body with no ATTACK part standing there runs"
+                    "the premise: a body with no heal runs from a lone scout"
 
                 Expect.equal
-                    (assignmentOf (guard "c1"))
+                    (assignmentOf (guard "c1") [ Attack; Move ])
+                    (Some(taskId Flee))
+                    "a guard idle beside a melee that out-damages its 12 heal runs"
+
+                Expect.equal
+                    (assignmentOf (guard "c1") [ RangedAttack; Move ])
                     None
-                    "and the one with an ATTACK part stands its ground: no Flee, and no other work its body admits"
+                    "and one idle beside a lone 1-RA scout it out-heals is not forced off"
+            }
+
+            test "a ranger whose Guard went this tick, beside an 8A melee, takes Flee and steps out" {
+                // #533, live at W18S25 t973,267: the Guard went `task-gone` beside
+                // Idol768 and the ranger stood idle, taking 240 a tick against its
+                // 84 heal, until it died.
+                let ranger =
+                    creepWith
+                        "r1"
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let melee = (List.replicate 8 Attack) @ [ Move ]
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                        Intents = intents
+                    } =
+                    laneColony [ ranger ] [ "r1", { X = 25; Y = 21 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } melee ]
+                    |> decideFrom (Map.ofList [ "r1", taskId (Guard "W9N9") ])
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released("r1", taskId (Guard "W9N9"), ReleaseReason.TaskGone))
+                    "the premise: its Guard is gone this tick"
+
+                Expect.equal
+                    (Map.tryFind "r1" assignments)
+                    (Some(taskId Flee))
+                    "it runs the same tick"
+
+                Expect.equal (moveIntents intents) [ "r1", Bottom ] "one step away from the melee"
+            }
+
+            test "a ranger holding a Guard it wins beside an 8A melee keeps it" {
+                // #533: a fighter that holds a fight Task keeps it; the fight's own
+                // ground handles the melee.
+                let room = reactorErrand.RoomName
+
+                let ranger =
+                    creepWith
+                        "r1"
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let colony =
+                    { (bareRespawn
+                       |> withReactorErrand
+                       |> withReactorOwner (Some Ownership.Ours)
+                       |> withBankedOre) with
+                        Bank = bank 5600 5600
+                        Hostiles =
+                            [
+                                hostileIn
+                                    room
+                                    { X = 25; Y = 30 }
+                                    ((List.replicate 8 Attack) @ [ Move ])
+                            ]
+                    }
+                    |> standingInErrand [ ranger, { X = 25; Y = 31 } ]
+
+                // Won: 900 hits at 240 less our 84 heal against 4,200 at our 140.
+                let { Verdicts = verdicts } =
+                    decideFrom (Map.ofList [ "r1", taskId (Guard room) ]) colony
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Kept("r1", taskId (Guard room)))
+                    "it holds the Guard"
+
+                // #533: fresh, the same body is out-damaged where it stands, so
+                // Flee applies too; the Guard it passes is what it takes.
+                Expect.equal
+                    (Map.tryFind "r1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard room)))
+                    "and a fresh one takes the Guard, not Flee"
+            }
+
+            test
+                "a fresh defender out-damaged off its line takes the Defend it passes, not the nearer Flee" {
+                // #533: both Safety-tier Tasks apply to it, and the safe ground two
+                // steps off is nearer than the rampart eight off; the fight it
+                // passes outranks Flee all the same.
+                let colony =
+                    defenderHome
+                        defendedLine
+                        [ raidMeleeAt "h-1" { X = 10; Y = 34 } ]
+                        [ defender "defender-1", { X = 12; Y = 34 } ]
+
+                Expect.equal
+                    (Map.tryFind "defender-1" (decideOn colony).Assignments)
+                    (Some(taskId (Defend "W1N1")))
+                    "it walks to its rampart"
+            }
+
+            test "an idle ranger walking home walks round the Reach it fled, never back into it" {
+                // #533: a fighter with no fight Task walks home from any room but
+                // home; walked straight it steps back into the Reach Flee has just
+                // walked it out of, and runs again. A raid at (30,48) reaches x 25
+                // and up from row 43 down; the ranger at (28,42) stands outside it.
+                let raid = [ hostileIn "W1N2" { X = 30; Y = 48 } smallMelee ]
+                let ranger = creepWith "r-out" 0 0 Bodies.rangerPattern.Block
+                let decision = decideOn (transitRoom [ ranger, { X = 28; Y = 42 } ] raid)
+
+                Expect.isNone
+                    (Map.tryFind "r-out" decision.Assignments)
+                    "the premise: it holds nothing"
+
+                let step = moveIntentsFor "r-out" decision.Intents
+
+                Expect.isTrue
+                    (step = [ MoveCreep("r-out", Left) ] || step = [ MoveCreep("r-out", TopLeft) ])
+                    $"along the Reach's edge, never into it: {step}"
             }
 
             test "the Move Intent walks toward a safe tile, and no action is emitted" {

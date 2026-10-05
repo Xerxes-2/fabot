@@ -1378,8 +1378,22 @@ let private shelterOf (view: ColonyView) atlas (hot: Set<Pos>) : Set<RoomPos> =
         (Atlas.shelterGround atlas view.Perimeter shelterDepth)
         (Set.union hot besideSpawns |> RoomPos.setAt home)
 
+/// How far a hostile's Reach runs from its tile, in Chebyshev tiles: its
+/// weapon's range plus the margin, or None for one that cannot hurt. A body
+/// that can barely move reaches one past its weapon's range (#510): with its
+/// fatigue spent it steps once, then waits out the weight of that step.
+let internal reachRadius (view: ColonyView) (hostile: HostileInfo) : int option =
+    let margin =
+        if HostileInfo.stationary view.Hostiles hostile then
+            Engine.meleeRange
+        else
+            view.Tuning.ReachMargin
+
+    HostileInfo.weaponRange view.Hostiles hostile
+    |> Option.map (fun r -> r + margin)
+
 /// This tick's Threats, off the view's hostiles and the rampart census, room by
-/// room: weapon range plus the margin in Chebyshev tiles, and across a border
+/// room: `reachRadius` in Chebyshev tiles, and across a border
 /// as far onto the next room's tiles (#514), less every tile under one of our
 /// standing ramparts in the room it lands in. The held facts say which rangers
 /// hold each room's Guard, which an outmatched room's safe ground is laid for.
@@ -1400,17 +1414,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             view.Hostiles
             |> List.filter (fun hostile -> not (shielded hostile.Pos.Room))
             |> List.choose (fun hostile ->
-                // A body that can barely move reaches one past its weapon's
-                // range (#510): with its fatigue spent it steps once, then
-                // waits out the weight of that step.
-                let margin =
-                    if HostileInfo.stationary view.Hostiles hostile then
-                        Engine.meleeRange
-                    else
-                        view.Tuning.ReachMargin
-
-                HostileInfo.weaponRange view.Hostiles hostile
-                |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r + margin))
+                reachRadius view hostile
+                |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r))
         with
         | [] -> Map.empty, Map.empty
         | threats ->

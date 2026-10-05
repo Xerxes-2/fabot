@@ -479,8 +479,10 @@ let matchCreeps
                 // A holder Flee applies to runs, whatever its Task's ground
                 // (#472): `threatened` reads the Task's tiles, and a body
                 // walking past a raid toward safe ground is struck all the way.
+                // A fight Task's holder keeps it (#533): its ground is the
+                // fight's answer to the Reach.
                 | Some pooled when
-                    pooled.Task <> Flee
+                    not (safetyTier pooled.Task)
                     && fleeing
                        |> Option.exists (fun flee -> applicable view threats atlas creep flee)
                     ->
@@ -513,8 +515,21 @@ let matchCreeps
                     | _ -> None)
                 |> List.fold (fun near cost -> Some(near |> Option.fold min cost)) None
 
+        // A fight Task the body passes outranks Flee (#533), which the two
+        // share a tier with and would take on travel cost or pool order.
+        let fights =
+            gated
+            |> List.exists (fun (pooled, result) ->
+                pooled.Task <> Flee && safetyTier pooled.Task && Result.isOk result)
+
         gated
         |> List.map (fun (pooled, result) ->
+            let result =
+                if fights && pooled.Task = Flee then
+                    Error RejectReason.Inapplicable
+                else
+                    result
+
             let tid = taskId pooled.Task
 
             pooled,

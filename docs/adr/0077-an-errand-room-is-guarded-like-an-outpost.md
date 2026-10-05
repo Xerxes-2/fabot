@@ -1,6 +1,8 @@
 # An errand room is guarded like an outpost
 
-> **Status:** accepted, amended by #417, 0078, #420
+> **Status:** accepted, amended by #417, 0078, #420, #533
+
+> **Amended by #533** on 2026-10-05: the Consequence that "a Fighter does not Flee" is gone. A guard the withdrawal takes the Guard from holds no fight Task, so it flees where the Reach out-damages its own heal (ADR 0056's #533 note).
 
 > **Amended by #420** on 2026-09-26: the errand room is guarded, and its Reclaim pooled and its re-claimer seated, only while there is ore to burn in it — banked, diggable, aboard a body, beside the Reactor, or burning in it for us or an ally (`Facts.fuelledErrands`). Live, W15S28 kept two rangers and a re-claimer on an empty Reactor with nothing banked. The declaration stays, so the ore's return reopens it.
 

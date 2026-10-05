@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510, #516
+> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510, #516, #533
+
+> **Amended by #533** on 2026-10-05 (live t973,267: a ranger whose Guard went `task-gone` beside an 8-ATTACK melee stood idle and died): decision 3's Fighter exemption from Flee becomes a fight Task's. A fighter holding no fight Task (Guard, Fight, Defend, Assault) fights nothing, so it runs like any body where the hostiles whose Reach covers its tile out-damage its own heal (`outDamaged`: its own heal only, the heal of ours reaching it left out, erring toward running, until the world and movement epics reuse #531's strength reading); one that holds such a Task, or is offered one it passes, keeps or takes the fight, which outranks Flee inside the Safety tier. An idle fighter walking home walks round the Reach.
 
 > **Amended by #516** on 2026-10-05: "on contact and never before" stays a rule of the guard *row*. A [[trespasser]] — an unarmed WORK, CARRY or CLAIM body of a declared enemy (`Colony.enemies`, the user's call of 2026-10-05; a neutral player's never) in a room the colony mines — pools the room's Guard as a kill no row casts for, taken by a guard or a ranger already standing, a quiet resident of a bordering home included, and never while a defended room is raided; a hauler is waited for at its store, never chased out of the room. A #510 chase lends the same quiet residents.
 

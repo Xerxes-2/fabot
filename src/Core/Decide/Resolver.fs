@@ -510,16 +510,25 @@ let movementOf
             |> Set.ofList
 
     // The bodies walking home out of an evacuating room, which walk round its
-    // Reach (#512): asked, as the runners are, only on a tick with one.
+    // Reach (#512), and every idle fighter walking home (#533), or it walks
+    // back into the Reach Flee walked it out of: asked, as the runners are,
+    // only on a tick with one.
     let home = SpatialInfo.homeName view.Spatial
 
     let roundWalkers =
-        if Map.isEmpty threats.Reach || Set.isEmpty view.Evacuating then
+        if Map.isEmpty threats.Reach then
             Set.empty
         else
+            let fighters =
+                view.Creeps
+                |> List.filter isFighterBody
+                |> List.map (fun c -> c.Name)
+                |> Set.ofList
+
             placed
             |> List.filter (fun (name, at) ->
-                Map.tryFind name crossings = Some home && Set.contains at.Room view.Evacuating)
+                Map.tryFind name crossings = Some home
+                && (Set.contains at.Room view.Evacuating || Set.contains name fighters))
             |> List.map fst
             |> Set.ofList
 

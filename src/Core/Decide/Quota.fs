@@ -405,8 +405,8 @@ let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
 let internal isSapperBody (creep: CreepInfo) =
     squadRoleByName creep.Name |> Option.exists SquadRole.dismantles
 
-/// Any fighting row's body, a squad's medic and sapper among them: what never
-/// flees and walks home when idle.
+/// Any fighting row's body, a squad's medic and sapper among them: what flees
+/// only with no fight Task to hold (#533) and walks home when idle.
 let internal isFighterBody (creep: CreepInfo) =
     isGuardBody creep
     || isRangerBody creep

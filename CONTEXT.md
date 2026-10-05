@@ -84,7 +84,7 @@ The Task of taking a [[candidate colony]]'s controller for our own with CLAIM pa
 The Task of claiming the sector Reactor for this player with CLAIM parts, pooled one per declared [[errand]] off the declaration alone, feeding-tier, and fired only on a tick the reactor is not ours — and neither pooled nor its body cast while an [[ally]] is burning in it (#415). ADR-0057, ADR-0060, ADR-0069. ☢️
 
 ### Flee
-The Task of getting out of a [[reach]]: applicable to any creep standing inside one except a Fighter and a [[work-heavy body]] standing where it digs — on a [[post]], or at home a bare [[seat]] of a source with none; one walking anywhere takes it like any other body (#515) — with the room's safe set as its [[work area]] and no action. One of the two Safety-tier Tasks. ADR-0033, ADR-0056. 🏃
+The Task of getting out of a [[reach]]: applicable to any creep standing inside one whose hostiles out-damage its own heal, except a [[work-heavy body]] standing where it digs — on a [[post]], or at home a bare [[seat]] of a source with none; one walking anywhere takes it like any other body (#515) — with the room's safe set as its [[work area]] and no action. A fighter takes it too, but a fight Task (Guard, Fight, Defend, Assault) it holds or passes outranks it (#533). In the Safety tier. ADR-0033, ADR-0056. 🏃
 
 ### Planner
 The pure step that reads a [[colony view]] and generates this tick's full Task pool from scratch, setting each entry's [[priority]] and [[capacity]] off the [[atlas]]. ADR-0052.

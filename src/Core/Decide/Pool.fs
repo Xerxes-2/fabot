@@ -178,11 +178,12 @@ let internal outlivesTheStay
     | None -> true
 
 /// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight,
-/// Defend and Assault. A predicate, because the two rules that turn on it
+/// Defend and Assault. A predicate, because the rules that turn on it
 /// (`areaFor` skipping the Reach subtraction, `threatened` written beneath
-/// it) are asked before `planPool` ranks anything, and `tierOf` ranks exactly
-/// these into `Safety`. Exhaustive on purpose.
-let private safetyTier task =
+/// it, the Matcher's fight over Flee) are asked before `planPool` ranks
+/// anything, and `tierOf` ranks exactly these into `Safety`. Exhaustive on
+/// purpose.
+let internal safetyTier task =
     match task with
     | Flee
     | Guard _
@@ -820,11 +821,11 @@ let planPool
     let tierOf task =
         match task with
         | Flee -> Safety
-        // The tier holds five Tasks and no ordering between them: Flee is
-        // inapplicable to a Fighter, a Guard, a Fight, a Defend and an
-        // Assault to nothing else, and a room's Guard and its Fight admit
-        // different bodies until its squad launches; a Defend admits its
-        // defenders alone.
+        // The tier holds five Tasks and no rank between them: a fight Task a
+        // fighter passes outranks Flee in the Matcher (#533), a Guard, a
+        // Fight, a Defend and an Assault admit a Fighter alone, and a room's
+        // Guard and its Fight admit different bodies until its squad
+        // launches; a Defend admits its defenders alone.
         | Guard _
         | Fight _
         | Defend _
