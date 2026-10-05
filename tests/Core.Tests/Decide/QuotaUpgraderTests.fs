@@ -476,10 +476,21 @@ let upgraderQuotaTests =
             // 1,300 is RCL4's, 800 RCL3's ten extensions, 750 the same
             // room one extension short of them, 550 RCL2's five.
             let atBank capacity level =
-                { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
-                    Bank = bank capacity capacity
+                let colony =
+                    { upgraderColony (withBuffer (Structure BuiltKind.Container)) with
+                        Bank = bank capacity capacity
+                    }
+                    |> withLevel level
+
+                // A full timer: clear of the downgrade deadline's floor (#525).
+                { colony with
+                    Controller =
+                        colony.Controller
+                        |> Option.map (fun c ->
+                            { c with
+                                TicksToDowngrade = Engine.controllerDowngrade level
+                            })
                 }
-                |> withLevel level
 
             test
                 "the standing row's own replacement can eat the whole remainder, and the floor hires the generalist then" {
@@ -1195,19 +1206,10 @@ let busyColonyTests =
         "a busy colony's upgrade yields"
         [
             // Income buys one standing body and the stock a second (#385), so
-            // the row stands at two and a cap of one shows. The controller is
-            // a whole timer from its deadline: the guard is off.
+            // the row stands at two and a cap of one shows. The fixture's
+            // controller is a whole timer from its deadline: the guard is off.
             let rich =
-                let colony =
-                    stocking 1_000_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
-
-                { colony with
-                    Controller =
-                        Some
-                            { controllerAt 5 with
-                                TicksToDowngrade = 80_000
-                            }
-                }
+                stocking 1_000_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
 
             let home = SpatialInfo.homeName rich.Spatial
 
@@ -1374,6 +1376,63 @@ let busyColonyTests =
                     (upgraderQuotaOf nearDowngrade)
                     2
                     "20,000 of an 80,000 timer: inside the deadline the row is what it buys, as before"
+            }
+
+            // One posted source: the income buys no standing body and no
+            // stock stands, so the row is empty on its own arithmetic. RCL5's
+            // timer is 80,000 and the deadline half of it.
+            let lean ticks (colony: ColonyView) =
+                { colony with
+                    Controller =
+                        Some
+                            { controllerAt 5 with
+                                TicksToDowngrade = ticks
+                            }
+                }
+
+            let leanColony =
+                oneSource (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+            test "inside its deadline a colony with no surplus keeps one upgrader, busy or not" {
+                let busy ticks = lean ticks (owing [ 5_000 ] leanColony)
+
+                Expect.isNonEmpty (busyOf (busy 40_800)) "the premise: sites make it busy"
+
+                Expect.equal
+                    (upgraderQuotaOf (busy 40_800))
+                    0
+                    "51% of the timer: busy without surplus, the row is empty as before"
+
+                Expect.equal
+                    (upgraderQuotaOf (busy 39_200))
+                    1
+                    "49%: inside the deadline one body stands, bought on stock"
+
+                Expect.equal (upgraderQuotaOf (lean 40_800 leanColony)) 0 "quiet at 51%: unchanged"
+                Expect.equal (upgraderQuotaOf (lean 39_200 leanColony)) 1 "quiet at 49%: one body"
+            }
+
+            test "inside its deadline the floor upgrader is cast before the worker gap" {
+                // The upgrader row casts after the workers; a colony whose
+                // worker gap never closes would never seat its only upgrader.
+                let castOf ticks =
+                    spawnIntents
+                        (decideOn
+                            { lean ticks (owing [ 5_000 ] leanColony) with
+                                Creeps = upgraderFleetAt 1800 1 0 0
+                            })
+                            .Intents
+                    |> castName
+
+                Expect.stringStarts
+                    (castOf 40_800)
+                    "worker-"
+                    "outside the deadline: the worker first"
+
+                Expect.stringStarts
+                    (castOf 39_200)
+                    "upgrader-"
+                    "inside it the colony's one upgrader comes before the hands"
             }
 
             // Three posted sources: income buys two standing bodies, so the

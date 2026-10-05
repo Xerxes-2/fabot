@@ -637,12 +637,20 @@ let planPool
     // child is written down and bounded.
     let ferrySinks = ferryBuffers view
 
-    // A busy colony's own buffer (#523): filled after every sink that spends.
+    // A busy colony's own buffer (#523): filled after every sink that spends,
+    // but not inside the deadline, where it feeds the upgrader (#525).
     let yieldingBuffer =
-        if not (List.isEmpty busy) then
+        if not (List.isEmpty busy) && not (insideDowngradeDeadline view) then
             fun id -> Set.contains id buffers && not (Set.contains id ferrySinks)
         else
             fun _ -> false
+
+    // A raid at home inside the deadline (#525): attackController sinks the
+    // timer mid-siege, and the towers and struck ramparts still come first.
+    let raidedInDeadline = List.contains Raided busy && insideDowngradeDeadline view
+
+    let isTower id =
+        view.Refillables |> List.exists (fun r -> r.Id = id && r.Kind = BuiltKind.Tower)
 
     // The claim party's controllers (#471): a candidate colony's, pooled as
     // an Upgrade before the claim lands.
@@ -884,17 +892,13 @@ let planPool
         // A rung over the stock, so the Storage still takes only what is left.
         | Refill(structureId, Energy) when yieldingBuffer structureId -> Stock
         | Refill(structureId, _) ->
-            let isTower =
-                view.Refillables
-                |> List.exists (fun r -> r.Id = structureId && r.Kind = BuiltKind.Tower)
-
             let kind = Map.tryFind structureId view.Spatial.TargetKinds
 
             if kind = Some(Structure BuiltKind.Storage) then
                 Stock
             elif kind = Some(Structure BuiltKind.Container) then
                 UpgradeBuffer
-            elif isTower then
+            elif isTower structureId then
                 Surplus
             else
                 // The flow; the refill cluster is keyed on a spawn and arrives
@@ -1065,6 +1069,9 @@ let planPool
             deadlineRank
         | Upgrade id when Atlas.targetRoom atlas id |> Option.exists (isNurseryNearDowngrade view) ->
             deadlineRank
+        | Refill(id, Energy) when raidedInDeadline && isTower id -> deadlineRank - priorityStep
+        | Repair id when raidedInDeadline && Set.contains id underAttack ->
+            deadlineRank - priorityStep
         | _ -> priorityOfTier tier + rankOfRung step
 
     let isBorrowedSite siteId =

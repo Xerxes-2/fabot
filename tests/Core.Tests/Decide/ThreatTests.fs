@@ -2211,6 +2211,162 @@ let downgradeDeadlineTests =
                     (Some(taskId (Refill("spawn-1", Energy))))
                     "a fresh timer changes nothing"
             }
+
+            // A busy colony on the tier corridor (RCL1, a 20,000 timer): a
+            // home site and a worn road beside its own controller and buffer.
+            let busyAt ticks =
+                let colony =
+                    { bareRespawn with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-1"
+                                    Left = 5_000
+                                    Begun = false
+                                }
+                            ]
+                        Controller =
+                            Some
+                                { controllerAt 1 with
+                                    TicksToDowngrade = ticks
+                                }
+                        Spatial =
+                            tierRoom
+                            |> withTargets
+                                [
+                                    "site-1", { X = 16; Y = 11 }, Site BuiltKind.Extension
+                                    "road-1", { X = 12; Y = 11 }, Structure BuiltKind.Road
+                                ]
+                    }
+                    |> withHits "road-1" BuiltKind.Road 500 5_000
+
+                let pool = poolBusyOn [ SitesOwed ] colony
+
+                fun task ->
+                    pool
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = task then Some entry.Priority else None)
+                    |> Option.defaultWith (fun () -> failtest $"{task} not pooled")
+
+            test "inside the deadline the colony's own Upgrade ranks above its Build and Repair" {
+                let inside = busyAt 9_800
+                let outside = busyAt 10_200
+
+                Expect.isLessThan
+                    (outside (Build "site-1"))
+                    (outside (Upgrade "ctrl-1"))
+                    "51% of the timer: the site first, as today"
+
+                Expect.isLessThan
+                    (outside (Repair "road-1"))
+                    (outside (Upgrade "ctrl-1"))
+                    "and the road"
+
+                Expect.equal (inside (Upgrade "ctrl-1")) deadlineRank "49%: the deadline rank"
+
+                Expect.isLessThan
+                    (inside (Upgrade "ctrl-1"))
+                    (inside (Build "site-1"))
+                    "over the site"
+
+                Expect.isLessThan
+                    (inside (Upgrade "ctrl-1"))
+                    (inside (Repair "road-1"))
+                    "and the road"
+            }
+
+            // A home inside its deadline (RCL1 at 9,800), a hungry tower, a
+            // rampart, and a loaded worker on the corridor; raided, a melee
+            // raider stands beside the rampart at the corridor's west end
+            // (attackController can sink the timer mid-siege).
+            let defended raided =
+                let colony =
+                    { bareRespawn with
+                        Refillables =
+                            [
+                                refillable "spawn-1" 0 BuiltKind.Spawn
+                                refillable "tower-1" 500 BuiltKind.Tower
+                            ]
+                        Creeps = [ worker "w1" 50 0 ]
+                        Controller =
+                            Some
+                                { controllerAt 1 with
+                                    TicksToDowngrade = 9_800
+                                }
+                        Spatial =
+                            tierRoom
+                            |> withTargets
+                                [ "ram-1", { X = 10; Y = 11 }, Structure BuiltKind.Rampart ]
+                            |> withCreepsAt [ "w1", { X = 16; Y = 11 } ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 5_000 1_000_000
+
+                if raided then
+                    facing [ hostileAt "raider" { X = 9; Y = 11 } smallMelee ] colony
+                else
+                    colony
+
+            test
+                "a raided home inside the deadline ranks its tower and struck rampart over the Upgrade" {
+                let rankIn busy colony =
+                    let pool = poolBusyOn busy colony
+
+                    fun task ->
+                        pool
+                        |> List.tryPick (fun entry ->
+                            if entry.Task = task then Some entry.Priority else None)
+                        |> Option.defaultWith (fun () -> failtest $"{task} not pooled")
+
+                let raided = rankIn [ Raided ] (defended true)
+                let quiet = rankIn [] (defended false)
+
+                Expect.isLessThan
+                    (raided (Refill("tower-1", Energy)))
+                    (raided (Upgrade "ctrl-1"))
+                    "raided: the tower first"
+
+                Expect.isLessThan
+                    (raided (Repair "ram-1"))
+                    (raided (Upgrade "ctrl-1"))
+                    "and the struck rampart"
+
+                Expect.isLessThan
+                    (quiet (Upgrade "ctrl-1"))
+                    (quiet (Refill("tower-1", Energy)))
+                    "quiet: the Upgrade first, as before"
+            }
+
+            test "a loaded worker in a raided home inside the deadline refills the tower first" {
+                let taskOf raided =
+                    Map.tryFind "w1" (decideOn (defended raided)).Assignments
+
+                Expect.equal
+                    (taskOf true)
+                    (Some(taskId (Refill("tower-1", Energy))))
+                    "raided: the tower"
+
+                Expect.equal
+                    (taskOf false)
+                    (Some(taskId (Upgrade "ctrl-1")))
+                    "quiet: the controller"
+            }
+
+            test "inside the deadline a busy colony's buffer keeps its own tier" {
+                // The #523 yield of the buffer would starve the very upgrader
+                // the deadline stands.
+                let buffer ticks =
+                    busyAt ticks (Refill("can-ctrl", Energy))
+
+                Expect.isGreaterThan
+                    (buffer 10_200)
+                    (priorityOfTier UpgradeBuffer)
+                    "outside the deadline: yielded under the buffer tier"
+
+                Expect.equal
+                    (buffer 9_800)
+                    (priorityOfTier UpgradeBuffer)
+                    "inside it: the buffer tier itself"
+            }
         ]
 
 [<Tests>]

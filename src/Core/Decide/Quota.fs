@@ -939,6 +939,9 @@ type QuotaRows =
         /// income (#385); and the uncapped count while the colony is busy for
         /// no work of its own, so the surplus the cap frees banks (#523).
         UpgraderCharged: int
+        /// Whether `Upgrader` is the deadline's floor body alone: income and
+        /// stock buy none (#525). The spawn casts that one ahead of the hands.
+        UpgraderFloored: bool
         /// One `Upgrader` body's lifetime cost at this tick's cast, the price
         /// the row sold it at and the surplus is charged at.
         UpgraderCost: int
@@ -982,10 +985,21 @@ let internal quotaRowsOf
 
     let uncapped, onStockUncapped = upgraderRow view atlas sizing surplus
 
+    let pressed = view.Controller |> Option.exists insideDeadline
+
+    // Inside the deadline the row stands at least one, on stock where the
+    // income buys none (#525).
+    let floored =
+        pressed && uncapped + onStockUncapped = 0 && rowStands view atlas sizing
+
     // A busy colony keeps one body as downgrade insurance, and the
     // downgrade guard lifts the cap (#523).
     let onIncome, onStock =
-        if not (List.isEmpty busy) && not (view.Controller |> Option.exists insideDeadline) then
+        if floored then
+            0, 1
+        elif pressed then
+            uncapped, onStockUncapped
+        elif not (List.isEmpty busy) then
             let onIncome = min uncapped 1
             onIncome, min onStockUncapped (1 - onIncome)
         else
@@ -1016,6 +1030,7 @@ let internal quotaRowsOf
         Dismantler = dismantlerQuota view
         Upgrader = onIncome + onStock
         UpgraderCharged = charged
+        UpgraderFloored = floored
         UpgraderCost = upgraderLifetimeCost sizing view.Bank.Capacity
         Surplus = surplus
     }

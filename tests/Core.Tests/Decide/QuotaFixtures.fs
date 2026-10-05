@@ -432,7 +432,13 @@ let internal upgraderColony room =
         Bank = bank 1800 1800
         Refillables = []
         Sources = [ source "src-a"; source "src-b" ]
-        Controller = Some(controllerAt 5)
+        // A full RCL5 timer: `controllerAt`'s 20,000 is inside the downgrade
+        // deadline, where the row has a floor of its own (#525).
+        Controller =
+            Some
+                { controllerAt 5 with
+                    TicksToDowngrade = 80_000
+                }
         Stages = homeStages room 5
         Spatial = room
     }

@@ -297,6 +297,9 @@ let internal planSpawns
 
         let target = workforceTarget view atlas tasks rows
 
+        // Read here: `rows` is the specialist table by the seats below.
+        let upgraderFloored = rows.UpgraderFloored
+
         // The miner row's cut: Work-heavy and no Carry, subtracted from the
         // Anchor row's census because the Carry part is the whole of the
         // difference between the two.
@@ -662,6 +665,16 @@ let internal planSpawns
         let upgraderRows, otherRows =
             filled |> List.partition (fun (row, _, _, _) -> row.Pattern = upgraderPattern)
 
+        // The deadline's floor body (#525) comes before the hands: a worker gap
+        // that never closes would otherwise starve it. A row the income or
+        // stock bought waits, for the loaded workers already feed the
+        // controller at the deadline rank.
+        let floorSeats, upgraderSeats =
+            if upgraderFloored then
+                rowSeats upgraderRows, []
+            else
+                [], rowSeats upgraderRows
+
         let seats =
             List.replicate
                 harvestFloor
@@ -673,13 +686,14 @@ let internal planSpawns
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
             @ rowSeats otherRows
+            @ floorSeats
             @ List.replicate
                 (if defenderOwed then
                      0
                  else
                      deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
-            @ rowSeats upgraderRows
+            @ upgraderSeats
 
 
         // Idle spawns draw from the colony's one bank in list order — each
