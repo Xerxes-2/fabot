@@ -1890,6 +1890,27 @@ let private diggerAt room pos =
         Owner = "Trepidimous"
     }
 
+/// The digger on its seat beside the outpost's rock at (25,40) (#550).
+let private seatedDigger =
+    { diggerAt "W1N2" { X = 24; Y = 41 } with
+        Id = "d-1"
+    }
+
+/// Gambit229 as W17S26 saw it (#550): an empty 23C23M hauler, at the pace of
+/// every fighting row of ours.
+let private haulerOf id pos =
+    { hostileIn "W1N2" pos (List.replicate 23 Carry @ List.replicate 23 Move) with
+        Id = id
+        Owner = "Trepidimous"
+    }
+
+/// Infinity425 as W17S26 saw it (#550): a 3M3C claimer reserving against us.
+let private claimerOf id pos =
+    { hostileIn "W1N2" pos (List.replicate 3 Move @ List.replicate 3 BodyPart.Claim) with
+        Id = id
+        Owner = "Trepidimous"
+    }
+
 /// The outpost floored out to its borders, and beyond it W1N3, the home of
 /// a child this colony raises, its controller at (25,25) and its resident
 /// ranger `r-1` on the ring: the home borders the outpost and not ours.
@@ -2111,6 +2132,184 @@ let trespassTests =
                 Expect.isTrue
                     (far |> Set.forall (fun tile -> rangeTo away tile = 1))
                     "seven from the one store it draws from none, and is the ground's own"
+            }
+
+            // Live W17S26 t979,593-980,050 (#550): a hauler parked four from the
+            // container laid its store ring under the whole kill, and the guard
+            // standing on it waited ~450 ticks beside a digger and a claimer.
+            test
+                "beside a trespasser the guard catches a hauler is not waited for at its store (#550)" {
+                let hauler = haulerOf "a-haul" { X = 29; Y = 44 }
+                let beside (pos: Pos) tile = rangeTo pos tile = 1
+
+                let besideAny bodies tile =
+                    bodies |> List.exists (fun h -> beside (RoomPos.pos h.Pos) tile)
+
+                for label, rooted in
+                    [
+                        // The outpost's controller stands at (30,48).
+                        "a claimer at the controller", claimerOf "y-claim" { X = 29; Y = 47 }
+                        "a digger on its seat", seatedDigger
+                        "a digger slower than the guard",
+                        { diggerAt "W1N2" { X = 22; Y = 46 } with
+                            Id = "d-2"
+                        }
+                    ] do
+                    let ground = groundOf (declaredRaid [ hauler; rooted ])
+
+                    Expect.isNonEmpty ground $"the premise: beside {label} the kill has ground"
+
+                    Expect.isTrue
+                        (ground |> Set.forall (besideAny [ hauler; rooted ]))
+                        $"beside {label}, every tile of it is beside a trespasser"
+
+                    Expect.isTrue
+                        (ground |> Set.exists (beside (RoomPos.pos hauler.Pos)))
+                        $"the hauler's own among them, beside {label}"
+
+                let crossing = claimerOf "y-claim" { X = 22; Y = 46 }
+
+                Expect.isTrue
+                    (groundOf (declaredRaid [ hauler; crossing ])
+                     |> Set.exists (besideAny [ hauler; crossing ] >> not))
+                    "a claimer crossing at the guard's pace roots nothing: the hauler's store ring stands"
+            }
+
+            test "a claimer heads the kill order among trespassers, behind the raid (#550)" {
+                let hauler = haulerOf "a-haul" { X = 27; Y = 46 }
+                let claimer = claimerOf "y-claim" { X = 29; Y = 47 }
+
+                let raider =
+                    { hostileIn "W1N2" { X = 20; Y = 44 } smallMelee with
+                        Id = "z-raid"
+                    }
+
+                let colony =
+                    declaredRaid [ hauler; claimer ]
+                    |> withGuards [ guard "g-1", { X = 28; Y = 46 } ]
+
+                let result = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the guard holds the kill"
+
+                Expect.contains
+                    result.Intents
+                    (AttackCreep("g-1", "y-claim"))
+                    "beside both, it swings at the claimer, the hauler nearer the Post"
+
+                let raided = declaredRaid [ hauler; claimer; raider ]
+                let threats = threatsOf raided (Atlas.ofView raided)
+
+                Expect.equal
+                    ((Threats.briefOf threats "W1N2").Targets.Order
+                        raided
+                        "W1N2"
+                        (fun _ -> 0)
+                        [ hauler; claimer; raider ]
+                     |> List.map (fun h -> h.Id))
+                    [ "z-raid"; "y-claim"; "a-haul" ]
+                    "the raid first, then the claimer, then the rest"
+            }
+
+            test
+                "each trespasser is answered by a row that can strike it: the guard the rooted and the slow, the ranger the rest (#550)" {
+                let hauler = haulerOf "a-haul" { X = 29; Y = 44 }
+
+                // The asks and the guards' cap, as a colony whose creeps hold
+                // these Tasks reads them.
+                let readHolding (holding: string list) colony =
+                    let threats =
+                        threatsOfHeld
+                            colony
+                            (Atlas.ofView colony)
+                            (heldTaskFacts
+                                colony
+                                (holding
+                                 |> List.map (fun name -> name, taskId (Guard "W1N2"))
+                                 |> Map.ofList))
+
+                    let brief = Threats.briefOf threats "W1N2"
+
+                    brief.Asks
+                    |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+                    |> List.filter (fun (_, wanted) -> wanted > 0),
+                    Map.tryFind (CapScope.Row CastRow.Guard) (brief.Capacity colony threats).Caps
+
+                let asksOf colony = fst (readHolding [] colony)
+
+                let lending colony =
+                    colony |> withGuards [ ranger "r-9", { X = 28; Y = 47 } ]
+
+                Expect.equal
+                    (asksOf (declaredRaid [ hauler; seatedDigger ]))
+                    [ CastRow.Guard, 2; CastRow.Ranger, 1 ]
+                    "the digger asks the guard row, the hauler at its pace the ranger's, and the guard's too while no ranger holds the kill"
+
+                Expect.equal
+                    (asksOf
+                        { declaredRaid [ hauler ] with
+                            Bank = bank 550 550
+                        })
+                    [ CastRow.Guard, 1 ]
+                    "with no ranger block castable and none to lend, the guard's alone"
+
+                Expect.equal
+                    (readHolding [ "r-9" ] (declaredRaid [ hauler; seatedDigger ] |> lending))
+                    ([ CastRow.Guard, 1; CastRow.Ranger, 1 ], Some 1)
+                    "a ranger holding the kill takes the hauler off the guard row"
+
+                Expect.equal
+                    (readHolding
+                        []
+                        (declaredRaid [ hauler ] |> withBodyAtHome (ranger "r-9") atSpawn))
+                    ([ CastRow.Guard, 1; CastRow.Ranger, 1 ], Some 1)
+                    "a lendable ranger elsewhere takes nothing off the guard row"
+
+                // The ranger's lend reads its home's quiet and where it stands,
+                // which may flip tick to tick; the guard's seat reads neither.
+                Expect.equal
+                    (snd (readHolding [] (declaredRaid [ hauler ] |> lending)))
+                    (snd (readHolding [] (declaredRaid [ hauler ])))
+                    "the guard's cap is one with a ranger to lend or none"
+
+                let haulers = [ for i in 1..4 -> haulerOf $"haul-{i}" { X = 20 + i; Y = 44 } ]
+
+                Expect.equal
+                    (asksOf (declaredRaid haulers))
+                    [ CastRow.Guard, Engine.guardCap; CastRow.Ranger, Engine.guardCap ]
+                    "four haulers buy no more than a raid's room of bodies a row"
+
+                let holders held colony =
+                    (decide colony held Set.empty None).Assignments
+                    |> Map.filter (fun _ task -> task = taskId (Guard "W1N2"))
+                    |> Map.keys
+                    |> Set.ofSeq
+
+                Expect.equal
+                    (holders
+                        Map.empty
+                        (declaredRaid [ hauler; seatedDigger ]
+                         |> withGuards
+                             [ guard "g-1", { X = 27; Y = 47 }; ranger "r-9", { X = 28; Y = 47 } ]))
+                    (Set.ofList [ "g-1"; "r-9" ])
+                    "a guard and a ranger hold the kill together"
+
+                Expect.equal
+                    (holders
+                        (Map.ofList [ "r-9", taskId (Guard "W1N2") ])
+                        (declaredRaid [ hauler; seatedDigger ]
+                         |> withGuards
+                             [
+                                 guard "g-1", { X = 27; Y = 47 }
+                                 guard "g-2", { X = 26; Y = 47 }
+                                 ranger "r-9", { X = 28; Y = 47 }
+                             ])
+                     |> Set.count)
+                    2
+                    "beside the ranger holding it, a second guard is no answer to the hauler"
             }
 
             test "a body on the exit row of the room beyond keeps the kill across the bounce" {
@@ -3538,6 +3737,11 @@ let guardPrecedenceTests =
                 let one = Capacity.fighters 1
                 let relieved = one |> Capacity.relieving
 
+                let hauled =
+                    Capacity.fighters 2
+                    |> Capacity.capping (CapScope.Row CastRow.Guard) 1
+                    |> Capacity.capping (CapScope.Row CastRow.Ranger) 2
+
                 let row ground from rung capacity takers =
                     {
                         Ground = ground
@@ -3563,7 +3767,11 @@ let guardPrecedenceTests =
                         [ Raid ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         [ Core ], row [ Core ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        [ Trespasser ], row [ Trespasser ] [ "Trespass" ] OneRungUp one [ "g-1" ]
+                        // Moved on purpose (#550): the hauler, at the guard's
+                        // pace, asks a ranger seat beside the guard's, which
+                        // stays until a ranger holds the kill: r-1 takes it.
+                        [ Trespasser ],
+                        row [ Trespasser ] [ "Trespass" ] OneRungUp hauled [ "g-1"; "r-1" ]
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
                         [ Harassed ], row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
                         // #535's hold rule: the guard holding the Guard keeps it
@@ -3801,9 +4009,17 @@ let guardPrecedenceTests =
                     (Duty.Guard BriefKind.Trespass)
                     "the trespass's Guard"
 
+                // Moved on purpose (#550): the flavour's hauler, at the guard's
+                // pace, asks the ranger row too, and the guard's until a
+                // ranger holds the kill.
                 Expect.equal
                     (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
+                    (Some(
+                        safetyRank OneRungUp,
+                        Capacity.fighters 2
+                        |> Capacity.capping (CapScope.Row CastRow.Guard) 1
+                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 2
+                    ))
                     "pooled as its kill"
             }
 

@@ -418,6 +418,44 @@ module Brief =
             Trespass = None
         }
 
+    /// The rows a trespass's kill asks (#550), each with the trespassers
+    /// standing in its room it answers: the guard those its swing catches
+    /// (`Facts.guardCatches`), the ranger the rest — a hauler at the guard's
+    /// pace — wherever its block is castable or a ranger of ours may be lent
+    /// to the kill, striking each of them. The guard answers the rest too
+    /// until a ranger holds the kill (`holders`, sticky, so no tick-to-tick
+    /// flip): on the store ring it swings at every draw, and the ranger
+    /// replaces it on them, never doubles it.
+    let internal trespassSplit (view: ColonyView) (holders: string list) (room: string) =
+        let trespassers =
+            view.Hostiles
+            |> List.filter (fun hostile ->
+                hostile.Pos.Room = room && Facts.trespasser view (Set.singleton room) hostile)
+
+        let caught, rest = trespassers |> List.partition (guardCatches view)
+
+        let rangerMay () =
+            view.Creeps
+            |> List.exists (fun creep ->
+                isRangerRowBody creep
+                && Facts.rangerMayKill
+                    view
+                    room
+                    (SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                     |> Option.map (fun at -> at.Room))
+                && rest |> List.forall (Facts.canStrike view (partCount creep.Body)))
+
+        let rangerHolds =
+            view.Creeps
+            |> List.exists (fun creep -> isRangerRowBody creep && List.contains creep.Name holders)
+
+        let asked = not (List.isEmpty rest) && (castable view rangerPattern || rangerMay ())
+
+        [
+            CastRow.Guard, (if asked && rangerHolds then caught else trespassers)
+            CastRow.Ranger, (if asked then rest else [])
+        ]
+
     /// Every kind's targets today: what `Facts.guardShoots` passes, in the kill
     /// order.
     let private guardTargets =
@@ -462,6 +500,7 @@ module Brief =
         (room: string)
         (verdict: Lazy<Answer>)
         (ranged: bool)
+        (answered: Lazy<(CastRow * HostileInfo list) list>)
         (view: ColonyView)
         (atlas: Atlas.Atlas)
         (creep: CreepInfo)
@@ -484,15 +523,22 @@ module Brief =
                 | Answer.Lose -> true)
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
             && strikes (HostileInfo.raider view.Hostiles)
-        // A trespass's kill (#516): the guard row's body, or a ranger the
-        // resident rule lends. A child's outpost is the child's guard's, and
-        // the residents' beside it (#517). Defence first is the rank's: a
-        // raid's Guard outranks it (`claimed`, #528).
+        // A trespass's kill (#516): the guard row's body that strikes every
+        // trespasser its row answers (`trespassSplit`, #550), or a ranger the
+        // resident rule lends that strikes them all. A child's outpost is the
+        // child's guard's, and the residents' beside it (#517). Defence first
+        // is the rank's: a raid's Guard outranks it (`claimed`, #528).
         | BriefKind.Trespass ->
-            (isGuardRowBody creep && not (List.contains room view.Borrowed.ChildOutposts)
-             || isRangerRowBody creep
-                && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name))
-            && strikes (Facts.trespasser view (Set.singleton room))
+            if isRangerRowBody creep then
+                Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
+                && strikes (Facts.trespasser view (Set.singleton room))
+            else
+                isGuardRowBody creep
+                && not (List.contains room view.Borrowed.ChildOutposts)
+                && answered.Value
+                   |> List.forall (fun (row, trespassers) ->
+                       row <> CastRow.Guard
+                       || trespassers |> List.forall (Facts.canStrike view (partCount creep.Body)))
         | BriefKind.Outpost when ranged ->
             isRangerRowBody creep
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
@@ -553,8 +599,17 @@ module Brief =
     /// What each kind asks its row for. A ranger kind the ranger row's, never
     /// below `Tuning.RangerResidentBlocks` for a resident, the resident a raid
     /// meets first; a chase nothing; every other kind the guard row's
-    /// `guardsWanted`, at `guardBlocksFor`.
-    let private askOf (kind: BriefKind) (ranged: bool) (room: string) : RowAsk list =
+    /// `guardsWanted`, at `guardBlocksFor`; a trespass one body a trespasser
+    /// of the row that answers it (`trespassSplit`, #550), up to
+    /// `Engine.guardCap` a row, the guards never
+    /// fewer than `guardsWanted` where they answer one or the trespasser only
+    /// bounces on the exit into the room.
+    let private askOf
+        (kind: BriefKind)
+        (ranged: bool)
+        (answered: Lazy<(CastRow * HostileInfo list) list>)
+        (room: string)
+        : RowAsk list =
         match kind with
         // Quirk, kept (the Brief's S0), for the B-stage to settle: a resident
         // room that is a harassment room too is the resident's kind, ground
@@ -589,7 +644,30 @@ module Brief =
                     Blocks = fun view -> rangerBlocksFor 1 view room
                 }
             ]
-        | BriefKind.Trespass
+        | BriefKind.Trespass ->
+            let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
+
+            answered.Value
+            |> List.map (fun (row, trespassers) ->
+                {
+                    Row = row
+                    // At most `Engine.guardCap` a row: bodies that strike
+                    // nothing back never buy more spawns than a raid's room.
+                    Wanted =
+                        fun view _ ->
+                            match row, trespassers with
+                            | CastRow.Guard, [] when not bouncing -> 0
+                            | CastRow.Guard, _ ->
+                                max (guardsWanted view room) (List.length trespassers)
+                                |> min Engine.guardCap
+                            | _ -> min Engine.guardCap (List.length trespassers)
+                    Blocks =
+                        fun view ->
+                            if row = CastRow.Ranger then
+                                rangerBlocksFor 1 view room
+                            else
+                                guardBlocksFor view room
+                })
         | BriefKind.Outpost
         | BriefKind.Core
         | BriefKind.ExitHold ->
@@ -639,9 +717,25 @@ module Brief =
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
             | Answer.Kite
             | Answer.Lose -> Capacity.fighters 1
-        // One body kills a trespasser, which strikes nothing back (#516), and
-        // never fewer than the room's own guards.
-        | BriefKind.Trespass -> Capacity.fighters (max 1 (wanted ()))
+        // One body kills a trespasser, which strikes nothing back (#516): its
+        // row asks summed (#550). Where the ranger row answers one, the guards
+        // are capped at their own row's count and a ranger takes any seat, as
+        // its shot reaches what a swing catches too.
+        | BriefKind.Trespass ->
+            let count row =
+                asks
+                |> List.filter (fun a -> a.Row = row)
+                |> List.sumBy (fun a -> a.Wanted view threats)
+
+            let guards, rangers = count CastRow.Guard, count CastRow.Ranger
+            let capacity = Capacity.fighters (guards + rangers)
+
+            if rangers = 0 then
+                capacity
+            else
+                capacity
+                |> Capacity.capping (CapScope.Row CastRow.Guard) guards
+                |> Capacity.capping (CapScope.Row CastRow.Ranger) (guards + rangers)
         | BriefKind.Outpost
         | BriefKind.Core
         | BriefKind.ExitHold -> Capacity.fighters (wanted ())
@@ -668,19 +762,20 @@ module Brief =
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
         (ranger: Lazy<bool>)
+        (answered: Lazy<(CastRow * HostileInfo list) list>)
         (claims: BriefKind list)
         (laid: Laid)
         : Brief =
         let kind = kindOf claims
         let kill = BriefKind.isKill kind
         let ranged = kind = BriefKind.Outpost && ranger.Value
-        let ask = askOf kind ranged room
+        let ask = askOf kind ranged answered room
 
         {
             Duty = Duty.Guard kind
             Claims = claims
             Targets = guardTargets
-            Admits = admitsOf kind room verdict ranged
+            Admits = admitsOf kind room verdict ranged answered
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind ranged laid
@@ -708,7 +803,7 @@ module Brief =
     /// on no ground, the one a remembered raid pools in a room the colony is
     /// blind in (#366). No raider stands in it, so its verdict is `Win`.
     let unclaimed (room: string) : Brief =
-        claimed room false (lazy Answer.Win) (lazy None) (lazy false) [] bare
+        claimed room false (lazy Answer.Win) (lazy None) (lazy false) (lazy []) [] bare
 
     /// How many [[defender]]s the home wants this tick (#504): one a body of
     /// the raid at its line, at most `Tuning.DefenderCap`; none in a home
@@ -2007,6 +2102,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // `haulGround` of the store nearest it, which it comes within a ranger's
     // shot of to draw at all; one `storeReach` or more from every store is
     // drawing from none, and gets the tiles beside it, a melee guard's chance.
+    // Only while no trespasser the guard's swing catches stands in its room
+    // (`guardCatches`, #550): beside one, a body on the store ring has no
+    // target in reach nor a step away, so the hauler gets the tiles beside it
+    // too.
     //
     // A trespasser on the exit row of a room beside one we mine is carried
     // into it next tick, and back if it is bouncing: keyed to that room, the
@@ -2020,6 +2119,14 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         let hauls (hostile: HostileInfo) =
             List.contains Carry hostile.Body
             && not (HostileInfo.breaks view.Hostiles hostile)
+
+        let caught =
+            lazy
+                (view.Hostiles
+                 |> List.filter (fun hostile ->
+                     trespasser view engaged hostile && Facts.guardCatches view hostile)
+                 |> List.map (fun hostile -> hostile.Pos.Room)
+                 |> Set.ofList)
 
         let storesIn room =
             [ Structure BuiltKind.Container; Dropped Energy; Dropped Thorium; Tombstone ]
@@ -2036,7 +2143,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 let beside () = Atlas.adjacentWalkableIn atlas room at
 
                 let tiles =
-                    if hauls hostile then
+                    if hauls hostile && not (Set.contains room caught.Value) then
                         match
                             storesIn room |> List.filter (fun store -> range store at < storeReach)
                         with
@@ -2188,6 +2295,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 verdict
                 winners
                 (lazy (answeredByRanger room))
+                (lazy
+                    (Brief.trespassSplit
+                        view
+                        (HeldTaskFacts.holdersOf held (taskId (Guard room)))
+                        room))
                 (claimsIn room)
                 {
                     Kite = Map.tryFind room kite

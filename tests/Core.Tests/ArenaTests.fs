@@ -4580,6 +4580,92 @@ let arenaBorderTests =
                 Expect.isSome (diedOn "Specter836" trace) $"and Specter836 dies\n{describe trace}"
             }
 
+            // Live (t979,593-980,050) guard-978780 stood on Gambit229's store
+            // ring at (26,7), counted itself arrived, and struck nothing for
+            // ~450 ticks (#550). Beside Onyx632, slower than the guard, the
+            // kill's ground is beside each trespasser. No ranger holds the
+            // kill, so W17S25's guards answer all four, two at most; the mother's
+            // resident is lent to her own kill there, its ranger row asked for
+            // the haulers, but this arena holds no room between W15S28 and
+            // W17S26 for it to walk.
+            test
+                "#550 capture t979,950: the guard walks off the hauler's store ring and kills the trespassers" {
+                // #551's sway kept Onyx632's step every tick with two MOVE more,
+                // on a road the arena does not lay; the guard's catch reads
+                // plain, where its live 3M5W falls behind.
+                let start =
+                    let a = swayingTrespassers ()
+
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            |> List.map (fun b ->
+                                if b.Id = "Onyx632" then
+                                    { b with
+                                        Parts = parts [ Move, 3; Work, 5 ]
+                                    }
+                                else
+                                    b)
+                    }
+
+                let guard = "guard-978780-Spawn11"
+
+                let briefIn home =
+                    let view = viewOf start home
+                    let atlas = Fabot.Core.Atlas.ofView view
+                    let threats = Fabot.Core.Decide.Threat.threatsOf view atlas
+                    view, atlas, threats, Fabot.Core.Decide.Threat.Threats.briefOf threats "W17S26"
+
+                let child, _, threats, brief = briefIn "W17S25"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted child threats))
+                    [ CastRow.Guard, Engine.guardCap; CastRow.Ranger, Engine.guardCap ]
+                    "its guards answer all four until a ranger holds the kill, and the two haulers ask the ranger row"
+
+                let mother, atlas, threats, brief = briefIn "W15S28"
+
+                Expect.contains
+                    (mother.Creeps
+                     |> List.filter (brief.Admits mother atlas)
+                     |> List.map (fun c -> c.Name))
+                    "ranger-979811-Spawn8"
+                    "the mother's resident may be lent to her kill there"
+
+                Expect.isTrue
+                    (brief.Asks
+                     |> List.exists (fun ask ->
+                         ask.Row = CastRow.Ranger && ask.Wanted mother threats > 0))
+                    "and her ranger row is asked for the haulers"
+
+                let _, trace = start |> run 90
+                let failure = describe trace
+
+                Expect.isTrue
+                    (trace
+                     |> List.take 10
+                     |> List.exists (fun t ->
+                         t.Ours
+                         |> List.exists (function
+                             | AttackCreep(name, _) -> name = guard
+                             | _ -> false)))
+                    $"the guard walks to the trespassers and strikes within ten ticks\n{failure}"
+
+                for id in [ "Onyx632"; "Morgana682" ] do
+                    Expect.isSome (diedOn id trace) $"{id} dies\n{failure}"
+
+                // Left with Gambit229 at its pace and Infinity425 crossing, the
+                // guard waits on the store ring, where it swings at every draw.
+                let container = RoomPos.at "W17S26" { X = 27; Y = 9 }
+
+                Expect.isTrue
+                    (pathOf guard trace
+                     |> List.last
+                     |> fun (_, s) ->
+                         RoomPos.range s.At container |> Option.exists (fun r -> r <= 2))
+                    $"and then waits for Gambit229 at the container\n{failure}"
+            }
+
             // Live (t974,722-974,950) the anchor stepped onto the invader's
             // tile every tick and only walked once it died. A body we cannot
             // move is ground nobody of ours can take, an ally's as much as an

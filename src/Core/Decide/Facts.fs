@@ -640,15 +640,27 @@ let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hosti
     not (HostileInfo.shoots side hostile)
     && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait side hostile)
 
+/// Whether a hostile stands within a step of a target of this kind in its room.
+let private besideTargetOf (view: ColonyView) (kind: TargetKind) (hostile: HostileInfo) =
+    (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
+    |> Map.exists (fun id tile ->
+        Map.tryFind id view.Spatial.TargetKinds = Some kind
+        && range tile (RoomPos.pos hostile.Pos) <= 1)
+
 /// Whether an unarmed worker stands on a seat it digs from: WORK in effect,
 /// no weapon, within a step of a source of its room.
 let private onDigSeat (view: ColonyView) (hostile: HostileInfo) =
     HostileInfo.works view.Hostiles hostile
     && not (HostileInfo.armed view.Hostiles hostile)
-    && (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
-       |> Map.exists (fun id tile ->
-           Map.tryFind id view.Spatial.TargetKinds = Some Source
-           && range tile (RoomPos.pos hostile.Pos) <= 1)
+    && besideTargetOf view Source hostile
+
+/// Whether a [[trespasser]] stands rooted at its work (#550): a digger on its
+/// seat (`onDigSeat`), or a CLAIM body beside its room's controller, which it
+/// reserves or attacks from there; one crossing the room is not.
+let internal rootedAtWork (view: ColonyView) (hostile: HostileInfo) =
+    onDigSeat view hostile
+    || HostileInfo.claims view.Hostiles hostile
+       && besideTargetOf view Controller hostile
 
 /// Whether a hostile stands on a standing rampart that is not ours (#535): the
 /// projection carries hits for an ownable structure only when it is ours.
@@ -699,6 +711,17 @@ let private damageOf (parts: BodyPart -> int) =
     Engine.attackPower * parts Attack
     + Engine.rangedAttackPower * parts RangedAttack
 
+/// Whether a hostile is slower than a body of these part counts on plain, the
+/// ground a fight crosses: it cannot keep off that body's swing.
+let private slowerOnPlain (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
+    match
+        Gait.ticks Gait.plain (HostileInfo.gait side hostile),
+        Gait.ticks Gait.plain (Gait.ofParts ours)
+    with
+    | None, _ -> true
+    | Some theirs, Some mine -> theirs > mine
+    | Some _, None -> false
+
 /// Whether a melee swing reaches a raider (#535): one whose gun is not its
 /// weapon — no RANGED_ATTACK in effect, or a swing that outdeals its shot
 /// (the engine's smallMelee, one gun beside its ATTACK, closes) — so it must
@@ -708,15 +731,6 @@ let private damageOf (parts: BodyPart -> int) =
 /// gun, as quick as ours, keeps its range for as long as it likes, and its
 /// healers behind it: one token ATTACK among its guns does not bring it in.
 let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raider: HostileInfo) =
-    let slower =
-        match
-            Gait.ticks Gait.plain (HostileInfo.gait side raider),
-            Gait.ticks Gait.plain (Gait.ofParts ours)
-        with
-        | None, _ -> true
-        | Some theirs, Some mine -> theirs > mine
-        | Some _, None -> false
-
     let parts = partCountIn (HostileInfo.effectiveParts side raider)
 
     Engine.attackPower * parts Attack
@@ -724,7 +738,7 @@ let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raid
     || HostileInfo.stationary side raider
     // Penned in its room (an Invader), as `canStrike` reads it.
     || not (HostileInfo.crossesExits raider)
-    || slower
+    || slowerOnPlain side ours raider
 
 /// Whether a body of these part counts brings its swing to bear on one
 /// hostile (#535): one that is no raider, or a raider its swing reaches
@@ -753,6 +767,14 @@ let private borneDamage (side: HostileInfo list) (raid: HostileInfo list) (ours:
 let internal defenderReaches (side: HostileInfo list) (hostile: HostileInfo) : bool =
     swingBorneOn side (partCountIn defenderPattern.Block) hostile
 
+/// Whether the guard's swing catches a [[trespasser]] (#550): one rooted at
+/// its work (`rootedAtWork`), or one slower than the guard on plain. A hauler
+/// at the guard's pace keeps off a swing and never off a shot, so the guard
+/// row answers the ones it catches and the ranger row the rest.
+let internal guardCatches (view: ColonyView) (trespasser: HostileInfo) : bool =
+    rootedAtWork view trespasser
+    || slowerOnPlain view.Hostiles (partCountIn guardPattern.Block) trespasser
+
 /// What a body of ours heals itself a tick while it fights: a ranged body's
 /// heal acts beside its shot (#411), and a melee body's is suppressed by its
 /// own attack, so it heals nothing.
@@ -772,6 +794,10 @@ type KillTier =
     | BrokenHealer
     /// The rest of the raid: an armed body, or a healer we do not break.
     | Raid
+    /// A CLAIM body outside a ranger's room (#550): a reservation against
+    /// ours shuts the room's sources, so it goes first of the bodies that
+    /// strike nothing back.
+    | Reserver
     /// Anything else the Guard may shoot.
     | Bystander
 
@@ -877,16 +903,15 @@ let internal damageReaching (view: ColonyView) : HostileInfo -> int =
 
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's
-/// melee guard) the raid first and nothing more.
+/// melee guard) the raid first, then a claimer, and nothing more.
 let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRank =
     if not (Set.contains room (rangerRooms view)) then
         fun hostile ->
             {
                 Tier =
-                    (if HostileInfo.armed view.Hostiles hostile then
-                         Raid
-                     else
-                         Bystander)
+                    (if HostileInfo.armed view.Hostiles hostile then Raid
+                     elif HostileInfo.claims view.Hostiles hostile then Reserver
+                     else Bystander)
                 EffectiveHits = 0
             }
     else
@@ -1412,7 +1437,8 @@ let private bandOf =
     | Claimer -> 0
     | BrokenHealer -> 1
     | Raid -> 2
-    | Bystander -> 3
+    | Reserver -> 3
+    | Bystander -> 4
 
 /// One side's heal this tick, given the damage each of its bodies takes:
 /// each healer in turn pre-heals the body most threatened — the damage
