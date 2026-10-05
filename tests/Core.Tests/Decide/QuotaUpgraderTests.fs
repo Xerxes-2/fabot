@@ -1186,3 +1186,247 @@ let quotaInputTests =
                     "a hauler in the oven pays off no Anchor gap"
             }
         ]
+
+/// A busy colony's upgrading yields (#523): while the line, the home's sites,
+/// a raid, a child or the reserve wants the energy, the row casts one body.
+[<Tests>]
+let busyColonyTests =
+    testList
+        "a busy colony's upgrade yields"
+        [
+            // Income buys one standing body and the stock a second (#385), so
+            // the row stands at two and a cap of one shows. The controller is
+            // a whole timer from its deadline: the guard is off.
+            let rich =
+                let colony =
+                    stocking 1_000_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+
+                { colony with
+                    Controller =
+                        Some
+                            { controllerAt 5 with
+                                TicksToDowngrade = 80_000
+                            }
+                }
+
+            let home = SpatialInfo.homeName rich.Spatial
+
+            let quotasOf colony =
+                (decideOn
+                    { colony with
+                        Creeps = upgraderFleet 0 1
+                    })
+                    .Quotas
+
+            let rowQuota name colony =
+                (quotasOf colony).Rows
+                |> List.find (fun row -> row.Row = name)
+                |> fun row -> row.Quota
+
+            let upgraderQuotaOf = rowQuota "upgrader"
+            let busyOf colony = (quotasOf colony).Busy
+
+            // A terminal holding a send's worth, and a colony short of its
+            // reserve to send it to: aid goes out this tick.
+            let sendingAid (colony: ColonyView) =
+                { colony with
+                    AidRooms = [ "W3N1" ]
+                    Spatial =
+                        { colony.Spatial with
+                            Stores = Map.add "term-1" 50_000 colony.Spatial.Stores
+                        }
+                        |> withTargets [ "term-1", { X = 22; Y = 9 }, Structure BuiltKind.Terminal ]
+                }
+
+            let lineAt hits =
+                { rich with
+                    Perimeter = [ { X = 16; Y = 9 } ]
+                    Spatial =
+                        rich.Spatial
+                        |> withTargets [ "ram-1", { X = 16; Y = 9 }, Structure BuiltKind.Rampart ]
+                }
+                |> withHits "ram-1" BuiltKind.Rampart hits 1_000_000
+
+            test "a quiet colony is not busy, and its row is unchanged" {
+                Expect.isEmpty (busyOf rich) "the premise: nothing else wants the energy"
+
+                Expect.equal
+                    (upgraderQuotaOf rich)
+                    2
+                    "income buys one standing body and the stock a second"
+            }
+
+            test "a perimeter rampart well under its floor makes the colony busy" {
+                Expect.equal (busyOf (lineAt 89_000)) [ LineBroken ] "89,000 of a 100,000 floor"
+
+                Expect.isEmpty
+                    (busyOf (lineAt 99_900))
+                    "a kept line sits just under its floor, and that is no business"
+            }
+
+            test "a rampart site on the perimeter makes the colony busy" {
+                let sited perimeter =
+                    { rich with
+                        Perimeter = perimeter
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-r"
+                                    Left = 1
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            rich.Spatial
+                            |> withTargets [ "site-r", { X = 16; Y = 9 }, Site BuiltKind.Rampart ]
+                    }
+
+                Expect.equal
+                    (busyOf (sited [ { X = 16; Y = 9 } ]))
+                    [ LineBroken ]
+                    "a site on the line"
+
+                Expect.isEmpty
+                    (busyOf (sited []))
+                    "the same one-energy site on no line is no business"
+            }
+
+            test "home sites owing more than one hauler load make the colony busy" {
+                let load =
+                    partCountIn (bodyFor haulerPattern rich.Bank.Capacity) Carry
+                    * Engine.carryPartCapacity
+
+                Expect.equal (busyOf (owing [ load + 1 ] rich)) [ SitesOwed ] "a load and one more"
+                Expect.isEmpty (busyOf (owing [ load ] rich)) "one load is a trip, not a backlog"
+            }
+
+            test "an armed hostile at home makes the colony busy" {
+                let facing room body =
+                    { rich with
+                        Hostiles = [ hostileIn room { X = 16; Y = 9 } body ]
+                    }
+
+                Expect.equal (busyOf (facing home smallMelee)) [ Raided ] "a raider in the home"
+                Expect.isEmpty (busyOf (facing home [ Move ])) "a scout is no raid"
+
+                Expect.isEmpty
+                    (busyOf (facing "W1N2" smallMelee))
+                    "a raider in another room is not the home's"
+            }
+
+            test "a child fed by a pooled ferry sink makes the colony busy" {
+                let mother stage buffered =
+                    let colony = ferryMother stage
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores =
+                                    colony.Spatial.Stores
+                                    |> Map.add "storage-1" 1_000_000
+                                    |> Map.add "can-child" buffered
+                            }
+                    }
+
+                Expect.equal
+                    (busyOf (mother Bootstrapping 500))
+                    [ FeedingChild ]
+                    "the ferry's sink is pooled while the child's buffer has room"
+
+                Expect.isEmpty
+                    (busyOf (mother Bootstrapping Engine.containerCapacity))
+                    "a full buffer pools no sink: a child merely raised is no business"
+
+                Expect.isEmpty (busyOf (mother Independent 500)) "a grown child feeds itself"
+            }
+
+            test "aid sent this tick makes the colony busy" {
+                Expect.equal (busyOf (sendingAid rich)) [ FeedingChild ] "the terminal sends"
+
+                Expect.isEmpty
+                    (busyOf { rich with AidRooms = [ "W3N1" ] })
+                    "a colony that would give but has no terminal to send from is not feeding anyone"
+            }
+
+            test "a stock under the emergency reserve makes the colony busy" {
+                Expect.equal
+                    (busyOf (
+                        stocking 5_000 (upgraderColony (withBuffer (Structure BuiltKind.Container)))
+                    ))
+                    [ UnderReserve ]
+                    "5,000 under RCL5's 10,000"
+            }
+
+            test "while busy the row casts at most one body" {
+                Expect.equal
+                    (upgraderQuotaOf (owing [ 5_000 ] rich))
+                    1
+                    "the income's body stays as downgrade insurance; the stock's waits"
+            }
+
+            test "the downgrade guard still raises a busy colony's row" {
+                let nearDowngrade =
+                    { owing [ 5_000 ] rich with
+                        Controller = Some(controllerAt 5)
+                    }
+
+                Expect.equal
+                    (upgraderQuotaOf nearDowngrade)
+                    2
+                    "20,000 of an 80,000 timer: inside the deadline the row is what it buys, as before"
+            }
+
+            // Three posted sources: income buys two standing bodies, so the
+            // cap frees one body's surplus for the worker row to take or not.
+            // An unposted fourth rock's seat crews lift the row off the floor
+            // two the Build pool puts under it, so the income term shows.
+            test "a cap for work hands the freed surplus to the worker row" {
+                let unpostedRock (colony: ColonyView) =
+                    { colony with
+                        Sources = colony.Sources @ [ source "src-d" ]
+                        Spatial =
+                            colony.Spatial
+                            |> withTargets [ "src-d", { X = 24; Y = 10 }, Source ]
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        layer.Terrain |> TerrainGrid.add { X = 24; Y = 10 } Wall
+                                })
+                    }
+
+                let sited = owing [ 5_000 ] (unpostedRock (thirdSource rich))
+
+                let guarded =
+                    { sited with
+                        Controller = Some(controllerAt 5)
+                    }
+
+                Expect.equal (upgraderQuotaOf sited) 1 "the premise: sites cap the row"
+
+                Expect.isGreaterThan
+                    (rowQuota "worker" sited)
+                    (rowQuota "worker" guarded)
+                    "the income the capped body would have drunk hires hands for the sites"
+            }
+
+            test "a cap for anything else banks the freed surplus" {
+                let aiding = sendingAid (thirdSource rich)
+
+                let guarded =
+                    { aiding with
+                        Controller = Some(controllerAt 5)
+                    }
+
+                Expect.equal (upgraderQuotaOf aiding) 1 "the premise: aid caps the row"
+
+                Expect.isLessThan
+                    (upgraderQuotaOf aiding)
+                    (upgraderQuotaOf guarded)
+                    "and the guard lifts it"
+
+                Expect.equal
+                    (rowQuota "worker" aiding)
+                    (rowQuota "worker" guarded)
+                    "no hand is hired off energy already spoken for"
+            }
+        ]

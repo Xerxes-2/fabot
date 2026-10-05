@@ -373,9 +373,9 @@ let decideUnarbitrated
 
     // The consignment's send (#349), beside the defence reflexes because it is
     // the same kind of thing: a structure's own verb, read off the view.
-    let consignmentIntents =
-        let consigned = planConsignment view
+    let consigned = planConsignment view
 
+    let aidIntents =
         let sending =
             consigned
             |> List.choose (function
@@ -383,7 +383,9 @@ let decideUnarbitrated
                 | _ -> None)
             |> Set.ofList
 
-        consigned @ planAid view sending @ planObserver view
+        planAid view sending
+
+    let consignmentIntents = consigned @ aidIntents @ planObserver view
 
     // The pool is derived before the spawns, and the dependency runs one way:
     // the worker row's floor asks the pool, and nothing in the pool reads a
@@ -396,9 +398,13 @@ let decideUnarbitrated
 
     let tasks = planTasks view atlas threats held outposts
 
+    // Why the colony is busy (#523), once a tick for the upgrader row and the
+    // buffer's rank.
+    let busy = busyReasons view tasks (not (List.isEmpty aidIntents))
+
     // Every entry's priority and capacity, set once here and read by the
     // Matcher and the mover.
-    let pool = planPool view atlas threats tasks
+    let pool = planPool view atlas threats busy tasks
 
     // A far field whose Task is not in the tick's list is dead weight the
     // census never evicts (#392). Every far leg priced this tick — by the
@@ -411,7 +417,15 @@ let decideUnarbitrated
     let overflow = haulOverflowOf view atlas plan.HaulerDemand
 
     let spawnIntents, quotas =
-        planSpawns view atlas outposts sizing threats tasks (withOverflow plan.HaulerQuota overflow)
+        planSpawns
+            view
+            atlas
+            outposts
+            sizing
+            threats
+            tasks
+            busy
+            (withOverflow plan.HaulerQuota overflow)
 
     let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
     let assigned = assignedTasks tasks next
@@ -568,6 +582,7 @@ let decideUnarbitrated
                 HaulerDemand = plan.HaulerDemand
                 Overflow = overflow
                 Fights = fightReports view threats
+                Busy = busy
             }
         HaulOverflow = overflow
         OutpostRooms = outposts.Declared

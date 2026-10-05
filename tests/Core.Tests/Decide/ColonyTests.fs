@@ -3601,7 +3601,7 @@ let borrowedRoomBudgetTests =
                 let capOf loads id =
                     let view = twoBuffers loads
 
-                    planPool view (Atlas.ofView view) noThreats (planTasksOn view noThreats)
+                    planPool view (Atlas.ofView view) noThreats [] (planTasksOn view noThreats)
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity

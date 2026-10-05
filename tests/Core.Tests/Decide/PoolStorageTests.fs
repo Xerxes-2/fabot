@@ -80,6 +80,41 @@ let stockTests =
                     "at it the buffer outbids the stock again"
             }
 
+            test "while the colony is busy the upgrade buffer is filled after builds and repairs" {
+                // W17S25, 2026-10-05 (#523): the haulers kept the buffer full
+                // while the west line lay broken. The stock's own Refill
+                // stays the deepest.
+                let colony =
+                    stockColony
+                        [ refillable "tower-1" 500 BuiltKind.Tower ]
+                        (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ])
+
+                let rankIn busy task =
+                    poolBusyOn busy colony
+                    |> List.tryPick (fun entry ->
+                        if entry.Task = task then Some entry.Priority else None)
+
+                let raided = [ Raided ]
+                let buffer = rankIn raided (Refill("can-ctrl", Energy))
+
+                Expect.equal
+                    (rankIn [] (Refill("can-ctrl", Energy)))
+                    (Some(priorityOfTier UpgradeBuffer))
+                    "quiet: the buffer's own tier, as before"
+
+                Expect.isTrue
+                    (Option.map2 (>) buffer (Some(priorityOfTier UpgradeBuffer)) = Some true)
+                    $"busy: below the buffer tier, where a child's ferry sink stands ({buffer})"
+
+                Expect.isTrue
+                    (Option.map2 (>) buffer (rankIn raided (Refill("tower-1", Energy))) = Some true)
+                    "and below the surplus tier's sinks"
+
+                Expect.isTrue
+                    (Option.map2 (<) buffer (rankIn raided (Refill("sto-1", Energy))) = Some true)
+                    "and still above the stock's own Refill"
+            }
+
             test "a hungry tower outbids the stock, however close the stock stands" {
                 // The buffer is brimming, so the tower is the stock's one
                 // rival and the factor is evidence about that pair alone.

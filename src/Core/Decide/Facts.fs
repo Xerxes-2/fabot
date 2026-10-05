@@ -262,6 +262,44 @@ let internal perimeterRamparts (view: ColonyView) : (string * RoomPos * int) lis
             else
                 None)
 
+/// The declared line a raid breaks: its ramparts under nine tenths of their
+/// floor, and the rampart sites on its tiles, by id. Empty in a colony that
+/// keeps no ramparts or declared no line. Read by the pool's line rung and by
+/// `Planner.busyReasons`, so the two name one line.
+let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
+    if not (keepsRamparts view) || List.isEmpty view.Perimeter then
+        Set.empty, Set.empty
+    else
+        let home = SpatialInfo.homeName view.Spatial
+        let line = Set.ofList view.Perimeter
+
+        let floorAt tile =
+            Map.tryFind tile view.RampartFloors
+            |> Option.defaultValue view.Tuning.RampartFloor
+
+        // Nine tenths: decay and the repair that stops at the floor keep a
+        // maintained line just under it (live W12S28: 99,401-99,901).
+        let weak =
+            perimeterRamparts view
+            |> List.choose (fun (id, tile, hits) ->
+                let floor = floorAt (RoomPos.pos tile)
+                if hits < floor - floor / 10 then Some id else None)
+            |> Set.ofList
+
+        let sites =
+            view.ConstructionSites
+            |> List.choose (fun site ->
+                if Map.tryFind site.Id view.Spatial.TargetKinds = Some(Site BuiltKind.Rampart) then
+                    SpatialInfo.placementOf view.Spatial site.Id
+                    |> Option.filter (fun tile ->
+                        tile.Room = home && Set.contains (RoomPos.pos tile) line)
+                    |> Option.map (fun _ -> site.Id)
+                else
+                    None)
+            |> Set.ofList
+
+        weak, sites
+
 /// The raid bodies at the home's line this tick (#504): a hostile, no
 /// keeper's, standing outside the line (`Atlas.outsideLine`) with a live ATTACK or
 /// RANGED_ATTACK, or with WORK and beside a perimeter rampart. A body inside

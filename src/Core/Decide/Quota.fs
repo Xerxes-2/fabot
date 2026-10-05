@@ -1037,10 +1037,11 @@ type QuotaRows =
         /// One body while anything stands in a [[salvage]] room to take down.
         Dismantler: int
         Upgrader: int
-        /// How many of `Upgrader` the stock bought (#385): `workforceTarget`
-        /// must charge the surplus for these mouths not at all, since they ate
-        /// no income.
-        UpgraderOnStock: int
+        /// How many upgrader bodies `workforceTarget` charges the surplus
+        /// for: the income-bought ones only, since a stock-bought mouth ate no
+        /// income (#385); and the uncapped count while the colony is busy for
+        /// no work of its own, so the surplus the cap frees banks (#523).
+        UpgraderCharged: int
         /// One `Upgrader` body's lifetime cost at this tick's cast, the price
         /// the row sold it at and the surplus is charged at.
         UpgraderCost: int
@@ -1069,6 +1070,7 @@ let internal quotaRowsOf
     (threats: Threats)
     (outposts: OutpostFacts)
     (sizing: RowSizing)
+    (busy: BusyReason list)
     haulerQuota
     : QuotaRows =
     // Under the emergency reserve the income rows are sized to a share of
@@ -1081,7 +1083,18 @@ let internal quotaRowsOf
         else
             whole
 
-    let onIncome, onStock = upgraderRow view atlas sizing surplus
+    let uncapped, onStockUncapped = upgraderRow view atlas sizing surplus
+
+    // A busy colony keeps one body as downgrade insurance, and the
+    // downgrade guard lifts the cap (#523).
+    let onIncome, onStock =
+        if not (List.isEmpty busy) && not (view.Controller |> Option.exists insideDeadline) then
+            let onIncome = min uncapped 1
+            onIncome, min onStockUncapped (1 - onIncome)
+        else
+            uncapped, onStockUncapped
+
+    let charged = if busyAtWork busy then onIncome else uncapped
 
     {
         Reserver = sizing.ReserverClaims
@@ -1105,7 +1118,7 @@ let internal quotaRowsOf
         Courier = sizing.CourierQuota
         Dismantler = dismantlerQuota view
         Upgrader = onIncome + onStock
-        UpgraderOnStock = onStock
+        UpgraderCharged = charged
         UpgraderCost = upgraderLifetimeCost sizing view.Bank.Capacity
         Surplus = surplus
     }
@@ -1133,10 +1146,8 @@ let internal workforceTarget (view: ColonyView) atlas (tasks: Task list) (rows: 
     let workerDrain = upgradeDrainOf (bodyFor workerPattern capacity)
 
     // What the standing row takes out of the surplus before the commuting one
-    // is hired against the rest: the income-bought mouths only (#385), since a
-    // stock-bought mouth ate no income and charging it here would take the
-    // surplus away twice.
-    let upgraderCost = (rows.Upgrader - rows.UpgraderOnStock) * rows.UpgraderCost
+    // is hired against the rest (`UpgraderCharged`).
+    let upgraderCost = rows.UpgraderCharged * rows.UpgraderCost
 
     // ADR-0037
     let incomeWorkers =

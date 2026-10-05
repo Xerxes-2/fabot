@@ -269,6 +269,7 @@ let internal planSpawns
     (sizing: RowSizing)
     (threats: Threats)
     (tasks: Task list)
+    (busy: BusyReason list)
     (haulerQuota: int)
     : Intent list * Quotas =
     // The spawn holds while its doorstep is hot: a creep born into a Reach is
@@ -292,7 +293,7 @@ let internal planSpawns
         // Every specialist row's quota in one value, read once because every
         // row is an addend of the target *and* a gap of its own in the
         // cascade.
-        let rows = quotaRowsOf view atlas threats outposts sizing haulerQuota
+        let rows = quotaRowsOf view atlas threats outposts sizing busy haulerQuota
 
         let target = workforceTarget view atlas tasks rows
 
@@ -554,6 +555,7 @@ let internal planSpawns
                 HaulerDemand = []
                 Overflow = HaulOverflow.none
                 Fights = []
+                Busy = []
                 Rows =
                     (filled
                      |> List.map (fun (row, alive, inOven, _) ->

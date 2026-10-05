@@ -519,9 +519,13 @@ let planTasksHoldingThorium (holding: Task list) view =
         (Planner.outpostFactsOf view)
 
 /// This tick's pool with its priorities and capacities, over the
-/// snapshot's own Atlas — what the Matcher and the mover are both handed.
-let poolOn snapshot =
-    planPool snapshot (Atlas.ofView snapshot) noThreats (planTasksOn snapshot noThreats)
+/// snapshot's own Atlas — what the Matcher and the mover are both handed —
+/// with the colony busy for these reasons (#523).
+let poolBusyOn busy snapshot =
+    planPool snapshot (Atlas.ofView snapshot) noThreats busy (planTasksOn snapshot noThreats)
+
+/// The same pool with the colony busy for nothing.
+let poolOn snapshot = poolBusyOn [] snapshot
 
 /// Run the Resolver at its own seam: assigned Tasks as data over the
 /// snapshot's Atlas; a creep absent from the list is idle. Move Intents
@@ -2415,6 +2419,7 @@ let pooledHolding (holding: (string * Task) list) (task: Task) (colony: ColonyVi
         colony
         atlas
         threats
+        []
         (Planner.planTasks colony atlas threats held (Planner.outpostFactsOf colony))
     |> List.tryFind (fun entry -> entry.Task = task)
     |> Option.map (fun entry -> entry.Priority, entry.Capacity)

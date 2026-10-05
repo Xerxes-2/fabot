@@ -3917,7 +3917,11 @@ let dyingRampartTests =
                     |> List.tryFind (fun p -> p.Task = task)
                     |> Option.map (fun p -> p.Priority)
 
-                let lined = defenderHome defendedLine [] []
+                let lined =
+                    defenderHome defendedLine [] []
+                    |> withHits "ram-a" BuiltKind.Rampart 89_000 1_000_000
+                    |> withHits "ram-b" BuiltKind.Rampart 99_900 1_000_000
+
                 let unlined = { lined with Perimeter = [] }
 
                 Expect.isTrue
@@ -3925,7 +3929,15 @@ let dyingRampartTests =
                         (<)
                         (rankIn lined (Repair "ram-a"))
                         (rankIn unlined (Repair "ram-a")) = Some true)
-                    "ram-a at 90,000 under the 100,000 floor: on the line it is lifted"
+                    "ram-a at 89,000 of the 100,000 floor: on the line it is lifted"
+
+                // #523: a kept line sits just under its floor.
+                Expect.isSome (rankIn lined (Repair "ram-b")) "the premise: ram-b pools its Repair"
+
+                Expect.equal
+                    (rankIn lined (Repair "ram-b"))
+                    (rankIn unlined (Repair "ram-b"))
+                    "ram-b at 99,900, inside the floor's tenth: no lift"
 
                 Expect.isNone
                     (rankIn lined (Repair "ram-c"))

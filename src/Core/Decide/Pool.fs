@@ -582,7 +582,13 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
 /// entry ranks and how many bodies it admits, and between them they are
 /// everything the Matcher knows about a Task. Every exception the colony has
 /// learned about ordering and crowding lands here and nowhere else.
-let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : PooledTask list =
+let planPool
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (busy: BusyReason list)
+    (tasks: Task list)
+    : PooledTask list =
     let bank = view.Bank.Capacity
 
     // The three loads a store is divided by, each the row's own cast at the
@@ -638,6 +644,13 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
     // The ferry's sinks (`ferryBuffers`): what a mother lends a bootstrapping
     // child is written down and bounded.
     let ferrySinks = ferryBuffers view
+
+    // A busy colony's own buffer (#523): filled after every sink that spends.
+    let yieldingBuffer =
+        if not (List.isEmpty busy) then
+            fun id -> Set.contains id buffers && not (Set.contains id ferrySinks)
+        else
+            fun _ -> false
 
     // The claim party's controllers (#471): a candidate colony's, pooled as
     // an Upgrade before the claim lands.
@@ -716,37 +729,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
 
     // The declared perimeter's ramparts under their floor, and the sites on
     // its tiles: the line a raid breaks, rebuilt before roads and extensions.
-    let weakLine, lineSites =
-        if not (Facts.keepsRamparts view) || List.isEmpty view.Perimeter then
-            Set.empty, Set.empty
-        else
-            let home = SpatialInfo.homeName view.Spatial
-            let line = Set.ofList view.Perimeter
-
-            let floorAt tile =
-                Map.tryFind tile view.RampartFloors
-                |> Option.defaultValue view.Tuning.RampartFloor
-
-            let weak =
-                Facts.perimeterRamparts view
-                |> List.choose (fun (id, tile, hits) ->
-                    if hits < floorAt (RoomPos.pos tile) then Some id else None)
-                |> Set.ofList
-
-            let sites =
-                tasks
-                |> List.choose (function
-                    | Build siteId when
-                        Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Rampart)
-                        ->
-                        SpatialInfo.placementOf view.Spatial siteId
-                        |> Option.filter (fun tile ->
-                            tile.Room = home && Set.contains (RoomPos.pos tile) line)
-                        |> Option.map (fun _ -> siteId)
-                    | _ -> None)
-                |> Set.ofList
-
-            weak, sites
+    let weakLine, lineSites = Facts.brokenLine view
 
     // The emergency reserve (#505): under it the stock's draw is the
     // emergency sinks' — the refill cluster and the towers, and the Repairs
@@ -906,6 +889,8 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             reserveShort && (isStorage structureId || Set.contains structureId ferrySinks)
             ->
             UpgradeBuffer
+        // A rung over the stock, so the Storage still takes only what is left.
+        | Refill(structureId, Energy) when yieldingBuffer structureId -> Stock
         | Refill(structureId, _) ->
             let isTower =
                 view.Refillables
@@ -1079,6 +1064,7 @@ let planPool (view: ColonyView) atlas (threats: Threats) (tasks: Task list) : Po
             // A trespass's likewise (#516), a quiet resident's ring too.
             | Guard room when Threats.isKill threats room -> OneRungUp
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
+            | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
             | _ -> OnTheTier
 
         match task with

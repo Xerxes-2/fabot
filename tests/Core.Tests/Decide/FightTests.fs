@@ -101,7 +101,7 @@ let private fightCaps (colony: ColonyView) (holding: (string * Task) list) =
     let atlas = Atlas.ofView colony
     let threats = threatsHolding colony held
 
-    planPool colony atlas threats (planHolding colony holding)
+    planPool colony atlas threats [] (planHolding colony holding)
     |> List.tryFind (fun entry -> entry.Task = Fight "W1N2")
     |> Option.map (fun entry ->
         SquadRole.all
@@ -129,7 +129,7 @@ let pooledTests =
                 let threats = threatsHolding mother (heldOn mother [])
 
                 let capacity =
-                    planPool mother atlas threats tasks
+                    planPool mother atlas threats [] tasks
                     |> List.find (fun entry -> entry.Task = Fight "W1N2")
                     |> fun entry -> entry.Capacity
 
@@ -151,6 +151,7 @@ let pooledTests =
                         mother
                         atlas
                         (threatsHolding mother (heldOn mother []))
+                        []
                         (planHolding mother [])
                     |> List.tryFind (fun entry -> entry.Task = task)
                     |> Option.map (fun entry -> entry.Priority)
@@ -1014,7 +1015,7 @@ let assaultTests =
                 let threats = assaultThreats colony
 
                 let capacity =
-                    planPool colony atlas threats (planHolding colony [])
+                    planPool colony atlas threats [] (planHolding colony [])
                     |> List.find (fun entry -> entry.Task = Assault "W1N2")
                     |> fun entry -> entry.Capacity
 
@@ -1040,6 +1041,7 @@ let assaultTests =
                         colony
                         (Atlas.ofView colony)
                         (assaultThreats colony)
+                        []
                         (planHolding colony [])
                      |> List.tryFind (fun entry -> entry.Task = Assault "W1N2")
                      |> Option.map (fun entry -> entry.Priority))
@@ -1476,7 +1478,7 @@ let assaultTests =
                 let threats = assaultThreats colony
 
                 let capacity =
-                    planPool colony atlas threats (planHolding colony [])
+                    planPool colony atlas threats [] (planHolding colony [])
                     |> List.find (fun entry -> entry.Task = Assault "W1N2")
                     |> fun entry -> entry.Capacity
 

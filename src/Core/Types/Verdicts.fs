@@ -434,6 +434,22 @@ type FightReport =
         Squads: SquadPrice list
     }
 
+/// Why a colony is **busy** this tick (#523): other work wants the energy the
+/// upgrade would take. Each is its own case because the worker row reads
+/// them apart: a broken line and owed sites are work the freed surplus buys
+/// hands for, and the other three are energy already spoken for.
+type BusyReason =
+    /// The declared line well under its floor, or a rampart site on it.
+    | LineBroken
+    /// The home's sites owe more than one hauler load.
+    | SitesOwed
+    /// An armed raider stands in the home.
+    | Raided
+    /// A child's ferry sink is pooled, or aid is sent this tick.
+    | FeedingChild
+    /// The stock stands under its emergency reserve (#505).
+    | UnderReserve
+
 /// The tick's workforce arithmetic as the cascade saw it: the whole
 /// target, the living and casting counts it was measured against, and one
 /// `RowQuota` per row. `Rows` empty and `Target` zero is the cascade's
@@ -454,6 +470,8 @@ type Quotas =
         Overflow: HaulOverflow
         /// The squad exchange, per raided resident room (#452).
         Fights: FightReport list
+        /// Why the colony is busy this tick, empty when it is not (#523).
+        Busy: BusyReason list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -468,6 +486,7 @@ module Quotas =
             HaulerDemand = []
             Overflow = HaulOverflow.none
             Fights = []
+            Busy = []
         }
 
 /// What one tick of deciding returns: the Intents to execute, the

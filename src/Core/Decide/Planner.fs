@@ -229,6 +229,64 @@ let internal ferryBuffers (view: ColonyView) : Set<string> =
         |> Set.ofList
         |> Set.union buffers
 
+/// Why the colony is **busy** this tick (#523), empty when it is not. Derived
+/// once in `Entry.decide` off the pooled Tasks, so a child counts only while
+/// its ferry sink is actually pooled, and handed to the upgrader row
+/// (`Quota.quotaRowsOf`) and the buffer's rank (`Pool.planPool`).
+let internal busyReasons (view: ColonyView) (tasks: Task list) (aidSent: bool) : BusyReason list =
+    let home = SpatialInfo.homeName view.Spatial
+
+    // An unplaced site reads as home, as the surplus rung's does.
+    let homeOwed =
+        view.ConstructionSites
+        |> List.filter (fun site ->
+            SpatialInfo.roomOf view.Spatial site.Id
+            |> Option.forall (fun room -> room = home))
+        |> List.sumBy (fun site -> site.Left)
+
+    let lineBroken =
+        let weak, sites = Facts.brokenLine view
+        not (Set.isEmpty weak && Set.isEmpty sites)
+
+    let ferrying =
+        aidSent
+        || (let sinks = ferryBuffers view
+
+            not (Set.isEmpty sinks)
+            && tasks
+               |> List.exists (function
+                   | Refill(id, Energy) -> Set.contains id sinks
+                   | _ -> false))
+
+    [
+        if lineBroken then
+            LineBroken
+        // More than one hauler load: a smaller backlog is one trip, not a queue.
+        if homeOwed > carryCapacityOf (bodyFor haulerPattern view.Bank.Capacity) then
+            SitesOwed
+        if
+            view.Hostiles
+            |> List.exists (fun h -> HostileInfo.raiderOnPaper h && h.Pos.Room = home)
+        then
+            Raided
+        if ferrying then
+            FeedingChild
+        if Facts.belowReserve view then
+            UnderReserve
+    ]
+
+/// Whether a busy colony's freed upgrade surplus buys hands (#523): the line
+/// and the sites are work; a raid, a child and the reserve are energy already
+/// spoken for, and there the surplus banks.
+let internal busyAtWork (busy: BusyReason list) =
+    busy
+    |> List.exists (function
+        | LineBroken
+        | SitesOwed -> true
+        | Raided
+        | FeedingChild
+        | UnderReserve -> false)
+
 /// Whether a ferry sink is delivered to by a drop beside it and never by a
 /// transfer: a nursery's spawn site (#473), or a raised child's controller
 /// while its buffer is unbuilt — the only controllers `ferryBuffers` names.

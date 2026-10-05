@@ -1378,6 +1378,7 @@ let colonyViewTests =
                         view
                         atlas
                         threats
+                        []
                         (Planner.planTasks
                             view
                             atlas
