@@ -643,6 +643,23 @@ let internal planSpawns
         let owed (row: SpecialistRow) =
             not defenderOwed || not (heldForDefender row.Pattern)
 
+        let rowSeats (rows: (SpecialistRow * int * int * int) list) =
+            rows
+            |> List.filter (fun (row, _, _, _) -> owed row)
+            |> List.collect (fun (row, _, _, gap) ->
+                List.replicate
+                    gap
+                    (castFromBank row.Pattern (fun bank ->
+                        sizedBodyFor rowSizing row.Pattern bank.Capacity)))
+
+        // The upgrader row casts after the workers (user, 2026-10-05): W17S25
+        // held its one remaining worker's seat behind an upgrader the bank
+        // could not yet pay while its west line lay broken, and the idle
+        // upgraders had nothing to drink. The surplus mouth waits on the
+        // hands that build and repair.
+        let upgraderRows, otherRows =
+            filled |> List.partition (fun (row, _, _, _) -> row.Pattern = upgraderPattern)
+
         let seats =
             List.replicate
                 harvestFloor
@@ -653,19 +670,14 @@ let internal planSpawns
                 // Sized from `Available` like the harvest floor (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
                 (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
-            @ (filled
-               |> List.filter (fun (row, _, _, _) -> owed row)
-               |> List.collect (fun (row, _, _, gap) ->
-                   List.replicate
-                       gap
-                       (castFromBank row.Pattern (fun bank ->
-                           sizedBodyFor rowSizing row.Pattern bank.Capacity))))
+            @ rowSeats otherRows
             @ List.replicate
                 (if defenderOwed then
                      0
                  else
                      deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
                 (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
+            @ rowSeats upgraderRows
 
 
         // Idle spawns draw from the colony's one bank in list order — each

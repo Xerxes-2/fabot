@@ -89,8 +89,9 @@ let upgraderQuotaTests =
             test "a built buffer hires the standing row out of the surplus" {
                 // 30,000 in over a life from two posted sources, less 2 × 700 of Anchor
                 // and 1,800 of hauler, is 26,800 of surplus; one standing body's eleven
-                // Work drinks 16,500 of it, so the quota is one.
-                match buffered 0 0 with
+                // Work drinks 16,500 of it, so the quota is one. The one generalist
+                // the remainder hires stands, so the standing row is the gap.
+                match buffered 0 1 with
                 | [ (_, body, name) ] ->
                     Expect.stringStarts name "upgrader-" "the surplus hires the standing row"
 
@@ -275,7 +276,7 @@ let upgraderQuotaTests =
                 let leanFleet = upgraderFleetAt 1800 1 0
 
                 Expect.stringStarts
-                    (castName (buffered 0 0))
+                    (castName (buffered 0 1))
                     "upgrader-"
                     "the premise: at two posted sources this same buffer hires the standing row"
 
@@ -315,16 +316,17 @@ let upgraderQuotaTests =
                     "with no container at the controller the same two generalists are the target"
             }
 
-            test "the standing row is cast after the hauler row and before the generalist" {
-                // The ground rows produce the surplus, so they are cast first; the
-                // generalist spends it at nine Work against eleven, so it is cast last.
+            test "the standing row is cast after the ground rows and after the generalist" {
+                // The ground rows produce the surplus, so they are cast first. The
+                // generalist builds and repairs, so it is cast before the mouth that
+                // only spends (user, 2026-10-05: an upgrader never outranks a worker).
                 // The fleets below differ from the fleet above in one body each.
                 Expect.stringStarts
-                    (castName (buffered 0 0))
+                    (castName (buffered 0 1))
                     "upgrader-"
-                    "the premise: with every ground row manned the standing row is next"
+                    "the premise: with every ground row and the generalist manned the standing row is next"
 
-                let noAnchor = upgraderFleet 0 0 |> List.filter (fun creep -> creep.Name <> "a2")
+                let noAnchor = upgraderFleet 0 1 |> List.filter (fun creep -> creep.Name <> "a2")
 
                 Expect.stringStarts
                     (castName (
@@ -353,6 +355,30 @@ let upgraderQuotaTests =
                     "with the quota's one standing, what is left of the target is the generalist's"
             }
 
+            test "a worker gap is cast before an upgrader gap" {
+                // User, 2026-10-05: W17S25 held its one remaining worker's seat
+                // behind an upgrader the bank could not yet pay. Both rows are one
+                // short here, and the generalist's seat comes first.
+                let colony = upgraderColony (withBuffer (Structure BuiltKind.Container))
+                let fleet = upgraderFleet 0 0
+
+                Expect.equal
+                    (rowOf "upgrader" { colony with Creeps = fleet }
+                     |> Option.map (fun row -> row.Quota - row.Living))
+                    (Some 1)
+                    "the premise: the standing row is one body short"
+
+                Expect.stringStarts
+                    (castName (buffered 0 1))
+                    "upgrader-"
+                    "and one more generalist closes the only other gap"
+
+                Expect.stringStarts
+                    (castName (buffered 0 0))
+                    "worker-"
+                    "so with both short the generalist is cast first"
+            }
+
             test "a declared outpost's reserver is cast before the standing row" {
                 // The reserver decides whether an outpost's sources are worth five a
                 // tick or ten, and the upgrader spends what they bring in.
@@ -366,8 +392,9 @@ let upgraderQuotaTests =
                     "reserver-"
                     "the row that doubles the income is cast before the row that spends it"
 
+                // The generalist stands too: the standing row is cast after it.
                 let withReserver =
-                    upgraderFleet 0 0
+                    upgraderFleet 0 1
                     @ [ creepWith "r1" 0 50 [ BodyPart.Claim; BodyPart.Claim; Move; Move ] ]
 
                 Expect.stringStarts
@@ -424,7 +451,7 @@ let upgraderQuotaTests =
                     }
 
                 Expect.stringStarts
-                    (castName (buffered 0 0))
+                    (castName (buffered 0 1))
                     "upgrader-"
                     "the premise: this buffer hires the row when there is income to hire it out of"
 
@@ -499,21 +526,32 @@ let upgraderQuotaTests =
                 // against `floor((capacity - 50) / 150)` Work reaches four Work.
                 // Two haulers stand because at an 800 bank this room's two containers
                 // ask for two bodies, whose gap would be cast ahead of the upgrader's.
-                Expect.stringStarts
-                    (castName (casts (atBank 800 3) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
-                    "upgrader-"
+                // The quota is read off the row itself: the generalist's gap is cast
+                // ahead of the standing row's, so a cast would read the worker row.
+                let upgraderQuotaAt colony =
+                    rowOf
+                        "upgrader"
+                        { colony with
+                            Creeps = upgraderFleet 0 0 @ [ hauler "h2" 0 100 ]
+                        }
+                    |> Option.map (fun row -> row.Quota)
+                    |> Option.defaultValue 0
+
+                Expect.isGreaterThan
+                    (upgraderQuotaAt (atBank 800 3))
+                    0
                     "at the 800 bank the row's own cast is a standing body, so the surplus hires it"
 
-                Expect.stringStarts
-                    (castName (casts (atBank 750 3) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
-                    "worker-"
+                Expect.equal
+                    (upgraderQuotaAt (atBank 750 3))
+                    0
                     "fifty energy poorer the same cast is `4W/1C/4M` and the row is not hired"
 
                 // The RCL2 bank's hauler body carries 300 where the 800 bank's carries
                 // 500, so the two containers ask for two bodies there and one here.
-                Expect.stringStarts
-                    (castName (casts (atBank 550 2) (upgraderFleet 0 0 @ [ hauler "h2" 0 100 ])))
-                    "worker-"
+                Expect.equal
+                    (upgraderQuotaAt (atBank 550 2))
+                    0
                     "and at the RCL2 bank, where the cast is `3W/1C/3M`, the surplus is the generalist's"
             }
 
@@ -938,10 +976,12 @@ let quotaInputTests =
                 // drain alone divides it into four bodies, the drain plus the body it
                 // is spent on into three. Four would drink 66,000 and cost 6,800 to
                 // replace, 1,300 over the income, out of the Storage every tick.
+                // Read off the row: this colony also leaves a generalist gap, which
+                // is cast ahead of the standing row's.
                 Expect.equal
-                    (castRows (decideOn (upgraderBandColony 2)).Intents)
-                    [ "upgrader" ]
-                    "two upgraders standing and the row is a body short"
+                    (rowOf "upgrader" (upgraderBandColony 2) |> Option.map (fun row -> row.Quota))
+                    (Some 3)
+                    "the row is three bodies, so two upgraders standing is a body short"
 
                 Expect.equal
                     (castRows (decideOn (upgraderBandColony 3)).Intents)
