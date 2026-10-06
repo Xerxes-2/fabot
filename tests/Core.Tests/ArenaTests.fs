@@ -16950,6 +16950,50 @@ let w18s25CrippledTests =
                     "W17S29's ranger answers W17S25's raided outpost W17S26 throughout"
             }
 
+            // #599: per colony the mother's big ranger takes the chase at t36
+            // from W17S25's east side, 40 steps and a swamp choke from the
+            // cripple, and crosses into W18S25 at t88, after the W17S29 ranger
+            // has it dying (t92). Every rested tick it holds the chase it steps:
+            // the 12 ticks it stands are swamp fatigue, 8 of them the choke's
+            // two columns and 4 a swamp step round an idle defender on the
+            // choke's one road (the occupancy surcharge). Arriving too late
+            // is the seat's (#596), not the walk's.
+            test
+                "#573 capture t994,917: the mother's ranger holding the chase steps toward W18S25 every tick it is rested, and crosses at t88" {
+                let ranger = "ranger-993409-Spawn3"
+
+                let ticks =
+                    // Ticks 0 to 88.
+                    ((w18s25Crippled (), []), List.replicate 89 ())
+                    ||> List.fold (fun (a, acc) () ->
+                        let next, trace = stepIn FightLane.PerColony a
+                        let body = trace.Bodies |> List.find (fun b -> b.Id = ranger)
+
+                        next,
+                        (trace.Tick, body, Map.tryFind ranger next.Carried.Assignments) :: acc)
+                    |> snd
+                    |> List.rev
+
+                Expect.exists
+                    ticks
+                    (fun (_, _, task) -> task = Some "guard:W18S25")
+                    "it holds the cripple's chase"
+
+                for (_, before, _), (tick, after, task) in List.pairwise ticks do
+                    if
+                        task = Some "guard:W18S25"
+                        && before.At.Room <> "W18S25"
+                        && before.Fatigue = 0
+                    then
+                        Expect.notEqual
+                            after.At
+                            before.At
+                            $"t{tick}: rested and holding the chase, it steps"
+
+                let _, last, _ = List.last ticks
+                Expect.equal last.At.Room "W18S25" "it stands in W18S25 by t88"
+            }
+
             test
                 "#573 capture t994,917, the world lane: the one ranger on the kite kills the cripple" {
                 let _, trace = w18s25Crippled () |> runIn FightLane.World 120
