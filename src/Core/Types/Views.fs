@@ -236,6 +236,11 @@ type WorldView =
         /// remembers an armed threat in (`StandDown.RaidedOutposts`,
         /// `ChasedOutposts`, `ThreatenedOutposts`): the rooms that want eyes.
         Danger: Set<string>
+        /// The watched rooms shut on another player's reservation
+        /// whose holder no look has read (`StandDown.RivalReserved`, #604):
+        /// eyes ask whose the hold is, and an enemy's ends the row. The observer's, beside `Danger`; no walk
+        /// reads it.
+        Questioned: Set<string>
         /// The rooms of ours an observer stands in: whose look each room of
         /// `Danger` is (`lookerOf`).
         Observers: string list
@@ -273,6 +278,7 @@ module WorldView =
             Rooms = Map.empty
             Watched = Set.empty
             Danger = Set.empty
+            Questioned = Set.empty
             Observers = []
             Looks = None
             Bodies = lazy Map.empty
@@ -366,6 +372,11 @@ module WorldView =
                 |> List.map (fun gate ->
                     Set.unionMany
                         [ gate.RaidedOutposts; gate.ChasedOutposts; gate.ThreatenedOutposts ])
+                |> Set.unionMany
+                |> Set.intersect watched
+            Questioned =
+                gates
+                |> List.map (fun gate -> gate.RivalReserved)
                 |> Set.unionMany
                 |> Set.intersect watched
             Observers =
@@ -1157,8 +1168,7 @@ module ColonyView =
     /// also one of our outposts: there a lapsed reservation means our own
     /// reserver stood down, and the containers are ours.
     let private harassTargets (ourOutpost: bool) (enemy: string) (facts: RoomFacts) : Set<string> =
-        let enemyHolds (held: ReservationInfo) =
-            held.Holder = ReservationHolder.Rival && held.Username = enemy
+        let enemyHolds (held: ReservationInfo) = held.Username = enemy
 
         let enemyRemote =
             facts.Control

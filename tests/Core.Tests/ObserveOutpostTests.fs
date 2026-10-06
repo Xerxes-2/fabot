@@ -1638,6 +1638,136 @@ let holdTests =
                     "and it is in this set too: the two families name one room and say different things"
             }
 
+            // #604. Live t1,006,924: Trepidimous killed W17S25's reserver in
+            // W17S26 and reserved it; the room stood down to his hold's end, so
+            // nothing of ours went back, no vision, no guard, his diggers mined.
+            test
+                "a declared enemy's hold withdraws nothing and refuses no reserver; a neutral's does both" {
+                let heldByWhom holder username =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet
+                         |> withDeclaredOutpost outpostRoom
+                         |> visible
+                             outpostRoom
+                             (Some
+                                 {
+                                     Holder = holder
+                                     TicksToEnd = 4000
+                                     Username = username
+                                 }))
+
+                let enemy = heldByWhom ReservationHolder.Enemy "Trepidimous"
+                let neutral = heldByWhom ReservationHolder.Rival "giaco"
+
+                Expect.isEmpty
+                    enemy.Outposts
+                    "the enemy's hold opens no stand-down: it is contested"
+
+                Expect.isEmpty (shutAt 101 enemy) "so the room stays worked, and seen"
+
+                Expect.isEmpty
+                    (heldAt 101 enemy)
+                    "and the reserver row hires for it, to attack the hold"
+
+                Expect.equal
+                    (standDowns neutral)
+                    [ outpostRoom, 100, 100, 4100, StandDownBasis.RivalReservation ]
+                    "a neutral's identical hold is #165's stand-down, as ever"
+
+                Expect.equal (heldAt 101 neutral) (Set.singleton outpostRoom) "and #333's refusal"
+            }
+
+            // #604's deploy: the live W17S26 row was written as a rival's
+            // reservation before an enemy's could read as his.
+            test
+                "a standing rival-reservation row ends on the first look that reads the hold an enemy's" {
+                let reading holder username =
+                    quiet
+                    |> withDeclaredOutpost outpostRoom
+                    |> visible
+                        outpostRoom
+                        (Some
+                            {
+                                Holder = holder
+                                TicksToEnd = 3900
+                                Username = username
+                            })
+
+                let fresh =
+                    RaidState.empty
+                    |> raidTick
+                        100
+                        (quiet |> visible outpostRoom (heldBy ReservationHolder.Rival 4000))
+
+                Expect.isEmpty
+                    (recheckedAt 150 fresh)
+                    "a row this bundle opened read its holder a neutral's: nothing to question"
+
+                // The row as the bundle before #604 left it on the wire: no
+                // look of this bundle has read whose the hold is.
+                let written =
+                    { fresh with
+                        Outposts =
+                            fresh.Outposts |> List.map (fun row -> { row with HolderUnread = true })
+                    }
+
+                Expect.equal
+                    (shutAt 150 written)
+                    (Set.singleton outpostRoom)
+                    "the premise: the row shuts the room"
+
+                Expect.equal
+                    (recheckedAt 150 written)
+                    (Set.singleton outpostRoom)
+                    "and the gate looks into it every tick, to read whose the hold is"
+
+                Expect.isEmpty
+                    (written
+                     |> raidTick 200 (reading ReservationHolder.Rival "giaco")
+                     |> recheckedAt 201)
+                    "until one look reads it: a neutral's long hold is questioned once, not for weeks"
+
+                Expect.isEmpty
+                    (written
+                     |> raidTick 200 (reading ReservationHolder.Enemy "Trepidimous")
+                     |> shutAt 201)
+                    "the hold read as the enemy's, the row ends: no stand-down"
+
+                Expect.equal
+                    (written |> raidTick 200 quiet |> shutAt 201)
+                    (Set.singleton outpostRoom)
+                    "a blind tick ends nothing"
+
+                Expect.equal
+                    (written |> raidTick 200 (reading ReservationHolder.Rival "giaco") |> shutAt 201)
+                    (Set.singleton outpostRoom)
+                    "a neutral's hold read again keeps it"
+            }
+
+            test "an enemy's hold puts no floor under the raid's clock in the room" {
+                let held =
+                    squadIn outpostRoom "Trepidimous"
+                    |> visible
+                        outpostRoom
+                        (Some
+                            {
+                                Holder = ReservationHolder.Enemy
+                                TicksToEnd = 500
+                                Username = "Trepidimous"
+                            })
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 100 held
+                    |> raidTick 110 (squadIn raidRoom "Trepidimous")
+
+                Expect.isEmpty
+                    (shutAt 111 state)
+                    "the squad gone, the room reopens: his reservation is no reason to stay out"
+            }
+
             test "the gate stops holding a reservation on the tick the engine's countdown reaches" {
                 // What the gate does with the record (`Planner.reservableControllers`
                 // through `ColonyView.HeldOutposts`): `tick < Until`, the same test the
@@ -2084,6 +2214,7 @@ let private shutOnRaid: RaidState =
                     PlayerSince = None
                     Chased = false
                     Bounced = false
+                    HolderUnread = false
                 }
             ]
     }
@@ -2218,6 +2349,7 @@ let private rowOf room opened expiry basis stronghold : OutpostEpisode =
         PlayerSince = None
         Chased = false
         Bounced = false
+        HolderUnread = false
     }
 
 /// A colony beside the fixture's, home `W13S28`, declaring nothing.

@@ -1236,6 +1236,7 @@ let harassStandDownTests =
                                     PlayerSince = None
                                     Chased = false
                                     Bounced = false
+                                    HolderUnread = false
                                 }
                             ]
                     }
@@ -1297,6 +1298,7 @@ let harassStandDownTests =
                         PlayerSince = None
                         Chased = false
                         Bounced = false
+                        HolderUnread = false
                     }
 
                 let state =

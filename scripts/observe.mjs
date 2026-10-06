@@ -1320,6 +1320,7 @@ if (command === "console") {
     ours: "this colony's own CLAIM parts (which the bot never records here)",
     invader: "the NPC Invader — the hold a level-0 core takes and leaves behind it",
     rival: "another player's CLAIM parts",
+    enemy: "a declared enemy's CLAIM parts — contested: the reserver attacks the hold off (#604)",
   };
 
   // The rooms whose controller somebody else is standing on (#333), read the
@@ -1624,10 +1625,17 @@ if (command === "console") {
           "  the engine refuses reserveController on a controller anybody else holds, and " +
             "createConstructionSite",
         );
-        console.log(
-          "  in the room with it — so the reserver row hires nobody for this room and it " +
-            "raises no container (#333).",
-        );
+        if (hold.holder === "rival") {
+          console.log(
+            "  in the room with it — so the reserver row hires nobody for this room and it " +
+              "raises no container (#333).",
+          );
+        } else {
+          console.log(
+            "  in the room with it — so the room raises no container, and the reserver row's " +
+              "body attackControllers the hold off (#487, #604).",
+          );
+        }
         // The row reads this same record, which is why the line above is a
         // statement about the row and not only about the engine: a tick with
         // vision answers for the room itself, and on every blind tick the

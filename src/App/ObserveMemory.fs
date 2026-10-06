@@ -443,6 +443,11 @@ let private encodeOutpost (episode: OutpostEpisode) =
     if episode.Bounced then
         o?bounced <- true
 
+    // Written only once a look has read the holder (#604), so a legacy row
+    // reads unread and is questioned.
+    if not episode.HolderUnread then
+        o?read <- true
+
     o
 
 let private decodeOutpost (raw: obj) : OutpostEpisode =
@@ -478,6 +483,8 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         // Absent on a legacy row: `Danger.ofColonies` reads a legacy ring's
         // bounce off its earlier rows.
         Bounced = (raw?bounced: obj) = box true
+        // Absent on a row written before #604: its holder is unread.
+        HolderUnread = (raw?read: obj) <> box true
     }
 
 // One room held by somebody else's reservation on the wire: `{ holder,

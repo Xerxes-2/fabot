@@ -80,10 +80,6 @@ let terrainMaskSwamp = 2
 /// Screeps `STRUCTURE_INVADER_CORE` constant.
 let structureInvaderCore = "invaderCore"
 
-/// The NPC Invader's username, as the engine spells it on every object that
-/// user holds: a core, a raider, and the reservation a level-0 core takes.
-let invaderUsername = "Invader"
-
 /// Screeps `EFFECT_COLLAPSE_TIMER` constant: the effect a deployed stronghold's
 /// structures carry; when it runs out the engine removes the stronghold.
 let effectCollapseTimer = 1002

@@ -1091,8 +1091,9 @@ type ObserverTiers =
     {
         /// The rooms that want eyes (`WorldView.Danger`, #534) whose look is
         /// this observer's (`WorldView.lookerOf`): a room some colony stands
-        /// down from on a raid, or remembers an armed threat in, looked at
-        /// once its last sighting is `dangerStride` old.
+        /// down from on a raid, or remembers an armed threat in, or shuts on
+        /// a reservation whose holder is to be read (`WorldView.Questioned`,
+        /// #604), looked at once its last sighting is `dangerStride` old.
         Danger: string list
         /// Declared colony rooms not yet ours, and our nurseries: looked at
         /// while nothing of ours sees them.
@@ -1229,7 +1230,7 @@ let private observerTiers (view: ColonyView) (watched: string list) : ObserverTi
 
     {
         Danger =
-            view.World.Danger
+            Set.union view.World.Danger view.World.Questioned
             |> Set.filter (fun room -> WorldView.lookerOf view.World room = Some home)
             |> Set.toList
         Claims =

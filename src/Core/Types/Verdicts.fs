@@ -312,20 +312,26 @@ let standDownBasisName =
     | StandDownBasis.PlayerRaidHold -> "player-raid-hold"
 
 /// The wire spelling of each ReservationHolder, on the Raid log's Memory leaf.
-/// Only two of the three are ever written — the leaf records the rooms whose
-/// controller somebody else holds — but the name is spelt for all three.
+/// All but `ours` are ever written — the leaf records the rooms whose
+/// controller somebody else holds — but the name is spelt for every holder.
 let reservationHolderName =
     function
     | ReservationHolder.Ours -> "ours"
     | ReservationHolder.Invader -> "invader"
     | ReservationHolder.Rival -> "rival"
+    | ReservationHolder.Enemy -> "enemy"
 
 /// The ReservationHolder a wire name spells, or None: the shell drops that
 /// entry rather than naming the wrong player.
 let reservationHolderOf =
     reverseOf
         reservationHolderName
-        [ ReservationHolder.Ours; ReservationHolder.Invader; ReservationHolder.Rival ]
+        [
+            ReservationHolder.Ours
+            ReservationHolder.Invader
+            ReservationHolder.Rival
+            ReservationHolder.Enemy
+        ]
 
 /// The StandDownBasis a wire name spells, or None: the shell drops that row
 /// rather than inventing a reason for it.

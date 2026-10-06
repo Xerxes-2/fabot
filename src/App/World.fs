@@ -732,20 +732,10 @@ let private seenFacts
                             if isNull (box c.reservation) then
                                 None
                             else
-                                // Three holders, not two: the stand-down
-                                // reads different clocks off the NPC's and a
-                                // player's.
-                                let holder =
-                                    if Some c.reservation.username = ours then
-                                        ReservationHolder.Ours
-                                    elif c.reservation.username = invaderUsername then
-                                        ReservationHolder.Invader
-                                    else
-                                        ReservationHolder.Rival
-
                                 Some
                                     {
-                                        Holder = holder
+                                        Holder =
+                                            Colony.reservationHolder ours c.reservation.username
                                         TicksToEnd = c.reservation.ticksToEnd
                                         Username = c.reservation.username
                                     }

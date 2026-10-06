@@ -443,7 +443,7 @@ The hard floor on the controller's downgrade timer, half the level's full timer,
 ### Stand-down
 An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]], so nothing pools, counts or walks there, except that while a body of the colony stands in it the room is an [[evacuating room]] its bodies walk home from — until a tick read off the threat, one clock per threat:
 - a [[stronghold]]'s core: its collapse (a level-0 core opens none: a guard kills it, #487), or 2,500 ticks where none can be read;
-- a rival's reservation: its end;
+- a neutral's or an ally's reservation: its end (a declared enemy's opens none: it is a raid, contested, and our reserver attacks it off, #604);
 - a raid (bodies with an ATTACK, RANGED_ATTACK or WORK part in effect) nothing of ours wins — neither the biggest body its casters' row casts (the colonies whose rows cast for it, its own colony's however the stand-down shuts it), nor a ranger of theirs kiting it ([[chase]]), nor the rangers standing in it with those called from beside it, of every colony that sees the raid and would send them, each lent by its own colony's rule (the room's one verdict, priced once a tick over our fleet and the world's vision and read by every colony, ADR-0091): its longest remaining life; a body that can barely move opens none (#510);
 - a player's raid alone in an outpost: at most `Tuning.PlayerRaidHold` (200) past its first sighting, never short of a rival's hold (#513);
 - a squad in a [[harassment room]]: fifty ticks past its last sighting;

@@ -953,12 +953,19 @@ type StandDown =
         /// passage itself. Live, a `bunker4` in W15S26 killed two re-claimers
         /// on the same entry tile 161 ticks apart while the room was shut.
         Impassable: Set<string>
-        /// The rooms of `Shut` this tick takes one look into (#165): a
+        /// The rooms of `Shut` this tick takes one look into (#165, and every
+        /// `RivalReserved` room, #604): a
         /// **subset** of it and never a room leaving it. The look re-admits
         /// the room to the scan — the next [[raid log]] can drop a latch the
         /// rival has walked away from — and to nothing else, so the
         /// withdrawal stands on the very tick the gate is being questioned.
         Rechecked: Set<string>
+        /// The rooms of `Shut` shut on another player's reservation
+        /// (`StandDownBasis.RivalReservation`) whose holder no look has read
+        /// (`OutpostEpisode.HolderUnread`): each is in `Rechecked` and wants
+        /// the observer's eyes until one does, so a hold read as an enemy's
+        /// ends the row on sight (#604).
+        RivalReserved: Set<string>
         /// The declared [[outpost]]s whose controller **somebody else's CLAIM
         /// parts were standing on** at the last look, whose hold has not run
         /// out (`RaidState.Holds`, #333). The reservation sense
@@ -1035,6 +1042,7 @@ module StandDown =
             Shut = Set.empty
             Impassable = Set.empty
             Rechecked = Set.empty
+            RivalReserved = Set.empty
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
             RaidedOutposts = Set.empty
@@ -1182,6 +1190,15 @@ module Colony =
     /// Anybody else's structure or power creep shields a mass attack (#537).
     let strikesAnywhere (username: string) =
         isEnemy username || username = "Invader"
+
+    /// Whose CLAIM parts a reservation's username names, `ours` being our
+    /// own (None before the shell has read it): the one classification the
+    /// shell hands every hold through.
+    let reservationHolder (ours: string option) (username: string) : ReservationHolder =
+        if Some username = ours then ReservationHolder.Ours
+        elif username = "Invader" then ReservationHolder.Invader
+        elif isEnemy username then ReservationHolder.Enemy
+        else ReservationHolder.Rival
 
     /// The rooms another player, not an ally, owns the controller of, as a
     /// human surveyed them (#459): `World.rivalHeld` treats each as rival

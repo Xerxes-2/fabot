@@ -171,12 +171,13 @@ type ControllerInfo =
     }
 
 /// Whose CLAIM parts hold one room's reservation, as the colony reads it:
-/// three answers and not a username, the same closed shape as `Ownership`
-/// below. The third is load-bearing and not a refinement of the second:
-/// an NPC invader's reservation and another *player's* are each a
-/// **clock** a [[stand-down]] runs to that the other's rule would read
-/// wrong. What carries no clock at all is a player's *ownership*, which is
-/// `Ownership`'s answer and not this one's.
+/// four answers and not a username, the same closed shape as `Ownership`
+/// below, classified once by the shell (`Colony.reservationHolder`). The
+/// third is load-bearing and not a refinement of the second: an NPC
+/// invader's reservation and another *player's* are each a **clock** a
+/// [[stand-down]] runs to that the other's rule would read wrong; the fourth
+/// is no clock at all, but a raid. What carries no clock either is a
+/// player's *ownership*, which is `Ownership`'s answer and not this one's.
 [<RequireQualifiedAccess>]
 type ReservationHolder =
     /// This colony's own CLAIM parts. The one answer that doubles the
@@ -187,17 +188,21 @@ type ReservationHolder =
     /// (docs/research/remote-mining.md §8.4). Worth the neutral rate like any
     /// hold that is not ours, and, unlike a rival's, an expiry: this lapses.
     | Invader
-    /// Another player. Worth the neutral rate, and a [[stand-down]] that
-    /// runs to the end of the hold itself. Its permanent half is
-    /// `Ownership.Rival`.
+    /// Another player who is not a declared enemy: a neutral or an ally.
+    /// Worth the neutral rate, and a [[stand-down]] that runs to the end of
+    /// the hold itself. Its permanent half is `Ownership.Rival`.
     | Rival
+    /// A declared enemy (`Colony.enemies`, #604): a raid on the room and not
+    /// somebody else's room. No stand-down; the reserver attacks it off as
+    /// it does the Invader's.
+    | Enemy
 
 /// The reservation standing on one room's controller this tick: a neutral
 /// controller held by CLAIM parts, which doubles every source in that
 /// room, decays by one a tick and caps at 5,000.
 type ReservationInfo =
     {
-        /// Whose CLAIM parts hold it — which of the three, never which string:
+        /// Whose CLAIM parts hold it — which holder, never which string:
         /// the engine answers holding with a username, and both names that would
         /// have to be compared are the shell's to know.
         Holder: ReservationHolder
@@ -208,8 +213,8 @@ type ReservationInfo =
         TicksToEnd: int
         /// The username the engine answers the hold with. Read by one rule,
         /// the [[harassment room]]'s (#432): a room reserved by anyone but the
-        /// declared enemy yields no container to take down, and `Holder`
-        /// cannot tell an ally's claimer from the enemy's.
+        /// room's declared enemy yields no container to take down, and
+        /// `Holder` says an enemy holds it, not which one.
         Username: string
     }
 
@@ -300,9 +305,9 @@ module RoomControlInfo =
         |> Option.filter (fun held -> held.Holder <> ReservationHolder.Ours)
 
     /// Whether a hold of `heldByOther`'s refuses the reserver row its
-    /// controller (#487): another player's, which is a stand-down of its own.
-    /// The Invader's does not: `attackController` takes a tick per CLAIM part
-    /// off it. One predicate for the vision read (`reservableControllers`) and
+    /// controller (#487): a neutral's or an ally's, which is a stand-down of
+    /// its own. The Invader's and an enemy's (#604) do not: `attackController`
+    /// takes a tick per CLAIM part off either. One predicate for the vision read (`reservableControllers`) and
     /// the blind one (`StandDown.HeldOutposts`), or the two could disagree.
     let refusesReserver (holder: ReservationHolder) : bool = holder = ReservationHolder.Rival
 

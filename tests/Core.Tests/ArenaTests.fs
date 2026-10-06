@@ -1490,6 +1490,7 @@ let arenaScenarioTests =
                                                             Basis = StandDownBasis.InvaderRaid
                                                             Stronghold = false
                                                             Bounced = false
+                                                            HolderUnread = false
                                                             Raiders =
                                                                 Set.singleton "invader-cripple"
                                                             PlayerSince = None
@@ -2769,6 +2770,7 @@ let private shutOutpostCripple () : Arena =
                                             PlayerSince = Some 973_265
                                             Chased = false
                                             Bounced = false
+                                            HolderUnread = false
                                         }
                                     ]
                             }
@@ -3081,6 +3083,7 @@ let private rootedInvaderOnAnchorStep () : Arena =
                                             PlayerSince = None
                                             Chased = false
                                             Bounced = false
+                                            HolderUnread = false
                                         }
                                     ]
                             }
@@ -3535,6 +3538,7 @@ let private swayingTrespassers () : Arena =
                                             PlayerSince = None
                                             Chased = false
                                             Bounced = false
+                                            HolderUnread = false
                                         }
                                     ]
                                 Fought =
@@ -4075,6 +4079,7 @@ let private diggerBesideHeldExit () : Arena =
                                             PlayerSince = None
                                             Chased = false
                                             Bounced = false
+                                            HolderUnread = false
                                         }
                                     ]
                             }
@@ -7857,6 +7862,7 @@ let private idleRangerInReach () : Arena =
                                             PlayerSince = Some 973_265
                                             Chased = false
                                             Bounced = false
+                                            HolderUnread = false
                                         }
                                     ]
                             }
@@ -12257,6 +12263,7 @@ let private intercept850 () : Arena =
             PlayerSince = None
             Chased = false
             Bounced = false
+            HolderUnread = false
         }
 
     let rows =
@@ -16903,6 +16910,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -16915,6 +16923,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -16932,6 +16941,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -16944,6 +16954,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -16963,6 +16974,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -16975,6 +16987,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -16992,6 +17005,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17004,6 +17018,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17023,6 +17038,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17035,6 +17051,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -17052,6 +17069,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17064,6 +17082,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17082,6 +17101,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17094,6 +17114,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -17111,6 +17132,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17123,6 +17145,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17142,6 +17165,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17154,6 +17178,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -17171,6 +17196,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17183,6 +17209,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17202,6 +17229,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.CollapseTimer
                                             Stronghold = true
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17214,6 +17242,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.PlayerRaidHold
                                             Stronghold = false
                                             Bounced = true
+                                            HolderUnread = false
                                             Raiders =
                                                 Set.ofList
                                                     [
@@ -17231,6 +17260,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false
@@ -17243,6 +17273,7 @@ let private w18s25Crippled () : Arena =
                                             Basis = StandDownBasis.RivalReservation
                                             Stronghold = false
                                             Bounced = false
+                                            HolderUnread = false
                                             Raiders = Set.empty
                                             PlayerSince = None
                                             Chased = false

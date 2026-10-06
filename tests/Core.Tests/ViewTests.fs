@@ -2855,6 +2855,7 @@ let worldSeamTests =
                         PlayerSince = None
                         Chased = false
                         Bounced = false
+                        HolderUnread = false
                     }
 
                 let log =

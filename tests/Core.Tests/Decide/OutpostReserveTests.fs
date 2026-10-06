@@ -113,6 +113,49 @@ let reserveTests =
                     "and the controller it leaves free is reserved, as ever"
             }
 
+            // #604. Live t1,006,924: Trepidimous killed W17S25's reserver in
+            // W17S26 and reserved it; the reserver row hired nobody for the room
+            // until his hold ran out, which a claimer of his renews for ever.
+            test
+                "a reserver beside a controller a declared enemy reserves attacks it; a neutral's it leaves be" {
+                let actsUnder control =
+                    let colony = reserveColony [ reserver "r1", { X = 10; Y = 44 } ]
+
+                    (decideOn
+                        { colony with
+                            RoomControl = Map.add "W1N2" control colony.RoomControl
+                        })
+                        .Intents
+                    |> List.filter (function
+                        | ReserveController _
+                        | AttackController _ -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (actsUnder (enemyReservedRoom 3_000))
+                    [ AttackController("r1", "ctrl-out") ]
+                    "the enemy's hold is attacked off, as the Invader's is"
+
+                Expect.isEmpty
+                    (actsUnder (reservedRoom false 3_000))
+                    "a neutral player's hold is still refused and waited out (#333)"
+            }
+
+            test "the shell's username reads as the holder the rules decide by" {
+                let holderOf = Colony.reservationHolder (Some "fabot")
+
+                Expect.equal
+                    ([ "fabot"; "Invader"; "Trepidimous"; "Odiodin"; "giaco" ] |> List.map holderOf)
+                    [
+                        ReservationHolder.Ours
+                        ReservationHolder.Invader
+                        ReservationHolder.Enemy
+                        ReservationHolder.Rival
+                        ReservationHolder.Rival
+                    ]
+                    "a declared enemy's hold is the enemy's; an ally's and a neutral's are a rival's"
+            }
+
             test "a body with no CLAIM part is never matched to Reserve" {
                 // Pairwise against the test above: one body swapped. A generalist
                 // cannot push a reservation up by a tick.

@@ -115,6 +115,23 @@ let coreReservedRoom ticksToEnd : RoomControlInfo =
         Sign = None
     }
 
+/// A neutral room a declared enemy reserves (#604): Trepidimous' claimer
+/// on our outpost, which is contested and not waited out.
+let enemyReservedRoom ticksToEnd : RoomControlInfo =
+    {
+        Owner = Ownership.Unowned
+        Reservation =
+            Some
+                {
+                    Holder = ReservationHolder.Enemy
+                    TicksToEnd = ticksToEnd
+                    Username = "Trepidimous"
+                }
+        SafeMode = false
+        SafeModeCooldownUntil = 0
+        Sign = None
+    }
+
 /// The stage map of a colony that declares itself and nothing else, at the
 /// given controller level. Keyed by the home name alone, unlike
 /// `homeControl` below: a stage entry says a colony of ours lives there, so

@@ -287,6 +287,19 @@ wire("danger: a well-formed leaf round-trips unchanged", async () => {
   assert.equal(stable(await dangerThrough(full)), stable(full));
 });
 
+// #604: a declared enemy's hold is its own holder on the wire.
+wire("danger: every holder's hold round-trips, an enemy's included", async () => {
+  const full = {
+    W1N2: { hold: { holder: "invader", until: 900 } },
+    W1N3: { hold: { holder: "rival", until: 900 } },
+    W1N4: { hold: { holder: "enemy", until: 900 } },
+    // A row whose holder a look has read, beside W1N2's legacy row with none.
+    W1N5: { down: { ...outpost, room: "W1N5", basis: "rival-reservation", read: true } },
+  };
+
+  assert.equal(stable(await dangerThrough(full)), stable(full));
+});
+
 // The parts the world layer's S5 moved out of each colony's log: a fight
 // record, a taken tick and a probe log, each read alone.
 // #564: the Fight squad is retired; a record a bundle before it wrote carries

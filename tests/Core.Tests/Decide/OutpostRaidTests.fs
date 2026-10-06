@@ -7013,3 +7013,47 @@ let pursuitTests =
                 Expect.equal (Map.tryFind "g-1" result.Assignments) (Some(taskId Flee)) "it flees"
             }
         ]
+
+/// W17S26 at t1,007,995 (#604): Trepidimous reserves our outpost, one
+/// 18M17A of his stands guard and a 5W3M digs it, under the given hold.
+let private contestedUnder control =
+    let colony =
+        declaredRaid
+            [
+                { hostileIn
+                      "W1N2"
+                      { X = 25; Y = 42 }
+                      (List.replicate 18 Move @ List.replicate 17 Attack) with
+                    Owner = "Trepidimous"
+                }
+                seatedDigger
+            ]
+
+    { colony with
+        RoomControl = Map.add "W1N2" control colony.RoomControl
+    }
+
+[<Tests>]
+let contestedOutpostTests =
+    testList
+        "an outpost a declared enemy reserves and works (#604)"
+        [
+            test
+                "his guard and his digger are the outpost's Guard, and his hold is a Reserve to attack" {
+                let pool = pooledOf (contestedUnder (enemyReservedRoom 1_900))
+
+                Expect.isSome
+                    (entryFor (Guard "W1N2") pool)
+                    "the outpost's Guard is pooled against him"
+
+                Expect.isSome
+                    (entryFor (Reserve "ctl-out") pool)
+                    "and the controller is ours to attack"
+
+                Expect.isNone
+                    (entryFor
+                        (Reserve "ctl-out")
+                        (pooledOf (contestedUnder (reservedRoom false 1_900))))
+                    "a neutral's hold is refused the reserver, as ever (#333)"
+            }
+        ]

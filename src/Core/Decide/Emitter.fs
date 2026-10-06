@@ -386,12 +386,14 @@ let private unownedController (view: ColonyView) id =
     |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
     |> Option.exists (fun control -> control.Owner = Ownership.Unowned)
 
-/// Whether the Invader reserves a controller, off the same control entry.
-let private invaderHeld (view: ColonyView) id =
+/// Whether a hold the reserver attacks off stands on a controller, off the
+/// same control entry: somebody else's that does not refuse it, the
+/// Invader's or an enemy's (#604).
+let private attackedHold (view: ColonyView) id =
     SpatialInfo.roomOf view.Spatial id
     |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
-    |> Option.bind (RoomControlInfo.heldBy ReservationHolder.Invader)
-    |> Option.isSome
+    |> Option.bind RoomControlInfo.heldByOther
+    |> Option.exists (fun held -> not (RoomControlInfo.refusesReserver held.Holder))
 
 /// The claim party's walk (#471): for each candidate's controller, the
 /// ticks each loaded holder of its Upgrade still has to walk to reach it.
@@ -537,9 +539,9 @@ let private intentFor
     | Build siteId -> Some(BuildSite(creep.Name, siteId))
     | Repair structureId -> Some(RepairStructure(creep.Name, structureId))
     | Upgrade controllerId -> Some(UpgradeController(creep.Name, controllerId))
-    // The Invader's hold is attacked off before it is reserved over (#487):
-    // `reserveController` is refused on it.
-    | Reserve controllerId when invaderHeld view controllerId ->
+    // The Invader's or an enemy's hold is attacked off before it is reserved
+    // over (#487, #604): `reserveController` is refused on it.
+    | Reserve controllerId when attackedHold view controllerId ->
         Some(AttackController(creep.Name, controllerId))
     | Reserve controllerId -> Some(ReserveController(creep.Name, controllerId))
     | Claim controllerId -> Some(ClaimController(creep.Name, controllerId))

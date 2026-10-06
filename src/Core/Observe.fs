@@ -344,6 +344,12 @@ type OutpostEpisode =
         /// read off that row at the opening, since the world log keeps one row
         /// a room and the earlier one is gone the tick after.
         Bounced: bool
+        /// Whether no look has read whose this row's reservation is since an
+        /// enemy's could read as his (#604): a row written before then waits
+        /// on a hold that may be an enemy's, so the gate questions it
+        /// (`StandDown.RivalReserved`) until a look reads a neutral's or an
+        /// ally's (`sight`) or ends it (`endEnemyHeld`).
+        HolderUnread: bool
     }
 
 /// Whether an outpost episode still holds its room shut at this tick: the one
@@ -657,8 +663,11 @@ let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
         |> Option.defaultValue (view.Time + view.Tuning.StandDownFallback, StandDownBasis.Fallback)
 
 /// The tick a room another player has reserved stands down to: the end of
-/// that reservation, off the engine's own countdown. No floor, unlike
-/// `deadlineOf`'s reservation branch: a player's claimer that stops coming
+/// that reservation, off the engine's own countdown. A neutral's or an
+/// ally's alone: an enemy's hold is contested, never waited out (#604), so
+/// the room stays worked and its armed bodies are the verdict's
+/// (`raidDeadlines`). No floor, unlike `deadlineOf`'s reservation branch: a
+/// player's claimer that stops coming
 /// re-takes nothing. Ownership is not here: the engine gives it no end, so it
 /// stays the latch `RivalHeld` remembers.
 ///
@@ -797,6 +806,9 @@ let private sight
                     // Sticky, where the basis is not: a bunker seen once is a
                     // bunker.
                     Stronghold = episode.Stronghold || stronghold
+                    // A rival-reservation sighting is a look that read the
+                    // hold a neutral's or an ally's.
+                    HolderUnread = episode.HolderUnread && basis <> StandDownBasis.RivalReservation
                 }
             else
                 episode)
@@ -820,8 +832,30 @@ let private sight
                         earlier.RoomName = room
                         && earlier.Basis = StandDownBasis.RaidGone
                         && tick - earlier.Expiry <= bounceTicks)
+                HolderUnread = false
             }
         ]
+
+/// End each standing row clocked off another player's reservation whose room
+/// vision answers for this tick with no neutral's or ally's hold on it
+/// (#604): an enemy's hold is contested and never waited out, and a hold gone
+/// or ours is no clock either. A row written before an enemy's hold read as
+/// his ends on the first look (`StandDown.RivalReserved` buys it).
+let private endEnemyHeld (view: ColonyView) (episodes: OutpostEpisode list) =
+    let unclocked room =
+        Map.tryFind room view.RoomControl
+        |> Option.exists (RoomControlInfo.heldBy ReservationHolder.Rival >> Option.isNone)
+
+    episodes
+    |> List.map (fun episode ->
+        if
+            standingDown view.Time episode
+            && episode.Basis = StandDownBasis.RivalReservation
+            && unclocked episode.RoomName
+        then
+            { episode with Expiry = view.Time }
+        else
+            episode)
 
 /// Whether a row runs on a raid's clock, and so on its bodies (#507): a core's
 /// or a reservation's clock is not a raid's, and a bunker is a bunker.
@@ -1051,6 +1085,19 @@ let private lookDue (tuning: Tuning) (tick: int) (latch: RivalLatch) =
     tuning.RivalRecheck > 0
     && (latch.LastLooked > tick || tick - latch.LastLooked >= tuning.RivalRecheck)
 
+/// The rooms a row clocked off another player's reservation shuts this tick
+/// whose holder no look has read yet (`HolderUnread`): looked into every tick
+/// until one does (#604), since the hold it waits on may read as an enemy's,
+/// which `endEnemyHeld` ends on sight.
+let private rivalReserved (tick: int) (state: RaidState) : Set<string> =
+    state.Outposts
+    |> List.filter (fun episode ->
+        standingDown tick episode
+        && episode.Basis = StandDownBasis.RivalReservation
+        && episode.HolderUnread)
+    |> List.map (fun episode -> episode.RoomName)
+    |> Set.ofList
+
 /// The stand-down gate's answer for this colony this tick, read off the
 /// previous tick's log: the one reader that acts on the Raid log. `Shut` is
 /// dropped from the declarations the shell works; `Rechecked` has its
@@ -1080,6 +1127,8 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.filter (snd >> lookDue tuning tick)
             |> List.map fst
             |> Set.ofList
+            |> Set.union (rivalReserved tick state)
+        RivalReserved = rivalReserved tick state
         // The standing holds, on the same `tick < Until` test the fold keeps
         // them by. Filtered here as well so the gate cannot withhold a
         // reservation on a leaf the fold has not caught up with.
@@ -1401,7 +1450,7 @@ let foldRaids
         // A tick that sees nothing (no vision, or a clear room) leaves every
         // stand-down exactly as it found it, clock included.
         Outposts =
-            (prior.Outposts, deadlines view looking priced)
+            (endEnemyHeld view prior.Outposts, deadlines view looking priced)
             ||> List.fold (fun episodes seen ->
                 sight view.Tuning.RaidBounceTicks view.Time seen episodes)
             |> strikeGone looking priced rivalHolds
@@ -1733,6 +1782,7 @@ module Danger =
                 | None, y -> y
             Chased = a.Chased || b.Chased
             Bounced = a.Bounced || b.Bounced
+            HolderUnread = a.HolderUnread || b.HolderUnread
         }
 
     /// Several logs' rival latches as one: every room any latched, on its
