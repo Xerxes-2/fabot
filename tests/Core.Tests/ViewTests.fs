@@ -6618,6 +6618,34 @@ let worldViewTests =
             }
 
             test
+                "a room's own Reach is built once a tick off one set of hostiles and ramparts, and again off any other" {
+                let share = (WorldView.sharingSafeGround WorldView.empty).ReachGround.Value
+                let mutable built = 0
+                let tiles = Set.singleton { X = 5; Y = 5 }
+
+                let build () =
+                    built <- built + 1
+                    tiles
+
+                let standing = [ { X = 5; Y = 5 }, 4 ]
+                let ramparts = Set.singleton { X = 6; Y = 6 }
+
+                Expect.equal
+                    (share "W1N1" standing ramparts build)
+                    tiles
+                    "the first colony builds it"
+
+                Expect.equal (share "W1N1" standing ramparts build) tiles "the second reads it"
+                Expect.equal built 1 "built once"
+
+                share "W1N1" [ { X = 5; Y = 5 }, 5 ] ramparts build |> ignore
+                share "W1N1" standing Set.empty build |> ignore
+                share "W1N2" standing ramparts build |> ignore
+
+                Expect.equal built 4 "another reach, other ramparts, another room: each its own"
+            }
+
+            test
                 "the watched set keeps every declared room, shut or not, and the danger is the watched rooms a log holds a raid on" {
                 let gate =
                     { StandDown.none with

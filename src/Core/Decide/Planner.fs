@@ -396,15 +396,23 @@ let planTasks
     //
     // And one per room a trespasser stands in (#516): its kill, for a body
     // no row casts.
+    //
+    // Only the Guards this colony pools (the world layer's S4): a raided
+    // room's `Win` is pooled by its answerer and by each colony it counts,
+    // and by no other.
     let guards =
         let briefed (claimed: Brief -> bool) =
             threats.Briefs
             |> Map.toSeq
             |> Seq.choose (fun (task, brief) ->
                 match task with
-                | Guard room when claimed brief -> Some room
+                | Guard room when claimed brief && Threats.pools view brief -> Some room
                 | _ -> None)
             |> Set.ofSeq
+
+        let guarded =
+            outposts.Guarded
+            |> List.filter (fun room -> Threats.pools view (Threats.briefOf threats room))
 
         // Every Brief of a Task of its own, by its Task.
         let briefedAs duty =
@@ -430,7 +438,7 @@ let planTasks
 
         // And every Guard a body of ours holds while it still holds the fight
         // (`Threats.holdsFight`, #535): the verdict starts a fight, never
-        // ends one.
+        // ends one, whoever answers the room.
         let fought =
             let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
 
@@ -440,10 +448,10 @@ let planTasks
                 |> List.choose (fun name -> Map.tryFind name bodies)
                 |> List.exists (fun creep ->
                     Threats.holdsFight view atlas threats creep (Guard room)))
-            |> fun rooms -> Set.difference rooms (Set.ofList (outposts.Guarded @ holding @ killing))
+            |> fun rooms -> Set.difference rooms (Set.ofList (guarded @ holding @ killing))
             |> Set.toList
 
-        (outposts.Guarded @ holding @ killing @ fought |> List.map Guard)
+        (guarded @ holding @ killing @ fought |> List.map Guard)
         @ briefedAs Duty.Fight
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault

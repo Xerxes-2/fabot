@@ -3177,9 +3177,9 @@ let childOutpostTests =
             // own: the mother calls, or the child shuts, never neither.
             // Flipped at the world layer's S3 (`docs/adr/0086`): the room's one
             // verdict prices both colonies' bodies, each lent by its own
-            // colony's rule, and the raid is a Win.
+            // colony's rule, and the raid is a Win. Its S4 gate below.
             test
-                "a raid only the child's ranger and the mother's resident win together is one Win, answered by one colony, and nothing stands down" {
+                "a raid only the child's ranger and the mother's resident win together is one Win, cast for by one colony and fought by both" {
                 let harasser room =
                     { hostileIn
                           room
@@ -3257,6 +3257,49 @@ let childOutpostTests =
                     "answered by one colony: the child, a crossing from it where the mother is three"
 
                 Expect.isEmpty (shut judged) "and the child stands nothing down"
+
+                // The world layer's S4: both colonies decide off the judged
+                // views. Each colony the `Win` counts pools the room's Guard
+                // and sends its own body, so neither sends half the answer;
+                // only the answerer casts for it.
+                let judgedMother, judgedChild = judgedBoth mother child
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
+
+                Expect.isSome
+                    (pooledOf judgedChild |> entryFor (Guard "W1N4"))
+                    "the child, the answerer, pools guard:W1N4"
+
+                Expect.isSome
+                    (pooledOf judgedMother |> entryFor (Guard "W1N4"))
+                    "the mother, whose resident it counts, pools it too"
+
+                let briefIn (view: ColonyView) =
+                    Threats.briefOf (threatsOf view (Atlas.ofView view)) "W1N4"
+
+                Expect.equal
+                    [
+                        Threats.answers judgedChild (briefIn judgedChild)
+                        Threats.answers judgedMother (briefIn judgedMother)
+                    ]
+                    [ true; false ]
+                    "and only the child casts for it"
+
+                let childDecides = decide judgedChild held Set.empty None
+                let motherDecides = decide judgedMother held Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-own" childDecides.Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "the child sends her own ranger"
+
+                Expect.equal
+                    (Map.tryFind "r-1" motherDecides.Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "the mother sends her resident"
+
+                Expect.isNone
+                    (Map.tryFind "r-1" childDecides.Assignments)
+                    "each colony assigns only its own body"
             }
 
             // The Brief's S8 (#518): whether a resident may be lent to a kill is
@@ -3386,6 +3429,56 @@ let childOutpostTests =
                 Expect.isNone (Facts.verdictOf judged "W1N4").Answerer "answered by nobody"
 
                 Expect.equal (shutOf judged) (Set.singleton "W1N4") "so the child stands it down"
+            }
+
+            // The world layer's S4: the answerer's binding never strips a
+            // room of the colony whose own Guard it is. The child's row loses
+            // her outpost, the mother's resident beside it wins it alone, and
+            // the mother answers; the child still pools her outpost's Guard
+            // and casts for it, or nobody of hers would guard the room her
+            // miners keep working.
+            test
+                "a neighbour's ranger winning the child's outpost alone leaves the child pooling and casting for it" {
+                let mother =
+                    { watchingBeyond [ synapse "W1N4" ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [
+                                    creepWith
+                                        "r-1"
+                                        0
+                                        0
+                                        (List.replicate 21 Move
+                                         @ List.replicate 14 RangedAttack
+                                         @ List.replicate 7 Heal)
+                                ]
+                        }
+
+                let mother, child = judgedBoth mother (childBeside mother 850 [])
+
+                Expect.equal
+                    (Facts.verdictOf child "W1N4").Answerer
+                    (Some "W1N1")
+                    "the premise: the mother's resident wins it alone, and she answers"
+
+                let briefIn (view: ColonyView) =
+                    Threats.briefOf (threatsOf view (Atlas.ofView view)) "W1N4"
+
+                Expect.isSome
+                    (pooledOf child |> entryFor (Guard "W1N4"))
+                    "the child pools her outpost's Guard"
+
+                Expect.isTrue
+                    (Threats.answers child (briefIn child))
+                    "and casts for it, whoever answers"
+
+                Expect.isSome
+                    (pooledOf mother |> entryFor (Guard "W1N4"))
+                    "the mother, the answerer, pools it for her resident"
             }
 
             // The world layer's S3: a raid the room's own row answers is no
@@ -3634,6 +3727,44 @@ let childOutpostTests =
                         [ Facts.answer mother "W1N3"; Facts.answer child "W1N3" ]
                         [ Answer.Lose; Answer.Lose ]
                         $"under one verdict, at a child's bank of {energy}, the raid is still outmatched"
+            }
+
+            // The world layer's S4: a home's raid is its own colony's Defend
+            // and its garrison's Guard, two Tasks (#552), so no answerer binds
+            // it: the mother keeps her garrison's Guard though the child's
+            // rangers alone are the fewest that win.
+            test
+                "a raid at a raised child's home her rangers win binds no answerer: the mother keeps her garrison's Guard" {
+                let mother =
+                    { raisingBeyond [ synapse "W1N3" ] with
+                        Bank = bank 850 850
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ smallResident "r-1" ]
+                        }
+
+                let mother, child =
+                    judgedBoth
+                        mother
+                        (childBeside
+                            mother
+                            850
+                            [
+                                smallResident "a-own", { X = 24; Y = 26 }
+                                smallResident "b-own", { X = 24; Y = 27 }
+                            ])
+
+                Expect.equal
+                    (Facts.verdictOf child "W1N3").Bodies
+                    [ "a-own", "W1N3"; "b-own", "W1N3" ]
+                    "the premise: the child's two rangers are the fewest that win it"
+
+                Expect.isSome
+                    (pooledOf mother |> entryFor (Guard "W1N3"))
+                    "the mother pools her garrison's Guard"
             }
 
             test

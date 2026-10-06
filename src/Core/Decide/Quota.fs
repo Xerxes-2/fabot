@@ -434,17 +434,24 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
 /// The guarded rooms a fighting row casts for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
-/// melee guard. A chased room (#510) asks neither row.
+/// melee guard. A chased room (#510) asks neither row, nor a raided room
+/// another colony answers (the world layer's S4): the answerer casts for it.
 let private guardedAsks
+    (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : (string * RowAsk) list =
     outposts.Guarded
     |> List.collect (fun room ->
-        (Threats.briefOf threats room).Asks
-        |> List.filter (fun ask -> ask.Row = row)
-        |> List.map (fun ask -> room, ask))
+        let brief = Threats.briefOf threats room
+
+        if Threats.answers view brief then
+            brief.Asks
+            |> List.filter (fun ask -> ask.Row = row)
+            |> List.map (fun ask -> room, ask)
+        else
+            [])
 
 /// Every other Brief's ask of a row — the home's Defend's (#504), each
 /// Fight's and Assault's per squad role —: a Brief exists only while its
@@ -458,8 +465,13 @@ let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
         | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
 
 /// A fighting row's asks: its guarded rooms' and every other Brief's.
-let private asksFor (threats: Threats) (outposts: OutpostFacts) (row: CastRow) : RowAsk list =
-    (guardedAsks threats outposts row |> List.map snd) @ briefAsks threats row
+let private asksFor
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    (row: CastRow)
+    : RowAsk list =
+    (guardedAsks view threats outposts row |> List.map snd) @ briefAsks threats row
 
 /// A fighting row's quota: its asks' counts, summed.
 let internal rowQuota
@@ -468,7 +480,8 @@ let internal rowQuota
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    asksFor threats outposts row |> List.sumBy (fun ask -> ask.Wanted view threats)
+    asksFor view threats outposts row
+    |> List.sumBy (fun ask -> ask.Wanted view threats)
 
 /// The blocks a fighting row casts this tick: the worst of its guarded rooms'
 /// answers, the row's floor where none is guarded — one guard block, the
@@ -481,7 +494,7 @@ let internal rowBlocksWanted
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    match asksFor threats outposts row |> List.map (fun ask -> ask.Blocks view) with
+    match asksFor view threats outposts row |> List.map (fun ask -> ask.Blocks view) with
     | [] ->
         match row with
         | CastRow.Ranger -> view.Tuning.RangerResidentBlocks
@@ -632,7 +645,7 @@ let internal reserverClaimsOf
     // flips once and not every cast.
     let withheld =
         let castFor row =
-            guardedAsks threats outposts row |> List.map fst |> Set.ofList
+            guardedAsks view threats outposts row |> List.map fst |> Set.ofList
 
         Set.union
             (if castRowStands view threats outposts CastRow.Guard then

@@ -1336,27 +1336,27 @@ let private lendableTo
         here = room || quiet here && rangerMayKill view room (Some here))
 
 /// The fewest rangers that win the raid in `room` together, among every
-/// lender's (`lendableTo`), and the homes of the bodies taken; None where all
-/// of them lose. Taken standing in the room first, then beside it, by name
-/// within each, and priced in `pricing`, a view that sees the raid. One count
-/// over every colony's bodies, so a raid only two colonies' rangers win
-/// together is won (#518).
+/// lender's (`lendableTo`), each by name with its colony's home; None where
+/// all of them lose. Taken standing in the room first, then beside it, by
+/// name within each, and priced in `pricing`, a view that sees the raid. One
+/// count over every colony's bodies, so a raid only two colonies' rangers
+/// win together is won (#518).
 let private rangersAmong
     (pricing: Lazy<ColonyView>)
     (lenders: (string * ColonyView * (CreepInfo -> bool)) list)
     (room: string)
-    : (int * Set<string>) option =
-    let rec wins taken homes count rest =
+    : (string * string) list option =
+    let rec wins taken named rest =
         match rest with
         | [] -> None
         | ((creep: CreepInfo), (home: string)) :: rest ->
             let taken = creep :: taken
-            let homes = Set.add home homes
+            let named = (creep.Name, home) :: named
 
             if bodiesWin pricing.Value room taken then
-                Some(count + 1, homes)
+                Some(List.rev named)
             else
-                wins taken homes (count + 1) rest
+                wins taken named rest
 
     lenders
     |> List.collect (fun (home, view, sends) ->
@@ -1364,7 +1364,7 @@ let private rangersAmong
         |> List.map (fun (creep, here) -> (here <> room, creep.Name), (creep, home)))
     |> List.sortBy fst
     |> List.map snd
-    |> wins [] Set.empty 0
+    |> wins [] []
 
 /// One colony as the world's verdict prices a room: its home; its view, with
 /// the world's look into the stand-down rows it prices out of sight laid in,
@@ -1431,17 +1431,18 @@ let private priceAmong
                      (seeing |> List.map (fun p -> p.Home, p.View, p.Sends room))
                      room)
 
-    let verdict answer rows own (answering: Pricer list) =
+    let verdict answer rows own bodies (answering: Pricer list) =
         {
             Answer = answer
             Rows = rows
             Own = own
-            Rangers = lazy (Option.map fst rangers.Value)
+            Rangers = lazy (Option.map List.length rangers.Value)
+            Bodies = bodies
             Answerer = answererAmong hops room answering
         }
 
     match seeing with
-    | [] -> verdict Answer.Win Map.empty (pricers |> List.map (fun p -> p.Home) |> Set.ofList) []
+    | [] -> verdict Answer.Win Map.empty (pricers |> List.map (fun p -> p.Home) |> Set.ofList) [] []
     | first :: _ ->
         let casters =
             match seeing |> List.filter (fun p -> p.Casts.Value.Contains room) with
@@ -1465,23 +1466,35 @@ let private priceAmong
             casters |> List.filter (fun (p, _) -> rows.[p.Home].Wins) |> List.map fst
 
         if not (List.isEmpty rowed) then
-            verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) rowed
+            verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) [] rowed
         else
             match
                 casters
                 |> List.filter (fun (_, priced) -> kitedByRanger priced room)
                 |> List.map fst
             with
-            | _ :: _ as kiters -> verdict Answer.Kite rows Set.empty kiters
+            | _ :: _ as kiters -> verdict Answer.Kite rows Set.empty [] kiters
             | [] ->
                 match rangers.Value with
-                | Some(_, homes) ->
-                    verdict
-                        Answer.Win
-                        rows
-                        Set.empty
-                        (pricers |> List.filter (fun p -> homes.Contains p.Home))
-                | None -> verdict Answer.Lose rows Set.empty []
+                | Some taken ->
+                    let homes = taken |> List.map snd |> Set.ofList
+                    let among = pricers |> List.filter (fun p -> homes.Contains p.Home)
+
+                    // A colony whose row casts for the room answers it ahead
+                    // of one whose rangers only join it (the world layer's
+                    // S4): it casts what the room still wants, as for a
+                    // child's outpost the child, not the mother crossing it.
+                    let answering =
+                        match
+                            among
+                            |> List.filter (fun p ->
+                                casters |> List.exists (fun (c, _) -> c.Home = p.Home))
+                        with
+                        | [] -> among
+                        | casting -> casting
+
+                    verdict Answer.Win rows Set.empty taken answering
+                | None -> verdict Answer.Lose rows Set.empty [] []
 
 /// One room's verdict as this view reads it: the world's, priced once a tick
 /// over every colony's bodies (`judge`), or, where the world priced none — a

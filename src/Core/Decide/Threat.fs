@@ -295,6 +295,17 @@ type Brief =
         /// out of the swing of a melee body breaking the core (#558). Read
         /// after `Stances`. Empty for every other Task.
         Seats: Map<string, Set<RoomPos>>
+        /// The one colony that casts for it, where the world's verdict binds
+        /// one (the world layer's S4): a raided room's `Win` answerer
+        /// (`RoomVerdict.Answerer`). None where none binds — no raid, a
+        /// `Kite`, a `Lose`, a home of ours, a room whose Guard is this
+        /// colony's own (`Facts.guardedRooms`), a Task of the colony's own —,
+        /// and this colony pools it and casts for it as before.
+        Answerer: string option
+        /// The colonies whose rangers that `Win` counts (`RoomVerdict.Bodies`):
+        /// each pools it beside the answerer and sends its own, casting none
+        /// (`Threats.pools`). Empty where no answerer binds.
+        Counted: Set<string>
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -834,6 +845,8 @@ module Brief =
             Formation = None
             Stances = Map.empty
             Seats = Map.empty
+            Answerer = None
+            Counted = Set.empty
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
@@ -989,6 +1002,8 @@ module Brief =
             Formation = None
             Stances = stances
             Seats = Map.empty
+            Answerer = None
+            Counted = Set.empty
         }
 
     /// A Fight's or an Assault's Brief on its squad's `Formation`: it admits
@@ -1039,6 +1054,8 @@ module Brief =
             Formation = Some formation
             Stances = Map.empty
             Seats = Map.empty
+            Answerer = None
+            Counted = Set.empty
         }
 
     /// A combat Task no source claims this tick: a Guard's `unclaimed`; a
@@ -1365,6 +1382,20 @@ module Threats =
         match Map.tryFind task threats.Briefs with
         | Some brief -> Some brief
         | None -> Brief.unclaimedFor task
+
+    /// Whether this colony casts for a Brief (the world layer's S4): one no
+    /// world answerer binds, or one it answers. A raided room's `Win` is cast
+    /// for by one colony.
+    let answers (view: ColonyView) (brief: Brief) : bool =
+        brief.Answerer
+        |> Option.forall (fun answerer -> answerer = SpatialInfo.homeName view.Spatial)
+
+    /// Whether this colony pools a Brief: one it casts for (`answers`), or
+    /// one whose `Win` counts it (`Brief.Counted`), which sends its own
+    /// bodies and casts none.
+    let pools (view: ColonyView) (brief: Brief) : bool =
+        answers view brief
+        || Set.contains (SpatialInfo.homeName view.Spatial) brief.Counted
 
     /// How many bodies a combat Task asks its rows for this tick, every ask
     /// summed; none for a Task no Brief describes.
@@ -1749,21 +1780,50 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             // Filed by the room each tile lies in, which across a border is not
             // the room the Threat stands in, and none in a room of ours under
-            // safe mode, where it could hurt nothing either.
+            // safe mode, where it could hurt nothing either. What a room's own
+            // Threats lay in it is built once for every colony that sees them
+            // alike (`WorldView.ReachGround`, the world layer's S4); what
+            // spills in across a border reads this colony's crossings.
             let reach =
-                threats
-                |> List.collect (fun (room, pos, r) ->
-                    (room, tilesWithin r pos) :: reachAcross atlas room pos r)
-                |> List.groupBy fst
-                |> List.filter (fun (room, _) -> not (shielded room))
-                |> List.choose (fun (room, shares) ->
+                let spilled =
+                    threats
+                    |> List.collect (fun (room, pos, r) -> reachAcross atlas room pos r)
+                    |> List.groupBy fst
+                    |> Map.ofList
+
+                let standing = byRoom |> Map.ofList
+
+                Set.union (Set.ofSeq (Map.keys spilled)) (Set.ofSeq (Map.keys standing))
+                |> Set.toList
+                |> List.filter (shielded >> not)
+                |> List.choose (fun room ->
                     let ramparts = Atlas.ourRampartTilesIn atlas room
+                    let uncovered tile = not (Set.contains tile ramparts)
+
+                    let own =
+                        match Map.tryFind room standing with
+                        | None -> Set.empty
+                        | Some inRoom ->
+                            let laid = inRoom |> List.map (fun (_, pos, r) -> pos, r)
+
+                            let build () =
+                                laid
+                                |> List.collect (fun (pos, r) -> tilesWithin r pos)
+                                |> List.filter uncovered
+                                |> Set.ofList
+
+                            match view.World.ReachGround with
+                            | Some share -> share room laid ramparts build
+                            | None -> build ()
 
                     let tiles =
-                        shares
-                        |> List.collect snd
-                        |> List.filter (fun tile -> not (Set.contains tile ramparts))
-                        |> Set.ofList
+                        match Map.tryFind room spilled with
+                        | None -> own
+                        | Some shares ->
+                            shares
+                            |> List.collect snd
+                            |> List.filter uncovered
+                            |> List.fold (fun tiles tile -> Set.add tile tiles) own
 
                     // Nothing left to run from once our own ramparts have taken
                     // the whole Reach back: no Reach, no entry, no safe set to
@@ -1971,23 +2031,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // weighed this colony's row, the room's one verdict (`Facts.answered`, the
     // world's) and the rangers that win it, each read on first use. Any other
     // room has no raider, and is `Win`.
-    let rows =
-        let home = SpatialInfo.homeName view.Spatial
+    let home = SpatialInfo.homeName view.Spatial
 
+    let judged =
         view.Hostiles
         |> List.map (fun hostile -> hostile.Pos.Room)
         |> List.distinct
-        |> List.map (fun room ->
-            room,
-            lazy
-                (match Map.tryFind home (verdictOf view room).Rows with
-                 | Some row -> row
-                 | None -> rowAnswer view room))
+        |> List.map (fun room -> room, lazy (Facts.verdictOf view room))
         |> Map.ofList
 
+    let rows =
+        judged
+        |> Map.map (fun room verdict ->
+            lazy
+                (match Map.tryFind home verdict.Value.Rows with
+                 | Some row -> row
+                 | None -> rowAnswer view room))
+
     let verdicts =
-        rows
-        |> Map.map (fun room _ -> lazy (answered view room), lazy (rangersWin view room))
+        judged
+        |> Map.map (fun _ verdict ->
+            lazy (verdict.Value.Answer, not (Set.isEmpty verdict.Value.Own)),
+            lazy verdict.Value.Rangers.Value)
 
     let verdictOf room =
         Map.tryFind room verdicts
@@ -2403,6 +2468,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let trespass = laidBy BriefKind.Trespass |> Map.ofList
 
+    // Who casts for and who pools each raided room's Guard (the world layer's
+    // S4): a `Win`'s answerer casts; it and every colony the `Win` counts —
+    // whose row wins it, or whose rangers are among the fewest that win it —
+    // pool it, each sending its own bodies. The binding governs only a colony
+    // that crosses or neighbours the room: one whose own Guard it is
+    // (`Facts.guardedRooms`) pools it and casts for it whoever answers, so a
+    // neighbour's ranger winning it never strips the room of its own guard.
+    // A `Kite` binds none: the verdict names no body, and the ranger that
+    // kites it down is any colony's. Nor does a home of ours: its raid is its
+    // own colony's Defend and its garrison's Guard, two Tasks (#552).
+    let answererIn room =
+        match Map.tryFind room judged with
+        | Some verdict when not (Map.containsKey room view.Stages) ->
+            match verdict.Value with
+            | {
+                  Answer = Answer.Win
+                  Answerer = Some answerer
+              } as verdict when not (Set.contains room guarded.Value) ->
+                Some answerer, verdict.Bodies |> List.map snd |> Set.ofList |> Set.union verdict.Own
+            | _ -> None, Set.empty
+        | _ -> None, Set.empty
+
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Outpost`.
     let briefs =
@@ -2423,25 +2510,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 | None -> lazy Answer.Win, lazy None
 
             Guard room,
-            Brief.claimed
-                room
-                (Map.containsKey room ring)
-                verdict
-                winners
-                (lazy (answeredByRanger room))
-                (lazy
-                    (Brief.trespassSplit
-                        view
-                        (HeldTaskFacts.holdersOf held (taskId (Guard room)))
-                        room))
-                (claimsIn room)
-                {
-                    Kite = Map.tryFind room kite
-                    Resident = Map.tryFind room residentRing
-                    Harass = Map.tryFind room harassRing
-                    Ring = Map.tryFind room rings
-                    Trespass = Map.tryFind room trespass
-                })
+            { Brief.claimed
+                  room
+                  (Map.containsKey room ring)
+                  verdict
+                  winners
+                  (lazy (answeredByRanger room))
+                  (lazy
+                      (Brief.trespassSplit
+                          view
+                          (HeldTaskFacts.holdersOf held (taskId (Guard room)))
+                          room))
+                  (claimsIn room)
+                  {
+                      Kite = Map.tryFind room kite
+                      Resident = Map.tryFind room residentRing
+                      Harass = Map.tryFind room harassRing
+                      Ring = Map.tryFind room rings
+                      Trespass = Map.tryFind room trespass
+                  } with
+                Answerer = fst (answererIn room)
+                Counted = snd (answererIn room)
+            })
         |> Map.ofSeq
 
     // A core's ranged holders on its range-3 ring (#558): they shoot it from

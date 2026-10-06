@@ -106,11 +106,15 @@ type RoomVerdict =
         /// that sees it and would send them, standing in the room or lent to
         /// it by their own colony's rule; None where all of them lose.
         Rangers: Lazy<int option>
+        /// Those rangers by name, each with its colony's home, where they
+        /// are the answer (no row wins and none kites); empty otherwise.
+        Bodies: (string * string) list
         /// The one colony that answers the room: among the colonies whose
         /// row wins it, else those of them whose biggest ranger kites it,
-        /// else whose rangers are among the fewest that win it, the fewest
-        /// crossings from it, then the largest bank, then by home name. None
-        /// on a Lose.
+        /// else whose rangers are among the fewest that win it — one whose
+        /// row casts for the room first —, the fewest crossings from it, then
+        /// the largest bank, then by home name. None on a Lose. On a `Win`
+        /// outside our homes only it casts for the room (`Brief.Answerer`).
         Answerer: string option
     }
 
@@ -161,6 +165,13 @@ type WorldView =
         /// the same two, else what the builder answers, kept. None builds
         /// each set alone, which is every fixture's.
         SafeGround: (string -> Set<Pos> -> int[] -> (unit -> Set<RoomPos>) -> Set<RoomPos>) option
+        /// The tick's shared Reach (`sharingSafeGround`): given a room, the
+        /// tile and reach of each hostile standing in it and our ramparts
+        /// there, the Reach in the room an earlier colony built off the same
+        /// three, else what the builder answers, kept. None builds each
+        /// alone, which is every fixture's.
+        ReachGround:
+            (string -> (Pos * int) list -> Set<Pos> -> (unit -> Set<Pos>) -> Set<Pos>) option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -176,6 +187,7 @@ module WorldView =
             Bodies = lazy Map.empty
             Answers = Map.empty
             SafeGround = None
+            ReachGround = None
         }
 
     /// The one observer whose look a room of `Danger` is: the nearest in
@@ -196,8 +208,9 @@ module WorldView =
     /// colonies seeing one raided room under one walking grid and one Reach
     /// share one set of two thousand tiles. Compared by content, so a colony
     /// whose projection walks the room differently (a transit room's
-    /// furniture is not placed) builds its own. Mutable and heap-only, like
-    /// `JoinTable`: the shell lays a fresh one each tick.
+    /// furniture is not placed) builds its own; and a Reach table on the
+    /// same terms (`ReachGround`). Mutable and heap-only, like `JoinTable`:
+    /// the shell lays fresh ones each tick.
     let sharingSafeGround (watch: WorldView) : WorldView =
         let built =
             System.Collections.Generic.Dictionary<string, (int[] * Set<Pos> * Set<RoomPos>) list>()
@@ -230,7 +243,40 @@ module WorldView =
                 built.[room] <- (grid, reach, tiles) :: entries
                 tiles
 
-        { watch with SafeGround = Some share }
+        // And the Reach a room's own hostiles lay in it (the world layer's
+        // S4), once for every colony that sees them alike.
+        let reached =
+            System.Collections.Generic.Dictionary<
+                string,
+                ((Pos * int) list * Set<Pos> * Set<Pos>) list
+             >()
+
+        let reachOf
+            (room: string)
+            (standing: (Pos * int) list)
+            (ramparts: Set<Pos>)
+            (build: unit -> Set<Pos>)
+            =
+            let entries =
+                match reached.TryGetValue room with
+                | true, entries -> entries
+                | _ -> []
+
+            match
+                entries
+                |> List.tryFind (fun (others, covered, _) ->
+                    others = standing && covered = ramparts)
+            with
+            | Some(_, _, tiles) -> tiles
+            | None ->
+                let tiles = build ()
+                reached.[room] <- (standing, ramparts, tiles) :: entries
+                tiles
+
+        { watch with
+            SafeGround = Some share
+            ReachGround = Some reachOf
+        }
 
     /// Whether vision answers for a room this tick, whoever's.
     let sees (watch: WorldView) (room: string) : bool = Map.containsKey room watch.Rooms
@@ -295,6 +341,7 @@ module WorldView =
                      |> Map.ofList)
             Answers = Map.empty
             SafeGround = None
+            ReachGround = None
         }
 
 /// One colony's whole reading of this tick: its home room's projection, the
