@@ -2850,7 +2850,13 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         beside ()
 
                 [ room, tiles ]
-            elif Seam.onRing at && trespassingBody view.Hostiles hostile then
+            elif
+                Seam.onRing at
+                && trespassingBody view.Hostiles hostile
+                // Struck as if its room were ours: never an ally's, nor a
+                // neutral's that carried no weapon (#597).
+                && mayStrike view (Set.singleton room) hostile
+            then
                 // The tile it lands on across the exit it stands on.
                 RoomName.adjacent room
                 |> List.filter (trespassRooms view)

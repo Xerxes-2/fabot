@@ -671,17 +671,35 @@ let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
     && ourRoom view hostile.Pos.Room
 
 /// Whether a hostile's body trespasses wherever it stands (#516), among
-/// `side`: unarmed in effect, and shot disarmed — a weapon on paper and none
-/// in effect (#528, any owner's since #535), so it strikes nothing back — or
-/// a declared enemy's (`Colony.enemies`) working or carrying with a WORK,
-/// CARRY or CLAIM. A hauler carries our dug energy off; a bare scout takes
-/// nothing. Whose it may be is `mayStrike`'s.
+/// `side`, unarmed in effect and one of three bodies:
+/// - shot disarmed: a weapon on paper and none in effect (#528, any owner's
+///   since #535), so it strikes nothing back;
+/// - a raid's healer whose raiders are gone (#597): a HEAL on paper, live or
+///   shot off, with no raider in its room or the rooms beside it. It heals
+///   its own parts back, or the next raid's; beside a raider, or one just
+///   across the exit, it is that raid's;
+/// - a declared enemy's (`Colony.enemies`) working or carrying with a WORK,
+///   CARRY or CLAIM. A hauler carries our dug energy off; a bare scout takes
+///   nothing.
+/// Whose it may be is `mayStrike`'s.
 let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
     let takes part =
         part = Work || part = Carry || part = BodyPart.Claim
 
+    let raidGone () =
+        let room = hostile.Pos.Room
+        let beside = RoomName.adjacent room
+
+        not (
+            side
+            |> List.exists (fun other ->
+                (other.Pos.Room = room || List.contains other.Pos.Room beside)
+                && HostileInfo.raider side other)
+        )
+
     not (HostileInfo.armed side hostile)
     && (Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
+        || List.contains Heal hostile.Body && raidGone ()
         || Colony.isEnemy hostile.Owner
            && List.exists takes hostile.Body
            && List.exists takes (HostileInfo.effectiveParts side hostile))

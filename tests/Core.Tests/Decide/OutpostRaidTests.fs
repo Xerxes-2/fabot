@@ -3105,6 +3105,50 @@ let trespassTests =
             }
 
             test
+                "a raid's healer on the exit row beyond is the kill an Invader's is, never an ally's or a neutral's (#597)" {
+                let healerOf owner =
+                    { hostileIn "W1N3" { X = 25; Y = 49 } smallHealer with
+                        Owner = owner
+                    }
+
+                let pooled owner =
+                    pooledOf (raisingBeyond [ healerOf owner ])
+                    |> entryFor (Guard "W1N2")
+                    |> Option.isSome
+
+                Expect.isTrue (pooled "Invader") "the premise: an Invader's is carried in, a kill"
+                Expect.isFalse (pooled "Odiodin") "an ally's passing healer calls no guard out"
+                Expect.isFalse (pooled "Kalgen") "nor a neutral's, which carried no weapon"
+            }
+
+            test "a healer whose raider stands just across the exit is still that raid's (#597)" {
+                let healer =
+                    { hostileIn "W1N2" { X = 25; Y = 1 } smallHealer with
+                        Owner = "Invader"
+                    }
+
+                let raider =
+                    { hostileIn "W1N3" { X = 25; Y = 47 } smallRanged with
+                        Id = "h-2"
+                        Owner = "Invader"
+                    }
+
+                let dutyIn hostiles =
+                    let colony = raisingBeyond hostiles
+                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty
+
+                Expect.equal
+                    (dutyIn [ healer ])
+                    (Duty.Guard BriefKind.Trespass)
+                    "the premise: alone, it is the trespass's kill"
+
+                Expect.notEqual
+                    (dutyIn [ healer; raider ])
+                    (Duty.Guard BriefKind.Trespass)
+                    "with a ranged raider next door no trespass kill sends a guard into its reach"
+            }
+
+            test
                 "defence first: a fresh ranger takes the raided child's Guard, not a trespass at home" {
                 let raid =
                     { hostileIn "W1N3" { X = 40; Y = 40 } smallMelee with
@@ -3434,6 +3478,62 @@ let trespassTests =
                      )
                      |> entryFor (Guard "W1N2"))
                     "a scout carried no weapon to lose"
+            }
+
+            // #597: spar outpost-squad's last healer, every HEAL shot off,
+            // its 1 MOVE left at 100 hits, outlived the armed raiders and
+            // nothing hunted it.
+            test
+                "a raid's healer left in our outpost is a trespasser, its HEAL live or shot off; a neutral's unarmed body is not (#597)" {
+                let remnant owner =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 4 Move @ List.replicate 5 Heal @ [ Move ]) with
+                        Owner = owner
+                        Hits = 100
+                    }
+
+                let colony =
+                    declaredRaid [ remnant "Invader" ]
+                    |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
+
+                Expect.equal
+                    ((Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty)
+                    (Duty.Guard BriefKind.Trespass)
+                    "an Invader's healer with no live HEAL is the trespass's kill"
+
+                Expect.equal
+                    (Map.tryFind "g-1" (decideOn colony).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and the guard takes it"
+
+                let pooled hostile =
+                    pooledOf (declaredRaid [ hostile ]) |> entryFor (Guard "W1N2") |> Option.isSome
+
+                Expect.isTrue (pooled (remnant "Trepidimous")) "a declared enemy's remnant"
+
+                Expect.isTrue
+                    (pooled
+                        { hostileIn "W1N2" { X = 25; Y = 44 } smallHealer with
+                            Owner = "Invader"
+                        })
+                    "an Invader's healer whose HEAL still acts, its raid dead"
+
+                Expect.isFalse (pooled (remnant "Odiodin")) "never an ally's"
+
+                Expect.isFalse
+                    (pooled (remnant "giaco"))
+                    "nor a neutral's healer, which carried no weapon (`mayStrike`)"
+
+                for label, parts in
+                    [ "scout", [ Move ]; "hauler", List.replicate 4 Carry @ List.replicate 4 Move ] do
+                    Expect.isFalse
+                        (pooled
+                            { hostileIn "W1N2" { X = 25; Y = 44 } parts with
+                                Owner = "giaco"
+                            })
+                        $"nor a neutral's {label}"
             }
         ]
 
