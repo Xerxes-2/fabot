@@ -18,7 +18,8 @@ npm run capture -- <room> <tick> [--rooms R1,R2] [--name slug] [--out path] [--l
 The skeleton has a header and a fixture `let private <slug> () : Arena`. The header names the command, the tick, and each room's replay URL. The fixture holds:
 
 - **Controllers:** owner, level, safe modes, cooldown and clocks.
-- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. An invader core carries its level (0 unless written) and reaches the colony as `RoomFacts.InvaderCores`, with no collapse clock. Roads, drops, tombstones and ruins are left out, and the header counts them.
+- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. An invader core carries its level (0 unless written) and reaches the colony as `RoomFacts.InvaderCores`, with no collapse clock. Drops, tombstones and ruins are left out, and the header counts them.
+- **Roads:** `withRoads [ x, y, hits; ... ]` per room (#560). A step onto one costs fatigue 1 a part, as the engine's, and our colony walks them as the shell files them. They neither wear nor decay.
 - **Bodies:** both sides, built with `body` plus their hits, life, fatigue and stores. A comment beside each body lists its live parts and its live acts.
 - **Banks:** each home's bank is its energy capacity, not what it held at the tick. The arena never debits the bank and reads it as the capacity too. A near-empty bank prices the guard row's cast as a loss, and that stands an outpost down that live held.
 - **Live Memory** (`--live-memory`, on by default when the tick is at most 300 ticks behind live): the captured homes' Raid log (stand-downs open at the tick, threat and fight latches, home raided), `ArmedSeen` and `Towered`. Memory holds only what it holds at the time of reading. An entry stamped after the tick is named in a comment and not seated.
@@ -30,10 +31,10 @@ The arena starts at `tick + 1`. The replay holds the state after the tick ran, s
 
 ## What it leaves to you
 
-- **Scripts:** every body not ours `Hold`s. Give each one a `Behaviour`, using the live acts written beside it.
+- **Scripts:** every body not ours `Hold`s. Give each one a `Behaviour`, using the live acts written beside it. `GoTo` and `Chase` path by steps, not terrain, so they can leave the live line (a swamp the live body kept off). A body whose path matters walks `Waypoints` of its live tiles (`observe history` over the ticks after). The arena's fatigue sets its pace, so a body that keeps its live ticks too is a check on the capture.
 - **Memory the replay cannot give:** `Healers`, `ExitWatches` and `Sightings` live only in the heap and always start empty. For an old tick, the Raid log and `ArmedSeen` start empty too.
 - **Check it reproduces live** before pinning anything: compare the run with `observe history` and `observe timeline` over the ticks after the capture. A capture that decides differently from live is a false regression test. For the t972,617 test, the first capture missed the mother W15S28 and seated a 14-energy bank. It lent the residents at once and stood W17S26 down, while live they held home.
-- **Not modelled by the arena:** reservations, boosts and roads.
+- **Not modelled by the arena:** reservations and boosts.
 - **Colonies:** they come from today's `Colony.declared`. Spell the record out if the test must outlive a roster change.
 
 ## Landing it

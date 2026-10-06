@@ -381,6 +381,7 @@ smoke("arena-skeleton writes the arena idiom off a replay", () => {
       body: [part("move"), part("ranged_attack")],
     },
     d1: { _id: "d1", type: "road", x: 3, y: 3, hits: 5000, hitsMax: 5000 },
+    d2: { _id: "d2", type: "road", x: 4, y: 3, hits: 1200, hitsMax: 5000 },
     k4: {
       _id: "k4", type: "creep", name: "invader_W17S25_1", x: 20, y: 20, user: "2", hits: 100, hitsMax: 100, ageTime: 2500,
       body: [part("move")], actionLog: { rangedAttack: { x: 8, y: 23 } },
@@ -439,7 +440,7 @@ smoke("arena-skeleton writes the arena idiom off a replay", () => {
     assert.ok(text.includes(line), `missing:\n${line}\n---\n${text}`);
   }
   assert.ok(!text.includes("invader_W17S25_1: TODO"), "the engine's invader AI is the arena's: no script to write");
-  assert.ok(!text.includes("road-3-3"), "a road is not placed");
+  assert.ok(text.includes("        |> withRoads [ 3, 3, 5_000; 4, 3, 1_200 ]"), `the roads are laid, by tile:\n${text}`);
   assert.ok(!text.includes("cast by"), "every caster captured");
 });
 smoke("arena-skeleton seats live Memory up to the tick and names a caster it lacks", () => {

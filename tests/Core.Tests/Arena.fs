@@ -37,10 +37,11 @@
 /// it: on cooldown, under an upgrade block, or past the downgrade line.
 /// Construction sites stand, are built with carried energy, and are removed
 /// by a body of another side stepping on them; placing one is a test's, not
-/// the pipeline's. A body withdraws energy from a store. Not modelled: the
-/// rest of the economy (harvest, pickup, a store's refill), a downgrade,
-/// roads, boosts, pulling, portals, power creeps, nukes, and safe mode for
-/// any side but ours.
+/// the pipeline's. A body withdraws energy from a store. A road (#560) is
+/// walked at fatigue 1 a part and filed for the colony's walk; it neither
+/// wears nor decays. Not modelled: the rest of the economy (harvest, pickup,
+/// a store's refill), a downgrade, boosts, pulling, portals, power creeps,
+/// nukes, and safe mode for any side but ours.
 module Fabot.Core.Tests.Arena
 
 open System.Collections.Generic
@@ -142,6 +143,11 @@ type Behaviour =
     /// A squad body on its way to a tile: in a room where an enemy stands it
     /// kites (`Kite`), and walks on (`GoTo`) where none does.
     | Sweep of goal: RoomPos * Focus * keep: int
+    /// A replay's path (#560): these live tiles in order, fighting what
+    /// stands in reach. The next tile is the one after the latest it stands
+    /// on, the first while it stands on none; at the last it holds. Its gait
+    /// is the arena's fatigue, so it keeps the live tiles, not the live ticks.
+    | Waypoints of RoomPos list
 
 /// One creep in the arena: its body head first, the hits it has left (which
 /// say which parts still act, `Engine.liveParts`), where it stands, its
@@ -556,6 +562,36 @@ let withRamparts (owner: Side) (hits: int) (tiles: Pos list) (r: ArenaRoom) : Ar
             })
     )
 
+/// Terrain at any tile of a room, the border ring included.
+let terrainAt (r: ArenaRoom) (tile: Pos) : Terrain =
+    if Seam.onRing tile then
+        Map.tryFind tile r.Capture.Border |> Option.defaultValue Wall
+    else
+        TerrainGrid.tryFind tile r.Capture.Terrain |> Option.defaultValue Wall
+
+/// Roads nobody owns on these tiles, `x, y, hits` each (#560), at ROAD_HITS
+/// times the ground's ratio (`roads.js`: 5 on swamp, 150 for a tunnel), as
+/// `road-x-y-<room>`: a capture's rooms share many a road tile. A
+/// step onto one costs its body fatigue 1 a part (`stepFatigue`), and the
+/// colony walks them as the shell files them (`RoomLayer.Roads`).
+let withRoads (roads: (int * int * int) list) (r: ArenaRoom) : ArenaRoom =
+    r
+    |> withStructures (
+        roads
+        |> List.map (fun (x, y, hits) ->
+            let at = { X = x; Y = y }
+
+            let ratio =
+                match terrainAt r at with
+                | Swamp -> Engine.roadSwampRatio
+                | Wall -> 150
+                | Plain -> 1
+
+            { structureOf "road" None hits (5_000 * ratio) at with
+                Id = $"road-{x}-{y}-{r.Capture.RoomName}"
+            })
+    )
+
 /// The towers not ours run these duties.
 let withTowerDuties (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom = { r with Duties = duties }
 
@@ -786,13 +822,6 @@ let withCasts (rows: string list) (a: Arena) : Arena = { a with Casts = Set.ofLi
 // ---------------------------------------------------------------------------
 // Geometry and the engine's tile rules
 // ---------------------------------------------------------------------------
-
-/// Terrain at any tile of a room, the border ring included.
-let terrainAt (r: ArenaRoom) (tile: Pos) : Terrain =
-    if Seam.onRing tile then
-        Map.tryFind tile r.Capture.Border |> Option.defaultValue Wall
-    else
-        TerrainGrid.tryFind tile r.Capture.Terrain |> Option.defaultValue Wall
 
 /// OBSTACLE_OBJECT_TYPES' structures (`constants.js`).
 let private obstacleKinds =
@@ -1029,7 +1058,12 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                                     yield site.At
                         ]
                         |> Set.ofList
-                    Roads = Set.empty
+                    // Built roads only, as `World.seenFacts` files them.
+                    Roads =
+                        structures
+                        |> List.filter (fun (_, kind) -> kind = BuiltKind.Road)
+                        |> List.map (fun (s, _) -> s.At)
+                        |> Set.ofList
                     RivalSites = rivalSites |> List.map (fun site -> site.At) |> Set.ofList
                     // Every structure another side owns (`World.factsOf`).
                     Foreign =
@@ -1912,9 +1946,9 @@ let private dist (p: RoomPos) (q: RoomPos) = max (abs (p.X - q.X)) (abs (p.Y - q
 /// The matrix bars terrain walls, rocks, the controller, obstacle
 /// structures, others' closed ramparts, the mover's side's obstacle sites
 /// and, unless ignored, creeps; an exit tile is walkable, an NPC never being
-/// carried off it. Plain 1, swamp 5 (`ignoreRoads`; the 2 and 10 without it
-/// keep the ratio, roads not being modelled). A goal out of reach gives the
-/// path to the nearest tile reached, as PathFinder's incomplete result does.
+/// carried off it. Plain 1, swamp 5, a road its ground's (`ignoreRoads`). A
+/// goal out of reach gives the path to the nearest tile reached, as
+/// PathFinder's incomplete result does.
 /// Dijkstra where PathFinder runs A* at heuristic weight 1.2: the two can
 /// break a tie between equal paths differently. The path leaves the start
 /// out.
@@ -2493,6 +2527,14 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
                 { b with
                     Script = Some(Kite(focus, keep))
                 }
+    | Waypoints tiles ->
+        let next =
+            match List.tryFindIndexBack ((=) b.At) tiles with
+            | Some i -> List.tryItem (i + 1) tiles
+            | None -> List.tryHead tiles
+
+        fightInReach a Nearest b
+        @ move (next |> Option.bind (fun tile -> stepToward a b (Set.singleton tile)))
     | Phases _
     | Retreat _ -> []
 
@@ -3070,16 +3112,23 @@ let private resolveMoves (a: Arena) (moves: (Body * RoomPos) list) : Map<string,
     matrix |> Seq.map (fun kv -> kv.Value.Id, kv.Key) |> Map.ofSeq
 
 /// Fatigue a step onto this tile adds (`movement.js` `execute`): every part
-/// but MOVE and CARRY, dead ones included, times 2 on plain and 10 on swamp;
-/// none at all for a step onto an exit tile from inside the room.
+/// but MOVE and CARRY, dead ones included, times 1 on a road, whatever the
+/// ground under it, 2 on plain and 10 on swamp; none at all for a step onto
+/// an exit tile from inside the room.
 let private stepFatigue (a: Arena) (b: Body) (dest: RoomPos) =
     if isEdge (RoomPos.pos dest) && not (isEdge (RoomPos.pos b.At)) then
         None
     else
+        let r = Map.find dest.Room a.Rooms
+        let tile = RoomPos.pos dest
+
         let rate =
-            match terrainAt (Map.find dest.Room a.Rooms) (RoomPos.pos dest) with
-            | Swamp -> Engine.swampWeight
-            | _ -> 2
+            if r.Structures |> List.exists (fun s -> s.Kind = "road" && s.At = tile) then
+                Gait.road
+            else
+                match terrainAt r tile with
+                | Swamp -> Engine.swampWeight
+                | _ -> Gait.plain
 
         let heavy = b.Parts |> List.filter (fun p -> p <> Move && p <> Carry) |> List.length
         let carried = (b.Energy + Engine.carryPartCapacity - 1) / Engine.carryPartCapacity

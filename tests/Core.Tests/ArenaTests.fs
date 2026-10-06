@@ -4715,8 +4715,8 @@ let private haulerBesideCore () : Arena =
 //   W15S28  https://screeps.com/room-history/shardSeason/W15S28/986000.json
 // Healers, ExitWatches and Sightings start empty; ArmedSeen, Towered and the
 // Raid log are live Memory's at t986,233, less what postdates the tick.
-// W17S26's reservation, 263 roads and a tombstone are not placed, nor the
-// ranger Spawn8 was casting; the invader core stands as a structure only (the
+// The 263 roads are laid (#560); W17S26's reservation and a tombstone are not
+// placed, nor the ranger Spawn8 was casting; the invader core stands as a structure only (the
 // arena lays no `InvaderCores`, #558). The Transition log no longer held the
 // two W17S26 rangers' Tasks, nor the anchor's or the guards'.
 
@@ -4743,6 +4743,17 @@ let private rangerIntoMelee () : Arena =
                     57_550
                     100_000
                     { X = 12; Y = 25 }
+            ]
+        |> withRoads
+            [
+                20, 1, 4_600
+                21, 2, 4_200
+                22, 3, 4_200
+                23, 4, 4_700
+                24, 5, 2_700
+                25, 6, 4_700
+                26, 7, 3_200
+                27, 8, 3_600
             ]
 
     let w17s25 =
@@ -4851,6 +4862,105 @@ let private rangerIntoMelee () : Arena =
                     Energy = 9_277
                 }
                 towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withRoads
+            [
+                1, 16, 3_400
+                2, 17, 3_500
+                3, 18, 3_400
+                4, 19, 4_800
+                5, 20, 4_800
+                6, 21, 3_000
+                7, 22, 14_900
+                8, 23, 13_900
+                9, 24, 13_500
+                10, 25, 18_800
+                10, 27, 13_500
+                10, 29, 17_000
+                11, 24, 17_300
+                11, 26, 15_100
+                11, 28, 19_400
+                11, 30, 3_400
+                12, 23, 18_400
+                12, 25, 18_900
+                12, 27, 13_500
+                12, 29, 3_800
+                13, 24, 3_200
+                13, 26, 3_500
+                13, 28, 4_500
+                13, 30, 4_000
+                14, 23, 3_100
+                14, 25, 2_800
+                14, 27, 3_600
+                14, 29, 3_700
+                14, 31, 3_800
+                15, 22, 4_100
+                15, 28, 4_400
+                15, 30, 2_900
+                15, 32, 3_700
+                16, 21, 3_700
+                16, 29, 2_700
+                16, 31, 3_000
+                16, 33, 3_000
+                16, 35, 3_100
+                16, 37, 2_500
+                16, 38, 16_500
+                16, 39, 17_800
+                16, 41, 3_000
+                16, 43, 2_900
+                16, 44, 2_900
+                17, 20, 3_400
+                17, 30, 2_700
+                17, 32, 3_400
+                17, 34, 2_700
+                17, 36, 4_400
+                17, 38, 2_900
+                17, 39, 14_900
+                17, 40, 12_000
+                17, 42, 2_900
+                17, 45, 3_800
+                18, 29, 3_100
+                18, 31, 3_500
+                18, 35, 2_500
+                18, 37, 3_000
+                18, 39, 3_400
+                18, 41, 4_000
+                18, 46, 4_300
+                19, 30, 2_900
+                19, 34, 3_700
+                19, 36, 4_700
+                19, 38, 3_500
+                19, 40, 3_400
+                19, 47, 3_900
+                20, 31, 4_400
+                20, 33, 3_900
+                20, 35, 3_400
+                20, 37, 2_800
+                20, 39, 3_500
+                20, 48, 4_500
+                21, 32, 3_000
+                21, 34, 4_700
+                21, 36, 3_500
+                21, 38, 2_300
+                22, 33, 3_000
+                22, 35, 3_500
+                22, 37, 3_000
+                23, 34, 2_900
+                23, 36, 3_400
+                24, 35, 3_600
+                25, 34, 4_400
+                26, 33, 2_400
+                27, 32, 4_600
+                28, 31, 20_500
+                28, 33, 12_500
+                29, 32, 20_500
+                29, 34, 15_000
+                30, 31, 21_000
+                30, 33, 16_000
+                31, 32, 16_000
+                32, 31, 21_000
+                33, 30, 22_500
+                33, 32, 18_810
             ]
 
     let w15s28 =
@@ -4979,6 +5089,168 @@ let private rangerIntoMelee () : Arena =
                 }
                 structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 }
             ]
+        |> withRoads
+            [
+                4, 5, 3_100
+                5, 4, 4_500
+                5, 6, 3_100
+                5, 44, 4_900
+                6, 3, 3_500
+                6, 7, 5_000
+                6, 29, 4_000
+                6, 43, 4_500
+                6, 45, 2_800
+                7, 2, 2_500
+                7, 8, 3_100
+                7, 28, 2_800
+                7, 42, 4_300
+                7, 46, 4_700
+                8, 1, 3_300
+                8, 9, 3_900
+                8, 28, 4_300
+                8, 41, 4_600
+                8, 47, 3_900
+                9, 10, 2_400
+                9, 27, 5_000
+                9, 28, 2_800
+                9, 40, 4_300
+                9, 48, 2_900
+                10, 11, 4_200
+                10, 26, 2_800
+                10, 29, 5_000
+                10, 39, 4_600
+                11, 12, 3_700
+                11, 18, 3_500
+                11, 27, 4_000
+                11, 30, 2_600
+                11, 38, 2_500
+                12, 13, 4_600
+                12, 17, 2_400
+                12, 25, 13_000
+                12, 27, 17_900
+                12, 28, 2_600
+                12, 29, 2_500
+                12, 31, 4_000
+                12, 33, 20_700
+                12, 35, 14_900
+                12, 37, 4_500
+                13, 14, 4_700
+                13, 16, 4_800
+                13, 26, 13_700
+                13, 28, 3_900
+                13, 30, 2_900
+                13, 32, 3_500
+                13, 34, 4_600
+                13, 36, 4_800
+                14, 15, 3_400
+                14, 25, 15_100
+                14, 27, 3_800
+                14, 29, 4_500
+                14, 31, 4_900
+                14, 33, 3_100
+                14, 35, 4_900
+                15, 15, 3_100
+                15, 26, 3_500
+                15, 28, 4_800
+                15, 30, 3_500
+                15, 32, 3_400
+                15, 34, 4_700
+                16, 16, 3_100
+                16, 25, 18_500
+                16, 27, 3_800
+                16, 29, 3_800
+                16, 31, 4_900
+                16, 33, 4_400
+                16, 35, 4_000
+                17, 17, 4_100
+                17, 26, 19_800
+                17, 28, 4_000
+                17, 30, 3_300
+                17, 32, 2_900
+                17, 34, 3_400
+                18, 18, 2_600
+                18, 25, 20_100
+                18, 27, 18_400
+                18, 29, 2_500
+                18, 31, 4_700
+                18, 33, 5_000
+                19, 19, 16_100
+                19, 22, 18_000
+                19, 24, 14_400
+                19, 26, 13_900
+                19, 28, 4_000
+                19, 30, 4_800
+                19, 32, 3_100
+                20, 20, 16_400
+                20, 21, 20_000
+                20, 23, 19_700
+                20, 25, 19_300
+                20, 27, 16_100
+                20, 29, 3_500
+                20, 31, 4_000
+                20, 33, 17_100
+                21, 21, 4_900
+                21, 22, 3_200
+                21, 23, 3_200
+                21, 24, 17_000
+                21, 25, 20_600
+                21, 26, 12_800
+                21, 28, 20_000
+                21, 30, 2_700
+                21, 32, 20_500
+                21, 34, 17_200
+                22, 24, 2_600
+                22, 25, 12_700
+                22, 27, 18_800
+                22, 28, 2_600
+                22, 29, 4_600
+                22, 30, 17_000
+                22, 31, 21_300
+                22, 32, 12_500
+                22, 33, 12_700
+                22, 35, 4_800
+                23, 26, 15_200
+                23, 28, 21_000
+                23, 29, 12_600
+                23, 30, 13_900
+                23, 31, 14_500
+                23, 32, 12_300
+                23, 33, 16_200
+                23, 34, 2_800
+                24, 25, 13_000
+                24, 28, 13_400
+                24, 29, 14_500
+                24, 30, 12_900
+                24, 33, 17_500
+                25, 24, 2_800
+                25, 28, 13_600
+                25, 29, 13_700
+                25, 34, 14_800
+                26, 23, 15_400
+                27, 22, 12_600
+                28, 21, 12_300
+                28, 34, 13_600
+                29, 20, 13_600
+                30, 19, 12_000
+                31, 18, 2_000
+                32, 17, 2_500
+                33, 16, 3_800
+                34, 15, 4_400
+                35, 14, 2_600
+                36, 13, 16_500
+                37, 12, 2_700
+                38, 11, 4_100
+                39, 12, 2_100
+                40, 13, 13_800
+                41, 14, 12_100
+                42, 15, 3_600
+                43, 16, 3_600
+                44, 17, 2_000
+                45, 18, 2_000
+                46, 19, 2_000
+                47, 20, 3_800
+                48, 21, 4_400
+            ]
 
     let colonies =
         Colony.declared
@@ -4986,7 +5258,8 @@ let private rangerIntoMelee () : Arena =
 
     let bodies: Body list =
         [
-            // Obsidian522: live 23 CARRY, 22 MOVE; walked to the container (27,8).
+            // Obsidian522: live 23 CARRY, 22 MOVE; walked north out over
+            // (20,0) and bounced on the W17S25 border under its tower.
             { body
                   "Obsidian522"
                   trepidimous
@@ -5040,24 +5313,48 @@ let private rangerIntoMelee () : Arena =
                           Carry, 1
                       ])
                   (at "W17S26" 21 2)
-                  (Some(GoTo(at "W17S26" 27 8))) with
+                  (Some(
+                      Waypoints
+                          [
+                              at "W17S26" 21 1
+                              at "W17S26" 20 0
+                              at "W17S25" 20 48
+                              at "W17S25" 21 49
+                          ]
+                  )) with
                 Hits = 4_420
                 TicksToLive = 196
             }
-            // HalfLife847: live, a step a tick after the nearest of ours
-            // (the ranger, then (27,8)), swinging at it, then off to the core.
+            // HalfLife847: live, down the road a step a tick, swinging at
+            // the ranger, then off toward the core: its live tiles to
+            // t986,030.
             { body
                   "HalfLife847"
                   trepidimous
                   (parts [ Move, 17; Attack, 17; Move, 1 ])
                   (at "W17S26" 20 1)
                   (Some(
-                      Phases
+                      Waypoints
                           [
-                              1, GoTo(at "W17S26" 21 2)
-                              2, GoTo(at "W17S26" 22 3)
-                              8, Chase(Nearest, None)
-                              99, GoTo(at "W17S26" 12 24)
+                              for x, y in
+                                  [
+                                      21, 2
+                                      22, 3
+                                      23, 4
+                                      24, 5
+                                      25, 6
+                                      26, 7
+                                      27, 8
+                                      26, 9
+                                      25, 10
+                                      24, 11
+                                      23, 12
+                                      22, 13
+                                      22, 14
+                                      21, 15
+                                      20, 16
+                                      19, 17
+                                  ] -> at "W17S26" x y
                           ]
                   )) with
                 TicksToLive = 1_446
@@ -5330,9 +5627,9 @@ let private rangerIntoMelee () : Arena =
 //   W17S25  https://screeps.com/room-history/shardSeason/W17S25/971000.json
 //   W15S28  https://screeps.com/room-history/shardSeason/W15S28/971000.json
 // Read too late for live Memory: the Raid log, ArmedSeen, Healers, ExitWatches
-// and Sightings start empty, and every body of ours starts idle. W18S25's
-// reservation, 264 roads and 2 tombstones are not placed, nor the hauler
-// Spawn3 was casting.
+// and Sightings start empty, and every body of ours starts idle. The 264
+// roads are laid (#560); W18S25's reservation and 2 tombstones are not
+// placed, nor the hauler Spawn3 was casting.
 
 /// W18S25 at t971,045 (#527's "Why"): Trepidimous' Virtual458 at (39,14),
 /// 14 live ATTACK and 1 live MOVE, steps once every ~9 ticks toward the
@@ -5347,6 +5644,33 @@ let private slowMeleeHaulers () : Arena =
     let w18s25 =
         room "W18S25"
         |> withStructures [ structureOf "container" None 120_000 250_000 { X = 31; Y = 5 } ]
+        |> withRoads
+            [
+                28, 9, 3_100
+                29, 8, 3_300
+                29, 10, 3_000
+                30, 7, 3_300
+                30, 11, 3_300
+                31, 6, 3_500
+                31, 12, 2_900
+                32, 13, 3_000
+                33, 14, 2_600
+                34, 15, 3_400
+                35, 16, 2_600
+                36, 17, 2_600
+                37, 16, 2_600
+                38, 15, 2_600
+                39, 14, 2_500
+                40, 13, 2_300
+                41, 12, 2_500
+                42, 13, 2_300
+                43, 13, 2_000
+                44, 13, 2_000
+                45, 13, 2_200
+                46, 14, 2_100
+                47, 15, 2_100
+                48, 16, 2_200
+            ]
 
     let w17s25 =
         room "W17S25"
@@ -5447,6 +5771,90 @@ let private slowMeleeHaulers () : Arena =
         |> withSite Side.Ours "extension" None 107 { X = 17; Y = 29 }
         |> withSite Side.Ours "extension" None 1_800 { X = 13; Y = 25 }
         |> withSite Side.Ours "road" None 271 { X = 18; Y = 29 }
+        |> withRoads
+            [
+                2, 17, 3_500
+                3, 18, 3_500
+                4, 19, 3_100
+                5, 20, 3_100
+                6, 21, 2_800
+                7, 22, 14_000
+                8, 23, 14_000
+                9, 24, 13_000
+                10, 25, 12_000
+                11, 24, 18_000
+                11, 26, 10_300
+                11, 28, 18_500
+                12, 23, 18_500
+                12, 25, 12_600
+                12, 27, 13_000
+                12, 29, 3_400
+                13, 24, 2_500
+                13, 26, 3_200
+                13, 28, 3_800
+                13, 30, 2_100
+                14, 23, 2_600
+                14, 25, 1_400
+                14, 27, 3_700
+                14, 29, 1_300
+                14, 31, 1_900
+                15, 22, 2_200
+                15, 28, 1_300
+                15, 30, 3_800
+                15, 32, 2_000
+                16, 21, 3_300
+                16, 29, 1_600
+                16, 31, 3_100
+                16, 33, 1_600
+                16, 35, 3_500
+                16, 37, 4_900
+                16, 38, 20_000
+                16, 39, 9_000
+                16, 41, 4_000
+                16, 43, 2_700
+                16, 44, 2_700
+                17, 20, 1_900
+                17, 30, 5_000
+                17, 32, 3_300
+                17, 34, 3_100
+                17, 36, 5_000
+                17, 38, 4_900
+                17, 39, 8_500
+                17, 40, 24_500
+                17, 42, 2_900
+                17, 45, 3_100
+                18, 31, 3_600
+                18, 35, 2_800
+                18, 37, 5_000
+                18, 39, 5_000
+                18, 41, 2_600
+                18, 46, 3_100
+                19, 30, 5_000
+                19, 34, 3_400
+                19, 36, 3_900
+                19, 38, 5_000
+                19, 40, 2_600
+                19, 47, 3_100
+                20, 31, 3_900
+                20, 33, 3_400
+                20, 35, 5_000
+                20, 37, 4_400
+                20, 39, 2_100
+                20, 48, 2_800
+                21, 34, 3_900
+                21, 36, 5_000
+                21, 38, 3_800
+                22, 37, 1_500
+                23, 36, 1_400
+                24, 35, 3_300
+                25, 34, 4_000
+                26, 33, 2_400
+                27, 32, 1_300
+                28, 33, 7_500
+                29, 34, 8_500
+                30, 33, 9_500
+                31, 32, 9_500
+            ]
 
     let w15s28 =
         room "W15S28"
@@ -5562,6 +5970,168 @@ let private slowMeleeHaulers () : Arena =
                 }
                 structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 }
             ]
+        |> withRoads
+            [
+                4, 5, 3_900
+                5, 4, 4_300
+                5, 6, 3_900
+                5, 44, 4_700
+                6, 3, 3_300
+                6, 7, 4_800
+                6, 29, 2_900
+                6, 43, 4_300
+                6, 45, 2_300
+                7, 2, 3_200
+                7, 8, 3_900
+                7, 28, 2_500
+                7, 42, 3_900
+                7, 46, 2_800
+                8, 1, 3_800
+                8, 9, 3_700
+                8, 28, 4_500
+                8, 41, 4_300
+                8, 47, 3_700
+                9, 10, 4_800
+                9, 27, 4_900
+                9, 28, 4_700
+                9, 40, 3_900
+                9, 48, 4_800
+                10, 11, 3_800
+                10, 26, 2_700
+                10, 29, 2_800
+                10, 39, 4_300
+                11, 12, 3_500
+                11, 18, 3_400
+                11, 27, 3_900
+                11, 30, 4_600
+                11, 38, 4_900
+                12, 13, 2_800
+                12, 17, 4_600
+                12, 25, 21_000
+                12, 27, 14_200
+                12, 28, 2_700
+                12, 29, 4_500
+                12, 31, 3_400
+                12, 33, 20_600
+                12, 35, 17_900
+                12, 37, 4_300
+                13, 14, 2_900
+                13, 16, 2_500
+                13, 26, 14_200
+                13, 28, 3_300
+                13, 30, 2_600
+                13, 32, 3_200
+                13, 34, 3_000
+                13, 36, 4_600
+                14, 15, 4_500
+                14, 25, 17_500
+                14, 27, 4_300
+                14, 29, 4_000
+                14, 31, 4_800
+                14, 33, 3_000
+                14, 35, 4_600
+                15, 15, 4_700
+                15, 26, 3_900
+                15, 28, 3_900
+                15, 30, 4_300
+                15, 32, 3_800
+                15, 34, 3_100
+                16, 16, 4_700
+                16, 25, 14_400
+                16, 27, 4_400
+                16, 29, 4_400
+                16, 31, 2_500
+                16, 33, 4_900
+                16, 35, 3_400
+                17, 17, 2_500
+                17, 26, 19_200
+                17, 28, 3_300
+                17, 30, 3_600
+                17, 32, 3_000
+                17, 34, 3_300
+                18, 18, 3_700
+                18, 25, 18_500
+                18, 27, 16_700
+                18, 29, 2_800
+                18, 31, 5_000
+                18, 33, 4_700
+                19, 19, 18_400
+                19, 22, 14_800
+                19, 24, 20_400
+                19, 26, 15_800
+                19, 28, 2_900
+                19, 30, 4_900
+                19, 32, 4_100
+                20, 20, 19_200
+                20, 21, 17_800
+                20, 23, 16_500
+                20, 25, 17_100
+                20, 27, 17_000
+                20, 29, 4_600
+                20, 31, 4_700
+                20, 33, 17_500
+                21, 21, 3_800
+                21, 22, 2_600
+                21, 23, 5_000
+                21, 24, 20_400
+                21, 25, 18_900
+                21, 26, 21_300
+                21, 28, 19_400
+                21, 30, 2_500
+                21, 32, 18_800
+                21, 34, 17_100
+                22, 24, 4_400
+                22, 25, 13_600
+                22, 27, 13_000
+                22, 28, 5_000
+                22, 29, 4_100
+                22, 30, 16_400
+                22, 31, 19_700
+                22, 32, 20_500
+                22, 33, 20_700
+                22, 35, 3_800
+                23, 26, 17_600
+                23, 28, 18_200
+                23, 29, 20_600
+                23, 30, 21_400
+                23, 31, 14_000
+                23, 32, 20_300
+                23, 33, 15_700
+                23, 34, 4_300
+                24, 25, 14_900
+                24, 28, 21_400
+                24, 29, 22_000
+                24, 30, 20_400
+                24, 33, 15_900
+                25, 24, 2_500
+                25, 28, 21_600
+                25, 29, 21_200
+                25, 34, 12_700
+                26, 23, 16_800
+                27, 22, 14_000
+                28, 21, 13_700
+                28, 34, 21_100
+                29, 20, 15_500
+                30, 19, 13_900
+                31, 18, 4_500
+                32, 17, 5_000
+                33, 16, 3_600
+                34, 15, 2_600
+                35, 14, 3_500
+                36, 13, 19_400
+                37, 12, 2_400
+                38, 11, 3_700
+                39, 12, 4_400
+                40, 13, 13_600
+                41, 14, 13_500
+                42, 15, 3_100
+                43, 16, 3_100
+                44, 17, 2_600
+                45, 18, 2_600
+                46, 19, 4_200
+                47, 20, 4_400
+                48, 21, 3_400
+            ]
 
     let colonies =
         Colony.declared
@@ -5569,14 +6139,32 @@ let private slowMeleeHaulers () : Arena =
 
     let bodies: Body list =
         [
-            // Virtual458: live 14 ATTACK, 1 MOVE; a diagonal step south-west
-            // each time its fatigue runs out.
+            // Virtual458: live 14 ATTACK, 1 MOVE; a road step each time its
+            // fatigue runs out, its live tiles to t971,136.
             { body
                   "Virtual458"
                   trepidimous
                   (parts [ Move, 17; Attack, 17; Move, 1 ])
                   (at "W18S25" 39 14)
-                  (Some(GoTo(at "W18S25" 30 23))) with
+                  (Some(
+                      Waypoints
+                          [
+                              for x, y in
+                                  [
+                                      38, 15
+                                      37, 16
+                                      36, 17
+                                      35, 16
+                                      34, 15
+                                      33, 14
+                                      32, 13
+                                      31, 12
+                                      30, 11
+                                      29, 10
+                                      28, 9
+                                  ] -> at "W18S25" x y
+                          ]
+                  )) with
                 Hits = 1_454
                 TicksToLive = 1_016
             }
@@ -5812,9 +6400,9 @@ let private slowMeleeHaulers () : Arena =
 //   W18S25  https://screeps.com/room-history/shardSeason/W18S25/972000.json
 //   W15S28  https://screeps.com/room-history/shardSeason/W15S28/972000.json
 // Read too late for live Memory: the Raid log, ArmedSeen, Healers, ExitWatches
-// and Sightings start empty, and every body of ours starts idle. W18S25's
-// reservation, 272 roads and 5 tombstones are not placed, nor the anchor
-// Spawn11 was casting.
+// and Sightings start empty, and every body of ours starts idle. The 272
+// roads are laid (#560); W18S25's reservation and 5 tombstones are not
+// placed, nor the anchor Spawn11 was casting.
 
 /// W17S25 at t972,061 (the movement ADR's doorway jam): no hostile in sight;
 /// guard-970892-Spawn11 stands idle on (1,15), the tile inside the west exit
@@ -5923,6 +6511,98 @@ let private doorwayJam () : Arena =
         |> withSite Side.Ours "extension" None 2_841 { X = 10; Y = 26 }
         |> withSite Side.Ours "extension" None 200 { X = 10; Y = 28 }
         |> withSite Side.Ours "extension" None 1_080 { X = 10; Y = 30 }
+        |> withRoads
+            [
+                2, 17, 3_300
+                3, 18, 3_300
+                4, 19, 2_900
+                5, 20, 2_900
+                6, 21, 2_600
+                7, 22, 13_000
+                8, 23, 13_000
+                9, 24, 12_000
+                10, 25, 11_500
+                10, 27, 25_000
+                10, 29, 25_000
+                11, 24, 17_500
+                11, 26, 9_800
+                11, 28, 18_000
+                11, 30, 5_000
+                12, 23, 18_000
+                12, 25, 11_600
+                12, 27, 12_000
+                12, 29, 3_200
+                13, 24, 2_300
+                13, 26, 3_000
+                13, 28, 3_700
+                13, 30, 1_900
+                14, 23, 2_400
+                14, 25, 1_300
+                14, 27, 3_600
+                14, 29, 3_900
+                14, 31, 1_700
+                15, 22, 2_000
+                15, 28, 4_400
+                15, 30, 3_600
+                15, 32, 1_700
+                16, 21, 3_200
+                16, 29, 1_500
+                16, 31, 2_900
+                16, 33, 1_300
+                16, 35, 3_300
+                16, 37, 4_700
+                16, 38, 19_000
+                16, 39, 8_000
+                16, 41, 3_800
+                16, 43, 2_500
+                16, 44, 2_500
+                17, 20, 1_800
+                17, 30, 4_900
+                17, 32, 3_200
+                17, 34, 2_900
+                17, 36, 4_800
+                17, 38, 4_800
+                17, 39, 8_000
+                17, 40, 23_500
+                17, 42, 2_800
+                17, 45, 2_900
+                18, 29, 4_900
+                18, 31, 3_500
+                18, 35, 2_600
+                18, 37, 4_800
+                18, 39, 4_900
+                18, 41, 2_500
+                18, 46, 3_000
+                19, 30, 4_800
+                19, 34, 3_300
+                19, 36, 3_800
+                19, 38, 4_900
+                19, 40, 2_500
+                19, 47, 3_000
+                20, 31, 3_800
+                20, 33, 3_300
+                20, 35, 4_900
+                20, 37, 4_300
+                20, 39, 2_000
+                20, 48, 2_700
+                21, 32, 5_000
+                21, 34, 3_800
+                21, 36, 4_900
+                21, 38, 3_700
+                22, 33, 5_000
+                22, 35, 4_900
+                22, 37, 1_400
+                23, 34, 4_900
+                23, 36, 1_300
+                24, 35, 3_200
+                25, 34, 3_900
+                26, 33, 4_300
+                27, 32, 4_000
+                28, 33, 7_000
+                29, 34, 8_000
+                30, 33, 8_500
+                31, 32, 9_000
+            ]
 
     let w18s25 =
         room "W18S25"
@@ -5931,6 +6611,33 @@ let private doorwayJam () : Arena =
                 { structureOf "container" None 125_100 250_000 { X = 31; Y = 5 } with
                     Energy = 369
                 }
+            ]
+        |> withRoads
+            [
+                28, 9, 2_900
+                29, 8, 3_200
+                29, 10, 2_800
+                30, 7, 3_200
+                30, 11, 3_100
+                31, 6, 3_400
+                31, 12, 2_700
+                32, 13, 2_900
+                33, 14, 2_500
+                34, 15, 3_300
+                35, 16, 2_500
+                36, 17, 2_500
+                37, 16, 2_400
+                38, 15, 2_400
+                39, 14, 2_300
+                40, 13, 2_100
+                41, 12, 2_300
+                42, 13, 2_100
+                43, 13, 1_900
+                44, 13, 1_800
+                45, 13, 2_000
+                46, 14, 2_000
+                47, 15, 1_900
+                48, 16, 2_000
             ]
 
     let w15s28 =
@@ -6056,6 +6763,168 @@ let private doorwayJam () : Arena =
                     Thorium = 41_977
                 }
                 structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 }
+            ]
+        |> withRoads
+            [
+                4, 5, 3_700
+                5, 4, 4_100
+                5, 6, 3_700
+                5, 44, 4_500
+                6, 3, 3_200
+                6, 7, 4_600
+                6, 29, 2_800
+                6, 43, 4_100
+                6, 45, 4_900
+                7, 2, 3_100
+                7, 8, 3_700
+                7, 28, 5_000
+                7, 42, 3_700
+                7, 46, 2_600
+                8, 1, 3_700
+                8, 9, 3_600
+                8, 28, 4_300
+                8, 41, 4_200
+                8, 47, 3_500
+                9, 10, 4_600
+                9, 27, 4_700
+                9, 28, 4_600
+                9, 40, 3_700
+                9, 48, 4_600
+                10, 11, 3_700
+                10, 26, 2_500
+                10, 29, 2_600
+                10, 39, 4_200
+                11, 12, 3_300
+                11, 18, 3_300
+                11, 27, 3_700
+                11, 30, 4_500
+                11, 38, 4_800
+                12, 13, 2_700
+                12, 17, 4_500
+                12, 25, 20_500
+                12, 27, 13_200
+                12, 28, 2_600
+                12, 29, 4_400
+                12, 31, 3_300
+                12, 33, 20_100
+                12, 35, 17_400
+                12, 37, 4_200
+                13, 14, 2_700
+                13, 16, 5_000
+                13, 26, 13_200
+                13, 28, 3_200
+                13, 30, 5_000
+                13, 32, 3_000
+                13, 34, 2_900
+                13, 36, 4_500
+                14, 15, 4_200
+                14, 25, 16_500
+                14, 27, 4_100
+                14, 29, 3_900
+                14, 31, 4_600
+                14, 33, 2_900
+                14, 35, 4_400
+                15, 15, 4_400
+                15, 26, 3_700
+                15, 28, 3_700
+                15, 30, 4_200
+                15, 32, 3_600
+                15, 34, 2_900
+                16, 16, 4_400
+                16, 25, 13_400
+                16, 27, 4_200
+                16, 29, 4_200
+                16, 31, 4_900
+                16, 33, 4_700
+                16, 35, 3_300
+                17, 17, 3_800
+                17, 26, 17_700
+                17, 28, 3_100
+                17, 30, 3_400
+                17, 32, 2_800
+                17, 34, 3_100
+                18, 18, 3_500
+                18, 25, 17_500
+                18, 27, 15_200
+                18, 29, 2_500
+                18, 31, 4_800
+                18, 33, 4_600
+                19, 19, 16_900
+                19, 22, 13_800
+                19, 24, 19_400
+                19, 26, 14_300
+                19, 28, 2_700
+                19, 30, 4_700
+                19, 32, 4_000
+                20, 20, 17_700
+                20, 21, 16_800
+                20, 23, 15_500
+                20, 25, 16_100
+                20, 27, 15_500
+                20, 29, 4_400
+                20, 31, 4_600
+                20, 33, 17_000
+                21, 21, 3_700
+                21, 22, 2_400
+                21, 23, 4_900
+                21, 24, 19_400
+                21, 25, 17_900
+                21, 26, 20_300
+                21, 28, 18_400
+                21, 30, 4_900
+                21, 32, 18_300
+                21, 34, 16_600
+                22, 24, 4_300
+                22, 25, 13_100
+                22, 27, 21_600
+                22, 28, 4_800
+                22, 29, 4_000
+                22, 30, 15_900
+                22, 31, 19_200
+                22, 32, 19_500
+                22, 33, 20_200
+                22, 35, 3_700
+                23, 26, 16_600
+                23, 28, 17_700
+                23, 29, 20_100
+                23, 30, 20_900
+                23, 31, 13_500
+                23, 32, 19_300
+                23, 33, 15_200
+                23, 34, 4_200
+                24, 25, 14_400
+                24, 28, 20_900
+                24, 29, 21_500
+                24, 30, 19_900
+                24, 33, 15_400
+                25, 24, 5_000
+                25, 28, 21_100
+                25, 29, 20_700
+                25, 34, 21_800
+                26, 23, 16_300
+                27, 22, 13_500
+                28, 21, 13_200
+                28, 34, 20_600
+                29, 20, 15_000
+                30, 19, 13_400
+                31, 18, 4_300
+                32, 17, 4_800
+                33, 16, 3_400
+                34, 15, 2_500
+                35, 14, 3_300
+                36, 13, 18_400
+                37, 12, 2_300
+                38, 11, 3_600
+                39, 12, 4_300
+                40, 13, 13_100
+                41, 14, 13_000
+                42, 15, 3_000
+                43, 16, 3_000
+                44, 17, 2_400
+                45, 18, 2_400
+                46, 19, 4_000
+                47, 20, 4_300
+                48, 21, 3_300
             ]
 
     let colonies =
@@ -7373,10 +8242,11 @@ let arenaBorderTests =
             // that ignores the melee's next step; flips at S3 (kite and
             // glue), whose acceptance is this melee killed untouched. Live
             // (t986,006-986,012) the ranger stepped to range 2 of HalfLife847
-            // to shoot, and was struck four times (4,200 to 2,496); here it
-            // is struck once (426, the live swing) and then outwalks it. The
-            // melee's first two steps are its live ones: the arena's chase
-            // steps onto the swamp at (23,3), where live it kept to plain.
+            // to shoot, and was struck four times, t3-t6 (4,200 to 2,496).
+            // The melee walks its live road tiles (#560) and keeps their
+            // ticks to t8; the ranger's first step is (25,6), not the live
+            // (24,6), so it stays a tile ahead down the road and is struck
+            // once, at t6 (426, the live swing), then outwalks it.
             test
                 "movement S0 capture t986,005: a ranger holding the Guard steps within two of a melee and is struck" {
                 let ranger = "ranger-984393-Spawn3"
@@ -7388,7 +8258,7 @@ let arenaBorderTests =
                     (Some "guard:W17S26")
                     "the ranger holds W17S26's Guard"
 
-                let _, trace = start |> run 5
+                let _, trace = start |> run 8
                 let failure = describe trace
                 let melee = pathOf "HalfLife847" trace |> Map.ofList
 
@@ -7401,35 +8271,44 @@ let arenaBorderTests =
                     (gaps |> List.skip 1 |> List.take 3 |> List.forall (fun gap -> gap <= 2))
                     $"it stands within two of the melee from t1 to t3\n{failure}"
 
-                Expect.isTrue
-                    (pathOf ranger trace |> List.exists (fun (_, s) -> s.Hits < 4_200))
-                    $"and the melee strikes it\n{failure}"
+                let struck =
+                    pathOf ranger trace
+                    |> List.pairwise
+                    |> List.choose (fun ((_, before), (tick, now)) ->
+                        if now.Hits < before.Hits then Some tick else None)
+
+                Expect.equal struck [ 6 ] $"and the melee strikes it once\n{failure}"
             }
 
             // Characterisation (movement S0): pins #527's loop, a
             // walker that does not route round a slow melee's Reach but flees
             // it each time the melee steps and rematches the same Refill;
             // flips at S2 (Reach, Safe, Flee and walk-round read the arrival
-            // map), whose acceptance is the detour that keeps the Refill. Live
-            // (t971,046-971,060) both haulers did this; here
-            // hauler-970335-Spawn11 does (Flee at t18 and t35, as the melee
-            // steps to (38,16) and (37,17)), while hauler-969730-Spawn11 walks
-            // round to the north at once and crosses home by t29: the arena
-            // lays no roads, which live made the path past the melee the
-            // cheaper one. After t35 the residents shoot Virtual458 down,
-            // which live they did not (the Raid log of t971,045 is not seated).
+            // map), whose acceptance is the detour that keeps the Refill. With
+            // the captured roads and Virtual458 on its live road tiles (#560),
+            // which it keeps to the tick by the road's fatigue, this is live
+            // (t971,046-971,081): hauler-970335-Spawn11 flees a tile back
+            // each time the melee steps, onto the live tiles on the live
+            // ticks; hauler-969730-Spawn11 flees once, at t1, then walks round
+            // to the north onto the road home and crosses at t25 (live t33,
+            // after waiting at (35,12) until t10 and a wider loop by (39,10)).
+            // From t32 the residents shoot Virtual458, which live they did
+            // not (the Raid log of t971,045 is not seated).
             test
                 "#527 capture t971,045: a hauler at a slow melee's Reach flees each step it takes and rematches its Refill" {
                 let hauler = "hauler-970335-Spawn11"
+                let walker = "hauler-969730-Spawn11"
 
-                let tasks =
+                let rows, trace =
                     (slowMeleeHaulers (), [ 0..35 ])
                     ||> List.mapFold (fun a tick ->
-                        let next, _ = step a
-                        (tick, Map.tryFind hauler next.Carried.Assignments), next)
+                        let next, t = step a
+                        let taskOf id = Map.tryFind id next.Carried.Assignments
+                        ((tick, taskOf hauler, taskOf walker), t), next)
                     |> fst
+                    |> List.unzip
 
-                let fled =
+                let fledAt (tasks: (int * string option) list) =
                     tasks
                     |> List.pairwise
                     |> List.choose (fun ((_, before), (tick, now)) ->
@@ -7438,12 +8317,41 @@ let arenaBorderTests =
                         else
                             None)
 
-                Expect.equal fled [ 18; 35 ] $"it flees as the melee steps\n{tasks}"
+                let tasks = rows |> List.map (fun (tick, task, _) -> tick, task)
+                let walks = rows |> List.map (fun (tick, _, task) -> tick, task)
+                let failure = describe trace
+
+                Expect.equal
+                    (fledAt tasks)
+                    [ 1; 10; 19; 28 ]
+                    $"it flees as the melee steps\n{tasks}"
 
                 Expect.equal
                     (tasks |> List.map snd |> List.distinct)
                     [ Some "refill:tower-13-29"; Some "flee" ]
                     "and holds the tower's Refill between, never another Task"
+
+                Expect.equal
+                    (pathOf hauler trace
+                     |> List.map (fun (_, s) -> RoomPos.pos s.At)
+                     |> List.distinct)
+                    [
+                        { X = 36; Y = 17 }
+                        { X = 35; Y = 16 }
+                        { X = 34; Y = 15 }
+                        { X = 33; Y = 14 }
+                        { X = 32; Y = 13 }
+                    ]
+                    $"a live tile back each time\n{failure}"
+
+                Expect.equal (fledAt walks) [ 1 ] $"the other flees once\n{walks}"
+
+                Expect.equal
+                    (pathOf walker trace
+                     |> List.tryFind (fun (_, s) -> s.At.Room = "W17S25")
+                     |> Option.map fst)
+                    (Some 25)
+                    $"and crosses home round the melee\n{failure}"
             }
 
             // Movement S0's doorway pin, flipped early (2026-10-07, live
@@ -7451,7 +8359,10 @@ let arenaBorderTests =
             // tiles beside an exit are idle ground, so an idle body steps off
             // them. Live (t972,062-972,082) the guard stood idle on (1,15) and
             // the hauler behind it was carried back to W18S25 every other
-            // tick. S4's stand-tile picker keeps the outcome.
+            // tick. S4's stand-tile picker keeps the outcome. The hauler's
+            // bounce does not reproduce, and not for want of roads: with them
+            // laid (#560) and the guard back on (1,15), it steps in by (1,16)
+            // at t0.
             test
                 "movement S0 capture t972,061: an idle guard steps off the doorway inside the west exit" {
                 let guard = "guard-970892-Spawn11"

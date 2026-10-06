@@ -23,7 +23,7 @@ const PARTS = {
 const SITE_KINDS = new Set(["spawn", "tower", "extension", "rampart", "road", "container", "storage"]);
 
 // Objects the arena has no place for, or holds elsewhere (sources, minerals
-// and the controller's tile are the room capture's).
+// and the controller's tile are the room capture's; roads go to `withRoads`).
 const NOT_PLACED = new Set(["source", "mineral", "controller", "creep", "constructionSite", "road", "tombstone", "ruin", "energy"]);
 
 // The engine's NPC owners (`creeps/tick.js`).
@@ -121,6 +121,7 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
     for (const o of objects) {
       if (["source", "mineral", "controller"].includes(o.type)) arenaIds.set(o._id, o._id);
       else if (o.type === "creep") arenaIds.set(o._id, o.name);
+      else if (o.type === "road") arenaIds.set(o._id, `road-${o.x}-${o.y}-${r.name}`);
       else unplaced.set(o._id, o.type);
     }
     const lines = [`    let ${roomBinding(r.name)} =`, `        room ${fsString(r.name)}`];
@@ -171,7 +172,7 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
     const structures = [];
     for (const o of objects) {
       if (NOT_PLACED.has(o.type) || (o.type === "spawn" && o.user === ourId)) {
-        if (["road", "tombstone", "ruin", "energy"].includes(o.type)) skipped.set(o.type, (skipped.get(o.type) ?? 0) + 1);
+        if (["tombstone", "ruin", "energy"].includes(o.type)) skipped.set(o.type, (skipped.get(o.type) ?? 0) + 1);
         continue;
       }
       if (o.type === "reactor") {
@@ -239,6 +240,13 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
       }
       if (items.length > 0) lines.push("        |> withStructures", "            [", ...items, "            ]");
     }
+    // Roads by tile and hits (#560): the arena walks them at fatigue 1 a
+    // part, and the colony's walk reads them as the shell files them.
+    const roads = objects
+      .filter((o) => o.type === "road")
+      .sort((a, b) => a.x - b.x || a.y - b.y)
+      .map((o) => `${o.x}, ${o.y}, ${fsInt(o.hits)}`);
+    if (roads.length > 0) lines.push(`        |> withRoads [ ${roads.join("; ")} ]`);
     for (const site of objects.filter((o) => o.type === "constructionSite")) {
       const owner = site.user === ourId ? "Side.Ours" : sideOf(site.user);
       const name = site.name ? `Some ${fsString(site.name)}` : "None";
@@ -324,7 +332,7 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
   }
 
   if (skipped.size > 0) {
-    notes.push(`not placed: ${[...skipped].map(([type, n]) => `${n} ${type}`).join(", ")} (the arena has no roads, drops or ruins).`);
+    notes.push(`not placed: ${[...skipped].map(([type, n]) => `${n} ${type}`).join(", ")} (the arena has no drops, tombstones or ruins).`);
   }
 
   const out = [];
