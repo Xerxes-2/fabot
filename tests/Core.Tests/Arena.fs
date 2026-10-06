@@ -1293,8 +1293,9 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
         WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
         |> WorldView.sharingSafeGround
 
-    // Each raided room's one verdict, as `Main` lays them (`Facts.judge`):
-    // every colony decides every arena tick.
+    // Each raided room's one verdict and every observer's one look, as `Main`
+    // lays them (`Facts.judge`, `Layout.aimObservers`): every colony decides
+    // every arena tick.
     world,
     living
     |> List.map (fun c ->
@@ -1323,6 +1324,7 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
     |> Facts.judge
         (fun home room -> World.hopsUnder StandDown.none joins tuning world home room)
         a.Carried.Assignments
+    |> Layout.aimObservers Set.empty
     |> List.zip living
 
 /// The view one living colony decides this tick off.

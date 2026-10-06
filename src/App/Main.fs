@@ -654,7 +654,8 @@ let private fullTick
     // laid in each (`Facts.judge`): a colony that does not decide sends only
     // the bodies its plan already holds there; the answerer is ranked by
     // crossings as a harassment room's caster is, the table built only where
-    // two colonies answer one room.
+    // two colonies answer one room. Then every observer's one look, aimed
+    // together so no two spend a tick on one room (`Layout.aimObservers`).
     let views =
         let hops = lazy (World.hopsUnder StandDown.none joins Tuning.defaults world)
 
@@ -675,6 +676,7 @@ let private fullTick
             }
             : Decide.Facts.Judged))
         |> Decide.Facts.judge (fun home room -> hops.Value home room) assignments
+        |> Decide.Layout.aimObservers idle
         |> List.zip (views |> List.map fst)
 
     // The decision is bound and then tupled, and the turn is a DU

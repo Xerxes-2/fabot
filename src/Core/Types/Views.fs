@@ -143,6 +143,11 @@ type WorldView =
         /// The rooms of ours an observer stands in: whose look each room of
         /// `Danger` is (`lookerOf`).
         Observers: string list
+        /// Each observer's room and the one room it looks at this tick, aimed
+        /// once over every colony (`Layout.aimObservers`). None until the
+        /// views are cut, and in every fixture of one colony, whose observer
+        /// is aimed over its own view alone.
+        Looks: Map<string, string> option
         /// Every body of ours by the room it stands in, and its tile there,
         /// whoever holds it. Read on first use: one reader, a home's Defend.
         Bodies: Lazy<Map<string, (CreepInfo * Pos) list>>
@@ -167,6 +172,7 @@ module WorldView =
             Watched = Set.empty
             Danger = Set.empty
             Observers = []
+            Looks = None
             Bodies = lazy Map.empty
             Answers = Map.empty
             SafeGround = None
@@ -275,6 +281,7 @@ module WorldView =
                     && facts.TargetKinds
                        |> Map.exists (fun _ kind -> kind = Structure BuiltKind.Observer))
                 |> List.map fst
+            Looks = None
             Bodies =
                 lazy
                     (world.Creeps

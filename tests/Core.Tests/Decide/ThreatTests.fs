@@ -5164,6 +5164,260 @@ let observerAimTests =
             }
         ]
 
+/// Rooms an observer at `from` reaches (`Engine.observerRange`, never its own).
+let private reaches (from: string) (room: string) =
+    room <> from
+    && RoomName.offsetOf from room
+       |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange)
+
+/// Each observer's tiers off one world: the shared lists every observer is
+/// handed, `Danger` cut to the room's looker (`WorldView.lookerOf`), its own box.
+let private worldTiers
+    (observers: (string * string list) list)
+    (danger: string list)
+    (shared: ObserverTiers)
+    =
+    let watch =
+        { WorldView.empty with
+            Observers = observers |> List.map fst
+        }
+
+    observers
+    |> List.map (fun (from, box) ->
+        from,
+        { shared with
+            Danger = danger |> List.filter (fun room -> WorldView.lookerOf watch room = Some from)
+            Box = box
+        })
+
+/// The world's looks at tick 1,000, given when each room was last seen.
+let private looksAt (seen: (string * int) list) observers =
+    let seen = Map.ofList seen
+
+    assignLooks
+        1_000
+        Tuning.defaults.ObserveStaleTicks
+        (fun room -> Map.tryFind room seen)
+        observers
+
+/// No two observers look at one room, and each looks within its reach.
+let private distinctAndInReach (looks: Map<string, string>) =
+    Expect.equal
+        (looks |> Map.values |> Seq.distinct |> Seq.length)
+        looks.Count
+        "no two observers look at one room"
+
+    for KeyValue(from, room) in looks do
+        Expect.isTrue (reaches from room) $"{from}'s look at {room} is in its reach"
+
+/// The rivals every colony's watched tier shares (`Colony.rivals` and the
+/// sighted ones), around W13S28 and W12S28.
+let private sharedTiers: ObserverTiers =
+    {
+        Danger = []
+        Claims = [ "W17S25" ]
+        Watched = [ "W18S26"; "W17S24"; "W22S28" ]
+        Harassed = [ "W17S26" ]
+        Box = []
+    }
+
+[<Tests>]
+let worldObserverTests =
+    testList
+        "the world's observers"
+        [
+            // User question 2026-10-07: W12S28 reached RCL8 beside W13S28's
+            // observer, the two in each other's range with one rival list.
+            test "two adjacent observers on one rival list never spend one tick on one room (#559)" {
+                let observers =
+                    worldTiers [ "W13S28", [ "W14S28" ]; "W12S28", [ "W11S28" ] ] [] sharedTiers
+
+                let looks = looksAt [] observers
+                distinctAndInReach looks
+
+                Expect.equal
+                    looks
+                    (Map.ofList [ "W13S28", "W17S25"; "W12S28", "W17S24" ])
+                    "the claim to the nearer observer, the other on the stalest rival room by name"
+
+                // Every shared room seen this tick: each falls back to its own box.
+                let allSeen =
+                    [ "W17S25"; "W18S26"; "W17S24"; "W22S28"; "W17S26" ]
+                    |> List.map (fun r -> r, 1_000)
+
+                Expect.equal
+                    (looksAt allSeen observers)
+                    (Map.ofList [ "W13S28", "W14S28"; "W12S28", "W11S28" ])
+                    "each its own box"
+            }
+
+            test
+                "the danger split is unchanged: a room that wants eyes is its looker's alone (#559)" {
+                // W18S25 is five from W13S28 and six from W12S28; W17S27 four
+                // and five.
+                let observers =
+                    worldTiers
+                        [ "W13S28", [ "W14S28" ]; "W12S28", [ "W11S28" ] ]
+                        [ "W18S25"; "W17S27" ]
+                        sharedTiers
+
+                let looks = looksAt [ "W17S27", 990 ] observers
+                distinctAndInReach looks
+
+                Expect.equal
+                    (Map.tryFind "W13S28" looks)
+                    (Some "W18S25")
+                    "the looker takes the room never seen first"
+
+                Expect.equal
+                    (Map.tryFind "W12S28" looks)
+                    (Some "W17S25")
+                    "the other observer takes no room of the looker's danger, and spends its look on the claim"
+
+                let alone =
+                    observers
+                    |> List.map (fun (from, tiers) ->
+                        from,
+                        aimObserver
+                            1_000
+                            Tuning.defaults.ObserveStaleTicks
+                            from
+                            (fun room -> if room = "W17S27" then Some 990 else None)
+                            tiers)
+
+                Expect.equal
+                    alone
+                    [ "W13S28", Some "W18S25"; "W12S28", Some "W17S25" ]
+                    "aimed one at a time, the same danger looks"
+            }
+
+            test "three observers in reach of one another each take a room of their own (#559)" {
+                let observers =
+                    worldTiers
+                        [ "W13S28", [ "W14S28" ]; "W12S28", [ "W11S28" ]; "W15S28", [ "W16S28" ] ]
+                        []
+                        { sharedTiers with
+                            Watched = [ "W18S26" ]
+                        }
+
+                let looks = looksAt [] observers
+                distinctAndInReach looks
+                Expect.equal looks.Count 3 "every observer looks"
+
+                Expect.equal
+                    (Map.tryFind "W15S28" looks)
+                    (Some "W17S25")
+                    "the claim to the nearest observer"
+
+                Expect.equal
+                    (Map.tryFind "W13S28" looks)
+                    (Some "W18S26")
+                    "the rival room to the nearest one still free"
+
+                Expect.equal
+                    (Map.tryFind "W12S28" looks)
+                    (Some "W17S26")
+                    "the harassment room to the last"
+            }
+
+            test "one observer alone is aimed as `aimObserver` aims it (#559)" {
+                for seen in
+                    [
+                        []
+                        [ "W17S25", 1_000 ]
+                        [ "W17S25", 1_000; "W18S26", 1_000 ]
+                        [ "W17S25", 1_000; "W18S26", 1_000; "W17S26", 1_000 ]
+                    ] do
+                    Expect.equal
+                        (looksAt seen [ "W13S28", tiers ] |> Map.tryFind "W13S28")
+                        (aimAt seen tiers)
+                        $"seen {seen}"
+            }
+
+            test
+                "two colonies' observers laid by the world look at two rooms, where each alone looked at one (#559)" {
+                let declared (colony: ColonyView) =
+                    { colony with
+                        Declared = [ "W1N1"; "W1N3"; "W2N3" ]
+                    }
+
+                let west =
+                    atLevel 8 (openRoom 6)
+                    |> declared
+                    |> withTarget "observer-1" { X = 30; Y = 30 } (Structure BuiltKind.Observer)
+
+                let east =
+                    let colony =
+                        atLevel 8 (openRoom 6)
+                        |> declared
+                        |> withTarget "observer-2" { X = 30; Y = 30 } (Structure BuiltKind.Observer)
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                RoomName = Some "W2N1"
+                                Rooms =
+                                    colony.Spatial.Rooms
+                                    |> Map.toList
+                                    |> List.map (fun (room, layer) ->
+                                        (if room = "W1N1" then "W2N1" else room), layer)
+                                    |> Map.ofList
+                            }
+                    }
+
+                let observed colony =
+                    (decideOn colony).Intents
+                    |> List.choose (function
+                        | ObserveRoom(observer, room) -> Some(observer, room)
+                        | _ -> None)
+
+                Expect.equal
+                    (observed west @ observed east)
+                    [ "observer-1", "W1N3"; "observer-2", "W1N3" ]
+                    "the premise: each aimed alone, both on the first claim"
+
+                let laid = aimObservers Set.empty [ west; east ]
+
+                Expect.equal
+                    (laid |> List.collect observed)
+                    [ "observer-1", "W1N3"; "observer-2", "W2N3" ]
+                    "aimed by the world, one claim each"
+
+                // West replays its plan this tick: its observer looks at
+                // nothing the world hands it, so the first claim is east's.
+                let westIdle = aimObservers (Set.singleton "W1N1") [ west; east ]
+
+                Expect.equal
+                    (westIdle |> List.map (fun view -> view.World.Looks))
+                    [ Some(Map.ofList [ "W2N1", "W1N3" ]); Some(Map.ofList [ "W2N1", "W1N3" ]) ]
+                    "an idle colony's observer holds no look, and the room it would take goes to the next free"
+            }
+
+            test "of rooms ranked alike, the one fewest free observers reach goes first (#559)" {
+                // W23S28 is ten from W13S28 and eleven from W12S28: only
+                // W13S28 reaches it. W14S28 both reach, and W13S28 is nearer.
+                let observers =
+                    worldTiers
+                        [ "W13S28", []; "W12S28", [] ]
+                        []
+                        {
+                            Danger = []
+                            Claims = [ "W14S28"; "W23S28" ]
+                            Watched = []
+                            Harassed = []
+                            Box = []
+                        }
+
+                let looks = looksAt [] observers
+                distinctAndInReach looks
+
+                Expect.equal
+                    looks
+                    (Map.ofList [ "W13S28", "W23S28"; "W12S28", "W14S28" ])
+                    "the only observer reaching W23S28 is not spent on W14S28"
+            }
+        ]
+
 [<Tests>]
 let dyingRampartTests =
     testList

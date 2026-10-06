@@ -1018,11 +1018,85 @@ type ObserverTiers =
 /// four ticks in five to the claims, the safe-mode clocks and the box.
 let private dangerStride = 5
 
-/// Where an observer in `from` looks this tick (#484): the first tier with a
-/// room in `Engine.observerRange` that wants a look, and in it the room
-/// longest unseen (`lastSeen` None first), then by name. Longest unseen is the
-/// round robin: the look itself is the next tick's sighting. A room seen this
-/// tick wants none, and the observer's own room is never one.
+/// Where every observer looks this tick, one room each and no room twice
+/// (#484, #559), given each observer's room and its tiers. Every room of a
+/// tier in `Engine.observerRange` of an observer holding it that wants a look
+/// is ranked by its tier, then longest unseen (`lastSeen` None first), then
+/// the fewest free observers holding it in reach, then by name, and each in
+/// turn goes to the nearest observer holding it still free, ties by room name. Longest unseen is the round robin: the look itself is
+/// the next tick's sighting. A room seen this tick wants none, and an
+/// observer's own room is never its look. One observer alone looks at the
+/// first tier's best room in its reach.
+let assignLooks
+    (time: int)
+    (staleAfter: int)
+    (lastSeen: string -> int option)
+    (observers: (string * ObserverTiers) list)
+    : Map<string, string> =
+    let reach from room =
+        if room = from then
+            None
+        else
+            RoomName.offsetOf from room
+            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+            |> Option.filter (fun distance -> distance <= Engine.observerRange)
+
+    let unseen room = lastSeen room <> Some time
+
+    let olderThan stride room =
+        lastSeen room |> Option.forall (fun tick -> time - tick >= stride)
+
+    let ranked (tiers: ObserverTiers) =
+        [
+            tiers.Danger, olderThan dangerStride
+            tiers.Claims, unseen
+            tiers.Watched, olderThan staleAfter
+            tiers.Harassed, unseen
+            tiers.Box, unseen
+        ]
+
+    let wanted =
+        observers
+        |> List.collect (fun (from, tiers) ->
+            ranked tiers
+            |> List.indexed
+            |> List.collect (fun (tier, (rooms, wants)) ->
+                rooms
+                |> List.choose (fun room ->
+                    reach from room
+                    |> Option.filter (fun _ -> wants room)
+                    |> Option.map (fun distance -> (tier, lastSeen room, room), (distance, from)))))
+        |> List.groupBy fst
+        |> List.map (fun (key, holders) -> key, List.map snd holders)
+
+    // Each pick re-reads who is still free: of the rooms ranked alike, the one
+    // the fewest free observers reach goes first, so the only observer that
+    // reaches a room is not spent on one another observer reaches too.
+    let rec pick (looks: Map<string, string>) wanted =
+        let servable =
+            wanted
+            |> List.choose (fun ((tier, seen, room), holders) ->
+                match
+                    holders |> List.filter (fun (_, from) -> not (Map.containsKey from looks))
+                with
+                | [] -> None
+                | free -> Some((tier, seen, List.length free, room), free))
+
+        match servable with
+        | [] -> looks
+        | _ ->
+            let (_, _, _, room), free = List.minBy fst servable
+            let _, from = List.min free
+
+            servable
+            |> List.filter (fun ((_, _, _, other), _) -> other <> room)
+            |> List.map (fun ((tier, seen, _, other), holders) -> (tier, seen, other), holders)
+            |> pick (Map.add from room looks)
+
+    pick Map.empty wanted
+
+/// Where an observer in `from` looks this tick (#484): `assignLooks` with no
+/// other observer.
 let aimObserver
     (time: int)
     (staleAfter: int)
@@ -1030,30 +1104,7 @@ let aimObserver
     (lastSeen: string -> int option)
     (tiers: ObserverTiers)
     : string option =
-    let inReach room =
-        room <> from
-        && RoomName.offsetOf from room
-           |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange)
-
-    let unseen room = lastSeen room <> Some time
-
-    let olderThan stride room =
-        lastSeen room |> Option.forall (fun tick -> time - tick >= stride)
-
-    let stale = olderThan staleAfter
-
-    [
-        tiers.Danger, olderThan dangerStride
-        tiers.Claims, unseen
-        tiers.Watched, stale
-        tiers.Harassed, unseen
-        tiers.Box, unseen
-    ]
-    |> List.tryPick (fun (rooms, wants) ->
-        rooms
-        |> List.filter (fun room -> inReach room && wants room)
-        |> List.sortBy (fun room -> lastSeen room, room)
-        |> List.tryHead)
+    assignLooks time staleAfter lastSeen [ from, tiers ] |> Map.tryFind from
 
 /// The observer's watched tier: `Colony.rivals`, every other room a sighting
 /// names a rival's, not an ally's (#489: their controllers' safe-mode clocks),
@@ -1068,42 +1119,87 @@ let watchedRooms (seen: Map<string, RoomSighting>) (crossed: Set<string>) : stri
 
     (Colony.rivals |> List.map fst) @ sighted @ Set.toList crossed |> List.distinct
 
-/// The observer at home spends its tick (#484): `aimObserver` over the rooms
-/// that want eyes, the declared rooms not yet colonies of ours or still
-/// nurseries, the watched
-/// rooms, `Colony.harass`, and the scan set.
+/// The observer standing at a colony's home, if one does.
+let private observerOf (view: ColonyView) : string option =
+    let home = SpatialInfo.homeName view.Spatial
+
+    SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Observer)
+    |> List.tryFind (fun id -> SpatialInfo.roomOf view.Spatial id = Some home)
+
+/// A colony's observer's tiers (#484): the rooms that want eyes whose look is
+/// its (`WorldView.lookerOf`), the declared rooms not yet colonies of ours or
+/// still nurseries, the `watched` rooms, `Colony.harass`, and its scan set.
+let private observerTiers (view: ColonyView) (watched: string list) : ObserverTiers =
+    let home = SpatialInfo.homeName view.Spatial
+
+    {
+        Danger =
+            view.World.Danger
+            |> Set.filter (fun room -> WorldView.lookerOf view.World room = Some home)
+            |> Set.toList
+        Claims =
+            view.Declared
+            |> List.filter (fun room ->
+                match Map.tryFind room view.Stages with
+                | None
+                | Some Nursery -> true
+                | Some _ -> false)
+        Watched = watched
+        Harassed = Colony.harass |> List.map (fun h -> h.RoomName)
+        Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
+    }
+
+/// The looks of the colonies' observers, aimed together (`assignLooks`) off
+/// the first view's clock and sightings, which every view shares.
+let private looksOf (views: ColonyView list) (watched: string list) : Map<string, string> =
+    match views with
+    | [] -> Map.empty
+    | first :: _ ->
+        let lastSeen room =
+            Map.tryFind room first.Seen |> Option.map (fun sighting -> sighting.Tick)
+
+        views
+        |> List.filter (fun view -> Option.isSome (observerOf view))
+        |> List.map (fun view -> SpatialInfo.homeName view.Spatial, observerTiers view watched)
+        |> assignLooks first.Time first.Tuning.ObserveStaleTicks lastSeen
+
+/// The world aims every observer once a tick (#559): one ranking over every
+/// colony's tiers, the watched rooms the union of every colony's crossings
+/// beside the rivals, each colony's box its own observer's, laid in every
+/// view as `WorldView.Looks`. The colonies of `idle` (homes that replay or
+/// wait this tick, and look at nothing of the world's choosing) hold no look,
+/// so a room they would take goes to the next observer free. The observer
+/// half of S6.
+let aimObservers (idle: Set<string>) (views: ColonyView list) : ColonyView list =
+    match views with
+    | [] -> []
+    | first :: _ ->
+        let crossed = views |> List.map (fun view -> view.Crossed) |> Set.unionMany
+
+        let looks =
+            looksOf
+                (views
+                 |> List.filter (fun view ->
+                     not (Set.contains (SpatialInfo.homeName view.Spatial) idle)))
+                (watchedRooms first.Seen crossed)
+
+        views
+        |> List.map (fun view ->
+            { view with
+                World = { view.World with Looks = Some looks }
+            })
+
+/// The observer at home spends its tick (#484): the look the world assigned
+/// it, or in a world that assigned none, the look its own view alone aims.
 let internal planObserver (view: ColonyView) : Intent list =
     let home = SpatialInfo.homeName view.Spatial
 
-    let observers =
-        SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Observer)
-        |> List.filter (fun id -> SpatialInfo.roomOf view.Spatial id = Some home)
-
-    match observers with
-    | [] -> []
-    | observer :: _ ->
-        let tiers =
-            {
-                Danger =
-                    view.World.Danger
-                    |> Set.filter (fun room -> WorldView.lookerOf view.World room = Some home)
-                    |> Set.toList
-                Claims =
-                    view.Declared
-                    |> List.filter (fun room ->
-                        match Map.tryFind room view.Stages with
-                        | None
-                        | Some Nursery -> true
-                        | Some _ -> false)
-                Watched = watchedRooms view.Seen view.Crossed
-                Harassed = Colony.harass |> List.map (fun h -> h.RoomName)
-                Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
-            }
-
-        let lastSeen room =
-            Map.tryFind room view.Seen |> Option.map (fun sighting -> sighting.Tick)
-
-        aimObserver view.Time view.Tuning.ObserveStaleTicks home lastSeen tiers
+    match observerOf view with
+    | None -> []
+    | Some observer ->
+        view.World.Looks
+        |> Option.defaultWith (fun () -> looksOf [ view ] (watchedRooms view.Seen view.Crossed))
+        |> Map.tryFind home
         |> Option.map (fun room -> ObserveRoom(observer, room))
         |> Option.toList
 
