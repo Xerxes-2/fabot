@@ -1129,8 +1129,10 @@ let loop () =
     // tick; a measurement that switches itself off has absences to explain.
     let atEntry = Game.cpu.getUsed ()
     // The flood counters start the tick at zero, so each colony's reading
-    // below is cumulative from here and `foldCpu` can difference it.
+    // below is cumulative from here and `foldCpu` can difference it; and the
+    // last tick's hostile sides go (`HostileInfo.forgetSides`).
     Grid.Counters.reset ()
+    HostileInfo.forgetSides ()
 
     // ADR-0082
     // Light only straight after a full tick, so never two in a row and never

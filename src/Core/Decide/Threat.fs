@@ -168,7 +168,7 @@ type Selector =
         /// The colony, the room, the walk and the shots; each rank priced once.
         /// What a holder strikes is `Emitter.pickStrike`'s choice off it.
         Order: ColonyView -> string -> (HostileInfo -> int) -> HostileInfo list -> HostileInfo list
-        /// Each shot's band of that order (`Facts.killBand`), first band
+        /// Each shot's band of that order (`Facts.killBandOf`), first band
         /// first, the colony and the room applied once: a mass attack counts
         /// only what it deals the band of the shot it would replace (#563).
         Band: ColonyView -> string -> HostileInfo -> int
@@ -478,18 +478,53 @@ module Brief =
         ]
 
     /// Every kind's targets today: what `Facts.guardShoots` passes, in the kill
-    /// order.
-    let private guardTargets =
+    /// order. One a Brief: its holders each order the same shots, so a
+    /// room's `killRank` is built once for a view and each shot ranked once.
+    let private guardTargets () =
+        let built =
+            System.Collections.Generic.Dictionary<
+                string,
+                ColonyView *
+                (HostileInfo -> KillRank) *
+                System.Collections.Generic.Dictionary<string, HostileInfo * KillRank>
+             >()
+
+        let rankIn (view: ColonyView) (room: string) : HostileInfo -> KillRank =
+            let rank, ranked =
+                match built.TryGetValue room with
+                | true, (seen, rank, ranked) when obj.ReferenceEquals(seen, view) -> rank, ranked
+                | _ ->
+                    let rank = killRank view room
+
+                    let ranked =
+                        System.Collections.Generic.Dictionary<string, HostileInfo * KillRank>()
+
+                    built.[room] <- (view, rank, ranked)
+                    rank, ranked
+
+            fun hostile ->
+                match ranked.TryGetValue hostile.Id with
+                | true, (seen, kept) when obj.ReferenceEquals(seen, hostile) -> kept
+                | _ ->
+                    let kept = rank hostile
+                    ranked.[hostile.Id] <- (hostile, kept)
+                    kept
+
         {
             Shoots = guardShoots
             Order =
                 fun view room walk shots ->
                     match shots with
-                    | [] -> []
+                    | []
+                    | [ _ ] -> shots
                     | _ ->
-                        let rank = killRank view room
-                        shots |> List.sortBy (fun h -> rank h, walk h, h.Id)
-            Band = killBand
+                        let rank = rankIn view room
+
+                        shots
+                        |> List.map (fun h -> (rank h, walk h, h.Id), h)
+                        |> List.sortBy fst
+                        |> List.map snd
+            Band = fun view room -> rankIn view room >> killBandOf
         }
 
     /// An outpost a ranger answers (`ranged`, #535) holds the kite ground
@@ -814,7 +849,7 @@ module Brief =
         {
             Duty = Duty.Guard kind
             Claims = claims
-            Targets = guardTargets
+            Targets = guardTargets ()
             Admits = admitsOf kind room verdict ranged answered
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
@@ -1029,7 +1064,7 @@ module Brief =
         {
             Duty = duty
             Claims = []
-            Targets = guardTargets
+            Targets = guardTargets ()
             Admits = fun _ _ creep -> Map.containsKey creep.Name formation.Roles
             Recall = None
             Laid = bare

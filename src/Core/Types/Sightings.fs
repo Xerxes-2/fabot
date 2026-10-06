@@ -209,37 +209,89 @@ module HostileInfo =
     /// ranged heal, itself included, short of the most hits (the least id
     /// on a tie). None while every one is whole.
     let healTargetOf (side: HostileInfo list) (healer: HostileInfo) : string option =
-        side
-        |> List.filter (fun ally ->
-            ally.Owner = healer.Owner
-            && missing ally > 0
-            && (ally.Id = healer.Id
-                || RoomPos.range healer.Pos ally.Pos
-                   |> Option.exists (fun r -> r <= Engine.rangedRange)))
-        |> List.sortBy (fun ally -> -(missing ally), ally.Id)
-        |> List.tryHead
-        |> Option.map (fun ally -> ally.Id)
+        // One pass for the least (-missing, id), the first of a tie kept: a
+        // stable sort's head.
+        let mutable best: HostileInfo option = None
+        let mutable most = 0
+
+        for ally in side do
+            if ally.Owner = healer.Owner then
+                let short = missing ally
+
+                if
+                    short > 0
+                    && (ally.Id = healer.Id
+                        || (match RoomPos.range healer.Pos ally.Pos with
+                            | Some r -> r <= Engine.rangedRange
+                            | None -> false))
+                then
+                    match best with
+                    | Some kept when short < most || short = most && compare ally.Id kept.Id >= 0 ->
+                        ()
+                    | _ ->
+                        best <- Some ally
+                        most <- short
+
+        best |> Option.map (fun ally -> ally.Id)
+
+    /// Every healer among `side` under the id it heals (`healTargetOf`),
+    /// beside its live HEAL, and every id the side holds a key, healed or not.
+    let private healersBy
+        (side: HostileInfo list)
+        : System.Collections.Generic.Dictionary<string, (HostileInfo * int) list> =
+        let healers =
+            System.Collections.Generic.Dictionary<string, (HostileInfo * int) list>()
+
+        for hostile in side do
+            healers.[hostile.Id] <- []
+
+        for healer in side do
+            let heals = liveHeals healer
+
+            if heals > 0 then
+                match healTargetOf side healer with
+                | Some id -> healers.[id] <- (healer, heals) :: healers.[id]
+                | None -> ()
+
+        healers
+
+    /// The sides `healersBy` read this tick, latest first: a list never
+    /// changes, so the same object is the same side. A hostile's every
+    /// part-question reads its side's, once a side and not once a question.
+    /// Bounded, and emptied each tick (`forgetSides`).
+    let mutable private sides
+        : (HostileInfo list *
+          System.Collections.Generic.Dictionary<string, (HostileInfo * int) list>) list =
+        []
+
+    /// A tick's sides, of every colony and question, kept at most.
+    let private sidesKept = 8
+
+    /// Empties the sides read (`sides`): the shell's, once a tick, so none
+    /// outlives it.
+    let forgetSides () = sides <- []
+
+    let private healersOf (side: HostileInfo list) =
+        match sides |> List.tryFind (fun (read, _) -> obj.ReferenceEquals(read, side)) with
+        | Some(_, healers) -> healers
+        | None ->
+            let healers = healersBy side
+            sides <- (side, healers) :: List.truncate (sidesKept - 1) sides
+            healers
 
     /// The hits a tick the healing reaching a hostile among `side` restores:
     /// every live HEAL whose one target it is (`healTargetOf`), its own or its
     /// owner's within ranged heal, at the heal's power beside it and the
     /// ranged heal's beyond.
     let private healedATick (side: HostileInfo list) (hostile: HostileInfo) : int =
-        let side =
-            if side |> List.exists (fun h -> h.Id = hostile.Id) then
-                side
-            else
-                hostile :: side
+        let healers =
+            match (healersOf side).TryGetValue hostile.Id with
+            | true, healers -> healers
+            | _ -> (healersBy (hostile :: side)).[hostile.Id]
 
-        side
-        |> List.sumBy (fun healer ->
-            let heals = liveHeals healer
-
-            if
-                heals = 0
-                || healer.Owner <> hostile.Owner
-                || healTargetOf side healer <> Some hostile.Id
-            then
+        healers
+        |> List.sumBy (fun (healer, heals) ->
+            if healer.Owner <> hostile.Owner then
                 0
             else
                 match RoomPos.range healer.Pos hostile.Pos with
