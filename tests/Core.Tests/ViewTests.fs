@@ -6985,6 +6985,10 @@ let worldViewTests =
                     "a tower left in a room another player took fires at nothing"
 
                 Expect.isFalse (fires (factsWith "Shib" None None)) "nor in a room nobody owns"
+
+                Expect.isFalse
+                    (fires (factsWith "Odiodin" None (Some "Odiodin")))
+                    "nor an ally's in its own room (#576)"
             }
 
             test

@@ -3236,6 +3236,41 @@ let private watchingBeyond hostiles =
             |> withNeighbour "W1N4" { RoomLayer.empty with Terrain = floor }
     }
 
+/// The view with W1N4 seen this tick (#576): the hostiles standing there,
+/// these Invader cores, and these towers not ours firing there.
+let private seenBeyond
+    (towers: (string * Pos) list)
+    (cores: InvaderCoreInfo list)
+    (colony: ColonyView)
+    =
+    { colony with
+        World =
+            { colony.World with
+                Rooms =
+                    colony.World.Rooms
+                    |> Map.add
+                        "W1N4"
+                        {
+                            Hostiles = colony.Hostiles |> List.filter (fun h -> h.Pos.Room = "W1N4")
+                            HostileFatigue = Map.empty
+                            InvaderCores = cores
+                            Towers = towers
+                            Fallen = []
+                            Control = neutralRoom
+                        }
+            }
+    }
+
+/// An Invader core of this level in W1N4: a stronghold's from level 1.
+let private coreBeyond level : InvaderCoreInfo =
+    {
+        Id = "core-1"
+        RoomName = "W1N4"
+        Tile = { X = 30; Y = 30 }
+        CollapseTick = None
+        Level = level
+    }
+
 /// The same with the resident gone and a melee guard of ours standing in
 /// the outpost instead.
 let private guardedBeyond hostiles =
@@ -3395,6 +3430,69 @@ let childOutpostTests =
                     (Map.tryFind "r-1" called.Assignments)
                     (Some(taskId (Guard "W1N4")))
                     "the resident takes the chase"
+            }
+
+            // #576: towers not ours strike every tile of their room, the kite
+            // ground and the ring alike, and no body of ours out-heals one.
+            // The cripple is no kite and no win there for any body, and the
+            // resident is not walked in after it: the chase lets go at the
+            // border.
+            test "a cripple stepped into a room a rival's tower fires in is no chase" {
+                let crippled =
+                    { crunchyAt { X = 25; Y = 42 } with
+                        Pos = { Room = "W1N4"; X = 25; Y = 42 }
+                    }
+
+                let colony =
+                    watchingBeyond [ crippled ] |> seenBeyond [ "tower-1", { X = 10; Y = 10 } ] []
+
+                Expect.equal (Facts.answer colony "W1N4") Answer.Lose "no kite, no win, no rangers"
+
+                Expect.isNone (pooledOf colony |> entryFor (Guard "W1N4")) "the chase is not pooled"
+
+                Expect.equal
+                    (Map.tryFind "r-1" (decide colony residentHeld Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "the resident stays on its home's Guard"
+            }
+
+            test "a cripple in an Invader stronghold's room under its towers is no chase" {
+                let crippled =
+                    { crippledAt { X = 25; Y = 42 } with
+                        Pos = { Room = "W1N4"; X = 25; Y = 42 }
+                        Owner = "Invader"
+                    }
+
+                let colony =
+                    watchingBeyond [ crippled ]
+                    |> seenBeyond
+                        [ "tower-1", { X = 10; Y = 10 }; "tower-2", { X = 12; Y = 10 } ]
+                        [ coreBeyond 3 ]
+
+                Expect.equal (Facts.answer colony "W1N4") Answer.Lose "no kite, no win, no rangers"
+
+                Expect.isNone (pooledOf colony |> entryFor (Guard "W1N4")) "the chase is not pooled"
+
+                Expect.equal
+                    (Map.tryFind "r-1" (decide colony residentHeld Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "the resident stays on its home's Guard"
+            }
+
+            test "a cripple in an outpost beside a level-0 core, no tower standing, is still chased" {
+                let crippled =
+                    { crippledAt { X = 25; Y = 42 } with
+                        Pos = { Room = "W1N4"; X = 25; Y = 42 }
+                    }
+
+                let colony = watchingBeyond [ crippled ] |> seenBeyond [] [ coreBeyond 0 ]
+
+                Expect.equal (Facts.answer colony "W1N4") Answer.Kite "the resident kites it"
+
+                Expect.equal
+                    (Map.tryFind "r-1" (decide colony residentHeld Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "and takes the chase"
             }
 
             test "a melee guard of ours is not sent across the child's border for it" {
@@ -3936,7 +4034,7 @@ let childOutpostTests =
                     RoomName.offsetOf home room
                     |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
 
-                let judgedWith (child: ColonyView) =
+                let judgedWith (mother: ColonyView) (child: ColonyView) =
                     match
                         judgeOverFleet
                             crossings
@@ -3957,7 +4055,7 @@ let childOutpostTests =
                     | [ mother; child ] -> mother, child
                     | _ -> failwith "two views in, two out"
 
-                let mother, judged = judgedWith child
+                let judgedMother, judged = judgedWith mother child
 
                 Expect.equal
                     (Facts.answer judged "W1N4")
@@ -3965,18 +4063,19 @@ let childOutpostTests =
                     "the mother's resident kites it: a Kite, binding nobody"
 
                 Expect.equal
-                    (Map.tryFind "r-1" (decide mother Map.empty Set.empty None).Assignments)
+                    (Map.tryFind "r-1" (decide judgedMother Map.empty Set.empty None).Assignments)
                     (Some(taskId (Guard "W1N4")))
                     "and the resident next door takes the chase"
 
-                // A tower not ours seen firing in the room: the exchange prices
-                // none, so no body standing by kites or wins the raid there.
-                let towered =
-                    { child with
+                // A tower not ours seen firing in the room, in the one world
+                // every colony reads: no body standing by out-heals it, so
+                // none kites or wins the raid there (#576).
+                let towered (view: ColonyView) =
+                    { view with
                         World =
-                            { child.World with
+                            { view.World with
                                 Rooms =
-                                    child.World.Rooms
+                                    view.World.Rooms
                                     |> Map.add
                                         "W1N4"
                                         {
@@ -3991,7 +4090,7 @@ let childOutpostTests =
                     }
 
                 Expect.equal
-                    (Facts.answer (snd (judgedWith towered)) "W1N4")
+                    (Facts.answer (snd (judgedWith (towered mother) (towered child))) "W1N4")
                     Answer.Lose
                     "under a tower not ours, the resident's kite is no answer"
             }

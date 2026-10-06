@@ -923,6 +923,17 @@ let private selfHealOf (parts: BodyPart -> int) =
     else
         0
 
+/// Whether towers not ours fire in a room (`WorldRoom.Towers`: a
+/// stronghold's, a rival's, never an ally's), every tile of it under them.
+/// No body of ours wins or kites anything there (#576): the towers strike
+/// the kite ground and the ring alike, up to 600 a tick each, refilled,
+/// over raiders on ramparts, and the exchange prices none of it. Their
+/// damage priced at the falloff still called a stronghold's L2 defender
+/// won by two rangers, who died walking in (spar).
+let private underRivalTowers (view: ColonyView) (room: string) =
+    Map.tryFind room view.World.Rooms
+    |> Option.exists (fun seen -> not (List.isEmpty seen.Towers))
+
 /// Which band of the kill order a target falls in (#451), first band first.
 type KillTier =
     /// A rival's CLAIM body in a resident room, anywhere in it:
@@ -1175,7 +1186,8 @@ let private exchangeAgainst
 
 /// `exchangeAgainst` the raid standing in one room, read at the window to
 /// close and strike (`Reaction.strike`): our bodies, by part counts and hits,
-/// beside `beside` damage a tick that is no body's.
+/// beside `beside` damage a tick that is no body's; never under towers not
+/// ours (`underRivalTowers`).
 let internal exchangeWon
     (view: ColonyView)
     (room: string)
@@ -1183,7 +1195,9 @@ let internal exchangeWon
     (bodies: ((BodyPart -> int) * int) list)
     =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    exchangeAgainst view Reaction.strike raid beside 0 bodies
+
+    not (underRivalTowers view room)
+    && exchangeAgainst view Reaction.strike raid beside 0 bodies
 
 /// Whether these creeps of ours, together, win the raid standing in a room
 /// (`exchangeWon`): what a muster waits for (#535), and one body alone is
@@ -1222,6 +1236,7 @@ let private blocksBeat
     =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
     let price = raidPrice view Reaction.strike raid
+    let towered = underRivalTowers view room
     let parts = partCountIn block
 
     let damage =
@@ -1234,7 +1249,8 @@ let private blocksBeat
     let hits = Engine.partHits * List.length block
 
     fun (blocks: int) ->
-        wonAgainst price (besideDamage + blocks * damage) (blocks * heal) (blocks * hits)
+        not towered
+        && wonAgainst price (besideDamage + blocks * damage) (blocks * heal) (blocks * hits)
 
 /// `blocksBeat` for the guard's melee block, its swing priced in full: the
 /// guard holds the post whatever it can reach (#531). Two readers: the guard
@@ -1279,7 +1295,8 @@ let rangerBlocksReach (view: ColonyView) : int =
 /// Whether a ranged body of these live parts kites the raid standing in a
 /// room down (#510): every raider there is one it holds the range on
 /// (`cannotClose`), and its damage out-runs every heal acting in the room,
-/// so the kite ends in a kill.
+/// so the kite ends in a kill; never under towers not ours
+/// (`underRivalTowers`).
 let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string) : bool =
     let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
@@ -1288,7 +1305,8 @@ let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string
     match inRoom |> List.filter (HostileInfo.raider view.Hostiles) with
     | [] -> false
     | raid ->
-        raid |> List.forall (cannotClose view.Hostiles parts)
+        not (underRivalTowers view room)
+        && raid |> List.forall (cannotClose view.Hostiles parts)
         // The heal priced in damage on the raider it costs least
         // (`HostileInfo.damageFor`), as `raidPrice` prices it.
         && damageOf parts > (raid |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.min)
@@ -1596,18 +1614,8 @@ let private priceAmong
             && strikesEvery priced parts (HostileInfo.raider priced.Hostiles) room
             && wins priced creep parts)
 
-    // Towers not ours fire in the room (a stronghold's, a rival's): the
-    // exchange prices none of them, so no body standing by wins or kites
-    // the raid there, and no rangers win it together.
-    let fired =
-        pricers
-        |> List.exists (fun p ->
-            Map.tryFind room p.View.World.Rooms
-            |> Option.exists (fun seen -> not (List.isEmpty seen.Towers)))
-
     let kites (p: Pricer) =
-        not fired
-        && fit p (fun priced creep parts -> isRangerRowBody creep && kitedDown priced parts room)
+        fit p (fun priced creep parts -> isRangerRowBody creep && kitedDown priced parts room)
 
     // Whether a fighter of this colony takes the raid now, or already holds
     // the room's Guard: the verdict starts a fight and does not end it on a
@@ -1615,8 +1623,7 @@ let private priceAmong
     let takes (p: Pricer) =
         p.Holds room
         || kites p
-        || not fired
-           && fit p (fun priced creep parts -> bodyWins priced room parts creep.Hits.Hits)
+        || fit p (fun priced creep parts -> bodyWins priced room parts creep.Hits.Hits)
 
     let seeing = pricers |> List.filter (fun p -> present p && raided (aroundOf p) room)
 
@@ -1624,7 +1631,6 @@ let private priceAmong
         lazy
             (match seeing with
              | [] -> None
-             | _ when fired -> None
              | first :: _ ->
                  rangersAmong
                      (lazy (aroundOf first))
