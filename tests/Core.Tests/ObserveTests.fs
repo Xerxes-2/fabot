@@ -215,6 +215,23 @@ let scoringTests =
                     "each verbose episode opens with a recorded scoring"
             }
 
+            test "a creep taken off the verbose list drops its scorings and keeps its story" {
+                let scoring = Verdict.Scoring("a", [ Candidate.Scored("t", 0, 0, 0) ])
+                let matched = Verdict.Matched("a", "t", MatchFactor.Rank)
+
+                let state = Map.empty |> tick 5 [ "a" ] [ matched; scoring ]
+
+                Expect.equal
+                    (timeline "a" (forgetScorings (Set.ofList [ "a" ]) state))
+                    [ 5, matched; 5, scoring ]
+                    "a creep still on the list keeps its scorings"
+
+                Expect.equal
+                    (timeline "a" (forgetScorings Set.empty state))
+                    [ 5, matched ]
+                    "only the scoring goes"
+            }
+
             test "scoring rides its own channel: the steady Kept stays quiet around it" {
                 // Flipping verbose on mid-investigation must not make the
                 // unchanged assignment re-append as if it were news.

@@ -147,6 +147,29 @@ let fold
     // `prior` — last tick's log — alive through this tick's, every tick.
     |> Fresh.mapOfSeq
 
+/// A creep off the verbose list drops its scorings at once: each runs to
+/// kilobytes, and the ring would otherwise hold them for the creep's life.
+let forgetScorings (verbose: Set<string>) (state: ObserveState) : ObserveState =
+    let stale (name, log: CreepLog) =
+        not (verbose.Contains name)
+        && log.Entries |> List.exists (fun entry -> isScoring entry.Verdict)
+
+    if state |> Map.toSeq |> Seq.exists stale |> not then
+        state
+    else
+        state
+        |> Map.toSeq
+        |> Seq.map (fun (name, log) ->
+            if stale (name, log) then
+                name,
+                { log with
+                    Entries =
+                        log.Entries |> List.filter (fun entry -> not (isScoring entry.Verdict))
+                }
+            else
+                name, log)
+        |> Fresh.mapOfSeq
+
 /// One visible reading of the sector Reactor programme; `None` at the fold
 /// boundary means the room is blind.
 type ReactorReading =

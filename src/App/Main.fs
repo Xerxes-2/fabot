@@ -907,6 +907,7 @@ let private fullTick
             ((decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
              @ moveVerdicts)
             priorLog
+        |> Observe.forgetScorings verbose
 
     // The tick after a global reset writes the log whole: the rows standing
     // are another bundle's, and only a whole write normalises the leaf to
