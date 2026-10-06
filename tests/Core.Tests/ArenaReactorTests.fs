@@ -356,7 +356,9 @@ let reactorHoldTests =
 
                     Expect.equal
                         (retaken, by)
-                        (212, "reserver-900000-Spawn8")
+                        // t211 since idle bodies step off the doorways (moved
+                        // from t212, 2026-10-07): one tick of a path changed.
+                        (211, "reserver-900000-Spawn8")
                         "and ours walks back in"
 
                     // Ticks 0–10 at 13, and six more of ours at 3 a tick.

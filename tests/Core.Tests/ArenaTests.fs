@@ -7446,16 +7446,14 @@ let arenaBorderTests =
                     "and holds the tower's Refill between, never another Task"
             }
 
-            // Characterisation (movement S0): pins an idle body's
-            // stand tile, which nothing keeps off the exit band or the
-            // doorway; flips at S4 (one stand-tile picker), whose acceptance
-            // names this doorway. Live (t972,062-972,082) the guard stood
-            // idle on (1,15) and the hauler behind it was carried back to
-            // W18S25 every other tick. Only the guard reproduces: here the
-            // hauler steps from the exit tile to (1,16) beside the guard and
-            // walks in, which live it never did.
+            // Movement S0's doorway pin, flipped early (2026-10-07, live
+            // t987,159-987,529: guard-986309 parked on the same (1,15)): the
+            // tiles beside an exit are idle ground, so an idle body steps off
+            // them. Live (t972,062-972,082) the guard stood idle on (1,15) and
+            // the hauler behind it was carried back to W18S25 every other
+            // tick. S4's stand-tile picker keeps the outcome.
             test
-                "movement S0 capture t972,061: an idle guard stands on the doorway inside the west exit" {
+                "movement S0 capture t972,061: an idle guard steps off the doorway inside the west exit" {
                 let guard = "guard-970892-Spawn11"
                 let doorway = RoomPos.at "W17S25" { X = 1; Y = 15 }
 
@@ -7472,8 +7470,8 @@ let arenaBorderTests =
                     $"the guard holds no Task\n{tasks}"
 
                 Expect.isTrue
-                    (pathOf guard trace |> List.forall (fun (_, s) -> s.At = doorway))
-                    $"and stands on (1,15) all twenty ticks\n{describe trace}"
+                    (pathOf guard trace |> List.exists (fun (_, s) -> s.At <> doorway))
+                    $"and leaves (1,15)\n{describe trace}"
             }
 
             // Characterisation (movement S0): pins how a body

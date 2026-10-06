@@ -1351,7 +1351,17 @@ let idleGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
         |> List.collect (adjacentWalkableIn atlas room)
         |> Set.ofList
 
-    Set.union (workingGroundIn atlas room) rings
+    // The ground beside every exit too: an idle body on (1,15) of W17S25 stood
+    // in the one doorway every hauler and raid crossed (live t987,159–987,529).
+    let doorways =
+        Map.tryFind room atlas.Spatial.Borders
+        |> Option.defaultValue Map.empty
+        |> Map.toSeq
+        |> Seq.filter (fun (_, ground) -> ground <> Wall)
+        |> Seq.collect (fst >> adjacentWalkableIn atlas room)
+        |> Set.ofSeq
+
+    Set.unionMany [ workingGroundIn atlas room; rings; doorways ]
 
 /// The Post a rock picks among its footed Seats: the farthest from the
 /// room's controller, then a built container before a site, then the first

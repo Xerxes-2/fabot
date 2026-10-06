@@ -5681,19 +5681,20 @@ let acrossTheBorderTests =
                     "it runs from the melee next door"
             }
 
-            test
-                "an idle body beside a home exit walks in while a raid stands across it, and stands when none does" {
+            test "an idle body beside a home exit walks in, raid across it or none" {
                 // Three columns short: the melee's Reach stops short of the
                 // exit, so the reserver on (1,34) is in none and holds nothing.
+                // Moved 2026-10-07: with no raid it used to stand there; the
+                // tiles beside an exit are idle ground now (a doorway blocks).
                 let raid = [ meleeWestAt { X = 46; Y = 34 } ]
                 let placed = [ reserverAt { X = 1; Y = 34 } ]
 
                 let quiet = decideOn (borderHome true [] [] placed)
                 let raided = decideOn (borderHome true [] raid placed)
 
-                Expect.isEmpty
+                Expect.isNonEmpty
                     (moveIntentsFor "reserver-1" quiet.Intents)
-                    "the premise: with nothing next door it stands where it is"
+                    "with nothing next door it steps off the doorway too"
 
                 Expect.isNone
                     (Map.tryFind "reserver-1" raided.Assignments)
