@@ -320,11 +320,72 @@ let movementTests =
 
                 Expect.equal
                     (Map.toList steps)
-                    [
-                        "w1",
-                        (RoomPos.at room { X = 10; Y = 13 }, RoomPos.at room { X = 10; Y = 12 })
-                    ]
-                    "up the corridor two tiles, the first being the move Intent's"
+                    [ "w1", [ for y in [ 13; 12; 11 ] -> RoomPos.at room { X = 10; Y = y } ] ]
+                    "up the corridor to its goal, a tile a tick, the first being the move Intent's"
+            }
+
+            test
+                "a cadence of 3 replays over its two light ticks the steps a full decide would issue there" {
+                let decidedAt y =
+                    let colony = corridorColony [ worker "w1" 0 50 ] [ "w1", { X = 10; Y = y } ]
+
+                    decideOn
+                        { colony with
+                            Tuning = { colony.Tuning with Cadence = 3 }
+                        }
+
+                let room = SpatialInfo.homeName (corridorColony [] []).Spatial
+
+                let glanceAt run y : LightTick.Glance =
+                    {
+                        Creeps =
+                            Map.ofList
+                                [
+                                    "w1",
+                                    {
+                                        Tile = RoomPos.at room { X = 10; Y = y }
+                                        Hits = 300
+                                        Inward = []
+                                        Heals = 0
+                                        Strikes = 0
+                                    }
+                                ]
+                        Hostiles = []
+                        Structures = []
+                        Controllers = Map.empty
+                        Time = run
+                        PowerCreeps = []
+                        Objects = Set.empty
+                    }
+
+                let full = decidedAt 14
+
+                let last =
+                    LightTick.ofPlans
+                        (glanceAt 0 14)
+                        Set.empty
+                        [
+                            room,
+                            LightTick.plan
+                                (glanceAt 0 14)
+                                (Set.ofList [ "w1" ])
+                                full.Steps
+                                full.Next
+                                full.Later
+                                full.Intents
+                                full.Aims
+                                full.Volleys
+                        ]
+
+                for run, y in [ 1, 13; 2, 12 ] do
+                    let replayed = LightTick.intents last (glanceAt run y) |> moveIntents
+
+                    Expect.isNonEmpty replayed $"light tick {run} steps"
+
+                    Expect.equal
+                        replayed
+                        (moveIntents (decidedAt y).Intents)
+                        $"light tick {run}, on (10,{y}): the full decide's step there"
             }
 
             test
@@ -343,7 +404,7 @@ let movementTests =
                     (Map.toList steps)
                     [
                         "w1",
-                        (RoomPos.at room { X = 10; Y = 14 }, RoomPos.at room { X = 10; Y = 13 })
+                        [ RoomPos.at room { X = 10; Y = 14 }; RoomPos.at room { X = 10; Y = 13 } ]
                     ]
                     "the light tick re-issues the step from where it stands"
             }

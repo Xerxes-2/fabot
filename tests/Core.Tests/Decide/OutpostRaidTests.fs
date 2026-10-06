@@ -5325,7 +5325,7 @@ let killAdmissionTests =
                     |> List.map (snd >> stepFrom { X = 19; Y = 1 })
 
                 match steps, Map.tryFind "g-1" decision.Steps with
-                | [ step ], Some(first, next) ->
+                | [ step ], Some(first :: next :: _) ->
                     Expect.isGreaterThan step.Y 1 "it steps down, under the Reach"
                     Expect.isFalse (Set.contains step reach) "and out of it"
 

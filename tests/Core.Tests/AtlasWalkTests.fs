@@ -6,6 +6,11 @@ open Fabot.Core.Types
 open Fabot.Core.Atlas
 open Fabot.Core.Tests.AtlasFixtures
 
+/// Each step plan's first two tiles: the step and what a cadence of 2's one
+/// light tick walks.
+let private firstTwo (plans: (string * RoomPos list) list) =
+    plans |> List.map (fun (creep, path) -> creep, List.truncate 2 path)
+
 /// Two lanes to one source: the straight lane at x = 10 from (10,14) up to the
 /// Seat at (10,11), and a parallel one at x = 11 reaching a Seat in as many
 /// steps. The two mid-lane tiles' terrain and the standing bodies are the caller's.
@@ -429,8 +434,8 @@ let stepPlanTests =
                 firstStepFor atlas "w" (Harvest "src-a") |> ignore
 
                 Expect.equal
-                    (stepPlans atlas)
-                    [ "w", (at home { X = 11; Y = 13 }, at home { X = 10; Y = 12 }) ]
+                    (firstTwo (stepPlans atlas))
+                    [ "w", [ at home { X = 11; Y = 13 }; at home { X = 10; Y = 12 } ] ]
                     "the first tile and the second, both of the priced path"
             }
 
@@ -445,8 +450,8 @@ let stepPlanTests =
                 firstStepBlindFor atlas "w" (Harvest "src-a") |> ignore
 
                 Expect.equal
-                    (stepPlans atlas)
-                    [ "w", (at home { X = 11; Y = 13 }, at home { X = 10; Y = 12 }) ]
+                    (firstTwo (stepPlans atlas))
+                    [ "w", [ at home { X = 11; Y = 13 }; at home { X = 10; Y = 12 } ] ]
                     "the priced lane stands after the blind ask"
             }
 
@@ -475,8 +480,8 @@ let stepPlanTests =
                 |> ignore
 
                 Expect.equal
-                    (stepPlans atlas)
-                    [ "w", (at home { X = 20; Y = 2 }, at home { X = 21; Y = 3 }) ]
+                    (firstTwo (stepPlans atlas))
+                    [ "w", [ at home { X = 20; Y = 2 }; at home { X = 21; Y = 3 } ] ]
                     "the step under the block and the one past its corner"
             }
 

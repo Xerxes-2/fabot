@@ -73,9 +73,9 @@ let private moveIntentFor
             Onward =
                 match candidates with
                 | head :: _ when head <> pos ->
-                    Atlas.stepPlanOf atlas creep
-                    |> Option.filter (fun (first, _) -> first = here head)
-                    |> Option.map snd
+                    match Atlas.stepPlanOf atlas creep with
+                    | Some(first :: second :: _) when first = here head -> Some second
+                    | _ -> None
                 | _ -> None
         }
 

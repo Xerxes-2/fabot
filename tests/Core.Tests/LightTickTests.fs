@@ -32,7 +32,7 @@ let private quiet: Glance =
         Hostiles = []
         Structures = [ tile 30 30 ]
         Controllers = Map.ofList [ homeRoom, (5, false) ]
-        Lean = false
+        Time = 0
         PowerCreeps = []
         Objects =
             Set.ofList
@@ -59,7 +59,7 @@ let private quiet: Glance =
 let private last: LastFull =
     LightTick.lastFull
         quiet
-        (Map.ofList [ "hauler", (tile 21 20, tile 22 20) ])
+        (Map.ofList [ "hauler", [ tile 21 20; tile 22 20 ] ])
         [
             HarvestSource("digger", "src-a")
             TransferEnergyToStructure("digger", "link-1", Energy)
@@ -498,7 +498,7 @@ let replayTests =
                 let full =
                     LightTick.lastFull
                         guarded
-                        (Map.ofList [ "guard", (tile 12 10, tile 13 10) ])
+                        (Map.ofList [ "guard", [ tile 12 10; tile 13 10 ] ])
                         [ AttackCreep("guard", "h-head") ]
                     |> aiming
                         [ AttackCreep("guard", "h-head"); AttackCreep("guard", "h-near") ]
@@ -712,7 +712,10 @@ let replayTests =
                     "on (21,20), toward (22,20)"
 
                 let diagonal =
-                    LightTick.lastFull quiet (Map.ofList [ "hauler", (tile 21 20, tile 22 21) ]) []
+                    LightTick.lastFull
+                        quiet
+                        (Map.ofList [ "hauler", [ tile 21 20; tile 22 21 ] ])
+                        []
 
                 Expect.equal
                     (LightTick.intents diagonal stepped)
@@ -726,6 +729,74 @@ let replayTests =
                          | MoveCreep _ -> true
                          | _ -> false))
                     "a blocked walker waits"
+            }
+
+            test
+                "a longer cadence's light ticks walk the plan on a tile a tick, from wherever on it the body stands" {
+                let walk =
+                    LightTick.lastFull
+                        quiet
+                        (Map.ofList [ "hauler", [ tile 21 20; tile 22 20; tile 23 21; tile 24 21 ] ])
+                        []
+
+                let at run x y =
+                    { quiet with
+                        Time = run
+                        Creeps = quiet.Creeps |> Map.add "hauler" (creepAt x y 500)
+                    }
+
+                for run, x, y, direction in
+                    [ 1, 21, 20, Right; 2, 22, 20, BottomRight; 3, 23, 21, Right ] do
+                    Expect.equal
+                        (LightTick.intents walk (at run x y))
+                        [ MoveCreep("hauler", direction) ]
+                        $"light tick {run}: from ({x},{y}) toward the plan's next tile"
+
+                Expect.equal
+                    (LightTick.intents walk (at 2 21 20))
+                    [ MoveCreep("hauler", Right) ]
+                    "a tick late, it walks on from where it stands"
+
+                Expect.isEmpty (LightTick.intents walk (at 3 24 21)) "at the plan's end it waits"
+            }
+
+            test
+                "a plan's later acts are issued on their own light tick, each superseding the one before" {
+                let planAt time =
+                    LightTick.plan
+                        { quiet with Time = time }
+                        (Set.ofList [ "hauler" ])
+                        Map.empty
+                        [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                        [ [ TransferEnergyToStructure("hauler", "spawn", Energy) ] ]
+                        [ TransferEnergyToStructure("hauler", "link-1", Energy) ]
+                        []
+                        Map.empty
+
+                let issued time (plan: Plan) =
+                    LightTick.intents
+                        (LightTick.ofPlans quiet Set.empty [ room, plan ])
+                        { quiet with Time = time }
+
+                Expect.equal
+                    (issued 1 (planAt 0))
+                    [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                    "the first light tick: the next pour, superseding the full tick's"
+
+                Expect.equal
+                    (issued 2 (planAt 0))
+                    [ TransferEnergyToStructure("hauler", "spawn", Energy) ]
+                    "the second: the later pour"
+
+                Expect.equal
+                    (issued 2 (planAt 1))
+                    [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                    "a plan a forced tick made a tick later is a tick younger"
+
+                Expect.contains
+                    (LightTick.lookups (LightTick.ofPlans quiet Set.empty [ room, planAt 0 ]))
+                    "spawn"
+                    "and the later act's object is looked up"
             }
 
             test "a light tick issues in creep-name order" {
@@ -1029,16 +1100,16 @@ let forcedTests =
                     (Some(LightForce.Hostile(room, "Trepidimous")))
                     "the same body beside our digger at home"
 
-                // The lean stop-gaps (2026-10-05) are gone: a lean bucket
-                // reads the same invariant.
+                // The lean stop-gaps (2026-10-05) are gone: a later light
+                // tick of a longer cadence reads the same invariant.
                 Expect.equal
                     (LightTick.forced
                         full
                         { trepAt (at outpost 12) with
-                            Lean = true
+                            Time = Tuning.maxCadence - 1
                         })
                     (Some(LightForce.Hostile(outpost, "Trepidimous")))
-                    "a lean bucket alike"
+                    "the last light tick of the longest cadence alike"
 
                 let crossing =
                     { trepAt (at harassed 12) with
@@ -1182,12 +1253,12 @@ let forcedTests =
             }
 
             test
-                "a ranged body walking in forces on the tick it can shoot after a step, and again on the tick it can shoot, a lean bucket alike (#549 review)" {
+                "a ranged body walking in forces on the tick it can shoot after a step, and again on the tick it can shoot, on any light tick of the cadence (#549 review)" {
                 // A flat ring keyed once per room read 5, 4 and 3 as one fact:
                 // the plan made at 5 never saw the shot at 3.
-                let shooterAt lean x =
+                let shooterAt run x =
                     { stepped with
-                        Lean = lean
+                        Time = run
                         Hostiles =
                             [
                                 { hostile x 10 "Trepidimous" true with
@@ -1196,28 +1267,28 @@ let forcedTests =
                             ]
                     }
 
-                for lean in [ false; true ] do
-                    let at5 = shooterAt lean 15
-                    let at4 = shooterAt lean 14
-                    let at3 = shooterAt lean 13
+                for run in 1 .. Tuning.maxCadence - 1 do
+                    let at5 = shooterAt run 15
+                    let at4 = shooterAt run 14
+                    let at3 = shooterAt run 13
 
                     Expect.isEmpty
                         (LightTick.forcing (LightTick.lastFull at5 Map.empty []) at5)
-                        $"lean {lean}: five off, out of a shot after a step"
+                        $"run {run}: five off, out of a shot after a step"
 
                     Expect.equal
                         (LightTick.forced (LightTick.lastFull at5 Map.empty []) at4)
                         (Some(LightForce.Hostile(room, "Trepidimous")))
-                        $"lean {lean}: four off, a shot after one step"
+                        $"run {run}: four off, a shot after one step"
 
                     Expect.equal
                         (LightTick.forced (LightTick.lastFull at4 Map.empty []) at3)
                         (Some(LightForce.Hostile(room, "Trepidimous")))
-                        $"lean {lean}: three off, a shot now, though the plan saw it a step away"
+                        $"run {run}: three off, a shot now, though the plan saw it a step away"
 
                     Expect.isEmpty
                         (LightTick.forcing (LightTick.lastFull at3 Map.empty []) at3)
-                        $"lean {lean}: the plan made at three accounts for it"
+                        $"run {run}: the plan made at three accounts for it"
             }
 
             test
@@ -2148,7 +2219,7 @@ let private holders =
 /// step into a walk; the miner harvesting, the observer looking.
 let private planned: LastFull =
     let planOf creeps steps intents =
-        LightTick.plan split (Set.ofList creeps) steps [] intents [] Map.empty
+        LightTick.plan split (Set.ofList creeps) steps [] [] intents [] Map.empty
 
     LightTick.ofPlans
         split
@@ -2157,7 +2228,7 @@ let private planned: LastFull =
             "W1N1",
             planOf
                 [ "digger"; "hauler" ]
-                (Map.ofList [ "hauler", (tile 20 20, tile 21 20) ])
+                (Map.ofList [ "hauler", [ tile 20 20; tile 21 20 ] ])
                 [ HarvestSource("digger", "src-a") ]
             "W3N1",
             planOf
@@ -2407,6 +2478,7 @@ let decidersTests =
                         (Set.ofList [ "hauler" ])
                         Map.empty
                         []
+                        []
                         [ PickupPile("hauler", "pile") ]
                         []
                         Map.empty
@@ -2461,7 +2533,8 @@ let homeTests =
                             Set.empty
                             [
                                 for home in [ room; "W3N1" ] ->
-                                    home, LightTick.plan far Set.empty Map.empty [] [] [] Map.empty
+                                    home,
+                                    LightTick.plan far Set.empty Map.empty [] [] [] [] Map.empty
                             ])
                         far
                         [ LightForce.Home(room, "Trepidimous") ])
@@ -2502,5 +2575,62 @@ let homeTests =
                             Controllers = Map.ofList [ room, (5, true) ]
                         })
                     "held off by our safe mode"
+            }
+        ]
+
+[<Tests>]
+let cadenceTests =
+    testList
+        "the cadence: ticks per full decide"
+        [
+            test "a live or tuned cadence is clamped to 2..4" {
+                Expect.equal
+                    ([ -3; 0; 1; 2; 3; 4; 5; 99 ] |> List.map LightTick.clampCadence)
+                    [ 2; 2; 2; 2; 3; 4; 4; 4 ]
+                    "under 2 no light tick, past 4 staler than a step plan walks"
+            }
+
+            test
+                "the tick after a full one replays only inside the cadence, and only while every tick since did" {
+                Expect.isTrue (LightTick.replays 2 1 0) "a cadence of 2: the one light tick"
+                Expect.isFalse (LightTick.replays 2 2 1) "and never two in a row"
+                Expect.isTrue (LightTick.replays 3 2 1) "a cadence of 3: two"
+                Expect.isFalse (LightTick.replays 3 3 2) "and never three"
+                Expect.isFalse (LightTick.replays 3 2 0) "a skipped tick decides"
+                Expect.isFalse (LightTick.replays 4 0 0) "the full tick's own"
+            }
+
+            test "the bucket raises the cadence under its line and lowers it only past the band" {
+                let tuning =
+                    { Tuning.defaults with
+                        Cadence = 2
+                        CadenceBuckets = [ 5000, 3; 2000, 4 ]
+                        CadenceBand = 1000
+                    }
+
+                let walk buckets =
+                    (Tuning.defaults.Cadence, buckets)
+                    ||> List.scan (LightTick.bucketCadence tuning)
+                    |> List.tail
+
+                Expect.equal
+                    (walk [ 9000; 4999; 5500; 5999; 6000; 4000; 1999; 2500; 3000; 10000 ])
+                    [ 2; 3; 3; 3; 2; 3; 4; 4; 3; 2 ]
+                    "each line crossed once going down, and again a band over it going up"
+
+                Expect.equal
+                    (LightTick.bucketCadence { tuning with Cadence = 3 } 3 10000)
+                    3
+                    "never under the tuned cadence"
+
+                Expect.equal
+                    (LightTick.bucketCadence Tuning.defaults 2 4999)
+                    3
+                    "the shipped line: the old Lean, one full in three under half a bucket"
+
+                Expect.equal
+                    (LightTick.bucketCadence Tuning.defaults 2 10000)
+                    2
+                    "a full bucket: today's"
             }
         ]

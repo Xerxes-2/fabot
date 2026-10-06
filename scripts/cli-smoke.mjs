@@ -53,6 +53,10 @@ refuses([], "usage:");
 refuses(["nope"], "usage:");
 refuses(["timeline"], "usage:");
 refuses(["verbose", "add"], "usage:");
+refuses(["cadence", "5"], "cadence takes 2, 3 or 4");
+refuses(["cadence", "2.5"], "cadence takes 2, 3 or 4");
+refuses(["cadence", "3", "4"], "usage:");
+refuses(["cadence", "--json"], "usage:");
 refuses(["console"], "console needs --seconds");
 refuses(["raids", "--colony"], "--colony needs a home room name");
 refuses(["cpu", "--colony", "W1N1"], "usage:");
@@ -82,6 +86,9 @@ for (const args of [
   ["cpu"],
   ["cpu", "--all", "--json"],
   ["verbose", "add", "worker-1-Spawn1"],
+  ["cadence"],
+  ["cadence", "3"],
+  ["cadence", "clear"],
   ["console", "--seconds", "3"],
   ["eval", "Game.time"],
   ["eval", "Game.time", "--seconds", "4"],

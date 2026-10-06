@@ -170,13 +170,14 @@ type Atlas =
             /// above are cut from and the [[working ground]] reads on its own.
             SeatUnions: System.Collections.Generic.Dictionary<string, Set<Pos>>
             /// Each creep's step plan this tick: the first tile of the path the
-            /// mover's own flood stepped it onto and the tile after it, written
+            /// mover's own flood stepped it onto and up to
+            /// `Tuning.maxCadence` - 1 tiles after it, at least one, written
             /// by the flood-based first step under `TravelCost` alone — never
             /// `Baseline`'s, which the Resolver asks for its verdict and nobody
             /// walks. A creep asked twice keeps the last ask; a light tick
-            /// walks it on only while it stands on the first tile, so a
+            /// walks it on only while it stands on a tile of the plan, so a
             /// mismatch costs that creep a tick and nothing else.
-            Steps: System.Collections.Generic.Dictionary<string, RoomPos * RoomPos>
+            Steps: System.Collections.Generic.Dictionary<string, RoomPos list>
             /// The creeps whose bodies carry more Work parts than Move, read from the
             /// body and never a name. Three readers ask it, so the arithmetic lives
             /// here once.
@@ -3047,8 +3048,9 @@ let refillTarget
             )
 
 /// The first step of a walk the mover takes, read off its flood, with the
-/// tile after it filed as the creep's step plan (`Steps`) — the plan dropped
-/// where the first step is the goal itself.
+/// tiles after it filed as the creep's step plan (`Steps`) — the plan dropped
+/// where the first step is the goal itself. A border tile on it carries the
+/// body into the neighbour, off the plan, where it walks no further.
 let private planned
     (atlas: Atlas)
     (creep: string)
@@ -3057,13 +3059,13 @@ let private planned
     (pos: Pos)
     (goal: Pos)
     : RoomPos =
-    let struct (first, second) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
-    let step = RoomPos.at room (posAt first)
+    let path = firstStepsOn near (indexOf pos) (indexOf goal) Tuning.maxCadence
+    let step = RoomPos.at room (posAt path.[0])
 
-    if second < 0 then
+    if path.Length < 2 then
         atlas.Steps.Remove creep |> ignore
     else
-        atlas.Steps.[creep] <- (step, RoomPos.at room (posAt second))
+        atlas.Steps.[creep] <- [ for index in path -> RoomPos.at room (posAt index) ]
 
     step
 
@@ -3434,8 +3436,8 @@ let standingAt (atlas: Atlas) (creep: string) (tile: RoomPos) (read: unit -> 'a)
 
 /// Sets a creep's step plan by hand: a fatigued walker the mover issued no
 /// step for this tick, standing on the first tile and stepping to the second.
-let recordStep (atlas: Atlas) (creep: string) (plan: RoomPos * RoomPos) =
-    atlas.Steps.[creep] <- plan
+let recordStep (atlas: Atlas) (creep: string) (at: RoomPos, step: RoomPos) =
+    atlas.Steps.[creep] <- [ at; step ]
 
 /// Drops a creep's step plan: a body the mover walks nowhere this tick,
 /// whatever an earlier reading filed for it.
@@ -3443,11 +3445,11 @@ let dropStep (atlas: Atlas) (creep: string) = atlas.Steps.Remove creep |> ignore
 
 /// Every creep's step plan as the mover left it this tick (`Atlas.Steps`),
 /// in creep-name order.
-let stepPlans (atlas: Atlas) : (string * (RoomPos * RoomPos)) list =
+let stepPlans (atlas: Atlas) : (string * RoomPos list) list =
     [ for KeyValue(creep, plan) in atlas.Steps -> creep, plan ] |> List.sortBy fst
 
 /// One creep's step plan as the mover left it this tick, if it has one.
-let stepPlanOf (atlas: Atlas) (creep: string) : (RoomPos * RoomPos) option =
+let stepPlanOf (atlas: Atlas) (creep: string) : RoomPos list option =
     match atlas.Steps.TryGetValue creep with
     | true, plan -> Some plan
     | _ -> None

@@ -441,9 +441,7 @@ let internal reachedIn (dist: int[]) (tile: Pos) : int = dist.[indexOf tile]
 /// the tile after it, walked back down the predecessor chain; the second is
 /// `-1` when the first is the goal itself. Only ever asked of a goal the
 /// flood has settled, and that is enough: every tile of a cheapest path is
-/// strictly cheaper than its end, so the chain is final when the goal is. The
-/// second tile is what a light tick walks a creep onto (the step plan), read
-/// off the flood the mover already ran.
+/// strictly cheaper than its end, so the chain is final when the goal is.
 let internal firstTwoStepsOn
     (flood: Flood)
     (startIndex: int)
@@ -458,6 +456,28 @@ let internal firstTwoStepsOn
             walk parent index
 
     walk goalIndex (-1)
+
+/// The first `count` tiles of the same path, fewer where the goal comes
+/// sooner: the tiles the light ticks walk a creep on along (the step plan),
+/// read off the flood the mover already ran. The chain is walked back once,
+/// keeping its last `count` tiles in a ring.
+let internal firstStepsOn (flood: Flood) (startIndex: int) (goalIndex: int) (count: int) : int[] =
+    let ring = Array.zeroCreate count
+    let mutable visited = 0
+    let mutable index = goalIndex
+    let mutable walking = true
+
+    while walking do
+        ring.[visited % count] <- index
+        visited <- visited + 1
+        let parent = flood.Parents.[index]
+
+        if parent = startIndex || parent < 0 then
+            walking <- false
+        else
+            index <- parent
+
+    Array.init (min visited count) (fun i -> ring.[(visited - 1 - i) % count])
 
 /// The flood every origin starts free at — the shape every caller but the far
 /// leg of a cross-room walk wants, since a creep pays nothing to be where it

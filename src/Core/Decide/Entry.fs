@@ -593,8 +593,10 @@ let decideUnarbitrated
     // to replay, a pour being one-shot, so it stood still a tick per member
     // (user, 2026-10-04). Its next act is laid now, off the pour this tick
     // makes: the next hungry member beside it, or else a step toward the rest
-    // (`Atlas.recordStep`, ahead of `stepPlans` below).
-    let nextPours =
+    // (`Atlas.recordStep`, ahead of `stepPlans` below). A cadence past 2 lays
+    // one pour per light tick it replays, each into the next hungry member
+    // beside while the load lasts (`Decision.Later`).
+    let pours =
         match Atlas.cluster atlas with
         | None -> []
         | Some cluster ->
@@ -611,54 +613,79 @@ let decideUnarbitrated
                     Map.tryFind creep.Name assigned, poured, Atlas.creepTile atlas creep.Name
                 with
                 | Some(Refill(spawnId, Energy)), Some target, Some at when spawnId = cluster.Spawn ->
-                    let room = Map.tryFind target cluster.Members |> Option.defaultValue 0
-                    let left = creep.Energy - min creep.Energy room
+                    let roomOf id =
+                        Map.tryFind id cluster.Members |> Option.defaultValue 0
 
-                    let rest =
-                        RefillCluster.hungry cluster
-                        |> List.filter ((<>) target)
-                        |> List.choose (fun id ->
-                            Atlas.positionOf atlas id |> Option.map (fun tile -> id, tile))
-                        |> List.filter (fun (_, tile) -> tile.Room = at.Room)
+                    let hungry = RefillCluster.hungry cluster
 
-                    let beside =
-                        rest
-                        |> List.choose (fun (id, tile) ->
-                            RoomPos.range at tile
-                            |> Option.filter (fun r -> r <= 1)
-                            |> Option.map (fun r -> r, id))
+                    // The pours after the one this tick makes, a light tick's
+                    // each: `light` counts them, `filled` the members poured.
+                    let rec onward light (filled: string list) left =
+                        let rest =
+                            hungry
+                            |> List.filter (fun id -> not (List.contains id filled))
+                            |> List.choose (fun id ->
+                                Atlas.positionOf atlas id |> Option.map (fun tile -> id, tile))
+                            |> List.filter (fun (_, tile) -> tile.Room = at.Room)
 
-                    if left <= 0 || List.isEmpty rest then
-                        None
-                    else
-                        match beside with
-                        | _ :: _ ->
-                            let _, id = List.min beside
-                            Some(TransferEnergyToStructure(creep.Name, id, Energy))
-                        | [] ->
-                            let goals =
-                                rest
-                                |> List.collect (fun (_, tile) ->
-                                    Atlas.adjacentWalkableIn atlas tile.Room (RoomPos.pos tile)
-                                    |> List.map (RoomPos.at tile.Room))
-                                |> Set.ofList
+                        let beside =
+                            rest
+                            |> List.choose (fun (id, tile) ->
+                                RoomPos.range at tile
+                                |> Option.filter (fun r -> r <= 1)
+                                |> Option.map (fun r -> r, id))
 
-                            match
-                                Atlas.withoutRecording atlas creep.Name (fun () ->
-                                    Atlas.firstStepWithin atlas creep.Name goals)
-                            with
-                            | Some step when step.Room = at.Room && step <> at ->
-                                Atlas.recordStep atlas creep.Name (at, step)
-                            | _ -> ()
+                        if light >= view.Tuning.Cadence || left <= 0 || List.isEmpty rest then
+                            []
+                        else
+                            match beside with
+                            | _ :: _ ->
+                                let _, id = List.min beside
 
-                            None
+                                TransferEnergyToStructure(creep.Name, id, Energy)
+                                :: onward (light + 1) (id :: filled) (left - min left (roomOf id))
+                            | [] when light > 1 -> []
+                            | [] ->
+                                let goals =
+                                    rest
+                                    |> List.collect (fun (_, tile) ->
+                                        Atlas.adjacentWalkableIn
+                                            atlas
+                                            tile.Room
+                                            (RoomPos.pos tile)
+                                        |> List.map (RoomPos.at tile.Room))
+                                    |> Set.ofList
+
+                                match
+                                    Atlas.withoutRecording atlas creep.Name (fun () ->
+                                        Atlas.firstStepWithin atlas creep.Name goals)
+                                with
+                                | Some step when step.Room = at.Room && step <> at ->
+                                    Atlas.recordStep atlas creep.Name (at, step)
+                                | _ -> ()
+
+                                []
+
+                    match
+                        onward 1 [ target ] (creep.Energy - min creep.Energy (roomOf target))
+                    with
+                    | [] -> None
+                    | laid -> Some laid
                 | _ -> None)
+
+    let nextPours = pours |> List.map List.head
+
+    // The hauler's arrivals and the refiller's pours for the light tick
+    // `light` (2 and on), each act at its own index.
+    let laterOf (byCreep: Intent list list) light =
+        byCreep |> List.choose (List.tryItem (light - 1))
 
     // A hauler stepping into its Task's Work Area this tick acts on arrival,
     // which the tick after it, light, issues (#529): withheld now for reach
     // alone, it stood a tick idle per leg. Off the tile it asks to step onto,
     // the Emitter's own act read there (`Emitter.arrival`), never on a
-    // channel one of the body's acts this tick holds.
+    // channel one of the body's acts this tick holds. A cadence past 2 reads
+    // each later light tick's act off the step plan's tile it lands on then.
     let arrivals =
         let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
 
@@ -672,9 +699,20 @@ let decideUnarbitrated
                 List.tryHead step.Candidates
             with
             | Some task, Some creep, Some landing when landing <> step.Pos ->
-                arrival view atlas threats creep task landing
+                let later =
+                    match Atlas.stepPlanOf atlas step.Creep with
+                    | Some(first :: beyond) when first = landing ->
+                        List.truncate (view.Tuning.Cadence - 2) beyond
+                    | _ -> []
+
+                landing :: later
+                |> List.map (
+                    arrival view atlas threats creep task
+                    >> Option.filter (fun act ->
+                        intents |> List.forall (IntentPlan.compatible act))
+                )
+                |> Some
             | _ -> None)
-        |> List.filter (fun act -> intents |> List.forall (IntentPlan.compatible act))
 
     // Read after the mover, which is what fills the table. A pair whose tiles
     // name two rooms is no plan a light tick could walk.
@@ -697,7 +735,13 @@ let decideUnarbitrated
         OutpostRooms = outposts.Declared
         WaitingContainers = waitingContainers
         Steps = steps
-        Next = nextPours @ arrivals
+        Next = nextPours @ List.choose List.head arrivals
+        Later =
+            [
+                for light in 2 .. view.Tuning.Cadence - 1 ->
+                    laterOf pours light
+                    @ List.choose (List.tryItem (light - 1) >> Option.flatten) arrivals
+            ]
         Aims = aims view atlas threats assigned
         Volleys = volleys view atlas threats assigned
         Drawn =

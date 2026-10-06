@@ -1389,10 +1389,10 @@ let nextPourTests =
                 Expect.isEmpty next "nothing beside it to pour into"
 
                 match Map.tryFind "h" steps with
-                | Some(first, second) ->
+                | Some(first :: second :: _) ->
                     Expect.equal first (RoomPos.at room { X = 11; Y = 11 }) "from where it stands"
                     Expect.equal second.Y 12 "one tile on toward ext-2"
-                | None -> failtest "a step plan toward ext-2"
+                | _ -> failtest "a step plan toward ext-2"
             }
 
             test "a load spent on this tick's pour plans nothing more" {
@@ -1433,5 +1433,36 @@ let nextPourTests =
                     next
                     [ TransferEnergyToStructure("h", "ext-2", Energy) ]
                     "the pour into the member beside the tile it steps onto"
+            }
+
+            test
+                "two steps out of reach at a cadence of 3: the pour is laid for the second light tick" {
+                // `h` at (11,17) is three off ext-2 (10,14): the full tick's
+                // step lands two off, the first light tick's one off.
+                let colony =
+                    clusterColony
+                        (0, 0, 50)
+                        [ creepWith "h" 100 0 [ Carry; Carry; Move ] ]
+                        [ "h", { X = 11; Y = 17 } ]
+
+                let sticky = Map.ofList [ "h", taskId (Refill("spawn-1", Energy)) ]
+
+                let decidedAt cadence =
+                    decideFrom
+                        sticky
+                        { colony with
+                            Tuning = { colony.Tuning with Cadence = cadence }
+                        }
+
+                let { Next = next; Later = later } = decidedAt 3
+
+                Expect.isEmpty next "the first light tick's tile is still two off"
+
+                Expect.equal
+                    later
+                    [ [ TransferEnergyToStructure("h", "ext-2", Energy) ] ]
+                    "the second's: beside it"
+
+                Expect.isEmpty (decidedAt 2).Later "a cadence of 2 lays nothing later"
             }
         ]

@@ -521,15 +521,20 @@ type Decision =
         /// every Seat this tick (#247), for the Layout channel.
         WaitingContainers: WaitingContainer list
         /// Each walking creep's step plan, as the mover's flood laid it this
-        /// tick: the tile it asked to step onto and the one after it, both in
-        /// the room it stands in. What a light tick walks it on along.
-        Steps: Map<string, RoomPos * RoomPos>
+        /// tick: the tile it asked to step onto and the ones after it, all in
+        /// the room it stands in. What the light ticks walk it on along.
+        Steps: Map<string, RoomPos list>
         /// The light tick's planned acts, never issued on this tick: each
         /// refiller that poured this tick and stands beside another hungry
         /// member of the refill cluster, its transfer into that one; and each
         /// hauler stepping into its Withdraw's, Pickup's or Refill's Work Area,
         /// its act on arrival (#529).
         Next: Intent list
+        /// The same for each light tick after the first a cadence past 2
+        /// replays (`Tuning.Cadence`), the second first: a refiller's pour
+        /// after its next one, and a hauler's act on arriving at its step
+        /// plan's later tiles. Empty at a cadence of 2.
+        Later: Intent list list
         /// Each fighter's strike at its target, in reach or not
         /// (`Emitter.aims`): what the light ticks after issue again.
         Aims: Intent list

@@ -180,6 +180,12 @@ let mutable private lastFull: (int * LightTick.LastFull) option = None
 // ticks, and forced ticks that carried a colony (#549).
 let mutable private lightRun = 0
 
+// The cadence the bucket asked for last tick (`LightTick.bucketCadence`),
+// and the tuning the colonies decide under with this tick's cadence in it,
+// which lays their later acts (`Decision.Later`).
+let mutable private bucketHeld = Tuning.defaults.Cadence
+let mutable private tuning = Tuning.defaults
+
 // Full ticks run since the reset: the replan turn counts these, not
 // `Game.time`, which with light ticks between would hand an even count of
 // colonies half the turns and the other half none.
@@ -273,8 +279,7 @@ let private glance () : LightTick.Glance =
                 else
                     None)
             |> Fresh.mapOfArray
-        // Half a bucket: past it a raid's forced full ticks are what empties it.
-        Lean = Game.cpu.bucket < 5000
+        Time = Game.time
         // Asked only in a room a volley stands in, mostly none (#537).
         PowerCreeps =
             match lastFull with
@@ -547,7 +552,7 @@ let private fullTick
             let view =
                 ColonyView.ofWorldRecalling
                     joins
-                    Tuning.defaults
+                    tuning
                     Colony.declared
                     casting
                     (gateOf colony.Home)
@@ -1058,6 +1063,7 @@ let private fullTick
                         (view.Creeps |> List.map _.Name |> Set.ofList)
                         decision.Steps
                         decision.Next
+                        decision.Later
                         decision.Intents
                         decision.Aims
                         decision.Volleys)
@@ -1135,25 +1141,31 @@ let loop () =
     HostileInfo.forgetSides ()
 
     // ADR-0082
-    // Light only straight after a full tick, so never two in a row and never
-    // on the tick after a reset, and only when nothing the glance reads says
-    // the replay would be wrong. With the cadence off no glance is taken at
-    // all, so the flag gives back today's tick and its cost exactly.
+    // Light only within the cadence after a full tick (`cadence` ticks a
+    // decide: the tuned one, a short bucket's, or the live override in
+    // Memory), never on the tick after a reset, and only when nothing the
+    // glance reads says the replay would be wrong. With the cadence off no
+    // glance is taken at all, so the flag gives back today's tick and its
+    // cost exactly.
     if not Tuning.defaults.LightTicks then
         fullTick atEntry None None |> ignore
     else
-        let seen = glance ()
+        bucketHeld <- LightTick.bucketCadence Tuning.defaults bucketHeld Game.cpu.bucket
 
-        // Lean (bucket short): a second light tick may follow the first, so a
-        // full tick costs one in three, not one in two (live t979,9xx: cadence
-        // full ticks at ~158 ms emptied the bucket). Forcing rules still apply.
-        let replayable tick =
-            tick = Game.time - 1 || (seen.Lean && tick = Game.time - 2 && lightRun = 1)
+        let cadence = ObserveMemory.loadCadence () |> Option.defaultValue bucketHeld
+
+        if tuning.Cadence <> cadence then
+            tuning <-
+                { Tuning.defaults with
+                    Cadence = cadence
+                }
+
+        let seen = glance ()
 
         // A forced tick that replayed colonies counts toward the cadence as a
         // light one: the full tick after it decides every colony (#549).
         match lastFull with
-        | Some(tick, last) when replayable tick ->
+        | Some(tick, last) when LightTick.replays cadence (Game.time - tick) lightRun ->
             match LightTick.forcing last seen with
             | [] ->
                 lightRun <- lightRun + 1

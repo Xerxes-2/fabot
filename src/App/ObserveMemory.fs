@@ -788,6 +788,24 @@ let private colonyLeaf (home: string) (leaf: string) : obj =
 
     if isNull colony then null else colony?(leaf)
 
+/// The live cadence from `Memory.fabot.observe.cadence` (ticks per full
+/// decide, `Tuning.Cadence`), clamped to `Tuning.minCadence`..`Tuning.maxCadence`: set, it
+/// takes the place of the tuned and the bucket's. Read each tick, so a flip
+/// through the Memory HTTP API lands on the next; anything but a whole
+/// number reads as unset.
+let loadCadence () : int option =
+    leafOr None (fun () -> observeLeaf "cadence") (fun raw ->
+        if jsTypeof raw <> "number" then
+            None
+        else
+            let value = unbox<float> raw
+
+            if System.Double.IsNaN value || value <> floor value then
+                None
+            else
+                // Clamped as a float first: a huge number never reaches `int`.
+                Some(Fabot.Core.LightTick.clampCadence (int (max 0.0 (min 99.0 value)))))
+
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Read fresh each tick so a flip
 /// through the Memory HTTP API takes effect on the next tick with no

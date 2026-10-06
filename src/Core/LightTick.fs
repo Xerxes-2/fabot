@@ -67,9 +67,9 @@ type Glance =
         Hostiles: GlanceHostile list
         Structures: RoomPos list
         Controllers: Map<string, int * bool>
-        /// The CPU bucket is low: a second light tick may follow the first
-        /// (`Main.loop`).
-        Lean: bool
+        /// The game tick it was taken on: how old each plan is, so which of
+        /// its later acts (`Plan.Later`) a replay issues.
+        Time: int
         /// The power creeps not ours to strike anywhere
         /// (`Colony.strikesAnywhere`) standing in the rooms of
         /// the last full tick's volleys (`LastFull.Volleys`, #537): shields a
@@ -102,11 +102,19 @@ type Plan =
         /// Each of them's tile at the start of that tick: where a drop, the
         /// one act with no target, was decided to land.
         Standing: Map<string, RoomPos>
-        /// Each walking creep's step plan.
-        Steps: Map<string, RoomPos * RoomPos>
+        /// Each walking creep's step plan: the tile the decide stepped it
+        /// onto, then one a light tick.
+        Steps: Map<string, RoomPos list>
         /// The acts a light tick issues again (`replayed`), in the decide's
         /// own order, its planned next acts (`Decision.Next`) among them.
         Acts: Intent list
+        /// The planned acts of each light tick after the first
+        /// (`Decision.Later`), the second first: each supersedes `Acts` on
+        /// its channel on its own tick.
+        Later: Intent list list
+        /// The tick the plan was made on (`Glance.Time`): a forced tick's
+        /// fresh plan is younger than the plans it carried.
+        At: int
         /// Whether a structure of the colony's fought (`fights`): an act no
         /// replay repeats.
         Fought: bool
@@ -214,6 +222,15 @@ let inward (walkable: Pos -> bool) (tile: Pos) : Direction list =
         let next = stepTo tile direction
         not (Seam.onRing next) && walkable next)
 
+/// The tile a step plan walks a body on to from where it stands: the one
+/// after its own, on any light tick of the cadence, so a body a tick late
+/// (blocked, fatigued) walks on from where it is. None off the plan or at
+/// its end.
+let private onward (path: RoomPos list) (tile: RoomPos) : RoomPos option =
+    path
+    |> List.pairwise
+    |> List.tryPick (fun (at, next) -> if at = tile then Some next else None)
+
 /// The step each creep on the ring takes this tick: the first of its `inward`
 /// steps onto a tile no creep stands on, ours or not, and that no other step
 /// of this tick lands on — a replayed step plan's (`steps`), or an earlier
@@ -222,10 +239,7 @@ let inward (walkable: Pos -> bool) (tile: Pos) : Direction list =
 /// every other tick, while the body stands. A creep on the ring missing from
 /// the map has every inward tile walled or held: the tick is full
 /// (`LightForce.OnBorder`) and the arbitration settles it.
-let private inwardSteps
-    (steps: Map<string, RoomPos * RoomPos>)
-    (now: Glance)
-    : Map<string, Direction> =
+let private inwardSteps (steps: Map<string, RoomPos list>) (now: Glance) : Map<string, Direction> =
     let onRing (creep: GlanceCreep) = Seam.onRing (RoomPos.pos creep.Tile)
 
     let standing =
@@ -240,7 +254,7 @@ let private inwardSteps
         |> Map.toSeq
         |> Seq.choose (fun (name, creep) ->
             match Map.tryFind name steps with
-            | Some(first, second) when first = creep.Tile && not (onRing creep) -> Some second
+            | Some path when not (onRing creep) -> onward path creep.Tile
             | _ -> None)
         |> Set.ofSeq
 
@@ -406,8 +420,9 @@ let private fights (intent: Intent) : bool =
 let plan
     (glance: Glance)
     (creeps: Set<string>)
-    (steps: Map<string, RoomPos * RoomPos>)
+    (steps: Map<string, RoomPos list>)
     (next: Intent list)
+    (later: Intent list list)
     (intents: Intent list)
     (aims: Intent list)
     (volleys: Map<string, Volley>)
@@ -422,10 +437,27 @@ let plan
             |> Fresh.mapOfSeq
         Steps = steps |> Map.toSeq |> Fresh.mapOfSeq
         Acts = actsOf next intents
+        Later = later |> List.map (List.filter (replayed >> Option.isSome))
+        At = glance.Time
         Fought = intents |> List.exists fights
         Aims = aims
         Volleys = volleys |> Map.toSeq |> Fresh.mapOfSeq
     }
+
+/// A plan's acts on the game tick `time`: its `Acts`, each later act planned
+/// for that many ticks after the plan's own (`Plan.Later`) superseding one on
+/// its channel.
+let private actsAt (time: int) (plan: Plan) : Intent list =
+    let light = time - plan.At
+
+    match
+        (if light < 2 then
+             None
+         else
+             List.tryItem (light - 2) plan.Later)
+    with
+    | Some later -> actsOf later plan.Acts
+    | None -> plan.Acts
 
 /// Whether a hostile strikes a tile at `range` now (`Some true`), after one
 /// step (`Some false`), or not by then (`None`): its weapon's range, one step
@@ -512,6 +544,8 @@ let private without (claimed: Set<string>) (plan: Plan) : Plan =
             Standing = plan.Standing |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
             Steps = plan.Steps |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
             Acts = plan.Acts |> List.filter acting
+            Later = plan.Later |> List.map (List.filter acting)
+            At = plan.At
             Fought = plan.Fought
             Aims = plan.Aims |> List.filter striking
             Volleys = plan.Volleys |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
@@ -550,7 +584,7 @@ let ofPlans (glance: Glance) (deferred: Set<string>) (plans: (string * Plan) lis
 /// single-colony shard reads it: its step plans and every intent it issued.
 let rec lastFull
     (glance: Glance)
-    (steps: Map<string, RoomPos * RoomPos>)
+    (steps: Map<string, RoomPos list>)
     (intents: Intent list)
     : LastFull =
     lastFullWith glance steps [] intents
@@ -558,13 +592,13 @@ let rec lastFull
 /// `lastFull` with its planned next acts (`Decision.Next`, `plan`).
 and lastFullWith
     (glance: Glance)
-    (steps: Map<string, RoomPos * RoomPos>)
+    (steps: Map<string, RoomPos list>)
     (next: Intent list)
     (intents: Intent list)
     : LastFull =
     let creeps = glance.Creeps |> Map.keys |> Set.ofSeq
 
-    ofPlans glance Set.empty [ "", plan glance creeps steps next intents [] Map.empty ]
+    ofPlans glance Set.empty [ "", plan glance creeps steps next [] intents [] Map.empty ]
 
 /// The record with only these colonies' plans.
 let only (homes: Set<string>) (last: LastFull) : LastFull =
@@ -572,11 +606,13 @@ let only (homes: Set<string>) (last: LastFull) : LastFull =
         Plans = last.Plans |> Map.filter (fun home _ -> Set.contains home homes)
     }
 
-/// Every plan as one: the bodies are disjoint (`ofPlans`), so nothing is
+/// Every plan as one on the game tick `time`, each plan's acts those of that
+/// tick (`actsAt`): the bodies are disjoint (`ofPlans`), so nothing is
 /// overwritten. Read within the tick.
-let private merged (last: LastFull) : Plan =
+let private merged (time: int) (last: LastFull) : Plan =
     match Map.toList last.Plans with
-    | [ _, plan ] -> plan
+    | [ _, plan ] when List.isEmpty plan.Later -> plan
+    | [ _, plan ] -> { plan with Acts = actsAt time plan }
     | plans ->
         let plans = List.map snd plans
 
@@ -587,7 +623,9 @@ let private merged (last: LastFull) : Plan =
             Creeps = plans |> List.map _.Creeps |> Set.unionMany
             Standing = mapOf _.Standing
             Steps = mapOf _.Steps
-            Acts = plans |> List.collect _.Acts
+            Acts = plans |> List.collect (actsAt time)
+            Later = []
+            At = time
             Fought = plans |> List.exists _.Fought
             Aims = plans |> List.collect _.Aims
             Volleys = mapOf _.Volleys
@@ -633,6 +671,29 @@ let private healing (last: LastFull) (now: Glance) : Map<string, int> =
     |> Seq.groupBy fst
     |> Seq.map (fun (target, heals) -> target, heals |> Seq.sumBy snd)
     |> Map.ofSeq
+
+/// A cadence inside `Tuning.minCadence`..`Tuning.maxCadence`: a live
+/// override's (`ObserveMemory.loadCadence`) or a tuned one.
+let clampCadence (cadence: int) : int =
+    max Tuning.minCadence (min Tuning.maxCadence cadence)
+
+/// The cadence the bucket asks for, off the one it asked for last tick
+/// (`held`): the highest of `Tuning.CadenceBuckets` whose line the bucket
+/// stands under, never under `Tuning.Cadence`; a raised cadence holds until
+/// the bucket climbs `CadenceBand` over the line that raised it.
+let bucketCadence (tuning: Tuning) (held: int) (bucket: int) : int =
+    let asked band =
+        (tuning.Cadence, tuning.CadenceBuckets)
+        ||> List.fold (fun cadence (line, asks) ->
+            if bucket < line + band then max cadence asks else cadence)
+
+    clampCadence (max (asked 0) (min held (asked tuning.CadenceBand)))
+
+/// Whether the tick `since` ticks after the cadence's full one replays the
+/// plans, at `cadence` ticks a decide: inside the cadence, and every tick
+/// since replayed (`run`, the ticks that did), so a skipped tick decides.
+let replays (cadence: int) (since: int) (run: int) : bool =
+    since >= 1 && since < cadence && run = since - 1
 
 /// The colonies a cold reset decides on its own tick and the ones it leaves
 /// to the next (#488), each in the order given: every colony with a threat in
@@ -745,7 +806,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             [ LightForce.CreepsChanged(Set.toList changed) ]
 
     let onBorder =
-        let stepping = inwardSteps (merged last).Steps now
+        let stepping = inwardSteps (merged now.Time last).Steps now
 
         now.Creeps
         |> Map.toList
@@ -873,7 +934,7 @@ let deciders
 let lookups (last: LastFull) : string list =
     last.Plans
     |> Map.values
-    |> Seq.collect _.Acts
+    |> Seq.collect (fun plan -> Seq.append plan.Acts (List.concat plan.Later))
     |> Seq.choose (fun act ->
         match replayed act with
         | Some(_, Stands.Object id) -> Some id
@@ -887,9 +948,9 @@ let lookups (last: LastFull) : string list =
 /// the engine checks range, store and cooldown, and a refused act costs no
 /// CPU; a drop only from the tile it was decided on. A fighter strikes at
 /// its aim again the same way (#528), on a channel no act of its holds. A
-/// creep standing on its step plan's first tile steps toward the second.
+/// creep standing on a tile of its step plan steps toward the next.
 let intents (record: LastFull) (now: Glance) : Intent list =
-    let last = merged record
+    let last = merged now.Time record
     let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
 
     let stands (actor: string option) (target: Stands) =
@@ -1073,12 +1134,14 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             match inward, glued with
             | None, Some direction -> yield MoveCreep(name, direction)
             | _ ->
-                match Map.tryFind name last.Steps with
-                | Some(first, second) when first = creep.Tile ->
-                    match directionTo (RoomPos.pos first) (RoomPos.pos second) with
+                match
+                    Map.tryFind name last.Steps |> Option.bind (fun path -> onward path creep.Tile)
+                with
+                | Some next ->
+                    match directionTo (RoomPos.pos creep.Tile) (RoomPos.pos next) with
                     | Some direction -> yield MoveCreep(name, direction)
                     | None -> ()
-                | _ -> ()
+                | None -> ()
 
         yield!
             standing

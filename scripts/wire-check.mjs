@@ -1347,6 +1347,39 @@ wire("verbose: a string list reads, and anything else reads as off", async () =>
   }
 });
 
+// ---- the live cadence ----------------------------------------------------
+
+wire("cadence: a whole number reads clamped to 2..4, and anything else reads as unset", async () => {
+  const { loadCadence } = await import(MODULE);
+
+  for (const [what, value, read] of [
+    ["absent", undefined, undefined],
+    ["2", 2, 2],
+    ["3", 3, 3],
+    ["4", 4, 4],
+    ["1, under the floor", 1, 2],
+    ["0", 0, 2],
+    ["-5", -5, 2],
+    ["9, over the ceiling", 9, 4],
+    ["1e300", 1e300, 4],
+    ["Infinity", Infinity, 4],
+    ["a fraction", 2.5, undefined],
+    ["NaN", NaN, undefined],
+    ["a numeric string", "3", undefined],
+    ["null", null, undefined],
+    ["an object", { cadence: 3 }, undefined],
+    ["a list", [3], undefined],
+    ["true", true, undefined],
+  ]) {
+    globalThis.Memory = rootMemoryWith("cadence", value);
+    assert.equal(loadCadence(), read, `${what} reads as ${read}`);
+  }
+
+  globalThis.Memory = {};
+  assert.equal(loadCadence(), undefined, "no fabot subtree reads as unset");
+  assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
+});
+
 wire("positions: what savePositions writes is what loadPositions reads", async () => {
   const { loadPositions, savePositions } = await import(MODULE);
   const { ofArray } = await import(LIST);

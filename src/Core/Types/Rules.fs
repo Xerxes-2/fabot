@@ -873,6 +873,19 @@ type Tuning =
         /// decision instead of deciding (`LightTick`). `false` makes every tick
         /// full: the one switch that reverses the cadence.
         LightTicks: bool
+        /// Ticks per full decide with the bucket healthy (the light-tick
+        /// cadence): 2 is a full tick then a light one, 3 a full then two
+        /// light, up to `Tuning.maxCadence`. A live override in Memory
+        /// (`ObserveMemory.loadCadence`) takes its place, and so does a
+        /// bucket line (`CadenceBuckets`) asking for more.
+        Cadence: int
+        /// The cadence a bucket under each line asks for, the highest
+        /// asked winning: a short bucket replays more ticks between decides.
+        CadenceBuckets: (int * int) list
+        /// How far over its line the bucket climbs before a raised cadence
+        /// falls back (`LightTick.bucketCadence`): one line crossed once,
+        /// not each tick the bucket wobbles round it.
+        CadenceBand: int
         /// The share of the colonies a cold reset decides on its own tick
         /// (`LightTick.resetSplit`), the threatened ones first; the rest
         /// stand that tick and decide on the next. Half: a reset's decide ran
@@ -1028,8 +1041,21 @@ module Tuning =
             QuietGap = 50
             VisionGrace = 150
             LightTicks = true
+            Cadence = 2
+            // Half a bucket, the old Lean line: past it a raid's forced full
+            // ticks are what empties it.
+            CadenceBuckets = [ 5000, 3 ]
+            // About a hundred ticks of refill at k = 3 before k = 2 resumes.
+            CadenceBand = 1000
             ResetFirstShare = 0.5
         }
+
+    /// The cadence bounds a tuned or live value is clamped to: under 2 there
+    /// is no light tick, and past 4 a plan is staler than its step plan's
+    /// tiles (`maxCadence`, which `Atlas` lays) can walk.
+    let minCadence = 2
+
+    let maxCadence = 4
 
     /// The **[[keeper margin]]**: the tiles masked out of a Source Keeper
     /// room's walkable ground around every rock a keeper is pinned to

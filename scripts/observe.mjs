@@ -40,6 +40,11 @@
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
 //   observe.mjs verbose clear           empty the verbose list
+//   observe.mjs cadence            the live cadence override as stored (ticks
+//                                  per full decide; unset, the tuned one and
+//                                  the bucket's rule decide)
+//   observe.mjs cadence <2..4>     set it: the bot reads it on its next tick
+//   observe.mjs cadence clear      unset it
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -94,7 +99,7 @@ const usage =
   "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | " +
   "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--all] [--json] | " +
-  "verbose [add <creep> | remove <creep> | clear] [--json] | " +
+  "verbose [add <creep> | remove <creep> | clear] [--json] | cadence [<2..4> | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
@@ -137,6 +142,7 @@ const ACCEPTS = {
   reactor: ["--json"],
   cpu: ["--json", "--all"],
   verbose: ["--json"],
+  cadence: [],
   console: ["--seconds"],
   eval: ["--seconds"],
   room: ["--json"],
@@ -169,6 +175,13 @@ if (command === "timeline" && !creepArg) fail(usage);
 if (command === "verbose" && action !== undefined) {
   if (!["add", "remove", "clear"].includes(action)) fail(usage);
   if (action !== "clear" && !actionName) fail(usage);
+}
+// The bot clamps whatever whole number it reads to 2..4 (`loadCadence`); the
+// CLI refuses anything else rather than write a value that reads otherwise.
+const CADENCES = ["2", "3", "4"];
+if (command === "cadence" && action !== undefined) {
+  if (action !== "clear" && !CADENCES.includes(action)) fail("cadence takes 2, 3 or 4, or clear");
+  if (actionName !== undefined) fail(usage);
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
@@ -845,6 +858,36 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`verbose list is now [${next.join(", ")}]`);
+  }
+} else if (command === "cadence") {
+  // ---- cadence: the live override of ticks per full decide --------------
+
+  // As the bot reads it: a whole number, clamped to 2..4; anything else unset.
+  const readable = (value) =>
+    typeof value === "number" && Number.isInteger(value) ? Math.max(2, Math.min(4, value)) : undefined;
+  const show = (value) => (value === undefined ? "unset (the tuned cadence and the bucket's rule)" : `${value}`);
+
+  if (action === undefined) {
+    console.log(`cadence override: ${show(readable(await memoryGet("fabot.observe.cadence")))}`);
+  } else {
+    const next = action === "clear" ? null : Number(action);
+    const res = await api.userMemorySet("fabot.observe.cadence", next, shard).catch((err) => {
+      fail(`memory write failed: ${err.message ?? err}`);
+    });
+    if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
+
+    // Applied on a tick boundary, as `verbose` waits for.
+    const wanted = readable(next);
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const seen = readable(await memoryGet("fabot.observe.cadence"));
+      if (seen === wanted) break;
+      if (Date.now() >= deadline) {
+        fail(`write accepted but not visible after 20s; still reading ${show(seen)}`);
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    console.log(`cadence override is now ${show(wanted)}`);
   }
 } else if (command === "raids") {
   // ---- raids: the Raid log, colony-level and episodic --------------------
