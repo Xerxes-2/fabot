@@ -204,6 +204,8 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
       }
       if (clash) fields.push(`Id = ${fsString(arenaId)}`);
       if (thorium > 0) fields.push(`Thorium = ${fsInt(thorium)}`);
+      // A stronghold's core; a level-0 core is the arena's default.
+      if (o.type === "invaderCore" && o.level > 0) fields.push(`Level = ${o.level}`);
       if (o.type === "rampart") {
         if (o.isPublic) fields.push("IsPublic = true");
         if (o.nextDecayTime) fields.push(`NextDecay = ${fsInt(o.nextDecayTime)}`);

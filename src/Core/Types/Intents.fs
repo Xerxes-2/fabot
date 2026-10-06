@@ -90,6 +90,9 @@ type Intent =
     /// attack and harvest in the engine's table, and not beside ranged heal,
     /// repair or build.
     | RangedAttackCreep of creepName: string * hostileId: string
+    /// The same shot at a structure (#558): a level-0 invader core a ranged
+    /// holder of its Guard strikes from its seat.
+    | RangedAttackStructure of creepName: string * structureId: string
     /// `rangedMassAttack` (#537): `Engine.massAttackPowerAt` a part, by range,
     /// on every creep and structure within 3 that is not ours — an ally's
     /// and a neutral's too, the engine knowing no ally. `rangedAttack`'s

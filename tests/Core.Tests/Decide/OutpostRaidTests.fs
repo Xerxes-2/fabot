@@ -4150,6 +4150,13 @@ let guardPrecedenceTests =
                     |> Capacity.capping (CapScope.Row CastRow.Guard) 1
                     |> Capacity.capping (CapScope.Row CastRow.Ranger) 2
 
+                // The guard's seat at a core, and one beside it for the
+                // ranger standing in the room (#558).
+                let cored =
+                    Capacity.fighters 2
+                    |> Capacity.capping (CapScope.Row CastRow.Guard) 1
+                    |> Capacity.capping (CapScope.Row CastRow.Ranger) 1
+
                 let row ground from rung capacity takers =
                     {
                         Ground = ground
@@ -4173,7 +4180,9 @@ let guardPrecedenceTests =
                         // Each alone. A raid's Guard two rungs up, over every
                         // kill (#528); a kill one, over a quiet holder's.
                         [ Raid ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
-                        [ Core ], row [ Core ] [ "Ring" ] OnTheTier one [ "g-1" ]
+                        // Moved on purpose (#558): the ranger standing in the
+                        // room takes a seat beside the guard's.
+                        [ Core ], row [ Core ] [ "Ring" ] OnTheTier cored [ "g-1"; "r-1" ]
                         [ Hold ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         // Moved on purpose (#550): the hauler, at the guard's
                         // pace, asks a ranger seat beside the guard's, which
@@ -4195,10 +4204,14 @@ let guardPrecedenceTests =
                         // a harassment room's raid is the enemy's own, on the tier.
                         [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "g-1"; "r-1" ]
                         [ Raid; Harassed ], row [] [ "Kite" ] OnTheTier relieved [ "g-1" ]
-                        // The held exit before the core, either before the trespasser.
+                        // The held exit before the trespasser, the trespasser
+                        // before the core. Moved on purpose (#558): the
+                        // trespasser, which can step away, is struck before
+                        // the core, which stands (it was the core's).
                         [ Hold; Core ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
-                        [ Core; Trespasser ], row [ Core ] [ "Ring" ] OnTheTier one [ "g-1" ]
+                        [ Core; Trespasser ],
+                        row [ Trespasser ] [ "Trespass" ] OneRungUp hauled [ "g-1"; "r-1" ]
                         [ Hold; Core; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         // A ranger room's declared ground before all three,
                         // where it pools. Moved by #542: an errand with no ore
@@ -4385,11 +4398,15 @@ let guardPrecedenceTests =
                         [ Raid; Trespasser ], BriefKind.Outpost
                         [ Raid; Resident ], BriefKind.Resident
                         [ Raid; Harassed ], BriefKind.Harass
+                        // Kept by #558: the core guards the room, so the hold
+                        // pools, and a held exit is defence, ahead of a kill
+                        // (#528), its target the raid that left by it.
                         [ Hold; Core; Trespasser ], BriefKind.ExitHold
                         // #542: nobody holds the exit, so its claim pools
                         // nothing and the trespass's kill is the room's.
                         [ Hold; Trespasser ], BriefKind.Trespass
-                        [ Core; Trespasser ], BriefKind.Core
+                        // Moved by #558: the trespass's kill before the core.
+                        [ Core; Trespasser ], BriefKind.Trespass
                         [ Resident; Core ], BriefKind.Resident
                         [ Harassed; Trespasser ], BriefKind.Harass
                         [ Resident; Harassed ], BriefKind.Resident

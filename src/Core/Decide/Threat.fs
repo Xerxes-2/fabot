@@ -92,11 +92,13 @@ type Duty =
 module BriefKind =
     /// The order a room's flavour is read in, written once: a resident room,
     /// a [[harassment room]], a chase (#510), a raid's ring, a held exit
-    /// (#450), a level-0 core (#487), a trespass's kill (#516). The order
+    /// (#450), a trespass's kill (#516), a level-0 core (#487): a creep that
+    /// can step away is struck before a core that stands, which takes the room
+    /// back once the creep is gone (#558). The order
     /// decides only among claims that pool a Task this tick (#542): the first
     /// of those is the room's kind, and a claim that pools nothing shuts no
     /// kind out. A kind claims only a room still open to it (`opens`), so a
-    /// held exit, a core and a trespass lay no ground under a pooling kind
+    /// held exit, a trespass and a core lay no ground under a pooling kind
     /// ahead of them (`threatsHeldBy`); and a Guard's ground is the first laid
     /// in its room from its kind down (`Brief.Ground`).
     let order =
@@ -106,8 +108,8 @@ module BriefKind =
             BriefKind.Chase
             BriefKind.Outpost
             BriefKind.ExitHold
-            BriefKind.Core
             BriefKind.Trespass
+            BriefKind.Core
         ]
 
     /// The kinds whose ground is the room's `Ring`.
@@ -288,6 +290,11 @@ type Brief =
         /// of the rows it asks on its own row's ground (#546). Empty for every
         /// other Task.
         Stances: Map<string, Set<RoomPos>>
+        /// A Guard's holders seated off `Ground` and striking from there: a
+        /// ranged holder of a level-0 core's Guard on the core's range-3 ring,
+        /// out of the swing of a melee body breaking the core (#558). Read
+        /// after `Stances`. Empty for every other Task.
+        Seats: Map<string, Set<RoomPos>>
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -544,8 +551,15 @@ module Brief =
         | BriefKind.Outpost when ranged ->
             isRangerRowBody creep
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
+        // A level-0 core is the guard row's to break (#487), and a ranger's
+        // already standing in its room with nothing better to strike (#558):
+        // by the lend rule, as a kill takes it, and on a seat of its own.
+        | BriefKind.Core ->
+            isGuardRowBody creep
+            || isRangerRowBody creep
+               && Atlas.creepRoom atlas creep.Name = Some room
+               && Facts.rangerMayKill view room (Some room)
         | BriefKind.Outpost
-        | BriefKind.Core
         | BriefKind.ExitHold -> isGuardRowBody creep
 
     /// How many rangers one resident room wants: the standing garrison
@@ -688,6 +702,7 @@ module Brief =
     /// against are one number.
     let private capacityOf
         (kind: BriefKind)
+        (room: string)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
         (asks: RowAsk list)
@@ -738,8 +753,27 @@ module Brief =
                 capacity
                 |> Capacity.capping (CapScope.Row CastRow.Guard) guards
                 |> Capacity.capping (CapScope.Row CastRow.Ranger) (guards + rangers)
+        // The guard row's count, and a seat beside it for each ranger it
+        // admits standing in the room (#558), so a ranger never takes a
+        // guard's.
+        | BriefKind.Core ->
+            let guards = wanted ()
+
+            let seated =
+                view.Creeps
+                |> List.filter (fun creep ->
+                    isRangerRowBody creep
+                    && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                       |> Option.exists (fun at -> at.Room = room))
+                |> List.length
+
+            if seated = 0 then
+                Capacity.fighters guards
+            else
+                Capacity.fighters (guards + seated)
+                |> Capacity.capping (CapScope.Row CastRow.Guard) guards
+                |> Capacity.capping (CapScope.Row CastRow.Ranger) seated
         | BriefKind.Outpost
-        | BriefKind.Core
         | BriefKind.ExitHold -> Capacity.fighters (wanted ())
 
     /// A Guard's own kind: the first of its claims, `Outpost` where none
@@ -795,10 +829,11 @@ module Brief =
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind verdict rangers ask
+            Capacity = capacityOf kind room verdict rangers ask
             Verdict = verdict
             Formation = None
             Stances = Map.empty
+            Seats = Map.empty
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
@@ -953,6 +988,7 @@ module Brief =
             Verdict = verdict
             Formation = None
             Stances = stances
+            Seats = Map.empty
         }
 
     /// A Fight's or an Assault's Brief on its squad's `Formation`: it admits
@@ -1002,6 +1038,7 @@ module Brief =
             Verdict = verdict
             Formation = Some formation
             Stances = Map.empty
+            Seats = Map.empty
         }
 
     /// A combat Task no source claims this tick: a Guard's `unclaimed`; a
@@ -2294,6 +2331,20 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // a trespass only the rooms they lay ground in. A claim that pools nothing
     // shuts nobody out. Per room, its claimants in that order; per kind, the
     // ground it laid.
+    // Whether a level-0 core in a room comes before its trespassers (#558):
+    // where only the guard row answers them and its swing catches none of
+    // them, a trespass kill would hold the guard where it strikes nothing, and
+    // the core would stand for ever. The guard breaks the core, swinging at
+    // a trespasser that comes in reach first; a body it catches, or one a
+    // ranger answers, is still struck first.
+    let coreFirst room =
+        Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room)
+        && Brief.trespassSplit view (HeldTaskFacts.holdersOf held (taskId (Guard room))) room
+           |> List.forall (fun (row, trespassers) ->
+               match row with
+               | CastRow.Guard -> trespassers |> List.forall (Facts.guardCatches view >> not)
+               | _ -> List.isEmpty trespassers)
+
     let claimants, laid =
         let outright rooms open' =
             rooms |> Seq.filter open' |> Seq.map (fun room -> room, Set.empty) |> List.ofSeq
@@ -2306,7 +2357,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             | BriefKind.Outpost -> outright ring.Keys
             | BriefKind.ExitHold -> holdsIn
             | BriefKind.Core -> coresIn
-            | BriefKind.Trespass -> trespassIn
+            | BriefKind.Trespass ->
+                fun open' -> trespassIn (fun room -> open' room && not (coreFirst room))
 
         ((Map.empty, Map.empty), BriefKind.order)
         ||> List.fold (fun (claimants: Map<string, BriefKind list>, laid) kind ->
@@ -2391,6 +2443,48 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     Trespass = Map.tryFind room trespass
                 })
         |> Map.ofSeq
+
+    // A core's ranged holders on its range-3 ring (#558): they shoot it from
+    // there, out of the swing of a melee body beside it. Only the tiles of it
+    // the holder walks to from where it stands in the room; none reached is
+    // no seat, never the ring beside the core.
+    let briefs =
+        let seatsIn room =
+            let ring =
+                lazy
+                    (Facts.expansionCores view
+                     |> List.filter (fun core -> core.RoomName = room)
+                     |> List.collect (fun core ->
+                         Atlas.walkableWithinIn atlas room Engine.rangedRange core.Tile
+                         |> List.filter (fun tile ->
+                             range tile core.Tile = Engine.rangedRange && not (Seam.onRing tile))))
+
+            let reached (creep: CreepInfo) =
+                match Atlas.creepTile atlas creep.Name with
+                | Some at when at.Room = room ->
+                    let walk = Atlas.pricedWalksFrom atlas room (fun _ -> 1) (RoomPos.pos at)
+
+                    ring.Value
+                    |> List.filter (walk >> Option.isSome)
+                    |> Set.ofList
+                    |> RoomPos.setAt room
+                | _ -> Set.empty
+
+            HeldTaskFacts.holdersOf held (taskId (Guard room))
+            |> List.choose (fun name ->
+                view.Creeps |> List.tryFind (fun creep -> creep.Name = name))
+            |> List.filter isRangerRowBody
+            |> List.map (fun creep -> creep.Name, reached creep)
+            |> Map.ofList
+
+        (briefs, briefs)
+        ||> Map.fold (fun seated task brief ->
+            match task, brief.Duty with
+            | Guard room, Duty.Guard BriefKind.Core ->
+                match seatsIn room with
+                | seats when Map.isEmpty seats -> seated
+                | seats -> Map.add task { brief with Seats = seats } seated
+            | _ -> seated)
 
     // The home's Defend while a raid stands at its line (#504).
     let briefs =

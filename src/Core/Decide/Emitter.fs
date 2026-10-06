@@ -837,25 +837,26 @@ let private guardIntent
     (creep: CreepInfo)
     (room: string)
     : Intent option =
-    let ranged = isRangerBody creep
     let reach = reachOf creep
 
-    // With no creep to hit, a guard swings at a level-0 core beside it (#487).
-    let coreBeside () =
-        if ranged then
-            None
-        else
-            Facts.expansionCores view
-            |> List.tryFind (fun core ->
-                core.RoomName = room
-                && Atlas.creepTile atlas creep.Name
-                   |> Option.bind (fun tile -> RoomPos.range tile (RoomPos.at room core.Tile))
-                   |> Option.exists (fun r -> r <= reach))
-            |> Option.map (fun core -> AttackStructure(creep.Name, core.Id))
+    // With no creep to hit, a body strikes a level-0 core in its reach: a
+    // guard's swing (#487), a ranger's shot (#558).
+    let coreInReach () =
+        Facts.expansionCores view
+        |> List.tryFind (fun core ->
+            core.RoomName = room
+            && Atlas.creepTile atlas creep.Name
+               |> Option.bind (fun tile -> RoomPos.range tile (RoomPos.at room core.Tile))
+               |> Option.exists (fun r -> r <= reach))
+        |> Option.map (fun core ->
+            if isRangerBody creep then
+                RangedAttackStructure(creep.Name, core.Id)
+            else
+                AttackStructure(creep.Name, core.Id))
 
     strikeOf view atlas targets fighting creep room
     |> strikeIntent creep
-    |> Option.orElseWith coreBeside
+    |> Option.orElseWith coreInReach
 
 /// The heal reflex beside any Task or none (#409): a body with an active HEAL
 /// part heals itself if it is hurt, else the most-hurt creep of ours beside it,

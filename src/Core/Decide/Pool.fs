@@ -272,8 +272,10 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         | Guard room ->
             let brief = Threats.briefOf threats room
 
-            // A holder mustering waits on its own ground (#535).
+            // A holder mustering waits on its own ground (#535); one seated
+            // strikes from its own (#558).
             Map.tryFind creep brief.Stances
+            |> Option.orElse (Map.tryFind creep brief.Seats)
             |> Option.orElse brief.Ground
             |> Option.defaultWith (fun () ->
                 match Atlas.sourceRingIn atlas room with

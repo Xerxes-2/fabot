@@ -18,7 +18,7 @@ npm run capture -- <room> <tick> [--rooms R1,R2] [--name slug] [--out path] [--l
 The skeleton has a header and a fixture `let private <slug> () : Arena`. The header names the command, the tick, and each room's replay URL. The fixture holds:
 
 - **Controllers:** owner, level, safe modes, cooldown and clocks.
-- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. Roads, drops, tombstones and ruins are left out, and the header counts them.
+- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. An invader core carries its level (0 unless written) and reaches the colony as `RoomFacts.InvaderCores`, with no collapse clock. Roads, drops, tombstones and ruins are left out, and the header counts them.
 - **Bodies:** both sides, built with `body` plus their hits, life, fatigue and stores. A comment beside each body lists its live parts and its live acts.
 - **Banks:** each home's bank is its energy capacity, not what it held at the tick. The arena never debits the bank and reads it as the capacity too. A near-empty bank prices the guard row's cast as a loss, and that stands an outpost down that live held.
 - **Live Memory** (`--live-memory`, on by default when the tick is at most 300 ticks behind live): the captured homes' Raid log (stand-downs open at the tick, threat and fight latches, home raided), `ArmedSeen` and `Towered`. Memory holds only what it holds at the time of reading. An entry stamped after the tick is named in a comment and not seated.

@@ -242,6 +242,7 @@ let private replayed (intent: Intent) : (string option * Stands) option =
     | WithdrawFromStore(creep, target, _, None)
     | PickupPile(creep, target)
     | AttackStructure(creep, target)
+    | RangedAttackStructure(creep, target)
     | ClaimReactor(creep, target) -> Some(Some creep, Stands.Object target)
     | AttackCreep(creep, target)
     | RangedAttackCreep(creep, target) -> Some(Some creep, Stands.Hostile target)
@@ -306,6 +307,7 @@ let private fights (intent: Intent) : bool =
     | AttackCreep _
     | AttackStructure _
     | RangedAttackCreep _
+    | RangedAttackStructure _
     | RangedMassAttack _
     | HealCreep _
     | RangedHealCreep _

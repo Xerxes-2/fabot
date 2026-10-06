@@ -239,6 +239,25 @@ let replayTests =
                     "and each target looked up"
             }
 
+            test "a ranged shot at a core is replayed while the core stands" {
+                // #558: a ranger seated at three shoots it as a guard swings.
+                let full =
+                    LightTick.lastFull quiet Map.empty [ RangedAttackStructure("hauler", "core") ]
+
+                Expect.equal
+                    (LightTick.intents full stepped)
+                    [ RangedAttackStructure("hauler", "core") ]
+                    "the same shot"
+
+                Expect.isEmpty
+                    (LightTick.intents
+                        full
+                        { stepped with
+                            Objects = Set.remove "core" stepped.Objects
+                        })
+                    "a core gone: nothing"
+            }
+
             test "a drop is replayed only from the tile it was decided on" {
                 // A drop has no target but the ground under the body.
                 let dropped = LightTick.lastFull quiet Map.empty [ DropEnergy "hauler" ]

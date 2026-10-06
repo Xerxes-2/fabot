@@ -228,6 +228,9 @@ type ArenaStructure =
         /// A rampart's `nextDecayTime`. One placed with none is taken to
         /// have just decayed: `arena` sets it a RAMPART_DECAY_TIME off.
         NextDecay: int
+        /// An invader core's `level`: 0, an expansion core, for every other
+        /// kind.
+        Level: int
     }
 
 /// What a tower not ours does, in the order it asks: the first duty with a
@@ -519,6 +522,7 @@ let structureOf
         IsPublic = false
         Name = None
         NextDecay = 0
+        Level = 0
     }
 
 /// A rampart of `owner`'s, not public, at RCL2's RAMPART_HITS_MAX.
@@ -696,6 +700,7 @@ let withBase (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom =
                 IsPublic = s.IsPublic
                 Name = None
                 NextDecay = s.NextDecay
+                Level = 0
             })
 
     { held with
@@ -1182,6 +1187,19 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         Body = b.Parts
                         Hits = b.Hits
                         TicksToLive = b.TicksToLive
+                    })
+            // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
+            // them; the arena runs no collapse clock.
+            InvaderCores =
+                r.Structures
+                |> List.filter (fun s -> s.Kind = "invaderCore")
+                |> List.map (fun s ->
+                    {
+                        Id = s.Id
+                        RoomName = name
+                        Tile = s.At
+                        CollapseTick = None
+                        Level = s.Level
                     })
         }
 
@@ -3222,7 +3240,9 @@ let step (a: Arena) : Arena * TickTrace =
             | BuildSite(n, s) -> Some(n, Act.Build s)
             | WithdrawFromStore(n, s, Energy, amount) -> Some(n, Act.Withdraw(s, amount))
             | AttackCreep(n, h) -> Some(n, Act.Attack h)
+            | AttackStructure(n, s) -> Some(n, Act.Attack s)
             | RangedAttackCreep(n, h) -> Some(n, Act.RangedAttack h)
+            | RangedAttackStructure(n, s) -> Some(n, Act.RangedAttack s)
             | RangedMassAttack n -> Some(n, Act.RangedMassAttack)
             | HealCreep(n, t) -> Some(n, Act.Heal t)
             | RangedHealCreep(n, t) -> Some(n, Act.RangedHeal t)

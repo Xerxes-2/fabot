@@ -177,9 +177,10 @@ let invaderCoreTests =
 
             // Characterisation (the Brief's S0): the core's Guard whole. Its swing
             // and its row are pinned above and by `the guard row`, its stand-down
-            // by `raid fold: outpost episodes`.
+            // by `raid fold: outpost episodes`. Moved by #558: a ranger standing
+            // in the room is seated beside the guard's seat, never in it.
             test
-                "a level-0 core's Guard is the guard row's body on the core's ring, on the tier, for one" {
+                "a level-0 core's Guard is the guard row's body on the core's ring, on the tier, for one, and a seat for a ranger in the room" {
                 let colony =
                     { declaredRaid [] with
                         InvaderCores = [ coreIn "W1N2" 0 None ]
@@ -193,8 +194,13 @@ let invaderCoreTests =
 
                 Expect.equal
                     (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
-                    "one Guard on the Safety tier, for one body"
+                    (Some(
+                        safetyRank OnTheTier,
+                        Capacity.fighters 2
+                        |> Capacity.capping (CapScope.Row CastRow.Guard) 1
+                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 1
+                    ))
+                    "one Guard on the Safety tier, for one guard and the ranger standing in the room"
 
                 Expect.equal
                     (Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
@@ -226,10 +232,128 @@ let invaderCoreTests =
                             { X = 21; Y = 47 }
                         ]
 
-                Expect.notEqual
+                Expect.equal
                     ((decideOn alone).Assignments |> Map.tryFind "r-1")
                     (Some(taskId (Guard "W1N2")))
-                    "and a ranger is refused it, the only body there"
+                    "a ranger standing in the room takes it, the only body there"
+
+                let outside =
+                    { declaredRaid [] with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                    }
+                    |> withBodyAtHome
+                        (creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 800))
+                        atSpawn
+
+                Expect.notEqual
+                    ((decideOn outside).Assignments |> Map.tryFind "r-1")
+                    (Some(taskId (Guard "W1N2")))
+                    "and one out of the room is refused it: nothing casts or calls a ranger to a core"
+            }
+
+            // #558: a ranger holding a core's Guard strikes it from the range-3
+            // ring, out of the swing of a melee body beside the core; never
+            // from the guard's ring.
+            test
+                "a ranger holding a level-0 core's Guard is seated on its range-3 ring and shoots it from there" {
+                let colony atTile =
+                    { declaredRaid [] with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                    }
+                    |> withGuards [ creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 800), atTile ]
+
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N2") ]
+                let seated = colony { X = 21; Y = 47 }
+                let atlas = Atlas.ofView seated
+                let threats = threatsOfHeld seated atlas (Facts.heldTaskFacts seated held)
+                let brief = Threats.briefOf threats "W1N2"
+
+                let seat = Map.tryFind "r-1" brief.Seats |> Option.defaultValue Set.empty
+                Expect.isNonEmpty seat "it has a seat"
+
+                Expect.isTrue
+                    (seat
+                     |> Set.forall (fun tile ->
+                         range (RoomPos.pos tile) { X = 25; Y = 42 } = Engine.rangedRange))
+                    "every tile of it at three from the core"
+
+                Expect.contains
+                    (decide (colony { X = 22; Y = 42 }) held Set.empty None).Intents
+                    (RangedAttackStructure("r-1", "core-W1N2"))
+                    "at three, it shoots the core"
+
+                let away =
+                    { declaredRaid [] with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                    }
+                    |> withBodyAtHome
+                        (creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 800))
+                        atSpawn
+
+                let awayBrief =
+                    Threats.briefOf
+                        (threatsOfHeld away (Atlas.ofView away) (Facts.heldTaskFacts away held))
+                        "W1N2"
+
+                Expect.equal
+                    (Map.tryFind "r-1" awayBrief.Seats)
+                    (Some Set.empty)
+                    "one with no walk to the ring from inside the room has no seat, never the ring beside the core"
+            }
+
+            // #558: the swap of the trespass ahead of the core must not stand a
+            // guard-only colony beside a hauler it cannot catch while the core
+            // stands for ever.
+            test
+                "where the guard alone answers trespassers it catches none of, the core is the room's and the guard breaks it" {
+                let hauler =
+                    { hostileIn
+                          "W1N2"
+                          { X = 30; Y = 44 }
+                          (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Id = "a-haul"
+                        Owner = "Trepidimous"
+                    }
+
+                // On its seat beside the outpost's rock at (25,40).
+                let digger =
+                    { hostileIn
+                          "W1N2"
+                          { X = 24; Y = 41 }
+                          (List.replicate 5 Work @ List.replicate 3 Move) with
+                        Id = "d-1"
+                        Owner = "Trepidimous"
+                    }
+
+                let colony hostiles =
+                    { declaredRaid hostiles with
+                        InvaderCores = [ coreIn "W1N2" 0 None ]
+                        Bank = bank 550 550
+                    }
+                    |> withGuards [ guard "g-1", beside ]
+
+                let held = Map.ofList [ "g-1", taskId (Guard "W1N2") ]
+
+                let kindOf view =
+                    (Threats.briefOf
+                        (threatsOfHeld view (Atlas.ofView view) (Facts.heldTaskFacts view held))
+                        "W1N2")
+                        .Duty
+
+                Expect.equal
+                    (kindOf (colony [ hauler ]))
+                    (Duty.Guard BriefKind.Core)
+                    "the hauler at its pace: the core's"
+
+                Expect.contains
+                    (decide (colony [ hauler ]) held Set.empty None).Intents
+                    (AttackStructure("g-1", "core-W1N2"))
+                    "the guard beside it swings at the core"
+
+                Expect.equal
+                    (kindOf (colony [ hauler; digger ]))
+                    (Duty.Guard BriefKind.Trespass)
+                    "a digger it catches is still struck first"
             }
         ]
 
