@@ -1079,3 +1079,45 @@ let replay
         { now with
             Creeps = now.Creeps |> Map.filter (fun name _ -> held name)
         }
+
+/// The tiles a replay's steps land on (#562): each `MoveCreep` from where its
+/// body stands in the glance, as the deciding colonies' arbitration reads
+/// them (`Resolver.resolveRooms`) — a step the engine is about to take
+/// whatever that arbitration settles. Never a step that fails anyway: one by
+/// a fatigued walker (`tired`), or onto a hostile or a body the replaying
+/// colonies (`homes`, by `holders`) hold that takes no step of its own.
+let claimed
+    (homes: Set<string>)
+    (holders: Map<string, string>)
+    (tired: Set<string>)
+    (now: Glance)
+    (replayed: Intent list)
+    : Set<RoomPos> =
+    let steps =
+        replayed
+        |> List.choose (fun intent ->
+            match intent with
+            | MoveCreep(name, direction) when not (Set.contains name tired) ->
+                Map.tryFind name now.Creeps
+                |> Option.map (fun creep -> name, creep.Tile, direction)
+            | _ -> None)
+
+    let stepping = steps |> List.map (fun (name, _, _) -> name) |> Set.ofList
+
+    let held name =
+        Map.tryFind name holders |> Option.exists (fun home -> Set.contains home homes)
+
+    let walls =
+        Seq.append
+            (now.Hostiles |> Seq.map (fun hostile -> hostile.Tile))
+            (now.Creeps
+             |> Map.toSeq
+             |> Seq.filter (fun (name, _) -> held name && not (Set.contains name stepping))
+             |> Seq.map (fun (_, creep) -> creep.Tile))
+        |> Set.ofSeq
+
+    steps
+    |> List.map (fun (_, tile, direction) ->
+        RoomPos.at tile.Room (stepTo (RoomPos.pos tile) direction))
+    |> List.filter (fun tile -> not (Set.contains tile walls))
+    |> Set.ofList

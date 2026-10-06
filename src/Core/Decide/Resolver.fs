@@ -736,7 +736,13 @@ let movementOf
 /// *destination* (#142): a creep matched to an outpost's Task is arbitrated at
 /// home over a home tile, and the next tick that room's pass walks it off the
 /// ring onto its own floor.
-let resolveRooms (movements: Movement list) : Intent list * Verdict list =
+///
+/// `claims` are the tiles the bodies of colonies that do not decide this tick
+/// step onto (a forced tick's replay, #549): their steps are issued whatever
+/// this pass settles, so a claimed tile is a wall to every intent here, and an
+/// idle body of ours standing on one steps off it where it can (#562) — a step
+/// it is denied is a step the replayed body is.
+let resolveRooms (claims: Set<RoomPos>) (movements: Movement list) : Intent list * Verdict list =
     let tired =
         (Set.empty, movements) ||> List.fold (fun acc m -> Set.union acc m.Tired)
 
@@ -758,16 +764,49 @@ let resolveRooms (movements: Movement list) : Intent list * Verdict list =
                     Set.union acc (m.Foreign |> Set.filter (fun tile -> tile.Room = room)))
                 |> Set.filter (fun tile -> not (Map.containsKey tile occupants))
 
+            let moveIntents =
+                movements
+                |> List.collect (fun m -> m.Intents |> List.filter (fun i -> i.Pos.Room = room))
+
+            // A claim moves only an idle body: a body with a Task on a
+            // claimed tile — a Defend holder on its rampart — keeps it, the
+            // claim is void, and the replayed step into it fails.
+            let claimed =
+                let inRoom = claims |> Set.filter (fun tile -> tile.Room = room)
+
+                if Set.isEmpty inRoom then
+                    inRoom
+                else
+                    moveIntents
+                    |> List.filter (fun i -> i.Rank <> idleRank)
+                    |> List.fold (fun kept i -> Set.remove i.Pos kept) inRoom
+
             let blocked =
                 here
                 |> List.choose (fun (name, at) ->
                     if Set.contains name tired then Some at else None)
                 |> Set.ofList
                 |> Set.union foreign
+                |> Set.union claimed
 
+            // An idle body standing on a claimed tile asks for its other
+            // tiles instead: its own is not a tile it may keep. With none it
+            // stays, and the replayed step into it fails.
             let moveIntents =
-                movements
-                |> List.collect (fun m -> m.Intents |> List.filter (fun i -> i.Pos.Room = room))
+                if Set.isEmpty claimed then
+                    moveIntents
+                else
+                    moveIntents
+                    |> List.map (fun i ->
+                        if Set.contains i.Pos claimed then
+                            match
+                                i.Candidates
+                                |> List.filter (fun tile -> not (Set.contains tile claimed))
+                            with
+                            | [] -> i
+                            | rest -> { i with Candidates = rest }
+                        else
+                            i)
 
             room,
             {
@@ -851,4 +890,4 @@ let resolve
     (crossings: Map<string, string>)
     (verbose: Set<string>)
     : Intent list * Verdict list =
-    resolveRooms [ movementOf view atlas threats pool assigned crossings verbose ]
+    resolveRooms Set.empty [ movementOf view atlas threats pool assigned crossings verbose ]

@@ -709,11 +709,6 @@ let private fullTick
 
             colony, view, decision, Game.cpu.getUsed (), flooded)
 
-    // The one movement pass of the tick: every colony's Move Intents,
-    // arbitrated once per room.
-    let moveIntents, moveVerdicts =
-        resolveRooms (decisions |> List.map (fun (_, _, decision, _, _) -> decision.Movement))
-
     // The replayed colonies' acts and steps, off the glance as a light tick
     // reads it, the objects their acts name looked up.
     let replayed =
@@ -727,6 +722,28 @@ let private fullTick
                     Objects = standingOf (LightTick.only replaying last)
                 }
         | _ -> []
+
+    // The one movement pass of the tick: every deciding colony's Move
+    // Intents, arbitrated once per room around the replayed colonies' steps.
+    let moveIntents, moveVerdicts =
+        let claims =
+            match seen with
+            | Some seen when not (List.isEmpty replayed) ->
+                // The replayed colonies' fatigued bodies, off their views.
+                let tired =
+                    views
+                    |> List.filter (fun (colony, _) -> Set.contains colony.Home replaying)
+                    |> List.collect (fun (_, view: ColonyView) ->
+                        view.Creeps
+                        |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None))
+                    |> Set.ofList
+
+                LightTick.claimed replaying holders tired seen replayed
+            | _ -> Set.empty
+
+        resolveRooms
+            claims
+            (decisions |> List.map (fun (_, _, decision, _, _) -> decision.Movement))
 
     // The decision boundary; the two Memory reads above are inside it, being
     // `decide`'s arguments.

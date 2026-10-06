@@ -2289,6 +2289,47 @@ let decidersTests =
                     "a light tick replays every plan"
             }
 
+            test "#562 a replayed step claims the tile it lands on, unless the step fails anyway" {
+                let homes = Set.ofList [ "W1N1" ]
+
+                let claims tired glance replayed =
+                    LightTick.claimed homes holders tired glance replayed
+
+                Expect.equal
+                    (claims Set.empty split (LightTick.replay homes holders planned split))
+                    (Set.singleton (tile 21 20))
+                    "the tile the replayed step lands on is the deciding colonies' claim, and no act is"
+
+                let step = [ MoveCreep("hauler", Right) ]
+
+                Expect.isEmpty
+                    (claims (Set.ofList [ "hauler" ]) split step)
+                    "a fatigued walker claims nothing"
+
+                Expect.isEmpty
+                    (claims
+                        Set.empty
+                        { split with
+                            Hostiles = [ hostile 21 20 "Invader" false ]
+                        }
+                        step)
+                    "nor a step onto a hostile"
+
+                let ahead =
+                    { split with
+                        Creeps = Map.add "digger" (creepAt 21 20 1000) split.Creeps
+                    }
+
+                Expect.isEmpty
+                    (claims Set.empty ahead step)
+                    "nor onto a replayed body that takes no step"
+
+                Expect.equal
+                    (claims Set.empty ahead (MoveCreep("digger", Right) :: step))
+                    (Set.ofList [ tile 21 20; tile 22 20 ])
+                    "a replayed body stepping on out of it leaves the claim standing"
+            }
+
             test "a forced tick's fresh plan claims a body before the plan it carried" {
                 // A body a deciding colony adopted is that colony's alone: two
                 // plans replaying one body would lay two acts on its channels.

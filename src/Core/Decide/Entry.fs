@@ -698,7 +698,7 @@ let decide
     // One colony alone is always its own turn to re-plan: the budget #357
     // added staggers colonies against each other.
     let decision = decideUnarbitrated view assignments verbose memo ReplanTurn.Now
-    let moveIntents, moveVerdicts = resolveRooms [ decision.Movement ]
+    let moveIntents, moveVerdicts = resolveRooms Set.empty [ decision.Movement ]
 
     { decision with
         Intents = decision.Intents @ moveIntents

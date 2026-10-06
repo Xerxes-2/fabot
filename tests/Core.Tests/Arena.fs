@@ -1428,7 +1428,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
 
     let decisions = decisions |> List.map (fun (c, _, decision) -> c.Home, decision)
 
-    let moves, _ = resolveRooms (decisions |> List.map (fun (_, d) -> d.Movement))
+    let moves, _ =
+        resolveRooms Set.empty (decisions |> List.map (fun (_, d) -> d.Movement))
 
     // One activation a shard, as `Main` sends them.
     let intents =

@@ -572,7 +572,7 @@ let movementTests =
 /// be shoved again next tick. A lane up x = 10 to the rock's Seat (10,10),
 /// the worker "h" walking up it and "i" idle; `side` adds (11,13), beside the
 /// idle body's (10,12) and the mover's (10,13) and on no way up.
-let private laneUp side idle mover =
+let private laneUpHolding side held =
     let terrain =
         [
             yield { X = 10; Y = 9 }, Wall
@@ -583,11 +583,39 @@ let private laneUp side idle mover =
 
     { bareRespawn with
         Sources = [ source "src-a" ]
-        Creeps = [ worker "h" 0 50; worker "i" 50 0 ]
+        Creeps = held |> List.map fst
         Spatial =
             spatial [ "src-a", { X = 10; Y = 9 } ] terrain
-            |> withCreepsAt [ "h", mover; "i", idle ]
+            |> withCreepsAt (held |> List.map (fun (creep, tile) -> creep.Name, tile))
     }
+
+let private laneUp side idle mover =
+    laneUpHolding side [ worker "h" 0 50, mover; worker "i" 50 0, idle ]
+
+/// The same lane worked by two colonies (#562): one holds the hauler on
+/// (10,13), the other the idle body on (10,12), each the other's foreign
+/// body.
+let private laneUpShared side =
+    let tile pos = Set.singleton (RoomPos.at "" pos)
+
+    { laneUpHolding side [ worker "h" 0 50, { X = 10; Y = 13 } ] with
+        Foreign = tile { X = 10; Y = 12 }
+    },
+    { laneUpHolding side [ worker "i" 50 0, { X = 10; Y = 12 } ] with
+        Foreign = tile { X = 10; Y = 13 }
+    }
+
+/// One colony's unarbitrated movement over its own Atlas and pool, for the
+/// passes `resolveRooms` folds across colonies.
+let private movementFor view assigned =
+    movementOf
+        view
+        (Atlas.ofView view)
+        noThreats
+        (poolOn view)
+        (Map.ofList assigned)
+        Map.empty
+        Set.empty
 
 [<Tests>]
 let arbitrationTests =
@@ -794,6 +822,79 @@ let arbitrationTests =
                 Expect.isEmpty
                     (resolveOn (ringLane false) assigned |> moveIntents)
                     "and with no way round nobody moves: the mover waits"
+            }
+
+            test "#562 another colony's idle body in the hauler's way in steps aside for it" {
+                let hauling, idling = laneUpShared true
+
+                let moves =
+                    resolveRooms
+                        Set.empty
+                        [ movementFor hauling [ "h", Harvest "src-a" ]; movementFor idling [] ]
+                    |> fst
+                    |> moveIntents
+                    |> List.sort
+
+                Expect.equal
+                    moves
+                    [ "h", Top; "i", BottomRight ]
+                    "one pass over both colonies' bodies: the idle body yields exactly as one colony's would"
+            }
+
+            test
+                "#562 a replayed colony's step is a claim: a deciding body steps off its tile and none steps onto it" {
+                let hauling, idling = laneUpShared true
+                let claim = Set.singleton (RoomPos.at "" { X = 10; Y = 12 })
+
+                let idleMoves claims =
+                    resolveRooms claims [ movementFor idling [] ] |> fst |> moveIntents
+
+                Expect.isEmpty (idleMoves Set.empty) "unclaimed, the idle body stands"
+
+                match idleMoves claim with
+                | [ "i", direction ] ->
+                    Expect.notEqual
+                        (stepFrom { X = 10; Y = 12 } direction)
+                        { X = 10; Y = 13 }
+                        "never onto the replayed body's own tile"
+                | other -> failtest $"the idle body steps off the claimed tile: %A{other}"
+
+                // The hauler's colony deciding, with nobody on (10,12) and a
+                // replayed step of another colony's into it.
+                let hauler = { hauling with Foreign = Set.empty }
+
+                Expect.equal
+                    (resolveRooms Set.empty [ movementFor hauler [ "h", Harvest "src-a" ] ]
+                     |> fst
+                     |> moveIntents)
+                    [ "h", Top ]
+                    "unclaimed, the hauler steps up the lane"
+
+                Expect.isEmpty
+                    (resolveRooms claim [ movementFor hauler [ "h", Harvest "src-a" ] ]
+                     |> fst
+                     |> moveIntents
+                     |> List.filter (fun (_, direction) -> direction = Top))
+                    "and claimed, it does not step into the replayed body"
+            }
+
+            test
+                "#562 a claim on a body with a Task is void: it keeps its tile, as a Defend holder its rampart" {
+                // An upgrader inside the pocket, five more tiles of its Work
+                // Area free around it: shuffled within it for nothing, it is
+                // what a claim would move were the claim any ranked body's.
+                let at = { X = 22; Y = 15 }
+                let colony = pocketColony [ upgrader "u" ] [ "u", at ]
+                let claim = Set.singleton (RoomPos.at (SpatialInfo.homeName colony.Spatial) at)
+
+                let moves assigned =
+                    resolveRooms claim [ movementFor colony assigned ] |> fst |> moveIntents
+
+                Expect.isEmpty
+                    (moves [ "u", Upgrade "ctrl-1" ])
+                    "the working body keeps its tile and the replayed step into it fails"
+
+                Expect.isNonEmpty (moves []) "idle on the same tile, it steps off for the claim"
             }
 
             test "#562 a parked body an idle body shoves takes its tile back" {
@@ -1739,18 +1840,9 @@ let arbitrationTests =
                         Foreign = Set.singleton (RoomPos.at "W1N1" { X = 11; Y = 12 })
                     }
 
-                let movementFor view assigned =
-                    movementOf
-                        view
-                        (Atlas.ofView view)
-                        noThreats
-                        (poolOn view)
-                        (Map.ofList assigned)
-                        Map.empty
-                        Set.empty
-
                 let together =
                     resolveRooms
+                        Set.empty
                         [
                             movementFor mother [ "eb", Harvest "src-e" ]
                             movementFor child [ "an", Harvest "src-w" ]
