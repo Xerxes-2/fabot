@@ -17121,3 +17121,759 @@ let w17s29TowerBackedTests =
                 Expect.isSome (diedOn "invader_W17S29_976" trace) $"the healer dies\n{failure}"
             }
         ]
+
+// ---- arena capture w17s29-starved-towers (#591) ---------------------------
+// `npm run capture -- W17S29 996765 --rooms W15S28 --name w17s29-starved --no-live-memory`, read at live t999,322.
+// The room-history replay at t996,765, the state after that tick ran: arena
+// tick 0 runs as t996,766 and decides what our code decided live then.
+//   W17S29  https://screeps.com/room-history/shardSeason/W17S29/996700.json
+//   W15S28  https://screeps.com/room-history/shardSeason/W15S28/996700.json
+// The two Invaders run the engine's NPC script; the Raid log, ArmedSeen,
+// Healers and Sightings start empty (the tick is past `--live-memory`).
+// Spawn3 is spawning guard-996644-Spawn3 until t996794: not placed.
+// Spawn8 is spawning worker-996759-Spawn8 until t996909: not placed.
+// not placed: 2 tombstone, 1 ruin (the arena has no drops, tombstones or ruins).
+
+/// W17S29 at t996,765: a dismantler and its healer on the anchor's rampart
+/// (44,38, 116k), both towers drained to 300 and 340, three loaded workers
+/// and 19k in the Storage.
+let private w17s29StarvedTowers () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 4
+        |> withControllerClocks 0 0 119_902 1_503_130
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        19, 35
+                        19, 41
+                        19, 43
+                        20, 36
+                        20, 38
+                        20, 40
+                        20, 42
+                        20, 44
+                        21, 35
+                        21, 37
+                        21, 41
+                        21, 43
+                        21, 45
+                        22, 36
+                        22, 44
+                        23, 35
+                        23, 37
+                        23, 43
+                        23, 45
+                        24, 36
+                        24, 42
+                        24, 44
+                        25, 35
+                        25, 37
+                        25, 43
+                        25, 45
+                        26, 36
+                        26, 38
+                        26, 44
+                        27, 35
+                        27, 43
+                        27, 45
+                        28, 44
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 22, 38; 22, 40; 22, 42; 24, 38; 25, 39; 25, 41; 26, 40 ] ->
+                    structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 135_200 250_000 { X = 13; Y = 29 } with
+                    Energy = 408
+                }
+                structureOf "container" None 135_500 250_000 { X = 15; Y = 43 }
+                structureOf "container" None 191_400 250_000 { X = 27; Y = 42 }
+                { structureOf "container" None 190_200 250_000 { X = 44; Y = 38 } with
+                    Energy = 1_188
+                }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 16; Y = 44 }
+                { structureOf "rampart" (Some Side.Ours) 99_901 30_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 996_862
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_601 30_000_000 { X = 21; Y = 39 } with
+                    NextDecay = 996_774
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_901 30_000_000 { X = 23; Y = 39 } with
+                    NextDecay = 996_809
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_901 30_000_000 { X = 23; Y = 41 } with
+                    NextDecay = 996_852
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_301 30_000_000 { X = 24; Y = 40 } with
+                    NextDecay = 996_851
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_401 30_000_000 { X = 26; Y = 42 } with
+                    NextDecay = 996_857
+                }
+                { structureOf "rampart" (Some Side.Ours) 116_311 30_000_000 { X = 44; Y = 38 } with
+                    NextDecay = 996_806
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 19_140
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 26; Y = 42 } with
+                    Energy = 4_000
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 340
+                towerOf Side.Ours { X = 23; Y = 41 } 300
+            ]
+        |> withRoads
+            [
+                13, 29, 4_400
+                14, 29, 2_900
+                15, 30, 2_800
+                16, 31, 2_800
+                16, 42, 4_500
+                17, 32, 3_100
+                17, 42, 15_400
+                18, 33, 3_900
+                18, 41, 20_600
+                19, 34, 17_700
+                19, 40, 3_200
+                19, 42, 4_300
+                20, 35, 13_800
+                20, 37, 20_500
+                20, 39, 3_000
+                20, 41, 3_100
+                20, 43, 3_900
+                21, 36, 3_800
+                21, 38, 4_400
+                21, 40, 3_600
+                21, 42, 4_000
+                21, 44, 4_400
+                22, 35, 3_700
+                22, 37, 2_800
+                22, 39, 4_600
+                22, 41, 3_400
+                22, 43, 3_570
+                22, 45, 4_560
+                23, 36, 4_500
+                23, 38, 3_700
+                23, 42, 3_000
+                23, 44, 3_770
+                24, 35, 20_500
+                24, 37, 2_700
+                24, 39, 2_800
+                24, 41, 2_900
+                24, 43, 2_400
+                24, 45, 2_870
+                25, 36, 15_500
+                25, 38, 2_800
+                25, 40, 4_200
+                25, 42, 2_700
+                25, 44, 2_600
+                26, 35, 16_700
+                26, 37, 14_100
+                26, 39, 19_500
+                26, 41, 3_200
+                26, 43, 3_400
+                26, 45, 3_600
+                27, 36, 19_300
+                27, 37, 13_500
+                27, 38, 12_100
+                27, 39, 15_300
+                27, 40, 20_100
+                27, 41, 3_600
+                27, 42, 2_800
+                27, 44, 4_400
+                28, 36, 19_900
+                28, 37, 13_400
+                28, 38, 12_100
+                28, 39, 12_900
+                28, 40, 17_500
+                28, 41, 3_700
+                28, 43, 2_700
+                29, 35, 2_800
+                29, 36, 13_400
+                29, 37, 20_700
+                29, 38, 18_100
+                29, 39, 20_100
+                29, 40, 14_000
+                29, 41, 14_200
+                29, 42, 3_400
+                30, 34, 4_600
+                30, 36, 13_400
+                30, 37, 17_200
+                30, 40, 21_100
+                30, 41, 20_500
+                30, 42, 13_800
+                31, 33, 4_300
+                31, 36, 15_600
+                31, 41, 21_100
+                31, 42, 15_600
+                32, 32, 3_500
+                32, 36, 19_400
+                32, 41, 3_900
+                33, 31, 2_400
+                33, 36, 17_400
+                33, 37, 18_800
+                33, 40, 3_700
+                34, 30, 3_000
+                34, 39, 3_800
+                35, 29, 3_700
+                35, 38, 2_700
+                36, 28, 4_500
+                36, 37, 3_900
+                37, 27, 3_600
+                37, 38, 3_500
+                38, 26, 3_700
+                38, 39, 3_300
+                39, 25, 3_200
+                39, 40, 4_800
+                40, 24, 4_400
+                40, 41, 3_500
+                41, 23, 3_600
+                41, 40, 3_600
+                42, 24, 4_000
+                42, 39, 3_800
+                43, 25, 3_460
+                44, 25, 3_080
+                44, 37, 3_000
+                44, 38, 4_400
+                45, 26, 1_060
+                45, 36, 2_600
+                46, 26, 3_770
+                46, 35, 3_000
+                47, 25, 3_870
+                47, 36, 4_400
+                48, 20, 4_170
+                48, 21, 3_970
+                48, 22, 3_770
+                48, 23, 4_010
+                48, 24, 2_670
+                48, 37, 3_000
+            ]
+        |> withSite Side.Ours "road" None 0 { X = 43; Y = 38 }
+
+    let w15s28 =
+        room "W15S28"
+        |> withController Ownership.Ours None 7 5
+        |> withControllerClocks 0 0 149_990 6_183_616
+        |> withSpawn "Spawn3" { X = 18; Y = 30 } 5_600
+        |> withSpawn "Spawn8" { X = 17; Y = 35 } 5_600
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 24
+                        12, 26
+                        13, 25
+                        13, 27
+                        13, 29
+                        14, 26
+                        14, 28
+                        15, 25
+                        15, 27
+                        15, 29
+                        16, 26
+                        16, 30
+                        17, 25
+                        17, 27
+                        18, 26
+                        18, 28
+                        19, 27
+                        20, 26
+                        20, 28
+                        21, 27
+                        21, 29
+                        22, 26
+                        23, 25
+                        23, 27
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 30
+                        12, 32
+                        12, 34
+                        12, 36
+                        13, 31
+                        13, 33
+                        13, 35
+                        14, 30
+                        14, 32
+                        14, 34
+                        15, 31
+                        15, 33
+                        15, 35
+                        16, 32
+                        16, 34
+                        17, 33
+                        18, 32
+                        18, 34
+                        19, 31
+                        19, 33
+                        20, 30
+                        20, 32
+                        21, 31
+                        21, 33
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 17, 31; 19, 29; 20, 34 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 125_100 250_000 { X = 6; Y = 29 } with
+                    Energy = 708
+                }
+                { structureOf "container" None 176_100 250_000 { X = 11; Y = 18 } with
+                    Energy = 324
+                }
+                structureOf "container" None 132_500 250_000 { X = 23; Y = 29 }
+                { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 21; Y = 35 } with
+                    Id = "extension-21-35-W15S28"
+                }
+                { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 23; Y = 35 } with
+                    Energy = 100
+                    Id = "extension-23-35-W15S28"
+                }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 29; Y = 12 }
+                { structureOf "rampart" (Some Side.Ours) 102_901 100_000_000 { X = 6; Y = 29 } with
+                    NextDecay = 996_797
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_801 100_000_000 { X = 11; Y = 18 } with
+                    NextDecay = 996_856
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_601 100_000_000 { X = 16; Y = 28 } with
+                    NextDecay = 996_815
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_701 100_000_000 { X = 17; Y = 29 } with
+                    NextDecay = 996_784
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_701 100_000_000 { X = 17; Y = 31 } with
+                    NextDecay = 996_857
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_801 100_000_000 { X = 17; Y = 35 } with
+                    NextDecay = 996_811
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_701 100_000_000 { X = 18; Y = 30 } with
+                    NextDecay = 996_832
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_001 100_000_000 { X = 19; Y = 29 } with
+                    NextDecay = 996_781
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_401 100_000_000 { X = 20; Y = 34 } with
+                    NextDecay = 996_774
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 17; Y = 29 } with
+                    Energy = 24_211
+                    Thorium = 41_977
+                }
+                structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 }
+            ]
+        |> withRoads
+            [
+                4, 5, 4_200
+                5, 4, 2_900
+                5, 6, 4_100
+                5, 44, 3_200
+                6, 3, 4_700
+                6, 7, 3_400
+                6, 29, 2_900
+                6, 43, 2_800
+                6, 45, 3_700
+                7, 2, 3_600
+                7, 8, 4_200
+                7, 28, 3_700
+                7, 42, 2_600
+                7, 46, 3_100
+                8, 1, 4_700
+                8, 9, 5_000
+                8, 28, 5_000
+                8, 41, 2_900
+                8, 47, 4_900
+                9, 10, 3_400
+                9, 27, 3_200
+                9, 28, 4_100
+                9, 40, 2_600
+                9, 48, 3_200
+                10, 11, 2_600
+                10, 26, 3_700
+                10, 29, 3_600
+                10, 39, 2_900
+                11, 12, 4_700
+                11, 18, 2_500
+                11, 27, 4_900
+                11, 30, 3_800
+                11, 38, 3_400
+                12, 13, 3_000
+                12, 17, 3_400
+                12, 25, 16_600
+                12, 27, 16_500
+                12, 28, 4_200
+                12, 29, 3_700
+                12, 31, 2_600
+                12, 33, 13_700
+                12, 35, 17_000
+                12, 37, 2_800
+                13, 14, 3_100
+                13, 16, 2_700
+                13, 26, 21_900
+                13, 28, 2_500
+                13, 30, 4_000
+                13, 32, 4_600
+                13, 34, 2_900
+                13, 36, 3_000
+                14, 15, 3_400
+                14, 25, 16_700
+                14, 27, 4_500
+                14, 29, 3_100
+                14, 31, 3_200
+                14, 33, 3_900
+                14, 35, 3_300
+                15, 15, 2_700
+                15, 26, 4_100
+                15, 28, 2_500
+                15, 30, 4_600
+                15, 32, 2_900
+                15, 34, 2_900
+                16, 16, 2_700
+                16, 25, 19_100
+                16, 27, 3_700
+                16, 29, 4_500
+                16, 31, 2_900
+                16, 33, 4_900
+                16, 35, 2_500
+                17, 17, 3_700
+                17, 26, 15_400
+                17, 28, 3_700
+                17, 30, 3_800
+                17, 32, 3_600
+                17, 34, 3_100
+                18, 18, 4_900
+                18, 25, 15_700
+                18, 27, 15_000
+                18, 29, 2_900
+                18, 31, 2_700
+                18, 33, 3_200
+                19, 19, 20_300
+                19, 22, 16_600
+                19, 24, 21_100
+                19, 26, 16_000
+                19, 28, 4_200
+                19, 30, 2_900
+                19, 32, 3_800
+                20, 20, 20_600
+                20, 21, 17_100
+                20, 23, 17_300
+                20, 25, 16_400
+                20, 27, 20_800
+                20, 29, 3_100
+                20, 31, 4_900
+                20, 33, 19_200
+                21, 21, 3_800
+                21, 22, 4_500
+                21, 23, 4_700
+                21, 24, 18_100
+                21, 25, 14_600
+                21, 26, 18_400
+                21, 28, 13_500
+                21, 30, 3_500
+                21, 32, 14_000
+                21, 34, 20_300
+                22, 24, 4_000
+                22, 25, 14_800
+                22, 27, 16_400
+                22, 28, 3_400
+                22, 29, 2_900
+                22, 30, 20_100
+                22, 31, 15_300
+                22, 32, 17_100
+                22, 33, 14_700
+                22, 35, 3_600
+                23, 26, 16_300
+                23, 28, 13_000
+                23, 29, 15_700
+                23, 30, 16_400
+                23, 31, 18_600
+                23, 32, 16_900
+                23, 33, 20_300
+                23, 34, 4_300
+                24, 25, 13_100
+                24, 28, 17_000
+                24, 29, 18_600
+                24, 30, 15_900
+                24, 33, 12_500
+                25, 24, 3_800
+                25, 28, 18_200
+                25, 29, 17_800
+                25, 34, 18_900
+                26, 23, 16_500
+                27, 22, 13_700
+                28, 21, 13_400
+                28, 34, 8_100
+                29, 20, 15_200
+                30, 19, 13_100
+                31, 18, 3_300
+                32, 17, 3_200
+                33, 16, 4_700
+                34, 15, 2_500
+                35, 14, 3_400
+                36, 13, 17_100
+                37, 12, 3_500
+                38, 11, 2_300
+                39, 12, 3_300
+                40, 13, 14_900
+                41, 14, 13_200
+                42, 15, 4_600
+                43, 16, 4_700
+                44, 17, 3_400
+                45, 18, 3_400
+                46, 19, 3_400
+                47, 20, 4_900
+                48, 21, 3_100
+            ]
+
+    // Today's declarations, not the tick's: spell them out if the test must outlive a roster change.
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S29"; "W15S28" ])
+
+    let bodies: Body list =
+        [
+            // invader_W17S29_832: live: attack→44,38 rangedAttack→44,38 healed→41,40
+            { body
+                  "invader_W17S29_832"
+                  (Side.Npc "Invader")
+                  (parts [ Tough, 16; Move, 24; RangedAttack, 3; Work, 4; Attack, 2; Move, 1 ])
+                  (at "W17S29" 43 39)
+                  (Some Invader) with
+                TicksToLive = 1_342
+            }
+            // invader_W17S29_976: live: rangedHeal→43,39
+            { body
+                  "invader_W17S29_976"
+                  (Side.Npc "Invader")
+                  (parts [ Move, 24; Heal, 25; Move, 1 ])
+                  (at "W17S29" 40 41)
+                  (Some Invader) with
+                TicksToLive = 1_342
+            }
+            { body
+                  "worker-995234-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 37 38)
+                  None with
+                TicksToLive = 72
+                Energy = 600
+            }
+            { body
+                  "worker-995430-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 37 39)
+                  None with
+                TicksToLive = 268
+                Energy = 504
+            }
+            { body
+                  "upgrader-995634-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 29 35)
+                  None with
+                TicksToLive = 460
+            }
+            { body
+                  "anchor-996061-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 44 38)
+                  None with
+                TicksToLive = 818
+                Energy = 50
+            }
+            { body
+                  "anchor-996085-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 13 29)
+                  None with
+                TicksToLive = 842
+                Energy = 50
+            }
+            { body
+                  "worker-996318-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 44 33)
+                  None with
+                TicksToLive = 1_156
+                Energy = 600
+            }
+            { body
+                  "upgrader-996423-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 28 33)
+                  None with
+                TicksToLive = 1_249
+            }
+            { body
+                  "worker-996636-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 48 23)
+                  None with
+                TicksToLive = 1_474
+            }
+            { body
+                  "reserver-996741-Spawn9"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 1; Move, 1 ])
+                  (at "W17S29" 43 25)
+                  None with
+                TicksToLive = 580
+            }
+            { body
+                  "hauler-995926-Spawn9"
+                  Side.Ours
+                  (parts [ Carry, 30; Move, 15 ])
+                  (at "W17S29" 48 35)
+                  None with
+                TicksToLive = 794
+                Energy = 1_500
+            }
+            { body
+                  "worker-995684-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 16; Carry, 17; Move, 17 ])
+                  (at "W15S28" 13 26)
+                  None with
+                TicksToLive = 567
+            }
+            { body
+                  "anchor-996028-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W15S28" 11 18)
+                  None with
+                TicksToLive = 785
+                Energy = 50
+            }
+            { body
+                  "hauler-996036-Spawn8"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 17 28)
+                  None with
+                TicksToLive = 913
+                Energy = 1_600
+            }
+            { body
+                  "anchor-996217-Spawn8"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W15S28" 6 29)
+                  None with
+                TicksToLive = 974
+                Energy = 50
+            }
+            { body
+                  "hauler-996263-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 19 26)
+                  None with
+                TicksToLive = 1_140
+            }
+            { body
+                  "upgrader-996497-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 24; Carry, 1; Move, 24 ])
+                  (at "W15S28" 19 24)
+                  None with
+                TicksToLive = 1_377
+            }
+            { body
+                  "guard-996609-Spawn8"
+                  Side.Ours
+                  (parts [ Tough, 5; Move, 25; Attack, 15; Heal, 5 ])
+                  (at "W15S28" 10 39)
+                  None with
+                TicksToLive = 1_492
+            }
+            { body
+                  "hauler-996091-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 15 30)
+                  None with
+                TicksToLive = 968
+                Energy = 1_400
+            }
+            { body
+                  "hauler-995872-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 12 13)
+                  None with
+                TicksToLive = 749
+                Energy = 1_544
+            }
+        ]
+
+    // No Transition-log verdict reaches back to t996,765: every body starts
+    // unassigned and the first tick hands out what live held (the workers
+    // on rampart-44-38's Repair, the hauler on tower-23-41's Refill).
+    arena 996_766 [ w17s29; w15s28 ] colonies bodies
+
+[<Tests>]
+let w17s29StarvedTowersTests =
+    testList
+        "arena capture w17s29-starved-towers"
+        [
+            // Live from t996,770 the towers sat at their 300 reserve for a
+            // hundred ticks with 19k in the Storage: three loaded workers
+            // held the struck rampart's Repair parked at the Reach's edge,
+            // no walk round to it (the arena reproduced it unchanged), and
+            // the towers had spent ~2,000 energy repairing a 112k rampart.
+            test
+                "#591 capture t996,765: the raided home keeps both towers fed from the Storage, and no tower repairs a rampart that outlasts the raid" {
+                let final, trace = w17s29StarvedTowers () |> run 30
+                let failure = describe trace
+
+                Expect.isEmpty
+                    (trace
+                     |> List.collect (fun t -> t.Ours)
+                     |> List.filter (function
+                         | RepairWithTower _ -> true
+                         | _ -> false))
+                    $"116k against the dismantler's 200 a tick outlasts the horizon: the energy held\n{failure}"
+
+                for id in [ "tower-21-39"; "tower-23-41" ] do
+                    let energy =
+                        final.Rooms["W17S29"].Structures
+                        |> List.find (fun s -> s.Id = id)
+                        |> fun s -> s.Energy
+
+                    Expect.isGreaterThan
+                        energy
+                        600
+                        $"{id} fed (live: 300 for a hundred ticks)\n{failure}"
+            }
+        ]

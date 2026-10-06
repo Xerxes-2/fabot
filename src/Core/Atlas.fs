@@ -3263,6 +3263,44 @@ and firstStepAvoidingWhere
             cheapestReached (reachedBy near) goals
             |> Option.map (fun (_, goal) -> planned atlas creep room near pos goal)
 
+/// A room's step weights with `avoid` made impassable: `wayRound`'s grid,
+/// built once a room for every body asked there.
+let weightsAvoiding (atlas: Atlas) (room: string) (avoid: Set<Pos>) : int[] =
+    let weights = Array.copy (weightsOf atlas room)
+
+    avoid
+    |> Set.iter (fun tile ->
+        if inGrid tile then
+            weights.[indexOf tile] <- -1)
+
+    weights
+
+/// `firstStepAvoiding`'s answer to whether a way round exists, for one body
+/// against many goal sets (#591): a test over tile sets of the creep's own
+/// room, true for one it stands in or reaches by a walk that never enters
+/// `avoid`, over `weights` (`weightsAvoiding` of that room and `avoid`). One
+/// flood a body, resumed as goals are asked; None for a creep the projection
+/// does not place.
+let wayRound
+    (atlas: Atlas)
+    (creep: string)
+    (avoid: Set<Pos>)
+    (weights: int[])
+    : (Set<RoomPos> -> bool) option =
+    match creepAt atlas creep with
+    | None -> None
+    | Some(room, pos) ->
+        let near =
+            lazy (floodPriced weights (occupiedOf atlas room) (factorOf atlas creep) TravelCost pos)
+
+        Some(fun goalTiles ->
+            Set.contains (RoomPos.at room pos) goalTiles
+            || (RoomPos.tilesIn room goalTiles
+                |> List.filter (fun tile -> not (Set.contains tile avoid))
+                |> function
+                    | [] -> false
+                    | goals -> cheapestReached (reachedBy near.Value) goals |> Option.isSome))
+
 /// The step a creep takes toward a **room**, with nothing placed in it to aim
 /// at: `stepAcross` without its far leg, the exit being the one this room's
 /// own flood reaches cheapest. It reads the border layer and the memoised

@@ -907,6 +907,20 @@ let decideUnarbitrated
                 Fighters = fighters |> Seq.map _.Name |> Fresh.setOfSeq
                 EconomyPooled = not (List.isEmpty economyPool)
                 OutpostRooms = outposts.Declared
+                Held =
+                    economyBodies
+                    |> Seq.choose (fun (creep: CreepInfo) ->
+                        Map.tryFind creep.Name assigned
+                        |> Option.map (fun task -> creep.Name, task))
+                    |> Fresh.mapOfSeq
+                Parked =
+                    (let walledOff = walledOffBy view atlas threats
+
+                     view.Creeps
+                     |> Seq.filter (fun creep ->
+                         Map.tryFind creep.Name assigned |> Option.exists (walledOff creep))
+                     |> Seq.map _.Name
+                     |> Fresh.setOfSeq)
             }
     }
 
@@ -924,7 +938,8 @@ let decideUnarbitrated
 /// None where the economy would decide otherwise, so the caller decides the
 /// colony whole this tick: a body across the fighter line since the carry,
 /// a cast ask moved or owed a spawn standing idle — spawning is the
-/// economy's —, or a fighter's step an economy body stands in.
+/// economy's —, an economy body a Reach has walled off from its Task since
+/// (`walledOffBy`), or a fighter's step an economy body stands in.
 let decideFight
     (view: ColonyView)
     (assignments: Assignments)
@@ -949,7 +964,27 @@ let decideFight
         let guarded =
             Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
 
-        if castAsks view threats guarded <> carry.Asks || castOwed view carry.Asks then
+        // An economy body a Reach has walled off from its Task since the
+        // carry (#591): only a whole decide's Matcher lets it go to other
+        // work, and its replay would park it at the edge until the next one.
+        let walledOffAnew =
+            lazy
+                (let walledOff = walledOffBy view atlas threats
+
+                 economyBodies
+                 |> List.exists (fun creep ->
+                     not (Set.contains creep.Name carry.Parked)
+                     && match
+                         Map.tryFind creep.Name carry.Held, Map.tryFind creep.Name assignments
+                        with
+                        | Some task, Some tid when taskId task = tid -> walledOff creep task
+                        | _ -> false))
+
+        if
+            castAsks view threats guarded <> carry.Asks
+            || castOwed view carry.Asks
+            || walledOffAnew.Force()
+        then
             None
         else
 

@@ -53,8 +53,29 @@ let private livePower (h: HostileInfo) (hits: int) : BodyPart -> int =
 let private liveCounts (hostiles: HostileInfo list) : Map<string, BodyPart -> int> =
     hostiles |> List.map (fun h -> h.Id, livePower h h.Hits) |> Map.ofList
 
-/// What a hostile of these live parts deals one tile of ours in `home` this
-/// tick: its weapons at their reach, or beside a structure its dismantle.
+/// What a hostile of these live parts deals one target of ours at this range
+/// a tick: its shot at its reach, and beside it its swing or, on a
+/// structure, its dismantle, whichever deals more — a dismantle and an
+/// attack share the engine's one melee act, and a ranged attack lands beside
+/// either (#591).
+let private strikeAt (parts: BodyPart -> int) (structure: bool) (r: int) =
+    let shot =
+        if r <= Engine.rangedRange then
+            Engine.rangedAttackPower * parts RangedAttack
+        else
+            0
+
+    let melee =
+        if r <= Engine.meleeRange then
+            max
+                (Engine.attackPower * parts Attack)
+                (if structure then Engine.dismantlePower * parts Work else 0)
+        else
+            0
+
+    shot + melee
+
+/// `strikeAt` on one tile of ours in `home`, from where the hostile stands.
 let private strikeOn
     (home: string)
     (parts: BodyPart -> int)
@@ -64,14 +85,7 @@ let private strikeOn
     =
     match RoomPos.range (RoomPos.at home tile) h.Pos with
     | None -> 0
-    | Some r ->
-        let dismantle =
-            if structure && r <= Engine.meleeRange then
-                Engine.dismantlePower * parts Work
-            else
-                0
-
-        max (damageAt parts r) dismantle
+    | Some r -> strikeAt parts structure r
 
 /// One part of the home's means to recover (#545): a spawn, an extension, or
 /// the CARRY of a body that refills them.
@@ -726,21 +740,44 @@ let internal planAid (view: ColonyView) (sending: Set<string>) : Intent list =
 /// The fire reflex's held hand (#477): with no hostile worth a shot, each tower
 /// still holding `Tuning.TowerRepairReserve` after the act repairs the rampart
 /// of ours under attack (`rampartsUnderAttack`, #467) with the fewest hits,
-/// then the nearest, then by id. A repair lands 800 near the tower and 200
-/// from range 20, against the 510 one 17-ATTACK melee strikes.
+/// then the nearest, then by id — one that would fall inside
+/// `Tuning.RampartRepairHorizon` at the strike the bodies reaching it deal
+/// (#591). A repair lands 800 near the tower and 200 from range 20, against
+/// the 510 one 17-ATTACK melee strikes.
 let private planTowerRepair (view: ColonyView) (towers: (string * RoomPos) list) : Intent list =
     let home = SpatialInfo.homeName view.Spatial
     let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
 
     // The struck ramparts (#477), else with none struck the dying ones
     // (`Tuning.RampartDying`): a fresh rampart decays away at 1 hit before a
-    // body comes to it (live 2026-10-04, W17S25).
+    // body comes to it (live 2026-10-04, W17S25). A struck one is the
+    // towers' only under its line (#591): the horizon's worth of the strike
+    // the raid at home deals it once every body of it stands beside it —
+    // the raid recalled between two looks counted, and never less than what
+    // strikes it now —, and never under `Tuning.RampartTowerFloor`, so a
+    // plinker that strikes it alone holds it no lower than a heavy body
+    // walking in breaks. Over the line it is the workers', and the towers
+    // hold for kills and heals (W17S29 t996,693: ~2,000 energy into a 112k
+    // rampart losing 90).
     let wanted =
         match rampartsUnderAttack view with
         | struck when Set.isEmpty struck ->
             fun _ kind (hits: HitsInfo) ->
                 kind = BuiltKind.Rampart && hits.Hits < view.Tuning.RampartDying
-        | struck -> fun id _ (hits: HitsInfo) -> Set.contains id struck && hits.Hits < hits.HitsMax
+        | struck ->
+            let hostiles = hostilesAtHome view
+            let strikers = liveCounts hostiles
+
+            let line =
+                let converged =
+                    hostiles |> List.sumBy (fun h -> strikeAt strikers[h.Id] true Engine.meleeRange)
+
+                max
+                    (int64 view.Tuning.RampartTowerFloor)
+                    (int64 view.Tuning.RampartRepairHorizon * int64 converged)
+
+            fun id _ (hits: HitsInfo) ->
+                Set.contains id struck && hits.Hits < hits.HitsMax && int64 hits.Hits < line
 
     match
         SpatialInfo.structureHits view.Spatial

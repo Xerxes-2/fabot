@@ -483,6 +483,16 @@ type Tuning =
         /// attack (#477), so a claimer or a dismantler walking in behind a
         /// healed raid can still be shot.
         TowerRepairReserve: int
+        /// The ticks a struck rampart must be about to fall within, at the
+        /// strike the bodies reaching it deal a tick, before a tower spends
+        /// on its repair (#591); one that outlasts them is left to the
+        /// workers, the towers holding their energy for kills and heals.
+        RampartRepairHorizon: int
+        /// The hits under which a tower repairs a struck rampart whatever
+        /// strikes it (#591): a raid that plinks it with one weak body holds
+        /// it no lower than a heavy body walking in breaks within the
+        /// horizon.
+        RampartTowerFloor: int
         /// The most [[defender]]s a home casts at once, one a raid melee at
         /// its ramparts (#504).
         DefenderCap: int
@@ -926,6 +936,12 @@ module Tuning =
             // Thirty shots: Trepidimous' 3-CLAIM tapper (600 hits) behind a
             // 7-HEAL healer (84 a tick) dies to ten range-20 shots of 150.
             TowerRepairReserve = 300
+            // Two hauler trips to the store and back (50 ticks each, the
+            // economy arm's horizon): the refill of a tower that starts
+            // repairing now, with one trip's margin.
+            RampartRepairHorizon = 100
+            // Trepidimous' 17-ATTACK melee, 510 a tick, over the horizon.
+            RampartTowerFloor = 51_000
             // Trepidimous' raids bring two melee (squads.md §1.2); a third
             // body has no rampart tile beside them on a three-tile choke.
             DefenderCap = 2

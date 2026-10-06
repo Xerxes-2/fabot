@@ -557,6 +557,12 @@ type FightCarry =
         /// The outpost rooms the colony works (`Decision.OutpostRooms`): what
         /// the Raid log's fold reads on a fight-only tick.
         OutpostRooms: string list
+        /// Each economy body's Task: what a fight-only tick asks whether a
+        /// Reach has since walled it off from (#591).
+        Held: Map<string, Task>
+        /// The economy bodies the full decide left on work walled off from
+        /// them, having no other: kept parked, so no full decide is owed.
+        Parked: Set<string>
     }
 
 /// What one tick of deciding returns: the Intents to execute, the

@@ -1675,6 +1675,56 @@ let fightOnlyDecideTests =
                     "the worker stands in the fighter's way"
             }
 
+            test
+                "an economy body a Reach walled off from its Task since the carry decides the colony whole, unless the carry left it parked (#591)" {
+                // A loaded worker on a struck rampart's Repair: from 17,25 the
+                // longbow's Reach leaves the Work Area's east edge open; one
+                // step on, from 19,25, it takes all of it but the rampart's
+                // own tile, which no walk reaches round it.
+                let at longbow =
+                    let room =
+                        openRoom 10
+                        |> withTargets [ "ram-1", { X = 20; Y = 25 }, Structure BuiltKind.Rampart ]
+                        |> withCreepsAt [ "w1", { X = 30; Y = 26 } ]
+
+                    { atLevel 3 room with
+                        Sources = []
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 300_000 3_000_000
+                    |> facing [ hostileAt "h-1" longbow [ RangedAttack; Move ] ]
+
+                let open' = at { X = 17; Y = 25 }
+                let walled = at { X = 19; Y = 25 }
+                let first = decideUnarbitrated open' Map.empty Set.empty None ReplanTurn.Now
+
+                Expect.equal
+                    (Map.tryFind "w1" first.Assignments)
+                    (Some(taskId (Repair "ram-1")))
+                    "premise: with a way round, the worker takes the Repair"
+
+                Expect.isEmpty first.Fight.Parked "and nothing is parked"
+
+                Expect.isSome
+                    (decideFight open' first.Assignments Set.empty first.Memo first.Fight)
+                    "premise: nothing moved, the fight decides alone"
+
+                Expect.isNone
+                    (decideFight walled first.Assignments Set.empty first.Memo first.Fight)
+                    "walled off since: a whole decide lets the worker go the same tick"
+
+                Expect.isSome
+                    (decideFight
+                        walled
+                        first.Assignments
+                        Set.empty
+                        first.Memo
+                        { first.Fight with
+                            Parked = Set.singleton "w1"
+                        })
+                    "a body the full decide left parked owes no other"
+            }
+
             test "a fight-only tick replays the economy's plan beside the fighters' fresh one" {
                 let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
                 let bodies = raidedHome.Creeps |> List.map _.Name |> Set.ofList

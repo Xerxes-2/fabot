@@ -15,6 +15,65 @@ type MatchShare =
         Offered: PooledTask list
     }
 
+/// The price's mate to the walk round (#472, #591): whether a body that runs
+/// from a Threat, standing outside its room's Reach, has no walk round the
+/// Reach to a Task's tiles in that room. The mover walks it round or parks
+/// it at the edge (`Resolver.moveIntentFor`), so such work is out of its
+/// reach, not merely dear. One closure a decide, recalled by its Threats so
+/// the Matcher and the fight carry share it: each room's grid with its Reach
+/// shut (`Atlas.weightsAvoiding`) built once, one flood a body
+/// (`Atlas.wayRound`), and nothing asked on a tick with no Reach.
+let private walledOffMemo: TickMemo.Memo<Threats, CreepInfo -> Task -> bool> =
+    TickMemo.create 8 TickMemo.byReference
+
+let private walledOffAfresh
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    : CreepInfo -> Task -> bool =
+    if Map.isEmpty threats.Reach then
+        fun _ _ -> false
+    else
+        let grids = System.Collections.Generic.Dictionary<string, int[]>()
+
+        let ways =
+            System.Collections.Generic.Dictionary<string, (Set<RoomPos> -> bool) option>()
+
+        fun (creep: CreepInfo) task ->
+            not (safetyTier task)
+            && runsFromThreats view atlas creep
+            && match Atlas.creepTile atlas creep.Name with
+               | None -> false
+               | Some at ->
+                   let reach = Threats.reachIn threats at.Room
+
+                   not (Set.isEmpty reach)
+                   && not (Set.contains (RoomPos.pos at) reach)
+                   && (let area = areaFor threats atlas creep.Name task
+
+                       not (Set.isEmpty area)
+                       && Set.forall (fun (tile: RoomPos) -> tile.Room = at.Room) area
+                       && (let way =
+                               match ways.TryGetValue creep.Name with
+                               | true, way -> way
+                               | _ ->
+                                   let weights =
+                                       match grids.TryGetValue at.Room with
+                                       | true, weights -> weights
+                                       | _ ->
+                                           let weights = Atlas.weightsAvoiding atlas at.Room reach
+                                           grids.[at.Room] <- weights
+                                           weights
+
+                                   let way = Atlas.wayRound atlas creep.Name reach weights
+                                   ways.[creep.Name] <- way
+                                   way
+
+                           way |> Option.exists (fun reaches -> not (reaches area))))
+
+let internal walledOffBy (view: ColonyView) atlas (threats: Threats) : CreepInfo -> Task -> bool =
+    TickMemo.recall walledOffMemo threats (fun _ -> walledOffAfresh view atlas threats)
+
 /// Keep still-valid assignments (anti-thrash) and greedily assign the rest,
 /// one share after another, each starting from the holdings the shares before
 /// it left. A body in no share is neither kept nor matched. `pool` is the
@@ -355,6 +414,34 @@ let matchCreepsBeside
             threatenedByKey.[key] <- answer
             answer
 
+    // Work a runner has no walk round the Reach to (`walledOffBy`) is out of
+    // its reach while it has other work it could take: priced as
+    // `travelCostOf` crossed for it, a body was ranked onto work it was
+    // never carried to and held it parked (W17S29 t996,770: loaded workers
+    // on a struck rampart the raid stood round, the tower at its reserve for
+    // a hundred ticks). A body with nothing else keeps it, parked at the
+    // edge until a way opens, as before.
+    let walledOffFrom = walledOffBy view atlas threats
+
+    let otherWork = System.Collections.Generic.Dictionary<string, bool>()
+
+    let walledOff (creep: CreepInfo) task =
+        walledOffFrom creep task
+        && (match otherWork.TryGetValue creep.Name with
+            | true, answer -> answer
+            | _ ->
+                let answer =
+                    pool
+                    |> List.exists (fun other ->
+                        not (safetyTier other.Task)
+                        && not (threatenedFor creep other.Task)
+                        && applicable view threats atlas creep other
+                        && Option.isSome (travelCostOf threats atlas creep.Name other.Task)
+                        && not (walledOffFrom creep other.Task))
+
+                otherWork.[creep.Name] <- answer
+                answer)
+
     // One gate cascade judges every (creep, Task) pair, for both readings of
     // one: the fresh candidate the Matcher scores and the assignment it is
     // deciding whether to keep. Rejected at the first gate it fails
@@ -387,6 +474,7 @@ let matchCreepsBeside
             else
                 match cost with
                 | None -> Error RejectReason.Unreachable
+                | Some _ when walledOff creep pooled.Task -> Error RejectReason.Unreachable
                 | Some _ when not (outlivesTheStay view atlas creep pooled.Task arrival) ->
                     Error RejectReason.Inapplicable
                 | Some cost ->

@@ -2347,11 +2347,13 @@ let fireReflexTests =
                 "a tower repairs our rampart a healed raider strikes, and fires instead at a raider worth a shot (#477)" {
                 let healed = [ Attack; Move ] @ List.replicate 20 Heal
 
+                // 2,000 hits: under the towers' repair line (#591; 90,000
+                // before, which is over it).
                 let besieged body =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
                         [ hostileAt "h-1" { X = 30; Y = 40 } body ]
-                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    |> withHits "rampart-1" BuiltKind.Rampart 2_000 1_000_000
                     |> holdingTower "tower-1" 500
 
                 let healedOn = (decideOn (besieged healed)).Intents
@@ -2380,8 +2382,10 @@ let fireReflexTests =
                             "rampart-far", { X = 40; Y = 10 }
                         ]
                         [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
-                    |> withHits "rampart-a" BuiltKind.Rampart 90_000 1_000_000
-                    |> withHits "rampart-b" BuiltKind.Rampart 60_000 1_000_000
+                    // Both under the towers' repair line (#591; 90,000 and
+                    // 60,000 before).
+                    |> withHits "rampart-a" BuiltKind.Rampart 2_500 1_000_000
+                    |> withHits "rampart-b" BuiltKind.Rampart 2_000 1_000_000
                     |> withHits "rampart-far" BuiltKind.Rampart 1_000 1_000_000
                     |> holdingTower "tower-1" 500
 
@@ -2398,7 +2402,8 @@ let fireReflexTests =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
                         [ hostileAt "h-1" { X = 30; Y = 40 } healed ]
-                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    // Under the towers' repair line (#591; 90,000 before).
+                    |> withHits "rampart-1" BuiltKind.Rampart 2_000 1_000_000
                     |> holdingTower "tower-1" energy
 
                 let reserve = (at 0).Tuning.TowerRepairReserve
@@ -2410,6 +2415,59 @@ let fireReflexTests =
                     (towerRepairs (decideOn (at (reserve + Engine.towerEnergyCost))).Intents)
                     [ "tower-1", "rampart-1" ]
                     "one act over it repairs"
+            }
+
+            test
+                "a tower repairs a struck rampart only under the horizon's worth of the raid converged on it, and never lets it under the floor (#591)" {
+                // W17S29 t996,693: the towers poured ~2,000 energy into a
+                // 112k rampart a dismantler took 90 a tick off, and sat at
+                // their reserve when the raid needed a shot. Every body here
+                // is healed past a tower's shot, so the tower only repairs.
+                let healing = List.replicate 20 Heal
+                let plinker = [ RangedAttack; Move ] @ healing
+                let heavy = List.replicate 25 Work @ [ Move ] @ healing
+
+                let at hostiles hits =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        hostiles
+                    |> withHits "rampart-1" BuiltKind.Rampart hits 30_000_000
+                    |> holdingTower "tower-1" Engine.towerCapacity
+
+                let repairs hostiles hits =
+                    towerRepairs (decideOn (at hostiles hits)).Intents
+
+                let tuning = (at [] 0).Tuning
+                let horizon = tuning.RampartRepairHorizon
+                let floor = tuning.RampartTowerFloor
+                let plinking = [ hostileAt "h-1" { X = 30; Y = 40 } plinker ]
+
+                Expect.isEmpty (repairs plinking 112_000) "a plinker on 112k: the energy held"
+
+                Expect.isEmpty (repairs plinking floor) "a plinker on the floor: held"
+
+                Expect.equal
+                    (repairs plinking (floor - 1))
+                    [ "tower-1", "rampart-1" ]
+                    "a plinker on a rampart under the floor: repaired, whatever its 10 a tick"
+
+                let line = horizon * 25 * Engine.dismantlePower
+                let dismantling = [ hostileAt "h-1" { X = 30; Y = 40 } heavy ]
+
+                Expect.isEmpty (repairs dismantling line) "a 25-WORK dismantler at its line: held"
+
+                Expect.equal
+                    (repairs dismantling (line - 1))
+                    [ "tower-1", "rampart-1" ]
+                    "under it: repaired"
+
+                // The plinker strikes it; the dismantler stands off at range 8.
+                let walkingIn = plinking @ [ hostileAt "h-2" { X = 31; Y = 32 } heavy ]
+
+                Expect.equal
+                    (repairs walkingIn 112_000)
+                    [ "tower-1", "rampart-1" ]
+                    "a dismantler at home but not yet beside it counts: 112k is under its line"
             }
 
             test
@@ -2459,7 +2517,9 @@ let fireReflexTests =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
                         trepPair
-                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    // Under the towers' repair line, the melee's 510 a tick
+                    // over the horizon (#591; 90,000 before, over it).
+                    |> withHits "rampart-1" BuiltKind.Rampart 40_000 1_000_000
                     |> holdingTower "tower-1" energy
 
                 let full = (decideOn (at Engine.towerCapacity)).Intents
@@ -2736,7 +2796,8 @@ let fireReflexTests =
                         [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
                         trepPair
                         [ "ours", { X = 31; Y = 40 }, 0 ]
-                    |> withHits "rampart-1" BuiltKind.Rampart 90_000 1_000_000
+                    // Under the towers' repair line (#591; 90,000 before).
+                    |> withHits "rampart-1" BuiltKind.Rampart 40_000 1_000_000
                     |> holdingTower "tower-1" 500
 
                 let intents = (decideOn onRampart).Intents

@@ -610,6 +610,52 @@ let verdictTests =
                     "with no rampart struck it keeps its Upgrade"
             }
 
+            test
+                "a loaded worker with no way round the Reach to a struck rampart is released Unreachable and refills the raided tower (#591)" {
+                // W17S29 t996,770: three loaded workers held the Repair of a
+                // rampart the raid's Reach stood round, parked at its edge,
+                // while a tower sat at its reserve for a hundred ticks. The
+                // longbow's Reach takes every tile of the Work Area but the
+                // rampart's own, and no walk to that one stays out of it.
+                let room =
+                    openRoom 10
+                    |> withTargets
+                        [
+                            "ram-1", { X = 20; Y = 25 }, Structure BuiltKind.Rampart
+                            "tower-1", { X = 30; Y = 30 }, Structure BuiltKind.Tower
+                        ]
+                    |> withCreepsAt [ "w1", { X = 30; Y = 26 } ]
+
+                let colony =
+                    { atLevel 3 room with
+                        Sources = []
+                        Creeps = [ worker "w1" 50 0 ]
+                        Refillables = [ refillable "tower-1" 700 BuiltKind.Tower ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 300_000 3_000_000
+                    |> facing [ hostileAt "h-1" { X = 19; Y = 25 } [ RangedAttack; Move ] ]
+
+                let sticky = Map.ofList [ "w1", taskId (Repair "ram-1") ]
+                let verdicts = (decideFrom sticky colony).Verdicts
+
+                Expect.contains
+                    verdicts
+                    (Verdict.Released(
+                        "w1",
+                        taskId (Repair "ram-1"),
+                        ReleaseReason.Rejected RejectReason.Unreachable
+                    ))
+                    $"the walled-off Repair lets the worker go: {verdicts}"
+
+                Expect.isTrue
+                    (verdicts
+                     |> List.exists (function
+                         | Verdict.Matched("w1", task, _) ->
+                             task = taskId (Refill("tower-1", Energy))
+                         | _ -> false))
+                    $"and it feeds the tower: {verdicts}"
+            }
+
             test "a repair runs to the whole line and then releases TaskGone, once per job" {
                 // A holder is released nowhere inside the band between the
                 // two lines and `task-gone` past it: one release per repair
