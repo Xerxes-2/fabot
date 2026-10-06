@@ -301,24 +301,84 @@ let guardRowTests =
                     "a lone healer is a hostile the raid log records and no threat at all"
             }
 
-            test "a raid at home hires no guard" {
-                // This row is the outpost's and nothing else: a raid in the home room
-                // is the keep's business, and the home room is not a declared outpost.
+            test "a raid at home its towers win hires no guard, and one they lose hires one" {
+                // A raid in the home is its towers' while they win it, and the
+                // Defend's at a line; one neither answers is the home's Guard's
+                // (#568: with no line, the towers off, nothing was cast).
                 // Read at (8,9), far enough from the spawn at (20,10) that the spawn
                 // hold is not what is answering; a held tick derives no quotas at all.
-                let athome =
-                    { guardColony [] [] with
+                let athome towers =
+                    let colony = guardColony [] []
+
+                    { colony with
                         Hostiles = [ hostileIn "W1N1" { X = 8; Y = 9 } smallMelee ]
+                        Refillables =
+                            colony.Refillables
+                            @ [
+                                for i in 1..towers ->
+                                    {
+                                        Id = $"tower-{i}"
+                                        FreeCapacity = 0
+                                        Kind = BuiltKind.Tower
+                                    }
+                            ]
+                        Spatial =
+                            { colony.Spatial with
+                                RoomName = Some "W1N1"
+                            }
                     }
 
                 Expect.equal
-                    (guardQuotaOf athome)
+                    (guardQuotaOf (athome 1))
                     (Some 0)
-                    "the same raid that hires one in the outpost hires none at home"
+                    "one loaded tower wins a smallMelee: the raid that hires one in the outpost hires none at home"
 
                 Expect.isSome
-                    (rowOf "guard" athome)
+                    (rowOf "guard" (athome 1))
                     "and the cascade ran: the row is written down, it is simply zero"
+
+                Expect.equal
+                    (guardQuotaOf (athome 0))
+                    (Some 1)
+                    "with no tower loaded and no line, the guard row answers it"
+
+                Expect.equal
+                    (guardQuotaOf { athome 0 with Mother = Some "W2N1" })
+                    (Some 0)
+                    "a child's home is its mother's to guard (#428), never its own row's"
+
+                // One tower drained under a shot's energy for a tick.
+                let drained stock =
+                    let colony = athome 0
+
+                    { colony with
+                        Refillables =
+                            colony.Refillables
+                            @ [
+                                {
+                                    Id = "tower-dry"
+                                    FreeCapacity = Engine.towerCapacity
+                                    Kind = BuiltKind.Tower
+                                }
+                            ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    colony.Spatial.TargetKinds
+                                    |> Map.add "storage-1" (Structure BuiltKind.Storage)
+                                Stores = colony.Spatial.Stores |> Map.add "storage-1" stock
+                            }
+                    }
+
+                Expect.equal
+                    (guardQuotaOf (drained Engine.towerCapacity))
+                    (Some 0)
+                    "a dry tower the stock refills whole still holds: a refill gap casts nothing"
+
+                Expect.equal
+                    (guardQuotaOf (drained 0))
+                    (Some 1)
+                    "one nothing refills is lost to the raid"
             }
 
             test "a melee guard cannot count self-heal toward surviving a healer-backed raid" {

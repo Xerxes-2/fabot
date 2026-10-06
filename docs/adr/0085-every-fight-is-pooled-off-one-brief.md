@@ -1,6 +1,8 @@
 # Every fight is pooled off one Brief: a room's targets, the bodies fit for them, and the ground they hit from
 
-> **Status:** accepted, amended by 0086, 0088, #550, #558
+> **Status:** accepted, amended by 0086, 0088, #550, #558, #568
+
+> **Amended by #568** (spar: outpost-ranged-healer's melee guards kited to death by Invader shooters, a 2-block guard by one smallRanged over ~200 ticks): T2's `Facts.swingReaches` no longer counts a raider penned in its room as in a swing's reach unless it carries a live ATTACK. An Invader with none flees every hostile inside three (`findAttack.js`) and keeps its range inside its room, so its shooters are the ranger row's as a player's are. The t973,670 capture now casts one ranger for the shooters; the guards kill the mixed body and live. `canStrike`'s penned clause (admission) is unchanged.
 
 > **Amended by ADR 0088 S2** (#533): `Avoid.Runner` for a fighter walking to a fight in another room than the one it stands in is no longer "nothing of its own". It walks round what out-damages its heal where it stands, as a runner walks round the Reach: the fight it walks to is not this room's. The other arms are unchanged until S3.
 

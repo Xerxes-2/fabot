@@ -1507,7 +1507,7 @@ let colonyViewTests =
                             atlas
                             threats
                             HeldTaskFacts.empty
-                            (Planner.outpostFactsOf view))
+                            (Planner.outpostFactsOf view (Fabot.Core.Atlas.ofView view)))
                     |> List.tryFind (fun entry -> entry.Task = Guard outpost)
 
                 Expect.equal
@@ -1638,7 +1638,7 @@ let colonyViewTests =
                         (Fabot.Core.Atlas.ofView taken)
                         noThreats
                         HeldTaskFacts.empty
-                        (outpostFactsOf taken))
+                        (outpostFactsOf taken (Fabot.Core.Atlas.ofView taken)))
                     (Claim $"ctrl-{child}")
                     "and its controller is a Claim in her pool"
 
@@ -1654,7 +1654,7 @@ let colonyViewTests =
                         (Fabot.Core.Atlas.ofView rival)
                         noThreats
                         HeldTaskFacts.empty
-                        (outpostFactsOf rival)
+                        (outpostFactsOf rival (Fabot.Core.Atlas.ofView rival))
                      |> List.filter (function
                          | Claim _ -> true
                          | _ -> false))
@@ -1692,7 +1692,7 @@ let colonyViewTests =
                             (Fabot.Core.Atlas.ofView taken)
                             noThreats
                             HeldTaskFacts.empty
-                            (outpostFactsOf taken)))
+                            (outpostFactsOf taken (Fabot.Core.Atlas.ofView taken))))
                     "nothing of that room is an intake of hers"
             }
 
@@ -1717,7 +1717,7 @@ let colonyViewTests =
                             (Fabot.Core.Atlas.ofView raising)
                             noThreats
                             HeldTaskFacts.empty
-                            (outpostFactsOf raising)))
+                            (outpostFactsOf raising (Fabot.Core.Atlas.ofView raising))))
                     "so nothing pools a draw on it"
 
                 Expect.equal
@@ -1890,7 +1890,7 @@ let private guardsPooled (view: ColonyView) =
         atlas
         (threatsOf view atlas)
         HeldTaskFacts.empty
-        (Planner.outpostFactsOf view)
+        (Planner.outpostFactsOf view (Fabot.Core.Atlas.ofView view))
     |> List.filter (function
         | Guard _ -> true
         | _ -> false)
@@ -2174,7 +2174,7 @@ let garrisonedHomeTests =
                         atlas
                         (threatsOf view atlas)
                         HeldTaskFacts.empty
-                        (Planner.outpostFactsOf view)
+                        (Planner.outpostFactsOf view (Fabot.Core.Atlas.ofView view))
                      |> List.contains (Upgrade "ctrl-W13S28"))
                     "and the child's Upgrade is not hers"
             }
@@ -2426,7 +2426,7 @@ let childOutpostTests =
                         atlas
                         (threatsOf view atlas)
                         HeldTaskFacts.empty
-                        (Planner.outpostFactsOf view)
+                        (Planner.outpostFactsOf view (Fabot.Core.Atlas.ofView view))
                      |> List.exists (fun task ->
                          match task with
                          | Pickup(id, _)
@@ -2577,7 +2577,8 @@ let worldSeamTests =
                         Observe.capEpisodes
                         Set.empty
                         motherView
-                        (Planner.outpostFactsOf motherView).Declared
+                        (Planner.outpostFactsOf motherView (Fabot.Core.Atlas.ofView motherView))
+                            .Declared
 
                 Expect.equal
                     (log.Outposts |> List.map (fun row -> row.RoomName, row.LastSeen))
@@ -4633,7 +4634,7 @@ let salvageTests =
                         (Fabot.Core.Atlas.ofView view)
                         noThreats
                         HeldTaskFacts.empty
-                        (outpostFactsOf view)
+                        (outpostFactsOf view (Fabot.Core.Atlas.ofView view))
                     |> List.filter (fun task ->
                         namedBy task |> Option.exists (fun id -> Set.contains id room))
 
@@ -5032,7 +5033,7 @@ let harassViewTests =
                             Observe.capEpisodes
                             Set.empty
                             seen
-                            (Planner.outpostFactsOf seen).Declared
+                            (Planner.outpostFactsOf seen (Fabot.Core.Atlas.ofView seen)).Declared
                             Observe.RaidState.empty
 
                     let gate = Observe.standDown Tuning.defaults (world.Time + 1) log
@@ -5311,7 +5312,7 @@ let harassViewTests =
 
                 Expect.isTrue (Map.containsKey harassRoom view.Spatial.Rooms) "in her scan set"
 
-                let facts = outpostFactsOf view
+                let facts = outpostFactsOf view (Fabot.Core.Atlas.ofView view)
 
                 Expect.equal
                     facts.Claims
@@ -5363,7 +5364,7 @@ let harassViewTests =
                     let view =
                         harassViewOver claimingDeclared StandDown.none harassDeclared world mother
 
-                    let facts = outpostFactsOf view
+                    let facts = outpostFactsOf view (Fabot.Core.Atlas.ofView view)
 
                     facts.Claims,
                     planTasks

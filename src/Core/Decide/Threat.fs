@@ -2592,7 +2592,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // only where a claim ahead would otherwise shut a later one out.
     let guarded =
         lazy
-            (Facts.guardedRooms view (Facts.declaredOutposts view) (Facts.fuelledErrands view)
+            (Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
              |> Set.ofList)
 
     let pools kind room =

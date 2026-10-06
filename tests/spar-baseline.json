@@ -71,6 +71,18 @@
     "ticks": 300,
     "towerSpent": 380
   },
+  "home-towerless-melee": {
+    "castEnergy": 750,
+    "cleared": 41,
+    "hurt": 340,
+    "kills": 1,
+    "ourDeaths": 0,
+    "safeMode": false,
+    "stoodDown": false,
+    "struck": 0,
+    "ticks": 300,
+    "towerSpent": 0
+  },
   "outpost-melee": {
     "castEnergy": 0,
     "cleared": 16,
@@ -96,11 +108,11 @@
     "towerSpent": 20
   },
   "outpost-ranged-healer": {
-    "castEnergy": 3000,
-    "cleared": 359,
-    "hurt": 4352,
+    "castEnergy": 2800,
+    "cleared": 161,
+    "hurt": 1332,
     "kills": 3,
-    "ourDeaths": 3,
+    "ourDeaths": 1,
     "safeMode": false,
     "stoodDown": false,
     "struck": 0,
@@ -108,16 +120,16 @@
     "towerSpent": 0
   },
   "outpost-squad": {
-    "castEnergy": 4500,
-    "cleared": 185,
-    "hurt": 3102,
+    "castEnergy": 4900,
+    "cleared": 427,
+    "hurt": 3000,
     "kills": 5,
-    "ourDeaths": 2,
+    "ourDeaths": 1,
     "safeMode": false,
     "stoodDown": false,
     "struck": 0,
     "ticks": 500,
-    "towerSpent": 30
+    "towerSpent": 0
   },
   "stronghold-l2-rangers": {
     "castEnergy": 0,

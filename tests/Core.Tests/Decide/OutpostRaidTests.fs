@@ -3247,7 +3247,7 @@ let private shutOf (colony: ColonyView) =
         Observe.capEpisodes
         Set.empty
         colony
-        (Planner.outpostFactsOf colony).Declared
+        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
     |> Observe.standDown Tuning.defaults (colony.Time + 1)
     |> fun gate -> gate.Shut
 
@@ -3348,7 +3348,7 @@ let childOutpostTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
@@ -3448,7 +3448,7 @@ let childOutpostTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
@@ -3580,7 +3580,7 @@ let childOutpostTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
@@ -4396,7 +4396,7 @@ let guardFlavourTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
@@ -5167,7 +5167,7 @@ let killAdmissionTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
@@ -5443,6 +5443,42 @@ let engagementTests =
                      |> List.map (fun ask -> ask.Row))
                     [ CastRow.Guard ]
                     "a bank that casts no ranger block is never asked for one (#546): the guard's"
+            }
+
+            test
+                "the W11S28 shape as the engine's Invaders asks the ranger row: penned, its shooters still flee" {
+                // An Invader with no ATTACK flees every hostile inside three
+                // (`findAttack.js`): penned in its room, it keeps its range
+                // there all the same (#568's spar, a guard kited to death).
+                let npc = invasion |> List.map (fun h -> { h with Owner = "Invader" })
+
+                let colony =
+                    { declaredRaid npc with
+                        Bank = bank 5600 5600
+                    }
+
+                let atlas = Atlas.ofView colony
+                let brief = Threats.briefOf (threatsOf colony atlas) "W1N2"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Ranger ]
+                    "the guard's swing reaches no Invader shooter, so the ranger row is asked"
+
+                Expect.isFalse
+                    (brief.Admits colony atlas (guard "g-1"))
+                    "and a melee guard is not sent into it"
+
+                let mixedOnly =
+                    { declaredRaid (List.take 1 npc) with
+                        Bank = bank 5600 5600
+                    }
+
+                Expect.equal
+                    ((Threats.briefOf (threatsOf mixedOnly (Atlas.ofView mixedOnly)) "W1N2").Asks
+                     |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Guard ]
+                    "an Invader carrying ATTACK closes, so it is still the guard's"
             }
 
             test

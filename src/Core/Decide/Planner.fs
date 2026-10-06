@@ -338,7 +338,7 @@ type OutpostFacts =
 /// `reservableControllers`, which re-entered `outpostControllers`, which
 /// re-entered `claimTargets`, so one ask at the end of the chain used to walk
 /// the census four times.
-let outpostFactsOf (view: ColonyView) : OutpostFacts =
+let outpostFactsOf (view: ColonyView) atlas : OutpostFacts =
     let controllers = outpostControllers view
     let declared = declaredOf view controllers
     let reservable = reservableControllersOf view controllers
@@ -349,7 +349,7 @@ let outpostFactsOf (view: ColonyView) : OutpostFacts =
         Declared = declared
         ReservableControllers = reservable
         ReservableRooms = reservableOutpostsOf view reservable
-        Guarded = guardedRooms view declared fuelled
+        Guarded = guardedRooms view atlas declared fuelled
         Fuelled = fuelled
     }
 

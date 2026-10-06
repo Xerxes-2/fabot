@@ -126,6 +126,23 @@ let private homeRaid (raid: BodyPart list list) () : Arena =
     arena 900_000 [ w12s28 () ] [ colony "W12S28" ] (homeCrew @ raiders)
     |> withCasts [ "guard"; "ranger"; "defender" ]
 
+/// The home raid with W12S28's towers gone and no safe mode left (#568): the
+/// raid no tower and no line answers, which only the home's own row's cast
+/// meets.
+let private towerlessRaid (raid: BodyPart list list) () : Arena =
+    let a = homeRaid raid ()
+
+    { a with
+        Rooms =
+            a.Rooms
+            |> Map.map (fun _ r ->
+                { r with
+                    Structures = r.Structures |> List.filter (fun s -> s.Kind <> "tower")
+                    Controller =
+                        r.Controller |> Option.map (fun c -> { c with SafeModeAvailable = 0 })
+                })
+    }
+
 /// W17S25's declared perimeter (`Colony.declared`): west to W18S25, south
 /// to W17S26, the x=32 neck east.
 let private w17s25Perimeter: Pos list =
@@ -304,6 +321,12 @@ let private scenarios () : Scenario list =
                 Start = homeRaid raid
                 Cleared = noHostile
             }
+        {
+            Slug = "home-towerless-melee"
+            Ticks = 300
+            Start = towerlessRaid [ smallMelee ]
+            Cleared = noHostile
+        }
         {
             Slug = "home-exit-bounce"
             Ticks = 300

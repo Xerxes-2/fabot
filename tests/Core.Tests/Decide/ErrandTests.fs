@@ -180,7 +180,7 @@ let errandStandDownTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
 
                 Expect.isFalse
                     (Set.contains errandRoom (Observe.standDown Tuning.defaults (tick + 1) log).Shut)
@@ -221,7 +221,7 @@ let errandStandDownTests =
                         Observe.capEpisodes
                         Set.empty
                         colony
-                        (Planner.outpostFactsOf colony).Declared
+                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
 
                 Expect.contains
                     (Observe.standDown Tuning.defaults (tick + 599) log).Shut
@@ -626,7 +626,7 @@ let errandStandDownTests =
                         Observe.capEpisodes
                         Set.empty
                         seen
-                        (Planner.outpostFactsOf seen).Declared
+                        (Planner.outpostFactsOf seen (Atlas.ofView seen)).Declared
                     |> Observe.standDown Tuning.defaults (tick + 1)
                     |> fun gate -> gate.Shut
 
@@ -781,7 +781,7 @@ let errandStandDownTests =
                         Observe.capEpisodes
                         Set.empty
                         seen
-                        (Planner.outpostFactsOf seen).Declared
+                        (Planner.outpostFactsOf seen (Atlas.ofView seen)).Declared
 
                 let gateAt tick =
                     (Observe.standDown Tuning.defaults tick log).Shut

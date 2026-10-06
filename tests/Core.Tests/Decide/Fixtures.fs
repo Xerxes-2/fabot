@@ -211,6 +211,7 @@ let bareRespawn =
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false
+        Mother = None
         Crossed = Set.empty
         Evacuating = Set.empty
         Reactors = []
@@ -506,7 +507,7 @@ let planTasksOn view threats =
         (Atlas.ofView view)
         threats
         HeldTaskFacts.empty
-        (Planner.outpostFactsOf view)
+        (Planner.outpostFactsOf view (Atlas.ofView view))
 
 /// `planTasksOn` over a colony whose living creeps hold these Tasks, spelled
 /// forward through `taskId` so a test names the Task and never a string.
@@ -518,7 +519,7 @@ let planTasksHolding (holding: Task list) view =
         { HeldTaskFacts.empty with
             All = holding |> List.map taskId |> Set.ofList
         }
-        (Planner.outpostFactsOf view)
+        (Planner.outpostFactsOf view (Atlas.ofView view))
 
 /// The same narrow held-task fact for a carrier that still has Thorium aboard.
 let planTasksHoldingThorium (holding: Task list) view =
@@ -532,7 +533,7 @@ let planTasksHoldingThorium (holding: Task list) view =
             All = ids
             WithThorium = ids
         }
-        (Planner.outpostFactsOf view)
+        (Planner.outpostFactsOf view (Atlas.ofView view))
 
 /// This tick's pool with its priorities and capacities, over the
 /// snapshot's own Atlas — what the Matcher and the mover are both handed —
@@ -2521,6 +2522,6 @@ let pooledHolding (holding: (string * Task) list) (task: Task) (colony: ColonyVi
         atlas
         threats
         []
-        (Planner.planTasks colony atlas threats held (Planner.outpostFactsOf colony))
+        (Planner.planTasks colony atlas threats held (Planner.outpostFactsOf colony atlas))
     |> List.tryFind (fun entry -> entry.Task = task)
     |> Option.map (fun entry -> entry.Priority, entry.Capacity)

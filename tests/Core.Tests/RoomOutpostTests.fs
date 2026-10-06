@@ -649,7 +649,7 @@ let outpostContainerTests =
                         (Fabot.Core.Atlas.ofView view)
                         noThreats
                         HeldTaskFacts.empty
-                        (outpostFactsOf view)
+                        (outpostFactsOf view (Fabot.Core.Atlas.ofView view))
                     |> List.filter (function
                         | Reserve _
                         | Claim _ -> true

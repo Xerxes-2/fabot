@@ -796,19 +796,23 @@ let private slowerOnPlain (side: HostileInfo list) (ours: BodyPart -> int) (host
 /// Whether a melee swing reaches a raider (#535): one whose gun is not its
 /// weapon — no RANGED_ATTACK in effect, or a swing that outdeals its shot
 /// (the engine's smallMelee, one gun beside its ATTACK, closes) — so it must
-/// close to hurt our work; or one that cannot keep away, rooted, penned in its
-/// room (an Invader, as `canStrike` reads it) or slower than ours on plain,
-/// the ground a fight crosses. A body fighting with its
-/// gun, as quick as ours, keeps its range for as long as it likes, and its
-/// healers behind it: one token ATTACK among its guns does not bring it in.
+/// close to hurt our work; or one that cannot keep away, rooted, an Invader
+/// carrying ATTACK or slower than ours on plain, the ground a fight crosses.
+/// A body fighting with its gun, as quick as ours, keeps its range for as
+/// long as it likes, and its healers behind it: one token ATTACK among its
+/// guns does not bring it in. Penned in its room is no reach (#568): an
+/// Invader with no ATTACK flees every hostile inside three
+/// (`findAttack.js`), and kites a melee guard to death inside its room.
 let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raider: HostileInfo) =
     let parts = HostileInfo.effectivePower side raider
 
     Engine.attackPower * parts Attack
     >= Engine.rangedAttackPower * parts RangedAttack
     || HostileInfo.stationary side raider
-    // Penned in its room (an Invader), as `canStrike` reads it.
+    // An Invader with a live ATTACK walks onto its target whatever else it
+    // carries: `findAttack.js` reads the active parts, never healed-back ones.
     || not (HostileInfo.crossesExits raider)
+       && List.contains Attack (Engine.liveParts raider.Body raider.Hits)
     || slowerOnPlain side ours raider
 
 /// Whether a body of these part counts brings its swing to bear on one
@@ -2353,16 +2357,87 @@ let private defendedHomesOf (view: ColonyView) : string list =
         view.Hostiles
         |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h))
 
+/// Whether the home stands raided by bodies nothing of ours answers but its
+/// own row's cast (#568): an armed body we may strike, out of safe mode,
+/// that no Defend meets — one inside the line, or any where the home holds
+/// no line a defender stands on (`raidAtLine`, `perimeterRamparts`) —
+/// priced with the healers beside it against the home's towers, which lose
+/// it; and the home's own row, where the verdict weighs it, wins it. Never a
+/// child's home (`ColonyView.Mother`): its mother guards it while its towers
+/// cannot hold it (`defendedHomesOf`, #428), and its own bank buys a body
+/// that dies before it matters. A row that loses casts nothing either.
+let private homeUnheld (view: ColonyView) atlas : bool =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let shielded =
+        Map.tryFind home view.RoomControl
+        |> Option.exists (fun control -> control.SafeMode)
+
+    let inHome =
+        view.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = home && not (HostileInfo.isKeeper h))
+
+    if
+        Option.isSome view.Mother
+        || shielded
+        || inHome |> List.forall (HostileInfo.armed view.Hostiles >> not)
+    then
+        false
+    else
+        let lined = keepsRamparts view && not (List.isEmpty (perimeterRamparts view))
+
+        let atLine =
+            if lined then
+                snd (raidAtLine view atlas) |> List.map (fun h -> h.Id) |> Set.ofList
+            else
+                Set.empty
+
+        let raid =
+            inHome
+            |> List.filter (fun h ->
+                not (Set.contains h.Id atLine)
+                && (HostileInfo.armed view.Hostiles h && mayStrike view Set.empty h
+                    || HostileInfo.heals view.Hostiles h))
+
+        // The home's own towers (`LoadedTowers` carries only the raised
+        // children's homes): each holding a shot's energy, and each dry one
+        // the stock refills whole, so a tick's refill gap casts nothing; only
+        // towers the stock cannot feed are lost to the raid.
+        let loaded, dry =
+            view.Refillables
+            |> List.filter (fun r -> r.Kind = BuiltKind.Tower)
+            |> List.partition (fun r ->
+                Engine.towerCapacity - r.FreeCapacity >= Engine.towerEnergyCost)
+
+        let towers =
+            List.length loaded
+            + min (List.length dry) (stockedEnergy view / Engine.towerCapacity)
+
+        raid |> List.exists (HostileInfo.armed view.Hostiles)
+        && not (
+            exchangeAgainst
+                view
+                Reaction.strike
+                raid
+                (towers * Engine.towerAttackAt Engine.towerFalloffRange)
+                (towers * Engine.towerHits)
+                []
+        )
+        && (verdictOf view home).Rows
+           |> Map.tryFind home
+           |> Option.exists (fun row -> row.Wins)
+
 /// The rooms whose Guard `planTasks` pools whatever kind claims them, and the
 /// rooms the fighting rows cast for (`OutpostFacts.Guarded`), or a Guard is
 /// pooled with no body bought or a body cast with no Task: the declared
 /// outposts a threat or a level-0 core (#487) stands in, the errand rooms the
 /// ranger row keeps a body in (#414), the children's homes this colony raises
-/// (#447) or defends (#428), and the harassment rooms it casts (#432). Each
+/// (#447) or defends (#428), the harassment rooms it casts (#432), and its
+/// own home while a raid there is unheld (`homeUnheld`, #568). Each
 /// room once: a raised home that is beaten is one Guard and one row's count,
 /// not two. The Brief reads it too (#542): a kind claims a room only where its
 /// claim pools something.
-let internal guardedRooms (view: ColonyView) (declared: string list) (fuelled: Errand list) =
+let internal guardedRooms (view: ColonyView) atlas (declared: string list) (fuelled: Errand list) =
     guardedOutpostsOf view declared
     @ coredOutpostsOf view declared
     @ guardedErrandsOf fuelled
@@ -2371,6 +2446,10 @@ let internal guardedRooms (view: ColonyView) (declared: string list) (fuelled: E
     @ defendedHomesOf view
     // Target or none, as an errand room is kept.
     @ (harassRooms view |> Set.toList)
+    @ (if homeUnheld view atlas then
+           [ SpatialInfo.homeName view.Spatial ]
+       else
+           [])
     |> List.distinct
 
 /// Whether the season's delivery programme has all of its current ground

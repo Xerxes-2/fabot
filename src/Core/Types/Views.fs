@@ -653,6 +653,10 @@ type ColonyView =
         /// The home room's declared perimeter (`Colony.Perimeter`, #446): the
         /// chokes the Layout ramparts beside the Keep.
         Perimeter: Pos list
+        /// The colony's declared mother (`Colony.Mother`): a child's home is
+        /// hers to guard when its towers cannot hold it (#428), never its own
+        /// guard row's (#568).
+        Mother: string option
         /// The hits a rampart on each of these home tiles is whole at, in
         /// place of `Tuning.RampartFloor` (`Colony.RampartFloors`).
         RampartFloors: Map<Pos, int>
@@ -1824,6 +1828,7 @@ module ColonyView =
                 else
                     None
             Perimeter = colony.Perimeter
+            Mother = colony.Mother
             RampartFloors = colony.RampartFloors
             // Off the world's creeps and not `mine` (#448): who holds a body
             // is not whether it defends the room it stands in.

@@ -29,7 +29,12 @@ let private planHolding (colony: ColonyView) (holding: (string * Task) list) =
     let held = heldOn colony holding
     let atlas = Atlas.ofView colony
 
-    Planner.planTasks colony atlas (threatsHolding colony held) held (Planner.outpostFactsOf colony)
+    Planner.planTasks
+        colony
+        atlas
+        (threatsHolding colony held)
+        held
+        (Planner.outpostFactsOf colony atlas)
 
 /// One row's quota as the colony decides it with these Tasks held.
 let private quotaHolding (colony: ColonyView) (holding: (string * Task) list) (row: string) =

@@ -22,6 +22,7 @@ Every scenario is hermetic. Its colonies are spelt out in `Spar.fs` and never re
 |---|---|
 | `outpost-<raid>` | Invaders in W12S27's south-west corner, where our anchor digs and a hauler waits. One guard block stands at home in W12S28 (RCL7); the guard and ranger rows cast. 500 ticks. |
 | `home-<raid>` | Invaders inside W12S28's north exit, under its three towers, with the home crew at work. The guard, ranger and defender rows cast. 300 ticks. |
+| `home-towerless-melee` | The `home-melee` raid with W12S28's towers gone and no safe mode left (#568): the raid no tower and no line answers, met only by the home's own guard row. 300 ticks. |
 | `home-exit-bounce` | The #552 shape: Trepidimous' 18M17A melee and 11M7H healer bounce on W17S25's west exit, against the RCL4 home's tower, its perimeter ramparts and defender, and the defender and ranger rows. 300 ticks. |
 | `stronghold-l2-rangers` | Three 21M 14R 7H rangers one tile inside W16S26's south exit, under the L2 bunker (#565, #566). Cleared means the core fell. 150 ticks. |
 | `home-boosted-pass` | A T3-boosted 10T 15R 10M 15H neutral player walks through W12S28, north exit to west exit (ADR 0089 S0). 150 ticks. |

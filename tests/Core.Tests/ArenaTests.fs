@@ -1221,20 +1221,16 @@ let arenaScenarioTests =
             // Reproduced live before #535 (main feaee027, no casts): both guards
             // took the Guard and the first went in alone at t6, swung the
             // small mixed body down and stood kept off by the shooters, the
-            // second in at t32. Now: these are Invaders, penned in their room,
-            // so a guard's swing reaches them as `canStrike` reads them (the
-            // review's decision): the room stays the guard row's. The nearer
-            // guard walks in (#366) and, stepping onto each target it swings
-            // at, runs the shooters into the room's walls and edges; with the
-            // second it kills the whole invasion, neither shot rooted, and no
-            // ranger is cast. Under the engine's invader AI (#541) the
-            // shooters flee rather than kite and the healers go to the hurt:
-            // deaths move from t8/79/24/38/19 to t8/70/15/40/33 (735, 768,
-            // 779, 495, 657), 779 cornered in the west wall pocket among its
-            // own, the verdict the same. A player's shooters as quick as the
-            // guard are the ranger row's (`engagementTests`).
+            // second in at t32. #535 read penned Invaders as in a melee's
+            // reach and the two guards ran the shooters into the walls. #568:
+            // an Invader shooter flees every hostile inside three, so penned
+            // is no reach (spar's lone guard kited to death by one), and the
+            // room is the ranger row's as a player's shooters are
+            // (`engagementTests`). The guards kill the mixed body at t9 and
+            // are sent no further; the ranger cast at t1 clears the rest by
+            // t198 (768, 779, 495, 657 at t184/189/198/198).
             test
-                "#535 capture t973,670: the W11S28 invasion is run down by the two guards, penned Invaders being in a melee's reach" {
+                "#535 capture t973,670: the W11S28 invasion's shooters keep off a melee guard, so a ranger is cast for them" {
                 let start = w11s28Invasion () |> withCasts [ "guard"; "ranger" ]
                 let _, trace = start |> run 300
                 crossValidate "w11s28-invasion" start trace
@@ -1248,7 +1244,12 @@ let arenaScenarioTests =
                             | Born id -> Some id
                             | _ -> None))
 
-                Expect.isEmpty born $"nothing more is cast\n{failure}"
+                Expect.isNonEmpty born $"a ranger is cast\n{failure}"
+
+                Expect.all
+                    born
+                    (fun id -> id.StartsWith "ranger-")
+                    $"and nothing but rangers\n{failure}"
 
                 for invader in
                     [

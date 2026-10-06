@@ -449,7 +449,7 @@ let decideUnarbitrated
     // spawn Intent. The outpost chain's answers are derived once (#383):
     // before this `claimTargets` ran 11.4 times a tick and
     // `outpostControllers` 9.1, each walking the kind census.
-    let outposts = outpostFactsOf view
+    let outposts = outpostFactsOf view atlas
 
     let sizing = rowSizingOf view atlas threats outposts held
 

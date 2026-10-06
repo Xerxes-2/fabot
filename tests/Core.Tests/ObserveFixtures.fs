@@ -85,6 +85,7 @@ let quiet: ColonyView =
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false
+        Mother = None
         Crossed = Set.empty
         Evacuating = Set.empty
         Reactors = []
@@ -199,7 +200,9 @@ let raidTick t (colony: ColonyView) state =
         3
         alive
         (atShortGap t colony)
-        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
+        (let v = atShortGap t colony in
+         Fabot.Core.Decide.Planner.outpostFactsOf v (Fabot.Core.Atlas.ofView v))
+            .Declared
         state
 
 /// The same fold with the world said separately from the colony: a
@@ -209,7 +212,9 @@ let raidTickIn alive t (colony: ColonyView) state =
         3
         (Set.ofList alive)
         (atShortGap t colony)
-        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
+        (let v = atShortGap t colony in
+         Fabot.Core.Decide.Planner.outpostFactsOf v (Fabot.Core.Atlas.ofView v))
+            .Declared
         state
 
 /// One colony's Raid-log tick over the world danger log
@@ -224,7 +229,9 @@ let dangerTick (owned: string list) t (colony: ColonyView) (own: RaidState, dang
         alive
         (Set.ofList owned)
         (atShortGap t colony)
-        (Fabot.Core.Decide.Planner.outpostFactsOf (atShortGap t colony)).Declared
+        (let v = atShortGap t colony in
+         Fabot.Core.Decide.Planner.outpostFactsOf v (Fabot.Core.Atlas.ofView v))
+            .Declared
         own
         danger
 
