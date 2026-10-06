@@ -240,6 +240,91 @@ module Engine =
         let live = (hits + partHits - 1) / partHits
         body |> List.skip (max 0 (List.length body - live))
 
+    /// The hits part `i` of an `n`-part body holds at these hits: the tail
+    /// whole, one part before it partial, the head destroyed.
+    let private partHitsAt (n: int) (hits: int) (i: int) =
+        max 0 (min partHits (hits - partHits * (n - 1 - i)))
+
+    /// The parts of a body acting at these hits, each counted at its boost's
+    /// multiple (`Boost.multiple`), as `calcBodyEffectiveness` sums them: a
+    /// T3 HEAL heals as four. `boosts` is one a part head first, or empty for
+    /// a body with none boosted, which counts `liveParts` as they are.
+    let powerAt (body: BodyPart list) (boosts: Boost list) (hits: int) : BodyPart -> int =
+        if List.isEmpty boosts then
+            partCountIn (liveParts body hits)
+        else
+            let live = (hits + partHits - 1) / partHits
+
+            let acting = List.zip body boosts |> List.skip (max 0 (List.length body - live))
+
+            fun part ->
+                acting
+                |> List.sumBy (fun (p, boost) -> if p = part then Boost.multiple p boost else 0)
+
+    /// The hits a strike of `damage` takes off a body at these hits
+    /// (`creeps/tick.js` `_applyDamage`): each boosted TOUGH from the head
+    /// back takes its `Boost.damageRatio` share of what reaches it, the rest
+    /// in full. All of it on a body with none boosted.
+    let damageTaken (body: BodyPart list) (boosts: Boost list) (hits: int) (damage: int) : int =
+        if List.isEmpty boosts || damage <= 0 then
+            damage
+        else
+            let n = List.length body
+
+            let _, reduced =
+                List.zip body boosts
+                |> List.indexed
+                |> List.fold
+                    (fun (left, reduced) (i, (part, boost)) ->
+                        if left <= 0.0 then
+                            left, reduced
+                        else
+                            let ratio = Boost.damageRatio part boost
+                            let taken = min (float (partHitsAt n hits i) / ratio) left
+                            left - taken, reduced + taken * (1.0 - ratio))
+                    (float damage, 0.0)
+
+            // Math.round, which rounds a half up.
+            damage - int (floor (reduced + 0.5))
+
+    /// The hits a body at these hits holds in parts that take a share of a
+    /// strike (`Boost.damageRatio` under 1): its boosted TOUGH still standing.
+    let toughHits (body: BodyPart list) (boosts: Boost list) (hits: int) : int =
+        if List.isEmpty boosts then
+            0
+        else
+            let n = List.length body
+
+            List.zip body boosts
+            |> List.indexed
+            |> List.sumBy (fun (i, (part, boost)) ->
+                if Boost.damageRatio part boost < 1.0 then
+                    partHitsAt n hits i
+                else
+                    0)
+
+    /// The damage a strike must deal to take `taken` hits off a body at these
+    /// hits: `damageTaken`'s inverse, its boosted TOUGH from the head back
+    /// costing `1 / Boost.damageRatio` a hit, and hits past the body's at
+    /// one each. A heal restores the hits the last strike took, so it is
+    /// priced in damage this way too.
+    let damageFor (body: BodyPart list) (boosts: Boost list) (hits: int) (taken: int) : int =
+        if List.isEmpty boosts || taken <= 0 then
+            taken
+        else
+            let n = List.length body
+
+            let left, damage =
+                List.zip body boosts
+                |> List.indexed
+                |> List.fold
+                    (fun (left, damage) (i, (part, boost)) ->
+                        let take = min (partHitsAt n hits i) left
+                        left - take, damage + float take / Boost.damageRatio part boost)
+                    (taken, 0.0)
+
+            int (ceil (damage + float left - 1e-9))
+
     /// The most guard **bodies** one guarded room ever buys: where "hire
     /// another" stops. Each is sized to win the exchange alone, up to what the
     /// bank buys, and a raid is withdrawn from where the biggest such body

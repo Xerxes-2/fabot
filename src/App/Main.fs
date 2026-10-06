@@ -245,6 +245,7 @@ let private glance () : LightTick.Glance =
                                     hostile.body
                                     |> Array.map (fun part -> World.bodyPartOf part.``type``)
                                     |> List.ofArray
+                                Boosts = World.boostsOf hostile.body
                                 Hits = hostile.hits
                                 TicksToLive = hostile.ticksToLive
                             }

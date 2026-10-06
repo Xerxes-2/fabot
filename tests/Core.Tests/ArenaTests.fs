@@ -140,6 +140,53 @@ let arenaPhysicsTests =
                 Expect.equal (snapshotOf "shooter" trace).Hits 200 "no strike-back at range"
             }
 
+            test "a boosted part acts at its multiple and a boosted TOUGH takes its share of a hit" {
+                // `calcBodyEffectiveness` with `BOOSTS`, and
+                // `_applyDamage` through the TOUGH from the head.
+                let boost tiers (b: Body) = { b with Boosts = tiers }
+
+                let tank =
+                    doing "tank" blue (parts [ Tough, 2; Move, 1; Heal, 1 ]) (at 20 12) []
+                    |> boost [ Tier3; Tier3; Unboosted; Unboosted ]
+
+                let hitter =
+                    doing
+                        "hitter"
+                        red
+                        (parts [ Move, 1; Attack, 2 ])
+                        (at 21 12)
+                        [ Act.Attack "tank" ]
+                    |> boost [ Unboosted; Tier1; Tier1 ]
+
+                let _, trace = physics [ tank; hitter ] |> run 1
+
+                Expect.equal
+                    (snapshotOf "tank" trace).Hits
+                    (400 - 36)
+                    "two UH ATTACK swing 120; the XGHO2 TOUGH takes 0.3 of it"
+
+                let medic =
+                    doing "medic" blue (parts [ Move, 1; Heal, 1 ]) (at 19 12) [ Act.Heal "tank" ]
+                    |> boost [ Unboosted; Tier3 ]
+
+                let _, trace = physics [ { tank with Hits = 300 }; medic ] |> run 1
+                Expect.equal (snapshotOf "tank" trace).Hits 348 "one XLHO2 HEAL heals 48"
+
+                let runner tiers =
+                    doing "runner" red (parts [ Move, 1; Attack, 3 ]) (at 20 12) [ Act.Move Right ]
+                    |> boost tiers
+
+                let after tiers =
+                    let _, trace = physics [ runner tiers ] |> run 2
+                    (snapshotOf "runner" trace).At
+
+                Expect.equal
+                    (after [ Unboosted; Unboosted; Unboosted; Unboosted ],
+                     after [ Tier3; Unboosted; Unboosted; Unboosted ])
+                    (at 21 12, at 22 12)
+                    "one MOVE under three parts tires on plain; an XZHO2 MOVE pays its 6 off at once"
+            }
+
             test "damage and heal settle together before the death check" {
                 let target =
                     { doing "target" red (parts [ Move, 1; Heal, 1 ]) (at 20 12) [] with
@@ -1044,7 +1091,7 @@ let private pouredBack (trace: TickTrace list) =
 //   W12S28  https://screeps.com/room-history/shardSeason/W12S28/973600.json
 // Left out, as the capture says: Healers, ExitWatches and Sightings start
 // empty; W11S28's reservation, roads and drops are not placed; two invaders'
-// boosts are not modelled. W12S28 is cut to what the fight reads: its
+// boosts are not placed. W12S28 is cut to what the fight reads: its
 // spawns, towers and storage. The two guards hold no verdict that early in
 // the Transition log, so they start unassigned.
 

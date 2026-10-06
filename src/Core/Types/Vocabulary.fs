@@ -18,6 +18,63 @@ type BodyPart =
     | Claim
     | Tough
 
+/// The boost one part carries, as far as a fight reads it: the tier of a
+/// compound on the part's own combat act (`BOOSTS`) — ATTACK's swing,
+/// RANGED_ATTACK's shot and mass attack, HEAL's heals, TOUGH's damage taken,
+/// MOVE's fatigue, WORK's dismantle — or none. A WORK boost for harvest,
+/// build or upgrade and a CARRY boost are `Unboosted`: no fight reads them.
+type Boost =
+    | Unboosted
+    | Tier1
+    | Tier2
+    | Tier3
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Boost =
+    /// The boost a compound gives a part, as the engine spells the compound
+    /// (`BOOSTS`): Unboosted for none, or one the part's fight act ignores.
+    let ofCompound (part: BodyPart) (compound: string) : Boost =
+        match part, compound with
+        | Attack, "UH"
+        | RangedAttack, "KO"
+        | Heal, "LO"
+        | Tough, "GO"
+        | Move, "ZO"
+        | Work, "ZH" -> Tier1
+        | Attack, "UH2O"
+        | RangedAttack, "KHO2"
+        | Heal, "LHO2"
+        | Tough, "GHO2"
+        | Move, "ZHO2"
+        | Work, "ZH2O" -> Tier2
+        | Attack, "XUH2O"
+        | RangedAttack, "XKHO2"
+        | Heal, "XLHO2"
+        | Tough, "XGHO2"
+        | Move, "XZHO2"
+        | Work, "XZH2O" -> Tier3
+        | _ -> Unboosted
+
+    /// How many unboosted parts of its kind one part acts as: ×2/×3/×4 a tier
+    /// on ATTACK, RANGED_ATTACK, HEAL, MOVE and (dismantling) WORK, as
+    /// `calcBodyEffectiveness` multiplies them; 1 for the rest, TOUGH
+    /// included, whose boost is on the damage it takes (`damageRatio`).
+    let multiple (part: BodyPart) (boost: Boost) : int =
+        match part, boost with
+        | (Attack | RangedAttack | Heal | Move | Work), Tier1 -> 2
+        | (Attack | RangedAttack | Heal | Move | Work), Tier2 -> 3
+        | (Attack | RangedAttack | Heal | Move | Work), Tier3 -> 4
+        | _ -> 1
+
+    /// The share of a strike's damage a part takes in its own hits: 0.7, 0.5
+    /// and 0.3 on a boosted TOUGH, 1 on any other part.
+    let damageRatio (part: BodyPart) (boost: Boost) : float =
+        match part, boost with
+        | Tough, Tier1 -> 0.7
+        | Tough, Tier2 -> 0.5
+        | Tough, Tier3 -> 0.3
+        | _ -> 1.0
+
 /// A body's parts counted by kind — the shape a living creep already carries
 /// in `CreepInfo.Body`, so one rule reads a body still in the oven and a
 /// living creep alike.

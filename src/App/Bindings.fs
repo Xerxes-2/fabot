@@ -296,6 +296,8 @@ type IBodyPartDef =
     /// count that does not read this counts weapons the creep no longer has
     /// (#270).
     abstract hits: int
+    /// The compound boosting this part, e.g. "XKHO2"; undefined unboosted.
+    abstract boost: string
 
 type ICreep =
     abstract id: string

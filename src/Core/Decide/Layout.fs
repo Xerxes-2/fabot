@@ -39,14 +39,19 @@ let private towerEnergy (view: ColonyView) (towerId: string) =
     |> Option.map (fun r -> Engine.towerCapacity - r.FreeCapacity)
     |> Option.defaultValue 0
 
-/// Each hostile's live parts by id (#544), the ones acting this tick: the
-/// engine destroys parts from the head.
+/// A hostile's parts acting at these hits, each at its boost's multiple
+/// (`Engine.powerAt`), counted once for the many questions asked of them.
+let private livePower (h: HostileInfo) (hits: int) : BodyPart -> int =
+    if List.isEmpty h.Boosts then
+        let counts = Engine.liveParts h.Body hits |> List.countBy id |> Map.ofList
+        fun part -> Map.tryFind part counts |> Option.defaultValue 0
+    else
+        Engine.powerAt h.Body h.Boosts hits
+
+/// Each hostile's live parts by id (#544), the ones acting this tick (the
+/// engine destroys parts from the head), each at its boost's multiple.
 let private liveCounts (hostiles: HostileInfo list) : Map<string, BodyPart -> int> =
-    hostiles
-    |> List.map (fun h ->
-        let counts = Engine.liveParts h.Body h.Hits |> List.countBy id |> Map.ofList
-        h.Id, (fun part -> Map.tryFind part counts |> Option.defaultValue 0))
-    |> Map.ofList
+    hostiles |> List.map (fun h -> h.Id, livePower h h.Hits) |> Map.ofList
 
 /// What a hostile of these live parts deals one tile of ours in `home` this
 /// tick: its weapons at their reach, or beside a structure its dismantle.
@@ -273,10 +278,7 @@ let private economyRazed (view: ColonyView) atlas (held: HeldTaskFacts) : bool =
             let shots = towers |> Array.map snd
             let alive i = hp[i] > 0 && ttl[i] > 0
 
-            let partsAt i =
-                let counts = Engine.liveParts raiders[i].Body hp[i] |> List.countBy id |> Map.ofList
-
-                fun part -> Map.tryFind part counts |> Option.defaultValue 0
+            let partsAt i = livePower raiders[i] hp[i]
 
             let fighters =
                 Atlas.placedCreeps atlas
@@ -446,7 +448,15 @@ let private economyRazed (view: ColonyView) atlas (held: HeldTaskFacts) : bool =
                         for i in 0 .. raiders.Length - 1 do
                             if alive i then
                                 let top = Engine.partHits * List.length raiders[i].Body
-                                hp[i] <- min top (hp[i] - dealt[i] + healed[i])
+
+                                let taken =
+                                    Engine.damageTaken
+                                        raiders[i].Body
+                                        raiders[i].Boosts
+                                        hp[i]
+                                        dealt[i]
+
+                                hp[i] <- min top (hp[i] - taken + healed[i])
                                 ttl[i] <- ttl[i] - 1
 
                         reckon (tick + 1)
@@ -851,9 +861,12 @@ let internal planFire (view: ColonyView) atlas : Intent list =
         // repair of the struck rampart thrown away. Each spare tower pays for
         // its own shots over its reserve; the heal our creeps leave unbeaten
         // runs for as long as the longest of them fires. Where our creeps
-        // already out-damage the heal, every shot sticks.
+        // already out-damage the heal, every shot sticks: the heal priced in
+        // the damage that undoes it through its TOUGH (`HostileInfo.damageFor`).
+        // A boosted body is settled tick by tick (`HostileInfo.killedWithin`),
+        // its TOUGH paid for once as it breaks.
         let killable (h: HostileInfo) =
-            let creepNet = int64 (damageOn h - healOn h)
+            let creepNet = int64 (damageOn h - HostileInfo.damageFor h (healOn h))
 
             let budgets =
                 spare
@@ -869,10 +882,22 @@ let internal planFire (view: ColonyView) atlas : Intent list =
             match budgets with
             | _ when creepNet > 0L -> true
             | [] -> false
-            | _ ->
+            | _ when List.isEmpty h.Boosts ->
                 let towersDeal = budgets |> List.sumBy (fun (damage, shots) -> damage * shots)
                 let longest = budgets |> List.map snd |> List.max
                 towersDeal + creepNet * longest >= int64 h.Hits
+            | _ ->
+                let onIt tick =
+                    damageOn h
+                    + (budgets
+                       |> List.sumBy (fun (damage, shots) ->
+                           if int64 tick <= shots then int damage else 0))
+
+                HostileInfo.killedWithin
+                    h
+                    onIt
+                    (healOn h)
+                    (budgets |> List.map snd |> List.max |> int)
 
         let claimer h =
             claimsAFlag hostiles (Set.singleton home) h
@@ -895,7 +920,7 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                             |> Option.map Engine.towerAttackAt
                             |> Option.defaultValue 0)
 
-                    towersDeal + damageOn h - healOn h >= h.Hits
+                    towersDeal + damageOn h >= HostileInfo.damageFor h (h.Hits + healOn h)
 
                  urgent
                  |> List.filter (fun h -> claimer h || killedNow h)
@@ -933,7 +958,7 @@ let internal planFire (view: ColonyView) atlas : Intent list =
                             let onIt = Map.tryFind h.Id landed |> Option.defaultValue 0
 
                             if
-                                onIt >= h.Hits + healOn h
+                                onIt >= HostileInfo.damageFor h (h.Hits + healOn h)
                                 || not (spareTower || Set.contains h.Id belowFloor.Value)
                             then
                                 None

@@ -50,6 +50,17 @@ let guardRowTests =
                     (false, true)
                     "its heal acts beside its shot: seven blocks out-last the squad, six do not"
 
+                // The same pair T3-boosted shoots 640 and heals
+                // 192 a tick; the verdict prices the boosts.
+                let boosted (colony: ColonyView) =
+                    { colony with
+                        Hostiles = colony.Hostiles |> List.map (boostedAt Tier3)
+                    }
+
+                Expect.isFalse
+                    (rangerBlocksBeat (boosted (raidOf 2)) errandRoom 7)
+                    "T3-boosted, the pair seven blocks beat unboosted is not beaten"
+
                 let rangerRow colony =
                     (decideOn colony).Quotas.Rows
                     |> List.tryFind (fun row -> row.Row = "ranger")

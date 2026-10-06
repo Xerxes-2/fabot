@@ -752,6 +752,7 @@ let forcedTests =
                         Owner = "Trepidimous"
                         Pos = tile 33 33
                         Body = [ Move; Move; Heal; Heal ]
+                        Boosts = []
                         Hits = 400
                         TicksToLive = 1000
                     }

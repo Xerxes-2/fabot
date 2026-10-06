@@ -1567,6 +1567,7 @@ let private trepMelee (room: string) : HostileInfo =
         Owner = "Trepidimous"
         Pos = RoomPos.at room { X = 7; Y = 1 }
         Body = [ Move; Attack ]
+        Boosts = []
         Hits = 200
         TicksToLive = 1000
     }

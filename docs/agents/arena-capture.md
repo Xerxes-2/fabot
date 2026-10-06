@@ -34,7 +34,7 @@ The arena starts at `tick + 1`. The replay holds the state after the tick ran, s
 - **Scripts:** every body not ours `Hold`s. Give each one a `Behaviour`, using the live acts written beside it. `GoTo` and `Chase` path by steps, not terrain, so they can leave the live line (a swamp the live body kept off). A body whose path matters walks `Waypoints` of its live tiles (`observe history` over the ticks after). The arena's fatigue sets its pace, so a body that keeps its live ticks too is a check on the capture.
 - **Memory the replay cannot give:** `Healers`, `ExitWatches` and `Sightings` live only in the heap and always start empty. For an old tick, the Raid log and `ArmedSeen` start empty too.
 - **Check it reproduces live** before pinning anything: compare the run with `observe history` and `observe timeline` over the ticks after the capture. A capture that decides differently from live is a false regression test. For the t972,617 test, the first capture missed the mother W15S28 and seated a 14-energy bank. It lent the residents at once and stood W17S26 down, while live they held home.
-- **Not modelled by the arena:** reservations and boosts.
+- **Not modelled by the arena:** reservations. A boosted body is placed with its `Boosts` (`boostsOn`); the arena prices them, but never boosts a body itself.
 - **Colonies:** they come from today's `Colony.declared`. Spell the record out if the test must outlive a roster change.
 
 ## Landing it

@@ -297,7 +297,7 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
       if ((c.store?.T ?? 0) > 0) fields.push(`Thorium = ${fsInt(c.store.T)}`);
       if (c.hits !== hitsMax) comments.push(`live: ${liveSummary(body)}`);
       if (partSum !== c.hits) comments.push(`its parts read ${partSum} hits, the creep ${c.hits}: the creep's is placed`);
-      if (body.some((p) => p.boost)) comments.push(`boosted (${[...new Set(body.filter((p) => p.boost).map((p) => p.boost))].join(", ")}): not modelled`);
+      if (body.some((p) => p.boost)) fields.push(`Boosts = boostsOn (${partsOf(body)}) [ ${body.map((p) => fsString(p.boost ?? "")).join("; ")} ]`);
       if (c.interRoom) comments.push(`crossing to ${c.interRoom.room} ${c.interRoom.x},${c.interRoom.y}`);
       if (ttl === null) comments.push("no ageTime in the replay: a full life");
       const acts = Object.entries(c.actionLog ?? {})

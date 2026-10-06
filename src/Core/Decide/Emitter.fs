@@ -51,7 +51,7 @@ let private outDamaged (view: ColonyView) atlas (creep: CreepInfo) =
                |> List.sumBy (fun hostile ->
                    match reachRadius view hostile with
                    | Some r when reaches hostile r ->
-                       let parts = partCountIn (HostileInfo.effectiveParts view.Hostiles hostile)
+                       let parts = HostileInfo.effectivePower view.Hostiles hostile
 
                        Engine.attackPower * parts Attack
                        + Engine.rangedAttackPower * parts RangedAttack

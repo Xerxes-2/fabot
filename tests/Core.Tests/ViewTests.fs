@@ -1057,6 +1057,7 @@ let colonyViewTests =
                         Owner = owner
                         Pos = RoomPos.at child { X = x; Y = y }
                         Body = [ Move ]
+                        Boosts = []
                         Hits = Engine.partHits
                         TicksToLive = 1000
                     }
@@ -1094,6 +1095,7 @@ let colonyViewTests =
                         Owner = "Trepidimous"
                         Pos = RoomPos.at child { X = x; Y = y }
                         Body = [ Move ]
+                        Boosts = []
                         Hits = Engine.partHits
                         TicksToLive = 1000
                     }
@@ -1828,6 +1830,7 @@ let private raidedBy owner (heals: int) =
                         Owner = owner
                         Pos = { Room = child; X = 5 + i; Y = 5 }
                         Body = parts
+                        Boosts = []
                         Hits = Engine.partHits * List.length parts
                         TicksToLive = 1000
                     })
@@ -2225,6 +2228,7 @@ let private raptorIn room : HostileInfo =
         Owner = "Trepidimous"
         Pos = { Room = room; X = 5; Y = 6 }
         Body = List.replicate 5 Work @ List.replicate 3 Move
+        Boosts = []
         Hits = 8 * Engine.partHits
         TicksToLive = 1000
     }
@@ -2459,6 +2463,7 @@ let private harasserIn room : HostileInfo =
         Owner = "Trepidimous"
         Pos = { Room = room; X = 25; Y = 20 }
         Body = List.replicate 7 Move @ List.replicate 13 RangedAttack
+        Boosts = []
         Hits = 20 * Engine.partHits
         TicksToLive = 1000
     }
@@ -3582,6 +3587,7 @@ let allyTests =
                         Owner = owner
                         Pos = RoomPos.at mother { X = 20; Y = 20 }
                         Body = [ RangedAttack; Heal; Move ]
+                        Boosts = []
                         Hits = 300
                         TicksToLive = 1_000
                     }
@@ -4602,6 +4608,7 @@ let private harassHostile id owner (body: BodyPart list) : HostileInfo =
         Owner = owner
         Pos = RoomPos.at harassRoom { X = 6; Y = 6 }
         Body = body
+        Boosts = []
         Hits = Engine.partHits * List.length body
         TicksToLive = 1000
     }

@@ -39,8 +39,10 @@
 /// by a body of another side stepping on them; placing one is a test's, not
 /// the pipeline's. A body withdraws energy from a store. A road (#560) is
 /// walked at fatigue 1 a part and filed for the colony's walk; it neither
-/// wears nor decays. Not modelled: the rest of the economy (harvest, pickup,
-/// a store's refill), a downgrade, boosts, pulling, portals, power creeps,
+/// wears nor decays. A body's `Boosts` multiply its swing, shot, heal,
+/// dismantle and MOVE, and its boosted TOUGH takes a share of the damage.
+/// Not modelled: the rest of the economy (harvest, pickup, a store's
+/// refill), a downgrade, boosting itself, pulling, portals, power creeps,
 /// nukes, and safe mode for any side but ours.
 module Fabot.Core.Tests.Arena
 
@@ -157,6 +159,8 @@ type Body =
         Id: string
         Side: Side
         Parts: BodyPart list
+        /// Each part's boost, head first, or empty for none (`HostileInfo.Boosts`).
+        Boosts: Boost list
         Hits: int
         At: RoomPos
         Fatigue: int
@@ -417,6 +421,7 @@ let body
         Id = id
         Side = side
         Parts = parts
+        Boosts = []
         Hits = partHitsOf parts
         At = at
         Fatigue = 0
@@ -430,6 +435,11 @@ let body
 /// A body spelt as part counts in order, head first: `parts [ Move, 21; RangedAttack, 14 ]`.
 let parts (counts: (BodyPart * int) list) : BodyPart list =
     counts |> List.collect (fun (part, n) -> List.replicate n part)
+
+/// A captured body's `Boosts`: one compound a part, head first, "" for none,
+/// read by the Core's own table (`Boost.ofCompound`).
+let boostsOn (parts: BodyPart list) (compounds: string list) : Boost list =
+    List.map2 Boost.ofCompound parts compounds
 
 /// A captured room with nothing of anybody's standing on it.
 let room (name: string) : ArenaRoom =
@@ -913,6 +923,12 @@ let live (b: Body) = Engine.liveParts b.Parts b.Hits
 
 let private activeCount (b: Body) (part: BodyPart) = partCountIn (live b) part
 
+/// The parts that act, each at its boost's multiple (`calcBodyEffectiveness`
+/// with `BOOSTS`): what a swing, a shot, a heal, a dismantle and MOVE's
+/// fatigue are priced by.
+let private activePower (b: Body) (part: BodyPart) =
+    Engine.powerAt b.Parts b.Boosts b.Hits part
+
 let private hitsMax (b: Body) = partHitsOf b.Parts
 
 /// Whether two sides fight each other: different, and not us beside an ally
@@ -1219,6 +1235,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         // The whole body, dead parts included, as
                         // `World.seenFacts` reads `c.body`.
                         Body = b.Parts
+                        Boosts = b.Boosts
                         Hits = b.Hits
                         TicksToLive = b.TicksToLive
                     })
@@ -1570,15 +1587,15 @@ let private ringAround (reach: int) (at: RoomPos) : Set<RoomPos> =
 /// dismantle, else attack — the engine admits one (`creeps/intents.js`) —
 /// beside a ranged shot.
 let private structureStrike (b: Body) =
-    let work = activeCount b Work * dismantlePower
+    let work = activePower b Work * dismantlePower
 
     let melee =
         if work > 0 then
             work
         else
-            activeCount b Attack * Engine.attackPower
+            activePower b Attack * Engine.attackPower
 
-    melee + activeCount b RangedAttack * Engine.rangedAttackPower
+    melee + activePower b RangedAttack * Engine.rangedAttackPower
 
 /// The structures that bar a body of this side and are not its own, by tile:
 /// what it has to break to pass. A rampart over a structure stands first.
@@ -2694,7 +2711,7 @@ let private mend (ledger: Ledger) (id: string) (amount: int) =
 /// one room and never across a border.
 let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
     let byId = a.Bodies |> List.map (fun o -> o.Id, o) |> Map.ofList
-    let power part each = activeCount b part * each
+    let power part each = activePower b part * each
     let stopped = safeModeStops a b
 
     // `attack.js` and `rangedAttack.js` refuse the body itself as a target.
@@ -2724,7 +2741,7 @@ let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
             // Strike-back: the target's own ATTACK lands on the attacker,
             // unless the hit landed on a rampart or the attacker stands on
             // one (`_damage.js`).
-            let back = activeCount t Attack * Engine.attackPower
+            let back = activePower t Attack * Engine.attackPower
 
             if back > 0 && not covered && (rampartOn ledger b.At).IsNone then
                 credit ledger.Damage b.Id back
@@ -2756,7 +2773,10 @@ let private perform (a: Arena) (ledger: Ledger) (b: Body) (act: Act) =
             && within Engine.rangedRange b.At (placeOf placed)
             ->
             let effect =
-                min (power Work repairPower) (min (energy * hitsPerEnergy) (s.HitsMax - s.Hits))
+                // A WORK's boost here is its dismantle's, never its repair's.
+                min
+                    (activeCount b Work * repairPower)
+                    (min (energy * hitsPerEnergy) (s.HitsMax - s.Hits))
 
             if effect > 0 then
                 mend ledger id effect
@@ -3075,7 +3095,7 @@ let private resolveMoves (a: Arena) (moves: (Body * RoomPos) list) : Map<string,
                         | _ -> false
 
                     let rate1 = if swap then 100 else affected b.At
-                    let rate4 = float (activeCount b Move) / float (weightOf b)
+                    let rate4 = float (activePower b Move) / float (weightOf b)
                     b, rate1, rate4, i)
                 |> List.sortBy (fun (_, r1, r4, i) -> -r1, -r4, i)
                 |> List.head
@@ -3727,7 +3747,7 @@ let step (a: Arena) : Arena * TickTrace =
                     | Some added -> dest, b.Fatigue + added
                 | None -> b.At, b.Fatigue
 
-            let fatigue = max 0 (fatigue - 2 * activeCount b Move)
+            let fatigue = max 0 (fatigue - 2 * activePower b Move)
 
             let damage =
                 match ledger.Damage.TryGetValue b.Id with
@@ -3739,7 +3759,9 @@ let step (a: Arena) : Arena * TickTrace =
                 | true, h -> h
                 | _ -> 0
 
-            let hits = min (hitsMax b) (b.Hits - damage + healing)
+            // Damage through the body's boosted TOUGH (`_applyDamage`).
+            let taken = Engine.damageTaken b.Parts b.Boosts b.Hits damage
+            let hits = min (hitsMax b) (b.Hits - taken + healing)
 
             let suicided = Map.tryFind b.Id actsOf |> Option.exists (List.contains Act.Suicide)
 

@@ -641,6 +641,7 @@ let hostileAt id pos body : HostileInfo =
         Owner = "raider"
         Pos = RoomPos.at "" pos
         Body = body
+        Boosts = []
         Hits = Engine.partHits * List.length body
         // A full Invader life: a fixture that said otherwise would be
         // making a claim about the stand-down rather than about the raid.
@@ -1656,6 +1657,22 @@ let hostileIn room pos body =
     { hostileAt "h-1" pos body with
         Pos = RoomPos.at room pos
     }
+
+/// The same hostile with every part boosted at `tier` (`HostileInfo.Boosts`),
+/// as a raid out of a full lab arrives.
+let boostedAt (tier: Boost) (h: HostileInfo) : HostileInfo =
+    { h with
+        Boosts = h.Body |> List.map (fun _ -> tier)
+    }
+
+/// Kalgen's raid body on MeowKittyWow (t968k), unboosted: 6 TOUGH, 22
+/// RANGED_ATTACK, 10 MOVE and 12 HEAL. Live every part was T3 (XGHO2,
+/// XKHO2, XZHO2, XLHO2): `boostedAt Tier3`.
+let kalgenBody =
+    List.replicate 6 Tough
+    @ List.replicate 22 RangedAttack
+    @ List.replicate 10 Move
+    @ List.replicate 12 Heal
 
 /// The engine's own `smallMelee`: two TOUGH, five MOVE, a RANGED_ATTACK, a
 /// WORK and an ATTACK — 1,000 hits and 40 damage at range 1, and the body

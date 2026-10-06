@@ -101,6 +101,7 @@ let raider id owner pos body : HostileInfo =
         Owner = owner
         Pos = RoomPos.at raidRoom pos
         Body = body
+        Boosts = []
         Hits = Engine.partHits * List.length body
         TicksToLive = Engine.creepLifetime
     }
@@ -277,6 +278,7 @@ let raiderIn room i body : HostileInfo =
         Owner = "Invader"
         Pos = RoomPos.at room { X = 25; Y = 25 }
         Body = body
+        Boosts = []
         Hits = Engine.partHits * List.length body
         TicksToLive = Engine.creepLifetime
     }

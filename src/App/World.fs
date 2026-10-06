@@ -31,6 +31,23 @@ let private targetsOf (kinds: Map<string, TargetKind>) : Lazy<Set<string>> =
 /// closed, so Tough is an unreachable fallback that keeps it total.
 let bodyPartOf = reverseOf partName allBodyParts >> Option.defaultValue Tough
 
+/// Each part's boost a fight reads, head first (`Boost.ofCompound`), or
+/// empty for a body none of whose parts carries one (`HostileInfo.Boosts`).
+let boostsOf (body: IBodyPartDef[]) : Boost list =
+    if body |> Array.forall (fun p -> isNull (box p.boost)) then
+        []
+    else
+        let boosts =
+            body
+            |> Array.map (fun p ->
+                if isNull (box p.boost) then
+                    Unboosted
+                else
+                    Boost.ofCompound (bodyPartOf p.``type``) p.boost)
+            |> Array.toList
+
+        if List.forall ((=) Unboosted) boosts then [] else boosts
+
 /// Classify an engine STRUCTURE_* string into the Core's built kinds; a
 /// string the table lacks is Other. Classified once so the rules stay in Core.
 let private builtKindOf =
@@ -790,6 +807,7 @@ let private seenFacts
                     // hostile is found *in* this room, which is what places it.
                     Pos = RoomPos.at room.name (posOf c.pos)
                     Body = c.body |> Array.map (fun p -> bodyPartOf p.``type``) |> Array.toList
+                    Boosts = boostsOf c.body
                     Hits = c.hits
                     TicksToLive = c.ticksToLive
                 }

@@ -119,6 +119,10 @@ type HostileInfo =
         /// of ours on the same coordinate of another room as range 0.
         Pos: RoomPos
         Body: BodyPart list
+        /// Each part's boost, head first as `Body`, or empty for a body with
+        /// none (the common case). On the creep and not in an id-keyed map
+        /// beside it: every question below asks it of the hostile alone.
+        Boosts: Boost list
         /// Hits left (#451): what a fight's kill order reads, and with the
         /// engine taking parts from the head, which of `Body` still act.
         Hits: int
@@ -172,17 +176,14 @@ module HostileInfo =
     let breaksOf (parts: BodyPart list) : bool =
         parts |> List.exists (fun part -> part = Work || part = BodyPart.Claim)
 
-    /// The parts of a hostile still acting.
-    let private liveParts (hostile: HostileInfo) : BodyPart list =
-        Engine.liveParts hostile.Body hostile.Hits
-
     /// Whether every part of a hostile still acts: what it is in effect
     /// whatever reaches it, the common case asked first.
     let private whole (hostile: HostileInfo) : bool =
         hostile.Hits > Engine.partHits * (List.length hostile.Body - 1)
 
-    /// Its HEAL still acting.
-    let private liveHeals (hostile: HostileInfo) : int = partCountIn (liveParts hostile) Heal
+    /// Its HEAL still acting, each at its boost's multiple.
+    let private liveHeals (hostile: HostileInfo) : int =
+        Engine.powerAt hostile.Body hostile.Boosts hostile.Hits Heal
 
     /// The hits a hostile is short of whole.
     let private missing (hostile: HostileInfo) : int =
@@ -255,6 +256,67 @@ module HostileInfo =
     let effectiveParts (side: HostileInfo list) (hostile: HostileInfo) : BodyPart list =
         partsWithin Reaction.strike side hostile
 
+    /// `partsWithin` counted at each part's boost (`Engine.powerAt`): what a
+    /// reader pricing what it deals, dismantles or walks multiplies by a
+    /// part's power. A T3 RANGED_ATTACK counts as four.
+    let powerWithin
+        (window: int)
+        (side: HostileInfo list)
+        (hostile: HostileInfo)
+        : BodyPart -> int =
+        if List.isEmpty hostile.Boosts then
+            partCountIn (partsWithin window side hostile)
+        else
+            let hits =
+                if whole hostile then
+                    hostile.Hits
+                else
+                    hitsWithin window side hostile
+
+            Engine.powerAt hostile.Body hostile.Boosts hits
+
+    /// `powerWithin` the parts it fights with (`effectiveParts`).
+    let effectivePower (side: HostileInfo list) (hostile: HostileInfo) : BodyPart -> int =
+        powerWithin Reaction.strike side hostile
+
+    /// The hits a strike of `damage` takes off it now, through its boosted
+    /// TOUGH (`Engine.damageTaken`).
+    let damageTaken (hostile: HostileInfo) (damage: int) : int =
+        Engine.damageTaken hostile.Body hostile.Boosts hostile.Hits damage
+
+    /// The damage a strike must deal to take `hits` off it now, through its
+    /// boosted TOUGH (`Engine.damageFor`): what a heal of `hits` on it costs
+    /// our damage to undo.
+    let damageFor (hostile: HostileInfo) (hits: int) : int =
+        Engine.damageFor hostile.Body hostile.Boosts hostile.Hits hits
+
+    /// The damage that kills it from the hits it has (`damageFor`).
+    let effectiveHits (hostile: HostileInfo) : int = damageFor hostile hostile.Hits
+
+    /// The hits it holds in its boosted TOUGH still standing
+    /// (`Engine.toughHits`): the share of `Hits` a strike pays more for.
+    let toughHits (hostile: HostileInfo) : int =
+        Engine.toughHits hostile.Body hostile.Boosts hostile.Hits
+
+    /// Whether `damage t` a tick from tick 1 to `ticks`, against `heal` a tick
+    /// put back, kills it, tick by tick as the engine settles it: the damage
+    /// through its boosted TOUGH (`Engine.damageTaken`), so the TOUGH is paid
+    /// for once as it breaks and again only as far as the heal restores it,
+    /// the heal capped at the whole body.
+    let killedWithin (hostile: HostileInfo) (damage: int -> int) (heal: int) (ticks: int) : bool =
+        let full = Engine.partHits * List.length hostile.Body
+
+        let rec settle tick hits =
+            if tick > ticks then
+                false
+            else
+                let left =
+                    hits - Engine.damageTaken hostile.Body hostile.Boosts hits (damage tick) + heal
+
+                left <= 0 || settle (tick + 1) (min full left)
+
+        settle 1 hostile.Hits
+
     /// How many of one part it fights with (`effectiveParts`).
     let private count (side: HostileInfo list) (hostile: HostileInfo) (part: BodyPart) : int =
         partCountIn (effectiveParts side hostile) part
@@ -298,17 +360,27 @@ module HostileInfo =
         effectiveParts side hostile
         |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Work)
 
-    /// What it heals a tick, its live HEAL priced unboosted (the projection
-    /// carries no boosts): a rate, read now, as the window's restoring is.
+    /// What it heals a tick, its live HEAL at their boosts: a rate, read now,
+    /// as the window's restoring is.
     let healing (_side: HostileInfo list) (hostile: HostileInfo) : int =
         Engine.healPower * liveHeals hostile
 
     /// Whether it heals with a HEAL: the live parts `healing` reads.
     let heals (_side: HostileInfo list) (hostile: HostileInfo) : bool = liveHeals hostile > 0
 
-    /// A hostile's gait (#510): its weight on paper, the MOVE it walks with.
+    /// A hostile's gait `window` ticks on: its weight on paper, every part
+    /// but MOVE weighing, destroyed ones too, against the MOVE it walks with
+    /// then at their boosts (`powerWithin`): a T3 MOVE pays off eight fatigue
+    /// a tick.
+    let gaitWithin (window: int) (side: HostileInfo list) (hostile: HostileInfo) : Gait =
+        {
+            Weight = Gait.weightOf (partCountIn hostile.Body)
+            Moves = powerWithin window side hostile Move
+        }
+
+    /// A hostile's gait (#510) with the parts it fights with (`gaitWithin`).
     let gait (side: HostileInfo list) (hostile: HostileInfo) : Gait =
-        Gait.ofBody hostile.Body (effectiveParts side hostile)
+        gaitWithin Reaction.strike side hostile
 
     /// Whether a hostile is as good as rooted (`Gait.stationary`).
     let stationary (side: HostileInfo list) (hostile: HostileInfo) : bool =
@@ -829,18 +901,20 @@ module World =
     /// Whether a colony's home cannot hold the raid standing in it this tick:
     /// the room is ours, an armed hostile that is not an ally is there, safe
     /// mode is off, and the raid heals at least what the towers holding a
-    /// shot's energy land at the falloff range.
+    /// shot's energy land at the falloff range, through the TOUGH of the
+    /// body of the raid they land most on.
     let homeBeaten (facts: RoomFacts) : bool =
         let raid =
             facts.Hostiles |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
 
         let towers = loadedTowers facts
+        let shot = towers * Engine.towerAttackAt Engine.towerFalloffRange
 
         facts.Control
         |> Option.exists (fun control -> control.Owner = Ownership.Ours && not control.SafeMode)
         && List.exists (HostileInfo.armed facts.Hostiles) raid
         && List.sumBy (HostileInfo.healing facts.Hostiles) raid
-           >= towers * Engine.towerAttackAt Engine.towerFalloffRange
+           >= (raid |> List.map (fun h -> HostileInfo.damageTaken h shot) |> List.max)
 
     /// Every spawn's name beside the room it stands in: what `Colony.castBy`
     /// reads a creep's caster off.

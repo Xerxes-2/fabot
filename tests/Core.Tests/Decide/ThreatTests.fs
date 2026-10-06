@@ -1834,6 +1834,29 @@ let safeModeTests =
                     "the same shooter with the tower loaded is the tower's"
             }
 
+            test
+                "Kalgen T3-boosted at the worn spawn fires where the loaded tower kills him unboosted" {
+                // Unboosted: 220 a tick takes the worn rampart
+                // and the spawn in 28 ticks, the tower's 510 less his 144
+                // heal kills him in 14. T3-boosted: 880 a tick takes them in
+                // 7, and the tower's 510 lands 153 through his TOUGH under
+                // 576 of heal: he never dies.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                let kalgen = hostileAt "k-1" { X = 25; Y = 28 } kalgenBody
+
+                Expect.isEmpty
+                    (fires (economyHome 1000 |> wornSpawn |> facing [ kalgen ]))
+                    "the premise: unboosted, the tower is enough"
+
+                Expect.equal
+                    (fires (economyHome 1000 |> wornSpawn |> facing [ boostedAt Tier3 kalgen ]))
+                    [ "ctrl-1" ]
+                    "T3-boosted, safe mode"
+            }
+
             test "the cripple, the lone melee and the poor pair past a low tower spend nothing" {
                 // #545 re-review C2-C5 on W17S25's t974,040 shape: a 1-RANGED
                 // cripple at the spawn takes it at t+571, past the horizon; a
@@ -2455,6 +2478,43 @@ let fireReflexTests =
                     (towerRepairs low)
                     [ "tower-1", "rampart-1" ]
                     "the struck rampart repaired instead"
+            }
+
+            test "the kill check refuses a T3-boosted healer whose TOUGH and heal undo every shot" {
+                // Kalgen's body four tiles off a full tower:
+                // 600 a shot. Unboosted it heals 144 of it; T3-boosted its
+                // TOUGH takes 180 of the 600 and its HEAL puts back 576.
+                let at body =
+                    towerColony [ "tower-1", { X = 10; Y = 40 } ] [ body ]
+
+                let kalgen = hostileAt "h-1" { X = 14; Y = 40 } kalgenBody
+
+                Expect.equal
+                    (shots (decideOn (at kalgen)).Intents)
+                    [ "tower-1", "h-1" ]
+                    "the premise: unboosted, 456 a shot net kills it"
+
+                Expect.isEmpty
+                    (shots (decideOn (at (boostedAt Tier3 kalgen))).Intents)
+                    "T3-boosted, no shot is worth the energy"
+            }
+
+            test
+                "six towers with three shots each over the reserve fire on a T3 Kalgen they kill on the third" {
+                // 3,600 a tick: its TOUGH breaks once on the first (2,200
+                // landed, 576 back), and the third kills. Charging the TOUGH
+                // in every tick's heal priced the kill at four ticks.
+                let towers = [ for y in 37..42 -> $"tower-{y}", { X = 10; Y = y } ]
+                let kalgen = boostedAt Tier3 (hostileAt "h-1" { X = 14; Y = 40 } kalgenBody)
+                let colony = towerColony towers [ kalgen ]
+                let held = colony.Tuning.TowerRepairReserve + 3 * Engine.towerEnergyCost
+
+                let armed = towers |> List.fold (fun c (id, _) -> holdingTower id held c) colony
+
+                Expect.equal
+                    (shots (decideOn armed).Intents |> List.map snd |> List.distinct)
+                    [ "h-1" ]
+                    "every tower shoots it"
             }
 
             test "an urgent shot is taken whatever the energy over the reserve can kill (#480)" {

@@ -1557,6 +1557,61 @@ let kiteTests =
                     "on ground in range of the cripple, not kited off the room"
             }
 
+            // A part's boost multiplies what it does, as the
+            // engine's `calcBodyEffectiveness` and `_applyDamage` do.
+            test
+                "a T3 6T22R10M12H is priced at its boosts: ×4 its shot, heal and MOVE, its TOUGH taking 0.3" {
+                let plain = hostileIn "W1N2" { X = 25; Y = 25 } kalgenBody
+                let t3 = boostedAt Tier3 plain
+
+                let shot h =
+                    HostileInfo.effectivePower [ h ] h RangedAttack
+
+                Expect.equal (shot plain, shot t3) (22, 88) "22 RANGED_ATTACK shoot as 88"
+
+                Expect.equal
+                    (HostileInfo.healing [ plain ] plain, HostileInfo.healing [ t3 ] t3)
+                    (144, 576)
+                    "12 HEAL heal 576 a tick, not 144"
+
+                let plainPace h =
+                    Gait.ticks Gait.plain (HostileInfo.gait [ h ] h)
+
+                Expect.equal
+                    (plainPace plain, plainPace t3)
+                    (Some 4, Some 1)
+                    "10 MOVE under 40 weighted parts: a tile in four ticks on plain, boosted in one"
+
+                Expect.equal
+                    (HostileInfo.effectiveHits plain, HostileInfo.effectiveHits t3)
+                    (5_000, 6_400)
+                    "its 600 hits of TOUGH cost 2,000 damage"
+
+                Expect.equal
+                    (HostileInfo.damageTaken t3 600, HostileInfo.damageTaken t3 3_000)
+                    (180, 1_600)
+                    "a 600 tower shot takes 180; 3,000 takes the TOUGH's 600 and 1,000 behind it"
+
+                Expect.equal
+                    (HostileInfo.damageFor t3 576)
+                    1_920
+                    "so a tick of its heal costs 1,920 of our damage to undo"
+
+                // 3,600 a tick: 2,200 through the TOUGH and 576 back leave
+                // 3,376; then 3,600 in full leaves 352; the third kills.
+                Expect.equal
+                    ([ 2; 3 ] |> List.map (HostileInfo.killedWithin t3 (fun _ -> 3_600) 576))
+                    [ false; true ]
+                    "under 3,600 a tick its TOUGH is paid for once: dead on the third tick"
+
+                let worn = { t3 with Hits = 4_400 }
+
+                Expect.equal
+                    (HostileInfo.damageTaken worn 600, HostileInfo.effectiveHits worn)
+                    (600, 4_400)
+                    "with its TOUGH shot off, a shot lands in full"
+            }
+
             test "a body whose gun is shot off and heals itself is unarmed within a short window" {
                 let wraith = wraithAt "W1N2" { X = 25; Y = 44 }
 

@@ -55,6 +55,7 @@ let private hostile owner id room (x, y) body =
         Owner = owner
         Pos = RoomPos.at room { X = x; Y = y }
         Body = body
+        Boosts = []
         Hits = Engine.partHits * List.length body
         TicksToLive = 1000
     }

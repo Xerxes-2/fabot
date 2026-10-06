@@ -756,7 +756,8 @@ let internal strikesEvery
     view.Hostiles
     |> List.forall (fun h -> h.Pos.Room <> room || not (counts h) || canStrike view ours h)
 
-/// What a body deals a tick, off its part counts: melee and ranged, unboosted.
+/// What a body deals a tick, off its part counts: melee and ranged, a boosted
+/// part counted at its multiple (`HostileInfo.powerWithin`).
 let private damageOf (parts: BodyPart -> int) =
     Engine.attackPower * parts Attack
     + Engine.rangedAttackPower * parts RangedAttack
@@ -781,7 +782,7 @@ let private slowerOnPlain (side: HostileInfo list) (ours: BodyPart -> int) (host
 /// gun, as quick as ours, keeps its range for as long as it likes, and its
 /// healers behind it: one token ATTACK among its guns does not bring it in.
 let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raider: HostileInfo) =
-    let parts = partCountIn (HostileInfo.effectiveParts side raider)
+    let parts = HostileInfo.effectivePower side raider
 
     Engine.attackPower * parts Attack
     >= Engine.rangedAttackPower * parts RangedAttack
@@ -861,8 +862,8 @@ type KillRank =
     {
         Tier: KillTier
         /// Its hits, plus the heal that reaches it this tick, less our damage
-        /// that does. Without a lock this all but locks itself: the target we
-        /// hurt stays the lowest.
+        /// that does, all priced in damage through its TOUGH. Without a lock
+        /// this all but locks itself: the target we hurt stays the lowest.
         EffectiveHits: int
     }
 
@@ -974,7 +975,9 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
         let damageOn = damageReaching view
 
         fun hostile ->
-            let heal = healOn hostile
+            // The heal reaching it in the damage it costs to undo, through
+            // its TOUGH, as its hits are.
+            let heal = HostileInfo.damageFor hostile (healOn hostile)
             let damage = damageOn hostile
 
             {
@@ -987,35 +990,75 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
                             HealOn = heal
                             DamageOn = damage
                         }
-                EffectiveHits = hostile.Hits + heal - damage
+                EffectiveHits = HostileInfo.effectiveHits hostile + heal - damage
             }
 
-/// A raid's price at a window: the damage it deals a tick, each raider with
-/// what it fights with (`HostileInfo.effectiveParts`); the healing it does,
-/// priced as a rate; and the hits of its armed bodies as they stand. Healers
-/// are priced in the healing and never in the hits.
-let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) =
-    let parts h =
-        HostileInfo.partsWithin window view.Hostiles h
+/// A raid's price at a window (`raidPrice`). Its armed bodies' hits come in
+/// two phases: `Tough`, the damage that breaks their boosted TOUGH still
+/// standing, while a hit healed costs `ToughHealing` of it; then `Hits`, the
+/// rest, struck and healed one for one at `Healing`.
+type private RaidPrice =
+    {
+        Damage: int
+        Healing: int
+        ToughHealing: int
+        Tough: int
+        Hits: int
+    }
 
-    raid |> List.sumBy (fun h -> damageOf (partCountIn (parts h))),
-    raid |> List.sumBy (HostileInfo.healing view.Hostiles),
-    raid
-    |> List.filter (fun h -> Option.isSome (HostileInfo.weaponRangeOf (parts h)))
-    |> List.sumBy (fun h -> h.Hits)
+/// A raid's price at a window: the damage it deals a tick, each raider with
+/// what it fights with at its boosts (`HostileInfo.powerWithin`); the healing
+/// it does, priced as a rate; and the hits of its armed bodies as they stand.
+/// Healers are priced in the healing and never in the hits. Its boosted TOUGH
+/// is charged once, in the damage that breaks it (`HostileInfo.damageFor`),
+/// the healing meanwhile on the armed body it costs most: a T3 TOUGH in front
+/// makes each hit healed on it cost three of our damage and a third.
+let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) : RaidPrice =
+    let armed =
+        raid
+        |> List.filter (fun h ->
+            Option.isSome (
+                HostileInfo.weaponRangeOf (HostileInfo.partsWithin window view.Hostiles h)
+            ))
+
+    let healing = raid |> List.sumBy (HostileInfo.healing view.Hostiles)
+    let tough = armed |> List.filter (fun h -> HostileInfo.toughHits h > 0)
+
+    {
+        Damage =
+            raid
+            |> List.sumBy (fun h -> damageOf (HostileInfo.powerWithin window view.Hostiles h))
+        Healing = healing
+        ToughHealing =
+            match tough with
+            | [] -> healing
+            | _ -> tough |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.max
+        Tough = tough |> List.sumBy (fun h -> HostileInfo.damageFor h (HostileInfo.toughHits h))
+        Hits = armed |> List.sumBy (fun h -> h.Hits - HostileInfo.toughHits h)
+    }
 
 /// Whether our side — this damage, healing and hits — wins against a priced
 /// raid: two clocks compared, cross-multiplied to stay in whole numbers. A
-/// raid that out-heals our damage is never killed.
-let private wonAgainst (raidDamage, raidHealing, raidHits) ourDamage ourHealing ourHits =
-    if raidDamage = 0 then
+/// raid that out-heals our damage is never killed, nor one whose TOUGH it
+/// never breaks; past its TOUGH our clock runs in two phases.
+let private wonAgainst (price: RaidPrice) ourDamage ourHealing ourHits =
+    if price.Damage = 0 then
         true
-    elif ourDamage <= raidHealing then
+    elif
+        ourDamage <= price.Healing
+        || (price.Tough > 0 && ourDamage <= price.ToughHealing)
+    then
         false
-    elif raidDamage <= ourHealing then
+    elif price.Damage <= ourHealing then
         true
+    elif price.Tough = 0 then
+        price.Hits * (price.Damage - ourHealing) < ourHits * (ourDamage - price.Healing)
     else
-        raidHits * (raidDamage - ourHealing) < ourHits * (ourDamage - raidHealing)
+        let ours =
+            float price.Tough / float (ourDamage - price.ToughHealing)
+            + float price.Hits / float (ourDamage - price.Healing)
+
+        ours < float ourHits / float (price.Damage - ourHealing)
 
 /// Whether our side wins the exchange against a raid (`wonAgainst` its
 /// `raidPrice`): what stands beside our bodies (`beside` damage and
@@ -1153,7 +1196,9 @@ let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string
     | [] -> false
     | raid ->
         raid |> List.forall (cannotClose view.Hostiles parts)
-        && damageOf parts > healing
+        // The heal priced in damage on the raider it costs least
+        // (`HostileInfo.damageFor`), as `raidPrice` prices it.
+        && damageOf parts > (raid |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.min)
 
 /// `kitedDown` for the biggest ranger body the bank buys: the room-level
 /// answer the stand-down, `outmatched` and the chase read.
@@ -1186,7 +1231,7 @@ let private arrivesWithin (view: ColonyView) (home: string) (hostile: HostileInf
             HostileInfo.weaponRangeOf parts
         with
         | Some tiles, Some reach ->
-            Gait.ticks Gait.road (Gait.ofBody hostile.Body parts)
+            Gait.ticks Gait.road (HostileInfo.gaitWithin Reaction.lend view.Hostiles hostile)
             |> Option.exists (fun pace -> max 0 (tiles - reach) * pace <= Reaction.lend)
         | _ -> false)
 
@@ -1813,26 +1858,31 @@ let kiteHolds
     : bool =
     // Whole ticks a plain tile takes: a MOVE pays off two fatigue a tick, and
     // every other part makes two.
-    let plainTicks (body: BodyPart list) =
-        let factor = Grid.emptyFactorOf body
-
-        if factor.MoveParts = 0 then
+    let ticksOf (fatigue: int) (moves: int) =
+        if moves = 0 then
             System.Int32.MaxValue
         else
-            max 1 ((factor.FatigueParts + factor.MoveParts - 1) / factor.MoveParts)
+            max 1 ((fatigue + moves - 1) / moves)
 
+    let plainTicks (body: BodyPart list) =
+        let factor = Grid.emptyFactorOf body
+        ticksOf factor.FatigueParts factor.MoveParts
+
+    // Each melee raider's plain ticks, its MOVE at its boosts
+    // (`HostileInfo.effectivePower`).
     let raidMelee =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
         |> List.filter (HostileInfo.melee view.Hostiles)
-        |> List.map (HostileInfo.effectiveParts view.Hostiles)
+        |> List.map (fun h ->
+            let factor = Grid.emptyFactorOf (HostileInfo.effectiveParts view.Hostiles h)
+            ticksOf factor.FatigueParts (HostileInfo.effectivePower view.Hostiles h Move))
 
     not (Set.isEmpty safe)
     && not (List.isEmpty members)
     && members |> List.forall (List.contains Attack >> not)
     && (List.isEmpty raidMelee
-        || (members |> List.map plainTicks |> List.max)
-           <= (raidMelee |> List.map plainTicks |> List.min))
+        || (members |> List.map plainTicks |> List.max) <= List.min raidMelee)
 
 /// Whether the resident garrison loses the raid standing in a room beside its
 /// loaded towers: what pools a Fight there. Both the garrison's size and the
