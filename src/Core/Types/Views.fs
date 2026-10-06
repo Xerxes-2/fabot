@@ -461,6 +461,17 @@ module WorldView =
             ArrivalGround = None
         }
 
+/// The [[lab cluster]] as one colony reads it, whichever colony's home it
+/// stands in: the declaration, and what that home holds, read off the world —
+/// the cluster's home is one of ours and always in sight.
+type LabFacts =
+    {
+        Cluster: LabCluster
+        /// Mineral -> what the cluster home's terminals and labs hold of it
+        /// together, a mineral held nowhere missing.
+        Stock: Map<Resource, int>
+    }
+
 /// One colony's whole reading of this tick: its home room's projection, the
 /// rooms it works beside it, the bodies it holds, the bank it casts from and
 /// the explicit little it may take of its neighbours'. ADR-0052
@@ -635,6 +646,10 @@ type ColonyView =
         /// the `send` is issued into that blindness on purpose, and a refusal
         /// costs the tick's call and nothing else.
         Consignee: string option
+        /// The [[lab cluster]] (`Colony.labCluster`) and what its home holds:
+        /// the cluster's own colony reacts, every other ships it the ore it
+        /// lacks. None while no declared colony's home is the cluster's.
+        Labs: LabFacts option
         /// The home room's declared perimeter (`Colony.Perimeter`, #446): the
         /// chokes the Layout ramparts beside the Keep.
         Perimeter: Pos list
@@ -909,7 +924,7 @@ module ColonyView =
             // reason, and so do the owners (#318): what a mother may act on
             // is the explicit list `borrowable` holds.
             Thorium = Map.empty
-            Ore = Map.empty
+            Minerals = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
             Sources = if digs then facts.Sources else []
@@ -1013,7 +1028,7 @@ module ColonyView =
             Thorium = oreOf facts.Thorium
             // The room's own [[ore]] is no score: it decays on the floor as
             // anything does, and goes out with the work.
-            Ore = Map.empty
+            Minerals = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
             Reactors = []
@@ -1139,7 +1154,7 @@ module ColonyView =
             // The mine's container decays like an outpost's, and is repaired
             // like one.
             Hits = mined facts.Hits
-            Ore = mined facts.Ore
+            Minerals = mined facts.Minerals
             ConstructionSites =
                 facts.ConstructionSites
                 |> List.filter (fun site -> Map.containsKey site.Id mine)
@@ -1723,7 +1738,7 @@ module ColonyView =
                     Hits = mergedBy (fun facts -> facts.Hits)
                     Stores = mergedBy (fun facts -> facts.Stores)
                     Thorium = mergedBy (fun facts -> facts.Thorium)
-                    Ore = mergedBy (fun facts -> facts.Ore)
+                    Minerals = mergedBy (fun facts -> facts.Minerals)
                     Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
                     PublicRamparts =
                         worked
@@ -1787,6 +1802,27 @@ module ColonyView =
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee
+            Labs =
+                let cluster = Colony.labCluster
+
+                if List.contains cluster.Home (Colony.homes colonies) then
+                    let facts = World.roomOf world cluster.Home
+
+                    let stock =
+                        [ BuiltKind.Terminal; BuiltKind.Lab ]
+                        |> List.collect (fun kind ->
+                            SpatialInfo.idsOfKindIn facts.TargetKinds (Structure kind))
+                        |> List.collect (fun id ->
+                            Map.tryFind id facts.Minerals
+                            |> Option.map Map.toList
+                            |> Option.defaultValue [])
+                        |> List.groupBy fst
+                        |> List.map (fun (resource, held) -> resource, List.sumBy snd held)
+                        |> Fresh.mapOfList
+
+                    Some { Cluster = cluster; Stock = stock }
+                else
+                    None
             Perimeter = colony.Perimeter
             RampartFloors = colony.RampartFloors
             // Off the world's creeps and not `mine` (#448): who holds a body

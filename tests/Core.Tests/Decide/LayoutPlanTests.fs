@@ -705,7 +705,7 @@ let private oreRoom extra =
         Spatial =
             { colony.Spatial with
                 Stores = Map.add "sto-x" 100_000 colony.Spatial.Stores
-                Ore = Map.ofList [ "min-a", Map.ofList [ Oxygen, 70_000 ] ]
+                Minerals = Map.ofList [ "min-a", Map.ofList [ Ore Oxygen, 70_000 ] ]
             }
             |> withTargets (
                 [

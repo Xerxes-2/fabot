@@ -150,9 +150,24 @@ type Ore =
 /// Every Ore — the closed set, closed by `Core.Tests` as `allBodyParts` is.
 let allOres = [ Hydrogen; Oxygen; Utrium; Keanium; Lemergium; Zynthium; Catalyst ]
 
+/// A **[[compound]]**: what the [[lab cluster]] makes out of [[ore]]. The UH
+/// line alone, the one boost line our own ore reaches; a compound joins the
+/// day a decision of ours names it.
+type Compound =
+    /// OH, hydroxide: H and O. It boosts nothing; UH2O's second reagent.
+    | Hydroxide
+    /// UH, utrium hydride: U and H. ATTACK ×2.
+    | UtriumHydride
+    /// UH2O, utrium acid: UH and OH. ATTACK ×3.
+    | UtriumAcid
+
+/// Every Compound — the closed set, closed by `Core.Tests` as `allOres` is.
+let allCompounds = [ Hydroxide; UtriumHydride; UtriumAcid ]
+
 /// What a store holds, as this colony reads it: the energy every Task in the
-/// pool is about, the season's Thorium beside it (ADR-0057), and the room's
-/// own ore, dug into the terminal to a target.
+/// pool is about, the season's Thorium beside it (ADR-0057), the room's own
+/// ore, dug into the terminal to a target, and the compounds the lab cluster
+/// makes of it.
 ///
 /// Not the engine's whole `RESOURCE_*` table: a resource belongs here when a
 /// decision of ours names it. Declared beside the body parts because it is the
@@ -162,6 +177,16 @@ type Resource =
     | Energy
     | Thorium
     | Ore of Ore
+    | Compound of Compound
+
+/// Whether a resource is a **mineral** in a store's sense — an ore or a
+/// compound — the resources a lab holds and `SpatialInfo.Minerals` files.
+let isMineralResource =
+    function
+    | Ore _
+    | Compound _ -> true
+    | Energy
+    | Thorium -> false
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
 /// executors that get matched to Tasks.

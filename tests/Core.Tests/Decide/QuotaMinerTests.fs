@@ -880,7 +880,7 @@ let private withoutHomeMine (colony: ColonyView) =
                 TargetKinds =
                     gone
                     |> List.fold (fun kinds id -> Map.remove id kinds) colony.Spatial.TargetKinds
-                Ore = Map.remove "min-a" colony.Spatial.Ore
+                Minerals = Map.remove "min-a" colony.Spatial.Minerals
             }
             |> withHome (fun layer ->
                 { layer with
@@ -913,7 +913,8 @@ let private errandOre =
                     |> Map.add "min-u" (Mineral(Ore Utrium))
                     |> Map.add "ext-u" (Structure BuiltKind.Extractor)
                     |> Map.add "can-u" (Structure BuiltKind.Container)
-                Ore = Map.add "min-u" (Map.ofList [ Utrium, 35_000 ]) declared.Spatial.Ore
+                Minerals =
+                    Map.add "min-u" (Map.ofList [ Ore Utrium, 35_000 ]) declared.Spatial.Minerals
                 Cooldowns = Map.add "ext-u" 0 declared.Spatial.Cooldowns
             }
             |> withNeighbour
@@ -1051,7 +1052,7 @@ let errandOreTests =
                                 TargetKinds =
                                     Map.add "min-u" (Mineral Thorium) errandOre.Spatial.TargetKinds
                                 Thorium = Map.add "min-u" 20_000 errandOre.Spatial.Thorium
-                                Ore = Map.remove "min-u" errandOre.Spatial.Ore
+                                Minerals = Map.remove "min-u" errandOre.Spatial.Minerals
                             }
                     }
 

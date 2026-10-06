@@ -147,6 +147,10 @@ let private execute (intent: Intent) : Outcome =
     | RemoveSite siteId -> withActor (Game.getObjectById siteId) removeSite
     | ObserveRoom(observerId, room) ->
         withActor (Game.getObjectById observerId) (fun observer -> observeRoom observer room)
+    | RunReaction(labId, reagentLab, otherReagentLab) ->
+        withTarget reagentLab (fun first ->
+            withTarget otherReagentLab (fun second ->
+                withActor (Game.getObjectById labId) (fun lab -> runReaction lab first second)))
     | SendFromTerminal(terminalId, resource, amount, destination) ->
         withActor (Game.getObjectById terminalId :?> ITerminal) (fun terminal ->
             terminal.send (resourceName resource, amount, destination))

@@ -730,12 +730,7 @@ let planPoolHolding
     let carriersAboard resource (sinks: string -> bool) =
         let carried =
             view.Creeps
-            |> List.map (fun creep ->
-                creep.Name,
-                match resource with
-                | Energy -> creep.Energy
-                | Thorium -> creep.Thorium
-                | Ore ore -> Map.tryFind ore creep.Ore |> Option.defaultValue 0)
+            |> List.map (fun creep -> creep.Name, CreepInfo.holding resource creep)
             |> Map.ofList
 
         tasks
@@ -749,10 +744,7 @@ let planPoolHolding
     // the aid's load (`Planner.terminalEnergyRefills`).
     let terminalTarget =
         max
-            (if Option.isSome view.Consignee then
-                 view.Tuning.TerminalEnergy
-             else
-                 0)
+            (Facts.feeReserve view)
             (if Facts.givesAid view then
                  view.Tuning.AidTerminalEnergy
              else
@@ -784,6 +776,27 @@ let planPoolHolding
              |> List.sumBy (function
                  | Refill(id, Energy) when not (isStorage id) -> max 0 (sinkRoom id)
                  | _ -> 0))
+
+    // The lab cluster's fills (`Facts.labPlan`): by reagent, the room its
+    // labs have left for it, and which labs ask. Lazy: only a terminal draw
+    // reads them.
+    let labFills = lazy (Facts.labPlan view).Fills
+
+    let labRoom =
+        lazy
+            (labFills.Value
+             |> List.groupBy (fun (_, reagent, _) -> reagent)
+             |> List.map (fun (reagent, fills) ->
+                 reagent, fills |> List.sumBy (fun (_, _, room) -> room))
+             |> Map.ofList)
+
+    let labsAsking =
+        lazy
+            (labFills.Value
+             |> List.groupBy (fun (_, reagent, _) -> reagent)
+             |> List.map (fun (reagent, fills) ->
+                 reagent, fills |> List.map (fun (lab, _, _) -> lab) |> Set.ofList)
+             |> Map.ofList)
 
     // The consignor's ore sink: the room its terminals have left.
     let terminalOreRoom =
@@ -1008,6 +1021,10 @@ let planPoolHolding
         | Withdraw(storeId, Ore _) when overflowing storeId && not spawnEmpty -> Feeding
         | Withdraw(_, Ore _)
         | Pickup(_, Ore _) -> StockDraw
+        // The lab cluster's haul, terminal to lab and lab to terminal: stock
+        // moved between two stores, at the Storage's tier.
+        | Withdraw(_, Compound _)
+        | Pickup(_, Compound _) -> StockDraw
         // ADR-0023. The Storage is stock, drawn a tier below the containers.
         // The stock feeds a starved cluster at the flow's own rank: a tie with
         // the containers and not a rank over them, so travel cost sends the
@@ -1373,6 +1390,22 @@ let planPoolHolding
                         Map.tryFind id view.Spatial.TargetKinds = Some(
                             Structure BuiltKind.Terminal
                         )))
+            )
+        // A reagent drawn out of the terminal for the labs, for the room the
+        // labs asking for it have left: a draw past it has one sink left, the
+        // terminal it came from.
+        | Withdraw(storeId, resource) when
+            isMineralResource resource
+            && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Terminal)
+            && Map.containsKey resource labRoom.Value
+            ->
+            let labs = labsAsking.Value |> Map.tryFind resource |> Option.defaultValue Set.empty
+
+            Capacity.total (
+                drawLoads
+                    (SpatialInfo.heldIn view.Spatial resource storeId)
+                    labRoom.Value.[resource]
+                    (carriersAboard resource labs.Contains)
             )
         // One body fetches what is lying beside the Reactor: the errand room
         // is three crossings out and the ore is a finite remainder. Above the

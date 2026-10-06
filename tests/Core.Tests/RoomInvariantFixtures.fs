@@ -275,6 +275,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Consignee = None
         Perimeter = []
         RampartFloors = Map.empty
+        Labs = None
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty

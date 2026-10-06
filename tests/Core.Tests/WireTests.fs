@@ -25,7 +25,7 @@ let private sampleNumbers = Some(sampleField 0, sampleField 1)
 let private sampleName = Some(sampleText 0)
 
 /// Every case of a closed union, read off the union's own metadata. Numbers,
-/// names, a `Resource` and an `Ore` are sampled; any other field type throws,
+/// names, a `Resource`, an `Ore` and a `Compound` are sampled; any other field type throws,
 /// which is the next author's notice to widen this. The Resource sample is
 /// `Energy`, so two resources at one store is the cross-product the Task test
 /// below walks by hand.
@@ -43,6 +43,8 @@ let private casesOf<'a> () =
                     box Energy
                 elif field.PropertyType = typeof<Ore> then
                     box Hydrogen
+                elif field.PropertyType = typeof<Compound> then
+                    box Hydroxide
                 else
                     failwith $"no sample value for a {field.PropertyType.Name} field")
 
@@ -170,6 +172,11 @@ let wireVocabularyTests =
                     (Set.ofList allOres)
                     (Set.ofArray (casesOf<Ore> ()))
                     "allOres is every Ore"
+
+                Expect.equal
+                    (Set.ofList allCompounds)
+                    (Set.ofArray (casesOf<Compound> ()))
+                    "allCompounds is every Compound"
 
                 for resource in casesOf<Resource> () do
                     Expect.contains

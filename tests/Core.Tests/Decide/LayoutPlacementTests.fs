@@ -34,6 +34,7 @@ let builtKindTests =
                         "extractor"
                         "terminal"
                         "observer"
+                        "lab"
                     ]
                     "each BuiltKind maps to its Screeps string"
             }
@@ -74,6 +75,8 @@ let builtKindTests =
                         BuiltKind.Terminal, Some WholeLine.Full
                         // The observer is of no Keep: losing it costs vision.
                         BuiltKind.Observer, None
+                        // A lab does not decay, and is of no Keep.
+                        BuiltKind.Lab, None
                     ]
                     "one line per kind, and none for the kinds Repair never touches"
 
@@ -93,8 +96,8 @@ let builtKindTests =
 
                 Expect.equal
                     (allBuiltKinds |> List.filter isStored)
-                    [ BuiltKind.Container; BuiltKind.Storage; BuiltKind.Terminal ]
-                    "the containers, the Storage and — since ore ships (#349) — the terminal put a store in the projection"
+                    [ BuiltKind.Container; BuiltKind.Storage; BuiltKind.Terminal; BuiltKind.Lab ]
+                    "the containers, the Storage, the terminal (#349) and the labs put a store in the projection"
 
                 // `allBuiltKinds` leaves Other out, so no filter above can
                 // say anything about it — and Other is the arm with the worst
@@ -468,6 +471,82 @@ let placementTests =
                      |> List.filter (fun (_, tile, kind) ->
                          kind <> StructureKind.Observer && List.contains tile observer))
                     "on a tile nothing else is planned for, a road included"
+            }
+
+            test
+                "the lab cluster's labs go up one at a time at its home, and never under the Storage floor" {
+                // RCL8, a Storage standing at (27,27) holding `energy`, and the
+                // cluster declared here or elsewhere.
+                let home energy clusterHome =
+                    let colony = atLevel 8 (openRoom 8)
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.ofList [ "sto-1", energy ]
+                            }
+                            |> withTargets
+                                [ "sto-1", { X = 27; Y = 27 }, Structure BuiltKind.Storage ]
+                        Labs =
+                            Some
+                                {
+                                    Cluster =
+                                        {
+                                            Home = clusterHome
+                                            Targets = Map.ofList [ UtriumAcid, 3_000 ]
+                                        }
+                                    Stock = Map.empty
+                                }
+                    }
+
+                let labs (view: ColonyView) =
+                    sitesOfKind StructureKind.Lab (decideOn view).Intents
+
+                let floor = Tuning.defaults.LabEnergyFloor
+
+                Expect.isEmpty (labs (home (floor - 1) "W1N1")) "under the floor: no lab"
+                Expect.isEmpty (labs (home floor "W9N9")) "another home's cluster: no lab"
+
+                let first = labs (home floor "W1N1")
+
+                Expect.hasLength
+                    first
+                    1
+                    "at the floor: one lab site, so the floor is asked before each"
+
+                let { Intents = intents } = decideOn (home floor "W1N1")
+
+                Expect.isEmpty
+                    (placementIntents intents
+                     |> List.filter (fun (_, tile, kind) ->
+                         kind <> StructureKind.Lab && List.contains tile first))
+                    "on a tile nothing else is planned for, a road included"
+
+                // Each stands in turn: the three are one stamp, two reagent
+                // labs and an output within reach of both.
+                let oneBuilt =
+                    home floor "W1N1" |> withTarget "lab-a" first.Head (Structure BuiltKind.Lab)
+
+                let second = labs oneBuilt
+                Expect.hasLength second 1 "the second lab"
+
+                let twoBuilt = oneBuilt |> withTarget "lab-b" second.Head (Structure BuiltKind.Lab)
+
+                let third = labs twoBuilt
+                Expect.hasLength third 1 "the third lab"
+
+                Expect.isSome
+                    (Labs.rolesOf [ "lab-a", first.Head; "lab-b", second.Head; "lab-c", third.Head ])
+                    "the three react: an output within reach of both reagent labs"
+
+                Expect.isEmpty
+                    (labs (twoBuilt |> withTarget "lab-c" third.Head (Structure BuiltKind.Lab)))
+                    "and `Tuning.Labs` is three: no fourth"
+
+                // A site going up holds the next.
+                Expect.isEmpty
+                    (labs (home floor "W1N1" |> withTarget "lab-a" first.Head (Site BuiltKind.Lab)))
+                    "none while a lab site is pending"
             }
 
             // The plan a room *built out* under one level's horizon only ever

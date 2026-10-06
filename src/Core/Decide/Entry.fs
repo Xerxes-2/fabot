@@ -175,7 +175,12 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // the dig gate, which reads stores no census carries.
     let ore = Facts.oreDug view |> String.concat ","
 
-    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}"
+    // Whether the lab cluster's Storage floor is met: the Layout places a lab
+    // off it, and it reads a store no census carries. Signed only while it
+    // is, so no other home's signature moves.
+    let labs = if Facts.labsFunded view then "\n~labs" else ""
+
+    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}{labs}"
 
 let censusSignature (view: ColonyView) : string = snd (signaturesOf view)
 
@@ -418,18 +423,26 @@ let decideUnarbitrated
     // the same kind of thing: a structure's own verb, read off the view.
     let consigned = planConsignment view
 
-    let aidIntents =
-        let sending =
-            consigned
-            |> List.choose (function
-                | SendFromTerminal(id, _, _, _) -> Some id
-                | _ -> None)
-            |> Set.ofList
+    let sendingIn intents =
+        intents
+        |> List.choose (function
+            | SendFromTerminal(id, _, _, _) -> Some id
+            | _ -> None)
+        |> Set.ofList
 
-        planAid view sending
+    let aidIntents = planAid view (sendingIn consigned)
+
+    // The lab cluster's ore, behind the Thorium and the aid: one send a
+    // terminal a tick.
+    let oreSends = planOreSend view (sendingIn (consigned @ aidIntents))
 
     let consignmentIntents =
-        consigned @ aidIntents @ planObserver view @ planExtractorMove view atlas
+        consigned
+        @ aidIntents
+        @ oreSends
+        @ planReaction view
+        @ planObserver view
+        @ planExtractorMove view atlas
 
     // The pool is derived before the spawns, and the dependency runs one way:
     // the worker row's floor asks the pool, and nothing in the pool reads a

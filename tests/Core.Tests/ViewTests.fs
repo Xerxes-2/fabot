@@ -209,7 +209,7 @@ let private creep name room : WorldCreep =
                 Fatigue = 0
                 Energy = 0
                 Thorium = 0
-                Ore = Map.empty
+                Minerals = Map.empty
                 FreeCapacity = 50
                 Moved = false
                 DrawnFrom = None
@@ -3785,11 +3785,11 @@ let errandTests =
                                 facts.TargetKinds
                                 mined.TargetKinds
                         ConstructionSites = facts.ConstructionSites @ mined.ConstructionSites
-                        Ore =
+                        Minerals =
                             Map.ofList
                                 [
-                                    "min-u", Map.ofList [ Utrium, 35_000 ]
-                                    "can-u", Map.ofList [ Utrium, 500 ]
+                                    "min-u", Map.ofList [ Ore Utrium, 35_000 ]
+                                    "can-u", Map.ofList [ Ore Utrium, 500 ]
                                 ]
                         Hits =
                             Map.ofList

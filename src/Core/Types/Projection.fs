@@ -216,7 +216,7 @@ type TargetKind =
     /// A mineral — a fact read off `FIND_MINERALS`, not a declaration — and
     /// **what it holds**: `Thorium`, or the room's [[ore]], never `Energy`.
     /// What it has left to give rides in `SpatialInfo.Thorium` or
-    /// `SpatialInfo.Ore`. The day the mod deletes an exhausted Thorium deposit
+    /// `SpatialInfo.Minerals`. The day the mod deletes an exhausted Thorium deposit
     /// the target leaves the projection, which retires everything hung off it;
     /// an ore deposit stays, at zero while it regenerates.
     | Mineral of resource: Resource
@@ -353,14 +353,15 @@ type SpatialInfo =
         /// a `Map<string, Map<Resource, int>>`, which would make every energy
         /// reader ask a question it never asks.
         Thorium: Map<string, int>
-        /// Target id -> the [[ore]] held there, by ore: a store's, a pile's, a
-        /// tombstone's, and an ore deposit's own remaining amount. A store
-        /// holding none has no entry. Nested by id first so every narrowing
-        /// that filters the id-keyed maps filters this one the same way.
-        Ore: Map<string, Map<Ore, int>>
-        /// Target id -> ticks before this structure may act again — today the
-        /// extractor's alone (`EXTRACTOR_COOLDOWN` is 5, so successive
-        /// harvests land six ticks apart). Absent per entry: a structure with
+        /// Target id -> the minerals held there (`isMineralResource`: the
+        /// [[ore]] and the [[compound]]s), by resource: a store's, a lab's, and
+        /// an ore deposit's own remaining amount. A store holding none has no
+        /// entry. Nested by id first so every narrowing that filters the
+        /// id-keyed maps filters this one the same way.
+        Minerals: Map<string, Map<Resource, int>>
+        /// Target id -> ticks before this structure may act again — the
+        /// extractor's (`EXTRACTOR_COOLDOWN` is 5, so successive harvests land
+        /// six ticks apart) and a lab's (`REACTION_TIME`). Absent per entry: a structure with
         /// no clock on it has no entry here, and 0 means "now", which is a
         /// different answer.
         Cooldowns: Map<string, int>
@@ -402,7 +403,7 @@ module SpatialInfo =
             Hits = Map.empty
             Stores = Map.empty
             Thorium = Map.empty
-            Ore = Map.empty
+            Minerals = Map.empty
             Cooldowns = Map.empty
             PublicRamparts = Set.empty
             Owners = Map.empty
@@ -490,10 +491,11 @@ module SpatialInfo =
         match resource with
         | Energy -> storedIn spatial id
         | Thorium -> spatial.Thorium |> Map.tryFind id |> Option.defaultValue 0
-        | Ore ore ->
-            spatial.Ore
+        | Ore _
+        | Compound _ ->
+            spatial.Minerals
             |> Map.tryFind id
-            |> Option.bind (Map.tryFind ore)
+            |> Option.bind (Map.tryFind resource)
             |> Option.defaultValue 0
 
     /// Everything one store holds, every resource summed: a store's capacity
@@ -501,7 +503,7 @@ module SpatialInfo =
     let heldAllIn (spatial: SpatialInfo) (id: string) : int =
         storedIn spatial id
         + heldIn spatial Thorium id
-        + (spatial.Ore
+        + (spatial.Minerals
            |> Map.tryFind id
            |> Option.map (Map.fold (fun total _ held -> total + held) 0)
            |> Option.defaultValue 0)
@@ -567,14 +569,12 @@ module SpatialInfo =
             oreRooms
             room
 
-    /// The ores one store holds any of, as resources.
-    let oresIn (spatial: SpatialInfo) (id: string) : Resource list =
-        spatial.Ore
+    /// The minerals one store holds any of, each beside its amount, in
+    /// resource order.
+    let mineralsIn (spatial: SpatialInfo) (id: string) : (Resource * int) list =
+        spatial.Minerals
         |> Map.tryFind id
-        |> Option.map (
-            Map.toList
-            >> List.choose (fun (ore, held) -> if held > 0 then Some(Ore ore) else None)
-        )
+        |> Option.map (Map.toList >> List.filter (fun (_, held) -> held > 0))
         |> Option.defaultValue []
 
     /// Whether one **object** is ours this tick (#318): an entry that says

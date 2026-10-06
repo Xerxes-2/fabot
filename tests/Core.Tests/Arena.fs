@@ -1073,7 +1073,7 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
         Hits = { Hits = b.Hits; HitsMax = hitsMax b }
         Energy = b.Energy
         Thorium = b.Thorium
-        Ore = Map.empty
+        Minerals = Map.empty
         FreeCapacity = max 0 (carry - b.Energy - b.Thorium)
         Body = active |> List.countBy id |> Map.ofList
         Moved =

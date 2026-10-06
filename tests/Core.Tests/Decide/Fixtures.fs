@@ -203,6 +203,7 @@ let bareRespawn =
         Consignee = None
         Perimeter = []
         RampartFloors = Map.empty
+        Labs = None
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
@@ -242,7 +243,7 @@ let creepWith name energy freeCapacity body =
         // Energy unless a case says otherwise: `carrying` below is the one
         // builder that puts the season's ore in a body.
         Thorium = 0
-        Ore = Map.empty
+        Minerals = Map.empty
         FreeCapacity = freeCapacity
         Moved = false
         DrawnFrom = None
@@ -858,34 +859,37 @@ let oreColony =
                     Map.add "min-a" (Mineral(Ore Oxygen)) mineHaulColony.Spatial.TargetKinds
                 Thorium = Map.empty
                 Stores = Map.add "sto-1" 100_000 mineHaulColony.Spatial.Stores
-                Ore = Map.ofList [ "min-a", Map.ofList [ Oxygen, 70_000 ] ]
+                Minerals = Map.ofList [ "min-a", Map.ofList [ Ore Oxygen, 70_000 ] ]
             }
             |> withObstacles [ { X = 13; Y = 9 } ]
             |> withTargets [ "term-1", { X = 13; Y = 9 }, Structure BuiltKind.Terminal ]
     }
 
-/// The same colony with `units` of one ore held in one store (or deposit),
-/// and the entry gone at zero, as the shell files it.
-let withOreIn id ore units (colony: ColonyView) =
+/// The same colony with `units` of one mineral held in one store (or
+/// deposit), and the entry gone at zero, as the shell files it.
+let withMineralIn id (mineral: Resource) units (colony: ColonyView) =
     let held =
-        Map.tryFind id colony.Spatial.Ore
+        Map.tryFind id colony.Spatial.Minerals
         |> Option.defaultValue Map.empty
         |> fun held ->
             if units > 0 then
-                Map.add ore units held
+                Map.add mineral units held
             else
-                Map.remove ore held
+                Map.remove mineral held
 
     { colony with
         Spatial =
             { colony.Spatial with
-                Ore =
+                Minerals =
                     if Map.isEmpty held then
-                        Map.remove id colony.Spatial.Ore
+                        Map.remove id colony.Spatial.Minerals
                     else
-                        Map.add id held colony.Spatial.Ore
+                        Map.add id held colony.Spatial.Minerals
             }
     }
+
+/// `withMineralIn` for an ore.
+let withOreIn id ore units (colony: ColonyView) = withMineralIn id (Ore ore) units colony
 
 /// The same colony with one ore's dig latched open, as the last decided tick
 /// left it (`ColonyView.DigOpen`).
@@ -894,13 +898,16 @@ let digOpen ore (colony: ColonyView) =
         DigOpen = Some(colony.DigOpen |> Option.defaultValue Set.empty |> Set.add ore)
     }
 
-/// A creep with `units` of one ore aboard, off the free room it was built
+/// A creep with `units` of one mineral aboard, off the free room it was built
 /// with — `carrying`'s twin one resource over.
-let carryingOre ore units (creep: CreepInfo) =
+let carryingMineral (mineral: Resource) units (creep: CreepInfo) =
     { creep with
-        Ore = Map.ofList [ ore, units ]
+        Minerals = Map.ofList [ mineral, units ]
         FreeCapacity = max 0 (creep.FreeCapacity - units)
     }
+
+/// `carryingMineral` for an ore.
+let carryingOre ore units (creep: CreepInfo) = carryingMineral (Ore ore) units creep
 
 /// The same colony under a named home room, geometry and all. Every fixture
 /// built on `SpatialFixtures.spatial` carries its layer under the empty name,

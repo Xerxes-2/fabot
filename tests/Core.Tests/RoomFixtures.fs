@@ -523,7 +523,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
         // No fixture carries Thorium: a captured room's creeps are the
         // colony's energy fleet.
         Thorium = 0
-        Ore = Map.empty
+        Minerals = Map.empty
         FreeCapacity = capacity - carried
         Moved = false
         DrawnFrom = None
@@ -896,6 +896,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Consignee = None
         Perimeter = []
         RampartFloors = Map.empty
+        Labs = None
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty

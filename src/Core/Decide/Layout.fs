@@ -585,6 +585,34 @@ let firstActivationOnly (intents: Intent list) : Intent list =
 
     keep false [] intents
 
+
+/// The most of `held` a terminal ships over `range` rooms with `energy` to
+/// pay the fee, or None under `Engine.terminalMinSend`. The largest amount the
+/// energy pays for, found by the fee rather than by an inverse of it: the
+/// engine's formula is an exponential and the amount is an integer, so the
+/// affordable amount is read off the fee of what is there.
+let private affordableSend (range: int) (held: int) (energy: int) : int option =
+    if held < Engine.terminalMinSend then
+        None
+    else
+        let affordable =
+            if Engine.sendFee range held <= energy then
+                held
+            else
+                // Scale down by the ratio the fee overshoots by. One correction
+                // is enough because the fee is linear in the amount — the
+                // exponential is in the range alone.
+                let ratio = float energy / float (Engine.sendFee range held)
+                float held * ratio |> floor |> int
+
+        if
+            affordable >= Engine.terminalMinSend
+            && Engine.sendFee range affordable <= energy
+        then
+            Some affordable
+        else
+            None
+
 /// The consignment's one intent (#349): a terminal shipping this colony's
 /// banked Thorium to the consignee's terminal — the only place the ore crosses
 /// the map without a body; the hauling either side is the `Planner`'s. Four
@@ -598,51 +626,58 @@ let firstActivationOnly (intents: Intent list) : Intent list =
 let internal planConsignment (view: ColonyView) : Intent list =
     match view.Consignee, view.Spatial.RoomName with
     | Some destination, Some home ->
-        let range =
-            // Screeps prices a send over `Game.map.getRoomLinearDistance`,
-            // which is Chebyshev — the diagonal of a room-name grid costs one
-            // room, not two — and every other distance in this tree is the hop
-            // count (`RoomName.hopsBetween`). Read the engine's metric here and
-            // not the walk's: the fee is the engine's to charge.
-            RoomName.offsetOf home destination
-            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-
         let ship terminalId =
             let banked = SpatialInfo.heldIn view.Spatial Thorium terminalId
             let energy = SpatialInfo.storedIn view.Spatial terminalId
 
-            match range with
-            | Some range when banked >= Engine.terminalMinSend ->
-                // The largest amount this terminal's own energy pays for,
-                // found by the fee rather than by an inverse of it: the
-                // engine's formula is an exponential and the amount is an
-                // integer, so the affordable amount is read off the fee of
-                // what is there.
-                let affordable =
-                    if Engine.sendFee range banked <= energy then
-                        banked
-                    else
-                        // Scale down by the ratio the fee overshoots by, then
-                        // step back to a figure the energy covers. One
-                        // correction is enough because the fee is linear in the
-                        // amount — the exponential is in the range alone.
-                        let ratio = float energy / float (Engine.sendFee range banked)
-                        float banked * ratio |> floor |> int
-
-                if
-                    affordable >= Engine.terminalMinSend
-                    && Engine.sendFee range affordable <= energy
-                then
-                    Some(SendFromTerminal(terminalId, Thorium, affordable, destination))
-                else
-                    None
-            | _ -> None
+            sendRange home destination
+            |> Option.bind (fun range -> affordableSend range banked energy)
+            |> Option.map (fun amount -> SendFromTerminal(terminalId, Thorium, amount, destination))
 
         view.Spatial.TargetKinds
         |> Map.toList
         |> List.filter (fun (_, kind) -> kind = Structure BuiltKind.Terminal)
         |> List.choose (fst >> ship)
     | _ -> []
+
+/// The [[lab cluster]]'s inputs by terminal: a colony whose terminal holds an
+/// ore the cluster lacks (`Facts.oreForCluster`) ships it to the cluster's
+/// home, no more than the cluster lacks, the fee out of the same terminal's
+/// energy (`affordableSend`). Sends between two terminals of ours are the
+/// consignment's own, which the season leaves open. A terminal already
+/// sending this tick (`sending`) is skipped, and of the ores it holds the one
+/// the cluster lacks most goes first: one send a terminal a tick.
+let internal planOreSend (view: ColonyView) (sending: Set<string>) : Intent list =
+    match Facts.oreForCluster view, view.Spatial.RoomName with
+    | Some(destination, short), Some home ->
+        match sendRange home destination with
+        | None -> []
+        | Some range ->
+            Facts.ourTerminals view
+            |> List.filter (fun id -> not (Set.contains id sending))
+            |> List.choose (fun terminalId ->
+                let energy = SpatialInfo.storedIn view.Spatial terminalId
+
+                short
+                |> Map.toList
+                |> List.sortBy (fun (ore, wanted) -> -wanted, ore)
+                |> List.tryPick (fun (ore, wanted) ->
+                    let held = SpatialInfo.heldIn view.Spatial (Ore ore) terminalId
+
+                    affordableSend range (min held wanted) energy
+                    |> Option.map (fun amount ->
+                        SendFromTerminal(terminalId, Ore ore, amount, destination))))
+    | _ -> []
+
+/// The [[lab cluster]]'s reactions this tick (`Labs.readyRuns`): each output
+/// lab ready now, or the tick after — the light tick that follows replays
+/// the ask, and the engine refuses the one the cooldown holds back.
+let internal planReaction (view: ColonyView) : Intent list =
+    let cooldown lab =
+        Map.tryFind lab view.Spatial.Cooldowns |> Option.defaultValue 0
+
+    Labs.readyRuns (Facts.labPlan view) (Facts.labHolds view) cooldown 1
+    |> List.map RunReaction
 
 /// Energy aid by terminal (user, 2026-10-04): a colony that gives
 /// (`Facts.givesAid`) ships its terminal's energy above the consignment's
@@ -652,11 +687,7 @@ let internal planConsignment (view: ColonyView) : Intent list =
 let internal planAid (view: ColonyView) (sending: Set<string>) : Intent list =
     match view.AidRooms, view.Spatial.RoomName with
     | destination :: _, Some home when Facts.givesAid view ->
-        let reserve =
-            if Option.isSome view.Consignee then
-                view.Tuning.TerminalEnergy
-            else
-                0
+        let reserve = Facts.feeReserve view
 
         // Chebyshev, the engine's metric for the fee (`planConsignment`).
         let range =
@@ -1301,6 +1332,10 @@ let private allowanceOf kind level =
     | BuiltKind.Spawn, _ -> 3
     | BuiltKind.Observer, (0 | 1 | 2 | 3 | 4 | 5 | 6 | 7) -> 0
     | BuiltKind.Observer, _ -> 1
+    | BuiltKind.Lab, (0 | 1 | 2 | 3 | 4 | 5) -> 0
+    | BuiltKind.Lab, 6 -> 3
+    | BuiltKind.Lab, 7 -> 6
+    | BuiltKind.Lab, _ -> 10
     | _ -> 0
 
 /// The kinds the clustered horizon sizes, and the ones the ceiling below is
@@ -1690,6 +1725,66 @@ let internal planExtractorMove (view: ColonyView) atlas : Intent list =
                 | Some(Site BuiltKind.Extractor) -> [ RemoveSite id ]
                 | _ -> [])
     | _ -> []
+
+/// How many free tiles nearest the terminal the lab stamp is searched over:
+/// the search is every pair of them, and the stamp is wanted beside the
+/// terminal anyway.
+let private labSearch = 40
+
+/// The [[lab cluster]]'s stamp: `count` tiles, every lab already `placed`
+/// among them, two of them reagent labs and every other within
+/// `Engine.labReactionRange` of both (`Labs.rolesOf`'s roles), the stamp
+/// nearest `anchor` — its tiles' ranges summed, ties to the least tiles in
+/// (X, Y) order. Out of `candidates` (free tiles) and the placed labs; empty
+/// when no stamp fits, or for fewer than three labs, which react nothing.
+let private labStamp
+    (count: int)
+    (anchor: Pos)
+    (placed: Pos list)
+    (candidates: Pos list)
+    : Pos list =
+    let nearest tiles =
+        tiles |> List.sortBy (fun (tile: Pos) -> range tile anchor, tile.X, tile.Y)
+
+    let pool =
+        placed
+        @ (candidates
+           |> List.filter (fun tile -> not (List.contains tile placed))
+           |> nearest
+           |> List.truncate labSearch)
+
+    let reaches a b = range a b <= Engine.labReactionRange
+
+    if count < 3 then
+        []
+    else
+        [
+            for i, reagent in List.indexed pool do
+                for other in List.skip (i + 1) pool do
+                    let outputs =
+                        pool
+                        |> List.filter (fun tile ->
+                            tile <> reagent
+                            && tile <> other
+                            && reaches tile reagent
+                            && reaches tile other)
+
+                    let kept, free =
+                        outputs |> List.partition (fun tile -> List.contains tile placed)
+
+                    let stamp = reagent :: other :: List.truncate (count - 2) (kept @ nearest free)
+
+                    if
+                        List.length stamp = count
+                        && placed |> List.forall (fun tile -> List.contains tile stamp)
+                    then
+                        yield stamp
+        ]
+        |> List.sortBy (fun stamp ->
+            stamp |> List.sumBy (range anchor),
+            stamp |> List.map (fun tile -> tile.X, tile.Y) |> List.sort)
+        |> List.tryHead
+        |> Option.defaultValue []
 
 /// Colony-level planning step beside the Planner/Matcher pipeline: the
 /// deterministic Layout (ADR-0011), computed whole from the Atlas every tick
@@ -2244,6 +2339,62 @@ let planLayout
         let extractorGap =
             extractorTiles |> List.filter (fun tile -> not (Set.contains tile takenTiles))
 
+        // The [[lab cluster]]'s stamp (`labStamp`), as near the terminal as
+        // the plan leaves room and around every lab already standing or
+        // going up. Only at the
+        // cluster's home over its Storage floor (`Facts.labsFunded`), and one
+        // site at a time, so the floor is asked again before each 50k goes
+        // in. Off every tile the plan holds for something else: the
+        // reservation, the footings, the roads, the container picks, the
+        // perimeter and every site's tile.
+        let labTiles, labSites =
+            if Facts.labsFunded view then
+                let tileIn kind =
+                    Atlas.idsOfKind atlas kind
+                    |> List.choose (fun id ->
+                        Atlas.positionOf atlas id |> Option.filter inHome |> Option.map RoomPos.pos)
+
+                let placed = tileIn (Structure BuiltKind.Lab) @ tileIn (Site BuiltKind.Lab)
+
+                let anchor =
+                    tileIn (Structure BuiltKind.Terminal)
+                    @ terminalPick
+                    @ (Atlas.storageTilesIn atlas room |> Set.toList)
+                    @ [ spawnPos ]
+                    |> List.head
+
+                let held =
+                    Set.unionMany
+                        [
+                            reserved
+                            footingTiles
+                            roadPlan
+                            takenTiles
+                            Set.ofList view.Perimeter
+                            Set.ofList (
+                                sourceContainerTiles
+                                @ Option.toList controllerContainerTile
+                                @ (mineralContainerPicks |> List.map snd)
+                            )
+                        ]
+
+                let stamp =
+                    labStamp
+                        (min view.Tuning.Labs (allowanceOf BuiltKind.Lab controller.Level))
+                        anchor
+                        placed
+                        (ordering |> List.filter (fun tile -> not (Set.contains tile held)))
+
+                let fresh = stamp |> List.filter (fun tile -> not (List.contains tile placed))
+
+                stamp,
+                (if Atlas.pendingIn atlas room BuiltKind.Lab > 0 then
+                     []
+                 else
+                     List.truncate 1 fresh)
+            else
+                [], []
+
         // The ramparts: one over every standing Keep structure and every
         // standing Post container, the tick the thing it covers stands — a site
         // is not covered until it is a structure — and one on every tile of the
@@ -2305,7 +2456,12 @@ let planLayout
                 view
                 atlas
                 room
-                (Set.union reservedTiles (RoomPos.setAt room footingTiles))
+                (Set.unionMany
+                    [
+                        reservedTiles
+                        RoomPos.setAt room footingTiles
+                        RoomPos.setAt room (Set.ofList labTiles)
+                    ])
                 roadPlan
                 (Set.unionMany
                     [ takenTiles; Set.ofList containerGap; Set.ofList extractorGap; rampartGap ])
@@ -2329,6 +2485,7 @@ let planLayout
         @ place
             Observer
             (observerTiles |> List.truncate (gapAt BuiltKind.Observer controller.Level))
+        @ place Lab labSites
         @ place Road (Set.toList placedRoads)
         @ place Container containerGap
         @ place Extractor extractorGap
@@ -2514,8 +2671,8 @@ let internal planSignatures (view: ColonyView) atlas (textFor: string -> string)
 let internal planPickups (view: ColonyView) atlas (assigned: Map<string, Task>) : Intent list =
     let oreBound name =
         match Map.tryFind name assigned with
-        | Some(Withdraw(_, (Thorium | Ore _)))
-        | Some(Pickup(_, (Thorium | Ore _))) -> true
+        | Some(Withdraw(_, (Thorium | Ore _ | Compound _)))
+        | Some(Pickup(_, (Thorium | Ore _ | Compound _))) -> true
         | _ -> false
 
     let hungry =

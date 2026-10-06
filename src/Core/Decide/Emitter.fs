@@ -248,8 +248,10 @@ let internal applicable
             && not standing
             && (not deliveryDraw || (carriesOnly && outlivesTheLoadedLeg))
         // The ore haul is the mine haul one resource over: an empty carrier, a
-        // few tiles from the mine to the terminal.
-        | Ore _ -> has Carry && emptyHanded && worthTheTrip && not heavy && not standing
+        // few tiles from the mine to the terminal. The lab cluster's haul is
+        // the same few tiles, terminal to lab and back.
+        | Ore _
+        | Compound _ -> has Carry && emptyHanded && worthTheTrip && not heavy && not standing
         | Energy ->
             has Carry
             && (halfEmpty || tops storeId stock)
@@ -265,7 +267,8 @@ let internal applicable
     // buffer, and it drops `worthTheTrip` because a pile decays and a store does
     // not, so there is no later body to leave it for (#311).
     | Pickup(_, Thorium)
-    | Pickup(_, Ore _) -> has Carry && emptyHanded && not heavy && not standing
+    | Pickup(_, Ore _)
+    | Pickup(_, Compound _) -> has Carry && emptyHanded && not heavy && not standing
     // A child's floor is the ferry's drop (#473): a Work body's to build and
     // upgrade with, and never a hauler's to carry back out.
     | Pickup(pileId, Energy) ->
@@ -324,12 +327,10 @@ let internal applicable
         && (not storage
             || creep.Thorium <> view.Tuning.ReactorLoad
             || Set.isEmpty (Facts.errandRoomsDeliverable view))
-    // What a body took is what it puts down: the ore it holds, into the
-    // terminal.
-    | Refill(_, Ore ore) ->
-        has Carry
-        && Map.tryFind ore creep.Ore |> Option.exists (fun held -> held > 0)
-        && not standing
+    // What a body took is what it puts down: the mineral it holds, into the
+    // terminal or the lab asking for it.
+    | Refill(_, (Ore _ | Compound _ as mineral)) ->
+        has Carry && CreepInfo.holding mineral creep > 0 && not standing
     // A Build is a walk a colony-wide rank cannot thin (#157, #234): light
     // bodies' work, and neither a heavy body's nor a standing one's. The one
     // exception is a container site under the body's own feet, on its own Post
@@ -494,11 +495,7 @@ let private intentFor
                 resource = Energy
                 && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Terminal)
             then
-                let reserve =
-                    if Option.isSome view.Consignee then
-                        view.Tuning.TerminalEnergy
-                    else
-                        0
+                let reserve = Facts.feeReserve view
 
                 Some(
                     max
@@ -507,6 +504,23 @@ let private intentFor
                             creep.FreeCapacity
                             (SpatialInfo.storedIn view.Spatial storeId - reserve))
                 )
+            // A reagent out of the terminal for the labs, and no more than
+            // the labs asking for it have room for: the rest would go back.
+            elif
+                isMineralResource resource
+                && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Terminal)
+            then
+                match
+                    (Facts.labPlan view).Fills
+                    |> List.sumBy (fun (_, reagent, room) -> if reagent = resource then room else 0)
+                with
+                | 0 -> None
+                | room ->
+                    Some(
+                        min
+                            (min creep.FreeCapacity room)
+                            (SpatialInfo.heldIn view.Spatial resource storeId)
+                    )
             else
                 None
 

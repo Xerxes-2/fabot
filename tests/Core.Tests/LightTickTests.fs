@@ -212,6 +212,29 @@ let replayTests =
                     "an observer gone: nothing"
             }
 
+            test "a lab's reaction is asked again, so the run the cooldown held back lands" {
+                // The engine counts each run off the labs' own stores and
+                // refuses one on cooldown: a replay draws nothing twice.
+                let glance =
+                    { quiet with
+                        Objects = Set.add "lab-c" quiet.Objects
+                    }
+
+                let reacted =
+                    LightTick.lastFull glance Map.empty [ RunReaction("lab-c", "lab-a", "lab-b") ]
+
+                Expect.equal
+                    (LightTick.intents reacted glance)
+                    [ RunReaction("lab-c", "lab-a", "lab-b") ]
+                    "the same reaction"
+
+                Expect.isEmpty (LightTick.intents reacted quiet) "the output lab gone: nothing"
+
+                Expect.isEmpty
+                    (LightTick.forcing reacted glance)
+                    "a reaction is no structure's fight: the next tick stays light"
+            }
+
             test "a swing at a core, a re-claim and a pickup are replayed while their targets stand" {
                 // #529: a level-0 core swung half the time took twice as long.
                 let full =

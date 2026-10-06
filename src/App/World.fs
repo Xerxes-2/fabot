@@ -49,22 +49,23 @@ let boostsOf (body: IBodyPartDef[]) : Boost list =
         if List.forall ((=) Unboosted) boosts then [] else boosts
 
 /// The resource a `RESOURCE_*` string names, and None for one no decision of
-/// ours names (a compound, a commodity).
+/// ours names (a compound off the UH line, a commodity).
 let private resourceOf = reverseOf resourceName allResources
 
-/// The [[ore]] one store holds, by ore, and empty for a store holding none.
-/// Its keys are walked only when the store holds more than its energy and
-/// Thorium, which is almost never.
-let private oreHeldBy (store: IStore) (energy: int) (thorium: int) : Map<Ore, int> =
+/// The minerals one store holds (the [[ore]] and the [[compound]]s), by
+/// resource, and empty for a store holding none. Its keys are walked only
+/// when the store holds more than its energy and Thorium, which is almost
+/// never.
+let private mineralsHeldBy (store: IStore) (energy: int) (thorium: int) : Map<Resource, int> =
     if storeUsedTotal store - energy - thorium <= 0 then
         Map.empty
     else
         storeKeys store
         |> Array.choose (fun key ->
             match resourceOf key with
-            | Some(Ore ore) ->
+            | Some resource when isMineralResource resource ->
                 match store.getUsedCapacity key with
-                | held when held > 0 -> Some(ore, held)
+                | held when held > 0 -> Some(resource, held)
                 | _ -> None
             | _ -> None)
         |> Fresh.mapOfArray
@@ -634,31 +635,32 @@ let private seenFacts
                     room.name
                     (Array.map fst column)
                     (Array.map snd column)
-        // The ore beside them: what each standing store holds, and an ore
-        // deposit's own remaining amount. A store holding none has no entry.
-        Ore =
+        // The minerals beside them: what each standing store holds, a lab's
+        // included, and an ore deposit's own remaining amount. A store
+        // holding none has no entry.
+        Minerals =
             Array.append
                 (storedStructures
                  |> Array.map (fun (st, _) ->
                      st.id,
-                     oreHeldBy
+                     mineralsHeldBy
                          st.store
                          (st.store.getUsedCapacity (resourceName Energy))
                          (st.store.getUsedCapacity (resourceName Thorium))))
                 (minerals
                  |> Array.choose (fun (m, resource) ->
                      match resource with
-                     | Ore ore when m.mineralAmount > 0 ->
-                         Some(m.id, Fresh.mapOfList [ ore, m.mineralAmount ])
+                     | Ore _ when m.mineralAmount > 0 ->
+                         Some(m.id, Fresh.mapOfList [ resource, m.mineralAmount ])
                      | _ -> None))
             |> Array.filter (fun (_, held) -> not (Map.isEmpty held))
             |> Fresh.mapOfArray
-        // The extractor's cooldown: `cooldown` is undefined on every other
-        // kind we build, and 0 is a real answer ("this tick"), so the map is
-        // not filtered the way the Thorium above is.
+        // The extractor's cooldown and a lab's: `cooldown` is undefined on
+        // every other kind we build, and 0 is a real answer ("this tick"), so
+        // the map is not filtered the way the Thorium above is.
         Cooldowns =
             structures
-            |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor)
+            |> Array.filter (fun (_, kind) -> kind = BuiltKind.Extractor || kind = BuiltKind.Lab)
             |> Array.map (fun (st, _) -> st.id, st.cooldown)
             |> Map.ofArray
         PublicRamparts =
@@ -1190,7 +1192,7 @@ let ofGame
                             Hits = { Hits = c.hits; HitsMax = c.hitsMax }
                             Energy = energy
                             Thorium = thorium
-                            Ore = oreHeldBy c.store energy thorium
+                            Minerals = mineralsHeldBy c.store energy thorium
                             // The whole store's free room: a creep's store is
                             // general, so this is the capacity less everything
                             // aboard and not the energy's own share.

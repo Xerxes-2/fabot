@@ -752,6 +752,53 @@ let horizonTests =
                             towers
                             $"RCL{level} allows {towers} towers and the room asks for all of them"
                 }
+
+            // The lab cluster's home on its real terrain, built out at RCL8
+            // as its own plan lays it, and its Storage over the floor: the
+            // stamp must fit, one lab at a time, into what the plan leaves.
+            test "W13S28 built out at RCL8 finds its three labs a stamp, one site at a time" {
+                let loaded = project (load "W13S28") { X = 16; Y = 12 } None
+                let bare = colonyOf loaded 8
+                let placed = placementsOf (decide bare Map.empty Set.empty None).Intents
+
+                let cluster =
+                    (tilesOfKind Terminal placed |> List.map (fun tile -> tile, BuiltKind.Terminal))
+                    @ standingCluster placed
+
+                let storage = cluster |> List.findIndex (fun (_, kind) -> kind = BuiltKind.Storage)
+
+                let funded (built: (Pos * BuiltKind) list) =
+                    let colony = withBuilt built bare
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Stores = Map.ofList [ $"built-{storage}", 150_000 ]
+                            }
+                        Labs =
+                            Some
+                                {
+                                    Cluster = Colony.labCluster
+                                    Stock = Map.empty
+                                }
+                    }
+
+                let labSites built =
+                    placementsOf (decide (funded built) Map.empty Set.empty None).Intents
+                    |> tilesOfKind StructureKind.Lab
+
+                let labs =
+                    (([], cluster), [ 1..3 ])
+                    ||> List.fold (fun (labs, built) _ ->
+                        match labSites built with
+                        | [ site ] -> labs @ [ site ], built @ [ site, BuiltKind.Lab ]
+                        | sites -> failwith $"one lab site at a time, got %A{sites}")
+                    |> fst
+
+                Expect.isSome
+                    (Labs.rolesOf (labs |> List.mapi (fun i tile -> $"lab-{i}", tile)))
+                    "the three react: an output within reach of both reagent labs"
+            }
         ]
 
 // ---- the extractor and its container, on the rooms that hold a deposit ---

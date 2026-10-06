@@ -66,6 +66,10 @@ type BuiltKind =
     /// The observer (#484): one per room at RCL8, whose `observeRoom` lends
     /// vision of one room within `Engine.observerRange` for the next tick.
     | Observer
+    /// A lab of the [[lab cluster]]: three at RCL6, six at RCL7, ten at RCL8.
+    /// It holds one mineral at a time, up to `Engine.labMineralCapacity`, and
+    /// `runReaction` makes a compound in it out of two others within range 2.
+    | Lab
     /// Any structure kind the decision layer has no rules for yet.
     | Other
 

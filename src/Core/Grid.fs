@@ -32,7 +32,7 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
     let carry = partCount creep.Body Carry
 
     let loadedCarry =
-        min carry ((creep.Energy + creep.Thorium + CreepInfo.oreAboard creep + 49) / 50)
+        min carry ((creep.Energy + creep.Thorium + CreepInfo.mineralsAboard creep + 49) / 50)
 
     let parts = creep.Body |> Map.toList |> List.sumBy snd
 
@@ -59,7 +59,7 @@ let factorCarrying (creep: CreepInfo) (load: int) : FatigueFactor =
         { creep with
             Energy = 0
             Thorium = load
-            Ore = Map.empty
+            Minerals = Map.empty
         }
 
 /// The fatigue factor of a body list carrying nothing — the shape a body

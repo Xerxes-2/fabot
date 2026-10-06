@@ -79,6 +79,34 @@ module Engine =
     /// bank are shipped in one lot or not at all.
     let terminalMinSend = 100
 
+    /// LAB_MINERAL_CAPACITY: the one mineral a lab holds, at most.
+    let labMineralCapacity = 3_000
+
+    /// LAB_REACTION_AMOUNT: what one `runReaction` takes of each reagent lab
+    /// and puts in the output lab.
+    let labReactionAmount = 5
+
+    /// The range `runReaction` reaches from the output lab to each reagent
+    /// lab (`run-reaction.js`).
+    let labReactionRange = 2
+
+    /// REACTION_TIME: the output lab's cooldown after one `runReaction` of
+    /// this compound.
+    let reactionTime =
+        function
+        | Hydroxide -> 20
+        | UtriumHydride -> 10
+        | UtriumAcid -> 5
+
+    /// REACTIONS, read the other way: the two reagents of a compound. The
+    /// order is the order a short pair is made in (`Labs.nextReaction`): OH
+    /// before UH, the slower reaction first.
+    let reagentsOf =
+        function
+        | Hydroxide -> Ore Hydrogen, Ore Oxygen
+        | UtriumHydride -> Ore Utrium, Ore Hydrogen
+        | UtriumAcid -> Compound Hydroxide, Compound UtriumHydride
+
     /// OBSERVER_RANGE: how far `observeRoom` reaches, Chebyshev over the room
     /// grid (`structures.js` compares each axis of `roomNameToXY`); further is
     /// ERR_NOT_IN_RANGE. The room it names is in `Game.rooms` the next tick
@@ -662,6 +690,16 @@ type Tuning =
         /// How far over `OreEnergyMargin` a shut dig's Storage must climb
         /// before it opens again; an open dig runs down to the margin itself.
         OreEnergyBand: int
+        /// The Storage energy under which the [[lab cluster]]'s home places
+        /// no lab and runs no reaction: the cluster never competes with
+        /// upgrading or defence.
+        LabEnergyFloor: int
+        /// How far under `LabEnergyFloor` a cluster already at work (a lab
+        /// holding a mineral) runs on; an idle one opens at the floor itself.
+        LabEnergyBand: int
+        /// How many labs the cluster is built to: one full chain run serially
+        /// (two reagent labs and one output), until demand is measured.
+        Labs: int
         /// The **[[emergency reserve]]** steps (#505): `(level, energy)`, the
         /// Storage energy a colony at that controller level or above keeps
         /// for spawning and defence, the last step at or under the level
@@ -945,6 +983,12 @@ module Tuning =
             OreTargetBand = 3_000
             // Half the margin: a Storage swinging round its margin opens the dig once, not each swing.
             OreEnergyBand = 5_000
+            // User, 2026-10-07: a lab is 50k, and the cluster never eats upgrading or defence.
+            LabEnergyFloor = 100_000
+            // A tenth: a Storage swinging round the floor stops the cluster once, not each swing.
+            LabEnergyBand = 10_000
+            // One serial UH2O chain; six only on measured demand (user, 2026-10-07).
+            Labs = 3
             // User, 2026-10-04: every Storage stood near 0 while the towers were full.
             EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]
             // Half: a 20-40 e/t surplus refills a 10-20k reserve inside about a creep's life.

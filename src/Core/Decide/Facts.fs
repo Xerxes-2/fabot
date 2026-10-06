@@ -16,7 +16,8 @@ let private resourceSuffix =
     function
     | Energy -> ""
     | Thorium -> ":Thorium"
-    | Ore _ as ore -> $":{resourceName ore}"
+    | Ore _
+    | Compound _ as mineral -> $":{resourceName mineral}"
 
 /// Stable identity of a Task across ticks; what Assignments point at.
 let taskId =
@@ -1998,6 +1999,113 @@ let internal oresDigOpen (view: ColonyView) : Set<Ore> =
         | Some(Ore ore) -> Some ore
         | _ -> None)
     |> Set.ofList
+
+/// The [[lab cluster]] this colony runs: its own home's, and None at every
+/// other home.
+let internal ownCluster (view: ColonyView) : LabFacts option =
+    view.Labs
+    |> Option.filter (fun labs -> Some labs.Cluster.Home = view.Spatial.RoomName)
+
+/// The labs standing in the home room, each beside its tile, in id order.
+let internal clusterLabs (view: ColonyView) : (string * Pos) list =
+    match view.Spatial.RoomName with
+    | None -> []
+    | Some home ->
+        let layer = SpatialInfo.layerOf view.Spatial home
+
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Lab)
+        |> List.choose (fun id ->
+            Map.tryFind id layer.TargetPositions |> Option.map (fun at -> id, at))
+        |> List.sortBy fst
+
+/// The one mineral a lab holds, and how much, or None for an empty one.
+let internal labHolds (view: ColonyView) (labId: string) : (Resource * int) option =
+    SpatialInfo.mineralsIn view.Spatial labId |> List.tryHead
+
+/// Whether the cluster's home runs it this tick: the home is the cluster's,
+/// and its Storage stands at `Tuning.LabEnergyFloor`, or within
+/// `Tuning.LabEnergyBand` under it while a lab still holds a mineral — a
+/// cluster at work runs on down to the band's foot, and an idle one opens
+/// only at the floor, so a Storage hovering at the line neither flips the
+/// plan nor sends the reagents back and forth. Read off the labs, not
+/// remembered. Under it no lab is placed and no lab works.
+let internal labsFunded (view: ColonyView) : bool =
+    match ownCluster view, homeStock view with
+    | Some _, Some stock ->
+        stock >= view.Tuning.LabEnergyFloor
+        || (stock >= view.Tuning.LabEnergyFloor - view.Tuning.LabEnergyBand
+            && clusterLabs view |> List.exists (fst >> labHolds view >> Option.isSome))
+    | _ -> false
+
+/// The cluster's plan this tick (`Labs.planFor`), idle at a home without the
+/// cluster and under the floor.
+let internal labPlan (view: ColonyView) : Labs.LabPlan =
+    match ownCluster view with
+    | Some labs when labsFunded view ->
+        Labs.planFor labs.Cluster.Targets labs.Stock (clusterLabs view) (labHolds view)
+    | _ -> Labs.idle
+
+/// The cluster's home and the ore it lacks (`Labs.oreShort`), for a colony
+/// that ships it ore: None at the cluster's own home and where none is
+/// declared, and an empty map while the cluster wants for nothing.
+let internal oreForCluster (view: ColonyView) : (string * Map<Ore, int>) option =
+    match view.Labs with
+    | Some labs when Some labs.Cluster.Home <> view.Spatial.RoomName ->
+        Some(labs.Cluster.Home, Labs.oreShort labs.Cluster.Targets labs.Stock)
+    | _ -> None
+
+/// The colony's standing terminals, in id order.
+let internal ourTerminals (view: ColonyView) : string list =
+    SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Terminal)
+    |> List.filter (SpatialInfo.placedAway view.Spatial >> not)
+
+/// The rooms a `send` between two homes is priced over: Screeps prices it
+/// over `Game.map.getRoomLinearDistance`, which is Chebyshev — the diagonal of
+/// a room-name grid costs one room, not two — and every other distance in this
+/// tree is the hop count (`RoomName.hopsBetween`). Read the engine's metric
+/// here and not the walk's: the fee is the engine's to charge.
+let internal sendRange (home: string) (destination: string) : int option =
+    RoomName.offsetOf home destination
+    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+/// The fee this colony's terminals pay to ship the cluster every unit of ore
+/// they hold that it lacks (`Engine.sendFee`), and 0 for a colony shipping it
+/// none.
+let internal oreShipFee (view: ColonyView) : int =
+    match oreForCluster view, view.Spatial.RoomName with
+    | Some(destination, short), Some home ->
+        let shipped =
+            short
+            |> Map.toList
+            |> List.sumBy (fun (ore, wanted) ->
+                min
+                    wanted
+                    (ourTerminals view |> List.sumBy (SpatialInfo.heldIn view.Spatial (Ore ore))))
+
+        match sendRange home destination with
+        | Some range when shipped > 0 -> Engine.sendFee range shipped
+        | _ -> 0
+    | _ -> 0
+
+/// The energy a terminal of this colony keeps for `send`'s fee: the
+/// consignment's `Tuning.TerminalEnergy` for a colony with a consignee, and
+/// for the ore the cluster lacks that ore's own fee and a margin over it —
+/// 3,000 U two rooms out is about 200 — whichever is more; none otherwise.
+let internal feeReserve (view: ColonyView) : int =
+    let consignment =
+        if Option.isSome view.Consignee then
+            view.Tuning.TerminalEnergy
+        else
+            0
+
+    // A hundred over: the fee is rounded up per send, and a top-up arriving
+    // between the Refill and the send still pays.
+    let ore =
+        match oreShipFee view with
+        | 0 -> 0
+        | fee -> fee + 100
+
+    max consignment ore
 
 /// Whether more ore is still on its way to the Storage: a diggable Thorium
 /// deposit of ours, or ore already standing in a mineral container. The

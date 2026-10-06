@@ -637,7 +637,8 @@ module Salvage =
     /// vision of it. A rampart is one, and the engine turns a dismantle on its
     /// tile onto it anyway. Roads and containers are nobody's; `Other` is left
     /// standing, which is the kinds the engine refuses to dismantle (a keeper
-    /// lair, a portal) and the ownable ones nothing models (a lab, a nuker).
+    /// lair, a portal) and the ownable ones nothing models (a nuker); and so is
+    /// a lab, modelled for our own cluster alone and left as it stood.
     let isTarget (kind: TargetKind) =
         match kind with
         | Structure BuiltKind.Spawn
@@ -651,6 +652,7 @@ module Salvage =
         | Structure BuiltKind.Rampart -> true
         | Structure BuiltKind.Road
         | Structure BuiltKind.Container
+        | Structure BuiltKind.Lab
         | Structure BuiltKind.Other
         | Source
         | Controller
@@ -1060,6 +1062,18 @@ type ColonyStage =
     /// every rule written for the one home this bot grew up in was written at.
     | Independent
 
+/// The **[[lab cluster]]**: the one home its labs stand in, and the stock of
+/// each [[compound]] it reacts up to. Declared once beside the colonies and
+/// not inside one, because every other colony's terminal ships it ore.
+/// Declared ahead of `Colony`, so a record written `{ Home = …` is a colony.
+type LabCluster =
+    {
+        Home: string
+        /// Compound -> the stock (its home's terminal and labs together) the
+        /// cluster reacts up to and stops at.
+        Targets: Map<Compound, int>
+    }
+
 /// One colony: a [[home room]] and the [[outpost]]s worked from it. The unit
 /// the whole decision layer is written in — one Atlas, one Layout, one set of
 /// quotas, one Task pool — and so the unit a declaration is written in.
@@ -1113,6 +1127,14 @@ type Colony =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Colony =
+    /// The lab cluster (user, 2026-10-07): W13S28, RCL8 and the largest bank.
+    let labCluster: LabCluster =
+        {
+            Home = "W13S28"
+            // Four 25-ATTACK brawlers' boosts at 750 each.
+            Targets = Fresh.mapOfList [ UtriumAcid, 3_000 ]
+        }
+
     /// The lines this colony writes on a controller it stands beside (#381),
     /// chosen by a human on 2026-09-25. The engine caps a sign at 100
     /// characters. Flavour on a sign, not a specification.

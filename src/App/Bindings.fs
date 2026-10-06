@@ -451,3 +451,9 @@ let removeSite (_site: obj) : int = jsNative
 /// OBSERVER_RANGE, ERR_RCL_NOT_ENOUGH below RCL8.
 [<Emit("$0.observeRoom($1)")>]
 let observeRoom (_observer: obj) (_room: string) : int = jsNative
+
+/// `lab.runReaction` (`game/structures.js`): ERR_TIRED on cooldown,
+/// ERR_NOT_IN_RANGE past range 2 of either reagent lab,
+/// ERR_NOT_ENOUGH_RESOURCES or ERR_INVALID_ARGS for the wrong reagents.
+[<Emit("$0.runReaction($1, $2)")>]
+let runReaction (_lab: obj) (_reagentLab: obj) (_otherReagentLab: obj) : int = jsNative

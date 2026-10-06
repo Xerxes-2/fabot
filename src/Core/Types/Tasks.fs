@@ -274,6 +274,8 @@ type StructureKind =
     | Spawn
     /// The observer (#484), at RCL8, placed after the extensions.
     | Observer
+    /// A lab of the [[lab cluster]], placed on its stamp, as near the terminal as the plan leaves room.
+    | Lab
 
 /// One step of creep movement, engine vocabulary: Top decreases Y.
 type Direction =
@@ -322,14 +324,15 @@ let partName =
 
 /// Every Resource the colony names — the closed set, for building tables over
 /// the vocabulary, and closed by `Core.Tests` exactly as `allBodyParts` is.
-let allResources = [ Energy; Thorium ] @ List.map Ore allOres
+let allResources =
+    [ Energy; Thorium ] @ List.map Ore allOres @ List.map Compound allCompounds
 
 /// Screeps RESOURCE_* strings as the engine spells them, in `store` keys and in
 /// the `withdraw`/`transfer` calls that have taken one all along — the one
 /// place the spelling lives (its reverse is derived from this table).
 /// `RESOURCE_THORIUM` is the season mod's own one-letter key, which is what
 /// `mineralType` reads on the deposit and what the reactor's store is filed
-/// under; an ore's is the engine's own one letter.
+/// under; an ore's is the engine's own one letter, a compound's its formula.
 let resourceName =
     function
     | Energy -> "energy"
@@ -341,6 +344,9 @@ let resourceName =
     | Ore Lemergium -> "L"
     | Ore Zynthium -> "Z"
     | Ore Catalyst -> "X"
+    | Compound Hydroxide -> "OH"
+    | Compound UtriumHydride -> "UH"
+    | Compound UtriumAcid -> "UH2O"
 
 /// Every BuiltKind the engine spells — the modelled set. Other is not one of
 /// them: it is the absence of a modelled kind. Closed by `Core.Tests`.
@@ -357,6 +363,7 @@ let allBuiltKinds =
         BuiltKind.Extractor
         BuiltKind.Terminal
         BuiltKind.Observer
+        BuiltKind.Lab
     ]
 
 /// Screeps STRUCTURE_* strings as the engine spells them, in `structureType`
@@ -377,6 +384,7 @@ let builtKindName =
     | BuiltKind.Extractor -> "extractor"
     | BuiltKind.Terminal -> "terminal"
     | BuiltKind.Observer -> "observer"
+    | BuiltKind.Lab -> "lab"
     | BuiltKind.Other -> ""
 
 /// The built kind a placement Intent's kind names: the one crossing between
@@ -396,6 +404,7 @@ let builtKindOfPlaceable =
     | Terminal -> BuiltKind.Terminal
     | Spawn -> BuiltKind.Spawn
     | Observer -> BuiltKind.Observer
+    | Lab -> BuiltKind.Lab
 
 /// The kinds Refill keeps fed: the spawn-energy feeders and the towers, the
 /// structures a view projects as Refillables. The controller container and the
@@ -416,6 +425,7 @@ let isRefillable =
     // send rule's business, pooled off its store the way the Storage's are.
     | BuiltKind.Terminal
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// ADR-0034. The Keep: the structures worth defending. One list, three rules
@@ -434,6 +444,7 @@ let isKeep =
     | BuiltKind.Rampart
     | BuiltKind.Extractor
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// The kinds a raid's damage is charged on: the Keep and the ramparts that
@@ -451,6 +462,7 @@ let isDefence =
     | BuiltKind.Link
     | BuiltKind.Extractor
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// The kinds whose projection has to ask the engine who owns them: every
@@ -470,6 +482,7 @@ let needsOwner =
     | BuiltKind.Link
     | BuiltKind.Extractor
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// Where a kind is whole — which of the three rules judges its hits, never the
@@ -501,10 +514,11 @@ let wholeLine =
     | BuiltKind.Link
     | BuiltKind.Extractor
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> None
 
-/// The kinds whose stored energy enters the projection: the containers, the
-/// Storage, and the terminal.
+/// The kinds whose store enters the projection: the containers, the Storage,
+/// the terminal and the labs.
 let isStored =
     function
     | BuiltKind.Container
@@ -513,7 +527,10 @@ let isStored =
     // energy the fee is paid out of (#349), never as an energy intake or a
     // hauling sink: a store in the projection that no rule names is a store
     // every generic rule may pick up.
-    | BuiltKind.Terminal -> true
+    | BuiltKind.Terminal
+    // A lab's mineral is the cluster's to read (`Labs`); its energy, which
+    // only a boost spends, no rule names.
+    | BuiltKind.Lab -> true
     | BuiltKind.Spawn
     | BuiltKind.Extension
     | BuiltKind.Tower
@@ -522,6 +539,7 @@ let isStored =
     | BuiltKind.Rampart
     | BuiltKind.Extractor
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// The kinds a creep can stand on; every other kind blocks its tile
@@ -546,6 +564,7 @@ let isWalkable =
     // (`docs/research/creep-positioning-traffic.md`).
     | BuiltKind.Terminal
     | BuiltKind.Observer
+    | BuiltKind.Lab
     | BuiltKind.Other -> false
 
 /// Screeps direction constants as `Creep.move` expects them: TOP = 1, then clockwise.

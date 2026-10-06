@@ -303,6 +303,11 @@ let private replayed (intent: Intent) : (string option * Stands) option =
     // Vision lands the tick after the look: one issued on the full tick
     // lands on the light tick, which reads nothing.
     | ObserveRoom(observer, _) -> Some(None, Stands.Object observer)
+    // The engine counts every run off the labs' own stores and refuses one on
+    // cooldown or short of a reagent, so a replay draws nothing twice: the
+    // full tick asks only on the tick the lab comes off its cooldown, or the
+    // tick before, and the light tick's ask is the one that lands then.
+    | RunReaction(lab, _, _) -> Some(None, Stands.Object lab)
     // It hits whoever stands near now, an ally walked in among them: an
     // aiming ranger's is chosen again off the glance (`intents`).
     | RangedMassAttack _
@@ -388,6 +393,7 @@ let private fights (intent: Intent) : bool =
     | DestroyStructure _
     | RemoveSite _
     | ObserveRoom _
+    | RunReaction _
     | SendFromTerminal _ -> false
 
 /// One colony's plan, off the glance taken at the start of the tick it

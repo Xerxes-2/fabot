@@ -123,6 +123,11 @@ type Intent =
     /// An observer of ours lending vision of one room for the next tick
     /// (#484). One-shot: the vision lasts the one tick after it.
     | ObserveRoom of observerId: string * room: string
+    /// A lab of ours making `Engine.labReactionAmount` of a compound out of
+    /// the two reagent labs it names (`runReaction`): each within range 2 of
+    /// it, holding the reagents, and the output lab off its cooldown, or the
+    /// engine refuses it.
+    | RunReaction of labId: string * reagentLab: string * otherReagentLab: string
     /// A terminal shipping a resource to another room's terminal (#349). The
     /// amount and the destination are named here for `HealCreep`'s reason, and
     /// this is the one intent whose refusal is expected in normal running: a

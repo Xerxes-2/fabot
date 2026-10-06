@@ -645,7 +645,7 @@ let planTasks
                  [ Thorium ]
              else
                  [])
-            @ SpatialInfo.oresIn view.Spatial id
+            @ (SpatialInfo.mineralsIn view.Spatial id |> List.map fst)
             |> List.map (fun resource -> Withdraw(id, resource)))
 
     // And the same intake off the floor (#311): every tick the haul lags, the
@@ -761,19 +761,48 @@ let planTasks
     let terminalRoom id =
         Engine.terminalCapacity - SpatialInfo.heldAllIn view.Spatial id
 
-    // The ore's sink is the home terminal, pooled off the bodies
-    // holding ore and off no fact about the mine, for `mineRefills`' reason:
-    // a body already holding ore must have somewhere to put it down.
+    // The [[lab cluster]]'s haul, derived whole each tick (`Facts.labPlan`):
+    // a reagent lab short of its reagent is a Refill, fed by a Withdraw of
+    // that reagent from the home terminal, and a lab holding what it should
+    // not, or an output at half full, is a Withdraw whose load goes to the
+    // terminal below. Nothing at a home without the cluster or under its floor.
+    let labWork = labPlan view
+
+    let labRefills =
+        labWork.Fills
+        |> List.map (fun (lab, reagent, _) -> Refill(lab, reagent))
+        |> List.distinct
+
+    let labReagents =
+        labWork.Fills |> List.map (fun (_, reagent, _) -> reagent) |> Set.ofList
+
+    let labDraws =
+        labReagents
+        |> Set.toList
+        |> List.collect (fun reagent ->
+            ourTerminals view
+            |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial reagent id > 0)
+            |> List.map (fun id -> Withdraw(id, reagent)))
+
+    let labDrains =
+        labWork.Drains |> List.map (fun (lab, mineral) -> Withdraw(lab, mineral))
+
+    // The minerals' sink is the home terminal, pooled off the bodies holding
+    // them and off no fact about the mine, for `mineRefills`' reason: a body
+    // already holding ore must have somewhere to put it down. Not a reagent a
+    // lab is asking for: that load is the lab's, and the terminal beside the
+    // lab would take it straight back.
     let oreRefills =
         let carried =
             view.Creeps
-            |> List.collect (fun creep -> creep.Ore |> Map.toList |> List.map fst)
+            |> List.collect (fun creep -> creep.Minerals |> Map.toList |> List.map fst)
             |> List.distinct
+            |> List.filter (fun mineral -> not (Set.contains mineral labReagents))
 
         terminals
         |> List.filter (fun id ->
             not (SpatialInfo.placedAway view.Spatial id) && terminalRoom id > 0)
-        |> List.collect (fun id -> carried |> List.map (fun ore -> Refill(id, Ore ore)))
+        |> List.collect (fun id -> carried |> List.map (fun mineral -> Refill(id, mineral)))
 
     // Outbound, and only for a colony that declares a consignee: the ore goes
     // from the Storage into the terminal. Gated on room in the terminal and on
@@ -820,11 +849,7 @@ let planTasks
     // arrives, down to the fee reserve its consignment keeps.
     let donates = Facts.givesAid view
 
-    let feeReserve =
-        if Option.isSome view.Consignee then
-            view.Tuning.TerminalEnergy
-        else
-            0
+    let feeReserve = Facts.feeReserve view
 
     // One energy Refill per terminal, to the larger of the two stocks it is
     // kept at: the consignment's fee and the aid's load.
@@ -982,5 +1007,10 @@ let planTasks
     @ mineWithdraws
     @ mineRefills
     @ oreRefills
+    // The lab's own haul, last: each is a few tiles between the terminal and
+    // a lab, and a laden body's only sink is one of them.
+    @ labRefills
+    @ labDrains
+    @ labDraws
     @ deliveryWithdraws
     @ reactorRefills
