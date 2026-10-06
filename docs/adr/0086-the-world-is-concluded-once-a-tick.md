@@ -1,6 +1,8 @@
 # The world is concluded once a tick; a colony owns bodies and economy
 
-> **Status:** accepted
+> **Status:** superseded by 0091
+
+> **Superseded by 0091** on 2026-10-07: its Decision (a colony owns its bodies; the answering colony pools the Task) and its rejected option "a world layer that also matches and casts centrally" give way to 0091's "the world decides the fight once a tick; a colony decides its economy". The code it shaped stays until 0091's W5 replaces it. S1–S5 below are the as-built record and stand; S6 folds into 0091's W1/W2.
 
 > **Proposed 2026-10-05** on an inventory of main c9deda59 and live play at t973,265–973,581; S0 at main feaee027. **Accepted by the user 2026-10-06.** It amends ADR 0047 and 0052 (the `ColonyView` as decide's only input), 0043 (the stand-down as a per-colony log) and 0085 (the Brief keyed per colony); each carries an "amended by 0086" banner. S0's characterisation tests are commented `Characterisation (the world layer's S0)`.
 

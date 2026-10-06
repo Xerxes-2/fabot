@@ -182,7 +182,7 @@ type WorldRoom =
     }
 
 /// The world layer's read of this tick, built once off the `World` and handed
-/// to every colony (ADR-0086).
+/// to every colony (ADR-0091).
 type WorldView =
     {
         /// Every room vision answered for this tick, by name.
