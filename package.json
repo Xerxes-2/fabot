@@ -9,6 +9,7 @@
     "upload": "node --env-file-if-exists=.env scripts/upload.mjs",
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "profile": "node scripts/profile.mjs",
+    "spar": "node scripts/spar.mjs",
     "cpuprofile": "node scripts/cpuprofile.mjs",
     "probe": "node scripts/probe.mjs",
     "wire": "npm run build:fable --silent && node scripts/wire-check.mjs",

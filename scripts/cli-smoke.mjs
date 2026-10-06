@@ -596,6 +596,22 @@ xxRefuses(["run", "w11s28-invasion", "--bogus"], "usage:");
 xxRefuses(["diff", "a.jsonl"], "usage:");
 xxRefuses(["diff", join(dir, "a.jsonl"), join(dir, "b.jsonl")], "no trace at");
 
+// ---- spar (#567): refusals only, never dotnet or the engine ----------------
+
+const sparRefuses = (args, says) =>
+  smoke(`spar ${args.join(" ")} refuses`, () => {
+    const { code, err } = run("spar.mjs", args);
+    assert.equal(code, 1, `exit ${code}; stderr: ${err}`);
+    assert.ok(!crashed(err), `crashed: ${err}`);
+    assert.ok(err.includes(says), `stderr does not say "${says}": ${err}`);
+  });
+
+sparRefuses(["--bogus"], "usage:");
+sparRefuses(["--accept", "extra"], "usage:");
+sparRefuses(["xx", "Not_A_Slug"], "usage:");
+sparRefuses(["xx", "--seed"], "--seed needs a whole number");
+sparRefuses(["xx", "outpost-melee", "--tolerance", "x"], "--tolerance needs a whole number");
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;

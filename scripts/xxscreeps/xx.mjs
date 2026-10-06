@@ -168,17 +168,21 @@ function screepsrc(ours) {
 // Our bodies' arena path and casts, tick by tick, for `engine/replay`: the
 // pipeline's Intents as `crossValidate` wrote them (`AttackCreep ("a", "b")`).
 const VERBS = { AttackCreep: "attack", RangedAttackCreep: "rangedAttack", HealCreep: "heal", RangedHealCreep: "rangedHeal", RangedMassAttack: "rangedMassAttack" };
+// Our towers' shots and heals too (#567), by the tower's tile: xxscreeps
+// gives every structure an id of its own.
+const TOWER_VERBS = { FireTower: "attack", HealWithTower: "heal" };
 function replayOf(scenario, arena) {
   const ours = new Set(scenario.bodies.filter((b) => b.side === "ours").map((b) => b.id));
+  const towers = new Map(scenario.rooms.flatMap((r) => r.structures.filter((s) => s.kind === "tower" && s.owner === "ours").map((s) => [s.id, [r.name, s.x, s.y]])));
   const ticks = arena.map((row) => {
-    const plan = {};
+    const plan = { "#towers": [] };
     for (const b of row.bodies) if (ours.has(b.id)) plan[b.id] = { at: [b.room, b.x, b.y], acts: [] };
     for (const intent of row.ours) {
       const m = /^(\w+) \((.*)\)$/.exec(intent);
-      const verb = m && VERBS[m[1]];
-      if (!verb) continue;
-      const [creep, targetName] = [...m[2].matchAll(/"([^"]*)"/g)].map((q) => q[1]);
-      plan[creep]?.acts.push([verb, targetName ?? null]);
+      if (!m) continue;
+      const [actor, targetName] = [...m[2].matchAll(/"([^"]*)"/g)].map((q) => q[1]);
+      if (VERBS[m[1]]) plan[actor]?.acts.push([VERBS[m[1]], targetName ?? null]);
+      else if (TOWER_VERBS[m[1]] && towers.has(actor)) plan["#towers"].push([...towers.get(actor), TOWER_VERBS[m[1]], targetName]);
     }
     return plan;
   });

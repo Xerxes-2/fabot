@@ -1,10 +1,11 @@
 // Our side replaying the arena run (#543), so only the other side's AI can
 // make the two traces part: each tick, each of our bodies steps toward
 // where the arena had it at the end of that tick, and casts the attacks and
-// heals the arena's pipeline cast, on whoever of those stands in reach.
+// heals the arena's pipeline cast, on whoever of those stands in reach, and
+// each of our towers its shot or heal (#567).
 // `replay.js` (`{ start, ticks: [{ <creep>: { at: [room, x, y], acts:
-// [[verb, target]] } }] }`, tick 0 the arena's first step) is written beside
-// this file per run.
+// [[verb, target]] }, "#towers": [[room, x, y, verb, target]] }] }`, tick 0
+// the arena's first step) is written beside this file per run.
 const { start, ticks } = require("replay");
 
 const parse = (name) => {
@@ -20,6 +21,12 @@ const DIRECTIONS = { "-1,-1": TOP_LEFT, "0,-1": TOP, "1,-1": TOP_RIGHT, "1,0": R
 
 module.exports.loop = function () {
   const plan = ticks[Game.time - start] ?? {};
+  for (const [room, x, y, verb, name] of plan["#towers"] ?? []) {
+    const here = Game.rooms[room];
+    const tower = here?.lookForAt(LOOK_STRUCTURES, x, y).find((s) => s.structureType === STRUCTURE_TOWER);
+    const target = here?.find(FIND_CREEPS).find((c) => c.name === name);
+    if (tower && target) verb === "attack" ? tower.attack(target) : tower.heal(target);
+  }
   for (const creep of Object.values(Game.creeps)) {
     const mine = plan[creep.name];
     if (!mine) continue;

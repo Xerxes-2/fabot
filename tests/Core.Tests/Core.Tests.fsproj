@@ -85,6 +85,7 @@
     <Compile Include="ArenaReactorTests.fs" />
     <Compile Include="ArenaClaimTests.fs" />
     <Compile Include="ArenaStrongholdTests.fs" />
+    <Compile Include="Spar.fs" />
     <Compile Include="ParallelSafetyTests.fs" />
   </ItemGroup>
   <ItemGroup>

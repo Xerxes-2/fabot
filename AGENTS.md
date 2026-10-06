@@ -19,6 +19,7 @@ Each rule's reason is in `docs/agents/hygiene.md`.
 - A combat rule reads the body, never the owner; the owner decides only diplomacy (`Facts.mayStrike`) and engine facts (an Invader stays in its room, a keeper holds its lair).
 - A capture (`npm run capture`, `docs/agents/arena-capture.md`) reproduces the live outcome before it is pinned; one that doesn't is a finding about the capture or the arena.
 - A behaviour change names every test expectation it moves and why; a refactor moves none.
+- A fight change (Facts, Threat, Emitter, Resolver, Arrival, the arena) runs `npm run spar` and names every worse metric in the commit: `docs/agents/spar.md`.
 
 ## ADRs
 
