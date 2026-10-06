@@ -527,9 +527,15 @@ let strongholdTests =
             // it dies (#566). Live it stepped once more, to 25,46, and died a
             // tick sooner (t980,650): its Task is gone from the Transition log,
             // and the code then routed it in, which 8b4a313f has since barred.
-            // Flips at S2, where Flee reads the towers' reach.
+            // Not flipped at movement S2, which lays the towers' reach and
+            // walks a body out over the exit by it (#566, ThreatTests' "a
+            // ranger under a stronghold's towers"): since 8b4a313f no chain
+            // enters a stronghold's room, so W15S28 does not project W16S26
+            // and the ranger standing there is placed by nothing — no Task,
+            // no Flee, no step. Only a body that stood there before that
+            // barrier can be in this state.
             test
-                "Characterisation (movement S0): the ranger stands under lethal tower fire until it dies; flips at S2" {
+                "Characterisation (movement S0): the ranger in a stronghold room no colony projects stands under its towers until it dies" {
                 let _, trace = w16s26T980640 () |> run 12
                 let id = "ranger-980431-Spawn3"
 

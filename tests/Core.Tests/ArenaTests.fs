@@ -7915,9 +7915,11 @@ let arenaBorderTests =
             // (t986,006-986,012) the ranger stepped to range 2 of HalfLife847
             // to shoot, and was struck four times, t3-t6 (4,200 to 2,496).
             // The melee walks its live road tiles (#560) and keeps their
-            // ticks to t8; the ranger's first step is (25,6), not the live
-            // (24,6), so it stays a tile ahead down the road and is struck
-            // once, at t6 (426, the live swing), then outwalks it.
+            // ticks to t8. Since movement S2 the ranger's walk is priced in
+            // whole ticks, the road no cheaper than plain: its first step is
+            // (23,5), off the road toward the melee, where before S2 it was
+            // (25,6) down the road and it was struck at t6. It is struck once,
+            // at t4 (426, the live swing), then steps clear.
             test
                 "movement S0 capture t986,005: a ranger holding the Guard steps within two of a melee and is struck" {
                 let ranger = "ranger-984393-Spawn3"
@@ -7948,25 +7950,22 @@ let arenaBorderTests =
                     |> List.choose (fun ((_, before), (tick, now)) ->
                         if now.Hits < before.Hits then Some tick else None)
 
-                Expect.equal struck [ 6 ] $"and the melee strikes it once\n{failure}"
+                Expect.equal struck [ 4 ] $"and the melee strikes it once\n{failure}"
             }
 
-            // Characterisation (movement S0): pins #527's loop, a
-            // walker that does not route round a slow melee's Reach but flees
-            // it each time the melee steps and rematches the same Refill;
-            // flips at S2 (Reach, Safe, Flee and walk-round read the arrival
-            // map), whose acceptance is the detour that keeps the Refill. With
-            // the captured roads and Virtual458 on its live road tiles (#560),
-            // which it keeps to the tick by the road's fatigue, this is live
-            // (t971,046-971,081): hauler-970335-Spawn11 flees a tile back
-            // each time the melee steps, onto the live tiles on the live
-            // ticks; hauler-969730-Spawn11 flees once, at t1, then walks round
-            // to the north onto the road home and crosses at t25 (live t33,
-            // after waiting at (35,12) until t10 and a wider loop by (39,10)).
-            // From t32 the residents shoot Virtual458, which live they did
-            // not (the Raid log of t971,045 is not seated).
+            // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read
+            // #527's loop live (t971,046-971,081): hauler-970335-Spawn11 fled a
+            // tile back each time the slow melee stepped and rematched the same
+            // Refill, standing still between; hauler-969730-Spawn11 fled once
+            // and crossed home at t25. Now Virtual458's map waits out its
+            // fatigue, so its Reach is its swing alone between steps, and a
+            // walk to work across a border goes round what the melee strikes
+            // before the walker is gone (`Threats.unsafeFor`): both haulers
+            // walk north round it with the Refill held, never flee, and cross
+            // home (the first standing still no more: its Work Area across the
+            // border was empty, and the walk round asked it for its way).
             test
-                "#527 capture t971,045: a hauler at a slow melee's Reach flees each step it takes and rematches its Refill" {
+                "#527 capture t971,045: both haulers walk round the slow melee to the tower and keep its Refill" {
                 let hauler = "hauler-970335-Spawn11"
                 let walker = "hauler-969730-Spawn11"
 
@@ -7979,50 +7978,35 @@ let arenaBorderTests =
                     |> fst
                     |> List.unzip
 
-                let fledAt (tasks: (int * string option) list) =
-                    tasks
-                    |> List.pairwise
-                    |> List.choose (fun ((_, before), (tick, now)) ->
-                        if now = Some "flee" && before <> now then
-                            Some tick
-                        else
-                            None)
-
-                let tasks = rows |> List.map (fun (tick, task, _) -> tick, task)
-                let walks = rows |> List.map (fun (tick, _, task) -> tick, task)
                 let failure = describe trace
 
-                Expect.equal
-                    (fledAt tasks)
-                    [ 1; 10; 19; 28 ]
-                    $"it flees as the melee steps\n{tasks}"
-
-                Expect.equal
-                    (tasks |> List.map snd |> List.distinct)
-                    [ Some "refill:tower-13-29"; Some "flee" ]
-                    "and holds the tower's Refill between, never another Task"
-
-                Expect.equal
-                    (pathOf hauler trace
-                     |> List.map (fun (_, s) -> RoomPos.pos s.At)
-                     |> List.distinct)
+                for id, held in
                     [
-                        { X = 36; Y = 17 }
-                        { X = 35; Y = 16 }
-                        { X = 34; Y = 15 }
-                        { X = 33; Y = 14 }
-                        { X = 32; Y = 13 }
-                    ]
-                    $"a live tile back each time\n{failure}"
+                        hauler, rows |> List.map (fun (_, task, _) -> task)
+                        walker, rows |> List.map (fun (_, _, task) -> task)
+                    ] do
+                    Expect.equal
+                        (List.distinct held)
+                        [ Some "refill:tower-13-29" ]
+                        $"{id} holds the tower's Refill every tick and never flees"
 
-                Expect.equal (fledAt walks) [ 1 ] $"the other flees once\n{walks}"
+                    Expect.isTrue
+                        (pathOf id trace
+                         |> List.pairwise
+                         |> List.forall (fun ((_, a), (_, b)) -> b.Hits >= a.Hits))
+                        $"{id} is never struck\n{failure}"
+
+                let home id =
+                    pathOf id trace
+                    |> List.tryFind (fun (_, s) -> s.At.Room = "W17S25")
+                    |> Option.map fst
 
                 Expect.equal
-                    (pathOf walker trace
-                     |> List.tryFind (fun (_, s) -> s.At.Room = "W17S25")
-                     |> Option.map fst)
-                    (Some 25)
-                    $"and crosses home round the melee\n{failure}"
+                    (home hauler)
+                    (Some 23)
+                    $"the first crosses home round the melee\n{failure}"
+
+                Expect.equal (home walker) (Some 20) $"and so does the other\n{failure}"
             }
 
             // Movement S0's doorway pin, flipped early (2026-10-07, live
@@ -8056,12 +8040,14 @@ let arenaBorderTests =
                     $"and leaves (1,15)\n{describe trace}"
             }
 
-            // Characterisation (movement S0): pins how a body
-            // released inside a Reach walks out of it, which reads no time:
-            // its way home to W17S25 runs through (48,14), beside Idol768;
-            // flips at S2 (walk-round reads the arrival map), whose
-            // acceptance is the #533 pin. Live (t973,268-973,294) the ranger
-            // stood idle on (46,14) and was struck to death: that was before
+            // Characterisation (movement S0): pinned how a body
+            // released inside a Reach walks out of it, which read no time:
+            // its way home to W17S25 runs through (48,14), beside Idol768.
+            // #563 made it the #533 acceptance before S2 did, and S2 keeps
+            // it: a fighter walking to another room's fight goes round what
+            // out-damages it where it stands (movement S2). Live
+            // (t973,268-973,294) the ranger stood idle on (46,14) and was
+            // struck to death: that was before
             // #533, which gave a released fighter a Task the same tick, so
             // the live outcome no longer reproduces by design. Here it takes
             // the home's Guard at t0 and, standing outside the Guard's room,

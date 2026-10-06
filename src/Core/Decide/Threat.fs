@@ -339,6 +339,20 @@ and Threats =
         /// holds (#535): a fight begun there is fought to its target's death,
         /// so a cripple or a healer left there is still its target.
         Engaged: Set<string>
+        /// Per room with a Reach, its hostile maps (`Arrival.inRoom`)
+        /// and their members priced (`Arrival.strikersOf`, on first read):
+        /// what the Reach, the damage gate, Flee and the walk round read.
+        Arrivals: Map<string, ArrivalMaps * Lazy<Arrival.Striker list>>
+        /// Our bodies' own arrival (`Arrival.ofBody`), each flooded on first
+        /// read this tick: heap-only, and gone with the Threats.
+        Walks: System.Collections.Generic.Dictionary<string, Arrival.BodyArrival option>
+        /// Each body's Flee ground (`Threats.fleeAreaFor`), laid on first read
+        /// this tick: three readers ask it a body.
+        Flights: System.Collections.Generic.Dictionary<string, Set<RoomPos>>
+        /// The colony's bodies this tick, whose walks those are.
+        Bodies: CreepInfo list
+        /// The reach horizon the Reach was laid at (`Tuning.ReachHorizon`).
+        Horizon: int
     }
 
 /// The tick with nothing to run from: what the pipeline is handed for a quiet
@@ -350,6 +364,11 @@ let noThreats =
         Shelter = Map.empty
         Briefs = Map.empty
         Engaged = Set.empty
+        Arrivals = Map.empty
+        Walks = System.Collections.Generic.Dictionary()
+        Flights = System.Collections.Generic.Dictionary()
+        Bodies = []
+        Horizon = Tuning.defaults.ReachHorizon
     }
 
 /// ADR-0056
@@ -1387,6 +1406,232 @@ module Threats =
         |> Option.map (fun ground -> ground.Force())
         |> Option.defaultValue Set.empty
 
+    /// What the hostiles whose maps reach a tile of a room land a tick on it
+    /// within `ticks` (`Arrival.damageAt`); 0 in a room with no Reach.
+    let damageAt (threats: Threats) (room: string) (ticks: int) (tile: Pos) : int =
+        match Map.tryFind room threats.Arrivals with
+        | Some(_, strikers) -> Arrival.damageAt room (strikers.Force()) ticks tile
+        | None -> 0
+
+    /// One of the colony's bodies by name, as the Threats were derived over.
+    let bodyOf (threats: Threats) (creep: string) : CreepInfo option =
+        threats.Bodies |> List.tryFind (fun body -> body.Name = creep)
+
+    /// The ticks a body cannot leave the tile it stands on (its fatigue
+    /// waited out, `Arrival.waitOf`), and the most a step of it takes on any
+    /// ground: what its own timing adds to the horizon.
+    let lagOf (creep: CreepInfo) : int * int =
+        let factor = Grid.fatigueFactorOf creep
+
+        let gait =
+            {
+                Weight = factor.FatigueParts
+                Moves = factor.MoveParts
+            }
+
+        Arrival.waitOf creep.Fatigue gait,
+        Arrival.paceOf gait
+        |> Option.map (fun pace -> pace.Swamp)
+        |> Option.defaultValue 0
+
+    /// Whether a hostile strikes the tile a body stands on before it can step
+    /// off it at its next decision: the room's Reach, or, for a body its
+    /// fatigue holds, a map striking the tile within the horizon and its wait
+    /// (movement S2). False for a body the projection does not place.
+    let standsStruck (threats: Threats) atlas (creep: CreepInfo) : bool =
+        match Atlas.creepTile atlas creep.Name with
+        | None -> false
+        | Some tile ->
+            Set.contains (RoomPos.pos tile) (reachIn threats tile.Room)
+            || (match Map.tryFind tile.Room threats.Arrivals, fst (lagOf creep) with
+                | Some(maps, _), wait when wait > 0 ->
+                    let index = indexOf (RoomPos.pos tile)
+
+                    maps.Classes
+                    |> List.exists (fun map -> Grid.at index map.Ticks <= threats.Horizon + wait)
+                    && not (
+                        Set.contains (RoomPos.pos tile) (Atlas.ourRampartTilesIn atlas tile.Room)
+                    )
+                | _ -> false)
+
+    /// One body's own arrival over the room it stands in, flooded once a
+    /// tick (`Threats.Walks`); None for a body the projection does not place,
+    /// and for any body on a tick with no Reach, which floods nothing.
+    let walkOf (threats: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
+        if Map.isEmpty threats.Arrivals then
+            None
+        else
+            match threats.Walks.TryGetValue creep.Name with
+            | true, walk -> walk
+            | _ ->
+                let walk = Arrival.ofBody atlas creep
+                threats.Walks.[creep.Name] <- walk
+                walk
+
+    /// By tile index of the room a body stands in, whether a hostile strikes
+    /// the tile before the body could be on it and gone (movement S2:
+    /// `A <= T_b + held`, ties unsafe), off our ramparts: what its walk goes
+    /// round. A non-fighter counts every class; a fighter (`fighter`) a tile
+    /// only where what strikes it then out-damages its heal (Decided 3).
+    /// None in a room with no Reach, or for a body the projection does not
+    /// place. Asked a tile at a time by the walk's flood, never built whole.
+    let unsafeFor
+        (threats: Threats)
+        atlas
+        (creep: CreepInfo)
+        (fighter: bool)
+        : (int -> bool) option =
+        // Flooded only for a body a hostile can strike by the decision after
+        // next, its own lag counted (movement's "only for bodies where A is
+        // within the horizon"): its fatigue and its slowest step, a swamp
+        // tile held long. One farther off walks round the Reach and decides
+        // again nearer.
+        let near =
+            Atlas.creepTile atlas creep.Name
+            |> Option.exists (fun at ->
+                match Map.tryFind at.Room threats.Arrivals with
+                | Some(maps, _) ->
+                    let index = indexOf (RoomPos.pos at)
+                    let wait, slowest = lagOf creep
+                    let within = 2 * threats.Horizon + wait + slowest
+
+                    maps.Classes |> List.exists (fun map -> Grid.at index map.Ticks <= within)
+                | None -> false)
+
+        match (if near then walkOf threats atlas creep else None) with
+        | None -> None
+        | Some walk ->
+            match Map.tryFind walk.Room threats.Arrivals with
+            | None -> None
+            | Some(maps, strikers) ->
+                let heal = Engine.healPower * partCount creep.Body Heal
+                let room = walk.Room
+                let ramparts = lazy (Atlas.ourRampartTilesIn atlas room)
+
+                Some(fun index ->
+                    let leaves = Grid.at index walk.Leaves
+
+                    leaves < System.Int32.MaxValue
+                    && maps.Classes |> List.exists (fun map -> Grid.at index map.Ticks <= leaves)
+                    && (not fighter
+                        || heal = 0
+                        || Arrival.damageAt room (strikers.Force()) leaves (posAt index) > heal)
+                    && not (Set.contains (posAt index) ramparts.Value))
+
+    /// Flee's ground for a body (movement S2): the tiles of the room's safe
+    /// set (`safeIn`) within a horizon of the nearest by its own arrival. Not
+    /// narrowed to the tiles it reaches before any hostile (`T_b < A`): that
+    /// cost the spar bench (`outpost-ranged-healer` never cleared). Where the
+    /// room has no safe tile at all — a room its hostile towers cover whole
+    /// (#566) — the ground beside the landings across the nearest open border
+    /// (`acrossFrom`). Empty for a body the projection does not place, or
+    /// with nowhere to go.
+    let rec fleeAreaFor (threats: Threats) atlas (creep: CreepInfo) : Set<RoomPos> =
+        if Map.isEmpty threats.Arrivals then
+            Set.empty
+        else
+            match threats.Flights.TryGetValue creep.Name with
+            | true, ground -> ground
+            | _ ->
+                let ground = fleeGroundOf threats atlas creep
+                threats.Flights.[creep.Name] <- ground
+                ground
+
+    and private fleeGroundOf (threats: Threats) atlas (creep: CreepInfo) : Set<RoomPos> =
+        match Atlas.creepTile atlas creep.Name with
+        | None -> Set.empty
+        | Some at ->
+            let room = at.Room
+
+            // The safe tiles a horizon's ticks or less past the nearest by the
+            // body's own arrival, a pass over the grid rather than the safe
+            // set built whole: what its walk to the safe set ends on, with a
+            // band, not the edge's one tile, so a held tile parks nobody.
+            let nearest () =
+                match walkOf threats atlas creep, Map.tryFind room threats.Arrivals with
+                | Some walk, Some(maps, _) ->
+                    let horizon = threats.Horizon
+                    let stands = Atlas.standsAt atlas room
+                    let ramparts = lazy (Atlas.ourRampartTilesIn atlas room)
+                    let mutable least = System.Int32.MaxValue
+                    let mutable found = []
+
+                    for index in 0 .. tileCount - 1 do
+                        let mine = Grid.at index walk.Ticks
+
+                        if mine < System.Int32.MaxValue && stands index then
+                            let soonest =
+                                maps.Classes
+                                |> List.fold
+                                    (fun soonest map -> min soonest (Grid.at index map.Ticks))
+                                    System.Int32.MaxValue
+
+                            if horizon < soonest || Set.contains (posAt index) ramparts.Value then
+                                least <- min least mine
+                                found <- (mine, RoomPos.at room (posAt index)) :: found
+
+                    found |> List.filter (fun (mine, _) -> mine <= least + horizon) |> List.map snd
+                | _ -> []
+
+            if Set.isEmpty (reachIn threats room) then
+                Set.empty
+            else
+                match nearest () with
+                | _ :: _ as tiles -> Set.ofList tiles
+                | [] ->
+                    match safeIn threats room with
+                    | safe when not (Set.isEmpty safe) -> safe
+                    | _ -> acrossFrom threats atlas at (walkOf threats atlas creep)
+
+    /// Flee's ground out of a room with no safe tile (#566): the ground
+    /// beside each landing across the nearest border whose landings lie in no
+    /// Reach of the room beyond, into a room a route enters (`Atlas.routes`:
+    /// never a rival's, a stronghold's or one withheld from passage, which an
+    /// unseen one would read as safe and no step would reach), nearest by the
+    /// body's own walk to its exits (`walk`), an exit it cannot walk to none.
+    and private acrossFrom
+        (threats: Threats)
+        atlas
+        (at: RoomPos)
+        (walk: Arrival.BodyArrival option)
+        : Set<RoomPos> =
+        let room = at.Room
+        let pos = RoomPos.pos at
+
+        let ticksTo (exit: Pos) =
+            match walk with
+            | Some walk -> Grid.at (indexOf exit) walk.Ticks
+            | None -> range pos exit
+
+        RoomName.adjacent room
+        |> List.filter (fun next -> not (List.isEmpty (Atlas.routes atlas room next)))
+        |> List.choose (fun next ->
+            let hot = reachIn threats next
+
+            match
+                Atlas.seams atlas room next
+                |> List.filter (fun (_, landing) -> not (Set.contains landing hot))
+            with
+            | [] -> None
+            | band ->
+                let ground =
+                    band
+                    |> List.collect (snd >> Atlas.adjacentWalkableIn atlas next)
+                    |> List.filter (fun tile -> not (Set.contains tile hot))
+                    |> Set.ofList
+                    |> RoomPos.setAt next
+
+                let nearest = band |> List.map (fst >> ticksTo) |> List.min
+
+                if Set.isEmpty ground || nearest = System.Int32.MaxValue then
+                    None
+                else
+                    Some((nearest, next), ground))
+        |> List.sortBy fst
+        |> List.tryHead
+        |> Option.map snd
+        |> Option.defaultValue Set.empty
+
     /// One room's range-1 ring (`Laid.Ring`), already joined to that room;
     /// empty for a room no Threat stands in.
     let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
@@ -1620,26 +1865,102 @@ let private defendGroundOf
 
         if Set.isEmpty ground then None else Some ground
 
-/// The tiles a Threat at `pos` reaches across its room's borders within `r`
-/// (#514), by neighbouring room: from each passable crossing (`Atlas.seams`),
-/// what is left of `r` after the walk to the exit and the carry across,
-/// measured from the tile it lands on. None for one farther than `r` from
-/// every edge, the quiet case asked first.
-let private reachAcross atlas (room: string) (pos: Pos) (r: int) : (string * Pos list) list =
-    let edge = Seam.exitEdge
+/// The world a colony's hostile maps read (`Arrival`): the world's rooms,
+/// and a room of the colony's hostiles the world carries none for as the
+/// colony sees it — a fixture's, the world being every colony's vision.
+let private arrivalWorld (view: ColonyView) : WorldView =
+    match
+        view.Hostiles
+        |> List.filter (fun hostile -> not (Map.containsKey hostile.Pos.Room view.World.Rooms))
+    with
+    | [] -> view.World
+    | unseen ->
+        { view.World with
+            Rooms =
+                unseen
+                |> List.groupBy (fun hostile -> hostile.Pos.Room)
+                |> List.fold
+                    (fun rooms (room, hostiles) ->
+                        Map.add
+                            room
+                            {
+                                Hostiles = hostiles
+                                HostileFatigue = Map.empty
+                                InvaderCores = []
+                                Towers = []
+                                Fallen = []
+                                Control =
+                                    Map.tryFind room view.RoomControl
+                                    |> Option.defaultValue
+                                        {
+                                            Owner = Ownership.Unowned
+                                            Reservation = None
+                                            SafeMode = false
+                                            SafeModeCooldownUntil = 0
+                                            Sign = None
+                                        }
+                            }
+                            rooms)
+                    view.World.Rooms
+        }
 
-    if min (min pos.X (edge - pos.X)) (min pos.Y (edge - pos.Y)) >= r then
-        []
-    else
-        RoomName.adjacent room
-        |> List.choose (fun next ->
-            match
-                Atlas.seams atlas room next
-                |> List.collect (fun (exit, landing) ->
-                    tilesWithin (r - range pos exit - 1) landing |> List.filter inGrid)
-            with
-            | [] -> None
-            | tiles -> Some(next, tiles))
+/// The hostile maps of every room of the projection a hostile
+/// creep or tower stands in or beside (`Arrival.inRoom`), less a room of
+/// ours under safe mode (`shielded`), where nothing hurts: by room, the maps
+/// and their members priced on first read. A room with no class has none.
+let private arrivalsOf
+    (view: ColonyView)
+    atlas
+    (shielded: string -> bool)
+    : Map<string, ArrivalMaps * Lazy<Arrival.Striker list>> =
+    let world = arrivalWorld view
+    let horizon = view.Tuning.ReachHorizon
+
+    // Each room an armed hostile or a hostile tower stands in, and each one
+    // beside it a crossing hostile there could land on within the horizon:
+    // one no farther from the border between than that, a tile a tick at the
+    // quickest. A room beside it that none could has no Reach, so no map.
+    let rooms =
+        world.Rooms
+        |> Map.toList
+        |> List.collect (fun (room, seen) ->
+            let armed =
+                seen.Hostiles
+                |> List.filter (fun hostile ->
+                    not (Colony.isAlly hostile.Owner)
+                    && Option.isSome (HostileInfo.weaponRange seen.Hostiles hostile))
+
+            let beside =
+                RoomName.adjacent room
+                |> List.filter (fun next ->
+                    armed
+                    |> List.exists (fun hostile ->
+                        HostileInfo.crossesExits hostile
+                        && (let at = RoomPos.pos hostile.Pos
+
+                            match RoomName.offsetOf room next with
+                            | Some(1, 0) -> Seam.exitEdge - at.X <= horizon
+                            | Some(-1, 0) -> at.X <= horizon
+                            | Some(0, 1) -> Seam.exitEdge - at.Y <= horizon
+                            | Some(0, -1) -> at.Y <= horizon
+                            | _ -> false)))
+
+            if List.isEmpty armed && List.isEmpty seen.Towers then
+                beside
+            else
+                room :: beside)
+
+    match rooms with
+    | [] -> Map.empty
+    | rooms ->
+        rooms
+        |> List.distinct
+        |> List.filter (fun room -> Map.containsKey room view.Spatial.Rooms && not (shielded room))
+        |> List.choose (fun room ->
+            match Arrival.inRoom atlas world room with
+            | { Classes = [] } -> None
+            | maps -> Some(room, (maps, lazy (Arrival.strikersOf world room maps))))
+        |> Map.ofList
 
 // Past a melee's step and swing plus the margin from the exit it comes in
 // by, so a body steps in only as far as that and the interior stays put.
@@ -1665,25 +1986,11 @@ let private shelterOf (view: ColonyView) atlas (hot: Set<Pos>) : Set<RoomPos> =
         (Atlas.shelterGround atlas view.Perimeter shelterDepth)
         (Set.union hot besideSpawns |> RoomPos.setAt home)
 
-/// How far a hostile's Reach runs from its tile, in Chebyshev tiles: its
-/// weapon's range plus the margin, or None for one that cannot hurt. A body
-/// that can barely move reaches one past its weapon's range (#510): with its
-/// fatigue spent it steps once, then waits out the weight of that step.
-let internal reachRadius (view: ColonyView) (hostile: HostileInfo) : int option =
-    let margin =
-        if HostileInfo.stationary view.Hostiles hostile then
-            Engine.meleeRange
-        else
-            view.Tuning.ReachMargin
-
-    HostileInfo.weaponRange view.Hostiles hostile
-    |> Option.map (fun r -> r + margin)
-
-/// This tick's Threats, off the view's hostiles and the rampart census, room by
-/// room: `reachRadius` in Chebyshev tiles, and across a border
-/// as far onto the next room's tiles (#514), less every tile under one of our
-/// standing ramparts in the room it lands in. The held facts say which rangers
-/// hold each room's Guard, which an outmatched room's safe ground is laid for.
+/// This tick's Threats, off the hostile maps (`arrivalsOf`) and the rampart
+/// census, room by room: a room's Reach is where a map strikes within the
+/// horizon, across a border too (#514), less every tile under one of our
+/// standing ramparts. The held facts say which rangers hold each room's
+/// Guard, which an outmatched room's safe ground is laid for.
 let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threats =
     // Under safe mode a hostile in a room of ours can hurt nothing, so it is no
     // Threat and has no Reach.
@@ -1696,119 +2003,82 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // Threats: neither the rampart census nor any room's own tiles are read on
     // a tick with nothing in it to run from. Its errand rooms' ground, below,
     // is a ring of eight tiles a Reactor.
-    let reach, ring =
+    let arrivals = arrivalsOf view atlas shielded
+
+    // Per room, the tiles some hostile map strikes within the horizon
+    // (`Tuning.ReachHorizon`), less our ramparts: built once for every colony
+    // that shares the room's maps (`WorldView.ReachGround`, the world layer's
+    // S4). Nothing left to run from once our own ramparts have taken the
+    // whole Reach back: no Reach, no entry, no safe set to derive.
+    let reach =
+        arrivals
+        |> Map.toList
+        |> List.choose (fun (room, (maps: ArrivalMaps, _)) ->
+            let ramparts = Atlas.ourRampartTilesIn atlas room
+            let horizon = view.Tuning.ReachHorizon
+
+            let build () =
+                Atlas.standingTilesWhere atlas room ramparts (fun index ->
+                    maps.Classes |> List.exists (fun map -> Grid.at index map.Ticks <= horizon))
+
+            let tiles =
+                match view.World.ReachGround with
+                | Some share -> share room maps ramparts build
+                | None -> build ()
+
+            if Set.isEmpty tiles then None else Some(room, tiles))
+        |> Map.ofList
+
+    let ring =
         match
             view.Hostiles
-            |> List.filter (fun hostile -> not (shielded hostile.Pos.Room))
-            |> List.choose (fun hostile ->
-                reachRadius view hostile
-                |> Option.map (fun r -> hostile.Pos.Room, RoomPos.pos hostile.Pos, r))
+            |> List.filter (fun hostile ->
+                not (shielded hostile.Pos.Room)
+                && Option.isSome (HostileInfo.weaponRange view.Hostiles hostile))
+            |> List.map (fun hostile -> hostile.Pos.Room, RoomPos.pos hostile.Pos)
         with
-        | [] -> Map.empty, Map.empty
+        | [] -> Map.empty
         | threats ->
-            // The tick's Threats partitioned by the room they stand in, once: all
-            // three maps below are keyed on this one room set, and derived from
-            // three separate regroupings nothing said so.
-            let byRoom = threats |> List.groupBy (fun (room, _, _) -> room)
-
-            // Filed by the room each tile lies in, which across a border is not
-            // the room the Threat stands in, and none in a room of ours under
-            // safe mode, where it could hurt nothing either. What a room's own
-            // Threats lay in it is built once for every colony that sees them
-            // alike (`WorldView.ReachGround`, the world layer's S4); what
-            // spills in across a border reads this colony's crossings.
-            let reach =
-                let spilled =
-                    threats
-                    |> List.collect (fun (room, pos, r) -> reachAcross atlas room pos r)
-                    |> List.groupBy fst
-                    |> Map.ofList
-
-                let standing = byRoom |> Map.ofList
-
-                Set.union (Set.ofSeq (Map.keys spilled)) (Set.ofSeq (Map.keys standing))
-                |> Set.toList
-                |> List.filter (shielded >> not)
-                |> List.choose (fun room ->
-                    let ramparts = Atlas.ourRampartTilesIn atlas room
-                    let uncovered tile = not (Set.contains tile ramparts)
-
-                    let own =
-                        match Map.tryFind room standing with
-                        | None -> Set.empty
-                        | Some inRoom ->
-                            let laid = inRoom |> List.map (fun (_, pos, r) -> pos, r)
-
-                            let build () =
-                                laid
-                                |> List.collect (fun (pos, r) -> tilesWithin r pos)
-                                |> List.filter uncovered
-                                |> Set.ofList
-
-                            match view.World.ReachGround with
-                            | Some share -> share room laid ramparts build
-                            | None -> build ()
-
-                    let tiles =
-                        match Map.tryFind room spilled with
-                        | None -> own
-                        | Some shares ->
-                            shares
-                            |> List.collect snd
-                            |> List.filter uncovered
-                            |> List.fold (fun tiles tile -> Set.add tile tiles) own
-
-                    // Nothing left to run from once our own ramparts have taken
-                    // the whole Reach back: no Reach, no entry, no safe set to
-                    // derive.
-                    if Set.isEmpty tiles then None else Some(room, tiles))
-                |> Map.ofList
+            let byRoom = threats |> List.groupBy fst
 
             // Less the tiles the Threats stand on: with two of them adjacent each
             // is a tile of the other's ring. Off the Threat list and not off the
             // Reach above, because the Reach has our ramparts subtracted and a
             // rampart is the best tile a guard can fight from.
-            let ring =
-                byRoom
-                |> List.map (fun (room, inRoom) ->
-                    let standing = inRoom |> List.map (fun (_, pos, _) -> pos) |> Set.ofList
+            byRoom
+            |> List.map (fun (room, inRoom) ->
+                let standing = inRoom |> List.map snd |> Set.ofList
 
-                    // Asked of the grid a tile at a time rather than against the
-                    // room's materialised walkable ground (#371): a ring is nine
-                    // tiles a Threat and the ground is two thousand.
-                    let around (tiles: Pos list) =
-                        tiles
-                        |> List.collect (fun pos ->
-                            Atlas.adjacentWalkableIn atlas room pos
-                            |> List.filter (fun tile -> not (Set.contains tile standing)))
-                        |> Set.ofList
+                // Asked of the grid a tile at a time rather than against the
+                // room's materialised walkable ground (#371): a ring is nine
+                // tiles a Threat and the ground is two thousand.
+                let around (tiles: Pos list) =
+                    tiles
+                    |> List.collect (fun pos ->
+                        Atlas.adjacentWalkableIn atlas room pos
+                        |> List.filter (fun tile -> not (Set.contains tile standing)))
+                    |> Set.ofList
 
-                    // A raid that outruns the row's guard (`Facts.canStrike`,
-                    // #531) is held off our work, not chased: the guard holds
-                    // the tiles beside the room's Posts, which a raider must
-                    // come within reach of to hurt the work there.
-                    let guard part =
-                        max 1 (guardBlocksReach view) * partCountIn guardPattern.Block part
+                // A raid that outruns the row's guard (`Facts.canStrike`,
+                // #531) is held off our work, not chased: the guard holds
+                // the tiles beside the room's Posts, which a raider must
+                // come within reach of to hurt the work there.
+                let guard part =
+                    max 1 (guardBlocksReach view) * partCountIn guardPattern.Block part
 
-                    let posts = Atlas.postsIn atlas room |> Set.toList
+                let posts = Atlas.postsIn atlas room |> Set.toList
 
-                    let tiles =
-                        if
-                            List.isEmpty posts
-                            || Facts.strikesEvery
-                                view
-                                guard
-                                (HostileInfo.raider view.Hostiles)
-                                room
-                        then
-                            around (inRoom |> List.map (fun (_, pos, _) -> pos))
-                        else
-                            Set.difference (around posts) (Set.ofList posts)
+                let tiles =
+                    if
+                        List.isEmpty posts
+                        || Facts.strikesEvery view guard (HostileInfo.raider view.Hostiles) room
+                    then
+                        around (inRoom |> List.map snd)
+                    else
+                        Set.difference (around posts) (Set.ofList posts)
 
-                    room, RoomPos.setAt room tiles)
-                |> Map.ofList
-
-            reach, ring
+                room, RoomPos.setAt room tiles)
+            |> Map.ofList
 
     let safeGround =
         reach
@@ -2275,10 +2545,17 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
                 [ room, tiles ]
             elif Seam.onRing at && trespassingBody view.Hostiles hostile then
-                reachAcross atlas room at 1
-                |> List.filter (fst >> trespassRooms view)
-                |> List.map (fun (next, landings) ->
-                    next, landings |> List.collect (Atlas.adjacentWalkableIn atlas next))
+                // The tile it lands on across the exit it stands on.
+                RoomName.adjacent room
+                |> List.filter (trespassRooms view)
+                |> List.choose (fun next ->
+                    match
+                        Atlas.seams atlas room next
+                        |> List.filter (fun (exit, _) -> exit = at)
+                        |> List.collect (snd >> Atlas.adjacentWalkableIn atlas next)
+                    with
+                    | [] -> None
+                    | tiles -> Some(next, tiles))
             else
                 []
 
@@ -2565,6 +2842,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Shelter = shelter
         Briefs = briefs
         Engaged = engaged
+        Arrivals = arrivals
+        Walks = System.Collections.Generic.Dictionary()
+        Flights = System.Collections.Generic.Dictionary()
+        Bodies = view.Creeps
+        Horizon = view.Tuning.ReachHorizon
     }
 
 /// This tick's Threats as a colony holding nothing would see them: no

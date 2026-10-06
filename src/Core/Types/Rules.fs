@@ -511,10 +511,11 @@ type Tuning =
         /// (#530): long enough to stop the draw-and-pour-back flip, short
         /// enough that a body whose only sink is that store is never stranded.
         DrawnHold: int
-        /// The Reach margin: the tiles a Threat's weapon range is widened by —
-        /// one for the hostile's next step, one for our own tick of lag.
-        /// Tiles of lag, so the same at every stage and bank.
-        ReachMargin: int
+        /// The reach horizon: the ticks to a body's next decision, this full
+        /// tick's and the light tick's after it. A tile a hostile can strike
+        /// within them (`Arrival`) is in its Reach. Ticks of the cadence, so
+        /// the same at every stage and bank.
+        ReachHorizon: int
         /// The [[standing body]]'s line: the Carry parts per Work at which a
         /// delivery stops being work and becomes a commute. A ratio over one
         /// body's own parts, so bank-free as written. ADR-0046
@@ -900,7 +901,7 @@ module Tuning =
             // flip is broken and a body whose only sink is the store it drew
             // from pours back after at most one trip's wait.
             DrawnHold = 50
-            ReachMargin = 2
+            ReachHorizon = 2
             StandingCarryPerWork = 4
             PioneerCount = 3
             // Live 2026-10-04: W17S25's pioneers arrived with 5 ticks left.
@@ -991,18 +992,17 @@ module Tuning =
     /// (`Keepers`), a lair one tile less (`Keepers.lairMargin`: the keeper
     /// stands on it, unpinned). Six today, and **derived rather than chosen** — a function
     /// beside the record and not a field in it, so a human who moves
-    /// `ReachMargin` moves this too:
+    /// `ReachHorizon` moves this too:
     ///
-    ///     the keeper's pin (1) + its longest weapon (3) + ReachMargin (2)
+    ///     the keeper's pin (1) + its longest weapon (3) + ReachHorizon (2)
     ///
-    /// Five is the right number for **survival** and the wrong number for what
-    /// this buys: a Reach is `weapon + ReachMargin` = 5 for a RANGED_ATTACK
-    /// body, so at five a crossing courier is inside a Reach and [[flee]]
-    /// applies. At six Flee is inapplicable by geometry — for the steady
-    /// state, not the ticks after a respawn (`Engine.keeperPin`, #327); past
-    /// eight W15S26 cannot be crossed at all.
+    /// A keeper takes at least a tick a tile, so within the horizon it
+    /// strikes no farther than that: at six a crossing courier is outside its
+    /// Reach and [[flee]] is inapplicable by geometry — for the steady state,
+    /// not the ticks after a respawn (`Engine.keeperPin`, #327); past eight
+    /// W15S26 cannot be crossed at all.
     let keeperMargin (tuning: Tuning) : int =
-        Engine.keeperPin + Engine.rangedRange + tuning.ReachMargin
+        Engine.keeperPin + Engine.rangedRange + tuning.ReachHorizon
 
     /// The [[emergency reserve]] at a controller level: the last of
     /// `EnergyReserves`' steps at or under it, and none under the first —

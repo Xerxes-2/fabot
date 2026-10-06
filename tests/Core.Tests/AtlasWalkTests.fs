@@ -70,15 +70,17 @@ let walkTests =
     testList
         "atlas walk"
         [
-            // Characterisation (movement S0, `docs/adr/0088`): the half-tick step
-            // units (`stepUnits`) price a road below plain for every body, so an
-            // unloaded 1:1 ranger, a tile a tick on both, takes the road lane.
-            // Flips at S2, where a walk is priced by arrival time.
+            // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read
+            // the half-tick step units (`stepUnits`) pricing a road below plain
+            // for every body, so an unloaded 1:1 ranger, a tile a tick on both,
+            // took the road lane. An armed body's walk is now priced in whole
+            // ticks (`FatigueFactor.Whole`): the lanes cost it alike, and the
+            // road decides nothing. An unarmed body keeps the half-tick units.
             test
-                "an unloaded ranger at a MOVE a part takes the road lane over an equally quick plain one" {
+                "an unloaded ranger at a MOVE a part prices the road lane and an equally quick plain one alike" {
                 // Two three-step lanes from (10,14) to the Seat (10,11): up
                 // x = 10, or by (11,13) and (11,12); `paved` is the lane's x.
-                let stepWith paved =
+                let stepWith body paved =
                     let atlas =
                         spatial
                             [ "src-a", { X = 10; Y = 10 } ]
@@ -96,21 +98,23 @@ let walkTests =
                                 Roads = Set.ofList [ { X = paved; Y = 12 }; { X = paved; Y = 13 } ]
                             })
                         |> withCreepsAt [ "w", { X = 10; Y = 14 } ]
-                        |> snapshotWith [ creepWith "w" 0 [ RangedAttack; Move ] ]
+                        |> snapshotWith [ creepWith "w" 0 body ]
                         |> ofView
 
                     let seat = RoomPos.setAt (atlasHome atlas) (Set.singleton { X = 10; Y = 11 })
                     firstStepAvoiding atlas "w" Set.empty seat |> stepOf atlas "w"
 
-                Expect.equal
-                    (stepWith 11)
-                    (Some { X = 11; Y = 13 })
-                    "onto the road: four half-tick units against plain's six, three ticks either way"
+                let ranger = [ RangedAttack; Move ]
 
                 Expect.equal
-                    (stepWith 10)
-                    (Some { X = 10; Y = 13 })
-                    "and the road again when x = 10 is paved"
+                    (stepWith ranger 11)
+                    (stepWith ranger 10)
+                    "three ticks either way: the same step whichever lane is paved"
+
+                Expect.equal
+                    (stepWith [ Work; Move ] 11)
+                    (Some { X = 11; Y = 13 })
+                    "an unarmed body still takes the road: four half-tick units against plain's six"
             }
 
             test "the walk is at least the Chebyshev distance to the tile it reaches" {

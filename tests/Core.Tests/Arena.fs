@@ -1321,6 +1321,13 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         Hits = b.Hits
                         TicksToLive = b.TicksToLive
                     })
+            // Each one's fatigue, where it has any, as `World.seenFacts`
+            // glances it (an arrival waits it out).
+            HostileFatigue =
+                here
+                |> List.filter (fun b -> b.Side <> Side.Ours && b.Fatigue > 0)
+                |> List.map (fun b -> b.Id, b.Fatigue)
+                |> Map.ofList
             // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
             // them: a stronghold's with its collapse clock.
             InvaderCores =

@@ -204,7 +204,7 @@ let internal safetyTier task =
 /// room's, and for a target the projection does not place. A Guard names its
 /// room outright; neither caller asks about the Safety tier, but the match is
 /// exhaustive.
-let private roomOfWork atlas task =
+let internal roomOfWork atlas task =
     match task with
     | Harvest id
     | Build id
@@ -242,18 +242,18 @@ let private reachOnWork (threats: Threats) atlas task : (RoomPos -> bool) option
         Some(fun tile -> Some tile.Room = room && Set.contains (RoomPos.pos tile) reach)
 
 /// ADR-0033. The tiles a creep may work a Task from this tick: its Work Area
-/// less its room's Reach — and for Flee, the safe set of the room the creep
-/// stands in. The subtraction is skipped for the whole Safety tier, whose
-/// areas are derived off `Threats` themselves: taking the Reach out again is
-/// a tautology for Flee and the end of the Task for a Guard. The exemption is
-/// the predicate, so a third Task ranked into Safety is exempt here without
-/// this function being touched.
+/// less its room's Reach — and for Flee, its ground off every Reach
+/// (`Threats.fleeAreaFor`). The subtraction is skipped for the whole Safety
+/// tier, whose areas are derived off `Threats` themselves: taking the Reach
+/// out again is a tautology for Flee and the end of the Task for a Guard. The
+/// exemption is the predicate, so a third Task ranked into Safety is exempt
+/// here without this function being touched.
 let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
     let ground =
         match task with
         | Flee ->
-            Atlas.creepRoom atlas creep
-            |> Option.map (Threats.safeIn threats)
+            Threats.bodyOf threats creep
+            |> Option.map (Threats.fleeAreaFor threats atlas)
             |> Option.defaultValue Set.empty
         // The guard's ring, in the room the Planner keyed the Task on — with
         // one fallback the room's blindness forces (#366): a Guard is pooled
@@ -321,7 +321,14 @@ let private groundRoom (room: string) (area: Set<RoomPos>) =
 /// room, as a squad's member is toward its own.
 let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
-    | Flee -> Atlas.travelCostWithin atlas creep (areaFor threats atlas creep task)
+    | Flee ->
+        // Out over a border where its room has no safe tile (#566).
+        let area = areaFor threats atlas creep task
+
+        match Atlas.creepRoom atlas creep with
+        | Some room when groundRoom room area <> room ->
+            Atlas.travelCostToward atlas creep task (groundRoom room area) area
+        | _ -> Atlas.travelCostWithin atlas creep area
     | Guard room when Map.containsKey creep (Threats.briefOf threats room).Stances ->
         let area = areaFor threats atlas creep task
         Atlas.travelCostToward atlas creep task (groundRoom room area) area
@@ -346,6 +353,11 @@ let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     | Guard room
     | Defend room
     | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
+    | Flee ->
+        match Atlas.creepRoom atlas creep with
+        | Some room when groundRoom room area <> room ->
+            Atlas.firstStepToward atlas creep task (groundRoom room area) area
+        | _ -> Atlas.firstStep atlas creep task area
     | _ -> Atlas.firstStep atlas creep task area
 
 /// Whether the Reach has taken the whole of a Task's Work Area: it had
@@ -373,12 +385,16 @@ let internal threatened (threats: Threats) atlas (creep: CreepInfo) task =
         not (Set.isEmpty area) && Set.forall hot area
 
 /// Whether the creep itself is standing where it can be hurt: its own tile
-/// inside a Reach of its own room. Flee's applicability, and the vision
+/// inside a Reach of its own room, or struck there before its fatigue lets
+/// it step off (`Threats.standsStruck`). Flee's applicability, and the vision
 /// grace's one gate. A creep the projection cannot place stands in no Reach.
 let internal standsInReach (threats: Threats) atlas (creep: string) =
-    match Atlas.creepTile atlas creep with
-    | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
-    | None -> false
+    match Threats.bodyOf threats creep with
+    | Some body -> Threats.standsStruck threats atlas body
+    | None ->
+        match Atlas.creepTile atlas creep with
+        | Some tile -> Set.contains (RoomPos.pos tile) (Threats.reachIn threats tile.Room)
+        | None -> false
 
 /// Whether the room a construction site stands in satisfies a rule — the room
 /// join every site predicate below makes, read off the projection so a room a

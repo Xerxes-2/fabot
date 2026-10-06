@@ -483,10 +483,10 @@ let keeperMaskTests =
             let chain = [ "W15S28"; "W15S27"; "W15S26"; "W15S25" ]
             let keeperRoom = load "W15S26"
 
-            // The margin is one plus three plus `ReachMargin`: five, six and
-            // seven are `ReachMargin` of one, two and three, and the bot
+            // The margin is one plus three plus `ReachHorizon`: five, six and
+            // seven are `ReachHorizon` of one, two and three, and the bot
             // ships the middle one.
-            let atlasAt reachMargin =
+            let atlasAt reachHorizon =
                 let captures = chain |> List.map load
 
                 let view =
@@ -510,15 +510,15 @@ let keeperMaskTests =
                 { view with
                     Tuning =
                         { Tuning.defaults with
-                            ReachMargin = reachMargin
+                            ReachHorizon = reachHorizon
                         }
                 }
                 |> ofView
 
-            let marginOf reachMargin =
+            let marginOf reachHorizon =
                 Tuning.keeperMargin
                     { Tuning.defaults with
-                        ReachMargin = reachMargin
+                        ReachHorizon = reachHorizon
                     }
 
             // W15S26's own exit tiles on one side, as `World.linked` reads
@@ -629,16 +629,16 @@ let keeperMaskTests =
 
                 Expect.equal (southBand 0).Length 20 "and the south border twenty"
 
-                for reachMargin in 1..2 do
+                for reachHorizon in 1..2 do
                     Expect.equal
-                        (northBand (marginOf reachMargin)).Length
+                        (northBand (marginOf reachHorizon)).Length
                         20
-                        $"the mask at {marginOf reachMargin} takes no north crossing"
+                        $"the mask at {marginOf reachHorizon} takes no north crossing"
 
                     Expect.equal
-                        (southBand (marginOf reachMargin)).Length
+                        (southBand (marginOf reachHorizon)).Length
                         20
-                        $"nor any south one, so a crossing at {marginOf reachMargin} costs what one at five costs"
+                        $"nor any south one, so a crossing at {marginOf reachHorizon} costs what one at five costs"
 
                 Expect.equal
                     (northBand (marginOf 3)).Length
@@ -860,7 +860,10 @@ let keeperMaskTests =
                     |> AtlasFixtures.snapshotWith []
                     |> fun view ->
                         { view with
-                            Tuning = { Tuning.defaults with ReachMargin = 3 }
+                            Tuning =
+                                { Tuning.defaults with
+                                    ReachHorizon = 3
+                                }
                         }
                     |> ofView
 
@@ -966,7 +969,12 @@ let keeperMaskTests =
                 // chain search answers, reads the row it filed the second time,
                 // and files another row under other rooms withheld.
                 let hopTable = JoinTable()
-                let tuning = { Tuning.defaults with ReachMargin = 3 }
+
+                let tuning =
+                    { Tuning.defaults with
+                        ReachHorizon = 3
+                    }
+
                 let hopsOf = World.hopsUnder StandDown.none hopTable tuning world
 
                 for home, room in [ "W15S27", "W14S26"; "W15S27", "W15S26"; "W15S26", "W14S26" ] do
@@ -1402,8 +1410,13 @@ let rivalRoomTests =
                 let evictedOver (wasRival: Set<string>) =
                     let walks = FarFieldMemo.walks ()
 
-                    walks.[({ X = 25; Y = 25 }, { FatigueParts = 1; MoveParts = 1 }, "W16S27")] <-
-                        Array.empty
+                    walks.[({ X = 25; Y = 25 },
+                            {
+                                FatigueParts = 1
+                                MoveParts = 1
+                                Whole = false
+                            },
+                            "W16S27")] <- Array.empty
 
                     let world = squareWorld None false
 

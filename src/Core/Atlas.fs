@@ -220,6 +220,7 @@ let private creepFloodKey (room: string) (pos: Pos) (factor: FatigueFactor) (pri
     + string factor.FatigueParts
     + "/"
     + string factor.MoveParts
+    + (if factor.Whole then "w" else "")
     + tag
 
 /// Whether two grids of one room hold the same value on every tile. Inline,
@@ -590,7 +591,12 @@ let workHeavy (atlas: Atlas) (creep: string) : bool = Set.contains creep atlas.H
 /// as a bare one-part-one-Move body — terrain weight verbatim.
 let private factorOf (atlas: Atlas) (creep: string) : FatigueFactor =
     Map.tryFind creep atlas.Factors
-    |> Option.defaultValue { FatigueParts = 1; MoveParts = 1 }
+    |> Option.defaultValue
+        {
+            FatigueParts = 1
+            MoveParts = 1
+            Whole = false
+        }
 
 /// The memoised flood for a creep from a tile of one room, under one pricing;
 /// placed creeps' own tiles hit the memo. The room is the caller's, and it is
@@ -908,6 +914,39 @@ let ourRampartTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     targetsOfKind atlas (Structure BuiltKind.Rampart)
     |> List.filter (fun id -> Map.containsKey id atlas.Spatial.Hits)
     |> tilesOfIdsIn atlas room
+
+/// Whether a creep may stand on a tile of a room, by tile index: the walking
+/// grid's answer, asked a tile at a time.
+let standsAt (atlas: Atlas) (room: string) : int -> bool =
+    let weights = weightsOf atlas room
+    fun index -> at index weights >= 0
+
+/// The tiles of a room `strikes` holds, by tile index, that a body of ours
+/// may stand on or cross from (the walking grid and the border ring), less
+/// `covered`: the Reach a room's hostile maps lay (`Arrival`), off the
+/// walls the dilation also marks.
+let standingTilesWhere
+    (atlas: Atlas)
+    (room: string)
+    (covered: Set<Pos>)
+    (strikes: int -> bool)
+    : Set<Pos> =
+    let weights = weightsOf atlas room
+    let ring = ringOf atlas room
+    // A loop and a cons, not a list comprehension: Fable runs that through
+    // its sequence enumerators, a closure a tile.
+    let mutable tiles = []
+
+    for down in 0 .. tileCount - 1 do
+        let index = tileCount - 1 - down
+
+        if (at index weights >= 0 || at index ring >= 0) && strikes index then
+            let tile = posAt index
+
+            if not (Set.contains tile covered) then
+                tiles <- tile :: tiles
+
+    Set.ofList tiles
 
 /// Tiles holding a standing Keep structure — the spawn, the tower, the
 /// Storage and the terminal: what a rampart covers, the tick the structure
@@ -2095,7 +2134,12 @@ let private exitPrice (atlas: Atlas) (stepPrices: int[]) room tile =
 /// The body a *plan* is priced for: fatigue parity, one fatigue-generating part
 /// to one Move, which under the walk's rounding is a tick on plain and five
 /// on swamp.
-let private planningFactor: FatigueFactor = { FatigueParts = 1; MoveParts = 1 }
+let private planningFactor: FatigueFactor =
+    {
+        FatigueParts = 1
+        MoveParts = 1
+        Whole = false
+    }
 
 /// The pricing a plan's walk is measured under: that body, on a walk, over
 /// empty ground. A constant, and stated once because the flood that lays a
@@ -3077,10 +3121,22 @@ let firstStepWithin (atlas: Atlas) (creep: string) (goals: Set<RoomPos>) : RoomP
 /// in; its plan is filed as `firstStepVia`'s is, so the light tick replays the
 /// walk round and not a plain one (#522). None where every goal in the
 /// creep's room lies in `avoid` or behind it.
-let firstStepAvoiding
+let rec firstStepAvoiding
     (atlas: Atlas)
     (creep: string)
     (avoid: Set<Pos>)
+    (goalTiles: Set<RoomPos>)
+    : RoomPos option =
+    firstStepAvoidingWhere atlas creep avoid (fun _ -> false) goalTiles
+
+/// `firstStepAvoiding` round `avoid` and the tiles `also` answers for, by
+/// tile index: a body's own unsafe tiles (movement S2), asked of the grid a
+/// tile at a time rather than built into a set a body.
+and firstStepAvoidingWhere
+    (atlas: Atlas)
+    (creep: string)
+    (avoid: Set<Pos>)
+    (also: int -> bool)
     (goalTiles: Set<RoomPos>)
     : RoomPos option =
     match creepAt atlas creep with
@@ -3088,7 +3144,7 @@ let firstStepAvoiding
     | Some(room, pos) ->
         let goals =
             RoomPos.tilesIn room goalTiles
-            |> List.filter (fun tile -> not (Set.contains tile avoid))
+            |> List.filter (fun tile -> not (Set.contains tile avoid || also (indexOf tile)))
 
         if List.isEmpty goals || Set.contains (RoomPos.at room pos) goalTiles then
             None
@@ -3099,6 +3155,13 @@ let firstStepAvoiding
             |> Set.iter (fun tile ->
                 if inGrid tile then
                     weights.[indexOf tile] <- -1)
+
+            // Never the tile it stands on: the walk starts there.
+            let start = indexOf pos
+
+            for index in 0 .. tileCount - 1 do
+                if index <> start && at index weights >= 0 && also index then
+                    setAt index weights -1
 
             let near =
                 floodPriced weights (occupiedOf atlas room) (factorOf atlas creep) TravelCost pos
@@ -3126,12 +3189,31 @@ let firstStepAvoiding
 /// enters it, and where no exit of the cheapest next room is left the next
 /// cheapest is tried. None where every one lies in it or behind it. Empty, it
 /// is no constraint at all.
-let stepTowardRoom
+let rec stepTowardRoom
     (atlas: Atlas)
     (creep: string)
     (avoid: Set<Pos>)
     (room: string)
     : RoomPos option =
+    stepTowardRoomWhere atlas creep avoid None room
+
+/// `stepTowardRoom` round `avoid` and, where given, the tiles `also` answers
+/// for by tile index (`firstStepAvoidingWhere`).
+and stepTowardRoomWhere
+    (atlas: Atlas)
+    (creep: string)
+    (avoid: Set<Pos>)
+    (also: (int -> bool) option)
+    (room: string)
+    : RoomPos option =
+    let blocked (tile: Pos) =
+        Set.contains tile avoid
+        || (match also with
+            | Some also -> also (indexOf tile)
+            | None -> false)
+
+    let free = Set.isEmpty avoid && Option.isNone also
+
     match creepAt atlas creep with
     | Some(creepRoom, from) when creepRoom <> room ->
         // The **next** room of the chain and not the goal: what a creep crossing
@@ -3159,7 +3241,7 @@ let stepTowardRoom
                 |> List.sortBy fst
                 |> List.choose (snd >> List.tryItem 1)
                 |> List.distinct
-                |> if Set.isEmpty avoid then List.truncate 1 else id
+                |> if free then List.truncate 1 else id
 
         nextRooms
         |> List.tryPick (fun next ->
@@ -3184,8 +3266,7 @@ let stepTowardRoom
             | band ->
                 let ground = weightsOf atlas creepRoom
 
-                let exits =
-                    band |> List.map fst |> List.filter (fun exit -> not (Set.contains exit avoid))
+                let exits = band |> List.map fst |> List.filter (blocked >> not)
 
                 // Standing on a crossing, hold it as `stepOnto` does (#436);
                 // beside one, step onto it, exactly as `stepAcross` does for the
@@ -3208,10 +3289,15 @@ let stepTowardRoom
                         |> Set.ofList
                         |> RoomPos.setAt creepRoom
 
-                    if Set.isEmpty avoid then
+                    if free then
                         firstStepVia atlas TravelCost creep goals
                     else
-                        firstStepAvoiding atlas creep avoid goals)
+                        firstStepAvoidingWhere
+                            atlas
+                            creep
+                            avoid
+                            (Option.defaultValue (fun _ -> false) also)
+                            goals)
     | _ -> None
 
 /// The first step toward an explicit set of tiles that names its own room:

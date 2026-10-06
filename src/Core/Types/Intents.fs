@@ -152,8 +152,15 @@ type Assignments = Map<string, string>
 
 /// A body's fatigue factor: the parts that generate fatigue when moving and
 /// the Move parts that pay it off. Terrain weight scales by their ratio to
-/// price travel in cost units.
-type FatigueFactor = { FatigueParts: int; MoveParts: int }
+/// price travel in cost units. `Whole`: an armed body's (a weapon or HEAL),
+/// whose ranking walk is priced in whole ticks (movement S2), a road no
+/// cheaper than plain where it is no quicker.
+type FatigueFactor =
+    {
+        FatigueParts: int
+        MoveParts: int
+        Whole: bool
+    }
 
 /// ADR-0032. The spawn-origin walk table: the traffic-blind walk out of the
 /// tiles beside a spawner, for a body's fatigue factor, as whole-tick

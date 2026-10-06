@@ -173,6 +173,9 @@ type WorldRoom =
         /// (`Arrival`: a hostile's arrival waits on it); absent is none.
         HostileFatigue: Map<string, int>
         InvaderCores: InvaderCoreInfo list
+        /// The towers not ours that fire there, each by id and tile
+        /// (`WorldView.hostileTowers`): every tile of the room is under them.
+        Towers: (string * Pos) list
         /// The ids of the creeps not ours whose tombstones lie there.
         Fallen: string list
         Control: RoomControlInfo
@@ -213,13 +216,12 @@ type WorldView =
         /// the same two, else what the builder answers, kept. None builds
         /// each set alone, which is every fixture's.
         SafeGround: (string -> Set<Pos> -> int[] -> (unit -> Set<RoomPos>) -> Set<RoomPos>) option
-        /// The tick's shared Reach (`sharingSafeGround`): given a room, the
-        /// tile and reach of each hostile standing in it and our ramparts
-        /// there, the Reach in the room an earlier colony built off the same
-        /// three, else what the builder answers, kept. None builds each
-        /// alone, which is every fixture's.
-        ReachGround:
-            (string -> (Pos * int) list -> Set<Pos> -> (unit -> Set<Pos>) -> Set<Pos>) option
+        /// The tick's shared Reach (`sharingSafeGround`): given a room, its
+        /// hostile maps (`ArrivalGround`'s, the same object for every colony
+        /// that shares them) and our ramparts there, the Reach in the room an
+        /// earlier colony built off the same two, else what the builder
+        /// answers, kept. None builds each alone, which is every fixture's.
+        ReachGround: (string -> ArrivalMaps -> Set<Pos> -> (unit -> Set<Pos>) -> Set<Pos>) option
         /// The tick's shared hostile maps (`sharingSafeGround`): given a
         /// room and the grounds its floods read (its own hostile ground and
         /// each neighbour's, None where the projection carries none), the
@@ -299,17 +301,15 @@ module WorldView =
                 built.[room] <- (grid, reach, tiles) :: entries
                 tiles
 
-        // And the Reach a room's own hostiles lay in it (the world layer's
-        // S4), once for every colony that sees them alike.
+        // And the Reach a room's hostile maps lay in it (the world layer's
+        // S4), once for every colony that shares the maps: the same object,
+        // off the table below.
         let reached =
-            System.Collections.Generic.Dictionary<
-                string,
-                ((Pos * int) list * Set<Pos> * Set<Pos>) list
-             >()
+            System.Collections.Generic.Dictionary<string, (ArrivalMaps * Set<Pos> * Set<Pos>) list>()
 
         let reachOf
             (room: string)
-            (standing: (Pos * int) list)
+            (maps: ArrivalMaps)
             (ramparts: Set<Pos>)
             (build: unit -> Set<Pos>)
             =
@@ -321,12 +321,12 @@ module WorldView =
             match
                 entries
                 |> List.tryFind (fun (others, covered, _) ->
-                    others = standing && covered = ramparts)
+                    obj.ReferenceEquals(others, maps) && covered = ramparts)
             with
             | Some(_, _, tiles) -> tiles
             | None ->
                 let tiles = build ()
-                reached.[room] <- (standing, ramparts, tiles) :: entries
+                reached.[room] <- (maps, ramparts, tiles) :: entries
                 tiles
 
         // And a room's hostile maps (`Arrival`), once for every colony whose
@@ -367,6 +367,34 @@ module WorldView =
     /// Whether vision answers for a room this tick, whoever's.
     let sees (watch: WorldView) (room: string) : bool = Map.containsKey room watch.Rooms
 
+    /// The towers not ours that fire in a room (#566), by id and tile: an
+    /// Invader's beside a [[stronghold]]'s core, or the tower of the player
+    /// owning the room, never an ally's. Read off the census of every owner's
+    /// structures (`TargetKinds`, `RoomLayer.Foreign`); a tower left in a room
+    /// its owner lost fires at nothing. Its energy is not carried, so it is
+    /// read as loaded, the direction a body runs in.
+    let hostileTowers (facts: RoomFacts) : (string * Pos) list =
+        let stronghold = facts.InvaderCores |> List.exists InvaderCoreInfo.isStronghold
+        let owner = facts.RivalController |> Option.map (fun rival -> rival.Owner)
+
+        if Map.isEmpty facts.Layer.Foreign || not stronghold && Option.isNone owner then
+            []
+        else
+            facts.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, kind) ->
+                match kind with
+                | Structure BuiltKind.Tower ->
+                    Map.tryFind id facts.Layer.TargetPositions
+                    |> Option.filter (fun tile ->
+                        match Map.tryFind tile facts.Layer.Foreign with
+                        | Some by ->
+                            not (Colony.isAlly by)
+                            && (by = "Invader" && stronghold || Some by = owner)
+                        | None -> false)
+                    |> Option.map (fun tile -> id, tile)
+                | _ -> None)
+
     /// The world's read off this tick's `World` and every colony's
     /// stand-down gate. A room with a `Control` entry is one something of ours
     /// looked into (`World.ofGame`). No shared safe ground: the shell lays its
@@ -394,6 +422,7 @@ module WorldView =
                             Hostiles = facts.Hostiles
                             HostileFatigue = facts.HostileFatigue
                             InvaderCores = facts.InvaderCores
+                            Towers = hostileTowers facts
                             Fallen = facts.Fallen
                             Control = control
                         }))

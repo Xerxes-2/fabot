@@ -207,41 +207,45 @@ let tuningTests =
                     "at ten the same walk spends both rungs and the nearer store wins"
             }
 
-            test "ReachMargin is the tiles a weapon's range is widened by" {
+            test "ReachHorizon is the ticks a hostile's strike is timed within" {
+                // A 1:1 melee on plain strikes range 1 now and a tile further
+                // each tick after.
                 let melee = facingBody { X = 25; Y = 29 } [ Attack; Move ]
 
                 Expect.isFalse
-                    (Set.contains { X = 25; Y = 25 } (reachIn melee))
-                    "range 1 plus the shipped two is three tiles, and four is clear"
+                    (Set.contains { X = 24; Y = 25 } (reachIn melee))
+                    "range 4 is three ticks off, past the shipped two"
 
                 Expect.isTrue
                     (Set.contains
-                        { X = 25; Y = 25 }
-                        (reachIn (melee |> tunedBy (fun t -> { t with ReachMargin = 3 }))))
-                    "one more tile of margin and the same tile is inside the Reach"
+                        { X = 24; Y = 25 }
+                        (reachIn (melee |> tunedBy (fun t -> { t with ReachHorizon = 3 }))))
+                    "one more tick of horizon and the same tile is inside the Reach"
             }
 
-            test "the keeper margin is derived from the Reach margin and never written down" {
+            test "the keeper margin is derived from the reach horizon and never written down" {
                 // What is pinned is the relation and not the digit: a human
-                // who moved `ReachMargin` and not the margin would put a
-                // crossing courier back inside a keeper's Reach in silence.
-                let reachOf (tuning: Tuning) = Engine.rangedRange + tuning.ReachMargin
+                // who moved `ReachHorizon` and not the margin would put a
+                // crossing courier back inside a keeper's Reach in silence. A
+                // keeper takes a tick a tile at the quickest.
+                let reachOf (tuning: Tuning) =
+                    Engine.rangedRange + tuning.ReachHorizon
 
-                for margin in 0..5 do
+                for horizon in 0..5 do
                     let tuning =
                         { Tuning.defaults with
-                            ReachMargin = margin
+                            ReachHorizon = horizon
                         }
 
                     Expect.isGreaterThan
                         (Tuning.keeperMargin tuning)
                         (reachOf tuning)
-                        $"a tile at the margin is outside the Reach of a keeper pinned within one of its rock (ReachMargin = {margin})"
+                        $"a tile at the margin is outside the Reach of a keeper pinned within one of its rock (ReachHorizon = {horizon})"
 
                     Expect.equal
                         (Tuning.keeperMargin tuning)
                         (Engine.keeperPin + reachOf tuning)
-                        "the keeper's pin, its longest weapon, and the Reach margin"
+                        "the keeper's pin, its longest weapon, and a tile a tick of the horizon"
 
                 Expect.equal
                     (Tuning.keeperMargin Tuning.defaults)

@@ -33,6 +33,9 @@ let private moveIntentFor
     (runs: bool)
     // A body walking home out of an evacuating room, round its Reach (#512).
     (walksRound: bool)
+    // What it walks round where it walks round a Reach, first choice first
+    // (`movementOf.roundsOf`), asked only where it does.
+    (rounds: unit -> (Set<Pos> * (int -> bool) option) list)
     // The home's shelter for an idle body at home that walks in to it and
     // stays on it (#514); empty for every other.
     (shelter: Set<RoomPos>)
@@ -105,15 +108,23 @@ let private moveIntentFor
         else
             intent rank (step :: detour step) Set.empty
 
-    // A body standing outside its room's `reach` walks round it (#472): the
-    // step that never enters it, else the plain one where that stays out of
-    // it, else none — it waits at the edge, planning no step for the light
-    // tick to replay. Inside it, or with none, the plain step.
-    let round (reach: Set<Pos>) (avoiding: unit -> RoomPos option) (plain: unit -> RoomPos option) =
+    // A body standing outside its room's `reach`, the tiles of the last of
+    // `avoids`, walks round it (#472): the step that never enters the first
+    // of `avoids` a walk keeps out of — its tiles and, where given, those its
+    // test answers for by index —, else the plain one where that stays out
+    // of `reach`, else none: it waits at the edge, planning no step for the
+    // light tick to replay. Inside it, or with none, the plain step.
+    let round
+        (avoids: (Set<Pos> * (int -> bool) option) list)
+        (avoiding: Set<Pos> -> (int -> bool) option -> RoomPos option)
+        (plain: unit -> RoomPos option)
+        =
+        let reach = fst (List.last avoids)
+
         if Set.isEmpty reach || Set.contains pos reach then
             plain ()
         else
-            match avoiding () with
+            match avoids |> List.tryPick (fun (avoid, also) -> avoiding avoid also) with
             | Some step -> Some step
             | None ->
                 let step =
@@ -135,14 +146,12 @@ let private moveIntentFor
     let crossingStep =
         match task, crossing with
         | None, Some target ->
-            let reach =
-                if walksRound then
-                    Threats.reachIn threats room
-                else
-                    Set.empty
+            let avoids = if walksRound then rounds () else [ Set.empty, None ]
 
-            round reach (fun () -> Atlas.stepTowardRoom atlas creep reach target) (fun () ->
-                Atlas.stepTowardRoom atlas creep Set.empty target)
+            round
+                avoids
+                (fun avoid also -> Atlas.stepTowardRoomWhere atlas creep avoid also target)
+                (fun () -> Atlas.stepTowardRoom atlas creep Set.empty target)
             |> Option.map RoomPos.pos
         | _ -> None
 
@@ -153,10 +162,22 @@ let private moveIntentFor
     // (`round`).
     let shelterStep () =
         if task.IsNone && not (Set.isEmpty shelter) && not (Set.contains at shelter) then
-            let reach = Threats.reachIn threats room
+            let avoids =
+                if Set.isEmpty (Threats.reachIn threats room) then
+                    [ Set.empty, None ]
+                else
+                    rounds ()
 
-            round reach (fun () -> Atlas.firstStepAvoiding atlas creep reach shelter) (fun () ->
-                Atlas.firstStepWithin atlas creep shelter)
+            round
+                avoids
+                (fun avoid also ->
+                    Atlas.firstStepAvoidingWhere
+                        atlas
+                        creep
+                        avoid
+                        (Option.defaultValue (fun _ -> false) also)
+                        shelter)
+                (fun () -> Atlas.firstStepWithin atlas creep shelter)
             |> Option.map RoomPos.pos
         else
             None
@@ -243,20 +264,44 @@ let private moveIntentFor
                 match kite with
                 | Some avoid ->
                     round
-                        avoid
-                        (fun () ->
+                        [ avoid, None ]
+                        (fun avoid _ ->
                             match area |> Seq.tryHead with
                             | Some tile when tile.Room <> room ->
                                 Atlas.stepTowardRoom atlas creep avoid tile.Room
                             | _ -> Atlas.firstStepAvoiding atlas creep avoid area)
                         plain
                 | None when runs && task <> Flee ->
-                    let reach =
+                    let avoids =
                         match task with
-                        | Defend _ -> Threats.defendAvoidIn threats room
-                        | _ -> Threats.reachIn threats room
+                        | Defend _ -> [ Threats.defendAvoidIn threats room, None ]
+                        | _ when Set.isEmpty (Threats.reachIn threats room) -> [ Set.empty, None ]
+                        | _ -> rounds ()
 
-                    round reach (fun () -> Atlas.firstStepAvoiding atlas creep reach area) plain
+                    // A walk to work in another room crosses toward it
+                    // (`stepTowardRoom`), round what it avoids here (#527):
+                    // its Work Area is empty from across a border, so asked
+                    // of the room the work is in.
+                    let workRoom =
+                        area
+                        |> Seq.tryHead
+                        |> Option.map (fun tile -> tile.Room)
+                        |> Option.orElseWith (fun () -> roomOfWork atlas task)
+
+                    round
+                        avoids
+                        (fun avoid also ->
+                            match workRoom with
+                            | Some other when other <> room ->
+                                Atlas.stepTowardRoomWhere atlas creep avoid also other
+                            | _ ->
+                                Atlas.firstStepAvoidingWhere
+                                    atlas
+                                    creep
+                                    avoid
+                                    (Option.defaultValue (fun _ -> false) also)
+                                    area)
+                        plain
                 | None -> plain ()
 
             match step |> Option.map RoomPos.pos with
@@ -545,6 +590,52 @@ let movementOf
             |> List.map (fun c -> c.Name)
             |> Set.ofList
 
+    // A fighter walking to a fight in another room than the one it stands in
+    // walks round what out-damages it here (movement S2, #533): the fight it
+    // walks to is not this room's.
+    let passers =
+        if Map.isEmpty threats.Reach then
+            Set.empty
+        else
+            placed
+            |> List.filter (fun (name, at) ->
+                match Map.tryFind name assigned with
+                | Some(Guard room)
+                | Some(Assault room) -> room <> at.Room
+                | _ -> false)
+            |> List.map fst
+            |> Set.ofList
+            |> Set.filter (fun name ->
+                view.Creeps |> List.exists (fun c -> c.Name = name && isFighterBody c))
+
+    // What a body walks round in the room it stands in, first choice first
+    // (movement S2): the room's Reach — for a fighter, the tiles of it where
+    // what strikes within the horizon out-damages its heal —, where the body
+    // would stand at its next decision, with the tiles a hostile strikes
+    // before it could be on them and gone (`Threats.unsafeFor`); then, where
+    // no walk keeps out of those, the Reach alone. The last is the one its
+    // own tile and its plain step are read against.
+    let roundsOf name room =
+        let reach = Threats.reachIn threats room
+
+        match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
+        | None -> [ reach, None ]
+        | Some creep ->
+            let fighter = isFighterBody creep
+            let heal = Engine.healPower * partCount creep.Body Heal
+
+            let standing =
+                if fighter && heal > 0 then
+                    reach
+                    |> Set.filter (fun tile ->
+                        Threats.damageAt threats room view.Tuning.ReachHorizon tile > heal)
+                else
+                    reach
+
+            match Threats.unsafeFor threats atlas creep fighter with
+            | Some timed -> [ standing, Some timed; standing, None ]
+            | None -> [ standing, None ]
+
     // The bodies walking home out of an evacuating room, which walk round its
     // Reach (#512), and every idle fighter walking home (#533), or it walks
     // back into the Reach Flee walked it out of: asked, as the runners are,
@@ -701,8 +792,9 @@ let movementOf
                     threats
                     atlas
                     name
-                    (Set.contains name runners)
+                    (Set.contains name runners || Set.contains name passers)
                     (Set.contains name roundWalkers)
+                    (fun () -> roundsOf name at.Room)
                     (match Map.tryFind home threats.Shelter with
                      | Some ground when Set.contains name sheltering -> ground.Force()
                      | _ -> Set.empty)

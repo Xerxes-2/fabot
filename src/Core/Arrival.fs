@@ -12,8 +12,13 @@ open Fabot.Core.Grid
 let private never = System.Int32.MaxValue
 
 /// One of our bodies' arrival over its room (`ofBody`): by tile index, the
-/// tick it can stand on the tile.
-type BodyArrival = { Room: string; Ticks: int[] }
+/// tick it can stand on the tile, and the tick it can step off it.
+type BodyArrival =
+    {
+        Room: string
+        Ticks: int[]
+        Leaves: int[]
+    }
 
 /// The whole ticks a tile takes a gait on each ground; None with no MOVE.
 let paceOf (gait: Gait) : Pace option =
@@ -60,13 +65,13 @@ let private stepTicks (pace: Pace) : int[] =
 /// that crosses exits walks on from a ring tile only as a seed (it landed
 /// there), the engine carrying it over the border the tick it steps on; one
 /// that does not (`walksRing`: an Invader's, a keeper's) walks the ring.
-/// Answers the arrival, by tile.
-let private flood
+/// Answers the arrival and the departure, by tile.
+let private floodWithDepartures
     (ground: int[])
     (pace: Pace option)
     (walksRing: bool)
     (seeds: (int * int * int) list)
-    : int[] =
+    : int[] * int[] =
     let arrive = Array.create tileCount never
     let depart = Array.create tileCount never
     let seeds = seeds |> List.sortBy (fun (_, _, leaves) -> leaves) |> Array.ofList
@@ -145,7 +150,11 @@ let private flood
                                         pending <- pending + 1
     | Some _ -> ()
 
-    arrive
+    arrive, depart
+
+/// `floodWithDepartures`' arrival alone.
+let private flood ground pace walksRing seeds =
+    fst (floodWithDepartures ground pace walksRing seeds)
 
 /// The soonest of each tile's square of `strike` about it (Chebyshev): what a
 /// weapon of that range strikes from where the body can stand. Separable,
@@ -223,6 +232,14 @@ let private threatsIn (world: WorldView) (room: string) : (HostileInfo * Hostile
         |> List.collect (fun hostile ->
             classesOf seen.Hostiles seen.HostileFatigue hostile
             |> List.map (fun (cls, wait) -> hostile, cls, wait))
+
+/// A room's hostile towers' class: a weapon whose range is the room, on no
+/// legs.
+let towerClass =
+    {
+        Strike = Engine.roomSide
+        Pace = None
+    }
 
 /// The pace no unseen body beats: a tile a tick on any ground.
 let private quickest = Some { Road = 1; Plain = 1; Swamp = 1 }
@@ -365,18 +382,33 @@ and private mapsOf
             | seeds -> Some(flood ground cls.Pace walksRing seeds))
         |> List.reduce (Array.map2 min)
 
+    // The room's hostile towers (#566): one class striking every tile of it
+    // now, which nothing carries across a border.
+    let towers =
+        match Map.tryFind room world.Rooms |> Option.map (fun seen -> seen.Towers) with
+        | Some(_ :: _ as towers) ->
+            [
+                {
+                    Class = towerClass
+                    Members = towers |> List.map fst
+                    Ticks = Array.create tileCount 0
+                }
+            ]
+        | _ -> []
+
     {
         Classes =
-            own @ carried
-            |> List.groupBy (fun (cls, _, _, _) -> cls)
-            |> List.filter (fun (_, sources) ->
-                sources |> List.exists (fun (_, _, seeds, _) -> not (List.isEmpty seeds)))
-            |> List.map (fun (cls, sources) ->
-                {
-                    Class = cls
-                    Members = sources |> List.collect (fun (_, ids, _, _) -> ids) |> List.distinct
-                    Ticks = dilate cls.Strike (floodOf cls sources)
-                })
+            (own @ carried
+             |> List.groupBy (fun (cls, _, _, _) -> cls)
+             |> List.filter (fun (_, sources) ->
+                 sources |> List.exists (fun (_, _, seeds, _) -> not (List.isEmpty seeds)))
+             |> List.map (fun (cls, sources) ->
+                 {
+                     Class = cls
+                     Members = sources |> List.collect (fun (_, ids, _, _) -> ids) |> List.distinct
+                     Ticks = dilate cls.Strike (floodOf cls sources)
+                 }))
+            @ towers
         Unseen =
             match unseen with
             | [] -> None
@@ -405,6 +437,91 @@ let soonestAt (maps: ArrivalMaps) (tile: Pos) : int option =
         | [] -> None
         | ticks -> Some(List.min ticks)
 
+/// One member of one class of a room's maps, priced: its class's ticks, where
+/// it stands, how far its weapon strikes and what it lands a tick on a tile.
+type Striker =
+    {
+        Ticks: int[]
+        At: RoomPos
+        Strike: int
+        Power: Pos -> int
+    }
+
+/// Each member of a room's classes as a `Striker` (Decided 3's price): a
+/// creep at its live weapon of that class in #531's window
+/// (`HostileInfo.effectivePower`), a tower at its falloff from the tile. The
+/// members are read off the world's rooms, this one's and its neighbours'.
+let strikersOf (world: WorldView) (room: string) (maps: ArrivalMaps) : Striker list =
+    let seen =
+        room :: RoomName.adjacent room
+        |> List.choose (fun name -> Map.tryFind name world.Rooms |> Option.map (fun r -> name, r))
+
+    let creeps =
+        seen
+        |> List.collect (fun (_, r) -> r.Hostiles |> List.map (fun h -> h.Id, (h, r.Hostiles)))
+        |> Map.ofList
+
+    let towers =
+        seen
+        |> List.filter (fun (name, _) -> name = room)
+        |> List.collect (fun (name, r) ->
+            r.Towers |> List.map (fun (id, tile) -> id, RoomPos.at name tile))
+        |> Map.ofList
+
+    maps.Classes
+    |> List.collect (fun map ->
+        map.Members
+        |> List.choose (fun id ->
+            match Map.tryFind id towers, Map.tryFind id creeps with
+            | Some at, _ ->
+                Some
+                    {
+                        Ticks = map.Ticks
+                        At = at
+                        Strike = map.Class.Strike
+                        Power = fun tile -> Engine.towerAttackAt (range tile (RoomPos.pos at))
+                    }
+            | None, Some(hostile, side) ->
+                let power = HostileInfo.effectivePower side hostile
+
+                let damage =
+                    if map.Class.Strike = Engine.meleeRange then
+                        Engine.attackPower * power Attack
+                    else
+                        Engine.rangedAttackPower * power RangedAttack
+
+                Some
+                    {
+                        Ticks = map.Ticks
+                        At = hostile.Pos
+                        Strike = map.Class.Strike
+                        Power = fun _ -> damage
+                    }
+            | None, None -> None))
+
+/// What the strikers of a room land a tick on one of its tiles that their
+/// class can strike within `ticks`: each one counted where it stands near
+/// enough to, at a tile a tick and one more over a border (its exit pair is
+/// one crossing). An overcount where one class is many bodies, the direction
+/// a body runs in.
+let damageAt (room: string) (strikers: Striker list) (ticks: int) (tile: Pos) : int =
+    let here = RoomPos.at room tile
+    let index = indexOf tile
+
+    strikers
+    |> List.sumBy (fun striker ->
+        if
+            at index striker.Ticks <= ticks
+            && (if striker.At.Room = room then
+                    range (RoomPos.pos striker.At) tile <= striker.Strike + ticks
+                else
+                    RoomName.tileRange striker.At here
+                    |> Option.exists (fun r -> r <= striker.Strike + ticks + 1))
+        then
+            striker.Power tile
+        else
+            0)
+
 /// One body of ours' arrival over its room by its live gait, its load read
 /// (`fatigueFactorOf`), and the fatigue it waits out now; None for a body the
 /// projection does not place.
@@ -421,12 +538,15 @@ let ofBody (atlas: Atlas.Atlas) (creep: CreepInfo) : BodyArrival option =
                     Moves = factor.MoveParts
                 }
 
+            let ticks, leaves =
+                floodWithDepartures
+                    ground
+                    (paceOf gait)
+                    false
+                    [ indexOf (RoomPos.pos tile), 0, waitOf creep.Fatigue gait ]
+
             {
                 Room = tile.Room
-                Ticks =
-                    flood
-                        ground
-                        (paceOf gait)
-                        false
-                        [ indexOf (RoomPos.pos tile), 0, waitOf creep.Fatigue gait ]
+                Ticks = ticks
+                Leaves = leaves
             }))

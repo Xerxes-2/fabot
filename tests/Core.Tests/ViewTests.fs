@@ -5707,8 +5707,11 @@ let private keeperWorld () : World =
 /// the same fixture with the mask pulled off that ground and nothing else
 /// moved. The
 /// margin is a `Tuning` knob and is swept as one here, exactly as
-/// `RoomSeamTests` sweeps it: 1 + 3 + `ReachMargin`, so one is five.
-let private reachingTuning = { Tuning.defaults with ReachMargin = 1 }
+/// `RoomSeamTests` sweeps it: 1 + 3 + `ReachHorizon`, so one is five.
+let private reachingTuning =
+    { Tuning.defaults with
+        ReachHorizon = 1
+    }
 
 /// The same room declared as each kind, so the two cases below differ in the
 /// clause of `scanOf` that reads them and in nothing else.
@@ -5981,7 +5984,7 @@ let scanSetMaskTests =
                 let margin =
                     Tuning.keeperMargin
                         { Tuning.defaults with
-                            ReachMargin = Tuning.defaults.ReachMargin + 1
+                            ReachHorizon = Tuning.defaults.ReachHorizon + 1
                         }
 
                 Expect.equal
@@ -6801,7 +6804,66 @@ let worldViewTests =
             }
 
             test
-                "a room's own Reach is built once a tick off one set of hostiles and ramparts, and again off any other" {
+                "a room's hostile towers fire where a stronghold's core or their owner's controller stands" {
+                // #566: an abandoned room's towers fire at nothing.
+                let factsWith owner core rival =
+                    { RoomFacts.empty with
+                        TargetKinds = Map.ofList [ "t-1", Structure BuiltKind.Tower ]
+                        Layer =
+                            { RoomLayer.empty with
+                                TargetPositions = Map.ofList [ "t-1", { X = 9; Y = 9 } ]
+                                Foreign = Map.ofList [ { X = 9; Y = 9 }, owner ]
+                            }
+                        InvaderCores =
+                            [
+                                for level in Option.toList core ->
+                                    {
+                                        Id = "core-1"
+                                        RoomName = "W1N1"
+                                        Tile = { X = 8; Y = 8 }
+                                        CollapseTick = None
+                                        Level = level
+                                    }
+                            ]
+                        RivalController =
+                            rival
+                            |> Option.map (fun by ->
+                                {
+                                    Owner = by
+                                    Level = 8
+                                    SafeModeUntil = 0
+                                    SafeModeCooldownUntil = 0
+                                    SafeModeAvailable = 0
+                                    UpgradeBlockedUntil = 0
+                                    TicksToDowngrade = 0
+                                    Seen = 0
+                                })
+                    }
+
+                let fires facts =
+                    not (List.isEmpty (WorldView.hostileTowers facts))
+
+                Expect.isTrue
+                    (fires (factsWith "Invader" (Some 2) None))
+                    "a stronghold's tower fires"
+
+                Expect.isFalse
+                    (fires (factsWith "Invader" (Some 0) None))
+                    "beside a level-0 core, no stronghold: none stands"
+
+                Expect.isTrue
+                    (fires (factsWith "Trep" None (Some "Trep")))
+                    "its owner's room: it fires"
+
+                Expect.isFalse
+                    (fires (factsWith "Shib" None (Some "Trep")))
+                    "a tower left in a room another player took fires at nothing"
+
+                Expect.isFalse (fires (factsWith "Shib" None None)) "nor in a room nobody owns"
+            }
+
+            test
+                "a room's own Reach is built once a tick off one room's maps and ramparts, and again off any other" {
                 let share = (WorldView.sharingSafeGround WorldView.empty).ReachGround.Value
                 let mutable built = 0
                 let tiles = Set.singleton { X = 5; Y = 5 }
@@ -6810,22 +6872,20 @@ let worldViewTests =
                     built <- built + 1
                     tiles
 
-                let standing = [ { X = 5; Y = 5 }, 4 ]
+                // The maps are shared by object (`ArrivalGround` hands every
+                // colony the one it built), so equal content is another.
+                let maps = { Classes = []; Unseen = None }
                 let ramparts = Set.singleton { X = 6; Y = 6 }
 
-                Expect.equal
-                    (share "W1N1" standing ramparts build)
-                    tiles
-                    "the first colony builds it"
-
-                Expect.equal (share "W1N1" standing ramparts build) tiles "the second reads it"
+                Expect.equal (share "W1N1" maps ramparts build) tiles "the first colony builds it"
+                Expect.equal (share "W1N1" maps ramparts build) tiles "the second reads it"
                 Expect.equal built 1 "built once"
 
-                share "W1N1" [ { X = 5; Y = 5 }, 5 ] ramparts build |> ignore
-                share "W1N1" standing Set.empty build |> ignore
-                share "W1N2" standing ramparts build |> ignore
+                share "W1N1" { Classes = []; Unseen = None } ramparts build |> ignore
+                share "W1N1" maps Set.empty build |> ignore
+                share "W1N2" maps ramparts build |> ignore
 
-                Expect.equal built 4 "another reach, other ramparts, another room: each its own"
+                Expect.equal built 4 "other maps, other ramparts, another room: each its own"
             }
 
             test

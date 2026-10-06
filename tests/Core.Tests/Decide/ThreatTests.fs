@@ -3396,9 +3396,11 @@ let threatTests =
                     "the same Reach whoever owns the creep"
             }
 
-            test "a Reach is the weapon range plus the margin, measured in Chebyshev tiles" {
-                // Melee reaches 1 + 2, ranged 3 + 2 — the margin is one tile
-                // for the hostile's next step and one for our own tick of lag.
+            test
+                "a 1:1 body's Reach on open plain is its weapon's range and a tile a tick of the horizon" {
+                // Melee reaches 1 + 2, ranged 3 + 2: a tile a tick for the two
+                // ticks to our next decision (`Tuning.ReachHorizon`). Off the
+                // spawn at (25,25), which no body stands on (movement S2).
                 let melee = reachIn (facingBody { X = 25; Y = 30 } [ Attack; Move ])
                 let ranged = reachIn (facingBody { X = 25; Y = 30 } [ RangedAttack; Move ])
 
@@ -3413,10 +3415,10 @@ let threatTests =
                     "and the Reach is a square: the diagonal at range 3 is in it too"
 
                 Expect.isTrue
-                    (Set.contains { X = 25; Y = 25 } ranged)
+                    (Set.contains { X = 24; Y = 25 } ranged)
                     "range 5 is inside a ranged Reach"
 
-                Expect.isFalse (Set.contains { X = 25; Y = 24 } ranged) "range 6 is outside it"
+                Expect.isFalse (Set.contains { X = 24; Y = 24 } ranged) "range 6 is outside it"
 
                 Expect.isTrue
                     (Set.contains
@@ -3425,13 +3427,14 @@ let threatTests =
                     "a body carrying both weapons reaches the farther of them"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): pins the Reach
-            // as a square blind to the ground and to the hostile's pace short
-            // of the stationary cut (`reachRadius`, `ReachMargin`,
-            // `Gait.stationary`). Flips at S2, where a tile is in reach when the
-            // hostile's arrival map says it can strike there in time.
+            // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read
+            // the Reach as a square blind to the ground and to the hostile's
+            // pace short of a stationary cut at five ticks a tile
+            // (`reachRadius`, `ReachMargin`): a tile is now in reach where the
+            // hostile's arrival map strikes it within the horizon, on the
+            // ground a body stands on, its fatigue waited out.
             test
-                "a Reach is the whole square about the hostile, off the ground too, and five ticks a tile is the cut to a step past its swing" {
+                "a Reach is where the hostile strikes within the horizon, on the ground alone, by its pace and its fatigue" {
                 // openRoom 8's ground ends at y = 33: the hostile on its edge.
                 let at = { X = 25; Y = 33 }
 
@@ -3439,26 +3442,55 @@ let threatTests =
                     Set.ofList
                         [
                             for x in at.X - r .. at.X + r do
-                                for y in at.Y - r .. at.Y + r -> { X = x; Y = y }
+                                for y in at.Y - r .. min 33 (at.Y + r) -> { X = x; Y = y }
                         ]
 
-                let reachOf attacks =
-                    reachIn (facingBody at (List.replicate attacks Attack @ [ Move ]))
+                let facingAt attacks =
+                    facingBody at (List.replicate attacks Attack @ [ Move ])
+
+                let tired attacks fatigue =
+                    let view = facingAt attacks
+
+                    { view with
+                        World =
+                            { view.World with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            "W1N1",
+                                            {
+                                                Hostiles = view.Hostiles
+                                                HostileFatigue = Map.ofList [ "h-1", fatigue ]
+                                                InvaderCores = []
+                                                Towers = []
+                                                Fallen = []
+                                                Control =
+                                                    {
+                                                        Owner = Ownership.Ours
+                                                        Reservation = None
+                                                        SafeMode = false
+                                                        SafeModeCooldownUntil = 0
+                                                        Sign = None
+                                                    }
+                                            }
+                                        ]
+                            }
+                    }
 
                 Expect.equal
-                    (reachOf 1)
+                    (reachIn (facingAt 1))
                     (square 3)
-                    "a melee on its legs: every tile within three, the rows past the ground's edge too"
+                    "a melee on its legs: its swing and a tile a tick, and none of the rows past the ground's edge"
 
                 Expect.equal
-                    (reachOf 4)
-                    (square 3)
-                    "four ATTACK on one MOVE, four ticks a plain tile: still the room's margin"
-
-                Expect.equal
-                    (reachOf 5)
+                    (reachIn (facingAt 4))
                     (square 2)
-                    "five ATTACK on one MOVE, five ticks a plain tile: a step past its swing"
+                    "four ATTACK on one MOVE, four ticks a plain tile: one step past its swing, the next four ticks off"
+
+                Expect.equal
+                    (reachIn (tired 4 8))
+                    (square 1)
+                    "and with the eight fatigue of a step on it, four ticks to wait: its swing alone"
             }
 
             test
@@ -3755,8 +3787,11 @@ let threatGateTests =
                                     [ "can-b", { X = 24; Y = 20 }, Structure BuiltKind.Container ]
                         }
 
+                // A shooter off the lane: its map strikes the lane's first
+                // tiles where it stands, and reaches no further, the lane
+                // being no ground of its (movement S2).
                 let colony =
-                    twoPosts |> facing [ hostileAt "h-1" { X = 28; Y = 20 } [ Attack; Move ] ]
+                    twoPosts |> facing [ hostileAt "h-1" { X = 28; Y = 20 } [ RangedAttack; Move ] ]
 
                 let {
                         Intents = intents
@@ -3848,7 +3883,9 @@ let hotCornerTests =
                 // Neither "any tile hot" (which would stop all upgrading over one
                 // corner) nor "every tile hot" (which would send the creep to the hot
                 // one): the Threat at (27,25) covers the near way in at (25,28) and
-                // leaves the far one at (23,28), so the creep turns the corner.
+                // leaves the far one at (23,28), so the creep turns the corner. A
+                // shooter, standing off the ground: its map strikes from where it
+                // stands and spreads no further (movement S2).
                 let {
                         Intents = quiet
                         Assignments = before
@@ -3867,7 +3904,7 @@ let hotCornerTests =
 
                 let raided =
                     hotCornerColony
-                    |> facing [ hostileAt "h-1" { X = 27; Y = 25 } [ Attack; Move ] ]
+                    |> facing [ hostileAt "h-1" { X = 27; Y = 25 } [ RangedAttack; Move ] ]
 
                 let {
                         Intents = intents
@@ -3994,7 +4031,9 @@ let fleeTests =
 
             // Characterisation (movement S0, `docs/adr/0088`): the walk round
             // (`moveIntentFor.round`, `Atlas.firstStepAvoiding`) takes the Reach
-            // as a wall. Flips at S2, where a walk avoids `A <= T_b + held`.
+            // as a wall. At S2 the walk avoids `A <= T_b + held` beside the
+            // Reach (`Threats.unsafeFor`) and the outcome holds: the way round
+            // here is the same.
             test "a body Flee applies to walks round a Reach to its work, never into it" {
                 // #472: an open floor, the source walled in at (25,14), its
                 // Seats along y = 15; a melee body at (25,20) whose Reach
@@ -4152,10 +4191,39 @@ let fleeTests =
 
                 let atlas = Atlas.ofView (facingHostile true)
 
+                // Less the walks' and flights' tables and the bodies they are
+                // of, which are the tick's own and no Reach.
                 Expect.equal
-                    (threatsOf (facingHostile true) atlas)
+                    { threatsOf (facingHostile true) atlas with
+                        Walks = noThreats.Walks
+                        Flights = noThreats.Flights
+                        Bodies = []
+                    }
                     noThreats
                     "and the tick derives no Reach at all"
+            }
+
+            test "a body its fatigue holds flees a strike that lands before it can step off" {
+                // Movement S2: a 1:1 melee four tiles up the lane strikes the
+                // hauler's tile in three ticks, past the horizon, so a hauler
+                // free to step is in no Reach; one whose fatigue holds it two
+                // ticks more is struck there before it can leave.
+                let fleesWith fatigue =
+                    let hauler =
+                        { creepWith "h1" 50 50 [ Carry; Carry; Move ] with
+                            Fatigue = fatigue
+                        }
+
+                    let colony =
+                        { laneColony [ hauler ] [ "h1", { X = 25; Y = 24 } ] with
+                            Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                        }
+                        |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                    Map.tryFind "h1" (decideOn colony).Assignments = Some(taskId Flee)
+
+                Expect.isFalse (fleesWith 0) "free to step, it stays at work"
+                Expect.isTrue (fleesWith 4) "held two ticks, it runs"
             }
 
             test "a body with no Work part flees too: no part and no capacity are asked" {
@@ -4209,7 +4277,9 @@ let fleeTests =
 
             // Characterisation (movement S0, `docs/adr/0088`): who flees reads
             // `Emitter.outDamaged`, each armed hostile within its `reachRadius`.
-            // Flips at S2, with the Reach it reads.
+            // At S2 it reads what the hostile maps strike the tile with within
+            // the horizon (`Threats.damageAt`), and the outcome holds: the 8A
+            // melee's 240 out-damages the 84 heal.
             test "a ranger whose Guard went this tick, beside an 8A melee, takes Flee and steps out" {
                 // #533, live at W18S25 t973,267: the Guard went `task-gone` beside
                 // Idol768 and the ranger stood idle, taking 240 a tick against its
@@ -4311,11 +4381,15 @@ let fleeTests =
                     "it walks to its rampart"
             }
 
-            test "an idle ranger walking home walks round the Reach it fled, never back into it" {
+            test "an idle ranger walking home walks round what out-damages it, never back into it" {
                 // #533: a fighter with no fight Task walks home from any room but
                 // home; walked straight it steps back into the Reach Flee has just
                 // walked it out of, and runs again. A raid at (30,48) reaches x 25
                 // and up from row 43 down; the ranger at (28,42) stands outside it.
+                // Since movement S2 (`docs/adr/0088`, Decided 3) a fighter walks
+                // round only the tiles where what strikes them out-damages its
+                // heal: the lone shot's fringe (10 a tick against its 12) it
+                // crosses, the melee's swing and shot together (40) it does not.
                 let raid = [ hostileIn "W1N2" { X = 30; Y = 48 } smallMelee ]
                 let ranger = creepWith "r-out" 0 0 Bodies.rangerPattern.Block
                 let decision = decideOn (transitRoom [ ranger, { X = 28; Y = 42 } ] raid)
@@ -4324,16 +4398,22 @@ let fleeTests =
                     (Map.tryFind "r-out" decision.Assignments)
                     "the premise: it holds nothing"
 
-                let step = moveIntentsFor "r-out" decision.Intents
+                match moveIntentsFor "r-out" decision.Intents with
+                | [ MoveCreep(_, direction) ] ->
+                    let step = stepFrom { X = 28; Y = 42 } direction
 
-                Expect.isTrue
-                    (step = [ MoveCreep("r-out", Left) ] || step = [ MoveCreep("r-out", TopLeft) ])
-                    $"along the Reach's edge, never into it: {step}"
+                    Expect.isGreaterThan
+                        (range step { X = 30; Y = 48 })
+                        (Engine.meleeRange + 2)
+                        $"out of the melee's swing within the horizon: {step}"
+                | other -> failtest $"one step: {other}"
             }
 
             // Characterisation (movement S0, `docs/adr/0088`): the Flee area is
-            // `Threats.Safe`, the ground outside every Reach. Flips at S2, where
-            // Flee steps to the nearest tile with `T_b < A`.
+            // `Threats.Safe`, the ground outside every Reach. At S2 Flee steps
+            // toward the safe tiles it stands on before any hostile can strike
+            // them (`T_b < A`, `Threats.fleeAreaFor`), and the outcome holds:
+            // south down the lane.
             test "the Move Intent walks toward a safe tile, and no action is emitted" {
                 // The Threat holds the lane's north end, so every tile within
                 // three of it is hot and the safe ground is south: the creep
@@ -4551,11 +4631,13 @@ let layeredThreatTests =
                          threatsOf colony (Atlas.ofView colony))
                         room
 
-                let atHome = [ hostileIn "W1N1" { X = 10; Y = 45 } [ Attack; Move ] ]
-                let inOutpost = [ hostileIn "W1N2" { X = 10; Y = 45 } [ Attack; Move ] ]
+                // (10,40): the one coordinate both corridors cover, since a
+                // Reach holds only tiles a body may stand on (movement S2).
+                let atHome = [ hostileIn "W1N1" { X = 10; Y = 40 } [ Attack; Move ] ]
+                let inOutpost = [ hostileIn "W1N2" { X = 10; Y = 40 } [ Attack; Move ] ]
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 45 } (reachIn "W1N1" atHome))
+                    (Set.contains { X = 10; Y = 40 } (reachIn "W1N1" atHome))
                     "filed at home, the hostile's own tile is in the home room's Reach"
 
                 Expect.isEmpty
@@ -4563,7 +4645,7 @@ let layeredThreatTests =
                     "and the outpost's Reach is empty, though it holds that very coordinate"
 
                 Expect.isTrue
-                    (Set.contains { X = 10; Y = 45 } (reachIn "W1N2" inOutpost))
+                    (Set.contains { X = 10; Y = 40 } (reachIn "W1N2" inOutpost))
                     "filed in the outpost, the same tile is in the outpost's Reach"
 
                 Expect.isEmpty
@@ -4879,26 +4961,27 @@ let keeperTests =
             }
 
             test
-                "the keeper is still a Threat and still derives a Reach: the ground changed, not the list" {
+                "the keeper is still a Threat and still has its map: the ground changed, not the list" {
                 // The override is for the ground and nothing else: a keeper is still a
-                // hostile, still derives a Reach and is still the raid log's business;
-                // the Reach just covers no tile of ours.
+                // hostile, still lays a hostile map and is still the raid log's
+                // business; the map just strikes no tile of ours within the horizon.
+                // Since movement S2 (`docs/adr/0088`) a Reach is the tiles a body
+                // stands on, so the room holds none, where it held the masked
+                // tiles about the keeper before.
                 let lair = { X = 35; Y = 11 }
                 let threats = threatsIn [ keeper lair ]
 
-                Expect.isNonEmpty
-                    (Threats.reachIn threats "W15S26")
-                    "the keeper's Reach is derived like any other hostile's"
-
                 Expect.isTrue
-                    (Set.contains lair (Threats.reachIn threats "W15S26"))
-                    "and it covers the tile it stands on, masked though that tile is"
+                    (Map.containsKey "W15S26" threats.Arrivals)
+                    "the keeper's map is laid like any other hostile's"
 
-                Expect.equal
+                Expect.isEmpty
+                    (Threats.reachIn threats "W15S26")
+                    "and its Reach covers no tile we walk on: the mask took them"
+
+                Expect.isEmpty
                     (Threats.safeIn threats "W15S26")
-                    (Atlas.walkableTilesIn (Atlas.ofView (crossing [])) "W15S26"
-                     |> RoomPos.setAt "W15S26")
-                    "and the safe set is the whole walkable ground: the Reach subtracts nothing, because there is nothing of ours to subtract from"
+                    "so no safe set is derived: there is nothing to run from"
 
                 Expect.isEmpty
                     (Threats.ringIn threats "W15S26")
@@ -5663,34 +5746,37 @@ let acrossTheBorderTests =
     testList
         "a Threat across the border"
         [
-            // Characterisation (movement S0, `docs/adr/0088`): the cross-border
-            // Reach (`reachAcross`), the radius less the walk to the exit and the
-            // carry. Flips at S2, where floods carry through `Atlas.seams`.
+            // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read
+            // the cross-border Reach as the radius less the walk to the exit and
+            // the carry (`reachAcross`): the melee's flood now carries across
+            // the exit, landing it on x = 0 at tick 1 and on x = 1 at tick 2,
+            // whose swing is x = 2.
             test
-                "a melee within its margin of an exit reaches the first two columns across it, and no further" {
+                "a melee beside an exit reaches across as far as it walks and swings within the horizon" {
                 // #514, live t958,965: the 18A melee on W18S25's east edge put no
                 // Reach on W17S25's x = 0..2, and the reserver idling beside the
                 // exit there died the tick the melee stepped across. Here the
                 // corridor is rows 33..35.
                 let reach = homeReach (borderHome true [] [ meleeWestAt { X = 48; Y = 34 } ] [])
 
-                for x in 0..1 do
+                for x in 0..2 do
                     for y in 33..35 do
                         Expect.contains
                             reach
                             { X = x; Y = y }
-                            $"({x},{y}) is a step and a swing across"
+                            $"({x},{y}) is struck within two ticks across"
 
                 Expect.isTrue
-                    (reach |> Set.forall (fun tile -> tile.X <= 1))
-                    $"nothing past its margin: {reach}"
+                    (reach |> Set.forall (fun tile -> tile.X <= 2))
+                    $"nothing past what it reaches in two ticks: {reach}"
 
                 Expect.isEmpty
                     (homeReach (borderHome true [] [ meleeWestAt { X = 45; Y = 34 } ] []))
                     "a melee four columns short of the exit reaches nothing across it"
             }
 
-            test "a ranged one reaches across by its range" {
+            test "a ranged one reaches across by its range from where it walks" {
+                // Landed on x = 0 at tick 1 and on x = 1 at tick 2 (movement S2).
                 let ranged =
                     { meleeWestAt { X = 48; Y = 34 } with
                         Body = [ RangedAttack; Move ]
@@ -5698,10 +5784,10 @@ let acrossTheBorderTests =
 
                 let reach = homeReach (borderHome true [] [ ranged ] [])
 
-                Expect.contains reach { X = 3; Y = 34 } "three columns in"
+                Expect.contains reach { X = 4; Y = 34 } "four columns in"
 
                 Expect.isTrue
-                    (reach |> Set.forall (fun tile -> tile.X <= 3))
+                    (reach |> Set.forall (fun tile -> tile.X <= 4))
                     $"and no further: {reach}"
             }
 
@@ -5720,6 +5806,102 @@ let acrossTheBorderTests =
                     "the ramparted tile is in no Reach"
 
                 Expect.contains reach { X = 1; Y = 33 } "the bare one beside it is"
+            }
+
+            // #566, live W16S26 t980,640-980,650: two rangers stood healing 84
+            // under a stronghold's 480 a tick, three tiles from the exit, until
+            // they died. A room's hostile towers are one arrival class striking
+            // every tile of it now (movement S2): the room has no safe tile, so
+            // Flee's ground is across the nearest border whose landing no Reach
+            // covers, and a body its towers out-damage walks out over it.
+            test "a ranger under a stronghold's towers it cannot out-heal walks out over the exit" {
+                let towered heal =
+                    let colony = borderHome true [] [] []
+                    let west = SpatialInfo.layerOf colony.Spatial "W2N1"
+
+                    let ranger =
+                        creepWith
+                            "r1"
+                            0
+                            0
+                            (List.replicate 21 Move
+                             @ List.replicate 14 RangedAttack
+                             @ List.replicate heal Heal)
+
+                    { colony with
+                        Creeps = colony.Creeps @ [ ranger ]
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W2N1"
+                                { west with
+                                    CreepPositions = Map.ofList [ "r1", { X = 44; Y = 34 } ]
+                                }
+                        World =
+                            { colony.World with
+                                Rooms =
+                                    Map.add
+                                        "W2N1"
+                                        {
+                                            Hostiles = []
+                                            HostileFatigue = Map.empty
+                                            InvaderCores = []
+                                            // Past the falloff: 150 a tick on every tile we stand on.
+                                            Towers = [ "tower-1", { X = 10; Y = 34 } ]
+                                            Fallen = []
+                                            Control =
+                                                {
+                                                    Owner = Ownership.Unowned
+                                                    Reservation = None
+                                                    SafeMode = false
+                                                    SafeModeCooldownUntil = 0
+                                                    Sign = None
+                                                }
+                                        }
+                                        colony.World.Rooms
+                            }
+                    }
+
+                let outOf heal =
+                    let decision = decideOn (towered heal)
+
+                    Map.tryFind "r1" decision.Assignments,
+                    moveIntentsFor "r1" decision.Intents
+                    |> List.map (function
+                        | MoveCreep(_, direction) -> stepFrom { X = 44; Y = 34 } direction
+                        | _ -> { X = 44; Y = 34 })
+
+                let task, steps = outOf 7
+
+                Expect.equal task (Some(taskId Flee)) "seven HEAL, 84 a tick under 150: it runs"
+
+                Expect.isTrue
+                    (steps |> List.forall (fun step -> step.X = 45))
+                    $"east, toward the exit into W1N1: {steps}"
+
+                Expect.equal
+                    (fst (outOf 13))
+                    None
+                    "thirteen HEAL, 156 a tick over 150: it out-heals the towers and stays"
+
+                // The one border open here leads into a room no route enters
+                // (a rival's, a stronghold's): no ground across it is Flee's.
+                let barred =
+                    let colony = towered 7
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                RivalRooms = Set.singleton "W1N1"
+                            }
+                    }
+
+                let threats = threatsOf barred (Atlas.ofView barred)
+                let ranger = barred.Creeps |> List.find (fun c -> c.Name = "r1")
+
+                Expect.isEmpty
+                    (Threats.fleeAreaFor threats (Atlas.ofView barred) ranger)
+                    "no way out across a border into a room no route enters"
             }
 
             test "a body beside the exit inside the cross-border Reach takes Flee" {

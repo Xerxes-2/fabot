@@ -19,45 +19,20 @@ let internal runsFromThreats (view: ColonyView) atlas (creep: CreepInfo) =
         && Atlas.standsWhereItDigs atlas (view.Sources |> List.map (fun s -> s.Id)) creep.Name
     )
 
-/// Whether the hostiles a body stands in the Reach of out-damage its own heal
-/// (#533): each armed one within its `reachRadius` of the tile, at its whole
-/// damage. Across a border a hostile counts where both stand that near an
-/// edge, a reading that errs toward running. A body with no HEAL is
-/// out-damaged by any, so the question costs it nothing. The heal of ours
-/// reaching it is left out: a healer's heal is its own fight's.
-let private outDamaged (view: ColonyView) atlas (creep: CreepInfo) =
+/// Whether what strikes the tile a body stands on within the horizon
+/// out-damages its own heal (#533; movement S2, Decided 3): each member of a
+/// hostile map that reaches the tile in time, a hostile tower at its falloff
+/// (`Threats.damageAt`). A body with no HEAL is out-damaged by any, so the
+/// question costs it nothing. The heal of ours reaching it is left out: a
+/// healer's heal is its own fight's.
+let private outDamaged (view: ColonyView) (threats: Threats) atlas (creep: CreepInfo) =
     let heal = Engine.healPower * partCount creep.Body Heal
 
     heal = 0
     || match Atlas.creepTile atlas creep.Name with
        | None -> true
        | Some tile ->
-           let at = RoomPos.pos tile
-           let neighbours = RoomName.adjacent tile.Room
-
-           let fromEdge (p: Pos) =
-               min (min p.X (Seam.exitEdge - p.X)) (min p.Y (Seam.exitEdge - p.Y))
-
-           let reaches (hostile: HostileInfo) r =
-               if hostile.Pos.Room = tile.Room then
-                   range at (RoomPos.pos hostile.Pos) <= r
-               else
-                   List.contains hostile.Pos.Room neighbours
-                   && fromEdge at <= r
-                   && fromEdge (RoomPos.pos hostile.Pos) <= r
-
-           let damage =
-               view.Hostiles
-               |> List.sumBy (fun hostile ->
-                   match reachRadius view hostile with
-                   | Some r when reaches hostile r ->
-                       let parts = HostileInfo.effectivePower view.Hostiles hostile
-
-                       Engine.attackPower * parts Attack
-                       + Engine.rangedAttackPower * parts RangedAttack
-                   | _ -> 0)
-
-           damage > heal
+           Threats.damageAt threats tile.Room view.Tuning.ReachHorizon (RoomPos.pos tile) > heal
 
 /// Whether a creep can usefully work this Task right now: the body must be able
 /// to do it, and its energy state must call for it. Gates read part arithmetic,
@@ -402,7 +377,7 @@ let internal applicable
     | Flee ->
         standsInReach threats atlas creep.Name
         && (isFighterBody creep || runsFromThreats view atlas creep)
-        && outDamaged view atlas creep
+        && outDamaged view threats atlas creep
 
 /// Whether a controller stands in a room nobody owns: the claim party's
 /// (#471), the one Upgrade pooled on such a controller. Read off the room's
@@ -881,10 +856,14 @@ let private guardIntent
 /// patient's missing hits as it is planned, so two healers do not both pour
 /// into a wound one of them closes.
 ///
-/// A fighter that owes nothing pre-heals (#451): first an adjacent fighter of
-/// ours standing in a Reach, at full hits too, since the engine credits a heal
-/// before its death check; then the reflex above; then itself where it stands
-/// in a Reach. A wounded fighter heals itself first.
+/// A fighter that owes nothing first closes a pressing wound: one beside it,
+/// or a fighter's within three owing at least its whole heal — under a
+/// room's towers, which cover every tile, a medic shielded the whole fighter
+/// beside it while the wounded one two tiles off bled (movement S2). Then it
+/// pre-heals (#451) an adjacent fighter of ours standing in a Reach, at full
+/// hits too, since the engine credits a heal before its death check; then any
+/// wound in reach; then itself where it stands in a Reach. A wounded fighter
+/// heals itself first.
 let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPlan.Plan) =
     let healParts (creep: CreepInfo) =
         Map.tryFind Heal creep.Body |> Option.defaultValue 0
@@ -920,7 +899,8 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
             |> List.tryHead
             |> Option.map (fun other -> other, Engine.meleeRange))
 
-    let woundFor (healer: CreepInfo) (owed: Map<string, int>) =
+    // The wound in reach it heals, of those `counts` admits.
+    let woundAmong (counts: CreepInfo -> int -> bool) (healer: CreepInfo) (owed: Map<string, int>) =
         if Map.find healer.Name owed > 0 then
             Some(healer, 0)
         else
@@ -933,7 +913,7 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
                     else
                         tileOf other
                         |> Option.bind (RoomPos.range at)
-                        |> Option.filter (fun r -> r <= Engine.rangedRange)
+                        |> Option.filter (fun r -> r <= Engine.rangedRange && counts other r)
                         |> Option.map (fun r -> other, r))
                 // Adjacent first, at three times the rate; then the deepest
                 // wound; then the name, so the choice is the same every tick.
@@ -941,10 +921,27 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
                     (r > Engine.meleeRange), -(Map.find other.Name owed), other.Name)
                 |> List.tryHead)
 
+    let woundFor = woundAmong (fun _ _ -> true)
+
+    // A wound that outweighs a shield: one beside the healer, healed at the
+    // shield's own rate, or a fighter's two or three off that owes at least
+    // what the healer's whole heal lands beside it — never a civilian's
+    // scratch at a third of the rate while a front-line fighter takes fire.
+    // Filtered before the pick, so a deep civilian wound nearer hides none.
+    let pressingFor (healer: CreepInfo) (owed: Map<string, int>) =
+        woundAmong
+            (fun other r ->
+                r <= Engine.meleeRange
+                || isFighterBody other
+                   && Map.find other.Name owed >= Engine.healPower * healParts healer)
+            healer
+            owed
+
     // A shield is spent only by a fighter that owes nothing itself.
     let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
         if isFighterBody healer && Map.find healer.Name owed <= 0 then
-            shieldFor healer owed
+            pressingFor healer owed
+            |> Option.orElse (shieldFor healer owed)
             |> Option.orElse (woundFor healer owed)
             |> Option.orElse (if inReach healer then Some(healer, 0) else None)
         else

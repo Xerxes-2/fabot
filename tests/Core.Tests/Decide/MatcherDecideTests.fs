@@ -1296,13 +1296,15 @@ let selfHealTests =
                 let ranger name =
                     creepWith name 0 0 Bodies.rangerPattern.Block
 
+                // On open ground: a Reach is laid over the tiles a body stands
+                // on (movement S2).
                 let heals hostiles =
                     let colony =
                         { bareRespawn with
                             Creeps = [ ranger "a"; ranger "b" ]
                             Spatial =
-                                bareRespawn.Spatial
-                                |> withCreepsAt [ "a", { X = 10; Y = 10 }; "b", { X = 11; Y = 10 } ]
+                                openRoom 8
+                                |> withCreepsAt [ "a", { X = 20; Y = 20 }; "b", { X = 21; Y = 20 } ]
                         }
                         |> facing hostiles
 
@@ -1315,9 +1317,88 @@ let selfHealTests =
                 Expect.isEmpty (heals []) "the premise: whole and out of any Reach, nobody heals"
 
                 Expect.equal
-                    (heals [ hostileAt "bow" { X = 14; Y = 10 } [ RangedAttack; Move ] ])
+                    (heals [ hostileAt "bow" { X = 24; Y = 20 } [ RangedAttack; Move ] ])
                     [ HealCreep("a", "b"); HealCreep("b", "a") ]
                     "each heals the other before the shot lands"
+            }
+
+            test
+                "a medic shields the fighter beside it before a hauler's scratch, and closes a fighter's real wound first" {
+                // Movement S2: a wound outweighs a shield beside the healer, or
+                // a fighter's within three owing at least the healer's whole
+                // heal (under a room's towers a medic shielded a whole fighter
+                // while the wounded one two tiles off bled). A civilian's
+                // scratch two off, healed at a third of the rate, waits.
+                let ranger name hits =
+                    let block = Bodies.rangerPattern.Block
+
+                    { creepWith name 0 0 block with
+                        Hits =
+                            {
+                                Hits = hits
+                                HitsMax = Engine.partHits * List.length block
+                            }
+                    }
+
+                let full = Engine.partHits * List.length Bodies.rangerPattern.Block
+
+                let heals (others: (CreepInfo * Pos) list) =
+                    let colony =
+                        { bareRespawn with
+                            Creeps = ranger "medic" full :: (others |> List.map fst)
+                            Spatial =
+                                openRoom 8
+                                |> withCreepsAt (
+                                    ("medic", { X = 20; Y = 20 })
+                                    :: (others |> List.map (fun (c, at) -> c.Name, at))
+                                )
+                        }
+                        |> facing [ hostileAt "bow" { X = 24; Y = 20 } [ RangedAttack; Move ] ]
+
+                    match IntentPlan.create [] with
+                    | Error conflict -> failtestf "invalid fixture: %A" conflict
+                    | Ok plan ->
+                        healReflex colony (threatsOf colony (Atlas.ofView colony)) plan
+                        |> IntentPlan.intents
+                        |> List.filter (function
+                            | HealCreep("medic", _)
+                            | RangedHealCreep("medic", _) -> true
+                            | _ -> false)
+
+                let scratched =
+                    { creepWith "hauler" 0 0 [ Carry; Carry; Move ] with
+                        Hits = { Hits = 299; HitsMax = 300 }
+                    }
+
+                Expect.equal
+                    (heals
+                        [ ranger "front" full, { X = 21; Y = 20 }; scratched, { X = 18; Y = 20 } ])
+                    [ HealCreep("medic", "front") ]
+                    "the fighter beside it, whole, before the hauler's one hit two off"
+
+                Expect.equal
+                    (heals
+                        [
+                            ranger "front" full, { X = 21; Y = 20 }
+                            ranger "hurt" 200, { X = 18; Y = 20 }
+                        ])
+                    [ RangedHealCreep("medic", "hurt") ]
+                    "a fighter two off owing more than its heal comes first"
+
+                let gashed =
+                    { creepWith "hauler" 0 0 [ Carry; Carry; Move ] with
+                        Hits = { Hits = 100; HitsMax = 300 }
+                    }
+
+                Expect.equal
+                    (heals
+                        [
+                            ranger "front" full, { X = 21; Y = 20 }
+                            gashed, { X = 18; Y = 20 }
+                            ranger "hurt" 500, { X = 17; Y = 20 }
+                        ])
+                    [ RangedHealCreep("medic", "hurt") ]
+                    "a civilian's deeper wound nearer hides no pressing fighter three off"
             }
 
             test "a wounded fighter heals itself before it pre-heals a whole one beside it" {

@@ -39,6 +39,10 @@ let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
     {
         FatigueParts = parts - partCount creep.Body Move - (carry - loadedCarry)
         MoveParts = partCount creep.Body Move
+        Whole =
+            partCount creep.Body Attack > 0
+            || partCount creep.Body RangedAttack > 0
+            || partCount creep.Body Heal > 0
     }
 
 /// The fatigue factor a living creep would have holding `load` units of one
@@ -71,6 +75,7 @@ let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
     let mutable total = 0
     let mutable moves = 0
     let mutable carry = 0
+    let mutable armed = false
 
     for part in body do
         total <- total + 1
@@ -78,11 +83,15 @@ let internal emptyFactorOf (body: BodyPart list) : FatigueFactor =
         match part with
         | Move -> moves <- moves + 1
         | Carry -> carry <- carry + 1
+        | Attack
+        | RangedAttack
+        | Heal -> armed <- true
         | _ -> ()
 
     {
         FatigueParts = total - moves - carry
         MoveParts = moves
+        Whole = armed
     }
 
 /// The fatigue factor of the same body carrying a full load — every part but
@@ -95,6 +104,7 @@ let internal loadedFactorOf (body: BodyPart list) : FatigueFactor =
     {
         FatigueParts = List.length body - moves
         MoveParts = moves
+        Whole = (emptyFactorOf body).Whole
     }
 
 /// ADR-0010
@@ -473,11 +483,21 @@ let internal floodFrom weights occupied stepPrices (start: Pos) =
 /// `TravelCost` and `Baseline` must go on sharing a step table, because
 /// `Atlas.farFieldAlong` files the far field of both under one key, so the
 /// field flooded for either is the field read back by the other.
+///
+/// An armed body's ranking price (`FatigueFactor.Whole`, movement S2) is its
+/// whole ticks, two units each: a road is no cheaper than plain where it is
+/// no quicker.
 let internal pricingOf (occupied: bool[]) (factor: FatigueFactor) (pricing: Pricing) =
+    let ranking () =
+        if factor.Whole then
+            stepTable (fun weight -> stepTicks factor weight |> Option.map (fun ticks -> 2 * ticks))
+        else
+            stepTable (stepUnits factor)
+
     match pricing with
-    | TravelCost -> stepTable (stepUnits factor), occupied
+    | TravelCost -> ranking (), occupied
     | Walk -> stepTable (stepTicks factor), noTraffic
-    | Baseline -> stepTable (stepUnits factor), noTraffic
+    | Baseline -> ranking (), noTraffic
 
 /// The walk's flood over one body, from anywhere in `starts`: the `Walk` row
 /// of `pricingOf`, reached by the clocks whose origins keep them outside the

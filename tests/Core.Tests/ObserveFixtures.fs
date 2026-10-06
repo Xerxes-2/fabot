@@ -247,6 +247,7 @@ let seenRooms (rooms: (string * HostileInfo list * string list) list) : WorldVie
                 ({
                     Hostiles = hostiles
                     InvaderCores = []
+                    Towers = []
                     Fallen = fallen
                     HostileFatigue = Map.empty
                     Control =

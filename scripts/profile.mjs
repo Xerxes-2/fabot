@@ -1846,10 +1846,10 @@ const OUTPOST_RESERVATION_TICKS = 4000;
 // Copied whole rather than reduced to "something with an ATTACK part",
 // because the parts are what the projection carries verbatim (ADR 0028) and
 // what every rule downstream reads: the ATTACK is what makes it a Threat at
-// all, and the RANGED_ATTACK beside it is what sets its Reach at 3 plus
-// `Tuning.ReachMargin` rather than 1 plus it — which is how much of the room
-// a raid actually takes, and therefore how much work the Reach subtraction
-// does on the ticks this run is measuring.
+// all, and the RANGED_ATTACK beside it is what sets its Reach at 3 plus a
+// tile a tick of `Tuning.ReachHorizon` rather than 1 plus it — which is how
+// much of the room a raid actually takes, and therefore how much work the
+// Reach subtraction does on the ticks this run is measuring.
 const SMALL_MELEE = [
   "tough",
   "tough",
@@ -1870,11 +1870,11 @@ const SMALL_MELEE = [
 //
 // Copied whole for `SMALL_MELEE`'s reason and one more. The parts are what the
 // projection carries verbatim (ADR 0028), and here they are also what the cost
-// being measured is made of: the RANGED_ATTACK sets the Reach at 3 plus
-// `Tuning.ReachMargin`, and the fifty-one-part body is what the Threat ring
-// subtraction runs over four times a tick in a room the couriers cross. A body
-// reduced to "something armed" would measure a room this bot does not have to
-// walk past (#370).
+// being measured is made of: the RANGED_ATTACK sets the Reach at 3 plus what
+// it walks in `Tuning.ReachHorizon`, and the fifty-one-part body is what the
+// Threat ring subtraction runs over four times a tick in a room the couriers
+// cross. A body reduced to "something armed" would measure a room this bot
+// does not have to walk past (#370).
 const SOURCE_KEEPER = [
   ...Array.from({ length: 17 }, () => "tough"),
   ...Array.from({ length: 13 }, () => "move"),
@@ -4498,7 +4498,7 @@ function printReactor(world, seeded) {
     .filter(([, tiles]) => tiles > 0);
   console.log(
     `  the mask: margin ${margin} (Tuning.keeperMargin = keeper pin + ranged range ` +
-      "+ Tuning.ReachMargin), " +
+      "+ Tuning.ReachHorizon), " +
       (masked.length
         ? masked.map(([room, tiles]) => `${room} ${tiles} tiles`).join(", ") +
           " — every walk priced across those rooms is priced over the masked layer"

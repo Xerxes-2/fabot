@@ -1,6 +1,8 @@
 # Roads enter the pricing; Refill layers its rank by target
 
-> **Status:** amended by 0023, #234, #242, #285, #530
+> **Status:** amended by 0023, 0088, #234, #242, #285, #530
+
+> **Amended by ADR 0088 S2**: an armed body's ranking walk (a weapon or HEAL, `FatigueFactor.Whole`) is priced in whole ticks, two units each, so a road is no cheaper than plain where it is no quicker: a ranger took the road into a melee walking it (W17S26). Every other body keeps the half-tick units.
 
 > **Amended by #530** on the rungs a haul trip is chosen by. **An urgent band** sits half a tier over Feeding (`Pool.urgentRank`), over every intake's lift, so a loaded body delivers there before it tops up (ADR 0023's #530 banner): the refill cluster while the colony is starved at it (ADR 0071) and the towers while the home is raided, one rank between which the walk decides; and a rung over both, a struck rampart's Repair (#467) — the tower's energy is no use once the raid is through the line. Inside the deadline the raid's two keep their place over the deadline. **A tombstone's or a ruin's energy Withdraw takes the pile's rung** (#250): both decay, and the pile's tier-wide rung sent a hauler past a store about to go. **#242's whole-trip line is floored at twice `Tuning.PickupThreshold`** (#249): under a 450 bank half a load is the threshold itself, and every pooled pile took the rung.
 

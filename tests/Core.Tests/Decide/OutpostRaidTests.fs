@@ -2262,6 +2262,7 @@ let shutChaseTests =
                                                 Hostiles = []
                                                 HostileFatigue = Map.empty
                                                 InvaderCores = []
+                                                Towers = []
                                                 Fallen = []
                                                 Control = neutralRoom
                                             }
@@ -4610,8 +4611,9 @@ let guardPrecedenceTests =
             // Characterisation (movement S0, `docs/adr/0088`): what each
             // flavour's holder walks round on its way (`Brief.Avoid`): a chase's
             // ranger a step and a swing about each melee, a trespass's killer the
-            // whole Reach, every other the runner's Reach. Flips at S2-S3, where
-            // every walk reads the arrival map and the arms go.
+            // whole Reach, every other the runner's Reach. At S2 the Reach and
+            // the runner's walk read the arrival map and the arms stand; S3
+            // (kite and glue) retires them.
             test "each flavour's walk-round arm" {
                 let avoidOf flavour =
                     let colony = withFlavour precedenceBasis flavour
@@ -5069,7 +5071,8 @@ let private beyond hostiles =
     }
 
 /// A digger in the outpost and a raider beyond its north border whose Reach
-/// spans (21..29, 0..2), our guard `g-1` at (20,1) just west of it.
+/// spans (20..30, 0..3) — it lands on y = 0 at tick 2 and shoots three from
+/// there (movement S2) —, our guard `g-1` at (19,1) just west of it.
 let private trespassPastAReach digger =
     beyond
         [
@@ -5078,7 +5081,7 @@ let private trespassPastAReach digger =
                 Id = "h-2"
             }
         ]
-    |> withGuards [ guard "g-1", { X = 20; Y = 1 } ]
+    |> withGuards [ guard "g-1", { X = 19; Y = 1 } ]
 
 [<Tests>]
 let killAdmissionTests =
@@ -5292,15 +5295,15 @@ let killAdmissionTests =
             }
 
             test "a trespass's killer walks round a Reach on its way, and plans the step it takes" {
-                // A raider beyond the border reaches (21..29, 0..2) of the
-                // outpost; the straight walk east from (20,1) to the digger
+                // A raider beyond the border reaches (20..30, 0..3) of the
+                // outpost; the straight walk east from (19,1) to the digger
                 // past it crosses it.
                 let colony = trespassPastAReach { X = 32; Y = 1 }
                 let reach = Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
 
                 Expect.contains
                     reach
-                    { X = 21; Y = 1 }
+                    { X = 20; Y = 1 }
                     "the premise: the Reach lies across the walk"
 
                 let decision = decideOn colony
@@ -5313,20 +5316,28 @@ let killAdmissionTests =
                 let steps =
                     moveIntents decision.Intents
                     |> List.filter (fst >> (=) "g-1")
-                    |> List.map (snd >> stepFrom { X = 20; Y = 1 })
+                    |> List.map (snd >> stepFrom { X = 19; Y = 1 })
 
-                Expect.equal steps [ { X = 20; Y = 2 } ] "it steps down, under the Reach"
+                match steps, Map.tryFind "g-1" decision.Steps with
+                | [ step ], Some(first, next) ->
+                    Expect.isGreaterThan step.Y 1 "it steps down, under the Reach"
+                    Expect.isFalse (Set.contains step reach) "and out of it"
 
-                // The light tick replays the plan's second tile from its first.
-                Expect.equal
-                    (Map.tryFind "g-1" decision.Steps)
-                    (Some(RoomPos.at "W1N2" { X = 20; Y = 2 }, RoomPos.at "W1N2" { X = 21; Y = 3 }))
-                    "its step plan is the step it issued, and the next one round"
+                    // The light tick replays the plan's second tile from its first.
+                    Expect.equal
+                        first
+                        (RoomPos.at "W1N2" step)
+                        "its step plan is the step it issued"
+
+                    Expect.isFalse (Set.contains (RoomPos.pos next) reach) "and the next one round"
+                | other -> failtest $"one step and a plan: {other}"
             }
 
             // Characterisation (movement S0, `docs/adr/0088`): with the Reach a
             // wall and no way round, the walker waits at its edge
-            // (`moveIntentFor.round`). Flips at S2.
+            // (`moveIntentFor.round`). Kept at S2: a trespass's killer walks
+            // round the whole Reach (`Avoid.Reach`), the arrival map's now, and
+            // its walk is S3's (kite and glue).
             test "a trespass's killer waits at the edge of a Reach that covers the kill's ground" {
                 // The same raider reaches every tile beside a digger at (27,1):
                 // the kill's ground less the Reach is empty, so there is no
@@ -5344,7 +5355,7 @@ let killAdmissionTests =
                 let steps =
                     moveIntents decision.Intents
                     |> List.filter (fst >> (=) "g-1")
-                    |> List.map (snd >> stepFrom { X = 20; Y = 1 })
+                    |> List.map (snd >> stepFrom { X = 19; Y = 1 })
 
                 Expect.isEmpty steps "it waits rather than step in"
                 Expect.isNone (Map.tryFind "g-1" decision.Steps) "and plans no step"

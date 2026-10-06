@@ -1,6 +1,8 @@
 # A Threat gates Tasks through its Reach, and a creep inside one flees
 
-> **Status:** amended by #217, #218, #514, #515
+> **Status:** amended by #217, #218, #514, #515, 0088
+
+> **Amended by ADR 0088 S2** (#527, #566): a Reach is no longer the weapon's range plus a margin about each Threat (`reachRadius`, `Tuning.ReachMargin`, `reachAcross` and the stationary margin are gone). It is the tiles a body of ours stands on that some hostile map (`Arrival`) strikes within `Tuning.ReachHorizon`, two ticks: each hostile timed by its pace and fatigue over the ground, carried across an exit onto the landing it reaches. The cross-border Reach of #514 is that carry. A room's hostile towers (a stronghold's, or a player's in the room it owns) strike its every tile now. Our ramparts and safe mode stand as before. Flee is applicable where the hostiles striking the tile within the horizon out-damage the body's heal (#533's reading, now off the maps). A body its fatigue holds takes it where a strike lands before it can step off. Its Work Area is the safe set's nearest tiles by the body's own walk. In a room with no safe tile, it is the ground across the nearest open exit into a room a route enters, whose landing lies in no Reach (#566). A body that runs walks round the Reach and the tiles a hostile strikes before it could be on them and gone, falling back to the Reach alone where no walk keeps out of both; a walk to work across a border goes round them toward the work's room (#527).
 
 > **Amended 2026-10-05** (#515): "a body that cannot run does not try" narrows to a Work-heavy body **standing where it digs** — a Post or mine Post, or at home a bare Seat of a source with no Post. Walking anywhere, it takes Flee like any other non-Fighter. The outpost Anchor's legs are ADR 0006's #515 amendment.
 
