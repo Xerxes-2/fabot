@@ -7903,28 +7903,25 @@ let arenaBorderTests =
                     let view = viewOf start home
                     let atlas = Fabot.Core.Atlas.ofView view
                     let threats = Fabot.Core.Decide.Threat.threatsOf view atlas
-                    view, atlas, threats, Fabot.Core.Decide.Threat.Threats.briefOf threats "W17S26"
+                    view, threats, Fabot.Core.Decide.Threat.Threats.briefOf threats "W17S26"
 
-                let child, _, threats, brief = briefIn "W17S25"
+                let _, threats, brief = briefIn "W17S25"
 
                 Expect.equal
-                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted child threats))
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
                     [ CastRow.Guard, Engine.guardCap; CastRow.Ranger, Engine.guardCap ]
                     "its guards answer all four until a ranger holds the kill, and the two haulers ask the ranger row"
 
-                let mother, atlas, threats, brief = briefIn "W15S28"
+                let mother, threats, brief = briefIn "W15S28"
 
                 Expect.contains
-                    (mother.Creeps
-                     |> List.filter (brief.Admits mother atlas)
-                     |> List.map (fun c -> c.Name))
+                    (mother.Creeps |> List.filter brief.Admits |> List.map (fun c -> c.Name))
                     "ranger-979811-Spawn8"
                     "the mother's resident may be lent to her kill there"
 
                 Expect.isTrue
                     (brief.Asks
-                     |> List.exists (fun ask ->
-                         ask.Row = CastRow.Ranger && ask.Wanted mother threats > 0))
+                     |> List.exists (fun ask -> ask.Row = CastRow.Ranger && ask.Wanted threats > 0))
                     "and her ranger row is asked for the haulers"
 
                 let _, trace = start |> run 90

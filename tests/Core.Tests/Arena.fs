@@ -1426,8 +1426,8 @@ let private dangerOf (a: Arena) =
         |> Observe.Danger.ofColonies Tuning.defaults a.Time)
 
 /// Every living colony's view cut from this tick's world, as
-/// `Main.fullTick` cuts them, beside the world.
-let private cut (a: Arena) : World * (Colony * ColonyView) list =
+/// `Main.fullTick` cuts them, beside the world and its crossings.
+let private cut (a: Arena) : World * (string -> string -> int option) * (Colony * ColonyView) list =
     let world = worldOf a
     let tuning = Tuning.defaults
     let living = World.living a.Colonies world
@@ -1452,40 +1452,33 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
         WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
         |> WorldView.sharingSafeGround
 
-    // Each raided room's one verdict and every observer's one look, as `Main`
-    // lays them (`Facts.judge`, `Layout.aimObservers`): every colony decides
-    // every arena tick.
+    // Each colony's view as cut, and the crossings a raided room's answerer
+    // is ranked by: `Entry.decideColonies` judges and aims them as `Main`
+    // hands it them, every colony deciding every arena tick.
     world,
+    (fun home room -> World.hopsUnder StandDown.none joins tuning world home room),
     living
     |> List.map (fun c ->
-        let view =
-            ColonyView.ofWorldRecalling
-                joins
-                tuning
-                a.Colonies
-                casting
-                gates.[c.Home]
-                holders
-                watch
-                world
-                c
+        c,
+        ColonyView.ofWorldRecalling
+            joins
+            tuning
+            a.Colonies
+            casting
+            gates.[c.Home]
+            holders
+            watch
+            world
+            c)
 
-        ({
-            Cut = view
-            Owns = Colony.declaredRooms c
-            Decides = true
-        }
-        : Facts.Judged))
-    |> Facts.judge
-        (fun home room -> World.hopsUnder StandDown.none joins tuning world home room)
-        a.Carried.Assignments
-    |> Layout.aimObservers Set.empty
-    |> List.zip living
-
-/// The view one living colony decides this tick off.
+/// The view one living colony decides this tick off: judged and aimed as
+/// `Entry.decideColonies` lays them.
 let viewOf (a: Arena) (home: string) : ColonyView =
-    cut a
-    |> snd
+    let _, hops, views = cut a
+
+    judgeColonies hops a.Carried.Assignments Set.empty views
+    |> Layout.aimObservers Set.empty
+    |> List.zip (views |> List.map fst)
     |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)
     |> Option.defaultWith (fun () -> failwithf "%s is no living colony" home)
 
@@ -1493,7 +1486,7 @@ let viewOf (a: Arena) (home: string) : ColonyView =
 /// every room's moves arbitrated once. The Intents, the next assignments and
 /// memos, and the world's carried memory.
 let private decideOurs (a: Arena) : Intent list * Carried =
-    let world, views = cut a
+    let world, hops, views = cut a
 
     let alive =
         a.Bodies
@@ -1501,18 +1494,25 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         |> List.map (fun b -> b.Id)
         |> Set.ofList
 
-    // Every colony decided, then the danger log folded through them in order.
+    // Every colony decided as `Main` decides it, each on its own turn, then
+    // the danger log folded through them in order.
     let decisions =
-        views
-        |> List.map (fun (c, view) ->
-            c,
-            view,
-            decideUnarbitrated
-                view
-                a.Carried.Assignments
-                Set.empty
-                (Map.tryFind c.Home a.Carried.Memos)
-                ReplanTurn.Now)
+        (decideColonies
+            {
+                Lane = Tuning.defaults.FightLane
+                Hops = hops
+                Holding = a.Carried.Assignments
+                Verbose = Set.empty
+                PlanMemos = a.Carried.Memos
+                Carries = Map.empty
+                Idle = Set.empty
+                FightAlone = Set.empty
+                TurnIndex = None
+            }
+            ignore
+            views)
+            .Decided
+        |> List.map (fun (c, view, decision, ()) -> c, view, decision)
 
     // Characterisation (the world-first epic's W0): a fighter holds no economy
     // Task and an economy body no combat one, on every tick of every arena.

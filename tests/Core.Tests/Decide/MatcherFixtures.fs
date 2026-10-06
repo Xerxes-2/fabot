@@ -131,7 +131,8 @@ let resolveVerdictsOn snapshot assigned =
 
 /// Run the Emitter at its own seam, over the same tick-start Atlas.
 let emitOn snapshot assigned =
-    emit snapshot (Atlas.ofView snapshot) noThreats (Map.ofList assigned)
+    let atlas = Atlas.ofView snapshot
+    emit snapshot atlas (Threats.quietOn snapshot atlas) (Map.ofList assigned)
 
 /// Two single-Seat sources at the ends of a two-tile corridor; each creep
 /// stands on the other's Seat.

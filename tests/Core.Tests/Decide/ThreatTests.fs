@@ -587,7 +587,7 @@ let private defendAsks colony =
     let threats = threatsOf colony (Atlas.ofView colony)
 
     match Threats.briefFor threats (Defend "W1N1") with
-    | Some brief -> brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+    | Some brief -> brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats)
     | None -> []
 
 let private defendGround colony =
@@ -856,8 +856,7 @@ let rampartDefenderTests =
                     let threats = threatsOfHeld colony (Atlas.ofView colony) held
 
                     match Threats.briefFor threats (Defend "W1N1") with
-                    | Some brief ->
-                        brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+                    | Some brief -> brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats)
                     | None -> []
 
                 let shooter = defenderHome defendedLine [ shooterAt { X = 17; Y = 34 } ] []
@@ -4307,9 +4306,11 @@ let fleeTests =
                 let atlas = Atlas.ofView (facingHostile true)
 
                 // Less the walks' and flights' tables and the bodies they are
-                // of, which are the tick's own and no Reach.
+                // of, and the unclaimed Briefs read off the view, which are
+                // the tick's own and no Reach.
                 Expect.equal
                     { threatsOf (facingHostile true) atlas with
+                        Unclaimed = noThreats.Unclaimed
                         Walks = noThreats.Walks
                         Flights = noThreats.Flights
                         Bodies = []
@@ -5168,10 +5169,12 @@ let raidPartTests =
                             }
                         |> standingInErrand [ ranger, { X = 25; Y = 43 } ]
 
+                    let atlas = Atlas.ofView colony
+
                     emit
                         colony
-                        (Atlas.ofView colony)
-                        noThreats
+                        atlas
+                        (Threats.quietOn colony atlas)
                         (Map.ofList [ ranger.Name, Guard reactorErrand.RoomName ])
                     |> List.contains (RangedAttackCreep(ranger.Name, "medic"))
 

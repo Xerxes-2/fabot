@@ -393,9 +393,11 @@ let planFightTasks
                 | _ -> None)
             |> Set.ofSeq
 
+        // A room no source claims binds no answerer (`Brief.unclaimed`).
         let guarded =
             guardedRooms
-            |> List.filter (fun room -> Threats.pools view (Threats.briefOf threats room))
+            |> List.filter (fun room ->
+                Map.tryFind (Guard room) threats.Briefs |> Option.forall (Threats.pools view))
 
         // Every Brief of a Task of its own, by its Task.
         let briefedAs duty =
@@ -440,7 +442,7 @@ let planFightTasks
         // And the home's Defend while it wants a defender (#504): the row
         // hires against the same number.
         @ (briefedAs Duty.Defend
-           |> List.filter (fun task -> Threats.wants view threats task > 0))
+           |> List.filter (fun task -> Threats.wants threats task > 0))
 
     flees @ guards
 

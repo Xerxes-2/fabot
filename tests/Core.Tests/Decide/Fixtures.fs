@@ -537,7 +537,8 @@ let planTasksHoldingThorium (holding: Task list) view =
 /// snapshot's own Atlas — what the Matcher and the mover are both handed —
 /// with the colony busy for these reasons (#523).
 let poolBusyOn busy snapshot =
-    planPool snapshot (Atlas.ofView snapshot) noThreats busy (planTasksOn snapshot noThreats)
+    let atlas = Atlas.ofView snapshot
+    planPool snapshot atlas (Threats.quietOn snapshot atlas) busy (planTasksOn snapshot noThreats)
 
 /// The same pool with the colony busy for nothing.
 let poolOn snapshot = poolBusyOn [] snapshot

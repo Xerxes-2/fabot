@@ -367,9 +367,7 @@ let internal applicable
     // bodies and no other (#504, #546).
     | Guard _
     | Defend _
-    | Assault _ ->
-        Threats.briefFor threats task
-        |> Option.exists (fun brief -> brief.Admits view atlas creep)
+    | Assault _ -> Threats.briefFor threats task |> Option.exists (fun brief -> brief.Admits creep)
     // Any body standing where the Reach out-damages it runs, a fighter
     // included (#533): one holding no fight Task fights nothing there, and a
     // defender with no line to hold is only a target (#504). Which fighter
@@ -752,8 +750,8 @@ let private strikeOrder
     // In a harassment room the declared enemy's unarmed creeps are targets
     // too (#432), after its armed ones.
     view.Hostiles
-    |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots view residentRooms fighting h)
-    |> targets.Order view room distance
+    |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots residentRooms fighting h)
+    |> targets.Order room distance
 
 /// A fighter's strike at a hostile: a ranger's shot, a guard's swing (#411).
 let private strikeAt (creep: CreepInfo) (hostile: HostileInfo) : Intent =
@@ -820,7 +818,7 @@ let private strikeOf
     // The bands are priced only where a mass attack may fire.
     let band =
         match mass with
-        | Some _ -> targets.Band view room
+        | Some _ -> targets.Band room
         | None -> fun _ -> 0
 
     strikeOrder view atlas targets fighting creep room
@@ -1074,10 +1072,10 @@ let private defendIntent
             let pick (targets: HostileInfo list) =
                 targets
                 |> List.filter beside
-                |> line.Order view here.Room (fun _ -> 0)
+                |> line.Order here.Room (fun _ -> 0)
                 |> List.tryHead
 
-            pick (view.Hostiles |> List.filter (line.Shoots view Set.empty Set.empty))
+            pick (view.Hostiles |> List.filter (line.Shoots Set.empty Set.empty))
             |> Option.orElse (pick view.Hostiles))
         |> Option.map (fun target -> AttackCreep(creep.Name, target.Id))
     | _ -> None
@@ -1223,6 +1221,7 @@ let arrival
 /// by its line. None for a melee defender, whose swing from its rampart is
 /// its own, a squad's sapper, and a body with no weapon.
 let private strikesBy
+    (view: ColonyView)
     (atlas: Atlas.Atlas)
     (threats: Threats)
     (assigned: Map<string, Task>)
@@ -1237,7 +1236,7 @@ let private strikesBy
     // (`Facts.mayStrike`), in the Guard's kill order.
     let reflexTargets room =
         {
-            Shoots = fun view _ engaged hostile -> Facts.mayStrike view engaged hostile
+            Shoots = fun _ engaged hostile -> Facts.mayStrike view engaged hostile
             Order = (Threats.briefOf threats room).Targets.Order
             Band = (Threats.briefOf threats room).Targets.Band
         }
@@ -1287,7 +1286,7 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
 
         view.Creeps
         |> List.collect (fun creep ->
-            match strikesBy atlas threats assigned creep with
+            match strikesBy view atlas threats assigned creep with
             | Some(room, targets, true) when not (mustering threats assigned creep) ->
                 strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
             | _ -> [])
@@ -1302,13 +1301,15 @@ let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, T
     | _ ->
         view.Creeps
         |> List.choose (fun creep ->
-            match strikesBy atlas threats assigned creep, Atlas.creepRoom atlas creep.Name with
+            match
+                strikesBy view atlas threats assigned creep, Atlas.creepRoom atlas creep.Name
+            with
             | Some(struck, targets, true), Some room when
                 gunsOf creep > 0 && not (mustering threats assigned creep)
                 ->
                 shields view room
                 |> Option.map (fun shields ->
-                    let band = targets.Band view struck
+                    let band = targets.Band struck
 
                     creep.Name,
                     {
@@ -1343,7 +1344,7 @@ let strikeReflex
 
         (plan, view.Creeps)
         ||> List.fold (fun plan creep ->
-            match strikesBy atlas threats assigned creep with
+            match strikesBy view atlas threats assigned creep with
             | Some(room, targets, false) ->
                 match strikeOf view atlas targets fighting creep room |> strikeIntent creep with
                 | Some strike ->
@@ -1365,7 +1366,7 @@ let glue (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
 
         view.Creeps
         |> List.choose (fun creep ->
-            match Map.tryFind creep.Name assigned, strikesBy atlas threats assigned creep with
+            match Map.tryFind creep.Name assigned, strikesBy view atlas threats assigned creep with
             | Some(Guard _), Some(room, targets, true) when
                 not (isRangerBody creep)
                 && partCount creep.Body Attack > 0

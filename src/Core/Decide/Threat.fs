@@ -157,21 +157,22 @@ module CastRow =
         | CastRow.Defender -> isNamedFor defenderPattern name
         | CastRow.Squad role -> squadRoleByName name = Some role
 
-/// What a Guard's holder shoots in its room, and in what kill order.
+/// What a Guard's holder shoots in its room, and in what kill order, read
+/// off the colony that built it.
 type Selector =
     {
-        /// Whether it shoots a hostile (`Facts.guardShoots`): the colony, its
-        /// resident rooms and the rooms whose fight it holds, then the hostile.
-        Shoots: ColonyView -> Set<string> -> Set<string> -> HostileInfo -> bool
+        /// Whether it shoots a hostile (`Facts.guardShoots`): its resident
+        /// rooms and the rooms whose fight it holds, then the hostile.
+        Shoots: Set<string> -> Set<string> -> HostileInfo -> bool
         /// The kill order among the shots in a room, its head first: by
         /// `Facts.killRank`, then by the holder's walk to each, then by id.
-        /// The colony, the room, the walk and the shots; each rank priced once.
+        /// The room, the walk and the shots; each rank priced once.
         /// What a holder strikes is `Emitter.pickStrike`'s choice off it.
-        Order: ColonyView -> string -> (HostileInfo -> int) -> HostileInfo list -> HostileInfo list
+        Order: string -> (HostileInfo -> int) -> HostileInfo list -> HostileInfo list
         /// Each shot's band of that order (`Facts.killBandOf`), first band
-        /// first, the colony and the room applied once: a mass attack counts
-        /// only what it deals the band of the shot it would replace (#563).
-        Band: ColonyView -> string -> HostileInfo -> int
+        /// first, the room applied once: a mass attack counts only what it
+        /// deals the band of the shot it would replace (#563).
+        Band: string -> HostileInfo -> int
     }
 
 /// The ground each source laid in one room this tick, before the room's kind
@@ -217,11 +218,15 @@ type Laid =
 /// an Assault —: its flavour and every answer a reader asks of it, derived
 /// each tick (`threatsHeldBy`, `withAssaults`) and never
 /// stored. A Task no source claims reads `Brief.unclaimedFor`. Equal only to
-/// itself: its answers are functions.
+/// itself: its answers are functions, each closed over the colony view and
+/// the Atlas that built it, so it lives no longer than the tick.
 [<ReferenceEquality>]
 type Brief =
     {
         Duty: Duty
+        /// The home of the colony whose view built it. Not `Home`: a record
+        /// literal with that label would read as this type.
+        BuiltBy: string
         /// A Guard's: every kind that claimed the room, down
         /// `BriefKind.order`, those that pool first (#542), its own first. A
         /// held exit (#450) among them is where the Planner keeps a living
@@ -230,9 +235,9 @@ type Brief =
         /// What its holder shoots (`Emitter.guardTarget`); a defender, the
         /// raid at the line, fewest hits first (`Emitter.defendIntent`).
         Targets: Selector
-        /// Whether a body may take it: the Emitter's gate, the colony and the
-        /// Atlas given. The walk to the ground is what travel cost prices.
-        Admits: ColonyView -> Atlas.Atlas -> CreepInfo -> bool
+        /// Whether a body may take it: the Emitter's gate. The walk to the
+        /// ground is what travel cost prices.
+        Admits: CreepInfo -> bool
         /// For a kill, how far a holder of another room's Guard is called off
         /// it (the Pool's `RecallPolicy.Kill`).
         Recall: Recall option
@@ -254,9 +259,9 @@ type Brief =
         /// Defend, one a role a squad; none for a chase (#510), which no row
         /// casts for.
         Asks: RowAsk list
-        /// How many bodies it admits, off the row's own count, the colony and
-        /// the tick's Threats given.
-        Capacity: ColonyView -> Threats -> Capacity
+        /// How many bodies it admits, off the row's own count, the tick's
+        /// Threats given.
+        Capacity: Threats -> Capacity
         /// The room's verdict (`Facts.answer`), priced once a tick on first
         /// read; `Win` in a room no raider stands in, and for an Assault,
         /// whose answer is its safe-mode window.
@@ -296,10 +301,14 @@ type Brief =
 and [<NoEquality; NoComparison>] RowAsk =
     {
         Row: CastRow
-        /// How many bodies, the colony and the tick's Threats given.
-        Wanted: ColonyView -> Threats -> int
-        Blocks: ColonyView -> int
+        /// How many bodies, the tick's Threats given.
+        Wanted: Threats -> int
+        Blocks: unit -> int
     }
+
+/// The Brief of each combat Task no source claims, read off one colony's
+/// view and Atlas; None for a Task no Brief describes. Equal only to itself.
+and [<ReferenceEquality>] Unclaimed = { BriefOf: Task -> Brief option }
 
 /// ADR-0033. Derived once a tick and shared by the applicability gate, Flee's
 /// Work Area and the spawn hold. Keyed by room: a `Set<Pos>` cannot say which
@@ -335,6 +344,10 @@ and Threats =
         /// Assault (`threatsOfHeld`). Keyed by the Task, so the
         /// home's Defend and the Guard a raid in the home claims are two.
         Briefs: Map<Task, Brief>
+        /// A combat Task's Brief where no source claims it
+        /// (`Brief.unclaimedFor`), on the view and Atlas these Threats were
+        /// derived off.
+        Unclaimed: Unclaimed
         /// The rooms a hostile stands in whose Guard a living body of ours
         /// holds (#535): a fight begun there is fought to its target's death,
         /// so a cripple or a healer left there is still its target.
@@ -355,14 +368,15 @@ and Threats =
         Horizon: int
     }
 
-/// The tick with nothing to run from: what the pipeline is handed for a quiet
-/// colony.
+/// The tick with nothing to run from: what a test hands the Planner for a
+/// quiet colony. No view derived it, so no Task is briefed.
 let noThreats =
     {
         Reach = Map.empty
         Safe = Map.empty
         Shelter = Map.empty
         Briefs = Map.empty
+        Unclaimed = { BriefOf = fun _ -> None }
         Engaged = Set.empty
         Arrivals = Map.empty
         Walks = System.Collections.Generic.Dictionary()
@@ -480,7 +494,7 @@ module Brief =
     /// Every kind's targets today: what `Facts.guardShoots` passes, in the kill
     /// order. One a Brief: its holders each order the same shots, so a
     /// room's `killRank` is built once for a view and each shot ranked once.
-    let private guardTargets () =
+    let private guardTargets (view: ColonyView) =
         let built =
             System.Collections.Generic.Dictionary<
                 string,
@@ -511,9 +525,9 @@ module Brief =
                     kept
 
         {
-            Shoots = guardShoots
+            Shoots = guardShoots view
             Order =
-                fun view room walk shots ->
+                fun room walk shots ->
                     match shots with
                     | []
                     | [ _ ] -> shots
@@ -524,7 +538,7 @@ module Brief =
                         |> List.map (fun h -> (rank h, walk h, h.Id), h)
                         |> List.sortBy fst
                         |> List.map snd
-            Band = fun view room -> rankIn view room >> killBandOf
+            Band = fun room -> rankIn view room >> killBandOf
         }
 
     /// An outpost a ranger answers (`ranged`, #535) holds the kite ground
@@ -655,12 +669,12 @@ module Brief =
     /// A harassment room's ranger (#432), one: a raid that one loses is the
     /// room's [[stand-down]]. Its floor is the one it was cast at
     /// (`ColonyView.HarassFloors`, #457).
-    let private harassAsk (room: string) : RowAsk =
+    let private harassAsk (view: ColonyView) (room: string) : RowAsk =
         {
             Row = CastRow.Ranger
-            Wanted = fun _ _ -> 1
+            Wanted = fun _ -> 1
             Blocks =
-                fun view ->
+                fun () ->
                     let floor =
                         Map.tryFind room view.HarassFloors
                         |> Option.defaultValue view.Tuning.HarassBlocks
@@ -682,6 +696,7 @@ module Brief =
         (rowCast: Lazy<CastRow option>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (room: string)
+        (view: ColonyView)
         : RowAsk list =
         match kind with
         // Quirk, kept (the Brief's S0), for the B-stage to settle: a resident
@@ -693,28 +708,28 @@ module Brief =
                 {
                     Row = CastRow.Ranger
                     Wanted =
-                        fun view threats ->
+                        fun threats ->
                             if Set.contains room (harassRooms view) then
-                                (harassAsk room).Wanted view threats
+                                (harassAsk view room).Wanted threats
                             else
                                 residentsWanted room view threats
                     Blocks =
-                        fun view ->
+                        fun () ->
                             if Set.contains room (harassRooms view) then
-                                (harassAsk room).Blocks view
+                                (harassAsk view room).Blocks()
                             else
                                 rangerBlocksFor view.Tuning.RangerResidentBlocks view room
                 }
             ]
-        | BriefKind.Harass -> [ harassAsk room ]
+        | BriefKind.Harass -> [ harassAsk view room ]
         // An outpost a ranger answers (#535): one, the smallest that wins it
         // alone.
         | BriefKind.Outpost when ranged ->
             [
                 {
                     Row = CastRow.Ranger
-                    Wanted = fun _ _ -> 1
-                    Blocks = fun view -> rangerBlocksFor 1 view room
+                    Wanted = fun _ -> 1
+                    Blocks = fun () -> rangerBlocksFor 1 view room
                 }
             ]
         | BriefKind.Trespass ->
@@ -727,7 +742,7 @@ module Brief =
                     // At most `Engine.guardCap` a row: bodies that strike
                     // nothing back never buy more spawns than a raid's room.
                     Wanted =
-                        fun view _ ->
+                        fun _ ->
                             match row, trespassers with
                             | CastRow.Guard, [] when not bouncing -> 0
                             | CastRow.Guard, _ ->
@@ -735,7 +750,7 @@ module Brief =
                                 |> min Engine.guardCap
                             | _ -> min Engine.guardCap (List.length trespassers)
                     Blocks =
-                        fun view ->
+                        fun () ->
                             if row = CastRow.Ranger then
                                 rangerBlocksFor 1 view room
                             else
@@ -747,8 +762,8 @@ module Brief =
             [
                 {
                     Row = CastRow.Guard
-                    Wanted = fun view _ -> guardsWanted view room
-                    Blocks = fun view -> guardBlocksFor view room
+                    Wanted = fun _ -> guardsWanted view room
+                    Blocks = fun () -> guardBlocksFor view room
                 }
             ]
         // A chase is cast for by nobody, but in a room shut on a raid the
@@ -761,16 +776,16 @@ module Brief =
                 [
                     {
                         Row = CastRow.Ranger
-                        Wanted = fun _ _ -> 1
-                        Blocks = fun view -> rangerBlocksFor 1 view room
+                        Wanted = fun _ -> 1
+                        Blocks = fun () -> rangerBlocksFor 1 view room
                     }
                 ]
             | Some _ ->
                 [
                     {
                         Row = CastRow.Guard
-                        Wanted = fun view _ -> guardsWanted view room
-                        Blocks = fun view -> guardBlocksFor view room
+                        Wanted = fun _ -> guardsWanted view room
+                        Blocks = fun () -> guardBlocksFor view room
                     }
                 ]
             | None -> []
@@ -791,7 +806,7 @@ module Brief =
         let wanted () =
             asks
             |> List.tryHead
-            |> Option.map (fun a -> a.Wanted view threats)
+            |> Option.map (fun a -> a.Wanted threats)
             |> Option.defaultValue 1
 
         match kind with
@@ -824,7 +839,7 @@ module Brief =
             let count row =
                 asks
                 |> List.filter (fun a -> a.Row = row)
-                |> List.sumBy (fun a -> a.Wanted view threats)
+                |> List.sumBy (fun a -> a.Wanted threats)
 
             let guards, rangers = count CastRow.Guard, count CastRow.Ranger
             let capacity = Capacity.fighters (guards + rangers)
@@ -874,8 +889,10 @@ module Brief =
     /// rangers that win it (`Facts.rangersWin`) and whether a ranger answers
     /// it (`Facts.rangerAnswers`, read for an outpost alone) and whether the
     /// colony's own row casts for its chase (`casts`) come priced lazily,
-    /// once a tick.
+    /// once a tick. Its answers read the view and Atlas given.
     let internal claimed
+        (view: ColonyView)
+        (atlas: Atlas.Atlas)
         (room: string)
         (raided: bool)
         (verdict: Lazy<Answer>)
@@ -897,13 +914,14 @@ module Brief =
                  else
                      None)
 
-        let ask = askOf kind ranged rowCast answered room
+        let ask = askOf kind ranged rowCast answered room view
 
         {
             Duty = Duty.Guard kind
+            BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = claims
-            Targets = guardTargets ()
-            Admits = admitsOf kind room verdict ranged rangers answered
+            Targets = guardTargets view
+            Admits = admitsOf kind room verdict ranged rangers answered view atlas
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind ranged laid
@@ -921,7 +939,7 @@ module Brief =
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind room verdict rangers ask
+            Capacity = capacityOf kind room verdict rangers ask view
             Verdict = verdict
             Formation = None
             Stances = Map.empty
@@ -933,8 +951,19 @@ module Brief =
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
     /// on no ground, the one a remembered raid pools in a room the colony is
     /// blind in (#366). No raider stands in it, so its verdict is `Win`.
-    let unclaimed (room: string) : Brief =
-        claimed room false (lazy Answer.Win) (lazy None) (lazy false) (lazy false) (lazy []) [] bare
+    let unclaimed (view: ColonyView) (atlas: Atlas.Atlas) (room: string) : Brief =
+        claimed
+            view
+            atlas
+            room
+            false
+            (lazy Answer.Win)
+            (lazy None)
+            (lazy false)
+            (lazy false)
+            (lazy [])
+            []
+            bare
 
     /// How many [[defender]]s the home wants this tick (#504): one a body of
     /// the raid at its line, at most `Tuning.DefenderCap`; none in a home
@@ -1023,6 +1052,7 @@ module Brief =
     /// outpost's. Its row asks are the capacity too, read a second time as a
     /// Guard's is.
     let internal defending
+        (view: ColonyView)
         (answered: (CastRow * HostileInfo list) list)
         (lent: int)
         (ground: Set<RoomPos> option)
@@ -1042,35 +1072,36 @@ module Brief =
                 {
                     Row = row
                     Wanted =
-                        fun view _ ->
+                        fun _ ->
                             if row = CastRow.Ranger then
                                 max 0 (defendersWanted raid view - lent)
                             else
                                 defendersWanted raid view
                     Blocks =
-                        fun view ->
+                        fun () ->
                             if row = CastRow.Ranger then
                                 rangerBlocksFor 1 view (SpatialInfo.homeName view.Spatial)
                             else
                                 view.Tuning.DefenderBlocks
                 })
 
-        let capacity view threats =
-            (Capacity.fighters (asks |> List.sumBy (fun ask -> ask.Wanted view threats)), asks)
+        let capacity threats =
+            (Capacity.fighters (asks |> List.sumBy (fun ask -> ask.Wanted threats)), asks)
             ||> List.fold (fun capacity ask ->
-                Capacity.capping (CapScope.Row ask.Row) (ask.Wanted view threats) capacity)
+                Capacity.capping (CapScope.Row ask.Row) (ask.Wanted threats) capacity)
 
         {
             Duty = Duty.Defend
+            BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = []
             Targets =
                 {
-                    Shoots = fun _ _ _ hostile -> Set.contains hostile.Id line
-                    Order = fun _ _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
-                    Band = fun _ _ _ -> 0
+                    Shoots = fun _ _ hostile -> Set.contains hostile.Id line
+                    Order = fun _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
+                    Band = fun _ _ -> 0
                 }
             Admits =
-                fun _ _ creep ->
+                fun creep ->
                     answered |> List.exists (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
             Recall = None
             Laid = bare
@@ -1093,6 +1124,7 @@ module Brief =
     /// role's row for that role's slots while `casting` — no squad is bought
     /// for a room it cannot rally for.
     let internal formed
+        (view: ColonyView)
         (duty: Duty)
         (rung: Rung)
         (verdict: Lazy<Answer>)
@@ -1106,19 +1138,20 @@ module Brief =
                 {
                     Row = CastRow.Squad role
                     Wanted =
-                        fun view _ ->
+                        fun _ ->
                             if casting view then
                                 SquadRole.slots role formation.Slots
                             else
                                 0
-                    Blocks = fun _ -> 1
+                    Blocks = fun () -> 1
                 })
 
         {
             Duty = duty
+            BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = []
-            Targets = guardTargets ()
-            Admits = fun _ _ creep -> Map.containsKey creep.Name formation.Roles
+            Targets = guardTargets view
+            Admits = fun creep -> Map.containsKey creep.Name formation.Roles
             Recall = None
             Laid = bare
             Ground = None
@@ -1126,7 +1159,7 @@ module Brief =
             Avoid = Avoid.Runner
             Rung = rung
             Asks = asks
-            Capacity = fun _ _ -> Capacity.roles formation.Slots
+            Capacity = fun _ -> Capacity.roles formation.Slots
             Verdict = verdict
             Formation = Some formation
             Stances = Map.empty
@@ -1139,7 +1172,7 @@ module Brief =
     /// Defend with no raid at the line, which still admits the defender row
     /// and wants none; an Assault with no ground, which admits no body. None
     /// for every other Task.
-    let unclaimedFor (task: Task) : Brief option =
+    let unclaimedFor (view: ColonyView) (atlas: Atlas.Atlas) (task: Task) : Brief option =
         let unformed duty =
             let none =
                 {
@@ -1153,13 +1186,13 @@ module Brief =
                 }
 
             Some
-                { formed duty OnTheTier (lazy Answer.Win) (fun _ -> false) none with
+                { formed view duty OnTheTier (lazy Answer.Win) (fun _ -> false) none with
                     Formation = None
                 }
 
         match task with
-        | Guard room -> Some(unclaimed room)
-        | Defend _ -> Some(defending [] 0 None Map.empty Set.empty (lazy Answer.Win))
+        | Guard room -> Some(unclaimed view atlas room)
+        | Defend _ -> Some(defending view [] 0 None Map.empty Set.empty (lazy Answer.Win))
         | Assault _ -> unformed Duty.Assault
         | _ -> None
 
@@ -1421,18 +1454,32 @@ module Formation =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Threats =
+    /// A quiet tick (`noThreats`) read off one colony's view and Atlas, so
+    /// a combat Task no source claims still has its Brief: what a test
+    /// hands a reader of the Briefs.
+    let quietOn (view: ColonyView) (atlas: Atlas.Atlas) : Threats =
+        { noThreats with
+            Unclaimed =
+                {
+                    BriefOf = Brief.unclaimedFor view atlas
+                }
+        }
+
     /// One room's Guard `Brief` this tick.
     let briefOf (threats: Threats) (room: string) : Brief =
         match Map.tryFind (Guard room) threats.Briefs with
         | Some brief -> brief
-        | None -> Brief.unclaimed room
+        | None ->
+            match threats.Unclaimed.BriefOf(Guard room) with
+            | Some brief -> brief
+            | None -> invalidOp $"No view derived these Threats to brief {room}'s Guard"
 
     /// One combat Task's `Brief` this tick (`Brief.unclaimedFor` where no
     /// source claims it); None for a Task no Brief describes.
     let briefFor (threats: Threats) (task: Task) : Brief option =
         match Map.tryFind task threats.Briefs with
         | Some brief -> Some brief
-        | None -> Brief.unclaimedFor task
+        | None -> threats.Unclaimed.BriefOf task
 
     /// Whether this colony casts for a Brief (the world layer's S4): one no
     /// world answerer binds, or one it answers. A raided room's `Win` is cast
@@ -1450,9 +1497,9 @@ module Threats =
 
     /// How many bodies a combat Task asks its rows for this tick, every ask
     /// summed; none for a Task no Brief describes.
-    let wants (view: ColonyView) (threats: Threats) (task: Task) : int =
+    let wants (threats: Threats) (task: Task) : int =
         briefFor threats task
-        |> Option.map (fun brief -> brief.Asks |> List.sumBy (fun ask -> ask.Wanted view threats))
+        |> Option.map (fun brief -> brief.Asks |> List.sumBy (fun ask -> ask.Wanted threats))
         |> Option.defaultValue 0
 
     /// One room's shelter (#514); empty for a room with none.
@@ -1807,7 +1854,7 @@ module Threats =
                 && view.Hostiles
                    |> List.exists (fun h ->
                        h.Pos.Room = room
-                       && brief.Targets.Shoots view resident engaged h
+                       && brief.Targets.Shoots resident engaged h
                        && Facts.canStrike view (partCount creep.Body) h)
             | _ -> false
         | _ -> false
@@ -2824,6 +2871,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             Guard room,
             { Brief.claimed
+                  view
+                  atlas
                   room
                   (Map.containsKey room ring)
                   verdict
@@ -2935,6 +2984,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             Map.add
                 (Defend home)
                 (Brief.defending
+                    view
                     answered
                     (Brief.lentRangers view holders)
                     ground
@@ -2948,6 +2998,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Safe = safeGround
         Shelter = shelter
         Briefs = briefs
+        Unclaimed =
+            {
+                BriefOf = Brief.unclaimedFor view atlas
+            }
         Engaged = engaged
         Arrivals = arrivals
         Walks = System.Collections.Generic.Dictionary()
@@ -3249,6 +3303,7 @@ let private withAssaults
                         Map.add
                             (Assault room)
                             (Brief.formed
+                                view
                                 Duty.Assault
                                 OnTheTier
                                 (lazy Answer.Win)
@@ -3297,9 +3352,9 @@ let private withMusters
 
                 match block with
                 | Some block ->
-                    let blocks = ask.Blocks view
+                    let blocks = ask.Blocks()
                     let parts = partCountIn block
-                    let coming = ask.Wanted view threats - List.length holders
+                    let coming = ask.Wanted threats - List.length holders
 
                     List.replicate
                         (max 0 coming)

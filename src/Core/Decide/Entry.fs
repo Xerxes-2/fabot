@@ -405,6 +405,109 @@ let private carriedSizing (sizing: RowSizing) : RowSizing =
         AnchorPostCaps = sizing.AnchorPostCaps |> Map.toSeq |> Fresh.mapOfSeq
     }
 
+/// The fight pass's inputs to the match, one colony's: the Threats and
+/// their Briefs, the structures' fight, the fight Tasks and their pool. All
+/// of it lives within the tick.
+[<NoEquality; NoComparison>]
+type private FightPass =
+    {
+        Threats: Threats
+        /// The towers', safe mode's and the rampart doors' acts.
+        Towers: Lazy<Intent list>
+        /// Flee and the combat Tasks (`planFightTasks`).
+        Tasks: Lazy<Task list>
+        /// Their pool (`planFightPool`).
+        Pool: Lazy<PooledTask list>
+    }
+
+/// The fight pass's head off the guarded outposts (`OutpostFacts.Guarded`):
+/// the Threats now, the rest when first read, so a fight-only decide the
+/// economy hands back prices none of it.
+let private fightPass
+    (view: ColonyView)
+    atlas
+    (held: HeldTaskFacts)
+    (guarded: string list)
+    : FightPass =
+    let threats = threatsOfHeld view atlas held
+    let tasks = lazy (planFightTasks view atlas threats held guarded)
+
+    {
+        Threats = threats
+        Towers =
+            lazy
+                (planSafeMode view atlas held
+                 @ planFire view atlas
+                 @ planTowerHeal view atlas
+                 @ planRampartDoors view)
+        Tasks = tasks
+        Pool = lazy (planFightPool threats tasks.Value)
+    }
+
+/// The fight pass's tail, over the bodies `movers` names (every body where
+/// None): the Emitter's acts, laid among the rest by `around`, the strike and
+/// heal reflexes over every body, the melee glue and the steps. The Intents
+/// (`movers`' alone, where named, the glue after) and the movement.
+let private fightActs
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (pool: PooledTask list)
+    (assigned: Map<string, Task>)
+    (crossings: Map<string, string>)
+    (verbose: Set<string>)
+    (movers: (string -> bool) option)
+    (around: Intent list -> Intent list)
+    : Intent list * Movement =
+    let intents =
+        emit view atlas threats assigned
+        |> around
+        |> Fabot.Core.IntentPlan.create
+        |> function
+            | Ok selected ->
+                strikeReflex view atlas threats assigned selected
+                |> healReflex view threats
+                |> Fabot.Core.IntentPlan.intents
+            | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+
+    // The reflexes run over every body, so a fighter's heal still reaches an
+    // economy body; a body `movers` leaves out has its own reflex elsewhere.
+    let intents =
+        match movers with
+        | None -> intents
+        | Some moves ->
+            intents
+            |> List.filter (fun intent -> IntentPlan.actor intent |> Option.forall moves)
+
+    // A melee fighter steps onto the target it swings at (#535): its move is
+    // that step, and the mover leaves its tile standing, as a tired body's.
+    let glued = glue view atlas threats assigned
+
+    let movement =
+        let stepping =
+            glued
+            |> List.choose (function
+                | MoveCreep(name, _) -> Some name
+                | _ -> None)
+            |> Set.ofList
+
+        let moved =
+            match movers with
+            | None -> movementOf view atlas threats pool assigned crossings verbose
+            | Some moves -> movementAmong moves view atlas threats pool assigned crossings verbose
+
+        if Set.isEmpty stepping then
+            moved
+        else
+            { moved with
+                Tired = Set.union moved.Tired stepping
+                Intents =
+                    moved.Intents
+                    |> List.filter (fun step -> not (Set.contains step.Creep stepping))
+            }
+
+    intents @ glued, movement
+
 /// The decision seam: a colony view in, Decision out, with this colony's
 /// movement left unarbitrated on it — a room's traffic is not one colony's
 /// decision, so the caller folds every colony's together and arbitrates each
@@ -527,8 +630,16 @@ let decideUnarbitrated
     // before the Threats, which lay each Assault's ground.
     let held = heldTaskFacts view assignments
 
-    // The tick's Threats, derived once and shared by every reader.
-    let threats = threatsOfHeld view atlas held
+    // The outpost chain's answers, derived once (#383): before this
+    // `claimTargets` ran 11.4 times a tick and `outpostControllers` 9.1,
+    // each walking the kind census. The fight pass reads its guarded rooms.
+    let outposts = outpostFactsOf view atlas
+
+    // The fight pass's head (`fightPass`): the tick's Threats, derived once
+    // and shared by every reader, the structures' fight, the fight Tasks and
+    // their pool.
+    let fight = fightPass view atlas held outposts.Guarded
+    let threats = fight.Threats
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
@@ -536,11 +647,7 @@ let decideUnarbitrated
 
     let outpostSiteIntents = outpostContainers @ planFirstSpawns view atlas
 
-    let defenseIntents =
-        planSafeMode view atlas held
-        @ planFire view atlas
-        @ planTowerHeal view atlas
-        @ planRampartDoors view
+    let defenseIntents = fight.Towers.Value
 
     // The consignment's send (#349), beside the defence reflexes because it is
     // the same kind of thing: a structure's own verb, read off the view.
@@ -569,11 +676,7 @@ let decideUnarbitrated
 
     // The pool is derived before the spawns, and the dependency runs one way:
     // the worker row's floor asks the pool, and nothing in the pool reads a
-    // spawn Intent. The outpost chain's answers are derived once (#383):
-    // before this `claimTargets` ran 11.4 times a tick and
-    // `outpostControllers` 9.1, each walking the kind census.
-    let outposts = outpostFactsOf view atlas
-
+    // spawn Intent.
     let sizing = rowSizingOf view atlas threats outposts held
 
     // The fight pass, carved out of the match: the fighters
@@ -583,8 +686,9 @@ let decideUnarbitrated
     // `held`, the guarded outposts and the row sizing (a relief's lead);
     // it leaves the fighters' assignments and Verdicts. The structures' fight
     // (`defenseIntents`), the Emitter, the reflexes and the one Resolver
-    // still run over both passes' bodies together.
-    let tasks = planTasks view atlas threats held outposts
+    // still run over both passes' bodies together. The whole list is
+    // `planTasks`'s: the fight's at its head.
+    let tasks = fight.Tasks.Value @ planEconomyTasks view atlas held outposts
 
     // Why the colony is busy (#523), once a tick for the upgrader row and the
     // buffer's rank.
@@ -592,8 +696,12 @@ let decideUnarbitrated
 
     // Every entry's priority and capacity, set once here and read by the
     // Matcher and the mover: the fight pass's off the Briefs, the economy's
-    // after them, and the whole pool the two in pool order.
-    let fightPool, economyPool = planPools held view atlas threats busy tasks
+    // after them, and the whole pool the two in pool order (`planPools`).
+    let fightPool = fight.Pool.Value
+
+    let economyPool =
+        planPoolHolding held view atlas busy (List.filter (safetyTier >> not) tasks)
+
     let pool = fightPool @ economyPool
 
     // A far field whose Task is not in the tick's list is dead weight the
@@ -675,29 +783,28 @@ let decideUnarbitrated
         // held Task's crossing keeps that room over home.
         homeward @ graced |> Map.ofList
 
-    let taskIntents = emit view atlas threats assigned
+    // The Emitter's acts among every other: a task's pickup owns this creep's
+    // channel. Otherwise the reflex picks its last reachable pile, preserving
+    // the engine's former last-write choice without emitting overwritten
+    // calls. Different creeps may still share a pile.
+    let among taskIntents =
+        let taskPickers =
+            taskIntents
+            |> List.choose (function
+                | PickupPile(name, _) -> Some name
+                | _ -> None)
+            |> Set.ofList
 
-    // A task's pickup owns this creep's channel. Otherwise the reflex picks
-    // its last reachable pile, preserving the engine's former last-write choice
-    // without emitting overwritten calls. Different creeps may still share a pile.
-    let taskPickers =
-        taskIntents
-        |> List.choose (function
-            | PickupPile(name, _) -> Some name
-            | _ -> None)
-        |> Set.ofList
+        let pickupIntents =
+            planPickups view atlas assigned
+            |> List.filter (function
+                | PickupPile(name, _) -> not (Set.contains name taskPickers)
+                | _ -> true)
 
-    let pickupIntents =
-        planPickups view atlas assigned
-        |> List.filter (function
-            | PickupPile(name, _) -> not (Set.contains name taskPickers)
-            | _ -> true)
+        // The signature (#381), shaped after the pickup reflex: no walk, no
+        // Task, no competition.
+        let signIntents = planSignatures view atlas Colony.signatureFor
 
-    // The signature (#381), shaped after the pickup reflex: no walk, no Task,
-    // no competition.
-    let signIntents = planSignatures view atlas Colony.signatureFor
-
-    let intents =
         defenseIntents
         @ consignmentIntents
         @ spawnIntents
@@ -706,39 +813,9 @@ let decideUnarbitrated
         @ signIntents
         @ pickupIntents
         @ taskIntents
-        |> Fabot.Core.IntentPlan.create
-        |> function
-            | Ok selected ->
-                strikeReflex view atlas threats assigned selected
-                |> healReflex view threats
-                |> Fabot.Core.IntentPlan.intents
-            | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
-    // A melee fighter steps onto the target it swings at (#535): its move is
-    // that step, and the mover leaves its tile standing, as a tired body's.
-    let glued = glue view atlas threats assigned
-
-    let intents = intents @ glued
-
-    let movement =
-        let stepping =
-            glued
-            |> List.choose (function
-                | MoveCreep(name, _) -> Some name
-                | _ -> None)
-            |> Set.ofList
-
-        let moved = movementOf view atlas threats pool assigned crossings verbose
-
-        if Set.isEmpty stepping then
-            moved
-        else
-            { moved with
-                Tired = Set.union moved.Tired stepping
-                Intents =
-                    moved.Intents
-                    |> List.filter (fun step -> not (Set.contains step.Creep stepping))
-            }
+    let intents, movement =
+        fightActs view atlas threats pool assigned crossings verbose None among
 
     // A refiller that poured this tick has nothing for the light tick after it
     // to replay, a pour being one-shot, so it stood still a tick per member
@@ -957,12 +1034,14 @@ let decideFight
 
         let signedRooms, _, _, _, atlas = recallAtlas view (Some memo)
         let held = heldTaskFacts view assignments
-        let threats = threatsOfHeld view atlas held
 
         // `outpostFactsOf`'s guarded rooms, off the two facts of the chain they
         // read, as the Threats derive them.
         let guarded =
             Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
+
+        let fight = fightPass view atlas held guarded
+        let threats = fight.Threats
 
         // An economy body a Reach has walled off from its Task since the
         // carry (#591): only a whole decide's Matcher lets it go to other
@@ -988,14 +1067,9 @@ let decideFight
             None
         else
 
-            let defenseIntents =
-                planSafeMode view atlas held
-                @ planFire view atlas
-                @ planTowerHeal view atlas
-                @ planRampartDoors view
-
-            let tasks = planFightTasks view atlas threats held guarded
-            let pool = planFightPool view threats tasks
+            let defenseIntents = fight.Towers.Value
+            let tasks = fight.Tasks.Value
+            let pool = fight.Pool.Value
 
             let next, verdicts =
                 matchCreepsBeside
@@ -1036,48 +1110,17 @@ let decideFight
             // The reflexes run over every body as on a whole decide, so a fighter's
             // heal still reaches an economy body; an economy body's own reflex is its
             // replay's.
-            let ours intent =
-                IntentPlan.actor intent
-                |> Option.forall (fun name -> Set.contains name fighting)
-
-            let intents =
-                defenseIntents @ emit view atlas threats assigned
-                |> Fabot.Core.IntentPlan.create
-                |> function
-                    | Ok selected ->
-                        strikeReflex view atlas threats assigned selected
-                        |> healReflex view threats
-                        |> Fabot.Core.IntentPlan.intents
-                        |> List.filter ours
-                    | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
-
-            let glued = glue view atlas threats assigned
-
-            let movement =
-                let stepping =
-                    glued
-                    |> List.choose (function
-                        | MoveCreep(name, _) -> Some name
-                        | _ -> None)
-                    |> Set.ofList
-
-                let moved =
-                    movementAmong
-                        (fun name -> Set.contains name fighting)
-                        view
-                        atlas
-                        threats
-                        pool
-                        assigned
-                        crossings
-                        verbose
-
-                { moved with
-                    Tired = Set.union moved.Tired stepping
-                    Intents =
-                        moved.Intents
-                        |> List.filter (fun step -> not (Set.contains step.Creep stepping))
-                }
+            let intents, movement =
+                fightActs
+                    view
+                    atlas
+                    threats
+                    pool
+                    assigned
+                    crossings
+                    verbose
+                    (Some(fun name -> Set.contains name fighting))
+                    (fun emitted -> defenseIntents @ emitted)
 
             let economy = economyBodies |> List.map _.Name |> Set.ofList
 
@@ -1103,7 +1146,7 @@ let decideFight
 
                 Some
                     {
-                        Intents = intents @ glued
+                        Intents = intents
                         Assignments =
                             (next, assignments)
                             ||> Map.fold (fun acc name tid ->
@@ -1151,4 +1194,149 @@ let decide
     { decision with
         Intents = decision.Intents @ moveIntents
         Verdicts = decision.Verdicts @ moveVerdicts
+    }
+
+/// What one tick's colonies decide off, beside their views: the shell's
+/// tick (`Main`) and the arena's alike.
+[<NoEquality; NoComparison>]
+type ColonyInputs =
+    {
+        /// Which lane matches the fight (`Tuning.FightLane`, or its live
+        /// override). Read by none yet: the world lane's later slices.
+        Lane: FightLane
+        /// Crossings from a colony's home to a room, as `Facts.judge` ranks
+        /// a raided room's answerer by.
+        Hops: string -> string -> int option
+        /// Last tick's assignments, every colony's in one table.
+        Holding: Assignments
+        Verbose: Set<string>
+        /// Each colony's plan memo, by home.
+        PlanMemos: Map<string, PlanMemo>
+        /// Each colony's last whole decide's carry, by home.
+        Carries: Map<string, FightCarry>
+        /// The colonies that decide nothing this tick: replayed, or waiting
+        /// out the reset tick.
+        Idle: Set<string>
+        /// The colonies whose every fact is a fight's (`LightTick.fightOnly`),
+        /// each deciding its fight alone where it has a memo and a carry and
+        /// the economy does not hand it back.
+        FightAlone: Set<string>
+        /// The colony index whose turn it is to re-plan (#357), -1 for none;
+        /// None where every colony re-plans on its own turn.
+        TurnIndex: int option
+    }
+
+/// One tick's decisions over every colony.
+type ColonyDecisions<'Stamp> =
+    {
+        /// Every colony with its view, judged and its observer aimed, in
+        /// colony order.
+        Views: (Colony * ColonyView) list
+        /// Each decision in the order it was made — the fight-only ones
+        /// first —, with the view it read and the stamp taken after it.
+        Decided: (Colony * ColonyView * Decision * 'Stamp) list
+        /// The colonies that decided their fight alone.
+        FoughtAlone: Set<string>
+        /// The turn the whole decides were handed, -1 where it waits.
+        Turn: int
+        /// Whether the turn's colony decided no plan this tick, so the turn
+        /// stays its.
+        TurnWaits: bool
+    }
+
+/// Each raided room's one verdict, priced once over the fleet and the
+/// world's vision and laid in each view (`Facts.judge`): a colony that does
+/// not decide (`idle`) sends only the bodies its plan already holds there.
+let judgeColonies
+    (hops: string -> string -> int option)
+    (assignments: Assignments)
+    (idle: Set<string>)
+    (colonies: (Colony * ColonyView) list)
+    : ColonyView list =
+    colonies
+    |> List.map (fun (colony, view) ->
+        ({
+            Cut = view
+            Owns = Colony.declaredRooms colony
+            Decides = not (Set.contains colony.Home idle)
+        }
+        : Facts.Judged))
+    |> Facts.judge hops assignments
+
+/// Every colony's tick decided: the views judged (`judgeColonies`), the
+/// fight-only decides first (`decideFight`), so the turn and the observers'
+/// looks read the colonies that did fight alone, never the candidates a
+/// decide handed back — the fight reads no observer's look —, then every
+/// observer's one look aimed together (`Layout.aimObservers`), a fight-only
+/// or idle colony's replaying its last, then each other colony decided
+/// whole (`decideUnarbitrated`). `stamp` is read after each decision.
+let decideColonies
+    (inputs: ColonyInputs)
+    (stamp: unit -> 'Stamp)
+    (colonies: (Colony * ColonyView) list)
+    : ColonyDecisions<'Stamp> =
+    let judged = judgeColonies inputs.Hops inputs.Holding inputs.Idle colonies
+
+    let fought =
+        List.zip (colonies |> List.map fst) judged
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.FightAlone)
+        |> List.choose (fun (colony, view) ->
+            Option.map2
+                (fun memo carry -> decideFight view inputs.Holding inputs.Verbose memo carry)
+                (Map.tryFind colony.Home inputs.PlanMemos)
+                (Map.tryFind colony.Home inputs.Carries)
+            |> Option.flatten
+            |> Option.map (fun decision -> colony, view, decision, stamp ()))
+
+    let fightOnly =
+        fought |> List.map (fun (colony, _, _, _) -> colony.Home) |> Set.ofList
+
+    let turnWaits =
+        match inputs.TurnIndex with
+        | Some turn ->
+            colonies
+            |> List.tryItem turn
+            |> Option.exists (fun (colony, _) ->
+                Set.contains colony.Home inputs.Idle || Set.contains colony.Home fightOnly)
+        | None -> false
+
+    let turn =
+        match inputs.TurnIndex with
+        | Some turn when not turnWaits -> turn
+        | _ -> -1
+
+    let views =
+        judged
+        |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
+        |> List.zip (colonies |> List.map fst)
+
+    // The decision is bound and then tupled, and the turn is a DU
+    // (`ReplanTurn`), because the first shape shipped broken: as an expression
+    // inside the tuple with a `bool` last argument, the turn arrived as
+    // JavaScript `undefined`, `not undefined` is `true`, and no layout was
+    // planned at all (#357). Only `npm run profile` caught it.
+    let whole =
+        views
+        |> List.indexed
+        |> List.filter (fun (_, (colony, _)) ->
+            not (Set.contains colony.Home inputs.Idle)
+            && not (Set.contains colony.Home fightOnly))
+        |> List.map (fun (index, (colony, view)) ->
+            let memo = Map.tryFind colony.Home inputs.PlanMemos
+
+            let whose =
+                match inputs.TurnIndex with
+                | Some _ when index <> turn -> ReplanTurn.Waiting
+                | _ -> ReplanTurn.Now
+
+            let decision = decideUnarbitrated view inputs.Holding inputs.Verbose memo whose
+
+            colony, view, decision, stamp ())
+
+    {
+        Views = views
+        Decided = fought @ whole
+        FoughtAlone = fightOnly
+        Turn = turn
+        TurnWaits = turnWaits
     }

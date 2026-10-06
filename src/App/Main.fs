@@ -679,24 +679,9 @@ let private fullTick
     // Every colony that does not decide this tick.
     let idle = Set.union waiting replaying
 
-    // Each raided room's one verdict, priced once over the fleet and the
-    // world's vision and laid in each view (`Facts.judge`): a colony that does
-    // not decide sends only the bodies its plan already holds there; the
-    // answerer is ranked by
-    // crossings as a harassment room's caster is, the table built only where
-    // two colonies answer one room.
-    let judged =
-        let hops = lazy (World.hopsUnder StandDown.none joins Tuning.defaults world)
-
-        views
-        |> List.map (fun (colony, view) ->
-            ({
-                Cut = view
-                Owns = Colony.declaredRooms colony
-                Decides = not (Set.contains colony.Home idle)
-            }
-            : Decide.Facts.Judged))
-        |> Decide.Facts.judge (fun home room -> hops.Value home room) assignments
+    // A raided room's answerer is ranked by crossings as a harassment room's
+    // caster is, the table built only where two colonies answer one room.
+    let hops = lazy (World.hopsUnder StandDown.none joins Tuning.defaults world)
 
     // The flood counters after a decision, cumulative like the clock beside
     // them.
@@ -707,74 +692,46 @@ let private fullTick
             Pops = Grid.Counters.pops
         }
 
-    // The fight-only decides first (`Entry.decideFight`), so the turn and the
-    // observers' looks read the colonies that did fight alone, never the
-    // candidates a decide handed back. The fight reads no observer's look.
-    let fought =
-        List.zip (views |> List.map fst) judged
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home fightCandidates)
-        |> List.choose (fun (colony, view) ->
-            Option.map2
-                (fun memo carry -> Decide.Entry.decideFight view assignments verbose memo carry)
-                (Map.tryFind colony.Home planMemos)
-                (Map.tryFind colony.Home fightCarries)
-            |> Option.flatten
-            |> Option.map (fun decision ->
-                colony, view, decision, Game.cpu.getUsed (), floodedNow ()))
-
-    let fightOnly =
-        fought |> List.map (fun (colony, _, _, _, _) -> colony.Home) |> Set.ofList
-
-    let counted = fullTicks
-
+    // Whose turn it is to re-plan, by the full ticks counted so far.
     let turn =
         if List.isEmpty views || resetTick then
             -1
         else
-            counted % List.length views
+            fullTicks % List.length views
 
-    let turnWaits =
+    // Every colony's decision (`Entry.decideColonies`). The counter is read
+    // after each colony's decision, cumulative, so the CPU line can say which
+    // colony a spike came out of; `foldCpu` differences.
+    let colonyDecisions =
         views
-        |> List.tryItem turn
-        |> Option.exists (fun (colony, _) ->
-            Set.contains colony.Home replaying || Set.contains colony.Home fightOnly)
+        |> Decide.Entry.decideColonies
+            {
+                Lane =
+                    ObserveMemory.loadFightLane () |> Option.defaultValue Tuning.defaults.FightLane
+                Hops = fun home room -> hops.Value home room
+                Holding = assignments
+                Verbose = verbose
+                PlanMemos = planMemos
+                Carries = fightCarries
+                Idle = idle
+                FightAlone = fightCandidates
+                TurnIndex = Some turn
+            }
+            (fun () -> Game.cpu.getUsed (), floodedNow ())
 
-    if not turnWaits then
+    let fightOnly = colonyDecisions.FoughtAlone
+
+    if not colonyDecisions.TurnWaits then
         fullTicks <- fullTicks + 1
 
-    let turn = if turnWaits then -1 else turn
-
-    // Then every observer's one look, aimed together so no two spend a tick
-    // on one room (`Layout.aimObservers`); a fight-only colony's observers
-    // replay their last look.
-    let views =
-        judged
-        |> Decide.Layout.aimObservers (Set.union idle fightOnly)
-        |> List.zip (views |> List.map fst)
-
-    // The decision is bound and then tupled, and the turn is a DU
-    // (`ReplanTurn`), because the first shape shipped broken: as an expression
-    // inside the tuple with a `bool` last argument, the turn arrived as
-    // JavaScript `undefined`, `not undefined` is `true`, and no layout was
-    // planned at all (#357). Only `npm run profile` caught it.
-    // The counter is read after each colony's decision, cumulative, so the CPU
-    // line can say which colony a spike came out of; `foldCpu` differences.
-    let whole =
-        views
-        |> List.indexed
-        |> List.filter (fun (_, (colony, _)) ->
-            not (Set.contains colony.Home idle) && not (Set.contains colony.Home fightOnly))
-        |> List.map (fun (index, (colony, view)) ->
-            let memo = Map.tryFind colony.Home planMemos
-
-            let whose = if index = turn then ReplanTurn.Now else ReplanTurn.Waiting
-
-            let decision = decideUnarbitrated view assignments verbose memo whose
-
-            colony, view, decision, Game.cpu.getUsed (), floodedNow ())
+    let turn = colonyDecisions.Turn
+    let views = colonyDecisions.Views
 
     // Every decision in the order it was made, as the clock reads them.
-    let decidedInOrder = fought @ whole
+    let decidedInOrder =
+        colonyDecisions.Decided
+        |> List.map (fun (colony, view, decision, (at, flooded)) ->
+            colony, view, decision, at, flooded)
 
     // And in colony order, as every fold after reads them.
     let decisions =

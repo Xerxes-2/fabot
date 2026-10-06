@@ -1408,6 +1408,32 @@ wire("fightOnly: a boolean reads as itself, and anything else reads as unset", a
   assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
 });
 
+// ---- the live fight-lane switch ------------------------------------------
+
+wire("fightLane: the three lane names read as their lane, and anything else reads as unset", async () => {
+  const { loadFightLane } = await import(MODULE);
+  // A lane comes back as the F# union; its case name is what the switch set.
+  const caseOf = (lane) => (lane === undefined ? undefined : lane.name);
+
+  for (const [what, value, read] of [
+    ["absent", undefined, undefined],
+    ["percolony", "percolony", "PerColony"],
+    ["parity", "parity", "WorldParity"],
+    ["world", "world", "World"],
+    ["a case name", "World", undefined],
+    ["a boolean", true, undefined],
+    ["null", null, undefined],
+    ["an object", { fightLane: "world" }, undefined],
+  ]) {
+    globalThis.Memory = rootMemoryWith("fightLane", value);
+    assert.equal(caseOf(loadFightLane()), read, `${what} reads as ${read}`);
+  }
+
+  globalThis.Memory = {};
+  assert.equal(loadFightLane(), undefined, "no fabot subtree reads as unset");
+  assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
+});
+
 wire("positions: what savePositions writes is what loadPositions reads", async () => {
   const { loadPositions, savePositions } = await import(MODULE);
   const { ofArray } = await import(LIST);

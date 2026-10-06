@@ -522,8 +522,8 @@ let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string lis
         |> List.map (fun ask ->
             {
                 Row = row
-                Wanted = ask.Wanted view threats
-                Blocks = ask.Blocks view
+                Wanted = ask.Wanted threats
+                Blocks = ask.Blocks()
             }))
 
 /// A fighting row's quota: its asks' counts, summed.
@@ -533,8 +533,7 @@ let internal rowQuota
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    asksFor view threats outposts row
-    |> List.sumBy (fun ask -> ask.Wanted view threats)
+    asksFor view threats outposts row |> List.sumBy (fun ask -> ask.Wanted threats)
 
 /// The blocks a fighting row casts this tick: the worst of its guarded rooms'
 /// answers, the row's floor where none is guarded — one guard block, the
@@ -547,7 +546,7 @@ let internal rowBlocksWanted
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    match asksFor view threats outposts row |> List.map (fun ask -> ask.Blocks view) with
+    match asksFor view threats outposts row |> List.map (fun ask -> ask.Blocks()) with
     | [] ->
         match row with
         | CastRow.Ranger -> view.Tuning.RangerResidentBlocks
@@ -599,9 +598,9 @@ let private castRowStands
 
 /// One squad role's row quota: every pooled Assault's ask of the role
 /// (`Brief.formed`).
-let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) : int =
+let internal squadQuota (threats: Threats) (role: SquadRole) : int =
     briefAsks threats (CastRow.Squad role)
-    |> List.sumBy (fun ask -> ask.Wanted view threats)
+    |> List.sumBy (fun ask -> ask.Wanted threats)
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -1040,7 +1039,7 @@ let internal quotaRowsOf
         Ranger = rowQuota view threats outposts CastRow.Ranger
         Squad =
             SquadRole.all
-            |> List.map (fun role -> role, squadQuota view threats role)
+            |> List.map (fun role -> role, squadQuota threats role)
             |> Map.ofList
         // One Anchor per Post of every projected room but a raised child's,
         // whose rock its pioneers dig and its own row garrisons (#192).

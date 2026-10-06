@@ -60,6 +60,9 @@ refuses(["cadence", "--json"], "usage:");
 refuses(["fight-only", "yes"], "fight-only takes on, off or clear");
 refuses(["fight-only", "on", "off"], "usage:");
 refuses(["fight-only", "--json"], "usage:");
+refuses(["fight-lane", "on"], "fight-lane takes percolony, parity or world");
+refuses(["fight-lane", "world", "parity"], "usage:");
+refuses(["fight-lane", "--json"], "usage:");
 refuses(["console"], "console needs --seconds");
 refuses(["raids", "--colony"], "--colony needs a home room name");
 refuses(["cpu", "--colony", "W1N1"], "usage:");
@@ -95,6 +98,9 @@ for (const args of [
   ["fight-only"],
   ["fight-only", "off"],
   ["fight-only", "clear"],
+  ["fight-lane"],
+  ["fight-lane", "parity"],
+  ["fight-lane", "clear"],
   ["console", "--seconds", "3"],
   ["eval", "Game.time"],
   ["eval", "Game.time", "--seconds", "4"],

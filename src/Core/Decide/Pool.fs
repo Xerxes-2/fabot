@@ -618,7 +618,7 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
 /// A Safety-tier Task's entry: Flee's, or a combat Task's off its Brief. It
 /// reads no economy fact, so the fight pass prices its pool alone
 /// (`planFightPool`).
-let private safetyEntry (view: ColonyView) (threats: Threats) (task: Task) : PooledTask =
+let private safetyEntry (threats: Threats) (task: Task) : PooledTask =
     let brief = lazy (Threats.briefFor threats task)
 
     {
@@ -643,7 +643,7 @@ let private safetyEntry (view: ColonyView) (threats: Threats) (task: Task) : Poo
             | Defend _
             | Assault _ ->
                 brief.Value
-                |> Option.map (fun brief -> brief.Capacity view threats)
+                |> Option.map (fun brief -> brief.Capacity threats)
                 |> Option.defaultValue (Capacity.roles [])
             | _ -> Capacity.unbounded
         Borrowed = false
@@ -1575,8 +1575,8 @@ let planPoolHolding
 
 /// The fight pass's pool: the Safety-tier Tasks of `tasks`, Flee and the
 /// combat Tasks, in their order.
-let planFightPool (view: ColonyView) (threats: Threats) (tasks: Task list) : PooledTask list =
-    tasks |> List.filter safetyTier |> List.map (safetyEntry view threats)
+let planFightPool (threats: Threats) (tasks: Task list) : PooledTask list =
+    tasks |> List.filter safetyTier |> List.map (safetyEntry threats)
 
 /// The tick's pool in its two halves, each in pool order: the fight pass's
 /// (`planFightPool`) and the economy's, every Task below the Safety tier
@@ -1589,7 +1589,7 @@ let planPools
     (busy: BusyReason list)
     (tasks: Task list)
     : PooledTask list * PooledTask list =
-    planFightPool view threats tasks,
+    planFightPool threats tasks,
     planPoolHolding held view atlas busy (List.filter (safetyTier >> not) tasks)
 
 /// The whole pool (`planPools`) over a colony whose bodies hold nothing:

@@ -817,6 +817,20 @@ let loadFightOnly () : bool option =
         else
             None)
 
+/// The live fight-lane switch from `Memory.fabot.observe.fightLane`
+/// (`Tuning.FightLane`): set, it takes the tuned one's place. Read each tick;
+/// anything but `"percolony"`, `"parity"` or `"world"` reads as unset.
+let loadFightLane () : FightLane option =
+    leafOr None (fun () -> observeLeaf "fightLane") (fun raw ->
+        if jsTypeof raw <> "string" then
+            None
+        else
+            match unbox<string> raw with
+            | "percolony" -> Some FightLane.PerColony
+            | "parity" -> Some FightLane.WorldParity
+            | "world" -> Some FightLane.World
+            | _ -> None)
+
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Read fresh each tick so a flip
 /// through the Memory HTTP API takes effect on the next tick with no

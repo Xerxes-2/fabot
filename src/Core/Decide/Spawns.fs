@@ -685,7 +685,7 @@ let internal planSpawns
                                |> Option.exists (fun at -> at.Room = home))
                         |> List.length
 
-                    ask.Wanted view threats - atHome - castOf pattern > 0)
+                    ask.Wanted threats - atHome - castOf pattern > 0)
 
         let owed (row: SpecialistRow) =
             not defenderOwed || not (heldForDefender row.Pattern)

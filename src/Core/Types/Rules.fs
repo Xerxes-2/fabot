@@ -421,6 +421,15 @@ module Engine =
     /// flat `x * 50 + y` grid the Atlas lays.
     let roomSide = 50
 
+/// Where the fight is matched (the world-first epic's W5): each colony's own fighters over
+/// its own Briefs, the world's lane matched to give the same answer, or the
+/// world's lane over every fighter.
+[<RequireQualifiedAccess>]
+type FightLane =
+    | PerColony
+    | WorldParity
+    | World
+
 /// The colony's **tunables**, in one record: every number the bot chose
 /// rather than read off the server, carried on the [[colony view]] so a rule
 /// reads its colony's own. Each field states the stage and bank it was
@@ -908,6 +917,9 @@ type Tuning =
         /// (`ObserveMemory.loadFightOnly`) takes its place. `false` gives back
         /// the forced tick that decides each such colony whole.
         FightOnly: bool
+        /// Which lane matches the fight (`FightLane`). A live override in
+        /// Memory (`ObserveMemory.loadFightLane`) takes its place.
+        FightLane: FightLane
         /// The share of the colonies a cold reset decides on its own tick
         /// (`LightTick.resetSplit`), the threatened ones first; the rest
         /// stand that tick and decide on the next. Half: a reset's decide ran
@@ -1081,6 +1093,7 @@ module Tuning =
             // and a raid at home forces every tick, which is what empties the
             // bucket in a war.
             FightOnly = true
+            FightLane = FightLane.PerColony
             ResetFirstShare = 0.5
         }
 

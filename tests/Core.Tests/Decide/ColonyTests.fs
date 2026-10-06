@@ -2667,11 +2667,12 @@ let raisedHomeGarrisonTests =
 
                 let shot raid =
                     let colony = openGarrison [] [ ranger, { X = 12; Y = 46 } ] raid
+                    let atlas = Atlas.ofView colony
 
                     emit
                         colony
-                        (Atlas.ofView colony)
-                        noThreats
+                        atlas
+                        (Threats.quietOn colony atlas)
                         (Map.ofList [ ranger.Name, Guard "W1N2" ])
                     |> List.choose (function
                         | RangedAttackCreep(name, target) when name = ranger.Name -> Some target
@@ -2720,12 +2721,13 @@ let raisedHomeGarrisonTests =
                     ]
 
                 let colony = openGarrison [] [ ranger, { X = 12; Y = 46 } ] raid
+                let atlas = Atlas.ofView colony
 
                 Expect.equal
                     (emit
                         colony
-                        (Atlas.ofView colony)
-                        noThreats
+                        atlas
+                        (Threats.quietOn colony atlas)
                         (Map.ofList [ ranger.Name, Guard "W1N2" ])
                      |> List.choose (function
                          | RangedAttackCreep(name, target) when name = ranger.Name -> Some target
@@ -3647,7 +3649,9 @@ let borrowedRoomBudgetTests =
                 let capOf loads id =
                     let view = twoBuffers loads
 
-                    planPool view (Atlas.ofView view) noThreats [] (planTasksOn view noThreats)
+                    let atlas = Atlas.ofView view
+
+                    planPool view atlas (Threats.quietOn view atlas) [] (planTasksOn view noThreats)
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity

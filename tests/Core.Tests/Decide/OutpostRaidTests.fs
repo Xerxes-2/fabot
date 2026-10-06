@@ -2281,12 +2281,10 @@ let shutChaseTests =
                 let atlas = Atlas.ofView both
                 let brief = Threats.briefOf (threatsOf both atlas) "W1N2"
 
-                Expect.isTrue
-                    (brief.Admits both atlas (guard "g-1"))
-                    "the guard that wins alone is admitted"
+                Expect.isTrue (brief.Admits(guard "g-1")) "the guard that wins alone is admitted"
 
                 Expect.isFalse
-                    (brief.Admits both atlas weak)
+                    (brief.Admits weak)
                     "and one that loses the raid alone is not, though its row wins"
             }
 
@@ -2685,7 +2683,6 @@ let trespassTests =
 
                 Expect.equal
                     ((Threats.briefOf threats "W1N2").Targets.Order
-                        raided
                         "W1N2"
                         (fun _ -> 0)
                         [ hauler; claimer; raider ]
@@ -2714,9 +2711,9 @@ let trespassTests =
                     let brief = Threats.briefOf threats "W1N2"
 
                     brief.Asks
-                    |> List.map (fun ask -> ask.Row, ask.Wanted colony threats)
+                    |> List.map (fun ask -> ask.Row, ask.Wanted threats)
                     |> List.filter (fun (_, wanted) -> wanted > 0),
-                    Map.tryFind (CapScope.Row CastRow.Guard) (brief.Capacity colony threats).Caps
+                    Map.tryFind (CapScope.Row CastRow.Guard) (brief.Capacity threats).Caps
 
                 let asksOf colony = fst (readHolding [] colony)
 
@@ -3990,7 +3987,7 @@ let childOutpostTests =
                     [ CastRow.Guard ]
                     "and her chase asks her guard row for the body that wins it"
 
-                Expect.isTrue (Threats.wants child threats (Guard "W1N4") >= 1) "at least one"
+                Expect.isTrue (Threats.wants threats (Guard "W1N4") >= 1) "at least one"
             }
 
             // #573's shape: the owner can neither cast a winning row nor a
@@ -5668,11 +5665,11 @@ let killAdmissionTests =
                     "the premise: a trespass's kill"
 
                 Expect.isFalse
-                    (brief.Admits colony atlas slow)
+                    (brief.Admits slow)
                     "an empty hauler outruns the slow ranger on every ground"
 
                 Expect.isTrue
-                    (brief.Admits colony atlas (guard "g-1"))
+                    (brief.Admits(guard "g-1"))
                     "the 1:1 guard keeps its pace on road: worth the chase"
             }
 
@@ -5845,15 +5842,10 @@ let engagementTests =
                     "and the ranger wins it: the room stays open"
 
                 Expect.isTrue
-                    (brief.Admits
-                        colony
-                        atlas
-                        (creepWith "ranger-1" 0 0 (bodyFor Bodies.rangerPattern 5600)))
+                    (brief.Admits(creepWith "ranger-1" 0 0 (bodyFor Bodies.rangerPattern 5600)))
                     "a ranger takes it"
 
-                Expect.isFalse
-                    (brief.Admits colony atlas (guard "g-1"))
-                    "and a melee guard does not"
+                Expect.isFalse (brief.Admits(guard "g-1")) "and a melee guard does not"
 
                 let mixedOnly =
                     { declaredRaid (List.take 1 invasion) with
@@ -5898,9 +5890,7 @@ let engagementTests =
                     [ CastRow.Ranger ]
                     "the guard's swing reaches no Invader shooter, so the ranger row is asked"
 
-                Expect.isFalse
-                    (brief.Admits colony atlas (guard "g-1"))
-                    "and a melee guard is not sent into it"
+                Expect.isFalse (brief.Admits(guard "g-1")) "and a melee guard is not sent into it"
 
                 let mixedOnly =
                     { declaredRaid (List.take 1 npc) with
@@ -6105,7 +6095,7 @@ let engagementTests =
                     "the premise: a chase the residents win"
 
                 Expect.equal
-                    (brief.Capacity lentIn (threatsOf lentIn (Atlas.ofView lentIn))
+                    (brief.Capacity(threatsOf lentIn (Atlas.ofView lentIn))
                      |> Capacity.capOf CapScope.Fighters)
                     (Some 2)
                     "the call takes the two the verdict priced"
