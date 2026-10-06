@@ -2876,4 +2876,34 @@ let cadenceTests =
                     2
                     "a full bucket: today's"
             }
+
+            test
+                "the cadence in effect names its source: a live override over the bucket's over the tuned (#575)" {
+                let tuned = Tuning.defaults.Cadence
+
+                Expect.equal
+                    (LightTick.cadenceFrom Tuning.defaults tuned None)
+                    (tuned, LightTick.SwitchFrom.Tuned)
+                    "a full bucket: the tuned"
+
+                Expect.equal
+                    (LightTick.cadenceFrom Tuning.defaults 3 None)
+                    (3, LightTick.SwitchFrom.Bucket)
+                    "a raised one: the bucket's"
+
+                Expect.equal
+                    (LightTick.cadenceFrom Tuning.defaults 3 (Some tuned))
+                    (tuned, LightTick.SwitchFrom.Override)
+                    "an override stands over the bucket's, even at the tuned value"
+
+                Expect.equal
+                    (LightTick.switchFrom FightLane.PerColony (Some FightLane.World))
+                    (FightLane.World, LightTick.SwitchFrom.Override)
+                    "a switch's override"
+
+                Expect.equal
+                    (LightTick.switchFrom false None)
+                    (false, LightTick.SwitchFrom.Tuned)
+                    "a switch unset: the tuned"
+            }
         ]

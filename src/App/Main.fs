@@ -190,6 +190,14 @@ let mutable private lightRun = 0
 let mutable private bucketHeld = Tuning.defaults.Cadence
 let mutable private tuning = Tuning.defaults
 
+// The fight switches in effect, the tuned one or its live override, and
+// which (`ObserveMemory.saveSwitches`).
+let private fightOnlyNow () =
+    LightTick.switchFrom Tuning.defaults.FightOnly (ObserveMemory.loadFightOnly ())
+
+let private fightLaneNow () =
+    LightTick.switchFrom Tuning.defaults.FightLane (ObserveMemory.loadFightLane ())
+
 // Full ticks run since the reset: the replan turn counts these, not
 // `Game.time`, which with light ticks between would hand an even count of
 // colonies half the turns and the other half none.
@@ -553,8 +561,7 @@ let private fullTick
     // The lane that matches the fight (`Tuning.FightLane`, or its live
     // override), on the Tuning every view carries: the projection reads it,
     // and every rule of the fight.
-    let lane =
-        ObserveMemory.loadFightLane () |> Option.defaultValue Tuning.defaults.FightLane
+    let lane = fst (fightLaneNow ())
 
     if tuning.FightLane <> lane then
         tuning <- { tuning with FightLane = lane }
@@ -647,9 +654,7 @@ let private fullTick
                 |> Set.ofList
 
             let alone =
-                if
-                    ObserveMemory.loadFightOnly () |> Option.defaultValue Tuning.defaults.FightOnly
-                then
+                if fst (fightOnlyNow ()) then
                     LightTick.fightOnly
                         (fun name -> Set.contains name fighters)
                         colonies
@@ -1233,7 +1238,10 @@ let loop () =
     else
         bucketHeld <- LightTick.bucketCadence Tuning.defaults bucketHeld Game.cpu.bucket
 
-        let cadence = ObserveMemory.loadCadence () |> Option.defaultValue bucketHeld
+        let cadence, cadenceFrom =
+            LightTick.cadenceFrom Tuning.defaults bucketHeld (ObserveMemory.loadCadence ())
+
+        ObserveMemory.saveSwitches (cadence, cadenceFrom) (fightOnlyNow ()) (fightLaneNow ())
 
         if tuning.Cadence <> cadence then
             tuning <-

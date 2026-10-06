@@ -710,6 +710,29 @@ let bucketCadence (tuning: Tuning) (held: int) (bucket: int) : int =
 
     clampCadence (max (asked 0) (min held (asked tuning.CadenceBand)))
 
+/// Where a live switch's value in effect comes from: the tuned one, the
+/// bucket's rule (the cadence alone), or a live override in Memory, which
+/// stands until cleared (#575).
+[<RequireQualifiedAccess>]
+type SwitchFrom =
+    | Tuned
+    | Bucket
+    | Override
+
+/// A switch in effect off its tuned value and its live override.
+let switchFrom (tuned: 'a) (live: 'a option) : 'a * SwitchFrom =
+    match live with
+    | Some value -> value, SwitchFrom.Override
+    | None -> tuned, SwitchFrom.Tuned
+
+/// The cadence in effect: a live override's, else the bucket's (`held`,
+/// `bucketCadence`), which is the tuned one until the bucket raises it.
+let cadenceFrom (tuning: Tuning) (held: int) (live: int option) : int * SwitchFrom =
+    match live with
+    | Some cadence -> cadence, SwitchFrom.Override
+    | None when held <> tuning.Cadence -> held, SwitchFrom.Bucket
+    | None -> held, SwitchFrom.Tuned
+
 /// Whether the tick `since` ticks after the cadence's full one replays the
 /// plans, at `cadence` ticks a decide: inside the cadence, and every tick
 /// since replayed (`run`, the ticks that did), so a skipped tick decides.

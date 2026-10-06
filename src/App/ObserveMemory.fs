@@ -830,6 +830,35 @@ let loadFightLane () : FightLane option =
             | "world" -> Some FightLane.World
             | _ -> None)
 
+/// The live switches in effect this tick and where each comes from, at
+/// `Memory.fabot.observe.switches` (#575): `observe health` and `observe cpu`
+/// print them, an override standing flagged. Written each tick, read by
+/// nothing in the bot.
+let saveSwitches
+    (cadence: int * Fabot.Core.LightTick.SwitchFrom)
+    (fightOnly: bool * Fabot.Core.LightTick.SwitchFrom)
+    (fightLane: FightLane * Fabot.Core.LightTick.SwitchFrom)
+    =
+    let from source =
+        match source with
+        | Fabot.Core.LightTick.SwitchFrom.Tuned -> "tuned"
+        | Fabot.Core.LightTick.SwitchFrom.Bucket -> "bucket"
+        | Fabot.Core.LightTick.SwitchFrom.Override -> "override"
+
+    let raw = createEmpty<obj>
+    raw?cadence <- fst cadence
+    raw?cadenceFrom <- from (snd cadence)
+    raw?fightOnly <- fst fightOnly
+    raw?fightOnlyFrom <- from (snd fightOnly)
+
+    raw?fightLane <-
+        match fst fightLane with
+        | FightLane.PerColony -> "percolony"
+        | FightLane.World -> "world"
+
+    raw?fightLaneFrom <- from (snd fightLane)
+    writeObserveLeaf "switches" raw
+
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Read fresh each tick so a flip
 /// through the Memory HTTP API takes effect on the next tick with no

@@ -104,6 +104,7 @@ import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-history.mjs";
 import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
+import { switchesLine } from "./switches.mjs";
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
@@ -556,7 +557,7 @@ if (command === "console") {
 
   // Read off what the bot already writes — the Transition log's task
   // cursor, the positions leaf, each colony's Raid log, breach log and
-  // quotas, and the CPU line — plus the API's view of each home for the
+  // quotas, the CPU line and the switches in effect (#575) — plus the API's view of each home for the
   // spawn names a creep's name ends in. Nothing here needs new bot code,
   // and nothing here is a verdict: each line is a thing to go and look at.
   const observe = await memoryGet("fabot.observe");
@@ -720,6 +721,7 @@ if (command === "console") {
     );
     if (lag > 5) console.log(`stale    the last CPU row is t${lastRow.t}, ${lag} ticks behind the clock`);
   }
+  console.log(switchesLine(observe));
 
   console.log(
     `t${now} · ${homes.length} colon${homes.length === 1 ? "y" : "ies"} · ${names.length} creeps · ` +
@@ -2817,6 +2819,10 @@ if (command === "console") {
           `${fightOnlys}, mean ${fightOnlyMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
       if (forced) console.log(`  forced full: ${forced}`);
+      // The four leaves alone: the subtree whole is every creep's log.
+      const leaves = ["switches", "cadence", "fightOnly", "fightLane"];
+      const read = await Promise.all(leaves.map((leaf) => memoryGet(`fabot.observe.${leaf}`)));
+      console.log(switchesLine(Object.fromEntries(leaves.map((leaf, i) => [leaf, read[i]]))));
       console.log("");
     }
 

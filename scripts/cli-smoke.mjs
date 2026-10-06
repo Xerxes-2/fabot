@@ -189,6 +189,16 @@ const cpuRow = (t) => ({
 const cpuMemory = {
   fabot: {
     observe: {
+      // The switches in effect (#575), the fight lane overridden live.
+      switches: {
+        cadence: 3,
+        cadenceFrom: "bucket",
+        fightOnly: true,
+        fightOnlyFrom: "tuned",
+        fightLane: "world",
+        fightLaneFrom: "override",
+      },
+      fightLane: "world",
       cpu: {
         ticks: [
           ...Array.from({ length: 5 }, (_, i) => ({ ...cpuRow(i + 1), pops: 9001 + i })),
@@ -239,6 +249,33 @@ smoke("observe cpu reads the trimmed rows and the positional spans (#538)", () =
   assert.match(out, /the long record: 2 spans over 125 ticks, t1-125/, "a keyed span and a positional one both read");
   assert.match(out, /worst single tick 480\.5 ms in t101-125/);
   assert.match(out, /max {2}481 ms {2}mean {2}75 ms {2}bucket floor {3}9000 {2}replans 1 {2}max pops {3}9020/);
+});
+
+smoke("observe cpu names each switch in effect and its source, a standing override flagged (#575)", () => {
+  const { code, out, err } = runOffline(["cpu"]);
+  assert.equal(code, 0, err);
+  assert.ok(
+    out.includes(
+      "switches cadence 3 (bucket) · fight-only on (tuned) · fight-lane world (override)" +
+        "  ! override standing: fight-lane world (observe fight-lane clear)",
+    ),
+    out,
+  );
+});
+
+const { switchesLine } = await import("./switches.mjs");
+smoke("switches: none overridden is no flag; a bundle before them names the override leaves it can read", () => {
+  const tuned = { cadence: 2, cadenceFrom: "tuned", fightOnly: false, fightOnlyFrom: "tuned" };
+  assert.equal(
+    switchesLine({ switches: { ...tuned, fightLane: "percolony", fightLaneFrom: "tuned" } }),
+    "switches cadence 2 (tuned) · fight-only off (tuned) · fight-lane percolony (tuned)",
+  );
+  assert.equal(
+    switchesLine({ cadence: 4, fightOnly: null, fightLane: "parity" }),
+    "switches not written (the deployed bundle predates them)  ! override standing: cadence 4 (observe cadence clear)",
+    "a cleared leaf is null and an unread one is no override",
+  );
+  assert.equal(switchesLine({}), "switches not written (the deployed bundle predates them)");
 });
 
 // ---- observe.mjs outposts, offline ---------------------------------------
