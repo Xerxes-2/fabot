@@ -874,6 +874,12 @@ type World =
         /// #489): what `RivalSafeMode.canActivate` reads. Heap state the shell
         /// also keeps in Memory, so a reset does not forget a safe mode it saw.
         RivalControllers: Map<string, RivalController>
+        /// The ground of a room `Rooms` does not hold, asked by name (#570):
+        /// terrain and border alone, read by a view for the rooms a stray
+        /// body of its own may walk out over and never by a chain, so no
+        /// declaration's routing reads it. The shell's terrain memo; None
+        /// where nothing can be read.
+        StrayGround: string -> RoomFacts option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -893,6 +899,7 @@ module World =
             Raiders = Map.empty
             ArmedSeen = Map.empty
             RivalControllers = Map.empty
+            StrayGround = fun _ -> None
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -917,6 +924,14 @@ module World =
     /// entry absent, never as a lookup that throws.
     let roomOf (world: World) (room: string) : RoomFacts =
         Map.tryFind room world.Rooms |> Option.defaultValue RoomFacts.empty
+
+    /// A room's facts, or where `Rooms` holds none the ground a stray's walk
+    /// out reads (`StrayGround`, #570); None where the world can read
+    /// neither. Asked by a view's stranded rooms alone.
+    let groundOf (world: World) (room: string) : RoomFacts option =
+        match Map.tryFind room world.Rooms with
+        | Some facts -> Some facts
+        | None -> world.StrayGround room
 
     /// Whether safe mode is running in any room of ours this tick: one per
     /// shard, so while it runs no other room of ours can raise its own.
@@ -1747,7 +1762,7 @@ module World =
             /// The [[evacuating room]]s, in `Scanned` (#512): each outpost,
             /// errand or salvage room its stand-down shuts, with the transit
             /// rooms of the walk home from it, while a body this colony holds
-            /// stands on that walk.
+            /// stands on that walk; and the `Stranded` rooms (#570).
             Evacuating: string list
             /// The outposts of the children whose homes this colony keeps
             /// residents in — `Borrowed`'s raised half and `Garrisoned` —
@@ -1755,6 +1770,12 @@ module World =
             /// (#517), shut by her stand-down or not (#534), in `Scanned` as
             /// transit rooms.
             ChildOutposts: string list
+            /// The rooms of `Evacuating` held for a stray body alone (#570):
+            /// each room a body this colony holds stands in that nothing else
+            /// here projects, with the rooms it may walk out over. No chain
+            /// but one that starts in one enters them
+            /// (`SpatialInfo.StrayRooms`).
+            Stranded: string list
         }
 
     /// Each outpost, errand or salvage room of this colony's its stand-down
@@ -1935,6 +1956,27 @@ module World =
                 |> List.filter (worked.Contains >> not)
                 |> List.distinct
 
+        // A room a body this colony holds stands in that nothing above
+        // projects (#570) — a stronghold's room no chain enters, a room a
+        // hauler strayed into — with the rooms it may walk out over
+        // (`RoomName.walkOut`) toward this colony's home whose ground the world
+        // reads (`World.groundOf`): so the body is placed,
+        // Reach and Flee answer for it, and it walks home. No chain or gate
+        // filter, as for `evacuating`: the body is there whatever they say.
+        let stranded =
+            if Set.isEmpty standing then
+                []
+            else
+                let held = Set.ofList (scanned @ evacuating @ chasing @ childOutposts)
+
+                standing
+                |> Seq.filter (held.Contains >> not)
+                |> Seq.collect (RoomName.walkOut tuning.MaxHops colony.Home)
+                |> Seq.distinct
+                |> Seq.filter (fun room ->
+                    not (held.Contains room) && Option.isSome (groundOf world room))
+                |> List.ofSeq
+
         {
             Outposts = outposts
             Errands = errands
@@ -1946,10 +1988,11 @@ module World =
             Cast = cast
             Uncast = casting.Casters |> List.filter (snd >> Option.isNone) |> List.map fst
             Assaults = assaults
-            Scanned = scanned @ evacuating @ chasing @ childOutposts |> List.distinct
+            Scanned = scanned @ evacuating @ chasing @ childOutposts @ stranded |> List.distinct
             Worked = worked
-            Evacuating = evacuating
+            Evacuating = evacuating @ stranded |> List.distinct
             ChildOutposts = childOutposts
+            Stranded = stranded
         }
 
     /// `scanRecalling` over a table of this call's own (`linkedBy`).

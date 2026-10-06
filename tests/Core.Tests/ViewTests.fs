@@ -335,6 +335,7 @@ let private pairWorld: World =
         Raiders = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
+        StrayGround = fun _ -> None
     }
 
 let private noneShut = Map.empty<string, Set<string>>
@@ -1358,9 +1359,112 @@ let colonyViewTests =
                 Expect.isTrue (Set.contains outpost view.Evacuating) "and she walks it home"
             }
 
+            test
+                "a body of hers standing in a room no chain names is placed there and walks out of it" {
+                // #570: a hauler strayed into W12S29, beside her home, which no
+                // declaration of hers names. The room is projected for the
+                // body's sake alone: placed, its exits walkable, nothing in it
+                // pooled.
+                let stray = "W12S29"
+
+                let world =
+                    { pairWorld with
+                        Rooms =
+                            pairWorld.Rooms
+                            |> Map.add
+                                stray
+                                (roomOf
+                                    stray
+                                    Ownership.Unowned
+                                    [
+                                        "src-stray", { X = 6; Y = 6 }, Source
+                                        "can-stray", { X = 6; Y = 7 }, Structure BuiltKind.Container
+                                    ]
+                                 |> withSources [ "src-stray" ]
+                                 |> withStores [ "can-stray", 900 ]
+                                 |> withCreeps [ "hauler-901-Spawn1", { X = 20; Y = 20 } ]
+                                 |> snd)
+                        Creeps = creep "hauler-901-Spawn1" stray :: pairWorld.Creeps
+                    }
+
+                let view = viewOf world mother
+
+                Expect.equal
+                    (Map.tryFind
+                        "hauler-901-Spawn1"
+                        (SpatialInfo.layerOf view.Spatial stray).CreepPositions)
+                    (Some { X = 20; Y = 20 })
+                    "the body is placed on its tile"
+
+                Expect.isEmpty view.Unprojected "so nobody is unplaced"
+
+                Expect.isTrue (Set.contains stray view.Evacuating) "a room it walks home from"
+
+                Expect.isTrue
+                    (Set.contains stray view.Spatial.StrayRooms
+                     && not (Set.contains stray view.Crossed))
+                    "held for the stray alone: no chain of hers crosses it"
+
+                Expect.isFalse
+                    (List.exists (fun id -> id = "src-stray" || id = "can-stray") (idsOf view))
+                    "its rock and its store are not hers to work"
+
+                Expect.isFalse (Map.containsKey stray view.Sightings) "nor to remember"
+
+                let atlas = Fabot.Core.Atlas.ofView view
+
+                Expect.isNonEmpty
+                    (Fabot.Core.Atlas.routes atlas stray mother)
+                    "the stray walks home"
+
+                Expect.isEmpty
+                    (Fabot.Core.Atlas.routes atlas mother stray)
+                    "and no chain of hers from home enters its room"
+
+                // The dark room beyond its west exit, which the world holds no
+                // facts for, is projected for it off its ground alone
+                // (`World.StrayGround`).
+                let beyond = "W13S29"
+
+                let grounded =
+                    viewOf
+                        { world with
+                            StrayGround =
+                                fun room ->
+                                    if room = beyond then
+                                        Map.tryFind beyond (unseen beyond Map.empty)
+                                    else
+                                        None
+                        }
+                        mother
+
+                Expect.isTrue
+                    (Set.contains beyond grounded.Spatial.StrayRooms)
+                    "the ground beyond its exit is projected for the stray"
+
+                Expect.equal
+                    (World.hopsUnder
+                        StandDown.none
+                        (JoinTable())
+                        Tuning.defaults
+                        world
+                        mother
+                        beyond)
+                    None
+                    "and joins no declaration's chain"
+
+                Expect.isFalse
+                    (Map.containsKey
+                        stray
+                        (viewOf { world with Creeps = pairWorld.Creeps } mother).Spatial.Rooms)
+                    "with no body of hers in it, the room leaves the projection"
+            }
+
             test "a body standing in a room no colony projects is named unplaced" {
                 // The anchor row reads this to count out an Anchor the mover
-                // cannot step (#506): the room has no layer to place it in.
+                // cannot step (#506): the room has no layer to place it in —
+                // one whose ground the world cannot read, since any other
+                // room a body of hers stands in she projects (#570).
                 let world =
                     { pairWorld with
                         Creeps = creep "anchor-900-Spawn1" "W20S20" :: pairWorld.Creeps
@@ -1566,10 +1670,13 @@ let colonyViewTests =
 
                 // And the tick it does go dark: with no control entry there
                 // is no stage, the room leaves her scan set outright, and its
-                // memory leaves with it.
+                // memory leaves with it. Nobody in it: a room a body she holds
+                // stands in she projects whatever (#570), and with the child's
+                // spawn dark she holds the child's hauler too.
                 let blind =
                     { pairWorld with
                         Rooms = unseen child pairWorld.Rooms
+                        Creeps = pairWorld.Creeps |> List.filter (fun creep -> creep.Room <> child)
                     }
 
                 let view = viewOf blind mother
@@ -1581,6 +1688,23 @@ let colonyViewTests =
                 Expect.isFalse
                     (Map.containsKey child view.Sightings)
                     "and she remembers nothing of it"
+
+                // With her bodies still standing there, the room is one they
+                // walk out of, and still nothing she remembers.
+                let stranded =
+                    viewOf
+                        { pairWorld with
+                            Rooms = unseen child pairWorld.Rooms
+                        }
+                        mother
+
+                Expect.isTrue
+                    (Set.contains child stranded.Evacuating)
+                    "dark with her bodies in it, a room they walk out of"
+
+                Expect.isFalse
+                    (Map.containsKey child stranded.Sightings)
+                    "and she remembers nothing of it either"
             }
 
             test "an unseen outpost still carries its declared furniture" {

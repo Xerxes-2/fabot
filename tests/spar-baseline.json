@@ -134,9 +134,9 @@
   "stronghold-l2-rangers": {
     "castEnergy": 0,
     "cleared": null,
-    "hurt": 12600,
+    "hurt": 740,
     "kills": 0,
-    "ourDeaths": 3,
+    "ourDeaths": 0,
     "safeMode": false,
     "stoodDown": false,
     "struck": 0,

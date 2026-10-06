@@ -110,7 +110,8 @@ let private towerEnergy (a: Arena) (x: int) (y: int) : int =
 // `npm run capture -- W16S26 980640 --rooms W15S28 --no-live-memory`, read at live t990,242.
 //   W16S26  https://screeps.com/room-history/shardSeason/W16S26/980600.json
 //   W15S28  https://screeps.com/room-history/shardSeason/W15S28/980600.json
-// W16S27, the room the ranger came in from, has no replay (404). Spawn3 was
+// W16S27, the room the ranger came in from, has no replay (404): laid as its
+// bare terrain, as the live world held it for W15S28's chains. Spawn3 was
 // spawning worker-980588-Spawn3 and Spawn8 ranger-980534-Spawn8: not placed.
 // The second ranger is `npm run capture -- W16S26 980749`: the same room
 // but for the towers' stores and every clock.
@@ -455,7 +456,7 @@ let private w16s26T980640 () : Arena =
             }
         ]
 
-    arena 980_641 [ w16s26; w15s28 ] colonies bodies
+    arena 980_641 [ w16s26; room "W16S27"; w15s28 ] colonies bodies
 
 /// The bunker2 alone with a hostile of Trepidimous's, no keeper and no
 /// colony: the stronghold's own rules, a tick from t980,641.
@@ -522,33 +523,81 @@ let strongholdTests =
                         "the defender holds: no rampart tile stands beside the ranger"
                 }
 
-            // Characterisation (movement S0, `docs/adr/0088`): a ranger losing
-            // 336 a tick to the towers over its 84 heal stands and heals until
-            // it dies (#566). Live it stepped once more, to 25,46, and died a
-            // tick sooner (t980,650): its Task is gone from the Transition log,
-            // and the code then routed it in, which 8b4a313f has since barred.
-            // Not flipped at movement S2, which lays the towers' reach and
-            // walks a body out over the exit by it (#566, ThreatTests' "a
-            // ranger under a stronghold's towers"): since 8b4a313f no chain
-            // enters a stronghold's room, so W15S28 does not project W16S26
-            // and the ranger standing there is placed by nothing — no Task,
-            // no Flee, no step. Only a body that stood there before that
-            // barrier can be in this state.
+            // Flipped by #570 (was "Characterisation (movement S0): … stands
+            // under its towers until it dies", 336 a tick, dead at t980,651, on
+            // 26,47 throughout): no chain enters W16S26, but W15S28 projects it
+            // because its ranger stands there, so the ranger takes Flee for the
+            // exit (#566). It cannot make it: two steps out, its fatigue 6 holds
+            // it the first tick and its first step's the next two, and by then
+            // the towers have shot off its last MOVE (21 at the front of 42
+            // parts). Its step to 25,48, one nearer the west tower, costs it
+            // 396 a tick and the tick it dies on.
             test
-                "Characterisation (movement S0): the ranger in a stronghold room no colony projects stands under its towers until it dies" {
+                "the ranger in a stronghold room no chain enters takes Flee for the exit and is shot to a stand first" {
                 let _, trace = w16s26T980640 () |> run 12
                 let id = "ranger-980431-Spawn3"
 
                 Expect.equal
-                    (hitsOf id trace)
-                    [ 3_228; 2_892; 2_556; 2_220; 1_884; 1_548; 1_212; 876; 540; 192 ]
-                    $"336 a tick net, healing all the way\n{describe trace}"
+                    (trace
+                     |> List.take 4
+                     |> List.map (fun t -> List.contains (SayCreep(id, "🏃")) t.Ours))
+                    [ true; true; true; true ]
+                    $"Flee every tick it has a MOVE left\n{describe trace}"
 
-                Expect.equal (diedOn id trace) (Some 10) "dead at t980,651"
+                Expect.equal
+                    (pathOf id trace |> List.map (fun (_, b) -> b.At) |> List.distinct)
+                    [ at "W16S26" 26 47; at "W16S26" 25 48 ]
+                    "one step for the exit, on the first tick its fatigue lets it"
+
+                Expect.equal
+                    (hitsOf id trace)
+                    [ 3_228; 2_892; 2_496; 2_100; 1_704; 1_308; 912; 516; 108 ]
+                    "336, then 396 a tick net"
+
+                Expect.equal (diedOn id trace) (Some 9) "dead at t980,650"
+            }
+
+            // The same room and colony with the ranger hale and rested, as it
+            // stood the tick it first came under the towers: projected, it
+            // flees over the south exit into W16S27, off the towers' room,
+            // and heals there (#566, #570).
+            test "a hale ranger in a stronghold room no chain enters flees over the exit and lives" {
+                let id = "ranger-980431-Spawn3"
+                let start = w16s26T980640 ()
+
+                let hale =
+                    { start with
+                        Bodies =
+                            start.Bodies
+                            |> List.map (fun b ->
+                                if b.Id = id then
+                                    { b with Hits = 4_200; Fatigue = 0 }
+                                else
+                                    b)
+                    }
+
+                let _, trace = hale |> run 6
+
+                Expect.equal
+                    (trace
+                     |> List.take 2
+                     |> List.map (fun t -> List.contains (SayCreep(id, "🏃")) t.Ours))
+                    [ true; true ]
+                    $"it takes Flee at once\n{describe trace}"
+
+                Expect.equal
+                    (pathOf id trace |> List.map (fun (_, b) -> b.At.Room) |> List.distinct)
+                    [ "W16S26"; "W16S27" ]
+                    "and walks out over the exit"
+
+                Expect.isNone (diedOn id trace) "alive"
 
                 Expect.isTrue
-                    (pathOf id trace |> List.forall (fun (_, b) -> b.At = at "W16S26" 26 47))
-                    "it never steps back over the exit one tile away"
+                    (hitsOf id trace
+                     |> List.pairwise
+                     |> List.skip 2
+                     |> List.forall (fun (a, b) -> b > a))
+                    "out of the towers' room, healing"
             }
 
             test "the defender walks only its ramparts and swings at a hostile beside them" {

@@ -389,6 +389,11 @@ type SpatialInfo =
         /// where a chain a crossing longer does (`Atlas.routes`). Soft where
         /// `RivalRooms` is hard.
         AvoidRooms: Set<string>
+        /// The rooms of this projection held for a stray body of ours alone
+        /// (`World.ScanSet.Stranded`, #570): `Atlas.routes` enters one only on
+        /// a chain that starts in one — the stray's own walk out — and the
+        /// plan's census signs none.
+        StrayRooms: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -409,6 +414,7 @@ module SpatialInfo =
             Owners = Map.empty
             RivalRooms = Set.empty
             AvoidRooms = Set.empty
+            StrayRooms = Set.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the

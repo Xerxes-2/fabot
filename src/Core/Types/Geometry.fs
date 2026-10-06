@@ -322,6 +322,18 @@ module RoomName =
             ]
         | _ -> []
 
+    /// The rooms a body standing in `room` may walk out over (#570): the room,
+    /// the four beside it — whichever exit a flight takes — and, inside the hop
+    /// budget, every room a walk home to `home` could cross. Off the names
+    /// alone, as `transitBetween` is.
+    let walkOut (maxHops: int) (home: string) (room: string) : string list =
+        let homeward =
+            match hopsBetween home room with
+            | Some hops when hops <= maxHops -> transitBetween home room
+            | _ -> []
+
+        room :: adjacent room @ homeward |> List.distinct
+
     /// Every room a walk of at most `hops` crossings could pass through, the
     /// two ends excluded: `transitBetween`'s rectangle widened on every side
     /// by half the crossings to spare, since a step out of it is a step back

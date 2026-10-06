@@ -964,6 +964,20 @@ let private factsOf
         }
     | Some room -> seenFacts ours terrain spawns standing casting room
 
+/// A room's ground as a dark declared room's reads (`factsOf`'s unseen half):
+/// terrain and border off the memo, for `World.StrayGround` (#570).
+let private strayGround (roomName: string) : RoomFacts option =
+    let terrain = terrainOf roomName
+
+    Some
+        { RoomFacts.empty with
+            Layer =
+                { RoomLayer.empty with
+                    Terrain = terrain.Ground
+                }
+            Border = terrain.Border
+        }
+
 /// The rooms the world holds facts for this tick: every room we can see and
 /// every room a standing colony's declaration names. The union and not one
 /// colony's scan set: narrowing the world by the gates would put the shell in
@@ -1174,6 +1188,8 @@ let ofGame
         ArmedSeen = Map.empty
         // And the rival controllers `World.recallRivalControllers`' (#489).
         RivalControllers = Map.empty
+        // Any room's ground, asked for a stray's walk out alone (#570).
+        StrayGround = strayGround
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =
@@ -1215,6 +1231,7 @@ let ofGame
                 }
                 : WorldCreep)
     }
+
 
 /// Where every creep of ours stands this tick, for next tick's
 /// `CreepInfo.Moved`. Here so it shares `ofGame`'s gestating filter.

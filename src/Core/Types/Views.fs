@@ -1486,6 +1486,10 @@ module ColonyView =
         // rule is spelled.
         let transit = scanned |> List.filter (scan.Worked.Contains >> not) |> Set.ofList
 
+        // The rooms held for a stray body alone (#570), narrowed as transit
+        // rooms are.
+        let stranded = Fresh.setOfSeq scan.Stranded
+
         // Each scanned room's facts and its memory (#151), in scan order. A
         // room the colony only **crosses** keeps neither, one rule and not
         // two (#271): `transiting` takes its every id out, and a memory of
@@ -1497,7 +1501,15 @@ module ColonyView =
         let narrowed =
             scanned
             |> List.map (fun room ->
-                let facts = World.roomOf world room |> withoutAllyLoot
+                // A stranded room beyond `World.Rooms` reads a stray's ground
+                // (#570).
+                let facts =
+                    if stranded.Contains room then
+                        World.groundOf world room |> Option.defaultValue RoomFacts.empty
+                    else
+                        World.roomOf world room
+                    |> withoutAllyLoot
+
                 let remembered = Map.tryFind room world.Sightings
 
                 if List.contains room bootstrap then
@@ -1763,6 +1775,7 @@ module ColonyView =
                         let avoided = World.avoidedRooms tuning world
 
                         worked |> List.map fst |> List.filter avoided.Contains |> Fresh.setOfSeq
+                    StrayRooms = stranded
                 }
                 // The declared furniture and the errands' targets go in last,
                 // over the whole assembled projection: a declared id and tile
@@ -1870,7 +1883,10 @@ module ColonyView =
                 |> List.map (fun seen -> seen.Healer)
             RecalledRaiders = recalled
             SafeModeRunning = World.safeModeRunning world
-            Crossed = transit
+            // Less the rooms held for a stray alone (#570): no chain of the
+            // colony's crosses them, no observer aims at them and no sweep
+            // works them.
+            Crossed = Set.difference transit stranded
             Evacuating = Set.ofList scan.Evacuating
             // The declared Reactors' own rows (#354): the store here is what
             // meters a delivery. A room without vision contributes no row, and

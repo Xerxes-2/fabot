@@ -1387,6 +1387,7 @@ let worldOf (a: Arena) : World =
         Raiders = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
+        StrayGround = fun _ -> None
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered

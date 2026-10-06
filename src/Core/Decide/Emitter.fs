@@ -602,7 +602,11 @@ type Strike<'target> =
 /// transit room's, or one it does not project —, where no mass attack is
 /// fired.
 let shields (view: ColonyView) (room: string) : Set<Pos> option =
-    if not (Map.containsKey room view.Spatial.Rooms) || Set.contains room view.Crossed then
+    if
+        not (Map.containsKey room view.Spatial.Rooms)
+        || Set.contains room view.Crossed
+        || Set.contains room view.Spatial.StrayRooms
+    then
         None
     else
         (SpatialInfo.layerOf view.Spatial room).Foreign

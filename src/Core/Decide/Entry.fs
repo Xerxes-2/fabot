@@ -70,9 +70,13 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // Rebuilt and not mapped: `Map.map` would keep whichever comparer built
     // the world's Rooms — `Fresh`'s in the shell, a test's or the harness's
     // elsewhere — and the memo outlives the tick (#401).
+    // A room held for a stray alone (#570) is signed by neither half: no
+    // plan or walk table of the colony's reads it, and its coming and going
+    // replans nothing.
     let rooms =
         spatial.Rooms
         |> Map.toList
+        |> List.filter (fun (room, _) -> not (Set.contains room spatial.StrayRooms))
         |> List.map (fun (room, layer) ->
             room,
             let standingIds = ResizeArray<string>()

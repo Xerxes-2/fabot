@@ -1904,7 +1904,8 @@ let pricedWalksFrom
 /// the projection does not carry has no ring and is joined to nothing, so the
 /// search stays inside the rooms `RoomName.transitBetween` (and a harassment
 /// room's `Via`) put in the world. A room another player owns is entered by
-/// no chain (`SpatialInfo.RivalRooms`), and left by one.
+/// no chain (`SpatialInfo.RivalRooms`), and left by one; a room held for a
+/// stray body alone (`SpatialInfo.StrayRooms`) by a chain from one alone.
 /// Memoised per ordered pair, the empty answer included.
 ///
 /// **Which chain is walked is not decided here** (#288): two chains of the
@@ -1923,9 +1924,15 @@ let routesFor
     (toRoom: string)
     : string list list =
     memoised atlas.Routes (fromRoom, toRoom, walker) (fun () ->
+        // A room held for a stray alone (#570) is entered only by the stray's
+        // own walk out: a chain that starts in one.
+        let stray = atlas.Spatial.StrayRooms
+        let fromStray = Set.contains fromRoom stray
+
         let entered there =
-            not (Set.contains there atlas.Spatial.RivalRooms)
-            || walker = Walker.Siege && there = toRoom
+            (not (Set.contains there atlas.Spatial.RivalRooms)
+             || walker = Walker.Siege && there = toRoom)
+            && (fromStray || not (Set.contains there stray))
 
         // An assault's room from its declared entry alone, for a siege.
         let fromEntry here there =

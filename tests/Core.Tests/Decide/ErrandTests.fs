@@ -749,6 +749,7 @@ let errandStandDownTests =
                         Raiders = Map.empty
                         ArmedSeen = Map.empty
                         RivalControllers = Map.empty
+                        StrayGround = fun _ -> None
                     }
 
                 let view shut =
