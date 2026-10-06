@@ -18,7 +18,8 @@ npm run capture -- <room> <tick> [--rooms R1,R2] [--name slug] [--out path] [--l
 The skeleton has a header and a fixture `let private <slug> () : Arena`. The header names the command, the tick, and each room's replay URL. The fixture holds:
 
 - **Controllers:** owner, level, safe modes, cooldown and clocks.
-- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. An invader core carries its level (0 unless written) and reaches the colony as `RoomFacts.InvaderCores`, with no collapse clock. Drops, tombstones and ruins are left out, and the header counts them.
+- **Structures, sites and the Reactor:** placed by the arena builders, with hits, stores and rampart decay. An invader core carries its level (0 unless written) and reaches the colony as `RoomFacts.InvaderCores`. Drops, tombstones and ruins are left out, and the header counts them.
+- **Strongholds** (#565): a deployed core of level 1-3 gets `withTowerDuties [ FocusCore ]` and `withStronghold <collapse tick> <spawning>`, and its defenders `Defend`. The arena then runs `stronghold.js`: every tower on the hostile closest to the core (a keeper is no hostile; ties go to the first body in the fixture's order), the defender on its ramparts, its respawn 180 ticks after death, the loot event when the core falls, and the collapse. The core refills a tower on a fixed cadence (every 10th tick at L2), not on the engine's dice. A core still deploying stands alone, and L4+ is a TODO.
 - **Roads:** `withRoads [ x, y, hits; ... ]` per room (#560). A step onto one costs fatigue 1 a part, as the engine's, and our colony walks them as the shell files them. They neither wear nor decay.
 - **Bodies:** both sides, built with `body` plus their hits, life, fatigue and stores. A comment beside each body lists its live parts and its live acts.
 - **Banks:** each home's bank is its energy capacity, not what it held at the tick. The arena never debits the bank and reads it as the capacity too. A near-empty bank prices the guard row's cast as a loss, and that stands an outpost down that live held.
@@ -39,7 +40,7 @@ The arena starts at `tick + 1`. The replay holds the state after the tick ran, s
 
 ## Landing it
 
-1. Paste the fixture at module level in the arena file that owns the domain: `ArenaTests.fs` (scenarios, borders, defence), `ArenaClaimTests.fs` or `ArenaReactorTests.fs`.
+1. Paste the fixture at module level in the arena file that owns the domain: `ArenaTests.fs` (scenarios, borders, defence), `ArenaClaimTests.fs`, `ArenaReactorTests.fs` or `ArenaStrongholdTests.fs`.
 2. Move the test into that file's testList.
 3. Name both after what they pin.
 4. Write the expectation, and turn `ptest` into `test`.

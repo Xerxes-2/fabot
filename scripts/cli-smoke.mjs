@@ -529,6 +529,28 @@ smoke("arena-skeleton banks active extensions, suffixes a clashing site, clamps 
   assert.ok(!text.includes("let at roomName"), "no unused position helper when no body is placed");
 });
 
+smoke("arena-skeleton runs a deployed stronghold: core-focus towers, its clocks, a Defend defender", () => {
+  const collapse = [{ effect: 1002, power: 1002, endTime: 1045681, duration: 67951 }];
+  const objects = {
+    core: { _id: "core", type: "invaderCore", level: 2, user: "2", x: 8, y: 36, hits: 100000, hitsMax: 100000, effects: collapse, spawning: { name: "defender0", spawnTime: 1100 } },
+    t: { _id: "t", type: "tower", user: "2", x: 7, y: 35, store: { energy: 980 }, hits: 3000, hitsMax: 3000, effects: collapse },
+    d: { _id: "d", type: "creep", name: "defender1", user: "2", x: 8, y: 35, hits: 3000, hitsMax: 3000, ageTime: 1045681, strongholdId: "W16S26_1", body: [{ type: "attack", hits: 100 }] },
+  };
+  const text = skeleton({
+    rooms: [{ name: "W16S26", href: "h", objects, hasFixture: true }],
+    tick: 1000, ourId: "me", usernames: new Map(), assignments: null, slug: "bunker", command: "c",
+  });
+  for (const line of [
+    "        |> withTowerDuties [ FocusCore ]",
+    '        |> withStronghold 1_045_681 (Some("defender0", 1_100))',
+    "                    Level = 2",
+    '            { body "defender1" (Side.Npc "Invader") (parts [ Attack, 1 ]) (at "W16S26" 8 35) (Some Defend) with',
+  ]) {
+    assert.ok(text.includes(line), `missing:\n${line}\n---\n${text}`);
+  }
+  assert.ok(!text.includes("defender1: TODO"), "the core drives its defender: no script to write");
+});
+
 // ---- profile.mjs, flags -------------------------------------------------
 // The flags are read before the bundle loads, so a refusal needs no build.
 

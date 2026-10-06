@@ -41,6 +41,10 @@
 /// walked at fatigue 1 a part and filed for the colony's walk; it neither
 /// wears nor decays. A body's `Boosts` multiply its swing, shot, heal,
 /// dismantle and MOVE, and its boosted TOUGH takes a share of the damage.
+/// An Invader stronghold of level 1–3 runs by `stronghold.js` (#565,
+/// `withStronghold`): its towers on the hostile closest to the core, refilled
+/// on a fixed cadence, its defenders walking its ramparts and respawned by
+/// the core, its loot and its collapse.
 /// Not modelled: the rest of the economy (harvest, pickup, a store's
 /// refill), a downgrade, boosting itself, pulling, portals, power creeps,
 /// nukes, and safe mode for any side but ours.
@@ -101,8 +105,8 @@ type Act =
     | Suicide
 
 /// A scripted body's plan, re-read every tick from the start-of-tick state.
-/// Every behaviour but `Do` and `Invader` also fights what stands in reach
-/// of it (`fightInReach`).
+/// Every behaviour but `Do`, `Invader` and `Defend` also fights what stands
+/// in reach of it (`fightInReach`).
 type Behaviour =
     /// Exactly these acts every tick and nothing else: the physics tests'
     /// hand on the engine.
@@ -124,6 +128,10 @@ type Behaviour =
     /// The NPC raid creep, as the engine drives user '2' (`invaderActs`): a
     /// body with a HEAL part heals, one without attacks, and either shoots.
     | Invader
+    /// A stronghold's defender, as its core drives it (`stronghold/creeps.js`
+    /// `simple-melee`, then `focusClosest`): walks only over its side's
+    /// ramparts and swings at what stands beside them (`defendActs`).
+    | Defend
     /// Walk to a tile, across rooms if it is in another one.
     | GoTo of RoomPos
     /// Each behaviour until the arena tick beside it (exclusive); the last
@@ -252,6 +260,11 @@ type TowerDuty =
     | Shoot of Focus
     /// Repair the weakest rampart or wall of its side below these hits.
     | Mend of below: int
+    /// A stronghold's (`stronghold.js` `focusClosest`): every tower on the
+    /// one hostile closest to its side's invader core, ties to the first in
+    /// object order (the arena's body order); nothing once the core is gone,
+    /// its `pretick.js` being what drives them.
+    | FocusCore
 
 /// A sector centre's Reactor (`mod-season5/src/reactor.roomObject.js`): no
 /// hits, walkable, a T store of `Engine.reactorCapacity`.
@@ -264,6 +277,24 @@ type ArenaReactor =
         Thorium: int
         /// The tick its streak began; `continuousWork` is the time since.
         LaunchTime: int option
+    }
+
+/// A deployed stronghold, L1–L3 (`invader-core/stronghold/stronghold.js`
+/// `bunker1`–`bunker3`): its core's clocks. Its towers fire by `FocusCore`;
+/// its defenders walk by `Defend`.
+type ArenaStronghold =
+    {
+        /// The invader core's id; the stronghold acts while it stands.
+        Core: string
+        /// The core's owner, whose towers, ramparts and defenders are the
+        /// stronghold's.
+        Owner: Side
+        /// EFFECT_COLLAPSE_TIMER's `endTime`: the tick every structure of the
+        /// stronghold goes (`processor.js`), its defenders' `ageTime`.
+        CollapseAt: int
+        /// The defender the core is spawning and its `spawnTime`
+        /// (`invader-core/create-creep.js`); None while idle.
+        Spawning: (string * int) option
     }
 
 /// One captured room in the arena, with what stands on it beyond terrain.
@@ -283,6 +314,7 @@ type ArenaRoom =
         /// Whether its rival owner raises safe mode the tick a structure of
         /// theirs here is struck, whenever the engine lets them (#491).
         Panics: bool
+        Stronghold: ArenaStronghold option
     }
 
 /// A body in a spawn of ours (`spawns/create-creep.js`): born at `Done`.
@@ -364,7 +396,8 @@ type ArenaEvent =
     | ReactorClaimed of room: string * by: string
     /// The Reactor burnt one T for its owner, who scored this much.
     | Burned of room: string * owner: string * score: int
-    /// A spawn of ours finished a body, standing beside it.
+    /// A spawn of ours, or a stronghold's core, finished a body, standing
+    /// beside it.
     | Born of id: string
     /// A `claimController` landed: the room is the body's side's at level 1.
     | ControllerClaimed of room: string * by: string
@@ -379,6 +412,14 @@ type ArenaEvent =
     | Built of site: string
     /// A `setPublic` landed on a rampart of ours (`ramparts/set-public.js`).
     | MadePublic of rampart: string * isPublic: bool
+    /// A stronghold's core fell (`invader-core/destroy.js`): its ruin holds
+    /// commodities worth `coreAmounts[level]` of density (`strongholds.js`),
+    /// which kinds a roll of the core's deposit type picks. Its towers and
+    /// defenders stand idle until the collapse.
+    | CoreLooted of core: string * density: int
+    /// A stronghold's collapse timer ran out: its structures are gone
+    /// (`processor.js`), its defenders at the end of their `ageTime`.
+    | Collapsed of room: string
 
 /// One body at the end of a tick.
 type Snapshot =
@@ -452,6 +493,7 @@ let room (name: string) : ArenaRoom =
         Bank = 0
         Reactor = None
         Panics = false
+        Stronghold = None
     }
 
 /// Its rival owner raises safe mode here once struck, when the engine lets
@@ -604,6 +646,40 @@ let withRoads (roads: (int * int * int) list) (r: ArenaRoom) : ArenaRoom =
 
 /// The towers not ours run these duties.
 let withTowerDuties (duties: TowerDuty list) (r: ArenaRoom) : ArenaRoom = { r with Duties = duties }
+
+/// A stronghold's `population` by its core's level (`stronghold.js`): each
+/// defender's name and body (`creeps.js` `weakDefender`, `fullDefender`).
+let private populationOf (level: int) : (string * BodyPart list) list =
+    match level with
+    | 2 -> [ "defender0", parts [ Attack, 15; Move, 15 ] ]
+    | 3 ->
+        [
+            "defender0", parts [ Attack, 25; Move, 25 ]
+            "defender1", parts [ Attack, 25; Move, 25 ]
+        ]
+    | _ -> []
+
+/// The room's deployed invader core (one of level 1–3 among its structures)
+/// runs as a stronghold until `collapseAt`, spawning `spawning` (the name and
+/// `spawnTime`) if it is. Its towers want `withTowerDuties [ FocusCore ]`.
+/// L4–L5's `focusMax`, coordinated defenders, fortifier and boosts are not
+/// modelled.
+let withStronghold (collapseAt: int) (spawning: (string * int) option) (r: ArenaRoom) : ArenaRoom =
+    match r.Structures |> List.tryFind (fun s -> s.Kind = "invaderCore" && s.Level > 0) with
+    | Some({ Owner = Some owner } as core) when core.Level <= 3 ->
+        { r with
+            Stronghold =
+                Some
+                    {
+                        Core = core.Id
+                        Owner = owner
+                        CollapseAt = collapseAt
+                        Spawning = spawning
+                    }
+        }
+    | Some core ->
+        failwithf "%s: a level-%d stronghold is not modelled" r.Capture.RoomName core.Level
+    | None -> failwithf "%s has no deployed invader core" r.Capture.RoomName
 
 /// The room's captured controller, owned as given, its downgrade timer full.
 let withController
@@ -931,12 +1007,15 @@ let private activePower (b: Body) (part: BodyPart) =
 
 let private hitsMax (b: Body) = partHitsOf b.Parts
 
-/// Whether two sides fight each other: different, and not us beside an ally
-/// of ours (`Colony.isAlly`).
+/// Whether two sides fight each other: different, not us beside an ally of
+/// ours (`Colony.isAlly`), and not two NPCs: an invader's AI, a stronghold's
+/// and a keeper's each leave users '2' and '3' out of their hostiles
+/// (`invaders/pretick.js`, `invader-core/pretick.js`, `keepers/pretick.js`).
 let private sidesHostile (x: Side) (y: Side) : bool =
     let allied (x: Side) (y: Side) =
         match x, y with
         | Side.Ours, Side.Player name -> Colony.isAlly name
+        | Side.Npc _, Side.Npc _ -> true
         | _ -> false
 
     x <> y && not (allied x y) && not (allied y x)
@@ -1241,7 +1320,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         TicksToLive = b.TicksToLive
                     })
             // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
-            // them; the arena runs no collapse clock.
+            // them: a stronghold's with its collapse clock.
             InvaderCores =
                 r.Structures
                 |> List.filter (fun s -> s.Kind = "invaderCore")
@@ -1250,7 +1329,10 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         Id = s.Id
                         RoomName = name
                         Tile = s.At
-                        CollapseTick = None
+                        CollapseTick =
+                            r.Stronghold
+                            |> Option.filter (fun sh -> sh.Core = s.Id)
+                            |> Option.map (fun sh -> sh.CollapseAt)
                         Level = s.Level
                     })
         }
@@ -2335,6 +2417,109 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
 
     List.ofSeq acts
 
+/// The invader core of a side standing in a room.
+let private coreOf (r: ArenaRoom) (side: Side) : ArenaStructure option =
+    r.Structures
+    |> List.tryFind (fun s -> s.Kind = "invaderCore" && s.Owner = Some side)
+
+/// The hostile a stronghold's core focuses (`focusClosest`): the closest to
+/// it among the bodies in its room not of its side nor an NPC's, ties to
+/// the first in object order (lodash `_.min`).
+let private coreFocus (a: Arena) (room: string) (core: ArenaStructure) : Body option =
+    let at = RoomPos.at room core.At
+
+    a.Bodies
+    |> List.filter (fun b ->
+        b.At.Room = room
+        && core.Owner |> Option.exists (fun side -> sidesHostile side b.Side))
+    |> List.sortBy (fun b -> dist at b.At)
+    |> List.tryHead
+
+/// One stronghold defender's intents (`creeps.js` `simple-melee`, then
+/// `focusClosest`), off the start-of-tick room; nothing once its side's core
+/// is gone. Its `safeMatrixCallback` opens only its side's rampart tiles
+/// with no obstacle on them, creeps not asked: `findClosestByPath` takes the
+/// last hostile beside the nearest such tile beside any (none when no tile
+/// is beside one); beside it the defender swings, else it steps along the
+/// rampart walk toward it, to the first-reached tile in range 1 — PathFinder
+/// keeps an incomplete path's nearest tile, the target's own being shut.
+/// Then `focusClosest` turns any ATTACK body beside the core's focus on it.
+let private defendActs (a: Arena) (b: Body) : Act list =
+    let r = Map.find b.At.Room a.Rooms
+
+    match coreOf r b.Side with
+    | None -> []
+    | Some core ->
+        let hostiles =
+            a.Bodies
+            |> List.filter (fun o -> o.At.Room = b.At.Room && sidesHostile b.Side o.Side)
+
+        let swing =
+            if List.isEmpty hostiles then
+                []
+            else
+                let obstacles =
+                    r.Structures
+                    |> List.filter (fun s -> Set.contains s.Kind obstacleKinds)
+                    |> List.map (fun s -> s.At)
+                    |> Set.ofList
+
+                let safe =
+                    r.Structures
+                    |> List.filter (fun s -> s.Kind = "rampart" && s.Owner = Some b.Side)
+                    |> List.map (fun s -> s.At)
+                    |> List.filter (fun p -> not (Set.contains p obstacles))
+                    |> Set.ofList
+
+                let beside (p: Pos) (o: Body) = dist (RoomPos.at b.At.Room p) o.At <= 1
+
+                // Breadth-first over the safe tiles: each tile's parent.
+                let parent = Dictionary<Pos, Pos>()
+                let start = RoomPos.pos b.At
+                parent[start] <- start
+                let order = ResizeArray [ start ]
+                let mutable i = 0
+
+                while i < order.Count do
+                    let p = order[i]
+                    i <- i + 1
+
+                    for dx in -1 .. 1 do
+                        for dy in -1 .. 1 do
+                            let q = { X = p.X + dx; Y = p.Y + dy }
+
+                            if Set.contains q safe && not (parent.ContainsKey q) then
+                                parent[q] <- p
+                                order.Add q
+
+                let reached = List.ofSeq order
+
+                let target =
+                    reached
+                    |> List.tryFind (fun p -> hostiles |> List.exists (beside p))
+                    |> Option.bind (fun p -> hostiles |> List.filter (beside p) |> List.tryLast)
+
+                match target with
+                | None -> []
+                | Some t when dist b.At t.At <= 1 -> [ Act.Attack t.Id ]
+                | Some t ->
+                    let rec firstStep (p: Pos) =
+                        if parent[p] = start then p else firstStep parent[p]
+
+                    reached
+                    |> List.tryFind (fun p -> p <> start && beside p t)
+                    |> Option.bind (fun goal -> directionTo start (firstStep goal))
+                    |> Option.map Act.Move
+                    |> Option.toList
+
+        let focused =
+            coreFocus a b.At.Room core
+            |> Option.filter (fun t -> dist b.At t.At = 1 && List.contains Attack b.Parts)
+            |> Option.map (fun t -> Act.Attack t.Id)
+            |> Option.toList
+
+        swing @ focused
+
 /// The behaviour in force this tick, `Phases` and `Retreat` resolved.
 let rec private current (tick: int) (b: Body) (behaviour: Behaviour) : Behaviour =
     match behaviour with
@@ -2472,6 +2657,7 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
 
             shoot @ heal @ move (kiteStep a b target keep)
     | Invader -> invaderActs a b
+    | Defend -> defendActs a b
     | Breach goal ->
         match firstBarrier a b goal with
         | Some(target, s) ->
@@ -3246,6 +3432,10 @@ let private theirTowers (a: Arena) (ledger: Ledger) : (string * TowerAct) list =
                     |> Seq.sortBy (fun (_, s) -> s.Hits, s.Id)
                     |> Seq.tryHead
                     |> Option.map (fun (_, s) -> Fix s.Id)
+                | FocusCore ->
+                    coreOf r side
+                    |> Option.bind (coreFocus a name)
+                    |> Option.map (fun b -> Fire b.Id)
 
             r.Duties |> List.tryPick duty |> Option.map (fun act -> tower.Id, act)))
 
@@ -3351,6 +3541,43 @@ let step (a: Arena) : Arena * TickTrace =
         }
 
     let mutable rooms = a.Rooms
+
+    // A stronghold's core, idle, spawns the first of its population not
+    // standing in its room (`maintainPopulation`, `create-creep.js`):
+    // INVADER_CORE_CREEP_SPAWN_TIME a part, born at `spawnTime - 1`.
+    for name, r in Map.toList a.Rooms do
+        match r.Stronghold with
+        | Some sh when sh.Spawning.IsNone && a.Time < sh.CollapseAt ->
+            match r.Structures |> List.tryFind (fun s -> s.Id = sh.Core) with
+            | Some core ->
+                let perPart = if core.Level = 2 then 6 else 3
+
+                let missing =
+                    populationOf core.Level
+                    |> List.tryFind (fun (id, _) ->
+                        not (
+                            a.Bodies
+                            |> List.exists (fun b ->
+                                b.Id = id && b.At.Room = name && b.Side = sh.Owner)
+                        ))
+
+                match missing with
+                | Some(id, body) ->
+                    rooms <-
+                        Map.add
+                            name
+                            { r with
+                                Stronghold =
+                                    Some
+                                        { sh with
+                                            Spawning = Some(id, a.Time + perPart * List.length body)
+                                        }
+                            }
+                            rooms
+                | None -> ()
+            | None -> ()
+        | _ -> ()
+
     let poured = Dictionary<string, int>()
 
     // The Reactor beside a body, by id, and the room it stands in.
@@ -3512,6 +3739,79 @@ let step (a: Arena) : Arena * TickTrace =
         |> List.groupBy fst
         |> List.map (fun (tower, acts) -> tower, acts |> List.map snd |> List.minBy rank) do
         towerDoes a ledger tower act
+
+    // A standing stronghold core's `refillTowers`, off the start-of-tick
+    // towers: the emptiest of its towers on its ramparts at
+    // 2*TOWER_ENERGY_COST or less is topped up from nowhere
+    // (`invader-core/transfer.js`). The engine rolls `towerRefillChance` a
+    // tick; the arena refills on the ticks that chance's expected period
+    // divides, so a run is the same every time.
+    for r in a.Rooms.Values do
+        match r.Stronghold with
+        | Some sh when ledger.Standing.ContainsKey sh.Core ->
+            let core = r.Structures |> List.find (fun s -> s.Id = sh.Core)
+
+            let period =
+                match core.Level with
+                | 1 -> 100
+                | 2 -> 10
+                | 3 -> 3
+                | _ -> 1
+
+            let rampartTiles =
+                r.Structures
+                |> List.filter (fun s -> s.Kind = "rampart" && s.Owner = core.Owner)
+                |> List.map (fun s -> s.At)
+                |> Set.ofList
+
+            if a.Time % period = 0 then
+                r.Structures
+                |> List.filter (fun s ->
+                    s.Kind = "tower"
+                    && s.Owner = core.Owner
+                    && s.Energy <= 2 * Engine.towerEnergyCost
+                    && Set.contains s.At rampartTiles)
+                |> List.sortBy (fun s -> s.Energy)
+                |> List.tryHead
+                |> Option.iter (fun start ->
+                    match ledger.Standing.TryGetValue start.Id with
+                    | true, (room, tower) ->
+                        ledger.Standing[start.Id] <-
+                            (room,
+                             { tower with
+                                 Energy =
+                                     min
+                                         Engine.towerCapacity
+                                         (tower.Energy + Engine.towerCapacity - start.Energy)
+                             })
+                    | _ -> ())
+        | _ -> ()
+
+    // A stronghold whose core fell this tick: its loot, and no more spawning.
+    for name, r in Map.toList rooms do
+        match r.Stronghold with
+        | Some sh when not (ledger.Standing.ContainsKey sh.Core) && a.Rooms[name].Stronghold.IsSome ->
+            let level =
+                a.Rooms[name].Structures
+                |> List.tryFind (fun s -> s.Id = sh.Core)
+                |> Option.map (fun s -> s.Level)
+
+            match level with
+            | Some level ->
+                // `coreAmounts` by the template's `rewardLevel`, a bunker's
+                // its core's level.
+                let density = [| 0; 1_000; 16_000; 60_000; 400_000; 3_000_000 |][level]
+                events.Add(CoreLooted(sh.Core, density))
+
+                rooms <-
+                    Map.add
+                        name
+                        { r with
+                            Stronghold = Some { sh with Spawning = None }
+                        }
+                        rooms
+            | None -> ()
+        | _ -> ()
 
     for intent in ours do
         match intent with
@@ -3884,12 +4184,92 @@ let step (a: Arena) : Arena * TickTrace =
                 waiting
             | _ -> born, oven :: waiting)
 
+    // `invader-core/tick.js` and `_born-creep.js`: a standing core's defender
+    // is born at `spawnTime - 1` onto the first tile of TOP to TOP_LEFT round
+    // the core that holds no obstacle structure, no body and no wall but
+    // under a road, living to the collapse; with none it waits a tick. The
+    // spawn-stomp of a hostile on a ringed-in core is not modelled.
+    let bred = ResizeArray<Body>()
+
+    for name, r in Map.toList rooms do
+        match r.Stronghold with
+        | Some({ Spawning = Some(id, spawnTime) } as sh) when a.Time >= spawnTime - 1 ->
+            match r.Structures |> List.tryFind (fun s -> s.Id = sh.Core) with
+            | Some core ->
+                let taken = (settled @ born) |> List.map (fun b -> b.At) |> Set.ofList
+                let at = RoomPos.at name core.At
+
+                let free =
+                    [ Top; TopRight; Right; BottomRight; Bottom; BottomLeft; Left; TopLeft ]
+                    |> List.map (stepTo at)
+                    |> List.tryFind (fun tile ->
+                        let p = RoomPos.pos tile
+
+                        let road =
+                            r.Structures |> List.exists (fun s -> s.Kind = "road" && s.At = p)
+
+                        not (Set.contains tile taken)
+                        && (terrainAt r p <> Wall || road)
+                        && not (
+                            r.Structures
+                            |> List.exists (fun s -> s.At = p && Set.contains s.Kind obstacleKinds)
+                        ))
+
+                match free, populationOf core.Level |> List.tryFind (fun (n, _) -> n = id) with
+                | Some tile, Some(_, parts) ->
+                    events.Add(Born id)
+
+                    rooms <-
+                        Map.add
+                            name
+                            { r with
+                                Stronghold = Some { sh with Spawning = None }
+                            }
+                            rooms
+
+                    bred.Add
+                        { body id sh.Owner parts tile (Some Defend) with
+                            TicksToLive = sh.CollapseAt - (a.Time + 1)
+                        }
+                | _ -> ()
+            | None -> ()
+        | _ -> ()
+
+    // A stronghold's collapse (`processor.js`: EFFECT_COLLAPSE_TIMER's
+    // `endTime` reached): its core and every structure of its side, or on a
+    // tile its ramparts cover (the template's containers and roads), gone.
+    for name, r in Map.toList rooms do
+        match r.Stronghold with
+        | Some sh when a.Time >= sh.CollapseAt ->
+            let covered =
+                r.Structures
+                |> List.filter (fun s -> s.Kind = "rampart" && s.Owner = Some sh.Owner)
+                |> List.map (fun s -> s.At)
+                |> Set.ofList
+
+            rooms <-
+                Map.add
+                    name
+                    { r with
+                        Stronghold = None
+                        Structures =
+                            r.Structures
+                            |> List.filter (fun s ->
+                                s.Id <> sh.Core
+                                && s.Owner <> Some sh.Owner
+                                && not (Set.contains s.At covered))
+                    }
+                    rooms
+
+            events.Add(Collapsed name)
+        | _ -> ()
+
     let next =
         { a with
             Time = a.Time + 1
             Tick = a.Tick + 1
             Rooms = rooms
-            Bodies = settled @ List.rev born
+            Bodies = settled @ List.rev born @ List.ofSeq bred
             Scores = scores
             Ovens = List.rev ovens
             Carried =

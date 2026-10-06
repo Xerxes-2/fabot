@@ -26,6 +26,9 @@ const SITE_KINDS = new Set(["spawn", "tower", "extension", "rampart", "road", "c
 // and the controller's tile are the room capture's; roads go to `withRoads`).
 const NOT_PLACED = new Set(["source", "mineral", "controller", "creep", "constructionSite", "road", "tombstone", "ruin", "energy"]);
 
+// EFFECT_COLLAPSE_TIMER (`constants.js`): a deployed stronghold's clock.
+const COLLAPSE_TIMER = 1002;
+
 // The engine's NPC owners (`creeps/tick.js`).
 const NPCS = { 2: "Invader", 3: "Source Keeper" };
 
@@ -247,6 +250,21 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
       .sort((a, b) => a.x - b.x || a.y - b.y)
       .map((o) => `${o.x}, ${o.y}, ${fsInt(o.hits)}`);
     if (roads.length > 0) lines.push(`        |> withRoads [ ${roads.join("; ")} ]`);
+    // A deployed stronghold (#565): its towers focus the hostile nearest the
+    // core, its core keeps the collapse clock and its spawn queue. A core
+    // still deploying, or one of L4+, the arena does not run.
+    for (const core of objects.filter((o) => o.type === "invaderCore" && o.level > 0)) {
+      const collapse = (core.effects ?? []).find((e) => e.effect === COLLAPSE_TIMER)?.endTime;
+      if (core.deployTime || collapse === undefined) {
+        notes.push(`${r.name}: the L${core.level} stronghold is still deploying (t${core.deployTime}): its core stands alone.`);
+      } else if (core.level > 3) {
+        todos.push(`${r.name}: an L${core.level} stronghold (focusMax, coordinated defenders, boosts) is not modelled; script its towers and defenders.`);
+      } else {
+        if (objects.some((o) => o.type === "tower" && o.user === core.user)) lines.push("        |> withTowerDuties [ FocusCore ]");
+        const spawning = core.spawning?.name ? `(Some(${fsString(core.spawning.name)}, ${fsInt(core.spawning.spawnTime)}))` : "None";
+        lines.push(`        |> withStronghold ${fsInt(collapse)} ${spawning}`);
+      }
+    }
     for (const site of objects.filter((o) => o.type === "constructionSite")) {
       const owner = site.user === ourId ? "Side.Ours" : sideOf(site.user);
       const name = site.name ? `Some ${fsString(site.name)}` : "None";
@@ -305,11 +323,13 @@ export function skeleton({ rooms, tick, ourId, usernames, assignments, live = nu
         .map(([name, at]) => (typeof at === "object" && "x" in at ? `${name}→${at.x},${at.y}` : name))
         .join(" ");
       // The engine drives user '2' itself (`invaders/pretick.js`): the arena's
-      // `Invader` is that AI, so an invader needs no hand-written script.
-      const invader = String(c.user) === "2";
-      if (!ours && !invader) comments.push(`TODO script; live: ${acts || "no act"}`);
-      if (invader && acts) comments.push(`live: ${acts}`);
-      const script = ours ? "None" : invader ? "(Some Invader)" : "(Some Hold)";
+      // `Invader` is that AI, so an invader needs no hand-written script; a
+      // stronghold's defender is its core's (`Defend`).
+      const npcDriven = String(c.user) === "2";
+      const defender = npcDriven && !!c.strongholdId;
+      if (!ours && !npcDriven) comments.push(`TODO script; live: ${acts || "no act"}`);
+      if (npcDriven && acts) comments.push(`live: ${acts}`);
+      const script = ours ? "None" : defender ? "(Some Defend)" : npcDriven ? "(Some Invader)" : "(Some Hold)";
       const head = `body ${fsString(c.name)} ${side} (${partsOf(body)}) (at ${fsString(r.name)} ${c.x} ${c.y}) ${script}`;
       bodies.push(...comments.map((text) => `            // ${c.name}: ${text}`), withFields(head, fields, "            "));
     }
