@@ -858,17 +858,11 @@ let matchAcross
             // whatever the room's kind, capacity or muster.
             // It ends for a holder #533's flee takes: out-damaged where it
             // stands and losing its own exchange there (a guard shot
-            // rooted beside shooters it can no longer reach). On the world
-            // lane the hold keeps a seat the caps still have, holders read
-            // at the fight first, then soonest done (`remembered`).
+            // rooted beside shooters it can no longer reach). One rule on
+            // both lanes (#601): the lane decides who takes a seat, never
+            // who keeps one.
             | Some pooled when
                 Threats.holdsFight view atlas threats creep pooled.Task
-                && (view.Tuning.FightLane = FightLane.PerColony
-                    || hasCapacity
-                        creep
-                        acc
-                        pooled
-                        (lazy (Atlas.walkTicks atlas creep.Name pooled.Task)))
                 && not (
                     fleeing |> Option.exists (fun flee -> applicable view threats atlas creep flee)
                     && (match pooled.Task with

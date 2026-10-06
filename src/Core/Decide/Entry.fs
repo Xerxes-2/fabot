@@ -556,8 +556,15 @@ and [<NoEquality; NoComparison>] private Joining =
         Finish: MatchOutcome list -> Decision option
     }
 
+/// A Brief's place down `BriefKind.order`, a Task of its own first.
+let private kindRank (brief: Brief) =
+    match brief.Duty with
+    | Duty.Guard kind -> BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
+    | _ -> 0
+
 /// The Threats a colony's fighters are priced, emitted and moved in: its
-/// own, the world's Briefs it pools none of laid in beside them.
+/// own, the world's Briefs laid in beside them, each in the place of an own
+/// Brief of the same Task whose kind comes later down `BriefKind.order`.
 let private foughtThreats (threats: Threats) (world: WorldFight) : Threats =
     if Map.isEmpty world.Briefs then
         threats
@@ -566,10 +573,9 @@ let private foughtThreats (threats: Threats) (world: WorldFight) : Threats =
             Briefs =
                 (threats.Briefs, world.Briefs)
                 ||> Map.fold (fun briefs task brief ->
-                    if Map.containsKey task briefs then
-                        briefs
-                    else
-                        Map.add task brief briefs)
+                    match Map.tryFind task briefs with
+                    | Some mine when kindRank mine <= kindRank brief -> briefs
+                    | _ -> Map.add task brief briefs)
         }
 
 /// The fight pool over the world's Tasks too, each of the world's combat
@@ -1577,15 +1583,9 @@ let private worldFights
             // A room's kind is the first claim down `BriefKind.order`, every
             // colony's claims read as one room's: a resident room's Guard is
             // its residents' colony's.
-            let rank (brief: Brief) =
-                match brief.Duty with
-                | Duty.Guard kind ->
-                    BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
-                | _ -> 0
+            let first = claimed |> List.map (fun (_, _, _, brief) -> kindRank brief) |> List.min
 
-            let first = claimed |> List.map (fun (_, _, _, brief) -> rank brief) |> List.min
-
-            let ranked = claimed |> List.filter (fun (_, _, _, brief) -> rank brief = first)
+            let ranked = claimed |> List.filter (fun (_, _, _, brief) -> kindRank brief = first)
 
             let named home =
                 ranked |> List.tryFind (fun (_, colony, _, _) -> colony.Home = home)
@@ -1647,13 +1647,25 @@ let private worldFights
                 && (Set.contains task own
                     || fights && Map.containsKey room opening.View.Spatial.Rooms))
 
+        // An own Brief of a world Task whose kind comes later down
+        // `BriefKind.order` than the owner's gives way to it (#601): the
+        // room is fought as its kind, whichever colony's body holds it.
+        let yields task (brief: Brief) =
+            Set.contains task own
+            && Threats.briefFor opening.Threats task
+               |> Option.exists (fun mine -> kindRank mine > kindRank brief)
+
         // Its own Briefs of each room's fight: a body one of them admits
         // answers the room through it, so another colony's Brief there
         // admits it not (a resident keeps its Guard of a child's home, never
         // the child's Defend beside it; a melee guard its Guard admits none
         // of may still take that Defend).
         let briefedIn (room: string) =
-            own
+            handed
+            |> List.choose (fun (task, (_, _, brief, _), _) ->
+                if yields task brief then Some task else None)
+            |> Set.ofList
+            |> Set.difference own
             |> List.ofSeq
             |> List.choose (fun task ->
                 match task with
@@ -1661,7 +1673,10 @@ let private worldFights
                 | Defend at when at = room -> Threats.briefFor opening.Threats task
                 | _ -> None)
 
-        let laid = handed |> List.filter (fun (task, _, _) -> not (Set.contains task own))
+        let laid =
+            handed
+            |> List.filter (fun (task, (_, _, brief, _), _) ->
+                not (Set.contains task own) || yields task brief)
 
         let narrowed (room: string) (brief: Brief) =
             match briefedIn room with
@@ -1680,7 +1695,10 @@ let private worldFights
                 laid
                 |> List.map (fun (task, (room, _, brief, _), _) -> task, narrowed room brief)
                 |> Map.ofList
-            Tasks = laid |> List.map (fun (task, _, _) -> task)
+            Tasks =
+                laid
+                |> List.choose (fun (task, _, _) ->
+                    if Set.contains task own then None else Some task)
             Caps =
                 handed
                 |> List.map (fun (task, (_, _, _, capacity), _) -> task, capacity)

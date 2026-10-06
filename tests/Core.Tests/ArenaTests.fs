@@ -16919,11 +16919,14 @@ let w18s25CrippledTests =
             // throughout, its seat no far holder takes (#596); the mother's
             // bigger rangers, which would end it sooner on paper, take the
             // seat the kite adds for spells (t35-t52, t56-t69) and never reach
-            // it, so it alone kills at t103 —
+            // it, so it alone kills at t102 —
             // per colony, W17S29's ranger held it from W19S25 beside it and
             // the mother's resident joined at t36, three bodies on a one-seat
-            // kite. W17S29's ranger takes W17S26's Guard instead, a seat the
-            // owner's caps still have.
+            // kite. W17S26's trespass, a digger, is W17S25's guard's beside it
+            // as per colony (#601): W17S25 home's Guard is the mother's
+            // resident kind, which the child's own Outpost claim of it gives
+            // way to, so the guard is not pulled home and W17S29's far ranger
+            // no longer takes W17S26 from W19S25 and walks there for ever.
             test
                 "#573 capture t994,917, the world lane: the fleet body at the fight holds the cripple's chase throughout" {
                 let run = w18s25Crippled () |> crippledRunIn FightLane.World 50
@@ -16947,11 +16950,20 @@ let w18s25CrippledTests =
                             assignments)
                         $"t{tick}: no W17S29 body joins it"
 
-                Expect.all
-                    run
-                    (fun (_, _, assignments) ->
-                        Map.tryFind "ranger-994078-Spawn9" assignments = Some "guard:W17S26")
-                    "W17S29's ranger answers W17S25's raided outpost W17S26 throughout"
+                let _, _, first = List.head run
+
+                Expect.equal
+                    (Map.tryFind "guard-994071-Spawn11" first)
+                    (Some "guard:W17S26")
+                    "W17S25's guard beside W17S26 takes its trespass"
+
+                let _, trace = w18s25Crippled () |> runIn FightLane.World 30
+                let _, perColony = w18s25Crippled () |> runIn FightLane.PerColony 30
+
+                Expect.equal
+                    (diedOn "Quantum825" trace)
+                    (diedOn "Quantum825" perColony)
+                    $"the digger dies when it does per colony\n{describe trace}"
             }
 
             // #599: per colony the mother's big ranger takes the chase at t36
@@ -17002,7 +17014,8 @@ let w18s25CrippledTests =
                 "#573 capture t994,917, the world lane: the one ranger on the kite kills the cripple" {
                 let _, trace = w18s25Crippled () |> runIn FightLane.World 120
 
-                // t103 on the world lane; t92 per colony, three bodies on it.
+                // t102 on the world lane; t92 per colony, three bodies on it
+                // (#599).
                 Expect.isLessThanOrEqual
                     (diedOn "Faraday387" trace |> Option.defaultValue System.Int32.MaxValue)
                     110
@@ -20039,24 +20052,37 @@ let worldLaneCaptureTests =
                     "no later than per colony"
             }
 
-            // What keeps the world lane off the default (#596): the child's
-            // 600-hit ranger-985441 holds W17S26's Guard as per colony but
-            // steps (17,20) <-> (16,21) every tick and never shoots the hauler,
-            // which dies to the other ranger alone at t35 (t31 per colony,
-            // both shooting from t5).
+            // The child's 600-hit ranger-985441 keeps its seat on W17S26's
+            // trespass as per colony (#601). Before, the world lane's hold
+            // kept only the seats the caps still had, and the trespass's cap
+            // was 1 while the child's own ranger held it (its guard row then
+            // answers nothing) and 2 once it let go: the ranger stepped
+            // (17,20) <-> (16,21) between this Guard and its home's and never
+            // shot, and the hauler died to the other alone at t35 (t31 per
+            // colony).
             test
-                "#558 capture t985,660, the world lane: the child's ranger dithers on its Guard and never shoots Obsidian522" {
+                "#558 capture t985,660, the world lane: both rangers shoot Obsidian522 down as per colony" {
                 let _, trace = haulerBesideCore () |> runIn FightLane.World 80
+                let _, perColony = haulerBesideCore () |> runIn FightLane.PerColony 80
+                let failure = describe trace
 
-                Expect.isFalse
+                let dead =
+                    match diedOn "Obsidian522" trace with
+                    | Some tick -> tick
+                    | None -> failtest $"Obsidian522 dies\n{failure}"
+
+                Expect.isTrue
                     (trace
-                     |> List.exists (fun t ->
-                         t.Ours
-                         |> List.contains (
-                             RangedAttackCreep("ranger-985441-Spawn11", "Obsidian522")
-                         )))
-                    $"the child's ranger never shoots it\n{describe trace}"
+                     |> List.filter (fun t -> t.Tick >= 6 && t.Tick < dead)
+                     |> List.forall (fun t ->
+                         [ "ranger-984393-Spawn3"; "ranger-985441-Spawn11" ]
+                         |> List.forall (fun ranger ->
+                             t.Ours |> List.contains (RangedAttackCreep(ranger, "Obsidian522")))))
+                    $"both shoot it every tick from t6 until it dies\n{failure}"
 
-                Expect.equal (diedOn "Obsidian522" trace) (Some 35) "it dies at t35 to the other"
+                Expect.isLessThanOrEqual
+                    (Some dead)
+                    (diedOn "Obsidian522" perColony)
+                    $"no later than per colony\n{failure}"
             }
         ]

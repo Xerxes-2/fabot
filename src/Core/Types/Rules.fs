@@ -1099,10 +1099,10 @@ module Tuning =
             // and a raid at home forces every tick, which is what empties the
             // bucket in a war.
             FightOnly = true
-            // Per colony while the world lane loses #558's and #573's captures
-            // and spar's outpost-melee-healer (ArenaTests, "arena captures on
-            // the world lane"; ADR 0091's W5 as built). The live A/B window is
-            // `observe fight-lane world`, `percolony` (or clear) its kill switch.
+            // Per colony until a watched live window: the world lane ties or
+            // beats it on every spar row and on the captures but two (ADR
+            // 0091's W5 as built), but has never run across six colonies.
+            // `observe fight-lane world` turns it on live.
             FightLane = FightLane.PerColony
             // Two: a room beside the room beside, the window a body is lent
             // over (`Reaction.lend`).
