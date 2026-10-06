@@ -462,18 +462,121 @@ let arrivalTests =
                     "then five ticks a plain tile: ten fatigue on one MOVE"
             }
 
-            test "two reads of a room's maps under the world's table are one build" {
-                let atlas = rooms id |> atlasOf []
+            test
+                "a contested room's danger is one object for every colony, its Reach off the world's ramparts whatever a cut keeps" {
+                // A melee at (10,25) and our rampart at (12,25): one colony's
+                // cut keeps the rampart's census, the other's drops it, as a
+                // transit room's does.
+                let rampart = { X = 12; Y = 25 }
+
+                let kept =
+                    { rooms (fun layer ->
+                          { layer with
+                              TargetPositions = Map.ofList [ "rampart-1", rampart ]
+                          }) with
+                        TargetKinds = Map.ofList [ "rampart-1", Structure BuiltKind.Rampart ]
+                        Hits = Map.ofList [ "rampart-1", { Hits = 10_000; HitsMax = 300_000 } ]
+                    }
+
+                let seen = seeing [ home, [ trep "m" home (10, 25) [ Attack; Move ] ], [] ]
 
                 let world =
-                    seeing [ home, [ trep "m" home (10, 25) [ Attack; Move ] ], [] ]
-                    |> WorldView.sharingSafeGround
+                    { seen with
+                        Facts =
+                            kept.Rooms
+                            |> Map.map (fun room layer ->
+                                { RoomFacts.empty with
+                                    Layer = layer
+                                    Border = kept.Borders.[room]
+                                    TargetKinds = kept.TargetKinds
+                                    Hits = kept.Hits
+                                })
+                    }
+
+                let viewOf world spatial =
+                    { snapshotWith [] spatial with
+                        World = world
+                    }
+
+                let dangerOf view =
+                    (WorldDanger.read view).[home].Force() |> Option.get
+
+                match WorldDanger.lay [ viewOf world kept; viewOf world (rooms id) ] with
+                | [ keeping; cutting ] ->
+                    let danger = dangerOf cutting
+
+                    Expect.isTrue
+                        (obj.ReferenceEquals(dangerOf keeping, danger))
+                        "both colonies read the one danger"
+
+                    Expect.isFalse
+                        (Set.contains rampart danger.Reach)
+                        "our rampart is off the Reach"
+
+                    Expect.isTrue
+                        (Set.contains { X = 11; Y = 25 } danger.Reach)
+                        "the tile before it is struck"
+                | views -> failtestf "two views laid, %d back" (List.length views)
 
                 Expect.isTrue
-                    (obj.ReferenceEquals(
-                        Arrival.inRoom atlas world home,
-                        Arrival.inRoom atlas world home
-                    ))
-                    "the second read is the first's maps"
+                    (Set.contains rampart (dangerOf (viewOf seen (rooms id))).Reach)
+                    "a view read alone with no world reads its own cut, where no rampart stands"
+            }
+
+            test "a raid one colony recalls through a blind tick is every colony's danger there" {
+                // Nothing sees `home` this tick; one colony's view still holds
+                // the raider it last saw there (#569), the other's does not.
+                let raider = trep "m" home (10, 25) [ Attack; Move ]
+
+                let recalling =
+                    { snapshotWith [] (rooms id) with
+                        Hostiles = [ raider ]
+                    }
+
+                match WorldDanger.lay [ recalling; snapshotWith [] (rooms id) ] with
+                | [ _; blind ] ->
+                    let danger = (WorldDanger.read blind).[home].Force()
+
+                    Expect.isTrue
+                        (danger
+                         |> Option.exists (fun danger ->
+                             Set.contains { X = 11; Y = 25 } danger.Reach))
+                        "the colony that recalls nothing reads the raid's Reach"
+                | views -> failtestf "two views laid, %d back" (List.length views)
+            }
+
+            test
+                "a rampart with no hits is not ours: it blocks no flood of its owner's and covers no Reach" {
+                // The projection carries hits for an ownable kind only when it
+                // is ours; a rival's rampart has none, and he walks his own.
+                let tile = { X = 12; Y = 25 }
+                // The grid's index of the tile (`Grid`: column-major).
+                let index = tile.X * Engine.roomSide + tile.Y
+
+                let facts hits =
+                    {
+                        Layer =
+                            { (rooms id).Rooms.[home] with
+                                TargetPositions = Map.ofList [ "rampart-1", tile ]
+                            }
+                        Border = Map.ofList plainRing
+                        Kinds = Map.ofList [ "rampart-1", Structure BuiltKind.Rampart ]
+                        Hits = hits
+                        PublicRamparts = Set.empty
+                    }
+                    : Atlas.GroundFacts
+
+                let rival = facts Map.empty
+                let ours = facts (Map.ofList [ "rampart-1", { Hits = 10_000; HitsMax = 300_000 } ])
+
+                Expect.isGreaterThan
+                    (Atlas.hostileGroundOf rival).[index]
+                    0
+                    "his rampart is ground he walks"
+
+                Expect.isEmpty (Atlas.ourRampartTilesOf rival) "and none of ours"
+
+                Expect.equal (Atlas.hostileGroundOf ours).[index] -1 "ours blocks him"
+                Expect.equal (Atlas.ourRampartTilesOf ours) (Set.singleton tile) "and is ours"
             }
         ]

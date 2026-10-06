@@ -1456,9 +1456,7 @@ let private cut
     let holders =
         World.creepColoniesRecalling joins tuning a.Colonies casting living shut world
 
-    let watch =
-        WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
-        |> WorldView.sharingSafeGround
+    let watch = WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
 
     // Each colony's view as cut, and the crossings a raided room's answerer
     // is ranked by: `Entry.decideColonies` judges and aims them as `Main`

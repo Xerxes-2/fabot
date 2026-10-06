@@ -255,6 +255,184 @@ let private sameTraffic (kept: bool[]) (now: bool[]) =
 
     same
 
+/// One room's facts as its grounds are laid off them: its layer, its border
+/// ring, and the census its targets are read in — a world room's whole facts
+/// (`groundFactsOf`), or a projection's cut of them.
+type GroundFacts =
+    {
+        Layer: RoomLayer
+        Border: Map<Pos, Terrain>
+        Kinds: Map<string, TargetKind>
+        Hits: Map<string, HitsInfo>
+        PublicRamparts: Set<string>
+    }
+
+/// A world room's whole facts as its grounds read them.
+let groundFactsOf (facts: RoomFacts) : GroundFacts =
+    {
+        Layer = facts.Layer
+        Border = facts.Border
+        Kinds = facts.TargetKinds
+        Hits = facts.Hits
+        PublicRamparts = facts.PublicRamparts
+    }
+
+/// A room's raw ground and its walking grid, by tile index. These are the
+/// only form of the rules — every single-tile query reads one of them
+/// (`weightAt`) — so the precedence is spelled here and nowhere else: the
+/// [[keeper margin]] masked out of the terrain (`Keepers`), the one edit a
+/// colony makes to a fact about the world before a rule reads it; then, on
+/// the walking grid alone, roads over the passable ground they discount and
+/// obstacles over everything. The raw ground keeps neither pass, because a
+/// Seat is counted by terrain alone. Both fresh arrays.
+let groundGrids (margin: int) (room: string) (layer: RoomLayer) : int[] * int[] =
+    // Priced once with the terrain (`TerrainGrid.Weights`) and copied,
+    // because the mask and the passes below write into it.
+    let ground = Array.copy layer.Terrain.Weights
+
+    Keepers.maskedIndicesIn margin room
+    |> Array.iter (fun index -> ground.[index] <- -1)
+
+    let weights = Array.copy ground
+
+    // A road discounts the ground under it, never ground the projection
+    // calls impassable: a road on a wall (a tunnel, not modelled) or off
+    // the terrain projection stays impassable.
+    layer.Roads
+    |> Set.iter (fun tile ->
+        let index = indexOf tile
+
+        if weights.[index] > 0 then
+            weights.[index] <- 1)
+
+    layer.Obstacles |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
+
+    ground, weights
+
+/// A room's border ring as a grid: each exit tile's terrain weight, -1
+/// everywhere else. The mask runs over the ring too: an exit tile within the
+/// margin of a rock leaves the band, so a chain that existed over raw terrain
+/// may not exist over masked terrain. `World.linked` masks the same tiles off
+/// the world's own border maps, so the scan set and the price cannot
+/// disagree.
+let ringGrid (margin: int) (room: string) (border: Map<Pos, Terrain>) : int[] =
+    let grid = Array.create tileCount -1
+
+    border
+    |> Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain)
+
+    Keepers.maskedIndicesIn margin room
+    |> Array.iter (fun index -> grid.[index] <- -1)
+
+    grid
+
+/// The tiles of a room's targets that `matches` takes, by id and kind.
+let private tilesOfKinds (facts: GroundFacts) (matches: string -> TargetKind -> bool) : Set<Pos> =
+    facts.Layer.TargetPositions
+    |> Map.fold
+        (fun tiles id tile ->
+            match Map.tryFind id facts.Kinds with
+            | Some kind when matches id kind -> Set.add tile tiles
+            | _ -> tiles)
+        Set.empty
+
+/// The tiles of our standing ramparts in a room: a rampart with hits is ours
+/// (`ourRampartTilesIn`).
+let ourRampartTilesOf (facts: GroundFacts) : Set<Pos> =
+    tilesOfKinds facts (fun id kind ->
+        kind = Structure BuiltKind.Rampart && Map.containsKey id facts.Hits)
+
+/// The ground a hostile's arrival is timed over (`Arrival`), border ring
+/// included, as step weights: road 1, plain 2, swamp 10, -1 impassable. The
+/// raw terrain, unmasked (the [[keeper margin]] is our caution, not a wall),
+/// paved where we see roads (a road on a wall is a tunnel, walked at a road's
+/// pace) and blocked by every obstacle and by each private rampart of ours,
+/// but never by a construction site of ours, which the engine blocks only to
+/// us and a hostile walks over and destroys. A fresh array.
+let hostileGroundOf (facts: GroundFacts) : int[] =
+    let layer = facts.Layer
+    let grid = Array.copy layer.Terrain.Weights
+
+    facts.Border
+    |> Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain)
+
+    layer.Roads |> Set.iter (fun tile -> grid.[indexOf tile] <- 1)
+
+    let sites =
+        tilesOfKinds facts (fun _ kind ->
+            match kind with
+            | Site kind -> not (isWalkable kind)
+            | _ -> false)
+
+    let blockers =
+        if Set.isEmpty sites then
+            Set.empty
+        else
+            tilesOfKinds facts (fun _ kind ->
+                match kind with
+                | Structure kind -> not (isWalkable kind)
+                | Controller
+                | Mineral _ -> true
+                | _ -> false)
+
+    layer.Obstacles
+    |> Set.iter (fun tile ->
+        if not (Set.contains tile sites) || Set.contains tile blockers then
+            grid.[indexOf tile] <- -1)
+
+    tilesOfKinds facts (fun id kind ->
+        kind = Structure BuiltKind.Rampart
+        && Map.containsKey id facts.Hits
+        && not (Set.contains id facts.PublicRamparts))
+    |> Set.iter (fun tile -> grid.[indexOf tile] <- -1)
+
+    grid
+
+/// The tiles of a room `strikes` holds, by tile index, that a body of ours
+/// may stand on or cross from (`weights`, its walking grid, and `ring`, its
+/// border ring), less `covered`: the Reach a room's hostile maps lay
+/// (`Arrival`), off the walls the dilation also marks.
+let standingTilesOn
+    (weights: int[])
+    (ring: int[])
+    (covered: Set<Pos>)
+    (strikes: int -> bool)
+    : Set<Pos> =
+    // A loop and a cons, not a list comprehension: Fable runs that through
+    // its sequence enumerators, a closure a tile.
+    let mutable tiles = []
+
+    for down in 0 .. tileCount - 1 do
+        let index = tileCount - 1 - down
+
+        if (at index weights >= 0 || at index ring >= 0) && strikes index then
+            let tile = posAt index
+
+            if not (Set.contains tile covered) then
+                tiles <- tile :: tiles
+
+    Set.ofList tiles
+
+/// A walking grid's tiles less `except`, joined to the room: Flee's safe
+/// ground, the walkable tiles less a Reach. One pass over the grid and one
+/// tree built, where the difference of two sets mapped into a third built
+/// three.
+let walkableTilesExceptOn (weights: int[]) (room: string) (except: Set<Pos>) : Set<RoomPos> =
+    let excluded = Array.create tileCount false
+
+    for tile in except do
+        if inGrid tile then
+            excluded.[indexOf tile] <- true
+
+    // A loop and a cons, as `standingTilesOn`.
+    let mutable tiles = []
+
+    for index = tileCount - 1 downto 0 do
+        if at index weights >= 0 && not excluded.[index] then
+            tiles <- RoomPos.at room (posAt index) :: tiles
+
+    Set.ofList tiles
+
 /// The Atlas over a view, recalling the tables the census keys rather than
 /// laying empty ones: the spawn walk table, the Seam walks, and the far
 /// fields beside them (`docs/research/cpu-headroom.md` §5.1). The caller
@@ -327,11 +505,8 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
-    // The room's grids, one set per projected room. These are the only form of
-    // the rules — every single-tile query reads one of them (`weightAt`) — so
-    // the precedence is spelled here and nowhere else: terrain, then roads over
-    // the passable ground they discount, then obstacles over everything; the
-    // initial -1 answers every tile outside the projection. The occupancy
+    // The room's grids, one set per projected room (`groundGrids`); -1
+    // answers every tile outside the projection. The occupancy
     // surcharge marks **standing** traffic (#225) — a body that did not move
     // last tick, a fatigued one, and every body of another colony's — because
     // two travellers each pricing the other's tile never pass. A loose body
@@ -351,42 +526,14 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
-    // The [[keeper margin]], the one edit this colony makes to a fact about
-    // the world before a rule reads it (`Keepers`). It goes on the **raw
-    // ground**, ahead of the road and obstacle passes and ahead of the copy
-    // the walking grid is made from, so a masked tile is impassable to every
-    // query off either grid and the two cannot disagree about it. Asked in
-    // bulk, because a room the declaration names none of yields nothing here
-    // and costs the tick one lookup.
+    // The [[keeper margin]] (`Keepers`), on the raw ground ahead of the copy
+    // the walking grid is made from (`groundGrids`), so a masked tile is
+    // impassable to every query off either grid and the two cannot disagree
+    // about it.
     let keeperMargin = Tuning.keeperMargin tuning
 
-    let maskKeepers (room: string) (grid: int[]) =
-        Keepers.maskedIndicesIn keeperMargin room
-        |> Array.iter (fun index -> grid.[index] <- -1)
-
     let gridOf (room: string) (foreign: Set<Pos>) (layer: RoomLayer) =
-        // Priced once with the terrain (`TerrainGrid.Weights`) and copied,
-        // because the mask and the passes below write into it.
-        let ground = Array.copy layer.Terrain.Weights
-
-        maskKeepers room ground
-
-        // The walking grid starts as the raw ground and takes the two
-        // overriding passes; the ground itself keeps neither, because a
-        // Seat is counted by terrain alone.
-        let weights = Array.copy ground
-
-        // A road discounts the ground under it, never ground the projection
-        // calls impassable: a road on a wall (a tunnel, not modelled) or off
-        // the terrain projection stays impassable.
-        layer.Roads
-        |> Set.iter (fun tile ->
-            let index = indexOf tile
-
-            if weights.[index] > 0 then
-                weights.[index] <- 1)
-
-        layer.Obstacles |> Set.iter (fun tile -> weights.[indexOf tile] <- -1)
+        let ground, weights = groundGrids keeperMargin room layer
 
         let occupied = Array.create tileCount false
 
@@ -406,21 +553,9 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     // The border ring's own grid, keyed by the border layer's rooms rather than
     // by `Rooms`: a room with a ring and no ground, or ground and no ring, answers
     // -1 for the half it has not got. The shell never builds the first
-    // (`World.ofGame` reads terrain and ring off one memoised read).
-    //
-    // The mask runs over the ring too: an exit tile within the margin of a rock
-    // leaves the band, so a chain that existed over raw terrain may not exist
-    // over masked terrain. `World.linked` masks the same tiles off the world's
-    // own border maps, so the scan set and the price cannot disagree.
-    let ringOf (room: string) (ring: Map<Pos, Terrain>) =
-        let grid = Array.create tileCount -1
-
-        ring
-        |> Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain)
-
-        maskKeepers room grid
-
-        grid
+    // (`World.ofGame` reads terrain and ring off one memoised read), masked
+    // as the ground is (`ringGrid`).
+    let ringOf (room: string) (ring: Map<Pos, Terrain>) = ringGrid keeperMargin room ring
 
     let foreign =
         if Set.isEmpty view.Loose then
@@ -962,33 +1097,6 @@ let standsAt (atlas: Atlas) (room: string) : int -> bool =
     let weights = weightsOf atlas room
     fun index -> at index weights >= 0
 
-/// The tiles of a room `strikes` holds, by tile index, that a body of ours
-/// may stand on or cross from (the walking grid and the border ring), less
-/// `covered`: the Reach a room's hostile maps lay (`Arrival`), off the
-/// walls the dilation also marks.
-let standingTilesWhere
-    (atlas: Atlas)
-    (room: string)
-    (covered: Set<Pos>)
-    (strikes: int -> bool)
-    : Set<Pos> =
-    let weights = weightsOf atlas room
-    let ring = ringOf atlas room
-    // A loop and a cons, not a list comprehension: Fable runs that through
-    // its sequence enumerators, a closure a tile.
-    let mutable tiles = []
-
-    for down in 0 .. tileCount - 1 do
-        let index = tileCount - 1 - down
-
-        if (at index weights >= 0 || at index ring >= 0) && strikes index then
-            let tile = posAt index
-
-            if not (Set.contains tile covered) then
-                tiles <- tile :: tiles
-
-    Set.ofList tiles
-
 /// Tiles holding a standing Keep structure — the spawn, the tower, the
 /// Storage and the terminal: what a rampart covers, the tick the structure
 /// stands. A site is not covered until it is a structure.
@@ -1053,34 +1161,9 @@ let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     let weights = weightsOf atlas room
     Set.ofList (tilesWhere (fun index -> at index weights >= 0) id)
 
-/// The same tiles less `except`, joined to the room: Flee's safe ground,
-/// `walkableTilesIn` less a Reach. One pass over the grid and one tree built,
-/// where the difference of two sets mapped into a third built three.
+/// The same tiles less `except`, joined to the room (`walkableTilesExceptOn`).
 let walkableTilesExcept (atlas: Atlas) (room: string) (except: Set<Pos>) : Set<RoomPos> =
-    let weights = weightsOf atlas room
-    let excluded = Array.create tileCount false
-
-    for tile in except do
-        if inGrid tile then
-            excluded.[indexOf tile] <- true
-
-    Set.ofList (
-        tilesWhere (fun index -> at index weights >= 0 && not excluded.[index]) (RoomPos.at room)
-    )
-
-/// `walkableTilesExcept` through the tick's shared safe ground where one is
-/// laid (`WorldView.sharingSafeGround`, #534): two thousand tiles a raided
-/// room, once a tick and not once a colony.
-let walkableTilesExceptIn
-    (watch: WorldView)
-    (atlas: Atlas)
-    (room: string)
-    (except: Set<Pos>)
-    : Set<RoomPos> =
-    match watch.SafeGround with
-    | None -> walkableTilesExcept atlas room except
-    | Some share ->
-        share room except (weightsOf atlas room) (fun () -> walkableTilesExcept atlas room except)
+    walkableTilesExceptOn (weightsOf atlas room) room except
 
 /// The home's line entry for `perimeter` (#519): the memo's while it was laid
 /// for that perimeter, else a fresh one in its place.
@@ -1886,55 +1969,29 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
             fromRoom
             toRoom)
 
+/// One room's facts as a projection cuts them, for its grounds
+/// (`GroundFacts`); None for a room the projection does not carry.
+let projectedGroundFacts (spatial: SpatialInfo) (room: string) : GroundFacts option =
+    Map.tryFind room spatial.Rooms
+    |> Option.map (fun layer ->
+        {
+            Layer = layer
+            Border = Map.tryFind room spatial.Borders |> Option.defaultValue Map.empty
+            Kinds = spatial.TargetKinds
+            Hits = spatial.Hits
+            PublicRamparts = spatial.PublicRamparts
+        })
+
 /// The ground a body's arrival is timed over (`Arrival`), border ring
 /// included, as step weights: road 1, plain 2, swamp 10, -1 impassable. A
-/// hostile's (`hostile`) is the raw terrain, unmasked (the [[keeper margin]]
-/// is our caution, not a wall), paved where we see roads (a road on a wall is
-/// a tunnel, walked at a road's pace) and blocked by every obstacle and by
-/// each private rampart of ours, but never by a construction site of ours,
-/// which the engine blocks only to us and a hostile walks over and destroys;
-/// ours is the walking grid with the ring laid in. None for a room the
+/// hostile's (`hostile`) is `hostileGroundOf` this projection's cut of the
+/// room; ours is the walking grid with the ring laid in. None for a room the
 /// projection does not carry. A fresh array a call.
 let arrivalGroundIn (atlas: Atlas) (room: string) (hostile: bool) : int[] option =
     if not (Map.containsKey room atlas.Weights) then
         None
     elif hostile then
-        let layer = layerOf atlas room
-        let grid = Array.copy layer.Terrain.Weights
-
-        Map.tryFind room atlas.Spatial.Borders
-        |> Option.iter (Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain))
-
-        layer.Roads |> Set.iter (fun tile -> grid.[indexOf tile] <- 1)
-
-        let sites =
-            tilesWhereIn atlas room (function
-                | Site kind -> not (isWalkable kind)
-                | _ -> false)
-
-        let blockers =
-            if Set.isEmpty sites then
-                Set.empty
-            else
-                tilesWhereIn atlas room (function
-                    | Structure kind -> not (isWalkable kind)
-                    | Controller
-                    | Mineral _ -> true
-                    | _ -> false)
-
-        layer.Obstacles
-        |> Set.iter (fun tile ->
-            if not (Set.contains tile sites) || Set.contains tile blockers then
-                grid.[indexOf tile] <- -1)
-
-        targetsOfKind atlas (Structure BuiltKind.Rampart)
-        |> List.filter (fun id ->
-            Map.containsKey id atlas.Spatial.Hits
-            && not (Set.contains id atlas.Spatial.PublicRamparts))
-        |> tilesOfIdsIn atlas room
-        |> Set.iter (fun tile -> grid.[indexOf tile] <- -1)
-
-        Some grid
+        projectedGroundFacts atlas.Spatial room |> Option.map hostileGroundOf
     else
         let grid = Array.copy (weightsOf atlas room)
         let ring = ringOf atlas room

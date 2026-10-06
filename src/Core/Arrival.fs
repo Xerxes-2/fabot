@@ -277,48 +277,12 @@ let private crossings
             | Some far -> at (indexOf exit) far > 0
             | None -> true))
 
-/// A room's floods, shared through the world's table where it is laid
-/// (`WorldView.ArrivalGround`), keyed by everything they read: the room's
-/// hostile ground and each neighbour's, so whichever colony asks first, the
-/// floods are the same. None for a room the projection does not carry.
-let rec private roomOf (atlas: Atlas.Atlas) (world: WorldView) (room: string) : RoomArrival option =
-    Atlas.arrivalGroundIn atlas room true
-    |> Option.map (fun ground ->
-        let around =
-            RoomName.adjacent room
-            |> List.map (fun neighbour -> neighbour, Atlas.arrivalGroundIn atlas neighbour true)
-
-        let build () =
-            {
-                Own =
-                    lazy
-                        (threatsIn world room
-                         |> List.filter (fun (hostile, cls, _) ->
-                             HostileInfo.crossesExits hostile && Option.isSome cls.Pace)
-                         |> List.groupBy (fun (_, cls, _) -> cls)
-                         |> List.map (fun (cls, members) ->
-                             {
-                                 Class = cls
-                                 Members = members |> List.map (fun (hostile, _, _) -> hostile.Id)
-                                 Arrive =
-                                     members
-                                     |> List.map (fun (hostile, _, wait) ->
-                                         indexOf (RoomPos.pos hostile.Pos), 0, wait)
-                                     |> flood ground cls.Pace false
-                             }))
-                Maps = lazy (mapsOf atlas world room ground around)
-            }
-
-        match world.ArrivalGround with
-        | Some share -> share room (Some ground :: List.map snd around) build
-        | None -> build ())
-
 /// A room's maps: its own hostiles and what its neighbours carry across, one
 /// flood a class dilated by its strike, and the risk an unseen neighbour of
 /// remembered danger (`WorldView.Danger`) lands on its exits until it is seen
-/// again (Decided 2).
-and private mapsOf
-    (atlas: Atlas.Atlas)
+/// again (Decided 2). A neighbour's floods are `floodsOf`'s.
+let private mapsOf
+    (floodsOf: string -> RoomArrival option)
     (world: WorldView)
     (room: string)
     (ground: int[])
@@ -341,7 +305,7 @@ and private mapsOf
     let carriedFrom (neighbour, across) =
         let band = crossings ground across neighbour room
 
-        match across |> Option.bind (fun _ -> roomOf atlas world neighbour) with
+        match across |> Option.bind (fun _ -> floodsOf neighbour) with
         | Some floods ->
             floods.Own.Force()
             |> List.map (fun f ->
@@ -429,12 +393,76 @@ and private mapsOf
             | seeds -> Some(dilate Engine.rangedRange (flood ground quickest false seeds))
     }
 
-/// A room's hostile maps, built once a tick a room where the world's table is
-/// laid; none for a room the projection does not carry.
+/// Each room's floods over one hostile ground (`ground`, by room, None for a
+/// room it carries none for: `Atlas.hostileGroundOf`), as a table read by
+/// room: a room's floods, and its ground, built on first read and kept for
+/// every later one, a neighbour's carried across included. The world's
+/// danger reads one table a tick (`WorldDanger`).
+let floodsOver (ground: string -> int[] option) (world: WorldView) : string -> RoomArrival option =
+    let grounds = System.Collections.Generic.Dictionary<string, int[] option>()
+
+    let groundOf (room: string) =
+        if grounds.ContainsKey room then
+            grounds.[room]
+        else
+            let laid = ground room
+            grounds.[room] <- laid
+            laid
+
+    let built = System.Collections.Generic.Dictionary<string, RoomArrival option>()
+
+    let rec floodsOf (room: string) : RoomArrival option =
+        if built.ContainsKey room then
+            built.[room]
+        else
+            let floods =
+                groundOf room
+                |> Option.map (fun ground ->
+                    let around =
+                        RoomName.adjacent room
+                        |> List.map (fun neighbour -> neighbour, groundOf neighbour)
+
+                    {
+                        Own =
+                            lazy
+                                (threatsIn world room
+                                 |> List.filter (fun (hostile, cls, _) ->
+                                     HostileInfo.crossesExits hostile && Option.isSome cls.Pace)
+                                 |> List.groupBy (fun (_, cls, _) -> cls)
+                                 |> List.map (fun (cls, members) ->
+                                     {
+                                         Class = cls
+                                         Members =
+                                             members
+                                             |> List.map (fun (hostile, _, _) -> hostile.Id)
+                                         Arrive =
+                                             members
+                                             |> List.map (fun (hostile, _, wait) ->
+                                                 indexOf (RoomPos.pos hostile.Pos), 0, wait)
+                                             |> flood ground cls.Pace false
+                                     }))
+                        Maps = lazy (mapsOf floodsOf world room ground around)
+                    })
+
+            built.[room] <- floods
+            floods
+
+    floodsOf
+
+/// A room's hostile maps over one projection's ground
+/// (`Atlas.arrivalGroundIn`); none for a room the projection does not carry.
 let inRoom (atlas: Atlas.Atlas) (world: WorldView) (room: string) : ArrivalMaps =
-    match roomOf atlas world room with
+    match floodsOver (fun room -> Atlas.arrivalGroundIn atlas room true) world room with
     | Some floods -> floods.Maps.Force()
     | None -> { Classes = []; Unseen = None }
+
+/// The soonest any class is on a tile, by tile index: the per-tile reads ask
+/// it of every tile of a room, and a `List.exists` closure there is one
+/// allocation a tile.
+let rec soonestAmong (index: int) (classes: ClassArrival list) (soonest: int) : int =
+    match classes with
+    | [] -> soonest
+    | map :: rest -> soonestAmong index rest (min soonest (at index map.Ticks))
 
 /// One map's ticks at a tile; None where nothing ever gets there.
 let ticksAt (ticks: int[]) (tile: Pos) : int option =
@@ -450,16 +478,6 @@ let soonestAt (maps: ArrivalMaps) (tile: Pos) : int option =
     |> function
         | [] -> None
         | ticks -> Some(List.min ticks)
-
-/// One member of one class of a room's maps, priced: its class's ticks, where
-/// it stands, how far its weapon strikes and what it lands a tick on a tile.
-type Striker =
-    {
-        Ticks: int[]
-        At: RoomPos
-        Strike: int
-        Power: Pos -> int
-    }
 
 /// Each member of a room's classes as a `Striker` (Decided 3's price): a
 /// creep at its live weapon of that class in #531's window

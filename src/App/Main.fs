@@ -552,11 +552,10 @@ let private fullTick
     let atProjects = Game.cpu.getUsed ()
     let mutable projectedAt = []
 
-    // The world layer's read, once for every colony (`WorldView`), with this
-    // tick's safe-ground table: fresh each tick, so no tick's sets outlive it.
+    // The world layer's read, once for every colony (`WorldView`): fresh each
+    // tick, and its danger laid in once the views are cut (`WorldDanger`).
     let watch =
         WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
-        |> WorldView.sharingSafeGround
 
     // The lane that matches the fight (`Tuning.FightLane`, or its live
     // override), on the Tuning every view carries: the projection reads it,

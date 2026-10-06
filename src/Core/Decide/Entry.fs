@@ -1567,6 +1567,7 @@ type ColonyDecisions<'Stamp> =
 /// Each raided room's one verdict, priced once over the fleet and the
 /// world's vision and laid in each view (`Facts.judge`): a colony that does
 /// not decide (`idle`) sends only the bodies its plan already holds there.
+/// And each contested room's one danger (`WorldDanger.lay`).
 let judgeColonies
     (hops: string -> string -> int option)
     (assignments: Assignments)
@@ -1582,6 +1583,7 @@ let judgeColonies
         }
         : Facts.Judged))
     |> Facts.judge hops assignments
+    |> WorldDanger.lay
 
 /// ADR-0091
 /// The world's fight, one Brief per combat Task world-wide: of the colonies

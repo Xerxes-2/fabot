@@ -7065,34 +7065,6 @@ let worldViewTests =
         "the world layer's read, once a tick for every colony (#534)"
         [
             test
-                "a raided room's safe ground is built once a tick off one grid and one Reach, and again off any other" {
-                let share = (WorldView.sharingSafeGround WorldView.empty).SafeGround.Value
-                let mutable built = 0
-                let tiles = Set.singleton (RoomPos.at "W1N1" { X = 5; Y = 5 })
-
-                let build () =
-                    built <- built + 1
-                    tiles
-
-                let grid = Array.create 2500 1
-                let reach = Set.singleton { X = 1; Y = 1 }
-
-                Expect.equal (share "W1N1" reach grid build) tiles "the first colony builds it"
-
-                Expect.equal
-                    (share "W1N1" reach (Array.copy grid) build)
-                    tiles
-                    "the second reads it"
-
-                Expect.equal built 1 "built once"
-
-                share "W1N1" (Set.singleton { X = 2; Y = 2 }) grid build |> ignore
-                share "W1N1" reach (Array.create 2500 2) build |> ignore
-                share "W1N2" reach grid build |> ignore
-                Expect.equal built 4 "another Reach, another grid, another room: each its own"
-            }
-
-            test
                 "a room's hostile towers fire where a stronghold's core or their owner's controller stands" {
                 // #566: an abandoned room's towers fire at nothing.
                 let factsWith owner core rival =
@@ -7153,32 +7125,6 @@ let worldViewTests =
                 Expect.isFalse
                     (fires (factsWith "Odiodin" None (Some "Odiodin")))
                     "nor an ally's in its own room (#576)"
-            }
-
-            test
-                "a room's own Reach is built once a tick off one room's maps and ramparts, and again off any other" {
-                let share = (WorldView.sharingSafeGround WorldView.empty).ReachGround.Value
-                let mutable built = 0
-                let tiles = Set.singleton { X = 5; Y = 5 }
-
-                let build () =
-                    built <- built + 1
-                    tiles
-
-                // The maps are shared by object (`ArrivalGround` hands every
-                // colony the one it built), so equal content is another.
-                let maps = { Classes = []; Unseen = None }
-                let ramparts = Set.singleton { X = 6; Y = 6 }
-
-                Expect.equal (share "W1N1" maps ramparts build) tiles "the first colony builds it"
-                Expect.equal (share "W1N1" maps ramparts build) tiles "the second reads it"
-                Expect.equal built 1 "built once"
-
-                share "W1N1" { Classes = []; Unseen = None } ramparts build |> ignore
-                share "W1N1" maps Set.empty build |> ignore
-                share "W1N2" maps ramparts build |> ignore
-
-                Expect.equal built 4 "other maps, other ramparts, another room: each its own"
             }
 
             test

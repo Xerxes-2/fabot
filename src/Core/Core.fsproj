@@ -22,6 +22,7 @@
     <Compile Include="Grid.fs" />
     <Compile Include="Atlas.fs" />
     <Compile Include="Arrival.fs" />
+    <Compile Include="WorldDanger.fs" />
     <Compile Include="Decide/Bodies.fs" />
     <Compile Include="Decide/Labs.fs" />
     <Compile Include="Decide/Facts.fs" />
