@@ -975,6 +975,16 @@ let private westBorder =
         else
             Wall)
 
+/// W17S26's west border as #561 met it: an exit run down x = 0 past y 6,
+/// walled elsewhere.
+let private w17s26Border =
+    plainRing
+    |> Map.map (fun tile terrain ->
+        if tile.X = 0 && tile.Y >= 2 && tile.Y <= 9 then
+            terrain
+        else
+            Wall)
+
 /// The corner the north and west borders meet at, walled but for a west run
 /// of y 2..6 and a north run of x 1..5: (0,1) is wall, so from (1,1) the
 /// nearest exit is (1,0) on the north side, one step, and the west run's
@@ -1029,6 +1039,36 @@ let private kiterAt pos ttl =
         TicksToLive = ttl
     }
 
+/// The same world with these creeps' tombstones lying in W1N2.
+let private withFallen (fallen: string list) (world: World) : World =
+    { world with
+        Rooms =
+            world.Rooms
+            |> Map.change "W1N2" (Option.map (fun facts -> { facts with Fallen = fallen }))
+    }
+
+/// The same world with W2N2, the room across W1N2's west border, seen too,
+/// these hostiles standing in it.
+let private withWestSeen hostiles (world: World) : World =
+    { world with
+        Rooms =
+            world.Rooms
+            |> Map.add
+                "W2N2"
+                { RoomFacts.empty with
+                    Hostiles = hostiles
+                }
+        Sightings =
+            world.Sightings
+            |> Map.add
+                "W2N2"
+                {
+                    Tick = world.Time
+                    Targets = lazy Set.empty
+                    Rival = None
+                }
+    }
+
 let private watchOf (world: World) = Map.tryFind "W1N2" world.ExitWatches
 
 /// The watch carried through a run of ticks, from none.
@@ -1058,7 +1098,16 @@ let exitHoldTests =
 
                 Expect.equal
                     (watchOf seen)
-                    (Some(ExitWatch.Seen [ { At = { X = 1; Y = 22 }; Dies = 1600 } ]))
+                    (Some(
+                        ExitWatch.Seen
+                            [
+                                {
+                                    Id = "h-1"
+                                    At = { X = 1; Y = 22 }
+                                    Dies = 1600
+                                }
+                            ]
+                    ))
                     "while it stands there the world remembers where, and when it dies"
 
                 let gone = World.watchExits Tuning.defaults seen.ExitWatches (watched 101 [])
@@ -1156,6 +1205,69 @@ let exitHoldTests =
                     "nor from (1,30), whose border is wall"
             }
 
+            test "a threat that died beside the exit, its tombstone lying there, holds nothing" {
+                let lastSeen = watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]
+
+                Expect.isSome
+                    (watchThrough [ lastSeen; watched 101 [] ] |> holdOf)
+                    "the premise: gone from beside the run with no tombstone, it left"
+
+                Expect.isNone
+                    (watchThrough [ lastSeen; watched 101 [] |> withFallen [ "h-1" ] ] |> watchOf)
+                    "with its tombstone in the room it died a step from the exit"
+
+                Expect.isSome
+                    (watchThrough [ lastSeen; watched 101 [] |> withFallen [ "h-other" ] ] |> holdOf)
+                    "another creep's tombstone says nothing of this one"
+            }
+
+            test
+                "a threat that vanished beside the exit is held only if the room across could hold it" {
+                let lastSeen = watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]
+
+                Expect.isSome
+                    (watchThrough
+                        [
+                            lastSeen
+                            watched 101 [] |> withWestSeen [ kiterAt { X = 49; Y = 22 } 1400 ]
+                        ]
+                     |> holdOf)
+                    "seen across the border, it stepped onto the exit and was carried over"
+
+                Expect.isNone
+                    (watchThrough [ lastSeen; watched 101 [] |> withWestSeen [] ] |> watchOf)
+                    "the room across seen and it in none: it died, it did not cross"
+
+                let onRing = watched 100 [ kiterAt { X = 0; Y = 22 } 1500 ]
+
+                Expect.isSome
+                    (watchThrough [ onRing; watched 101 [] ] |> holdOf)
+                    "the premise: last seen on the exit tile itself and gone, it crossed"
+
+                Expect.isNone
+                    (watchThrough [ onRing; watched 101 [] |> withWestSeen [] ] |> watchOf)
+                    "last seen on the ring, the room across seen and it not there: it died"
+            }
+
+            test "W17S26 (#561): Beam715 dead at 1,6 beside the west run holds no exit" {
+                let beam =
+                    { kiterAt { X = 1; Y = 6 } 800 with
+                        Id = "beam715"
+                    }
+
+                let lastSeen = watchedOn w17s26Border 986951 [ beam ]
+                let next = watchedOn w17s26Border 986952 []
+
+                Expect.equal
+                    (watchThrough [ lastSeen; next ] |> holdOf |> Option.map _.Exit)
+                    (Some { X = 0; Y = 6 })
+                    "the premise: the watch read the vanished body as leaving by 0,6"
+
+                Expect.isNone
+                    (watchThrough [ lastSeen; next |> withFallen [ "beam715" ] ] |> watchOf)
+                    "its tombstone at 1,6 says it died: no hold, no guard sent to the corpse"
+            }
+
             test "the threat re-entering puts the ground back on its ring" {
                 let held =
                     watchThrough [ watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]; watched 101 [] ]
@@ -1166,7 +1278,16 @@ let exitHoldTests =
                         held.ExitWatches
                         (watched 102 [ kiterAt { X = 0; Y = 22 } 1400 ])
                      |> watchOf)
-                    (Some(ExitWatch.Seen [ { At = { X = 0; Y = 22 }; Dies = 1502 } ]))
+                    (Some(
+                        ExitWatch.Seen
+                            [
+                                {
+                                    Id = "h-1"
+                                    At = { X = 0; Y = 22 }
+                                    Dies = 1502
+                                }
+                            ]
+                    ))
                     "seen again, the world remembers the threat and holds nothing"
 
                 let ringOf colony =

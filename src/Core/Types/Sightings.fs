@@ -648,9 +648,11 @@ module ExitHold =
     /// Whether the hold still stands at `time`.
     let stands (time: int) (hold: ExitHold) = hold.Until > time
 
-/// One armed Threat as the full tick saw it: where it stood, and the tick its
-/// `ticksToLive` runs out.
-type SeenThreat = { At: Pos; Dies: int }
+/// One armed Threat as the full tick saw it: which creep, where it stood, and
+/// the tick its `ticksToLive` runs out. `Id` is the creep's id, the one its
+/// tombstone names (`RoomFacts.Fallen`); empty for a row a bundle before #561
+/// wrote, which no tombstone matches.
+type SeenThreat = { Id: string; At: Pos; Dies: int }
 
 /// What the world remembers of one room's armed Threats across ticks
 /// (`World.watchExits`, #450). Heap state only: a reset costs one hold.
@@ -927,16 +929,25 @@ module World =
     /// How far the body stood from the exit it took.
     let private distanceOf (run: ExitRun) = squaredDistance run.From run.Through
 
+    let private walkableExit (border: Map<Pos, Terrain>) (p: Pos) =
+        Seam.isExit p && (Map.tryFind p border |> Option.exists (fun t -> t <> Wall))
+
+    /// The walkable exit tiles a step from `tile`: the engine carries a body
+    /// across in the tick it steps onto one (`processor/intents/creeps/tick.js`
+    /// moves, then sends a body at the edge on), so these are every way out a
+    /// body last seen there had. A body seen on an exit tile has just arrived
+    /// and, unless it steps off, is carried straight back across that tick.
+    let private exitsBeside (border: Map<Pos, Terrain>) (tile: Pos) : Pos list =
+        tilesWithin 1 tile |> List.filter (walkableExit border)
+
     /// The exit run a body standing on `tile` could have stepped out by,
     /// through the walkable exit tile nearest it within a step, on whichever
     /// side. None for a tile no exit is a step from — a Threat that vanished
     /// there died, it did not leave.
     let private exitRunFrom (border: Map<Pos, Terrain>) (tile: Pos) : ExitRun option =
-        let walkable (p: Pos) =
-            Seam.isExit p && (Map.tryFind p border |> Option.exists (fun t -> t <> Wall))
+        let walkable = walkableExit border
 
-        tilesWithin 1 tile
-        |> List.filter walkable
+        exitsBeside border tile
         |> List.sortBy (fun exit -> squaredDistance tile exit, exit.X, exit.Y)
         |> List.tryHead
         |> Option.map (fun exit ->
@@ -972,6 +983,37 @@ module World =
             Map.tryFind room world.Sightings
             |> Option.exists (fun sighting -> sighting.Tick = world.Time)
 
+        // Only a Threat that left holds the run, never one that died (#561):
+        // its tombstone lies here, or every room it could have crossed into
+        // is seen this tick and it stands in none. A row with no id (written
+        // before #561) is matched by neither. Accepted staleness: the watch
+        // compares full ticks, so a body that crossed and walked on out of the
+        // seen neighbour during the light ticks between is ruled dead.
+        let died room (facts: RoomFacts) (threat: SeenThreat) =
+            let across () =
+                let exits = exitsBeside facts.Border threat.At
+
+                let into =
+                    RoomName.adjacent room
+                    |> List.filter (fun next ->
+                        RoomName.offsetOf room next
+                        |> Option.exists (fun offset ->
+                            exits
+                            |> List.exists (fun exit ->
+                                Seam.landingOf offset exit |> Option.isSome)))
+
+                not (List.isEmpty into)
+                && into
+                   |> List.forall (fun next ->
+                       seen next
+                       && not (
+                           roomOf world next
+                           |> _.Hostiles
+                           |> List.exists (fun h -> h.Id = threat.Id)
+                       ))
+
+            threat.Id <> "" && (List.contains threat.Id facts.Fallen || across ())
+
         let watch (room, facts: RoomFacts) =
             let armed =
                 facts.Hostiles
@@ -986,6 +1028,7 @@ module World =
                         armed
                         |> List.map (fun h ->
                             {
+                                Id = h.Id
                                 At = RoomPos.pos h.Pos
                                 Dies = world.Time + h.TicksToLive
                             })
@@ -993,6 +1036,7 @@ module World =
                 )
             | true, [], Some(ExitWatch.Seen last) ->
                 last
+                |> List.filter (fun threat -> not (died room facts threat))
                 |> List.choose (fun threat ->
                     exitRunFrom facts.Border threat.At |> Option.map (fun run -> run, threat.Dies))
                 |> List.sortBy (fun (run, _) -> distanceOf run)

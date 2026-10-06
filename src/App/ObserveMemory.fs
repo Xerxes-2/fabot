@@ -1074,8 +1074,9 @@ let private tileOfPair (raw: obj) : Pos =
         | [| Some x; Some y |] -> { X = x; Y = y }
         | _ -> failwith "not a tile"
 
-// One exit watch on the wire (#450, #542): `{ seen: [{ x, y, dies }] }` while
-// its armed bodies stand, `{ run, exit, until }` once their exit is held.
+// One exit watch on the wire (#450, #542): `{ seen: [{ id, x, y, dies }] }`
+// while its armed bodies stand, `{ run, exit, until }` once their exit is
+// held. `id` came with #561: a row without it reads as no id, written so.
 let private encodeWatch (watch: ExitWatch) =
     let o = createEmpty<obj>
 
@@ -1085,6 +1086,10 @@ let private encodeWatch (watch: ExitWatch) =
             threats
             |> List.map (fun threat ->
                 let t = createEmpty<obj>
+
+                if threat.Id <> "" then
+                    t?id <- threat.Id
+
                 t?x <- threat.At.X
                 t?y <- threat.At.Y
                 t?dies <- threat.Dies
@@ -1107,6 +1112,11 @@ let private decodeWatch (raw: obj) : ExitWatch =
         |> unbox<obj[]>
         |> Array.map (fun threat ->
             {
+                Id =
+                    match jsTypeof threat?id with
+                    | "undefined" -> ""
+                    | "string" -> unbox<string> threat?id
+                    | _ -> failwith "not a string: id"
                 At =
                     {
                         X = numberOf threat "x"

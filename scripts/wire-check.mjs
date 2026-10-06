@@ -282,7 +282,7 @@ const dangerThrough = async (leaf, colonies = undefined, tick = 1000) => {
 const hold = { holder: "invader", until: 900 };
 const threat = { until: 800 };
 const heldWatch = { run: [[0, 20], [0, 21]], exit: [0, 20], until: 950 };
-const seenWatch = { seen: [{ x: 10, y: 11, dies: 1400 }] };
+const seenWatch = { seen: [{ id: "h-1", x: 10, y: 11, dies: 1400 }] };
 
 for (const [name, leaf] of [
   ["absent", undefined],
@@ -317,6 +317,16 @@ wire("danger: a part off its shape costs that part, and a room left with none is
   });
 
   assert.equal(stable(written), stable({ W1N9: { hold }, W1N2: { down: outpost } }));
+});
+
+wire("danger: a seen threat without an id (before #561) reads as none and round-trips without one; one whose id is no string costs the watch", async () => {
+  const legacy = { seen: [{ x: 10, y: 11, dies: 1400 }] };
+  const written = await dangerThrough({
+    W1N3: { watch: legacy },
+    W1N4: { watch: { seen: [{ id: 7, x: 10, y: 11, dies: 1400 }] } },
+  });
+
+  assert.equal(stable(written), stable({ W1N3: { watch: legacy } }));
 });
 
 wire("danger: a row filed under a room is that room's, whatever it names", async () => {

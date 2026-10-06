@@ -2363,7 +2363,14 @@ let worldDangerTests =
                         Map.ofList
                             [
                                 outpostRoom,
-                                ExitWatch.Seen [ { At = { X = 10; Y = 10 }; Dies = 130 } ]
+                                ExitWatch.Seen
+                                    [
+                                        {
+                                            Id = "h-1"
+                                            At = { X = 10; Y = 10 }
+                                            Dies = 130
+                                        }
+                                    ]
                             ]
                     )
 

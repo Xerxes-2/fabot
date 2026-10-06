@@ -5958,7 +5958,17 @@ let exitHoldViewTests =
                 Expect.isEmpty
                     (viewOf
                         (withExits
-                            [ mother, ExitWatch.Seen [ { At = { X = 1; Y = 20 }; Dies = 1500 } ] ])
+                            [
+                                mother,
+                                ExitWatch.Seen
+                                    [
+                                        {
+                                            Id = "h-1"
+                                            At = { X = 1; Y = 20 }
+                                            Dies = 1500
+                                        }
+                                    ]
+                            ])
                         mother)
                         .ExitHolds
                     "nor is a Threat still standing there"
