@@ -514,6 +514,7 @@ function liveFields(live, tick, rooms) {
           `          Expiry = ${fsInt(o.expiry)}`,
           `          Basis = StandDownBasis.${BASES[o.basis]}`,
           `          Stronghold = ${o.stronghold === true}`,
+          `          Bounced = ${o.bounced === true}`,
           `          Raiders = ${idSet(o.raiders)}`,
           `          PlayerSince = ${o.player == null ? "None" : `Some ${fsInt(o.player)}`}`,
           `          Chased = ${o.chased === true} }`,
