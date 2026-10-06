@@ -3535,6 +3535,42 @@ let trespassTests =
                             })
                         $"nor a neutral's {label}"
             }
+
+            // #598: arena "a hurt pair retreats", Medic1's HEAL shot off
+            // while Brute1 still walked our room; the ranger in reach of it
+            // held its fire.
+            test
+                "a healer shot bare beside its armed raider is struck while the raider lives (#598)" {
+                let bare =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 46 }
+                          (List.replicate 4 Move @ List.replicate 5 Heal @ [ Move ]) with
+                        Owner = "Invader"
+                        Hits = 100
+                    }
+
+                let raider =
+                    { hostileIn "W1N2" { X = 25; Y = 40 } smallMelee with
+                        Id = "h-2"
+                        Owner = "Invader"
+                    }
+
+                let result =
+                    declaredRaid [ bare; raider ]
+                    |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
+                    |> decideOn
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the guard holds the raid's Guard"
+
+                Expect.contains
+                    result.Intents
+                    (AttackCreep("g-1", "h-1"))
+                    "and swings at the bare healer beside it, the raider out of reach"
+            }
         ]
 
 [<Tests>]

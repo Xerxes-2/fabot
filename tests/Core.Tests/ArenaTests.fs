@@ -7749,13 +7749,60 @@ let arenaBorderTests =
                         (w17s25 2 17)
                         (Some(Retreat(760, refuge, 800, Follow "Brute1")))
 
-                let _, trace = nurseryWest [ ranger; melee; healer ] |> run 30
-                Expect.isNonEmpty (crossingsInto "Brute1" "W18S25" trace) "the brute left"
-                Expect.isNonEmpty (crossingsInto "Medic1" "W18S25" trace) "the medic left"
+                for lane in [ FightLane.PerColony; FightLane.World ] do
+                    let _, trace = nurseryWest [ ranger; melee; healer ] |> runIn lane 30
+                    Expect.isNonEmpty (crossingsInto "Brute1" "W18S25" trace) "the brute left"
 
-                Expect.isEmpty
-                    (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
-                    $"the ranger did not follow\n{describe trace}"
+                    // Moved by #598: the medic, its HEAL shot off beside its
+                    // brute, is no longer nobody's and dies short of the exit
+                    // (it left at 380 hits).
+                    Expect.isSome
+                        (diedOn "Medic1" trace)
+                        $"{lane}: the medic dies\n{describe trace}"
+
+                    Expect.isEmpty (crossingsInto "Medic1" "W18S25" trace) "rather than leaving"
+
+                    Expect.isEmpty
+                        (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
+                        $"the ranger did not follow\n{describe trace}"
+
+                    // #598: half the raid going ends nothing for the half
+                    // still in our room; the ranger fires every tick a raider
+                    // stands in its reach there.
+                    let shots =
+                        trace
+                        |> List.map (fun t ->
+                            t.Tick,
+                            t.Ours
+                            |> List.exists (function
+                                | RangedAttackCreep(who, _)
+                                | RangedMassAttack who -> who = ranger.Id
+                                | _ -> false))
+                        |> Map.ofList
+
+                    let inReach =
+                        trace
+                        |> List.choose (fun t ->
+                            let at id =
+                                t.Bodies |> List.tryFind (fun b -> b.Id = id) |> Option.map _.At
+
+                            let reached raider =
+                                match at raider, at ranger.Id with
+                                | Some them, Some us ->
+                                    them.Room = "W17S25"
+                                    && RoomPos.range them us |> Option.exists (fun r -> r <= 3)
+                                | _ -> false
+
+                            if reached "Brute1" || reached "Medic1" then
+                                Some(t.Tick + 1)
+                            else
+                                None)
+
+                    for tick in inReach do
+                        if Map.containsKey tick shots then
+                            Expect.isTrue
+                                shots[tick]
+                                $"{lane} t{tick}: the ranger fires while a raider stands in reach in W17S25\n{describe trace}"
             }
 
             // As live (t972,617-972,661): the guard kills Wraith403 on its post

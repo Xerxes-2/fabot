@@ -674,10 +674,13 @@ let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
 /// `side`, unarmed in effect and one of three bodies:
 /// - shot disarmed: a weapon on paper and none in effect (#528, any owner's
 ///   since #535), so it strikes nothing back;
-/// - a raid's healer whose raiders are gone (#597): a HEAL on paper, live or
-///   shot off, with no raider in its room or the rooms beside it. It heals
-///   its own parts back, or the next raid's; beside a raider, or one just
-///   across the exit, it is that raid's;
+/// - a healer shot bare (#598): a HEAL on paper and none live, beside its
+///   raid or not. Its raiders still fighting leave it nobody's healer, and
+///   it is struck where it stands, as a cripple shot disarmed is;
+/// - a raid's healer whose raiders are gone (#597): a HEAL live, with no
+///   raider in its room or the rooms beside it. It heals its own parts
+///   back, or the next raid's; beside a raider, or one just across the
+///   exit, it is that raid's;
 /// - a declared enemy's (`Colony.enemies`) working or carrying with a WORK,
 ///   CARRY or CLAIM. A hauler carries our dug energy off; a bare scout takes
 ///   nothing.
@@ -699,7 +702,8 @@ let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
 
     not (HostileInfo.armed side hostile)
     && (Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
-        || List.contains Heal hostile.Body && raidGone ()
+        || List.contains Heal hostile.Body
+           && (not (HostileInfo.heals side hostile) || raidGone ())
         || Colony.isEnemy hostile.Owner
            && List.exists takes hostile.Body
            && List.exists takes (HostileInfo.effectiveParts side hostile))
