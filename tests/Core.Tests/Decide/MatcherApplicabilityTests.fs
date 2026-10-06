@@ -641,3 +641,77 @@ let pioneerStayTests =
                 Expect.isTrue (holdsSpawnSite inside) "it is there: every tick of it is work"
             }
         ]
+
+// Characterisation (the world-first epic's W0): the line the fight lane is
+// carved along. Every arena step asserts it too (`Arena.decideOurs`).
+[<Tests>]
+let fightEconomyPartitionTests =
+    testList
+        "the fight/economy partition"
+        [
+            test "a fighter on an economy Task or an economy body on a combat Task crosses the line" {
+                let guard = creepWith "guard" 0 0 Bodies.guardPattern.Block
+                let ranger = creepWith "ranger" 0 0 Bodies.rangerPattern.Block
+                let hauler = worker "hauler" 50 0
+
+                let crossing =
+                    Map.ofList
+                        [
+                            "guard", taskId (Harvest "src-a")
+                            "ranger", taskId (Refill("spawn-1", Energy))
+                            "hauler", taskId (Defend "W1N1")
+                        ]
+
+                Expect.equal
+                    (partitionBreaks [ guard; ranger; hauler ] crossing |> List.map fst)
+                    [ "guard"; "ranger"; "hauler" ]
+                    "each holding is across the line"
+
+                let kept =
+                    Map.ofList
+                        [
+                            "guard", taskId (Guard "W1N1")
+                            "ranger", taskId Flee
+                            "hauler", taskId Flee
+                        ]
+
+                Expect.isEmpty
+                    (partitionBreaks [ guard; ranger; hauler ] kept)
+                    "Flee is both sides'"
+            }
+
+            test
+                "a home under a raid keeps its fighters on the fight and its workers on the economy" {
+                let guard = creepWith "guard" 0 0 Bodies.guardPattern.Block
+                let ranger = creepWith "ranger" 0 0 Bodies.rangerPattern.Block
+
+                let room =
+                    openRoom 8
+                    |> withCreepsAt
+                        [
+                            "guard", { X = 22; Y = 25 }
+                            "ranger", { X = 23; Y = 25 }
+                            "w", { X = 26; Y = 27 }
+                        ]
+
+                let colony =
+                    { atLevel 4 room with
+                        Bank = bank 800 800
+                        Creeps = [ guard; ranger; worker "w" 0 50 ]
+                    }
+                    |> facing [ hostileAt "raider" { X = 19; Y = 25 } [ Attack; Move ] ]
+
+                let { Assignments = assignments } = decideOn colony
+
+                Expect.isTrue
+                    ([ "guard"; "ranger" ]
+                     |> List.exists (fun name ->
+                         Map.tryFind name assignments
+                         |> Option.exists (fun tid -> tid <> taskId Flee)))
+                    $"premise: a fighter holds the fight %A{assignments}"
+
+                Expect.isEmpty
+                    (partitionBreaks colony.Creeps assignments)
+                    "no body crosses the line"
+            }
+        ]

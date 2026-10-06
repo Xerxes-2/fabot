@@ -2525,3 +2525,22 @@ let pooledHolding (holding: (string * Task) list) (task: Task) (colony: ColonyVi
         (Planner.planTasks colony atlas threats held (Planner.outpostFactsOf colony atlas))
     |> List.tryFind (fun entry -> entry.Task = task)
     |> Option.map (fun entry -> entry.Priority, entry.Capacity)
+
+/// The bodies a decision holds across the fight/economy line, each with its
+/// Task id: a fighter (`isFighterBody`) on an economy Task, or an economy body
+/// on a Guard, Defend or Assault. Flee is both sides'. Every arena step
+/// asserts there are none (`Arena.decideOurs`).
+let partitionBreaks (creeps: CreepInfo list) (assignments: Assignments) : (string * string) list =
+    let combat = [ Guard ""; Defend ""; Assault "" ] |> List.map taskId
+
+    creeps
+    |> List.choose (fun creep ->
+        match Map.tryFind creep.Name assignments with
+        | Some tid when tid <> taskId Flee ->
+            let holdsCombat = combat |> List.exists (fun prefix -> tid.StartsWith prefix)
+
+            if isFighterBody creep <> holdsCombat then
+                Some(creep.Name, tid)
+            else
+                None
+        | _ -> None)

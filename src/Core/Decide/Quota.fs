@@ -414,7 +414,7 @@ let internal isSapperBody (creep: CreepInfo) =
 
 /// Any fighting row's body, a squad's medic and sapper among them: what flees
 /// only with no fight Task to hold (#533) and walks home when idle.
-let internal isFighterBody (creep: CreepInfo) =
+let isFighterBody (creep: CreepInfo) =
     isGuardBody creep
     || isRangerBody creep
     || isMedicBody creep
