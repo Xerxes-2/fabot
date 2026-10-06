@@ -193,6 +193,13 @@ type Laid =
         /// melee body there and that empty, the tiles farthest from it, never
         /// the threats' ring beside it.
         Kite: Set<RoomPos> option
+        /// With a kite ground laid about the kill order's head, the tiles one
+        /// to three off it that a kiter with no safe walk onto it closes on
+        /// (#595): off the exits and the hostiles' tiles, a melee arriving
+        /// later than the tick after, with escape room at least half the
+        /// ground's widest, the ground's own tests. Empty with any other
+        /// ground.
+        Approach: Lazy<Set<RoomPos>>
         /// In a resident room (`Facts.residentRooms`), the garrison's ground,
         /// which it holds and shoots from: in a declared errand room the
         /// Reactor's own ring (#414, #411), in a raised child's home its
@@ -456,6 +463,7 @@ module Brief =
     let private bare =
         {
             Kite = None
+            Approach = lazy Set.empty
             Resident = None
             Harass = None
             Ring = None
@@ -2045,32 +2053,52 @@ let private kiteGroundIn
                 0)
 
     match head with
-    | None -> Set.empty
+    | None -> Set.empty, lazy Set.empty
     | Some target ->
-        let within reach =
-            Atlas.walkableWithinIn atlas room reach (RoomPos.pos target.Pos)
-            |> List.filter isOpen
+        let at = RoomPos.pos target.Pos
 
-        let tiles =
+        let within reach =
+            Atlas.walkableWithinIn atlas room reach at |> List.filter isOpen
+
+        let reach, tiles =
             match
                 (if stepsNow target then
                      within (Engine.rangedRange - 1)
                  else
                      [])
             with
-            | [] -> within Engine.rangedRange
-            | near -> near
+            | [] -> Engine.rangedRange, within Engine.rangedRange
+            | near -> Engine.rangedRange - 1, near
 
-        match anyMelee, tiles with
-        | false, _
-        | _, [] -> tiles
-        | _ ->
-            let roomOf = tiles |> List.map (fun tile -> tile, escapeRoom tile)
-            let widest = roomOf |> List.map snd |> List.max
+        let ground, widest =
+            match anyMelee, tiles with
+            | false, _
+            | _, [] -> tiles, 0
+            | _ ->
+                let roomOf = tiles |> List.map (fun tile -> tile, escapeRoom tile)
+                let widest = roomOf |> List.map snd |> List.max
 
-            roomOf |> List.filter (fun (_, space) -> 2 * space >= widest) |> List.map fst
-        |> Set.ofList
-        |> RoomPos.setAt room
+                roomOf |> List.filter (fun (_, space) -> 2 * space >= widest) |> List.map fst,
+                widest
+
+        let ground = ground |> Set.ofList
+
+        // The band a kiter closes on the ground by (#595): the same tests,
+        // one to three tiles past it.
+        let approach =
+            lazy
+                (if Set.isEmpty ground then
+                     Set.empty
+                 else
+                     Atlas.walkableWithinIn atlas room (reach + 3) at
+                     |> List.filter (fun tile ->
+                         range tile at > reach
+                         && isOpen tile
+                         && (widest = 0 || 2 * escapeRoom tile >= widest))
+                     |> Set.ofList
+                     |> RoomPos.setAt room)
+
+        RoomPos.setAt room ground, approach
 
 /// The home's Defend's ground (#504), off this tick's raid at the line: every
 /// perimeter rampart of ours within its row's reach of a raid body — a
@@ -2677,20 +2705,27 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let outmatchedHere =
                 Set.contains room resident && fst (verdictOf room) = Answer.Lose
 
+            // Only the ground about the head has an approach band (#595).
+            let bare ground () = ground (), lazy Set.empty
+
             [
-                onRamparts
+                bare onRamparts
 
                 if outmatchedHere then
                     if rangerHere.Value then
-                        safe
+                        bare safe
                 elif not (List.isEmpty melee) || claimerLeads then
                     aroundHead
                 if not (List.isEmpty melee) && (not outmatchedHere || rangerHere.Value) then
-                    farthest
+                    bare farthest
             ]
             |> List.tryPick (fun ground ->
-                let tiles = ground ()
-                if Set.isEmpty tiles then None else Some(room, tiles)))
+                let tiles, approach = ground ()
+
+                if Set.isEmpty tiles then
+                    None
+                else
+                    Some(room, (tiles, approach))))
         |> Map.ofList
 
     // The held exits' ground (#450): the tiles within a melee guard's reach of
@@ -3010,7 +3045,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                           room))
                   (claimsIn room)
                   {
-                      Kite = Map.tryFind room kite
+                      Kite = Map.tryFind room kite |> Option.map fst
+                      Approach =
+                          Map.tryFind room kite
+                          |> Option.map snd
+                          |> Option.defaultValue (lazy Set.empty)
                       Resident = Map.tryFind room residentRing
                       Harass = Map.tryFind room harassRing
                       Ring = Map.tryFind room rings

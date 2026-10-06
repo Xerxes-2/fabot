@@ -121,8 +121,8 @@
   },
   "outpost-squad": {
     "castEnergy": 4900,
-    "cleared": 282,
-    "hurt": 2328,
+    "cleared": 274,
+    "hurt": 2248,
     "kills": 5,
     "ourDeaths": 1,
     "safeMode": false,

@@ -8012,7 +8012,8 @@ let arenaBorderTests =
             // timing, could be on it and gone (`Threats.kiteUnsafeFor`): it
             // holds at (25,7) while the melee is far, then steps and shoots
             // each tick a step ahead of it, never struck, until its life runs
-            // out at t11 (as live). The melee dies to the rest at t74.
+            // out at t11 (as live). The melee dies to ranger-984683 at t36
+            // (#595 below).
             test
                 "movement S3 capture t986,005: a ranger holding the Guard kites the melee down untouched" {
                 let ranger = "ranger-984393-Spawn3"
@@ -8046,35 +8047,60 @@ let arenaBorderTests =
                          | _ -> false))
                     $"it shoots the melee every tick from t3 while it lives\n{failure}"
 
+                // #595: the mother's ranger-984683 (14 RANGED_ATTACK) enters at
+                // t13 by (18,0). Every tile of its kite ground is one the
+                // melee strikes before the ranger, twelve tiles off, could be
+                // there and gone, so S3's walk found none and it parked on
+                // (17,1) until t67 while the melee stood killable at 2,030
+                // hits (main: first shot t68, kill t74). Now it closes on the
+                // ground by the safe tiles nearest it, waits a step off it for
+                // the melee's fatigue, steps in at t23 and shoots from t24.
+                let mother = pathOf "ranger-984683-Spawn3" trace
+
+                Expect.isTrue
+                    (mother |> List.forall (fun (_, s) -> s.Hits = 4_200))
+                    $"the melee never strikes the mother's ranger\n{failure}"
+
+                let firstShot =
+                    trace
+                    |> List.tryFind (fun t ->
+                        t.Ours
+                        |> List.contains (RangedAttackCreep("ranger-984683-Spawn3", "HalfLife847")))
+                    |> Option.map (fun t -> t.Tick)
+
+                Expect.equal
+                    firstShot
+                    (Some 24)
+                    $"it shoots the melee from t24 (main t68)\n{failure}"
+
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 74)
-                    $"the melee dies to the rest at t74 (main t53)\n{failure}"
+                    (Some 36)
+                    $"the melee dies at t36 (S3 t74)\n{failure}"
 
-                // Characterisation (movement S3, for S4's Flee band, #583):
-                // main lost anchor-985849 at t8 and kept reserver-985957; now
-                // the anchor lives and the reserver dies. At t1 the reserver's
-                // walk to its controller is priced round the 1-block ranger,
-                // which holds (25,10) (rested, so shovable, but priced as
-                // occupied) where on main it walked into the melee (600 to
-                // 102): it steps onto the swamp at (25,9), 16 fatigue holds it
-                // four ticks, it takes Flee for a ground of its own tile, and
-                // the melee's road takes it at t10.
+                // Characterisation (for S4's Flee band, #583). S3 kept
+                // anchor-985849 and lost reserver-985957 at t10: the 1-block
+                // ranger held (25,10), out of reach of its ground, and the
+                // reserver's walk priced round it took the swamp at (25,9).
+                // Since #595 that ranger closes on its ground by (26,8), the
+                // reserver walks (26,9) on plain and lives; the anchor steps to
+                // (26,8) at t6 as the melee steps beside it, and dies at t8
+                // (as before S3).
                 let reserver = pathOf "reserver-985957-Spawn11" trace
 
                 Expect.equal
                     (reserver
                      |> List.tryFind (fun (tick, _) -> tick = 1)
                      |> Option.map (fun (_, s) -> s.At, s.Fatigue))
-                    (Some(RoomPos.at "W17S26" { X = 25; Y = 9 }, 16))
-                    $"the reserver steps onto the swamp round the holding ranger\n{failure}"
+                    (Some(RoomPos.at "W17S26" { X = 26; Y = 9 }, 0))
+                    $"the reserver steps onto the plain round the ranger\n{failure}"
+
+                Expect.isNone (diedOn "reserver-985957-Spawn11" trace) $"and lives\n{failure}"
 
                 Expect.equal
-                    (diedOn "reserver-985957-Spawn11" trace)
-                    (Some 10)
-                    $"and dies at t10\n{failure}"
-
-                Expect.isNone (diedOn "anchor-985849-Spawn11" trace) $"the anchor lives\n{failure}"
+                    (diedOn "anchor-985849-Spawn11" trace)
+                    (Some 8)
+                    $"the anchor dies at t8\n{failure}"
             }
 
             // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read
@@ -19877,17 +19903,18 @@ let worldLaneCaptureTests =
             }
 
             // Why the tuned lane is still the colony's: on the world lane the
-            // melee is never killed. At t10 W17S26's chase turns Kite, one
-            // seat world-wide (one 14-RANGED ranger kites it down, rightly),
-            // and the seat goes to the holder at the fight soonest: the
-            // mother's ranger-984683 beside the room, the child's 985441 let
-            // go. That ranger parks at W17S26 (17,1) and never shoots, the
-            // melee at 2,030 hits t20-t119: a movement S3 kite-approach fault
-            // on both lanes (filed apart), which per colony the child's
-            // ranger, holding a seat of its own colony's count, covered — the
-            // three killed it at t74.
+            // melee dies late. At t10 W17S26's chase turns Kite, one seat
+            // world-wide (one 14-RANGED ranger kites it down, rightly), and
+            // the seat goes to the holder at the fight soonest. Before #595
+            // that was the mother's ranger-984683, which parked at W17S26
+            // (17,1) and never shot (the melee lived to t119). Since #595 the
+            // child's 2-RANGED ranger-985441 closes on its ground instead of
+            // holding (25,10), so it stands at the fight soonest and keeps the
+            // seat, the mother's ranger let go: it shoots from t17 and the
+            // melee dies at t114, where per colony the mother's ranger, a seat
+            // of its own colony's count, kills it at t36.
             test
-                "movement S3 capture t986,005, the world lane: the one seat goes to the mother's ranger beside the room, which never shoots" {
+                "movement S3 capture t986,005, the world lane: the one seat goes to the child's 2-RANGED ranger, which kills the melee at t114" {
                 let first, _ = rangerIntoMelee () |> runIn FightLane.World 20
 
                 Expect.equal
@@ -19895,10 +19922,38 @@ let worldLaneCaptureTests =
                      |> Map.filter (fun _ tid -> tid = "guard:W17S26")
                      |> Map.keys
                      |> List.ofSeq)
-                    [ "ranger-984683-Spawn3" ]
-                    "at t20 the mother's ranger holds the one seat alone"
+                    [ "ranger-985441-Spawn11" ]
+                    "at t20 the child's ranger holds the one seat alone"
 
                 let _, trace = rangerIntoMelee () |> runIn FightLane.World 120
-                Expect.isNone (diedOn "HalfLife847" trace) $"HalfLife847 lives\n{describe trace}"
+                let failure = describe trace
+
+                let shotBy ranger =
+                    trace
+                    |> List.tryFind (fun t ->
+                        t.Ours |> List.contains (RangedAttackCreep(ranger, "HalfLife847")))
+                    |> Option.map (fun t -> t.Tick)
+
+                let childShots =
+                    trace
+                    |> List.filter (fun t ->
+                        t.Tick >= 17
+                        && t.Ours
+                           |> List.contains (
+                               RangedAttackCreep("ranger-985441-Spawn11", "HalfLife847")
+                           ))
+                    |> List.length
+
+                Expect.equal
+                    childShots
+                    89
+                    $"the child's ranger shoots 89 of the 97 ticks from t17 to the kill\n{failure}"
+
+                Expect.isNone (shotBy "ranger-984683-Spawn3") $"the mother's never does\n{failure}"
+
+                Expect.equal
+                    (diedOn "HalfLife847" trace)
+                    (Some 114)
+                    $"HalfLife847 dies at t114\n{failure}"
             }
         ]

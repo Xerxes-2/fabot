@@ -1634,6 +1634,21 @@ let private groundOf colony =
     Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
     |> Option.defaultValue Set.empty
 
+/// The kite ground's approach band (#595), and what the first cut closed on
+/// in its place: every walkable tile within three of the ground, off it.
+let private approachOf colony =
+    let atlas = Atlas.ofView colony
+    let ground = groundOf colony
+
+    let walkable =
+        ground
+        |> Seq.collect (fun tile -> Atlas.walkableWithinIn atlas "W1N2" 3 (RoomPos.pos tile))
+        |> Seq.map (RoomPos.at "W1N2")
+        |> Set.ofSeq
+
+    (Threats.briefOf (threatsOf colony atlas) "W1N2").Laid.Approach.Value,
+    Set.difference walkable ground
+
 let private rangeTo (pos: Pos) (tile: RoomPos) = range pos (RoomPos.pos tile)
 
 [<Tests>]
@@ -1969,6 +1984,67 @@ let kiteTests =
                 Expect.isTrue
                     (ground |> Set.forall (fun tile -> rangeTo at tile >= 3))
                     "and nothing in it is in the melee's step and swing"
+            }
+
+            // #595 review: the band a kiter with no safe walk onto its ground
+            // closes on is the ground's own tests one to three past it. The
+            // first cut read it as the walkable tiles near the ground, which
+            // held the tiles within three of the melee the ground drops for
+            // want of escape room, the north row's corner and the corridor's
+            // mouth: a pocket the melee pins the kiter in.
+            test "the approach band keeps out of the pockets the kite ground keeps out of" {
+                let at = { X = 28; Y = 44 }
+                let band, near = approachOf (declaredRaid [ plodderAt at ] |> withDeadEnd)
+
+                let pocket (tile: RoomPos) =
+                    rangeTo at tile <= Engine.rangedRange || tile.X > 30
+
+                Expect.exists
+                    near
+                    pocket
+                    "the premise: the walkable tiles near the ground hold a pocket"
+
+                Expect.isNonEmpty band "there is a band to close by"
+
+                Expect.isFalse
+                    (band |> Set.exists pocket)
+                    "and none of it is a pocket the ground drops"
+            }
+
+            test "the approach band holds no exit tile" {
+                let at = { X = 25; Y = 3 }
+                let colony = declaredRaid [ plodderAt at ]
+                let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                let colony =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                for x in 15..35 do
+                                                    for y in 0..14 -> { X = x; Y = y }, Plain
+                                            ]
+                                }
+                    }
+
+                let band, near = approachOf colony
+                let exit (tile: RoomPos) = Seam.onRing (RoomPos.pos tile)
+
+                Expect.exists
+                    near
+                    exit
+                    "the premise: the walkable tiles near the ground hold exit tiles"
+
+                Expect.isNonEmpty band "there is a band to close by"
+
+                Expect.isFalse
+                    (band |> Set.exists exit)
+                    "and none of it is an exit tile, which carries the body out of the room"
             }
 
             // A kiter's exit camp, read by its own timing since movement S3

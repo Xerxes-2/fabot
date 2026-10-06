@@ -18,12 +18,14 @@ type private Kiting =
     /// By tile index, what its walk keeps off (`Threats.kiteUnsafeFor`), and
     /// the soonest a melee strikes each tile, which a tie breaks toward the
     /// later.
-    | Keeps of unsafe: (int -> bool) * later: (int -> int)
+    /// With the kite ground's approach band (`Laid.Approach`), lazily.
+    | Keeps of unsafe: (int -> bool) * later: (int -> int) * approach: Lazy<Set<RoomPos>>
 
 /// A kiter's step toward its ground (#510, #524, movement S3): the first step
 /// of a walk that keeps off what it keeps off, across the border too, a tie
 /// going to the tile a melee strikes later. Where no such walk reaches the
-/// ground: none, standing where it stands while that is safe; else the step
+/// ground, the same walk to the band's safe tiles nearest it (#595). Where none
+/// closes on it: none, standing where it stands while that is safe; else the step
 /// beside it a melee strikes last, where that is later than here.
 let private kiteStep
     atlas
@@ -31,17 +33,53 @@ let private kiteStep
     (at: RoomPos)
     (unsafe: int -> bool)
     (later: int -> int)
+    (approach: Lazy<Set<RoomPos>>)
     (area: Set<RoomPos>)
     : RoomPos option =
     let room = at.Room
     let pos = RoomPos.pos at
     let goals = Set.remove at area
 
+    // Where no safe walk reaches the ground, it closes on it all the same
+    // (#595): to the band's safe tiles a tile off it, then two, then three,
+    // while those lie nearer than it stands, so it waits a step from the
+    // ground for the melee's window and never parks at the edge it came in by.
+    // The band is the ground's own tests one to three past it: never an exit,
+    // never a pocket the ground was denied for want of escape room.
+    let closer () =
+        let ground = goals |> Seq.map RoomPos.pos |> List.ofSeq
+
+        let gap =
+            ground
+            |> List.map (fun tile -> range tile pos)
+            |> List.fold min System.Int32.MaxValue
+
+        let band =
+            approach.Value
+            |> Set.filter (fun tile ->
+                tile.Room = room && not (unsafe (indexOf (RoomPos.pos tile))))
+
+        let gapOf (tile: RoomPos) =
+            ground
+            |> List.map (range (RoomPos.pos tile))
+            |> List.fold min System.Int32.MaxValue
+
+        [ 1 .. min 3 (gap - 1) ]
+        |> List.tryPick (fun radius ->
+            let near = band |> Set.filter (fun tile -> gapOf tile <= radius)
+
+            if Set.isEmpty near then
+                None
+            else
+                Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe (Some later) near)
+
     let walk =
         match goals |> Seq.tryHead with
         | Some tile when tile.Room <> room ->
             Atlas.stepTowardRoomWhere atlas creep Set.empty (Some unsafe) (Some later) tile.Room
-        | _ -> Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe (Some later) goals
+        | _ ->
+            Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe (Some later) goals
+            |> Option.orElseWith closer
 
     match walk with
     | Some step -> Some step
@@ -114,7 +152,7 @@ let private moveIntentFor
     // (movement S3), whoever's chain asks.
     let beside =
         match kite with
-        | Some(Kiting.Keeps(unsafe, _)) ->
+        | Some(Kiting.Keeps(unsafe, _, _)) ->
             around |> List.filter (fun tile -> not (unsafe (indexOf tile)))
         | _ -> around
 
@@ -310,7 +348,7 @@ let private moveIntentFor
         // sooner than it could step off again (movement S3).
         let standsSafe () =
             match kite with
-            | Some(Kiting.Keeps(unsafe, _)) -> not (unsafe (indexOf pos))
+            | Some(Kiting.Keeps(unsafe, _, _)) -> not (unsafe (indexOf pos))
             | _ -> true
 
         if Set.contains (here pos) area && standsSafe () then
@@ -335,8 +373,8 @@ let private moveIntentFor
 
             let step =
                 match kite, reachRound with
-                | Some(Kiting.Keeps(unsafe, soonest)), _ ->
-                    kiteStep atlas creep at unsafe soonest area
+                | Some(Kiting.Keeps(unsafe, soonest, approach)), _ ->
+                    kiteStep atlas creep at unsafe soonest approach area
                 | Some Kiting.Clear, _ -> plain ()
                 | None, Some avoid ->
                     round
@@ -779,8 +817,13 @@ let movementAmong
         | Some creep when isRangerBody creep && avoidFor name = Avoid.Kite ->
             let camp = Map.tryFind at.Room view.ExitHolds |> Option.map (fun hold -> hold.Exit)
 
+            let approach =
+                match Map.tryFind name assigned with
+                | Some(Guard room) -> (Threats.briefOf threats room).Laid.Approach
+                | _ -> lazy Set.empty
+
             match Threats.kiteUnsafeFor threats atlas creep camp with
-            | Some(unsafe, soonest) -> Some(Kiting.Keeps(unsafe, soonest))
+            | Some(unsafe, soonest) -> Some(Kiting.Keeps(unsafe, soonest, approach))
             | None -> Some Kiting.Clear
         | _ -> None
 
@@ -827,17 +870,18 @@ let movementAmong
 
             let kiting =
                 match kitingOf name at with
-                | Some(Kiting.Keeps(unsafe, soonest)) -> Some(unsafe, soonest)
+                | Some(Kiting.Keeps(unsafe, soonest, approach)) -> Some(unsafe, soonest, approach)
                 | _ -> None
 
             let standsSafe =
                 match kiting with
-                | Some(unsafe, _) -> not (unsafe (indexOf (RoomPos.pos at)))
+                | Some(unsafe, _, _) -> not (unsafe (indexOf (RoomPos.pos at)))
                 | None -> true
 
             let walk () =
                 match kiting with
-                | Some(unsafe, soonest) -> kiteStep atlas name at unsafe soonest area
+                | Some(unsafe, soonest, approach) ->
+                    kiteStep atlas name at unsafe soonest approach area
                 | None -> stepToward atlas name task area
 
             if not (Set.contains at area && standsSafe) then
