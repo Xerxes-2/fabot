@@ -10,6 +10,7 @@ Each rule that picks a step or stand tile against hostiles has its own geometry 
 
 | Rule | Locator | Constant |
 |---|---|---|
+| Half-tick step units (ADR 0010): a road is always cheaper than plain, even for an unloaded 1:1 body that walks both at one tile a tick; a ranger takes the road into a melee walking it (user, 2026-10-07) | `stepUnits` Grid.fs:103 | road 1 unit, plain 2 |
 | Reach radius, stationary (#510, #521) | `reachRadius` Threat.fs:1671, `ReachMargin` Rules.fs:811, `Gait.stationary` Sightings.fs:93 | +2; +1 at ≥5 ticks/tile |
 | Cross-border reach (#514) | `reachAcross` Threat.fs:1627 | same radius |
 | Flee area | `Threats.Safe`, `Emitter.outDamaged` :28 | — |
@@ -56,7 +57,7 @@ The symptoms of 2026-10-05..07, each the same missing rule:
 |---|---|---|---|
 | S0 | Characterisation pins for every row; captures: W17S26 ranger-vs-melee, W18S25 Virtual458, doorway t972,062, #533, #551, #558 985660; time one flood | Captures reproduce live | measure |
 | S1 | `Arrival`: bucket-queue flood, classes, dilation, borders, unseen risk. No readers | Unit tests (swamp, road, fatigue, 0-MOVE, border); fingerprints unchanged | flood ≤0.3 ms; quiet +0 |
-| S2 | Reach, Safe, Flee and walk-round read it; `reachRadius`, `ReachMargin`, `reachAcross` and the stationary margin go; #527 is folded in | #527 hauler detours and keeps its Refill; #533 pin; moved expectations named | war ≤ +2 ms |
+| S2 | Reach, Safe, Flee and walk-round read it; `reachRadius`, `ReachMargin`, `reachAcross` and the stationary margin go; #527 is folded in; a fighter's walk is priced in whole ticks (`Gait.ticks`), ties broken toward the safer tile, not the road | #527 hauler detours and keeps its Refill; #533 pin; moved expectations named | war ≤ +2 ms |
 | S3 | Kite and glue: `kiteGroundIn` constants, `avoidOf`, `MeleeStepAndSwing`, `holdReach`, #524, `lamedIn`, `glueStep`'s `struck` | W17S26: melee killed untouched; W18S25 chase and siege suites unchanged | `escapeRoom` floods go: net ≤ 0 |
 | S4 | One stand-tile picker; `shelterDepth` and the exit band become map readings | Doorway, worker (1,15), #558 | ≤ +0.5 ms |
 | S5 | Light-tick forcing reads the margin; `A ≤ 1` collision surcharge (Decided 4) | #549 tests; light share no worse | light +0 |
