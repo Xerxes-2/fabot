@@ -10,6 +10,54 @@ open Fabot.Core.Types
 /// Creeps with no Task rank below every task in arbitration.
 let private idleRank = System.Int32.MaxValue
 
+/// A kiting ranger's walk (#510, movement S3).
+[<RequireQualifiedAccess>]
+type private Kiting =
+    /// No melee map nor camp in the room it stands in: the plain walk.
+    | Clear
+    /// By tile index, what its walk keeps off (`Threats.kiteUnsafeFor`), and
+    /// the soonest a melee strikes each tile, which a tie breaks toward the
+    /// later.
+    | Keeps of unsafe: (int -> bool) * later: (int -> int)
+
+/// A kiter's step toward its ground (#510, #524, movement S3): the first step
+/// of a walk that keeps off what it keeps off, across the border too, a tie
+/// going to the tile a melee strikes later. Where no such walk reaches the
+/// ground: none, standing where it stands while that is safe; else the step
+/// beside it a melee strikes last, where that is later than here.
+let private kiteStep
+    atlas
+    (creep: string)
+    (at: RoomPos)
+    (unsafe: int -> bool)
+    (later: int -> int)
+    (area: Set<RoomPos>)
+    : RoomPos option =
+    let room = at.Room
+    let pos = RoomPos.pos at
+    let goals = Set.remove at area
+
+    let walk =
+        match goals |> Seq.tryHead with
+        | Some tile when tile.Room <> room ->
+            Atlas.stepTowardRoomWhere atlas creep Set.empty (Some unsafe) (Some later) tile.Room
+        | _ -> Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe (Some later) goals
+
+    match walk with
+    | Some step -> Some step
+    | None ->
+        Atlas.dropStep atlas creep
+
+        if unsafe (indexOf pos) then
+            Atlas.adjacentWalkableIn atlas room pos
+            |> List.sortBy (fun tile -> unsafe (indexOf tile), -(later (indexOf tile)), tile)
+            |> List.tryHead
+            |> Option.filter (fun tile ->
+                not (unsafe (indexOf tile)) || later (indexOf tile) > later (indexOf pos))
+            |> Option.map (RoomPos.at room)
+        else
+            None
+
 /// Register one creep's Move Intent — every creep gets one: a traveller heads
 /// its next step and tails a sidestep, an arrived body heads its own tile and
 /// tails its area's neighbours then the ground outside, an idle body heads the
@@ -36,12 +84,19 @@ let private moveIntentFor
     // What it walks round where it walks round a Reach, first choice first
     // (`movementOf.roundsOf`), asked only where it does.
     (rounds: unit -> (Set<Pos> * (int -> bool) option) list)
+    // For a fighter, the rank an equal-tick step of its walk round is broken
+    // by, toward the tile a hostile strikes later (movement S3); None for
+    // every other body.
+    (later: (int -> int) option)
     // The home's shelter for an idle body at home that walks in to it and
     // stays on it (#514); empty for every other.
     (shelter: Set<RoomPos>)
-    // For a kiting ranger, the tiles of its room it walks round in place of
-    // the Reach (#510); None for every other body.
-    (kite: Set<Pos> option)
+    // For a kiting ranger, its walk in place of the Reach's (#510); None for
+    // every other body.
+    (kite: Kiting option)
+    // For a trespass's killer, the Reach it walks round (#516); None for
+    // every other body.
+    (reachRound: Set<Pos> option)
     (at: RoomPos)
     (task: Task option)
     (crossing: string option)
@@ -51,8 +106,17 @@ let private moveIntentFor
     let room = at.Room
     let pos = RoomPos.pos at
     let here = RoomPos.at room
-    let beside = Atlas.adjacentWalkableIn atlas room pos
-    let onSeam = Atlas.standsOnSeam atlas creep && not (List.isEmpty beside)
+    let around = Atlas.adjacentWalkableIn atlas room pos
+    let onSeam = Atlas.standsOnSeam atlas creep && not (List.isEmpty around)
+
+    // The ground beside it it may be stepped or shoved onto: for a kiter,
+    // never a tile a melee strikes before it could be off it again
+    // (movement S3), whoever's chain asks.
+    let beside =
+        match kite with
+        | Some(Kiting.Keeps(unsafe, _)) ->
+            around |> List.filter (fun tile -> not (unsafe (indexOf tile)))
+        | _ -> around
 
     // Where this creep may stay: its own tile, unless that tile is a Seam
     // with ground beside it to walk onto.
@@ -150,7 +214,7 @@ let private moveIntentFor
 
             round
                 avoids
-                (fun avoid also -> Atlas.stepTowardRoomWhere atlas creep avoid also target)
+                (fun avoid also -> Atlas.stepTowardRoomWhere atlas creep avoid also later target)
                 (fun () -> Atlas.stepTowardRoom atlas creep Set.empty target)
             |> Option.map RoomPos.pos
         | _ -> None
@@ -176,6 +240,7 @@ let private moveIntentFor
                         creep
                         avoid
                         (Option.defaultValue (fun _ -> false) also)
+                        None
                         shelter)
                 (fun () -> Atlas.firstStepWithin atlas creep shelter)
             |> Option.map RoomPos.pos
@@ -241,7 +306,14 @@ let private moveIntentFor
         // narrowed copy of it.
         let area = areaFor threats atlas creep task
 
-        if Set.contains (here pos) area then
+        // A kiter stands on its ground only while a melee strikes it there no
+        // sooner than it could step off again (movement S3).
+        let standsSafe () =
+            match kite with
+            | Some(Kiting.Keeps(unsafe, _)) -> not (unsafe (indexOf pos))
+            | _ -> true
+
+        if Set.contains (here pos) area && standsSafe () then
             let inside, outside =
                 beside |> List.partition (fun tile -> Set.contains (here tile) area)
 
@@ -256,13 +328,17 @@ let private moveIntentFor
             // round reaches the work. Flee's own walk is the way out of one.
             // A Defend's holder walks round the tiles outside its line a raid melee
             // reaches (#504), and waits inside it where no way round reaches
-            // its rampart. A kiting ranger walks round its own set (#510),
-            // across the border too.
+            // its rampart. A kiting ranger keeps off what a melee strikes
+            // before it could be on it and gone (`kiteStep`), across the
+            // border too; a trespass's killer walks round the Reach.
             let plain () = stepToward atlas creep task area
 
             let step =
-                match kite with
-                | Some avoid ->
+                match kite, reachRound with
+                | Some(Kiting.Keeps(unsafe, soonest)), _ ->
+                    kiteStep atlas creep at unsafe soonest area
+                | Some Kiting.Clear, _ -> plain ()
+                | None, Some avoid ->
                     round
                         [ avoid, None ]
                         (fun avoid _ ->
@@ -271,7 +347,7 @@ let private moveIntentFor
                                 Atlas.stepTowardRoom atlas creep avoid tile.Room
                             | _ -> Atlas.firstStepAvoiding atlas creep avoid area)
                         plain
-                | None when runs && task <> Flee ->
+                | None, None when runs && task <> Flee ->
                     let avoids =
                         match task with
                         | Defend _ -> [ Threats.defendAvoidIn threats room, None ]
@@ -293,16 +369,17 @@ let private moveIntentFor
                         (fun avoid also ->
                             match workRoom with
                             | Some other when other <> room ->
-                                Atlas.stepTowardRoomWhere atlas creep avoid also other
+                                Atlas.stepTowardRoomWhere atlas creep avoid also later other
                             | _ ->
                                 Atlas.firstStepAvoidingWhere
                                     atlas
                                     creep
                                     avoid
                                     (Option.defaultValue (fun _ -> false) also)
+                                    later
                                     area)
                         plain
-                | None -> plain ()
+                | None, None -> plain ()
 
             match step |> Option.map RoomPos.pos with
             | Some step -> travelling (rankOf task) step
@@ -619,12 +696,16 @@ let movementAmong
     // would stand at its next decision, with the tiles a hostile strikes
     // before it could be on them and gone (`Threats.unsafeFor`); then, where
     // no walk keeps out of those, the Reach alone. The last is the one its
-    // own tile and its plain step are read against.
+    // own tile and its plain step are read against. A fighter that wins the
+    // exchange against what strikes the room walks nothing round (#568,
+    // movement S3): the gate weighs the fight, not a tile's damage alone.
     let roundsOf name room =
         let reach = Threats.reachIn threats room
 
         match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
         | None -> [ reach, None ]
+        | Some creep when isFighterBody creep && Threats.winsIn view threats room creep ->
+            [ Set.empty, None ]
         | Some creep ->
             let fighter = isFighterBody creep
             let heal = Engine.healPower * partCount creep.Body Heal
@@ -690,30 +771,24 @@ let movementAmong
         | _ -> Avoid.Runner
 
     // A ranger kites (#510); a resident's walk onto its ramparts under a raid
-    // crosses the Reach, and is no kite.
-    let kiters =
-        view.Creeps
-        |> List.filter (fun c -> isRangerBody c && avoidFor c.Name = Avoid.MeleeStepAndSwing)
-        |> List.map (fun c -> c.Name)
-        |> Set.ofList
+    // crosses the Reach, and is no kite. Its walk keeps off what a melee
+    // strikes before it could be on it and gone, its own timing counted, and
+    // the camp about the exit a raid left by (`Threats.kiteUnsafeFor`).
+    let kitingOf name (at: RoomPos) =
+        match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
+        | Some creep when isRangerBody creep && avoidFor name = Avoid.Kite ->
+            let camp = Map.tryFind at.Room view.ExitHolds |> Option.map (fun hold -> hold.Exit)
 
-    let stepAndSwing = Engine.meleeRange + 1
+            match Threats.kiteUnsafeFor threats atlas creep camp with
+            | Some(unsafe, soonest) -> Some(Kiting.Keeps(unsafe, soonest))
+            | None -> Some Kiting.Clear
+        | _ -> None
 
-    let avoidOf name (at: RoomPos) =
-        if Set.contains name kiters then
-            let camp =
-                match Map.tryFind at.Room view.ExitHolds with
-                | Some hold -> tilesWithin stepAndSwing hold.Exit
-                | None -> []
-
-            let strike =
-                view.Hostiles
-                |> List.filter (fun h -> h.Pos.Room = at.Room && HostileInfo.melee view.Hostiles h)
-                |> List.collect (fun h -> tilesWithin stepAndSwing (RoomPos.pos h.Pos))
-
-            Some(Set.ofList (camp @ strike))
-        elif avoidFor name = Avoid.Reach then
-            Some(Threats.reachIn threats at.Room)
+    // A fighter's walk round breaks an equal-tick tie toward the tile a
+    // hostile strikes later (movement S3).
+    let laterOf name (at: RoomPos) =
+        if view.Creeps |> List.exists (fun c -> c.Name = name && isFighterBody c) then
+            Threats.soonestIn threats at.Room
         else
             None
 
@@ -742,16 +817,31 @@ let movementAmong
     // A fatigued walker issues no step this tick, so the light tick after it
     // had none to replay and it stood still the tick its fatigue cleared
     // (user, 2026-10-04): its plan is its own tile, then the step it would
-    // take. The light tick re-issues it until the engine lets it move.
+    // take. The light tick re-issues it until the engine lets it move. A
+    // kiter's is its kite step, the ticks it still stands held counted
+    // (#524).
     for name, at in placed do
         match Map.tryFind name assigned with
         | Some task when Set.contains name tired ->
             let area = areaFor threats atlas name task
 
-            if not (Set.contains at area) then
-                match
-                    Atlas.withoutRecording atlas name (fun () -> stepToward atlas name task area)
-                with
+            let kiting =
+                match kitingOf name at with
+                | Some(Kiting.Keeps(unsafe, soonest)) -> Some(unsafe, soonest)
+                | _ -> None
+
+            let standsSafe =
+                match kiting with
+                | Some(unsafe, _) -> not (unsafe (indexOf (RoomPos.pos at)))
+                | None -> true
+
+            let walk () =
+                match kiting with
+                | Some(unsafe, soonest) -> kiteStep atlas name at unsafe soonest area
+                | None -> stepToward atlas name task area
+
+            if not (Set.contains at area && standsSafe) then
+                match Atlas.withoutRecording atlas name walk with
                 | Some step when step.Room = at.Room && step <> at ->
                     Atlas.recordStep atlas name (at, step)
                 | _ -> ()
@@ -795,10 +885,15 @@ let movementAmong
                     (Set.contains name runners || Set.contains name passers)
                     (Set.contains name roundWalkers)
                     (fun () -> roundsOf name at.Room)
+                    (laterOf name at)
                     (match Map.tryFind home threats.Shelter with
                      | Some ground when Set.contains name sheltering -> ground.Force()
                      | _ -> Set.empty)
-                    (avoidOf name at)
+                    (kitingOf name at)
+                    (if avoidFor name = Avoid.Reach then
+                         Some(Threats.reachIn threats at.Room)
+                     else
+                         None)
                     at
                     (Map.tryFind name assigned)
                     (Map.tryFind name crossings))

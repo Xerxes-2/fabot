@@ -424,6 +424,44 @@ let arrivalTests =
                     "two ticks of fatigue, then a tile a tick"
             }
 
+            // #524 (movement S3): the engine weighs a part shot off; the
+            // projection's body holds only the parts still acting.
+            test "a body of ours walks under the weight of its parts shot off" {
+                let whole = creepWith "r" 0 [ RangedAttack; RangedAttack; Heal; Move; Move; Move ]
+
+                let shot =
+                    { whole with
+                        Body = Map.ofList [ RangedAttack, 1; Heal, 1; Move, 1 ]
+                        Hits = { Hits = 300; HitsMax = 600 }
+                    }
+
+                Expect.equal
+                    (Arrival.gaitOf whole)
+                    { Weight = 3; Moves = 3 }
+                    "whole: three weighed parts on three MOVE"
+
+                Expect.equal
+                    (Arrival.gaitOf shot)
+                    { Weight = 5; Moves = 1 }
+                    "three parts shot off: the two acting and the three gone, on the one MOVE left"
+
+                let atlas =
+                    rooms (fun layer ->
+                        { layer with
+                            CreepPositions = Map.ofList [ "r", { X = 10; Y = 25 } ]
+                        })
+                    |> atlasOf [ shot ]
+
+                let body = Arrival.ofBody atlas shot |> Option.get
+
+                Expect.equal (Arrival.ticksAt body.Ticks { X = 11; Y = 25 }) (Some 1) "one step on"
+
+                Expect.equal
+                    (Arrival.ticksAt body.Ticks { X = 12; Y = 25 })
+                    (Some 6)
+                    "then five ticks a plain tile: ten fatigue on one MOVE"
+            }
+
             test "two reads of a room's maps under the world's table are one build" {
                 let atlas = rooms id |> atlasOf []
 

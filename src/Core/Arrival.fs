@@ -34,6 +34,20 @@ let paceOf (gait: Gait) : Pace option =
             }
     | _ -> None
 
+/// One body of ours' gait as the engine walks it (#524): its live MOVE
+/// against the weight of every part but MOVE and empty CARRY
+/// (`fatigueFactorOf`), and of every part shot off, which the engine still
+/// weighs. A part shot off reads as weight even where it was a MOVE, the
+/// slower and so the safe direction.
+let gaitOf (creep: CreepInfo) : Gait =
+    let factor = fatigueFactorOf creep
+    let live = creep.Body |> Map.fold (fun total _ count -> total + count) 0
+
+    {
+        Weight = factor.FatigueParts + max 0 (creep.Hits.HitsMax / Engine.partHits - live)
+        Moves = factor.MoveParts
+    }
+
 /// The ticks a body waits its fatigue out before it may step: each live MOVE
 /// pays two a tick.
 let waitOf (fatigue: int) (gait: Gait) : int =
@@ -522,21 +536,15 @@ let damageAt (room: string) (strikers: Striker list) (ticks: int) (tile: Pos) : 
         else
             0)
 
-/// One body of ours' arrival over its room by its live gait, its load read
-/// (`fatigueFactorOf`), and the fatigue it waits out now; None for a body the
-/// projection does not place.
+/// One body of ours' arrival over its room by its gait (`gaitOf`: its live
+/// MOVE, its load and its parts shot off), and the fatigue it waits out now;
+/// None for a body the projection does not place.
 let ofBody (atlas: Atlas.Atlas) (creep: CreepInfo) : BodyArrival option =
     Atlas.creepTile atlas creep.Name
     |> Option.bind (fun tile ->
         Atlas.arrivalGroundIn atlas tile.Room false
         |> Option.map (fun ground ->
-            let factor = fatigueFactorOf creep
-
-            let gait =
-                {
-                    Weight = factor.FatigueParts
-                    Moves = factor.MoveParts
-                }
+            let gait = gaitOf creep
 
             let ticks, leaves =
                 floodWithDepartures

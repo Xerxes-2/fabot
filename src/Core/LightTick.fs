@@ -1227,8 +1227,10 @@ let intents (record: LastFull) (now: Glance) : Intent list =
 
             // A melee body steps onto the target it swings at, as on the full
             // tick (`Emitter.glueStep`), in place of its step plan's step:
-            // never off our structure's tile (a rampart), and never onto a
-            // tile another melee body of theirs swings at.
+            // never off our structure's tile (a rampart). The light tick
+            // glances no maps (movement S5 owns its margin), so it reads the
+            // target's tile as kept where no other melee body of theirs
+            // swings at it.
             let glued =
                 match issued with
                 | Some(AttackCreep _ as aim, true) ->
@@ -1241,7 +1243,14 @@ let intents (record: LastFull) (now: Glance) : Intent list =
 
                     aimed aim
                     |> Option.bind (fun (tile, _) ->
-                        Decide.Emitter.glueStep creep.Tile tile onRampart melee)
+                        let keeps =
+                            melee
+                            |> List.forall (fun other ->
+                                other = tile
+                                || RoomPos.range other tile
+                                   |> Option.forall (fun r -> r > Engine.meleeRange))
+
+                        Decide.Emitter.glueStep creep.Tile tile onRampart keeps)
                 | _ -> None
 
             match inward, glued with

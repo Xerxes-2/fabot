@@ -1758,9 +1758,11 @@ let kiteTests =
                     "and is read as no healer by the same parts"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): the kite ground's
-            // constants (`stepAndSwing`, `holdReach`): a ring at exactly three
-            // even about a melee that cannot step. Flips at S3.
+            // The kite ground off the maps (movement S3, which retired its
+            // step-and-swing cut and `holdReach`; `stepAndSwing` stays for the
+            // defender's line, S4's): the cripple, rested, takes one
+            // step before its seventeen-tick wait, so a tile at two is struck
+            // the tick after and the ring at three is what is left.
             test "a ranger is matched to kill it from range three, and the melee guard is not sent" {
                 let at = { X = 25; Y = 44 }
 
@@ -1800,13 +1802,16 @@ let kiteTests =
                     "its ground is in range of the melee and out of its step and swing"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): the kite ground
-            // is one set for the room, laid off the hostiles alone
-            // (`kiteGroundIn`): neither the ranger's legs nor its fatigue enter
-            // it, the parked #524. Flips at S3, where a kite tile is one the
-            // melee cannot reach before this ranger has shot and stepped on.
-            test "the kite ground is the same for a lamed, tired ranger as for a quick one" {
+            // Movement S3 flipped the S0 pin here ("the kite ground is the same
+            // for a lamed, tired ranger as for a quick one"): the room's ground
+            // is still one set, but which of its tiles a ranger may step onto
+            // is its own walk's (`Threats.kiteUnsafeFor`, #524): a tile the
+            // melee strikes before this ranger, its legs, its parts shot off
+            // and its fatigue counted, could be on it and gone.
+            test "a lamed, tired ranger may not step onto a kite tile a quick one may" {
                 let at = { X = 25; Y = 44 }
+                let from = { X = 21; Y = 47 }
+                let ring = { X = 22; Y = 47 }
                 let quick = ranger "r-1"
 
                 let lamed =
@@ -1815,17 +1820,22 @@ let kiteTests =
                         Fatigue = 20
                     }
 
-                let groundWith body =
-                    groundOf (
-                        declaredRaid [ crippledAt at ] |> withGuards [ body, { X = 22; Y = 47 } ]
-                    )
+                let unsafeWith body =
+                    let colony = declaredRaid [ plodderAt at ] |> withGuards [ body, from ]
 
-                Expect.isNonEmpty (groundWith quick) "the premise: the quick ranger has ground"
+                    let atlas = Atlas.ofView colony
 
-                Expect.equal
-                    (groundWith lamed)
-                    (groundWith quick)
-                    "one MOVE acting and twenty fatigue to pay: the same ring"
+                    match Threats.kiteUnsafeFor (threatsOf colony atlas) atlas body None with
+                    | Some(unsafe, _) -> unsafe (ring.X * Engine.roomSide + ring.Y)
+                    | None -> failtest "the premise: its walk reads the plodder's map"
+
+                Expect.isFalse
+                    (unsafeWith quick)
+                    "the quick ranger is on the ring at three and off it before the plodder's step and swing"
+
+                Expect.isTrue
+                    (unsafeWith lamed)
+                    "one MOVE acting under its shot-off weight and twenty fatigue to pay: struck first"
             }
 
             test "the speed and not the paper picks the target" {
@@ -1874,9 +1884,10 @@ let kiteTests =
                     "and nothing in it is in the melee's step and swing"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): a kiter's exit
-            // camp (`Resolver.avoidOf`), a step and a swing about the held exit.
-            // Flips at S3.
+            // A kiter's exit camp, read by its own timing since movement S3
+            // (`Threats.kiteUnsafeFor`): a step and a swing about the held exit,
+            // a step more for each tick past the first the tile holds the body.
+            // A rested ranger on plain keeps the S0 pin's two.
             test
                 "the chase crosses the border at an exit three or more from the one the target left by" {
                 // The raid left the home by (25,0) and waits across it; the ranger
@@ -2143,9 +2154,9 @@ let kiteStepTests =
     testList
         "a kiting ranger's step (#510)"
         [
-            // Characterisation (movement S0, `docs/adr/0088`): a kiter walks
-            // round a step and a swing about each melee (`Resolver.avoidOf`),
-            // not its Reach. Flips at S3.
+            // A kiter walks round what a melee strikes before it could be on it
+            // and gone (movement S3, `Threats.kiteUnsafeFor`), not its Reach:
+            // against the plodder that is the S0 pin's step and swing.
             test
                 "it walks onto the ring three from the melee, inside its Reach, and shoots from there" {
                 let melee = { X = 25; Y = 44 }
@@ -2175,6 +2186,133 @@ let kiteStepTests =
                     second.Intents
                     (RangedAttackCreep("r-1", "h-1"))
                     "and from the ring it shoots"
+            }
+
+            // Movement S3 review: the arbitration shoves a body only onto its own
+            // candidates, so a kiter on its ring at three offers none a melee
+            // strikes before it is off again: a higher-rank chain never pushes
+            // it to two.
+            test "a kiter on its ring offers the arbitration no tile in the melee's step and swing" {
+                let melee = { X = 25; Y = 44 }
+                let from = { X = 25; Y = 41 }
+
+                let colony =
+                    declaredRaid [ plodderAt melee ]
+                    |> withField
+                    |> withGuards [ ranger "r-1", from ]
+
+                let atlas = Atlas.ofView colony
+                let threats = threatsOf colony atlas
+
+                let movement =
+                    movementOf
+                        colony
+                        atlas
+                        threats
+                        []
+                        (Map.ofList [ "r-1", Guard "W1N2" ])
+                        Map.empty
+                        Set.empty
+
+                match movement.Intents |> List.tryFind (fun intent -> intent.Creep = "r-1") with
+                | Some intent ->
+                    Expect.equal
+                        (List.tryHead intent.Candidates)
+                        (Some(RoomPos.at "W1N2" from))
+                        "the premise: it stays"
+
+                    Expect.all
+                        intent.Candidates
+                        (fun tile -> range melee (RoomPos.pos tile) >= 3)
+                        "and is offered nothing within two of the melee"
+                | None -> failtest "it has an intent"
+            }
+
+            // Movement S3 (#524): a ring tile is one this ranger is off again
+            // before the melee strikes it. Swamp holds it five ticks, past the
+            // plodder's fourth: the swamp in front is walked round to a plain
+            // ring tile it is on in two ticks.
+            test "it walks round the swamp on the ring to a plain ring tile" {
+                let melee = { X = 25; Y = 44 }
+                let from = { X = 25; Y = 40 }
+                let swamp = [ for x in 24..26 -> { X = x; Y = 41 } ]
+                let colony = declaredRaid [ plodderAt melee ] |> withField
+                let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                let colony =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                for x in 15..35 do
+                                                    for y in 35..48 ->
+                                                        let tile = { X = x; Y = y }
+
+                                                        tile,
+                                                        (if List.contains tile swamp then
+                                                             Swamp
+                                                         else
+                                                             Plain)
+                                            ]
+                                }
+                    }
+                    |> withGuards [ ranger "r-1", from ]
+
+                let step =
+                    moveIntents (decideOn colony).Intents
+                    |> List.tryFind (fst >> (=) "r-1")
+                    |> Option.map (snd >> stepped from)
+
+                Expect.isSome step "it walks"
+
+                Expect.isFalse
+                    (List.contains step.Value swamp)
+                    "never onto the swamp three off the melee"
+
+                Expect.isGreaterThan
+                    (range melee step.Value)
+                    (Engine.meleeRange + 1)
+                    "nor into its step and swing"
+            }
+
+            // Movement S3 retired `glueStep`'s `struck` (a second melee beside
+            // the target's tile): the full tick reads the maps
+            // (`Emitter.glueKeeps`), the tile kept where it is struck no harder
+            // by the tick after than where the guard stands.
+            test "a melee guard keeps to its target's tile unless the maps strike it harder there" {
+                let target = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 44 }
+                let body = guard "g-1"
+
+                let keeps second =
+                    let colony =
+                        declaredRaid (plodderAt target :: second)
+                        |> withField
+                        |> withGuards [ body, from ]
+
+                    let atlas = Atlas.ofView colony
+
+                    Emitter.glueKeeps
+                        (threatsOf colony atlas)
+                        body
+                        (RoomPos.at "W1N2" from)
+                        (RoomPos.at "W1N2" target)
+
+                Expect.isTrue (keeps []) "alone, its target strikes both tiles alike"
+
+                let beyond =
+                    { plodderAt { X = 27; Y = 44 } with
+                        Id = "h-2"
+                    }
+
+                Expect.isFalse
+                    (keeps [ beyond ])
+                    "a second melee a step from the target's tile and two from the guard's strikes it there first"
             }
         ]
 
@@ -5025,12 +5163,16 @@ let guardPrecedenceTests =
                         )
                         // Three from the plodder, less the corners by the field's
                         // south edge, where too little room is left to back off.
+                        // Movement S3 reads the escape room off the maps within
+                        // the horizon (two), not a three-step flood: (28,47),
+                        // two off the field's east edge, backs onto as many
+                        // tiles as (22,47) does, and is kept.
                         ChaseSeen,
                         Some(
                             tiles (
                                 [ for y in 43..47 -> 22, y ]
                                 @ [ for x in 23..28 -> x, 43 ]
-                                @ [ for y in 44..46 -> 28, y ]
+                                @ [ for y in 44..47 -> 28, y ]
                             )
                         )
                         ChaseDark, None
@@ -5038,12 +5180,11 @@ let guardPrecedenceTests =
                     "each alone"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): what each
-            // flavour's holder walks round on its way (`Brief.Avoid`): a chase's
-            // ranger a step and a swing about each melee, a trespass's killer the
-            // whole Reach, every other the runner's Reach. At S2 the Reach and
-            // the runner's walk read the arrival map and the arms stand; S3
-            // (kite and glue) retires them.
+            // What each flavour's holder walks round on its way (`Brief.Avoid`):
+            // a chase's ranger what a melee map strikes before it could be on
+            // it and gone (movement S3: the kite, which retired the step and
+            // swing about each melee), a trespass's killer the whole Reach,
+            // every other the runner's Reach.
             test "each flavour's walk-round arm" {
                 let avoidOf flavour =
                     let colony = withFlavour precedenceBasis flavour
@@ -5059,8 +5200,8 @@ let guardPrecedenceTests =
                         Trespasser, Avoid.Reach
                         Resident, Avoid.Runner
                         Harassed, Avoid.Runner
-                        ChaseSeen, Avoid.MeleeStepAndSwing
-                        ChaseDark, Avoid.MeleeStepAndSwing
+                        ChaseSeen, Avoid.Kite
+                        ChaseDark, Avoid.Kite
                     ]
                     "each alone"
             }
@@ -5765,9 +5906,9 @@ let killAdmissionTests =
 
             // Characterisation (movement S0, `docs/adr/0088`): with the Reach a
             // wall and no way round, the walker waits at its edge
-            // (`moveIntentFor.round`). Kept at S2: a trespass's killer walks
-            // round the whole Reach (`Avoid.Reach`), the arrival map's now, and
-            // its walk is S3's (kite and glue).
+            // (`moveIntentFor.round`). Kept at S2 and S3: a trespass's killer
+            // walks round the whole Reach (`Avoid.Reach`), the arrival map's
+            // now; S3 moved only the kite's walk.
             test "a trespass's killer waits at the edge of a Reach that covers the kill's ground" {
                 // The same raider reaches every tile beside a digger at (27,1):
                 // the kill's ground less the Reach is empty, so there is no

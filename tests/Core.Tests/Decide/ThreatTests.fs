@@ -4665,6 +4665,33 @@ let fleeTests =
                 | other -> failtest $"one step: {other}"
             }
 
+            // #568 (movement S3): a fighter's walk gate weighs the exchange, not
+            // a tile's damage against its heal alone. A seven-block ranger's 84
+            // heal is out-damaged beside the smallMelee, but it kills the raid
+            // first, so its walk goes round nothing (`Resolver.roundsOf`).
+            test "a fighter walks round a raid's Reach only where it loses the exchange there" {
+                let raid = [ hostileIn "W1N2" { X = 30; Y = 48 } smallMelee ]
+
+                let winsWith body =
+                    let colony = transitRoom [ body, { X = 28; Y = 42 } ] raid
+                    let atlas = Atlas.ofView colony
+                    Threats.winsIn colony (threatsOf colony atlas) "W1N2" body
+
+                Expect.isFalse
+                    (winsWith (creepWith "r" 0 0 Bodies.rangerPattern.Block))
+                    "one block loses it: its walk goes round"
+
+                Expect.isTrue
+                    (winsWith (
+                        creepWith
+                            "r"
+                            0
+                            0
+                            (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
+                    ))
+                    "seven win it: nothing to walk round"
+            }
+
             // Characterisation (movement S0, `docs/adr/0088`): the Flee area is
             // `Threats.Safe`, the ground outside every Reach. At S2 Flee steps
             // toward the safe tiles it stands on before any hostile can strike

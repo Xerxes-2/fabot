@@ -2522,18 +2522,26 @@ let raisedHomeGarrisonTests =
             }
 
             test
-                "under a melee raid the garrison kites: nothing within two of a melee body, nor swamp near one" {
+                "under a melee raid the garrison kites: nothing within two of a melee body, nor a ranger's step onto swamp near one" {
                 // #451: on the threats' ring a ranger stood beside both melee
                 // bodies at W17S25 and took 1,020 a tick. The 10A2H raid is one
                 // an eight-block ranger wins, so the room is a fight, not a
                 // withdrawal to safe ground.
                 let brawler = { X = 20; Y = 30 }
                 let swamp = { X = 23; Y = 30 }
+                let plain = { X = 23; Y = 31 }
+
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
 
                 let raided =
                     openGarrison
                         [ swamp ]
-                        []
+                        [ ranger, { X = 24; Y = 31 } ]
                         [
                             hostileIn
                                 "W1N2"
@@ -2543,8 +2551,11 @@ let raisedHomeGarrisonTests =
                                  @ List.replicate 12 Move)
                         ]
 
+                let atlas = Atlas.ofView raided
+                let threats = threatsOf raided atlas
+
                 let ground =
-                    Threats.guardGroundIn (threatsOf raided (Atlas.ofView raided)) "W1N2"
+                    Threats.guardGroundIn threats "W1N2"
                     |> Option.defaultValue Set.empty
                     |> Set.map RoomPos.pos
 
@@ -2555,9 +2566,21 @@ let raisedHomeGarrisonTests =
                     (fun tile -> range brawler tile = Engine.rangedRange)
                     "only the tiles it shoots the brawler from and the brawler cannot reach in a step and a swing"
 
-                Expect.isFalse
-                    (Set.contains swamp ground)
-                    "and no swamp a melee body stands four from"
+                // Movement S3: swamp near a melee is the ranger's own walk's
+                // to keep off (`Threats.kiteUnsafeFor`), by the ticks the tile
+                // holds this body, no longer the room's ground's.
+                let index (tile: Pos) = tile.X * Engine.roomSide + tile.Y
+
+                match Threats.kiteUnsafeFor threats atlas ranger None with
+                | Some(unsafe, _) ->
+                    Expect.isTrue
+                        (unsafe (index swamp))
+                        "a step onto the swamp three from the brawler holds it five ticks: struck"
+
+                    Expect.isFalse
+                        (unsafe (index plain))
+                        "a step onto the plain tile beside it is off again first"
+                | None -> failtest "the premise: the ranger's walk reads the brawler's map"
             }
 
             test

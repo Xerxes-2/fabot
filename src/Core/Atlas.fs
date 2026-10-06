@@ -3060,6 +3060,11 @@ let refillTarget
 /// tiles after it filed as the creep's step plan (`Steps`) — the plan dropped
 /// where the first step is the goal itself. A border tile on it carries the
 /// body into the neighbour, off the plan, where it walks no further.
+///
+/// With `prefer`, a tie at the first step goes to the tile it ranks highest
+/// (movement S3: a fighter's walk toward the tile a hostile strikes later):
+/// any tile beside the body the flood reaches as cheaply as the first step
+/// and that lies beside the second, so the walk after it costs the same.
 let private planned
     (atlas: Atlas)
     (creep: string)
@@ -3067,8 +3072,33 @@ let private planned
     near
     (pos: Pos)
     (goal: Pos)
+    (prefer: (int -> int) option)
     : RoomPos =
     let path = firstStepsOn near (indexOf pos) (indexOf goal) Tuning.maxCadence
+
+    match prefer with
+    | Some rank when path.Length >= 2 ->
+        let first = path.[0]
+        let second = posAt path.[1]
+        let cost = glimpsedBy near (posAt first)
+        let mutable best = first
+
+        for tile in tilesWithin 1 pos do
+            let index = indexOf tile
+
+            if
+                inGrid tile
+                && tile <> pos
+                && index <> first
+                && range tile second <= 1
+                && glimpsedBy near tile = cost
+                && rank index > rank best
+            then
+                best <- index
+
+        path.[0] <- best
+    | _ -> ()
+
     let step = RoomPos.at room (posAt path.[0])
 
     if path.Length < 2 then
@@ -3105,7 +3135,7 @@ let private firstStepVia
             cheapestReached (reachedBy near) goals
             |> Option.map (fun (_, goal) ->
                 if pricing = TravelCost then
-                    planned atlas creep room near pos goal
+                    planned atlas creep room near pos goal None
                 else
                     let struct (first, _) = firstTwoStepsOn near (indexOf pos) (indexOf goal)
                     RoomPos.at room (posAt first))
@@ -3221,16 +3251,18 @@ let rec firstStepAvoiding
     (avoid: Set<Pos>)
     (goalTiles: Set<RoomPos>)
     : RoomPos option =
-    firstStepAvoidingWhere atlas creep avoid (fun _ -> false) goalTiles
+    firstStepAvoidingWhere atlas creep avoid (fun _ -> false) None goalTiles
 
 /// `firstStepAvoiding` round `avoid` and the tiles `also` answers for, by
 /// tile index: a body's own unsafe tiles (movement S2), asked of the grid a
-/// tile at a time rather than built into a set a body.
+/// tile at a time rather than built into a set a body. A tie at the first
+/// step goes to the tile `prefer` ranks highest, where given (`planned`).
 and firstStepAvoidingWhere
     (atlas: Atlas)
     (creep: string)
     (avoid: Set<Pos>)
     (also: int -> bool)
+    (prefer: (int -> int) option)
     (goalTiles: Set<RoomPos>)
     : RoomPos option =
     match creepAt atlas creep with
@@ -3261,7 +3293,7 @@ and firstStepAvoidingWhere
                 floodPriced weights (occupiedOf atlas room) (factorOf atlas creep) TravelCost pos
 
             cheapestReached (reachedBy near) goals
-            |> Option.map (fun (_, goal) -> planned atlas creep room near pos goal)
+            |> Option.map (fun (_, goal) -> planned atlas creep room near pos goal prefer)
 
 /// A room's step weights with `avoid` made impassable: `wayRound`'s grid,
 /// built once a room for every body asked there.
@@ -3327,15 +3359,17 @@ let rec stepTowardRoom
     (avoid: Set<Pos>)
     (room: string)
     : RoomPos option =
-    stepTowardRoomWhere atlas creep avoid None room
+    stepTowardRoomWhere atlas creep avoid None None room
 
 /// `stepTowardRoom` round `avoid` and, where given, the tiles `also` answers
-/// for by tile index (`firstStepAvoidingWhere`).
+/// for by tile index, a tie at the first step going to the tile `prefer`
+/// ranks highest (`firstStepAvoidingWhere`).
 and stepTowardRoomWhere
     (atlas: Atlas)
     (creep: string)
     (avoid: Set<Pos>)
     (also: (int -> bool) option)
+    (prefer: (int -> int) option)
     (room: string)
     : RoomPos option =
     let blocked (tile: Pos) =
@@ -3429,6 +3463,7 @@ and stepTowardRoomWhere
                             creep
                             avoid
                             (Option.defaultValue (fun _ -> false) also)
+                            prefer
                             goals)
     | _ -> None
 

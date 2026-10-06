@@ -691,28 +691,29 @@ let pickStrike
 /// loses nothing beside one that stays. None off a tile beside it, from our
 /// rampart (`onRampart`: off it the body takes every strike), onto an exit
 /// tile (the engine carries a body ending a tick there across the border),
-/// or onto a tile another melee raider (`melee`, their tiles) swings at.
-let glueStep
-    (from: RoomPos)
-    (target: RoomPos)
-    (onRampart: bool)
-    (melee: RoomPos list)
-    : Direction option =
-    let struck =
-        melee
-        |> List.exists (fun other ->
-            other <> target
-            && RoomPos.range other target |> Option.exists (fun r -> r <= Engine.meleeRange))
-
+/// or where the caller's reading of the target's tile is that it is struck
+/// harder than the body can take (`keeps` false: `glueKeeps` off the maps on
+/// the full tick).
+let glueStep (from: RoomPos) (target: RoomPos) (onRampart: bool) (keeps: bool) : Direction option =
     match RoomPos.range from target with
     | Some r when
         r = Engine.meleeRange
         && not onRampart
         && not (Seam.onRing (RoomPos.pos target))
-        && not struck
+        && keeps
         ->
         directionTo (RoomPos.pos from) (RoomPos.pos target)
     | _ -> None
+
+/// Whether a melee body beside its target keeps contact on the target's tile
+/// at no worse an exchange (movement S3): what the hostile maps land there by
+/// the tick it stands on it (`Threats.damageAt`) is no more than its heal, or
+/// than they land where it stands now. The target's own swing lands on both.
+let glueKeeps (threats: Threats) (creep: CreepInfo) (from: RoomPos) (target: RoomPos) : bool =
+    let heal = Engine.healPower * partCount creep.Body Heal
+    let onto = Threats.damageAt threats target.Room 1 (RoomPos.pos target)
+
+    onto <= heal || onto <= Threats.damageAt threats from.Room 1 (RoomPos.pos from)
 
 /// The Threats a fighter may strike in a room, in its Selector's kill order
 /// (`Facts.killRank`, #451), then the one nearest a Post of that room, ties by
@@ -1377,16 +1378,10 @@ let glue (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                     Atlas.creepTile atlas creep.Name
                 with
                 | Some(At(target, true)), Some from ->
-                    let melee =
-                        view.Hostiles
-                        |> List.filter (fun h ->
-                            h.Pos.Room = from.Room && HostileInfo.melee view.Hostiles h)
-                        |> List.map (fun h -> h.Pos)
-
                     let onRampart =
                         Set.contains (RoomPos.pos from) (Atlas.ourRampartTilesIn atlas from.Room)
 
-                    glueStep from target.Pos onRampart melee
+                    glueStep from target.Pos onRampart (glueKeeps threats creep from target.Pos)
                     |> Option.map (fun direction -> MoveCreep(creep.Name, direction))
                 | _ -> None
             | _ -> None)

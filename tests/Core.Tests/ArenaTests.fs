@@ -8003,19 +8003,18 @@ let arenaBorderTests =
                     $"the hauler reaches its container\n{describe trace}"
             }
 
-            // Characterisation (movement S0): pins the kite ring
-            // that ignores the melee's next step; flips at S3 (kite and
-            // glue), whose acceptance is this melee killed untouched. Live
+            // Movement S3 (`docs/adr/0088`) flipped the S0 pin here. Live
             // (t986,006-986,012) the ranger stepped to range 2 of HalfLife847
-            // to shoot, and was struck four times, t3-t6 (4,200 to 2,496).
-            // The melee walks its live road tiles (#560) and keeps their
-            // ticks to t8. Since movement S2 the ranger's walk is priced in
-            // whole ticks, the road no cheaper than plain: its first step is
-            // (23,5), off the road toward the melee, where before S2 it was
-            // (25,6) down the road and it was struck at t6. It is struck once,
-            // at t4 (426, the live swing), then steps clear.
+            // to shoot, and was struck four times, t3-t6 (4,200 to 2,496);
+            // S0 pinned one strike at t6, S2 (whole ticks) at t4. The melee
+            // walks its live road tiles (#560). Now the ranger's walk keeps off
+            // every tile the melee's map strikes before the ranger, by its own
+            // timing, could be on it and gone (`Threats.kiteUnsafeFor`): it
+            // holds at (25,7) while the melee is far, then steps and shoots
+            // each tick a step ahead of it, never struck, until its life runs
+            // out at t11 (as live). The melee dies to the rest at t74.
             test
-                "movement S0 capture t986,005: a ranger holding the Guard steps within two of a melee and is struck" {
+                "movement S3 capture t986,005: a ranger holding the Guard kites the melee down untouched" {
                 let ranger = "ranger-984393-Spawn3"
                 let start = rangerIntoMelee ()
                 let first, _ = step start
@@ -8025,26 +8024,57 @@ let arenaBorderTests =
                     (Some "guard:W17S26")
                     "the ranger holds W17S26's Guard"
 
-                let _, trace = start |> run 8
-                let failure = describe trace
-                let melee = pathOf "HalfLife847" trace |> Map.ofList
+                let gone (a: Arena) =
+                    a.Bodies |> List.forall (fun b -> b.Id <> "HalfLife847")
 
-                let gaps =
-                    pathOf ranger trace
-                    |> List.choose (fun (tick, s) ->
-                        Map.tryFind tick melee |> Option.bind (fun m -> RoomPos.range s.At m.At))
+                let _, trace = start |> runUntil gone 200
+                let failure = describe trace
+                let lived = pathOf ranger trace
 
                 Expect.isTrue
-                    (gaps |> List.skip 1 |> List.take 3 |> List.forall (fun gap -> gap <= 2))
-                    $"it stands within two of the melee from t1 to t3\n{failure}"
+                    (lived |> List.forall (fun (_, s) -> s.Hits = 4_200))
+                    $"the melee never strikes the ranger\n{failure}"
 
-                let struck =
-                    pathOf ranger trace
-                    |> List.pairwise
-                    |> List.choose (fun ((_, before), (tick, now)) ->
-                        if now.Hits < before.Hits then Some tick else None)
+                let melee = pathOf "HalfLife847" trace |> Map.ofList
 
-                Expect.equal struck [ 4 ] $"and the melee strikes it once\n{failure}"
+                Expect.isTrue
+                    (lived
+                     |> List.filter (fun (tick, _) -> tick >= 3)
+                     |> List.forall (fun (tick, _) ->
+                         match Map.tryFind (tick - 1) melee, Map.tryFind tick melee with
+                         | Some before, Some now -> now.Hits < before.Hits
+                         | _ -> false))
+                    $"it shoots the melee every tick from t3 while it lives\n{failure}"
+
+                Expect.equal
+                    (diedOn "HalfLife847" trace)
+                    (Some 74)
+                    $"the melee dies to the rest at t74 (main t53)\n{failure}"
+
+                // Characterisation (movement S3, for S4's Flee band, #583):
+                // main lost anchor-985849 at t8 and kept reserver-985957; now
+                // the anchor lives and the reserver dies. At t1 the reserver's
+                // walk to its controller is priced round the 1-block ranger,
+                // which holds (25,10) (rested, so shovable, but priced as
+                // occupied) where on main it walked into the melee (600 to
+                // 102): it steps onto the swamp at (25,9), 16 fatigue holds it
+                // four ticks, it takes Flee for a ground of its own tile, and
+                // the melee's road takes it at t10.
+                let reserver = pathOf "reserver-985957-Spawn11" trace
+
+                Expect.equal
+                    (reserver
+                     |> List.tryFind (fun (tick, _) -> tick = 1)
+                     |> Option.map (fun (_, s) -> s.At, s.Fatigue))
+                    (Some(RoomPos.at "W17S26" { X = 25; Y = 9 }, 16))
+                    $"the reserver steps onto the swamp round the holding ranger\n{failure}"
+
+                Expect.equal
+                    (diedOn "reserver-985957-Spawn11" trace)
+                    (Some 10)
+                    $"and dies at t10\n{failure}"
+
+                Expect.isNone (diedOn "anchor-985849-Spawn11" trace) $"the anchor lives\n{failure}"
             }
 
             // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read

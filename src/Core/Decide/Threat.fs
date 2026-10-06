@@ -136,12 +136,13 @@ type Avoid =
     /// Every Reach on the way (#516): its target strikes nothing back, and no
     /// Threat may.
     | Reach
-    /// A ranger's kite (#510): what each melee in the room it stands in
-    /// reaches in a step and a swing rather than the whole Reach, so the ring
-    /// at three it shoots from stays open to it, and a step and a swing off
-    /// the exit a raid left by, where a body camping across lands beside it.
-    /// Across the border too.
-    | MeleeStepAndSwing
+    /// A ranger's kite (#510, movement S3): the tiles of the room it stands
+    /// in that a melee map strikes before this body, its own legs and
+    /// fatigue counted, could be on them and gone (`Threats.kiteUnsafeFor`),
+    /// rather than the whole Reach, so the ring it shoots from stays open to
+    /// it; and about the exit a raid left by, where a body camping across
+    /// lands beside it. Across the border too.
+    | Kite
     /// A [[defender]]'s (#504): the tiles outside the home's line a raid
     /// melee there reaches in a step and a swing, where every other runner
     /// walks round the Reach.
@@ -928,7 +929,7 @@ module Brief =
             WalksIn = kind = BriefKind.Chase
             Avoid =
                 match kind with
-                | BriefKind.Chase -> Avoid.MeleeStepAndSwing
+                | BriefKind.Chase -> Avoid.Kite
                 | BriefKind.Trespass -> Avoid.Reach
                 | _ -> Avoid.Runner
             Rung =
@@ -1556,13 +1557,7 @@ module Threats =
     /// waited out, `Arrival.waitOf`), and the most a step of it takes on any
     /// ground: what its own timing adds to the horizon.
     let lagOf (creep: CreepInfo) : int * int =
-        let factor = Grid.fatigueFactorOf creep
-
-        let gait =
-            {
-                Weight = factor.FatigueParts
-                Moves = factor.MoveParts
-            }
+        let gait = Arrival.gaitOf creep
 
         Arrival.waitOf creep.Fatigue gait,
         Arrival.paceOf gait
@@ -1660,6 +1655,93 @@ module Threats =
                         || heal = 0
                         || Arrival.damageAt room (strikers.Force()) leaves (posAt index) > heal)
                     && not (Set.contains (posAt index) ramparts.Value))
+
+    /// Whether a fighter wins the exchange (`Facts.bodiesWin`) against every
+    /// hostile whose map reaches a room, in the room each stands in (#568,
+    /// movement S3): what its walk gate weighs, not a tile's damage against
+    /// its heal alone. False where a tower is a member (no exchange is won
+    /// under towers not ours) and in a room with no Reach.
+    let winsIn (view: ColonyView) (threats: Threats) (room: string) (creep: CreepInfo) : bool =
+        match Map.tryFind room threats.Arrivals with
+        | None -> false
+        | Some(maps, _) ->
+            let members = maps.Classes |> List.collect (fun map -> map.Members) |> List.distinct
+
+            let rooms =
+                members
+                |> List.map (fun id ->
+                    view.Hostiles
+                    |> List.tryFind (fun hostile -> hostile.Id = id)
+                    |> Option.map (fun hostile -> hostile.Pos.Room))
+                |> List.distinct
+
+            not (List.isEmpty rooms)
+            && rooms
+               |> List.forall (function
+                   | Some at -> Facts.bodiesWin view at [ creep ]
+                   | None -> false)
+
+    /// By tile index of a room, the soonest any of its maps strikes the tile:
+    /// what a fighter's walk breaks an equal-tick tie by, toward the later
+    /// (movement S3). None in a room with no Reach.
+    let soonestIn (threats: Threats) (room: string) : (int -> int) option =
+        Map.tryFind room threats.Arrivals
+        |> Option.map (fun (maps, _) ->
+            fun index -> soonestAmong index maps.Classes System.Int32.MaxValue)
+
+    /// A kiting body's walk (#510, #524, movement S3), by tile index of the
+    /// room it stands in: whether a melee map strikes the tile before the
+    /// body could be on it and gone, its own legs, load, parts shot off and
+    /// fatigue counted (`walkOf`), never sooner than the tick after (a body
+    /// that stays put moves again no sooner); and, about `camp` (the exit a
+    /// raid left by, `ColonyView.ExitHolds`), a step and a swing, and a step
+    /// more for each tick past the first the tile holds the body. Off our
+    /// ramparts. With it, the soonest a melee strikes each tile, which an
+    /// equal-tick walk breaks toward the later. None where neither a melee
+    /// map nor a camp stands in its room, or for a body the projection does
+    /// not place.
+    let kiteUnsafeFor
+        (threats: Threats)
+        atlas
+        (creep: CreepInfo)
+        (camp: Pos option)
+        : ((int -> bool) * (int -> int)) option =
+        let melee =
+            Atlas.creepTile atlas creep.Name
+            |> Option.bind (fun at -> Map.tryFind at.Room threats.Arrivals)
+            |> Option.map (fun (maps, _) ->
+                maps.Classes |> List.filter (fun map -> map.Class.Strike = Engine.meleeRange))
+            |> Option.defaultValue []
+
+        if List.isEmpty melee && Option.isNone camp then
+            None
+        else
+            // A camp on a tick with no map anywhere floods the body here,
+            // `walkOf` keeping none.
+            match
+                walkOf threats atlas creep
+                |> Option.orElseWith (fun () -> Arrival.ofBody atlas creep)
+            with
+            | None -> None
+            | Some walk ->
+                let ramparts = lazy (Atlas.ourRampartTilesIn atlas walk.Room)
+
+                let soonest index =
+                    soonestAmong index melee System.Int32.MaxValue
+
+                let unsafe index =
+                    let leaves = Grid.at index walk.Leaves
+
+                    leaves < System.Int32.MaxValue
+                    && (soonest index <= max 1 leaves
+                        || (match camp with
+                            | Some exit ->
+                                range exit (posAt index)
+                                <= Engine.meleeRange + 1 + leaves - Grid.at index walk.Ticks
+                            | None -> false))
+                    && not (Set.contains (posAt index) ramparts.Value)
+
+                Some(unsafe, soonest)
 
     /// Flee's ground for a body (movement S2): the tiles of the room's safe
     /// set (`safeIn`) within a horizon of the nearest by its own arrival. Not
@@ -1873,89 +1955,90 @@ let private killHead (view: ColonyView) (room: string) (targets: HostileInfo lis
         |> snd
         |> Some
 
-// The ranger's ground under a raid (#451). Engine actions resolve on the
-// tick's starting tiles and a melee body must start adjacent to swing, so a
-// ranger ending each tick two clear of every melee body is never hit while it
-// has a free step; a swamp tile costs it that step.
-//
-// A melee body hits what ends a tick within a step and a swing of it, and on
-// swamp within a few tiles of one the ranger loses the step it would have
-// stepped away with.
+/// A melee's step and swing: the tiles outside the home's line a raid melee
+/// at it reaches, which a defender's walk keeps off (#504).
 let private stepAndSwing = Engine.meleeRange + 1
-let private swampReach = Engine.meleeRange + 3
 
-/// How far a kite tile's escape room is flooded (#510): the steps a ranger
-/// takes while a melee closes on it from beyond a step and a swing.
-let private escapeDepth = 3
+/// By tile index, the soonest a melee class of a room's maps strikes the
+/// tile (`Arrival`, movement S3); `Int32.MaxValue` where none ever does.
+let private meleeSoonest (maps: ArrivalMaps option) : int -> int =
+    match
+        maps
+        |> Option.map (fun maps ->
+            maps.Classes |> List.filter (fun map -> map.Class.Strike = Engine.meleeRange))
+    with
+    | None
+    | Some [] -> fun _ -> System.Int32.MaxValue
+    | Some melee -> fun index -> Threats.soonestAmong index melee System.Int32.MaxValue
 
-/// How near its target a ranger holds (#535): a step inside its reach.
-let private holdReach = Engine.rangedRange - 1
-
-/// The tiles of one room within three of the kill order's head that no melee
-/// body reaches in a step and a swing, less swamp near one and the exit
-/// tiles, which carry a body out of the room: the kite ground. Of those, the
-/// ones with escape room (#510): a short flood of the open ground beyond each
-/// — off swamp and the exits, and out of every melee's step and swing — at
+/// The kite ground (#510, movement S3): the tiles of one room within the
+/// head's reach that a body standing there steps off before any melee map
+/// strikes them (a melee arrival later than the tick after), off the exit
+/// tiles, which carry a body out of the room. Within a tile less of the head
+/// where any is, while the head can step this tick (#535): its step away
+/// leaves such a tile in reach, where one at the edge is out of it the tick
+/// after. Of those, the ones with escape room: the open tiles about each,
+/// within the horizon's ticks, that a melee reaches no sooner than the tile
+/// itself (off swamp and the exits, read off the maps and never flooded), at
 /// least half the widest's, so the retreat never backs into a corridor,
-/// corner or swamp pocket a melee pins it in.
+/// corner or swamp pocket a melee pins it in. Which of them one body may
+/// stand on, its own legs and fatigue counted, is its walk's
+/// (`Threats.kiteUnsafeFor`).
 let private kiteGroundIn
     atlas
     (room: string)
+    (maps: ArrivalMaps option)
+    (horizon: int)
     (inRoom: HostileInfo list)
     (head: HostileInfo option)
+    (stepsNow: HostileInfo -> bool)
     =
-    let melee =
-        inRoom
-        |> List.filter (HostileInfo.melee inRoom)
-        |> List.map (fun hostile -> RoomPos.pos hostile.Pos)
+    let anyMelee = inRoom |> List.exists (HostileInfo.melee inRoom)
 
     let standing =
         inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
-    let clearOfMelee reach (tile: Pos) =
-        melee |> List.forall (fun m -> range m tile > reach)
+    let soonest = meleeSoonest maps
 
     let isOpen (tile: Pos) =
         not (Set.contains tile standing)
         && not (Seam.onRing tile)
-        && clearOfMelee stepAndSwing tile
-        && not (Atlas.isSwampIn atlas room tile)
+        && soonest (indexOf tile) > 1
 
     let escapeRoom (tile: Pos) =
-        let rec flood depth (seen: Set<Pos>) (front: Pos list) =
-            if depth = 0 || List.isEmpty front then
-                Set.count seen
+        let from = soonest (indexOf tile)
+
+        Atlas.walkableWithinIn atlas room horizon tile
+        |> List.sumBy (fun near ->
+            if
+                near <> tile
+                && isOpen near
+                && soonest (indexOf near) >= from
+                && not (Atlas.isSwampIn atlas room near)
+            then
+                1
             else
-                let next =
-                    front
-                    |> List.collect (Atlas.adjacentWalkableIn atlas room)
-                    |> List.filter (fun step -> isOpen step && not (Set.contains step seen))
-                    |> List.distinct
-
-                flood (depth - 1) (Set.union seen (Set.ofList next)) next
-
-        flood escapeDepth (Set.singleton tile) [ tile ]
+                0)
 
     match head with
     | None -> Set.empty
     | Some target ->
         let within reach =
             Atlas.walkableWithinIn atlas room reach (RoomPos.pos target.Pos)
-            |> List.filter (fun tile ->
-                not (Set.contains tile standing)
-                && not (Seam.onRing tile)
-                && clearOfMelee stepAndSwing tile
-                && not (Atlas.isSwampIn atlas room tile && not (clearOfMelee swampReach tile)))
+            |> List.filter isOpen
 
-        // Within two where any is (#535): the head's step away leaves it in
-        // reach, where a tile at three is out of it the tick after.
         let tiles =
-            match within holdReach with
+            match
+                (if stepsNow target then
+                     within (Engine.rangedRange - 1)
+                 else
+                     [])
+            with
             | [] -> within Engine.rangedRange
             | near -> near
 
-        match melee, tiles with
-        | [], _
+        match anyMelee, tiles with
+        | false, _
         | _, [] -> tiles
         | _ ->
             let roomOf = tiles |> List.map (fun tile -> tile, escapeRoom tile)
@@ -2476,15 +2559,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let standing =
                 inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
-            let gap (tile: Pos) =
-                melee |> List.map (fun m -> range m tile) |> List.min
+            let maps = Map.tryFind room arrivals |> Option.map fst
+            let soonest = meleeSoonest maps
 
             let head =
                 inRoom
                 |> List.filter (guardShoots view resident Set.empty)
                 |> killHead view room
 
-            let aroundHead () = kiteGroundIn atlas room inRoom head
+            // Whether a hostile can step this tick: a MOVE acting and its
+            // fatigue paid (`Arrival.waitOf`).
+            let stepsNow (hostile: HostileInfo) =
+                let gait = HostileInfo.gait inRoom hostile
+
+                let fatigue =
+                    Map.tryFind room view.World.Rooms
+                    |> Option.bind (fun seen -> Map.tryFind hostile.Id seen.HostileFatigue)
+                    |> Option.defaultValue 0
+
+                gait.Moves > 0 && Arrival.waitOf fatigue gait = 0
+
+            let aroundHead () =
+                kiteGroundIn atlas room maps view.Tuning.ReachHorizon inRoom head stepsNow
 
             // Under an armed raid, our standing ramparts within three of the
             // head (#467): a creep on its own rampart takes no damage, so
@@ -2525,8 +2621,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 |> Option.map (fun ground -> ground.Force())
                 |> Option.defaultValue Set.empty
 
-            // Nowhere to kite and nowhere safe: the room's tiles farthest from
-            // the melee, or, where every one is within a step and a swing,
+            // Nowhere to kite and nowhere safe: the room's tiles a melee
+            // strikes last, or, where one strikes every one by the tick after,
             // the tiles our rangers already hold.
             let farthest () =
                 let ground =
@@ -2544,12 +2640,13 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 if Set.isEmpty ground then
                     held
                 else
-                    let widest = ground |> Seq.map gap |> Seq.max
+                    let last (tile: Pos) = soonest (indexOf tile)
+                    let widest = ground |> Seq.map last |> Seq.max
 
-                    if widest <= stepAndSwing && not (Set.isEmpty held) then
+                    if widest <= 1 && not (Set.isEmpty held) then
                         held
                     else
-                        ground |> Set.filter (fun tile -> gap tile = widest) |> RoomPos.setAt room
+                        ground |> Set.filter (fun tile -> last tile = widest) |> RoomPos.setAt room
 
             let claimerLeads = head |> Option.exists (claimsAFlag inRoom resident)
 

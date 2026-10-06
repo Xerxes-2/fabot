@@ -533,38 +533,62 @@ let replayTests =
                     "with none in reach, the head, and the plan's step toward it"
             }
 
-            // Characterisation (movement S0, `docs/adr/0088`): melee glue steps
-            // onto the target's tile from range 1, blind to where the target can
-            // step next. Flips at S3, glue keeping contact after its best step.
+            // Melee glue steps onto the target's tile from range 1. Movement S3
+            // moved what keeps it off a tile into the caller's reading: the
+            // full tick's maps (`Emitter.glueKeeps`, a tile struck no harder
+            // than where it stands or than its heal), the light tick's glance
+            // (no second melee swinging at it) until S5.
             test
-                "the melee's step onto its target never lands on an exit, off our rampart, nor beside a second melee" {
+                "the melee's step onto its target never lands on an exit, off our rampart, nor where its caller reads it struck harder" {
                 // `Emitter.glueStep`, the one rule both ticks read (#535).
                 Expect.equal
-                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) false [])
+                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) false true)
                     (Some Right)
                     "the premise: beside its target, it steps onto its tile"
 
                 Expect.isNone
-                    (Decide.Emitter.glueStep (tile 1 10) (tile 0 10) false [])
+                    (Decide.Emitter.glueStep (tile 1 10) (tile 0 10) false true)
                     "never onto an exit tile: the engine carries the body across"
 
                 Expect.isNone
-                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) true [])
+                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) true true)
                     "never off our rampart"
 
                 Expect.isNone
-                    (Decide.Emitter.glueStep
-                        (tile 12 10)
-                        (tile 13 10)
-                        false
-                        [ tile 13 10; tile 14 11 ])
-                    "never onto a tile a second melee swings at"
+                    (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) false false)
+                    "never onto a tile its caller reads as struck harder"
 
-                let glanced name =
+                let glancedWith name hostiles =
                     { quiet with
                         Creeps = quiet.Creeps |> Map.add name (creepAt 12 10 1000)
-                        Hostiles = [ hostile 13 10 "Trepidimous" true ]
+                        Hostiles = hostiles
                     }
+
+                let glanced name =
+                    glancedWith name [ hostile 13 10 "Trepidimous" true ]
+
+                let stepsAmong name now =
+                    let full =
+                        LightTick.lastFull now Map.empty []
+                        |> aiming [ AttackCreep(name, "h-1") ] Map.empty
+
+                    LightTick.intents full now
+                    |> List.filter (function
+                        | MoveCreep(who, _) -> who = name
+                        | _ -> false)
+
+                Expect.isEmpty
+                    (stepsAmong
+                        "guard-2"
+                        (glancedWith
+                            "guard-2"
+                            [
+                                hostile 13 10 "Trepidimous" true
+                                { hostile 14 11 "Trepidimous" true with
+                                    Id = "h-2"
+                                }
+                            ]))
+                    "the light tick's glance: never onto a tile a second melee swings at"
 
                 let stepsOf name =
                     let now = glanced name

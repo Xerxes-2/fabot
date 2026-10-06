@@ -122,6 +122,55 @@ let walkTests =
                     "an unarmed body still takes the road: four half-tick units against plain's six"
             }
 
+            // Movement S3: what the S2 tie fell to the flood's order for, a
+            // fighter's walk that reads the maps breaks toward the tile a
+            // hostile strikes later (`prefer`, the user's road case: a ranger as
+            // quick off the road as on it never takes it into a melee walking it).
+            test "an equal-tick tie at the first step goes to the tile the walk prefers" {
+                let stepPreferring (rank: Pos -> int) =
+                    let atlas =
+                        spatial
+                            [ "src-a", { X = 10; Y = 10 } ]
+                            [
+                                { X = 10; Y = 10 }, Wall
+                                { X = 10; Y = 11 }, Plain
+                                { X = 10; Y = 12 }, Plain
+                                { X = 10; Y = 13 }, Plain
+                                { X = 10; Y = 14 }, Plain
+                                { X = 11; Y = 12 }, Plain
+                                { X = 11; Y = 13 }, Plain
+                            ]
+                        |> withHome (fun layer ->
+                            { layer with
+                                Roads = Set.ofList [ { X = 10; Y = 12 }; { X = 10; Y = 13 } ]
+                            })
+                        |> withCreepsAt [ "w", { X = 10; Y = 14 } ]
+                        |> snapshotWith [ creepWith "w" 0 [ RangedAttack; Move ] ]
+                        |> ofView
+
+                    let seat = RoomPos.setAt (atlasHome atlas) (Set.singleton { X = 10; Y = 11 })
+
+                    let byIndex index =
+                        rank
+                            {
+                                X = index / Engine.roomSide
+                                Y = index % Engine.roomSide
+                            }
+
+                    firstStepAvoidingWhere atlas "w" Set.empty (fun _ -> false) (Some byIndex) seat
+                    |> stepOf atlas "w"
+
+                Expect.equal
+                    (stepPreferring (fun tile -> if tile.X = 11 then 9 else 1))
+                    (Some { X = 11; Y = 13 })
+                    "the plain lane a hostile reaches later, the road lane no quicker"
+
+                Expect.equal
+                    (stepPreferring (fun tile -> if tile.X = 10 then 9 else 1))
+                    (Some { X = 10; Y = 13 })
+                    "and the road lane where that is the later"
+            }
+
             test "the walk is at least the Chebyshev distance to the tile it reaches" {
                 // Every body against every source in a room of mixed
                 // terrain, roads and scattered walls (#79 as a property).
