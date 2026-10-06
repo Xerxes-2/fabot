@@ -207,7 +207,6 @@ let bareRespawn =
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
-        LoadedTowers = Map.empty
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false
@@ -2544,3 +2543,27 @@ let partitionBreaks (creeps: CreepInfo list) (assignments: Assignments) : (strin
             else
                 None
         | _ -> None)
+
+/// The colony with our loaded towers standing on these tiles of a room
+/// (`WorldRoom.OurTowers`), the world's vision of the room laid in as it
+/// stands, the hostiles there its own.
+let withOurTowers (room: string) (tiles: Pos list) (colony: ColonyView) =
+    let seen =
+        Map.tryFind room colony.World.Rooms
+        |> Option.defaultValue
+            {
+                Hostiles = colony.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+                HostileFatigue = Map.empty
+                InvaderCores = []
+                Towers = []
+                OurTowers = []
+                Fallen = []
+                Control = neutralRoom
+            }
+
+    { colony with
+        World =
+            { colony.World with
+                Rooms = Map.add room { seen with OurTowers = tiles } colony.World.Rooms
+            }
+    }

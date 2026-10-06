@@ -2053,6 +2053,7 @@ let private observedShut (hostiles: HostileInfo list) =
                                 HostileFatigue = Map.empty
                                 InvaderCores = []
                                 Towers = []
+                                OurTowers = []
                                 Fallen = []
                                 Control =
                                     {

@@ -1989,6 +1989,7 @@ let private arrivalWorld (view: ColonyView) : WorldView =
                                 HostileFatigue = Map.empty
                                 InvaderCores = []
                                 Towers = []
+                                OurTowers = []
                                 Fallen = []
                                 Control =
                                     Map.tryFind room view.RoomControl
@@ -3325,7 +3326,6 @@ let private withMusters
                     (exchangeWon
                         view
                         room
-                        0
                         ((holders |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
                          @ castable brief holders))
 

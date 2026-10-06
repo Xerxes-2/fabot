@@ -1317,6 +1317,10 @@ let arenaClaimTests =
                 // on rampart 2,24; the tapper shot dead at t244 from the
                 // reserve, so no tap. The duo killed all four by t530; since
                 // #564 the two rangers, in at t336, kill none of them by t600.
+                // The tower's repairs have it under the fire reserve before
+                // they arrive and it fires no more (9 shots, 260 left), so it
+                // stands beside no fight of theirs (#590's review: a tower
+                // counts only while it fires over `TowerRepairReserve`).
                 Expect.isTrue
                     (report.ReliefCast |> Option.exists (fun t -> t <= 10))
                     $"#468: the raid's entry reverts the stage and the mother casts\n{failure}"

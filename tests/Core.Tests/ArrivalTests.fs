@@ -74,6 +74,7 @@ let private seeing (rooms: (string * HostileInfo list * (string * int) list) lis
                     HostileFatigue = Map.ofList fatigue
                     InvaderCores = []
                     Towers = []
+                    OurTowers = []
                     Fallen = []
                     Control =
                         {

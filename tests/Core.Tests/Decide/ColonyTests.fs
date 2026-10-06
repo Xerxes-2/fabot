@@ -2741,9 +2741,8 @@ let raisedHomeGarrisonTests =
                         (List.replicate 7 Bodies.rangerPattern.Block |> List.concat)
 
                 let raided towers =
-                    { openGarrison [] [ ranger, { X = 30; Y = 10 } ] homeRaid with
-                        LoadedTowers = Map.ofList [ "W1N2", towers ]
-                    }
+                    openGarrison [] [ ranger, { X = 30; Y = 10 } ] homeRaid
+                    |> withOurTowers "W1N2" (List.replicate towers { X = 40; Y = 10 })
 
                 Expect.equal
                     (rangerQuotaOf (raided 0))

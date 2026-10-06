@@ -81,7 +81,6 @@ let quiet: ColonyView =
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
-        LoadedTowers = Map.empty
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false
@@ -256,6 +255,7 @@ let seenRooms (rooms: (string * HostileInfo list * string list) list) : WorldVie
                     Hostiles = hostiles
                     InvaderCores = []
                     Towers = []
+                    OurTowers = []
                     Fallen = fallen
                     HostileFatigue = Map.empty
                     Control =

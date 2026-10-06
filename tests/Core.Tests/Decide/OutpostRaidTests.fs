@@ -2340,6 +2340,7 @@ let shutChaseTests =
                                                 HostileFatigue = Map.empty
                                                 InvaderCores = []
                                                 Towers = []
+                                                OurTowers = []
                                                 Fallen = []
                                                 Control = neutralRoom
                                             }
@@ -3255,6 +3256,7 @@ let private seenBeyond
                             HostileFatigue = Map.empty
                             InvaderCores = cores
                             Towers = towers
+                            OurTowers = []
                             Fallen = []
                             Control = neutralRoom
                         }
@@ -4083,6 +4085,7 @@ let childOutpostTests =
                                             HostileFatigue = Map.empty
                                             InvaderCores = []
                                             Towers = [ "tower-1", { X = 10; Y = 10 } ]
+                                            OurTowers = []
                                             Fallen = []
                                             Control = neutralRoom
                                         }
@@ -4572,12 +4575,8 @@ let childOutpostTests =
                 let mother towers others =
                     { watchingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
-                        LoadedTowers =
-                            if towers > 0 then
-                                Map.ofList [ "W1N3", towers ]
-                            else
-                                Map.empty
                     }
+                    |> withOurTowers "W1N3" (List.replicate towers { X = 25; Y = 25 })
                     |> fun colony ->
                         { colony with
                             Creeps =

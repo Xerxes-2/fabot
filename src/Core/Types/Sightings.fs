@@ -1019,13 +1019,24 @@ module World =
         |> List.filter (fun r -> r.Kind = BuiltKind.Tower)
         |> List.length
 
-    /// How many towers of ours in the room hold a shot's energy this tick.
-    let loadedTowers (facts: RoomFacts) : int =
+    /// The towers of ours in the room holding a shot's energy this tick.
+    let private loaded (facts: RoomFacts) : RefillableInfo list =
         facts.Refillables
         |> List.filter (fun r ->
             r.Kind = BuiltKind.Tower
             && Engine.towerCapacity - r.FreeCapacity >= Engine.towerEnergyCost)
-        |> List.length
+
+    /// How many towers of ours in the room hold a shot's energy this tick.
+    let loadedTowers (facts: RoomFacts) : int = List.length (loaded facts)
+
+    /// The tiles of the towers of ours in the room holding a shot over
+    /// `reserve` this tick: what every fight priced there counts beside our
+    /// bodies. Under the reserve `Layout.planFire` takes only an urgent shot.
+    let firingTowerTiles (reserve: int) (facts: RoomFacts) : Pos list =
+        loaded facts
+        |> List.filter (fun r ->
+            Engine.towerCapacity - r.FreeCapacity >= reserve + Engine.towerEnergyCost)
+        |> List.choose (fun r -> Map.tryFind r.Id facts.Layer.TargetPositions)
 
     /// ADR-0080
     /// Whether a colony's home cannot hold the raid standing in it this tick:

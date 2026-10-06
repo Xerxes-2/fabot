@@ -2478,6 +2478,59 @@ let fireReflexTests =
                     "the struck rampart repaired instead"
             }
 
+            test
+                "the kill check counts our ranger's shot beside the towers: 300 at the falloff alone never beats a 25-HEAL healer, 360 does (#590)" {
+                // W17S29 t996,675's shape: a healer glued to a 900-hit
+                // dismantler, both past the falloff of two towers.
+                let pair =
+                    [
+                        hostileAt
+                            "h-1"
+                            { X = 31; Y = 40 }
+                            ([
+                                Work
+                                Work
+                                Work
+                                Work
+                                RangedAttack
+                                RangedAttack
+                                Attack
+                                Attack
+                                Move
+                            ])
+                        hostileAt
+                            "med-1"
+                            { X = 32; Y = 40 }
+                            (List.replicate 25 Heal @ List.replicate 25 Move)
+                    ]
+
+                let towers = [ "tower-1", { X = 10; Y = 40 }; "tower-2", { X = 10; Y = 42 } ]
+                let alone = towerColony towers pair
+
+                let ranger =
+                    creepWith
+                        "ranger-1"
+                        0
+                        0
+                        (List.replicate 9 Move
+                         @ List.replicate 6 RangedAttack
+                         @ List.replicate 3 Heal)
+
+                let beside =
+                    { alone with
+                        Creeps = ranger :: alone.Creeps
+                        Spatial = alone.Spatial |> withCreepsAt [ ranger.Name, { X = 34; Y = 40 } ]
+                    }
+
+                Expect.isEmpty
+                    (shots (decideOn alone).Intents)
+                    "the towers alone only match the heal"
+
+                Expect.isNonEmpty
+                    (shots (decideOn beside).Intents)
+                    "the ranger's 60 at range 3 tips it: the towers fire"
+            }
+
             test "the kill check refuses a T3-boosted healer whose TOUGH and heal undo every shot" {
                 // Kalgen's body four tiles off a full tower:
                 // 600 a shot. Unboosted it heals 144 of it; T3-boosted its
@@ -3463,6 +3516,7 @@ let threatTests =
                                                 HostileFatigue = Map.ofList [ "h-1", fatigue ]
                                                 InvaderCores = []
                                                 Towers = []
+                                                OurTowers = []
                                                 Fallen = []
                                                 Control =
                                                     {
@@ -5848,6 +5902,7 @@ let acrossTheBorderTests =
                                             InvaderCores = []
                                             // Past the falloff: 150 a tick on every tile we stand on.
                                             Towers = [ "tower-1", { X = 10; Y = 34 } ]
+                                            OurTowers = []
                                             Fallen = []
                                             Control =
                                                 {

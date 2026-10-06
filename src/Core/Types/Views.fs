@@ -179,6 +179,9 @@ type WorldRoom =
         /// The towers not ours that fire there, each by id and tile
         /// (`WorldView.hostileTowers`): every tile of the room is under them.
         Towers: (string * Pos) list
+        /// The tiles of our towers there holding a shot's energy
+        /// (`World.firingTowerTiles`), whichever colony's room it is.
+        OurTowers: Pos list
         /// The ids of the creeps not ours whose tombstones lie there.
         Fallen: string list
         Control: RoomControlInfo
@@ -427,6 +430,8 @@ module WorldView =
                             HostileFatigue = facts.HostileFatigue
                             InvaderCores = facts.InvaderCores
                             Towers = hostileTowers facts
+                            OurTowers =
+                                World.firingTowerTiles Tuning.defaults.TowerRepairReserve facts
                             Fallen = facts.Fallen
                             Control = control
                         }))
@@ -680,10 +685,6 @@ type ColonyView =
         /// holds (`ColonyView.firstSpawns`). No entry for a nursery nobody
         /// swept a tile for.
         FirstSpawns: Map<string, FirstSpawnSite>
-        /// The towers of ours holding a shot's energy (`World.loadedTowers`)
-        /// in each child's home this colony raises, under its room's name
-        /// (#451): what its garrison fights beside. No entry for none.
-        LoadedTowers: Map<string, int>
         /// The raid healers seen in the home room within the last
         /// `Tuning.HealMemoryTicks` ticks and not standing there now, at the
         /// tile last seen (`World.Healers`, #480): one that stepped out across
@@ -1872,13 +1873,6 @@ module ColonyView =
                     firstSpawns stages colonies world
                     |> List.filter (fun (room, _) -> List.contains room nurseries)
                     |> Fresh.mapOfList
-            LoadedTowers =
-                bootstrap @ scan.Garrisoned
-                |> List.choose (fun room ->
-                    match World.loadedTowers (World.roomOf world room) with
-                    | 0 -> None
-                    | towers -> Some(room, towers))
-                |> Fresh.mapOfList
             RecalledHealers =
                 home :: bootstrap @ scan.Garrisoned
                 |> List.collect (fun room ->

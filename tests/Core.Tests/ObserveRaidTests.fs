@@ -1591,7 +1591,6 @@ let fightRecordTests =
                 let at bodies =
                     { Decide.Fixtures.fightingMother raid bodies with
                         Time = 1_000
-                        LoadedTowers = Map.empty
                     }
 
                 Expect.isNonEmpty

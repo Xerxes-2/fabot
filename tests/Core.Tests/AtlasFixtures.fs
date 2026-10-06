@@ -62,7 +62,6 @@ let snapshotWith creeps spatial =
         Defenders = Map.empty
         NurseryControllers = Map.empty
         FirstSpawns = Map.empty
-        LoadedTowers = Map.empty
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false

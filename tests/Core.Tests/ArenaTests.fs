@@ -9770,9 +9770,10 @@ let arenaDefenceTests =
                     "the spawn and the tower are the Keep"
 
                 Expect.equal
-                    (Map.tryFind "W17S25" mother.LoadedTowers)
-                    (Some 1)
-                    "the mother counts the loaded tower"
+                    (Map.tryFind "W17S25" mother.World.Rooms
+                     |> Option.map (fun seen -> seen.OurTowers))
+                    (Some [ childTower ])
+                    "the mother sees the loaded tower"
 
                 Expect.equal
                     (Map.tryFind "W17S25" child.Stages)
@@ -16808,5 +16809,315 @@ let w18s25CrippledTests =
                     (fun (_, _, assignments) ->
                         Map.tryFind "ranger-993409-Spawn3" assignments = Some "guard:W18S25")
                     "once its home raid is down, W17S25's resident ranger next door takes the chase"
+            }
+        ]
+
+// ---- arena capture w17s29-tower-backed (#590) --------------------------------
+// `npm run capture -- W17S29 996675 --name w17s29-tower-backed`, read at live
+// t999,336. The room-history replay at t996,675, the state after that tick
+// ran: arena tick 0 runs as t996,676.
+//   W17S29  https://screeps.com/room-history/shardSeason/W17S29/996600.json
+// Left out, as the capture says: the Raid log, ArmedSeen, Healers and
+// Sightings start empty; no body holds a Task (the Transition log holds none
+// that early); the worker Spawn9 casts until t996,741 is not placed; nor are
+// two tombstones, nor the extensions' energy beyond what the capture read.
+
+/// W17S29 at t996,675: an Invader pair in the home, its 25-HEAL healer glued
+/// to a dismantler whose TOUGH is shot off (900 hits), both ~20 tiles from
+/// the two towers, which land 2 × 150 against the healer's 300. Live, the
+/// resident ranger-996535 (6 RANGED_ATTACK, 60 a tick) stood in the room ~100
+/// ticks and never shot (#590): 60 beside the towers' 300 out-damages the heal.
+let private w17s29TowerBacked () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 4
+        |> withControllerClocks 0 0 119_992 1_503_130
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        19, 35
+                        19, 41
+                        19, 43
+                        20, 36
+                        20, 38
+                        20, 40
+                        20, 42
+                        21, 35
+                        21, 37
+                        21, 41
+                        21, 43
+                        22, 36
+                        22, 38
+                        22, 40
+                        23, 35
+                        23, 37
+                        24, 36
+                        26, 44
+                        27, 43
+                        27, 45
+                        28, 44
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        20, 44
+                        21, 45
+                        22, 42
+                        22, 44
+                        23, 43
+                        23, 45
+                        24, 38
+                        24, 42
+                        24, 44
+                        25, 35
+                        25, 37
+                        25, 39
+                        25, 43
+                        25, 45
+                        26, 36
+                        26, 38
+                        26, 40
+                        27, 35
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 135_200 250_000 { X = 13; Y = 29 } with
+                    Energy = 432
+                }
+                structureOf "container" None 135_500 250_000 { X = 15; Y = 43 }
+                structureOf "container" None 191_400 250_000 { X = 27; Y = 42 }
+                { structureOf "container" None 190_200 250_000 { X = 44; Y = 38 } with
+                    Energy = 264
+                }
+                { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 25; Y = 41 } with
+                    Energy = 13
+                }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 16; Y = 44 }
+                { structureOf "rampart" (Some Side.Ours) 100_201 30_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 996_763
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_601 30_000_000 { X = 21; Y = 39 } with
+                    NextDecay = 996_774
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_201 30_000_000 { X = 23; Y = 39 } with
+                    NextDecay = 996_710
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_201 30_000_000 { X = 23; Y = 41 } with
+                    NextDecay = 996_753
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_601 30_000_000 { X = 24; Y = 40 } with
+                    NextDecay = 996_752
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_701 30_000_000 { X = 26; Y = 42 } with
+                    NextDecay = 996_758
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_601 30_000_000 { X = 44; Y = 38 } with
+                    NextDecay = 996_707
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 19_740
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 26; Y = 42 } with
+                    Energy = 4_000
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 640
+                towerOf Side.Ours { X = 23; Y = 41 } 850
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S29" ])
+
+    let worker name x y ttl =
+        { body name Side.Ours (parts [ Work, 11; Carry, 12; Move, 12 ]) (at "W17S29" x y) None with
+            TicksToLive = ttl
+        }
+
+    let bodies: Body list =
+        [
+            worker "worker-995080-Spawn9" 42 39 8
+            { worker "worker-995234-Spawn9" 26 43 162 with
+                Energy = 244
+            }
+            worker "worker-995430-Spawn9" 20 35 358
+            worker "worker-996318-Spawn9" 27 36 1_246
+            { body
+                  "upgrader-995634-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 29 35)
+                  None with
+                TicksToLive = 550
+            }
+            { body
+                  "upgrader-996423-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 28 33)
+                  None with
+                TicksToLive = 1_339
+            }
+            { body
+                  "anchor-996061-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 44 38)
+                  None with
+                TicksToLive = 908
+                Energy = 50
+            }
+            { body
+                  "anchor-996085-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 13 29)
+                  None with
+                TicksToLive = 932
+                Energy = 50
+            }
+            { body
+                  "hauler-996183-Spawn9"
+                  Side.Ours
+                  (parts [ Carry, 30; Move, 15 ])
+                  (at "W17S29" 20 43)
+                  None with
+                TicksToLive = 1_141
+                Energy = 870
+            }
+            { body
+                  "hauler-995926-Spawn9"
+                  Side.Ours
+                  (parts [ Carry, 30; Move, 15 ])
+                  (at "W17S29" 32 32)
+                  None with
+                TicksToLive = 884
+                Energy = 992
+            }
+            { body
+                  "ranger-996535-Spawn9"
+                  Side.Ours
+                  (parts [ Move, 9; RangedAttack, 6; Heal, 3 ])
+                  (at "W17S29" 11 12)
+                  None with
+                TicksToLive = 1_412
+                Fatigue = 36
+            }
+            // live: 2 RANGED_ATTACK, 4 WORK, 2 ATTACK, 1 MOVE; attack→43,25.
+            // Its live tiles to t996,714, where it struck the anchor's
+            // rampart at 44,38 until t996,800 (`observe history`).
+            { body
+                  "invader_W17S29_832"
+                  (Side.Npc "Invader")
+                  (parts [ Tough, 16; Move, 24; RangedAttack, 3; Work, 4; Attack, 2; Move, 1 ])
+                  (at "W17S29" 44 25)
+                  (Some(
+                      Waypoints
+                          [
+                              for x, y in
+                                  [
+                                      45, 26
+                                      46, 27
+                                      45, 28
+                                      45, 29
+                                      45, 30
+                                      45, 31
+                                      45, 32
+                                      45, 33
+                                      44, 34
+                                      44, 35
+                                      43, 36
+                                      43, 37
+                                      43, 38
+                                  ] -> at "W17S29" x y
+                          ]
+                  )) with
+                Hits = 900
+                TicksToLive = 1_432
+            }
+            // live: heal→44,25, then beside the dismantler throughout.
+            { body
+                  "invader_W17S29_976"
+                  (Side.Npc "Invader")
+                  (parts [ Move, 24; Heal, 25; Move, 1 ])
+                  (at "W17S29" 45 26)
+                  (Some(Follow "invader_W17S29_832")) with
+                TicksToLive = 1_432
+            }
+        ]
+
+    arena 996_676 [ w17s29 ] colonies bodies
+
+[<Tests>]
+let w17s29TowerBackedTests =
+    testList
+        "arena capture w17s29-tower-backed"
+        [
+            // The pricing half of #590, red before it: the home's two loaded
+            // towers reach the world's read of the room, and the ranger
+            // standing there wins the 900-hit dismantler and its healer beside
+            // them (60 + 300 against 300 healed), which it loses alone.
+            test
+                "#590 capture t996,675: the ranger in the home wins the pair beside the home's towers, and loses it alone" {
+                let view = viewOf (w17s29TowerBacked ()) "W17S29"
+                let ranger = view.Creeps |> List.filter (fun c -> c.Name = "ranger-996535-Spawn9")
+
+                Expect.equal
+                    (Map.tryFind "W17S29" view.World.Rooms
+                     |> Option.map (fun seen -> seen.OurTowers))
+                    (Some [ { X = 21; Y = 39 }; { X = 23; Y = 41 } ])
+                    "the home's own loaded towers, by tile"
+
+                Expect.isTrue
+                    (Fabot.Core.Decide.Facts.bodiesWin view "W17S29" ranger)
+                    "beside the towers it wins"
+
+                let towerless =
+                    { view with
+                        World =
+                            { view.World with
+                                Rooms =
+                                    view.World.Rooms
+                                    |> Map.change
+                                        "W17S29"
+                                        (Option.map (fun seen -> { seen with OurTowers = [] }))
+                            }
+                    }
+
+                Expect.isFalse
+                    (Fabot.Core.Decide.Facts.bodiesWin towerless "W17S29" ranger)
+                    "alone it loses"
+            }
+
+            // Pending: priced right, the ranger still idles, as live. The
+            // home's raid outside the line is its Defend's, so the home pools
+            // no Guard a ranger takes (`homeUnheld`) and is no chase
+            // (`Facts.chased`); and by the time a ranger 40 tiles off walks
+            // in, the healer has the dismantler back at 5,000 hits, which
+            // the exchange prices a loss (its two ATTACK counted against a
+            // ranger at range 3). The invaders keep their live tiles.
+            ptest "#590 capture t996,675: the ranger engages beside the towers and the pair dies" {
+                let _, trace = w17s29TowerBacked () |> run 150
+                let failure = describe trace
+
+                Expect.isTrue
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Ours
+                         |> List.exists (function
+                             | RangedAttackCreep("ranger-996535-Spawn9", _) -> true
+                             | _ -> false)))
+                    $"the ranger shoots\n{failure}"
+
+                Expect.isSome (diedOn "invader_W17S29_832" trace) $"the dismantler dies\n{failure}"
+                Expect.isSome (diedOn "invader_W17S29_976" trace) $"the healer dies\n{failure}"
             }
         ]

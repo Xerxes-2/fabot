@@ -934,6 +934,32 @@ let private underRivalTowers (view: ColonyView) (room: string) =
     Map.tryFind room view.World.Rooms
     |> Option.exists (fun seen -> not (List.isEmpty seen.Towers))
 
+/// The tiles of our loaded towers in a room (`WorldRoom.OurTowers`).
+let private ourTowersIn (view: ColonyView) (room: string) : Pos list =
+    Map.tryFind room view.World.Rooms
+    |> Option.map (fun seen -> seen.OurTowers)
+    |> Option.defaultValue []
+
+/// What our loaded towers in a room (`WorldRoom.OurTowers`) land a tick on
+/// the armed raid there, each at its range from the raider they land least
+/// on, and at the falloff on one outside the room. Every fight priced in a
+/// room of our towers counts it beside our bodies (#590): a ranger idled
+/// beside a healer pair its 60 and the towers' 300 out-damaged together.
+let private ourTowersOn (view: ColonyView) (room: string) (raid: HostileInfo list) : int =
+    let towers = ourTowersIn view room
+
+    let on (h: HostileInfo) =
+        towers
+        |> List.sumBy (fun tower ->
+            RoomPos.range (RoomPos.at room tower) h.Pos
+            |> Option.defaultValue Engine.towerFalloffRange
+            |> Engine.towerAttackAt)
+
+    match towers, raid |> List.filter (HostileInfo.armed view.Hostiles) with
+    | [], _ -> 0
+    | _, [] -> List.length towers * Engine.towerAttackAt Engine.towerFalloffRange
+    | _, armed -> armed |> List.map on |> List.min
+
 /// Which band of the kill order a target falls in (#451), first band first.
 type KillTier =
     /// A rival's CLAIM body in a resident room, anywhere in it:
@@ -1186,37 +1212,32 @@ let private exchangeAgainst
 
 /// `exchangeAgainst` the raid standing in one room, read at the window to
 /// close and strike (`Reaction.strike`): our bodies, by part counts and hits,
-/// beside `beside` damage a tick that is no body's; never under towers not
-/// ours (`underRivalTowers`).
+/// beside our towers there (`ourTowersOn`); never under towers not ours
+/// (`underRivalTowers`).
 let internal exchangeWon
     (view: ColonyView)
     (room: string)
-    (beside: int)
     (bodies: ((BodyPart -> int) * int) list)
     =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
     not (underRivalTowers view room)
-    && exchangeAgainst view Reaction.strike raid beside 0 bodies
+    && exchangeAgainst view Reaction.strike raid (ourTowersOn view room raid) 0 bodies
 
 /// Whether these creeps of ours, together, win the raid standing in a room
 /// (`exchangeWon`): what a muster waits for (#535), and one body alone is
 /// what it weighs a body standing in the room by (`Quota.homeHolds`).
 let bodiesWin (view: ColonyView) (room: string) (creeps: CreepInfo list) =
-    exchangeWon
-        view
-        room
-        0
-        (creeps |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
+    exchangeWon view room (creeps |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
 
 /// `exchangeWon` for one body of these active part counts and hits.
 let internal bodyWins (view: ColonyView) (room: string) (parts: BodyPart -> int) (hits: int) =
-    exchangeWon view room 0 [ parts, hits ]
+    exchangeWon view room [ parts, hits ]
 
 /// Whether `blocks` whole blocks of a fighting row win `exchangeWon`, one
-/// body of the blocks' parts and hits, beside `besideDamage` a tick that is
-/// not a body's. Here and not in `Quota` because the ranger's ground reads it
-/// too (`outmatched`).
+/// body of the blocks' parts and hits, beside our towers there
+/// (`ourTowersOn`). Here and not in `Quota` because the ranger's ground reads
+/// it too (`outmatched`).
 ///
 /// Worked example: a lone smallMelee needs one guard block; backed by a
 /// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
@@ -1227,16 +1248,11 @@ let internal bodyWins (view: ColonyView) (room: string) (parts: BodyPart -> int)
 /// block's pace, so its swing reaches what one block's does. `borne` prices
 /// the damage the block brings to bear (`borneDamage`, #535); else in full,
 /// the guard holding the post (#531).
-let private blocksBeat
-    (block: BodyPart list)
-    (borne: bool)
-    (besideDamage: int)
-    (view: ColonyView)
-    (room: string)
-    =
+let private blocksBeat (block: BodyPart list) (borne: bool) (view: ColonyView) (room: string) =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
     let price = raidPrice view Reaction.strike raid
     let towered = underRivalTowers view room
+    let besideDamage = ourTowersOn view room raid
     let parts = partCountIn block
 
     let damage =
@@ -1258,17 +1274,17 @@ let private blocksBeat
 /// the biggest body the bank buys (`guardBlocksReach`) to decide whether an
 /// outpost is a fight or a withdrawal (`Observe.raidDeadlines`).
 let guardBlocksBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat guardPattern.Block false 0 view room
+    blocksBeat guardPattern.Block false view room
 
 /// `guardBlocksBeat` with the swing priced as brought to bear (#535): what
 /// picks the ranger row over the guard's.
 let private guardBorneBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat guardPattern.Block true 0 view room
+    blocksBeat guardPattern.Block true view room
 
 /// `blocksBeat` for the ranger's block (#411), which the errand room's
 /// stand-down and the ranger row read as the guard's do an outpost's.
 let rangerBlocksBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat rangerPattern.Block true 0 view room
+    blocksBeat rangerPattern.Block true view room
 
 /// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
 /// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
@@ -1295,8 +1311,8 @@ let rangerBlocksReach (view: ColonyView) : int =
 /// Whether a ranged body of these live parts kites the raid standing in a
 /// room down (#510): every raider there is one it holds the range on
 /// (`cannotClose`), and its damage out-runs every heal acting in the room,
-/// so the kite ends in a kill; never under towers not ours
-/// (`underRivalTowers`).
+/// so the kite ends in a kill, our towers there beside it (`ourTowersOn`);
+/// never under towers not ours (`underRivalTowers`).
 let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string) : bool =
     let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
 
@@ -1305,23 +1321,19 @@ let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string
     match inRoom |> List.filter (HostileInfo.raider view.Hostiles) with
     | [] -> false
     | raid ->
-        not (underRivalTowers view room)
-        && raid |> List.forall (cannotClose view.Hostiles parts)
         // The heal priced in damage on the raider it costs least
         // (`HostileInfo.damageFor`), as `raidPrice` prices it.
-        && damageOf parts > (raid |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.min)
+        let healed = raid |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.min
+
+        not (underRivalTowers view room)
+        && raid |> List.forall (cannotClose view.Hostiles parts)
+        && damageOf parts + ourTowersOn view room raid > healed
 
 /// `kitedDown` for the biggest ranger body the bank buys: the room-level
 /// answer the stand-down, `outmatched` and the chase read.
 let internal kitedByRanger (view: ColonyView) (room: string) : bool =
     let blocks = max 1 (rangerBlocksReach view)
     kitedDown view (fun part -> blocks * partCountIn rangerPattern.Block part) room
-
-/// What a room's loaded towers land a tick on one target, priced at the
-/// falloff range: a raised home's, beside whatever body of ours fights there.
-let private towerDamageIn (view: ColonyView) (room: string) =
-    let towers = Map.tryFind room view.LoadedTowers |> Option.defaultValue 0
-    towers * Engine.towerAttackAt Engine.towerFalloffRange
 
 /// A home's middle: what a raid on it strikes, its spawn, store and
 /// controller standing about there.
@@ -1359,14 +1371,12 @@ let private homeHolds (view: ColonyView) (home: string) (arriving: HostileInfo l
                |> Option.exists (fun at -> at.Room = home))
         |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits)
 
-    let towers = Map.tryFind home view.LoadedTowers |> Option.defaultValue 0
-
     exchangeAgainst
         view
         Reaction.lend
         arriving
-        (towerDamageIn view home)
-        (towers * Engine.towerHits)
+        (ourTowersOn view home arriving)
+        (List.length (ourTowersIn view home) * Engine.towerHits)
         staying
 
 /// Whether a resident room is quiet enough to lend its garrison to a kill
@@ -1421,15 +1431,9 @@ let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) 
            |> List.forall (fun h -> h.Pos.Room <> held || not (disturbs view resident h))
 
 /// Whether the biggest ranger the bank buys, at least one block as for the
-/// kite, wins a room's raid alone beside a raised home's loaded towers.
+/// kite, wins a room's raid alone beside our towers there.
 let private rangerRowWins (view: ColonyView) (room: string) =
-    blocksBeat
-        rangerPattern.Block
-        true
-        (towerDamageIn view room)
-        view
-        room
-        (max 1 (rangerBlocksReach view))
+    rangerBlocksBeat view room (max 1 (rangerBlocksReach view))
 
 /// A room's own row and its answer, the one reading `rangerAnswers` and the
 /// verdict share. A ranger room and one the colony harasses are the ranger's
@@ -1787,8 +1791,6 @@ let internal outmatched (view: ColonyView) (room: string) : bool = answer view r
 /// loaded towers: what opens its fight record. Both the garrison's size and the
 /// rangers actually standing there, priced together, lose.
 let internal residentsLose (view: ColonyView) (room: string) : bool =
-    let towers = towerDamageIn view room
-
     let standing =
         view.Creeps
         |> List.filter (fun creep ->
@@ -1796,16 +1798,10 @@ let internal residentsLose (view: ColonyView) (room: string) : bool =
             && SpatialInfo.creepPlacementOf view.Spatial creep.Name
                |> Option.exists (fun at -> at.Room = room))
 
-    let standingWin =
-        not (List.isEmpty standing)
-        && exchangeWon
-            view
-            room
-            towers
-            (standing |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
+    let standingWin = not (List.isEmpty standing) && bodiesWin view room standing
 
     not standingWin
-    && not (blocksBeat rangerPattern.Block true towers view room view.Tuning.RangerResidentBlocks)
+    && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
 
 /// The Planner's narrow view of the assignment table, filtered to the living:
 /// `Assignments` arrives from Memory and may name a creep that died last tick,
@@ -2545,8 +2541,8 @@ let private homeUnheld (view: ColonyView) atlas : bool =
                 && (HostileInfo.armed view.Hostiles h && mayStrike view Set.empty h
                     || HostileInfo.heals view.Hostiles h))
 
-        // The home's own towers (`LoadedTowers` carries only the raised
-        // children's homes): each holding a shot's energy, and each dry one
+        // The home's own towers, more than `WorldRoom.OurTowers`' loaded
+        // ones: each holding a shot's energy, and each dry one
         // the stock refills whole, so a tick's refill gap casts nothing; only
         // towers the stock cannot feed are lost to the raid.
         let loaded, dry =
