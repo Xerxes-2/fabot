@@ -208,13 +208,13 @@ let private classesOf
     let wait = waitOf (Map.tryFind hostile.Id fatigue |> Option.defaultValue 0) gait
 
     [
-        if List.contains Attack parts then
+        if List.exists (samePart Attack) parts then
             {
                 Strike = Engine.meleeRange
                 Pace = pace
             },
             wait
-        if List.contains RangedAttack parts then
+        if List.exists (samePart RangedAttack) parts then
             {
                 Strike = Engine.rangedRange
                 Pace = pace

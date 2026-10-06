@@ -321,6 +321,20 @@ let matchCreeps
         else
             lastSeenIn view tid
 
+    // `threatened` asked once per `threatenedKey` (a Task and a body kind)
+    // rather than once a pair.
+    let threatenedByKey = System.Collections.Generic.Dictionary<string, bool>()
+
+    let threatenedFor (creep: CreepInfo) task =
+        let key = threatenedKey atlas creep task
+
+        match threatenedByKey.TryGetValue key with
+        | true, answer -> answer
+        | _ ->
+            let answer = threatened threats atlas creep task
+            threatenedByKey.[key] <- answer
+            answer
+
     // One gate cascade judges every (creep, Task) pair, for both readings of
     // one: the fresh candidate the Matcher scores and the assignment it is
     // deciding whether to keep. Rejected at the first gate it fails
@@ -340,7 +354,7 @@ let matchCreeps
         (creep: CreepInfo)
         (pooled: PooledTask)
         : Result<int, RejectReason> =
-        if threatened threats atlas creep pooled.Task then
+        if threatenedFor creep pooled.Task then
             Error RejectReason.Threatened
         elif not (applicable view threats atlas creep pooled) then
             Error RejectReason.Inapplicable

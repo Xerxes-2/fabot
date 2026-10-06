@@ -384,6 +384,13 @@ let internal threatened (threats: Threats) atlas (creep: CreepInfo) task =
 
         not (Set.isEmpty area) && Set.forall hot area
 
+/// Everything `threatened` reads of a pair beyond the tick's Threats and
+/// Atlas: the Task, and whether the body is Work-heavy (the one thing of it
+/// `Atlas.workAreaAcross` narrows on). A reader asking per pair keys its
+/// answers on this.
+let internal threatenedKey atlas (creep: CreepInfo) task =
+    (if Atlas.workHeavy atlas creep.Name then "h:" else "l:") + taskId task
+
 /// Whether the creep itself is standing where it can be hurt: its own tile
 /// inside a Reach of its own room, or struck there before its fatigue lets
 /// it step off (`Threats.standsStruck`). Flee's applicability, and the vision

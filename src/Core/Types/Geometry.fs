@@ -122,10 +122,15 @@ let range (a: Pos) (b: Pos) = max (abs (a.X - b.X)) (abs (a.Y - b.Y))
 /// anyway, so clamping here would quietly change what a doorstep or a Reach
 /// means at a border.
 let tilesWithin (radius: int) (center: Pos) : Pos list =
-    [
-        for x in center.X - radius .. center.X + radius do
-            for y in center.Y - radius .. center.Y + radius -> { X = x; Y = y }
-    ]
+    // Laid from the far corner back, so the list reads in (X, Y) order: a loop
+    // and not a list comprehension, which Fable runs through a sequence.
+    let mutable tiles = []
+
+    for x = center.X + radius downto center.X - radius do
+        for y = center.Y + radius downto center.Y - radius do
+            tiles <- { X = x; Y = y } :: tiles
+
+    tiles
 
 /// The eight tiles touching this one, in (X, Y) order — the order every answer
 /// derived from them is listed in. **Unclamped**, like `tilesWithin`. It lives

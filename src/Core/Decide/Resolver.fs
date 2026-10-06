@@ -728,18 +728,7 @@ let movementOf
             && not (Set.contains name tired))
         |> List.map (fun (_, at) -> at.Room)
         |> List.distinct
-        |> List.map (fun room ->
-            let ground = Atlas.idleGroundIn atlas room
-
-            let off =
-                ground
-                |> Set.toList
-                |> List.collect (Atlas.adjacentWalkableIn atlas room)
-                |> List.filter (fun tile -> not (Set.contains tile ground))
-                |> Set.ofList
-                |> RoomPos.setAt room
-
-            room, (ground, off))
+        |> List.map (fun room -> room, Atlas.idleGroundAndRingIn atlas room)
         |> Map.ofList
 
     let idleGround room =

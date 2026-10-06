@@ -31,7 +31,12 @@ module Gait =
     /// The weight of a body by part counts: every part but MOVE, and CARRY
     /// read empty, which over-states its pace, the safe direction.
     let weightOf (parts: BodyPart -> int) : int =
-        [ Work; Attack; RangedAttack; Heal; BodyPart.Claim; Tough ] |> List.sumBy parts
+        parts Work
+        + parts Attack
+        + parts RangedAttack
+        + parts Heal
+        + parts BodyPart.Claim
+        + parts Tough
 
     /// The gait of a body by its live part counts.
     let ofParts (parts: BodyPart -> int) : Gait =
@@ -161,20 +166,30 @@ module HostileInfo =
     /// The range a list of parts can hurt a creep from, or None for one that
     /// cannot: paper or live as the caller's list is.
     let weaponRangeOf (body: BodyPart list) : int option =
-        [
-            if List.contains Attack body then
-                Engine.meleeRange
-            if List.contains RangedAttack body then
-                Engine.rangedRange
-        ]
-        |> function
-            | [] -> None
-            | ranges -> Some(List.max ranges)
+        let mutable melee = false
+        let mutable ranged = false
+
+        for part in body do
+            match part with
+            | Attack -> melee <- true
+            | RangedAttack -> ranged <- true
+            | _ -> ()
+
+        match melee, ranged with
+        | false, false -> None
+        | true, false -> Some Engine.meleeRange
+        | false, true -> Some Engine.rangedRange
+        | true, true -> Some(max Engine.meleeRange Engine.rangedRange)
 
     /// Whether a list of parts can take down a structure or a controller:
     /// WORK or CLAIM.
     let breaksOf (parts: BodyPart list) : bool =
-        parts |> List.exists (fun part -> part = Work || part = BodyPart.Claim)
+        parts
+        |> List.exists (fun part ->
+            match part with
+            | Work
+            | BodyPart.Claim -> true
+            | _ -> false)
 
     /// Whether every part of a hostile still acts: what it is in effect
     /// whatever reaches it, the common case asked first.
@@ -358,7 +373,12 @@ module HostileInfo =
     /// whose weapons are shot off with no heal reaching it have none.
     let hurts (side: HostileInfo list) (hostile: HostileInfo) : bool =
         effectiveParts side hostile
-        |> List.exists (fun part -> part = Attack || part = RangedAttack || part = Work)
+        |> List.exists (fun part ->
+            match part with
+            | Attack
+            | RangedAttack
+            | Work -> true
+            | _ -> false)
 
     /// What it heals a tick, its live HEAL at their boosts: a rate, read now,
     /// as the window's restoring is.

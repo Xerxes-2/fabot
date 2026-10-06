@@ -223,10 +223,11 @@ let private creepFloodKey (room: string) (pos: Pos) (factor: FatigueFactor) (pri
     + (if factor.Whole then "w" else "")
     + tag
 
-/// Whether two grids of one room hold the same value on every tile. Inline,
-/// so each call site compares its own primitive and never through a generic
-/// equality call per tile.
-let inline private sameGrid (kept: 'T[]) (now: 'T[]) =
+/// Whether two walking grids of one room hold the same weight on every tile,
+/// read through the flood's unchecked accessor (`at`) rather than Fable's
+/// own indexer, which re-tests every index. Not one generic inline function:
+/// each grid's accessor is its own `[<Emit>]`.
+let private sameGrid (kept: int[]) (now: int[]) =
     let mutable same = obj.ReferenceEquals(kept, now)
     let mutable index = 0
 
@@ -234,7 +235,21 @@ let inline private sameGrid (kept: 'T[]) (now: 'T[]) =
         same <- true
 
         while same && index < tileCount do
-            same <- kept.[index] = now.[index]
+            same <- at index kept = at index now
+            index <- index + 1
+
+    same
+
+/// `sameGrid` for two standing-traffic grids.
+let private sameTraffic (kept: bool[]) (now: bool[]) =
+    let mutable same = obj.ReferenceEquals(kept, now)
+    let mutable index = 0
+
+    if not same then
+        same <- true
+
+        while same && index < tileCount do
+            same <- flagAt index kept = flagAt index now
             index <- index + 1
 
     same
@@ -414,7 +429,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
 
     for KeyValue(room, (keptWeights, keptOccupied)) in kept.Grids do
         let walking = sameGrid keptWeights (weightsIn room)
-        stillLaid.[room] <- struct (walking, walking && sameGrid keptOccupied (occupiedIn room))
+        stillLaid.[room] <- struct (walking, walking && sameTraffic keptOccupied (occupiedIn room))
 
     let survivors = ResizeArray<string * Flood>()
 
@@ -983,19 +998,34 @@ let walkableWithinIn (atlas: Atlas) (room: string) (radius: int) (pos: Pos) : Po
     let weights = weightsOf atlas room
     tilesWithin radius pos |> List.filter (walkableAt weights)
 
+/// The room's tiles whose index `keep` answers for, in index order, each as
+/// `tile` makes it: a loop and not a list comprehension, which Fable runs
+/// through a sequence a tile at a time.
+let private tilesWhere (keep: int -> bool) (tile: Pos -> 'T) : 'T list =
+    let mutable tiles = []
+
+    for index = tileCount - 1 downto 0 do
+        if keep index then
+            tiles <- tile (posAt index) :: tiles
+
+    tiles
+
+/// Each walkable tile touching `pos` on a grid, handed to `visit`.
+let private aroundWalkable (weights: int[]) (pos: Pos) (visit: Pos -> unit) =
+    for x in pos.X - 1 .. pos.X + 1 do
+        for y in pos.Y - 1 .. pos.Y + 1 do
+            let tile = { X = x; Y = y }
+
+            if (x <> pos.X || y <> pos.Y) && walkableAt weights tile then
+                visit tile
+
 /// Every tile of the room a creep may stand on — `adjacentWalkableIn`'s
 /// answer over the whole room, off the same grid and so under the same
 /// terrain, road and obstacle precedence. This is Flee's safe ground, and a
 /// creep runs over the ground of the room it stands in.
 let walkableTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     let weights = weightsOf atlas room
-
-    Set.ofList
-        [
-            for index in 0 .. tileCount - 1 do
-                if at index weights >= 0 then
-                    posAt index
-        ]
+    Set.ofList (tilesWhere (fun index -> at index weights >= 0) id)
 
 /// The same tiles less `except`, joined to the room: Flee's safe ground,
 /// `walkableTilesIn` less a Reach. One pass over the grid and one tree built,
@@ -1008,12 +1038,9 @@ let walkableTilesExcept (atlas: Atlas) (room: string) (except: Set<Pos>) : Set<R
         if inGrid tile then
             excluded.[indexOf tile] <- true
 
-    Set.ofList
-        [
-            for index in 0 .. tileCount - 1 do
-                if at index weights >= 0 && not excluded.[index] then
-                    RoomPos.at room (posAt index)
-        ]
+    Set.ofList (
+        tilesWhere (fun index -> at index weights >= 0 && not excluded.[index]) (RoomPos.at room)
+    )
 
 /// `walkableTilesExcept` through the tick's shared safe ground where one is
 /// laid (`WorldView.sharingSafeGround`, #534): two thousand tiles a raided
@@ -1396,24 +1423,55 @@ let private storeTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// out, as W13S28's pocket did. Only the *ring* is added and never the
 /// store's own tile: every store a body can stand on is already inside the
 /// working ground by construction, and the rest are obstacles.
-let idleGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
-    let rings =
-        storeTilesIn atlas room
-        |> Set.toList
-        |> List.collect (adjacentWalkableIn atlas room)
-        |> Set.ofList
+///
+/// Laid on a grid and read off it once, rather than three sets unioned as
+/// trees.
+let private idleMaskIn (atlas: Atlas) (room: string) : bool[] =
+    let weights = weightsOf atlas room
+    let mask = Array.create tileCount false
+
+    let mark (tile: Pos) =
+        if inGrid tile then
+            mask.[indexOf tile] <- true
+
+    let markAround (pos: Pos) = aroundWalkable weights pos mark
+
+    workingGroundIn atlas room |> Set.iter mark
+    storeTilesIn atlas room |> Set.iter markAround
 
     // The ground beside every exit too: an idle body on (1,15) of W17S25 stood
     // in the one doorway every hauler and raid crossed (live t987,159–987,529).
-    let doorways =
-        Map.tryFind room atlas.Spatial.Borders
-        |> Option.defaultValue Map.empty
-        |> Map.toSeq
-        |> Seq.filter (fun (_, ground) -> ground <> Wall)
-        |> Seq.collect (fst >> adjacentWalkableIn atlas room)
-        |> Set.ofSeq
+    match Map.tryFind room atlas.Spatial.Borders with
+    | Some border ->
+        border
+        |> Map.iter (fun tile ground ->
+            if ground <> Wall then
+                markAround tile)
+    | None -> ()
 
-    Set.unionMany [ workingGroundIn atlas room; rings; doorways ]
+    mask
+
+/// The idle ground (`idleMaskIn`) as a set of the room's tiles.
+let idleGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    let mask = idleMaskIn atlas room
+    Set.ofList (tilesWhere (fun index -> mask.[index]) id)
+
+/// The idle ground (`idleGroundIn`) beside the ring just outside it: the
+/// walkable tiles touching it that it does not hold, where any step off it
+/// lands.
+let idleGroundAndRingIn (atlas: Atlas) (room: string) : Set<Pos> * Set<RoomPos> =
+    let weights = weightsOf atlas room
+    let mask = idleMaskIn atlas room
+    let ring = Array.create tileCount false
+
+    for index in 0 .. tileCount - 1 do
+        if mask.[index] then
+            aroundWalkable weights (posAt index) (fun tile ->
+                if not mask.[indexOf tile] then
+                    ring.[indexOf tile] <- true)
+
+    Set.ofList (tilesWhere (fun index -> mask.[index]) id),
+    Set.ofList (tilesWhere (fun index -> ring.[index]) (RoomPos.at room))
 
 /// The Post a rock picks among its footed Seats: the farthest from the
 /// room's controller, then a built container before a site, then the first

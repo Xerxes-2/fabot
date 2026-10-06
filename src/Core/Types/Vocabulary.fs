@@ -18,6 +18,21 @@ type BodyPart =
     | Claim
     | Tough
 
+/// Whether two parts are one kind, matched case by case: `=` on a union is
+/// Fable's generic `equals`, and the body scans below ask it of every part of
+/// every hostile, many times a tick.
+let samePart (a: BodyPart) (b: BodyPart) : bool =
+    match a, b with
+    | Work, Work
+    | Carry, Carry
+    | Move, Move
+    | Attack, Attack
+    | RangedAttack, RangedAttack
+    | Heal, Heal
+    | Claim, Claim
+    | Tough, Tough -> true
+    | _ -> false
+
 /// The boost one part carries, as far as a fight reads it: the tier of a
 /// compound on the part's own combat act (`BOOSTS`) — ATTACK's swing,
 /// RANGED_ATTACK's shot and mass attack, HEAL's heals, TOUGH's damage taken,
@@ -133,7 +148,13 @@ let isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
 /// itself: for the rules that ask about a single part, where building a map
 /// to read one key out of it is the dearer spelling.
 let partCountIn (body: BodyPart list) part =
-    body |> List.filter ((=) part) |> List.length
+    let mutable count = 0
+
+    for each in body do
+        if samePart each part then
+            count <- count + 1
+
+    count
 
 /// A room's ordinary **[[ore]]**: the seven base minerals a `FIND_MINERALS`
 /// deposit can hold beside the season's Thorium. The compounds a lab makes
