@@ -320,34 +320,23 @@ let signatureMoves (before: string) (after: string) : string list =
 /// difference of.
 let roomSignatures (view: ColonyView) : Map<string, string> = fst (signaturesOf view)
 
-/// The decision seam: a colony view in, Decision out, with this colony's
-/// movement left unarbitrated on it — a room's traffic is not one colony's
-/// decision, so the caller folds every colony's together and arbitrates each
-/// room once (`resolveRooms`). Plan, match, emit, move, beside the colony steps
-/// (spawns, sites), all pricing from one Atlas built up front.
-let decideUnarbitrated
-    (view: ColonyView)
-    (assignments: Assignments)
-    (verbose: Set<string>)
-    (memo: PlanMemo option)
-    (turn: ReplanTurn)
-    : Decision =
-    // Where each body's load came from, settled before anything reads a body.
-    let view =
-        { view with
-            Creeps =
-                view.Creeps
-                |> List.map (fun creep ->
-                    { creep with
-                        DrawnFrom = drawnFrom view assignments creep
-                    })
-        }
+/// The view with where each body's load came from settled, before anything
+/// reads a body.
+let private withDrawn (view: ColonyView) (assignments: Assignments) : ColonyView =
+    { view with
+        Creeps =
+            view.Creeps
+            |> List.map (fun creep ->
+                { creep with
+                    DrawnFrom = drawnFrom view assignments creep
+                })
+    }
 
+/// The Atlas a decide prices from, its tables recalled off the memo and each
+/// room's evicted where its census moved, beside the per-room and flat
+/// signatures and the tables handed to it.
+let private recallAtlas (view: ColonyView) (memo: PlanMemo option) =
     let signedRooms, signature = signaturesOf view
-    // The signature is read before the Atlas is built, because the Atlas is
-    // one of the things it decides: the plan is recalled whole on the flat
-    // signature, the tables beside it per room on the per-room half.
-    let recalled = memo |> Option.filter (fun m -> m.Signature = signature)
 
     // ADR-0032
     // The memo's tables go to the Atlas whatever the plan's signature did:
@@ -393,6 +382,48 @@ let decideUnarbitrated
     | _ -> ()
 
     memo |> Option.iter (fun m -> Atlas.evictAvoided atlas m.AvoidRooms)
+
+    signedRooms, signature, walks, farFields, atlas
+
+/// A memo handed on with this tick's stamps: the per-room signatures, the
+/// rooms a rival holds and the rooms a non-fighter goes round.
+let private stamped
+    (view: ColonyView)
+    (signedRooms: Map<string, string>)
+    (memo: PlanMemo)
+    : PlanMemo =
+    { memo with
+        RoomSignatures = signedRooms
+        RivalRooms = view.Spatial.RivalRooms
+        AvoidRooms = view.Spatial.AvoidRooms
+    }
+
+/// The row sizing as the fight-only ticks after it carry it: rebuilt by
+/// `Fresh`, for it outlives the tick (#401).
+let private carriedSizing (sizing: RowSizing) : RowSizing =
+    { sizing with
+        AnchorPostCaps = sizing.AnchorPostCaps |> Map.toSeq |> Fresh.mapOfSeq
+    }
+
+/// The decision seam: a colony view in, Decision out, with this colony's
+/// movement left unarbitrated on it — a room's traffic is not one colony's
+/// decision, so the caller folds every colony's together and arbitrates each
+/// room once (`resolveRooms`). Plan, match, emit, move, beside the colony steps
+/// (spawns, sites), all pricing from one Atlas built up front.
+let decideUnarbitrated
+    (view: ColonyView)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo option)
+    (turn: ReplanTurn)
+    : Decision =
+    let view = withDrawn view assignments
+
+    // The signature is read before the Atlas is built, because the Atlas is
+    // one of the things it decides: the plan is recalled whole on the flat
+    // signature, the tables beside it per room on the per-room half.
+    let signedRooms, signature, walks, farFields, atlas = recallAtlas view memo
+    let recalled = memo |> Option.filter (fun m -> m.Signature = signature)
 
     // The rooms a rival holds, and the rooms a non-fighter goes round, stamped
     // beside the per-room signatures on every memo handed on: the tables are
@@ -869,7 +900,204 @@ let decideUnarbitrated
             |> List.choose (fun creep ->
                 creep.DrawnFrom |> Option.map (fun store -> creep.Name, store))
             |> Map.ofList
+        Fight =
+            {
+                Sizing = carriedSizing sizing
+                Asks = castAsks view threats outposts.Guarded
+                Fighters = fighters |> Seq.map _.Name |> Fresh.setOfSeq
+                EconomyPooled = not (List.isEmpty economyPool)
+                OutpostRooms = outposts.Declared
+            }
     }
+
+/// A fight-only decide (`LightTick.fightOnly`): the fight pass alone, on the inputs a
+/// whole decide reads — the Threats, the structures' fight (`defenseIntents`'
+/// towers, safe mode and rampart doors), the fight pool and the fighters'
+/// match, emit, reflexes and steps — with the economy's few answers it reads
+/// carried off the last whole decide (`carry`: a relief's row sizing, and
+/// whether the economy pooled anything, which an idle fighter's reason reads)
+/// and the guarded rooms derived again, as the Threats derive them. Every
+/// economy body keeps its Task (`assignments`), issues nothing and takes no
+/// step: the caller replays its plan. Its Intents are the fighters' and the
+/// structures' fight; its movement registers the fighters alone.
+///
+/// None where the economy would decide otherwise, so the caller decides the
+/// colony whole this tick: a body across the fighter line since the carry,
+/// a cast ask moved or owed a spawn standing idle — spawning is the
+/// economy's —, or a fighter's step an economy body stands in.
+let decideFight
+    (view: ColonyView)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo)
+    (carry: FightCarry)
+    : Decision option =
+    let view = withDrawn view assignments
+    let fighters, economyBodies = view.Creeps |> List.partition isFighterBody
+    let fighting = fighters |> List.map _.Name |> Set.ofList
+
+    if fighting <> carry.Fighters then
+        None
+    else
+
+        let signedRooms, _, _, _, atlas = recallAtlas view (Some memo)
+        let held = heldTaskFacts view assignments
+        let threats = threatsOfHeld view atlas held
+
+        // `outpostFactsOf`'s guarded rooms, off the two facts of the chain they
+        // read, as the Threats derive them.
+        let guarded =
+            Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
+
+        if castAsks view threats guarded <> carry.Asks || castOwed view carry.Asks then
+            None
+        else
+
+            let defenseIntents =
+                planSafeMode view atlas held
+                @ planFire view atlas
+                @ planTowerHeal view atlas
+                @ planRampartDoors view
+
+            let tasks = planFightTasks view atlas threats held guarded
+            let pool = planFightPool view threats tasks
+
+            let next, verdicts =
+                matchCreepsBeside
+                    carry.EconomyPooled
+                    view
+                    atlas
+                    carry.Sizing
+                    threats
+                    pool
+                    [ { Bodies = fighters; Offered = pool } ]
+                    assignments
+                    verbose
+
+            let assigned = assignedTasks tasks next
+
+            // `decideUnarbitrated`'s crossings, of the fighters: a graced keep's last
+            // room, else home for an idle one standing away.
+            let crossings =
+                let home = SpatialInfo.homeName view.Spatial
+
+                let graced =
+                    next
+                    |> Map.toList
+                    |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
+                    |> List.choose (fun (name, tid) ->
+                        lastSeenIn view tid |> Option.map (fun room -> name, room))
+
+                let homeward =
+                    fighters
+                    |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
+                    |> List.choose (fun creep ->
+                        Atlas.creepRoom atlas creep.Name
+                        |> Option.filter (fun room -> room <> home)
+                        |> Option.map (fun _ -> creep.Name, home))
+
+                homeward @ graced |> Map.ofList
+
+            // The reflexes run over every body as on a whole decide, so a fighter's
+            // heal still reaches an economy body; an economy body's own reflex is its
+            // replay's.
+            let ours intent =
+                IntentPlan.actor intent
+                |> Option.forall (fun name -> Set.contains name fighting)
+
+            let intents =
+                defenseIntents @ emit view atlas threats assigned
+                |> Fabot.Core.IntentPlan.create
+                |> function
+                    | Ok selected ->
+                        strikeReflex view atlas threats assigned selected
+                        |> healReflex view threats
+                        |> Fabot.Core.IntentPlan.intents
+                        |> List.filter ours
+                    | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
+
+            let glued = glue view atlas threats assigned
+
+            let movement =
+                let stepping =
+                    glued
+                    |> List.choose (function
+                        | MoveCreep(name, _) -> Some name
+                        | _ -> None)
+                    |> Set.ofList
+
+                let moved =
+                    movementAmong
+                        (fun name -> Set.contains name fighting)
+                        view
+                        atlas
+                        threats
+                        pool
+                        assigned
+                        crossings
+                        verbose
+
+                { moved with
+                    Tired = Set.union moved.Tired stepping
+                    Intents =
+                        moved.Intents
+                        |> List.filter (fun step -> not (Set.contains step.Creep stepping))
+                }
+
+            let economy = economyBodies |> List.map _.Name |> Set.ofList
+
+            // A fighter whose wanted tile an economy body stands on: only a
+            // whole decide's arbitration shoves or swaps that body, and here
+            // it is a wall — a worker parked on a rampart, a hauler in a choke.
+            let blocked =
+                let walls =
+                    Atlas.placedCreeps atlas
+                    |> List.filter (fun (name, _) -> Set.contains name economy)
+                    |> List.map snd
+                    |> Set.ofList
+
+                movement.Intents
+                |> List.exists (fun step ->
+                    match step.Candidates with
+                    | wanted :: _ -> wanted <> step.Pos && Set.contains wanted walls
+                    | [] -> false)
+
+            if blocked then
+                None
+            else
+
+                Some
+                    {
+                        Intents = intents @ glued
+                        Assignments =
+                            (next, assignments)
+                            ||> Map.fold (fun acc name tid ->
+                                if Set.contains name economy then
+                                    Map.add name tid acc
+                                else
+                                    acc)
+                        Memo = stamped view signedRooms memo
+                        Verdicts = verdicts
+                        Movement = movement
+                        Quotas = Quotas.silent
+                        HaulOverflow = HaulOverflow.none
+                        OutpostRooms = carry.OutpostRooms
+                        WaitingContainers = []
+                        Steps =
+                            Atlas.stepPlans atlas
+                            |> Seq.filter (fun (name, _) -> Set.contains name fighting)
+                            |> Fresh.mapOfSeq
+                        Next = []
+                        Later = []
+                        Aims = aims view atlas threats assigned
+                        Volleys = volleys view atlas threats assigned
+                        Drawn =
+                            view.Creeps
+                            |> List.choose (fun creep ->
+                                creep.DrawnFrom |> Option.map (fun store -> creep.Name, store))
+                            |> Map.ofList
+                        Fight = carry
+                    }
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:
 /// `decideUnarbitrated`'s answer with this colony's movement folded back in

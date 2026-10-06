@@ -137,6 +137,10 @@ let beside (decided: Intent list) (extra: Intent list) : Intent list =
     extra
     |> List.filter (fun intent -> channels intent |> List.forall (taken.Contains >> not))
 
+/// The creep an act is a body's act of; None for a structure's.
+let actor (intent: Intent) : string option =
+    channels intent |> List.tryHead |> Option.map fst
+
 /// Whether two acts may stand in one plan: never two on one creep's channel,
 /// nor an engine suppression pair.
 let compatible (first: Intent) (second: Intent) : bool =

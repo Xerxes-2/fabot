@@ -715,21 +715,26 @@ wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one
   // #549: a partial forced tick says how many facts forced it and how many
   // colonies replayed; one fact and nobody replayed writes neither key.
   const partial = { ...full, t: 14, forced: "home W1N1 Invader", facts: 3, replayed: 5 };
+  // And how many colonies decided their fight alone (`LightTick.fightOnly`).
+  const fightOnly = { ...full, t: 16, forced: "home W1N1 Invader", fightOnly: 2 };
 
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced, partial], spans: [] });
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced, partial, fightOnly], spans: [] });
   saveCpu(loadCpu());
   assert.equal(
     stable(globalThis.Memory.fabot.observe.cpu.ticks),
-    stable([full, forced, partial]),
-    "the forced rows keep their reason, facts and replayed count; the plain full row stays without the keys",
+    stable([full, forced, partial, fightOnly]),
+    "the forced rows keep their reason, facts, replayed and fight-only counts; the plain full row stays without the keys",
   );
 
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [{ ...full, forced: "border", facts: 1, replayed: 0 }], spans: [] });
+  globalThis.Memory = rootMemoryWith("cpu", {
+    ticks: [{ ...full, forced: "border", facts: 1, replayed: 0, fightOnly: 0 }],
+    spans: [],
+  });
   saveCpu(loadCpu());
   assert.equal(
     stable(globalThis.Memory.fabot.observe.cpu.ticks),
     stable([forced].map((row) => ({ ...row, t: 10 }))),
-    "one fact and nothing replayed re-encodes without the keys",
+    "one fact and nothing replayed or fought alone re-encodes without the keys",
   );
 
   for (const reason of [null, 3, true, {}]) {
@@ -1377,6 +1382,29 @@ wire("cadence: a whole number reads clamped to 2..4, and anything else reads as 
 
   globalThis.Memory = {};
   assert.equal(loadCadence(), undefined, "no fabot subtree reads as unset");
+  assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
+});
+
+// ---- the live fight-only switch ------------------------------------------
+
+wire("fightOnly: a boolean reads as itself, and anything else reads as unset", async () => {
+  const { loadFightOnly } = await import(MODULE);
+
+  for (const [what, value, read] of [
+    ["absent", undefined, undefined],
+    ["true", true, true],
+    ["false", false, false],
+    ["a string", "true", undefined],
+    ["a number", 1, undefined],
+    ["null", null, undefined],
+    ["an object", { fightOnly: true }, undefined],
+  ]) {
+    globalThis.Memory = rootMemoryWith("fightOnly", value);
+    assert.equal(loadFightOnly(), read, `${what} reads as ${read}`);
+  }
+
+  globalThis.Memory = {};
+  assert.equal(loadFightOnly(), undefined, "no fabot subtree reads as unset");
   assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
 });
 

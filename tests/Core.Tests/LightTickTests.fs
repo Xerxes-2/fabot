@@ -2431,8 +2431,9 @@ let decidersTests =
             test "#562 a replayed step claims the tile it lands on, unless the step fails anyway" {
                 let homes = Set.ofList [ "W1N1" ]
 
+                // The bodies W1N1 holds, whose plans replay.
                 let claims tired glance replayed =
-                    LightTick.claimed homes holders tired glance replayed
+                    LightTick.claimed (Set.ofList [ "digger"; "hauler" ]) tired glance replayed
 
                 Expect.equal
                     (claims Set.empty split (LightTick.replay homes holders planned split))
@@ -2497,6 +2498,178 @@ let decidersTests =
                     (LightTick.intents record split)
                     [ HarvestSource("digger", "src-a"); PickupPile("hauler", "pile") ]
                     "the hauler's pickup alone"
+            }
+        ]
+
+/// The fighter test `LightTick.fightOnly` reads off the views: W3N1's ranger.
+let private ranger name = name = "ranger"
+
+[<Tests>]
+let fightOnlyTests =
+    testList
+        "a forced tick decides a colony's fight alone"
+        [
+            test "every fact a fight's: the colony decides its fight alone" {
+                let alone reasons =
+                    LightTick.fightOnly ranger pair holders planned split reasons
+
+                Expect.equal
+                    (alone [ LightForce.Home("W3N1", "Trepidimous") ])
+                    (Set.ofList [ "W3N1" ])
+                    "a raider at home"
+
+                Expect.equal
+                    (alone [ LightForce.Hostile("W5N1", "Invader") ])
+                    (Set.ofList [ "W3N1" ])
+                    "a hostile new in reach, where its ranger stands"
+
+                Expect.equal
+                    (alone [ LightForce.Fought "W3N1" ])
+                    (Set.ofList [ "W3N1" ])
+                    "its tower fought"
+
+                Expect.equal
+                    (alone [ LightForce.HitsLost "ranger" ])
+                    (Set.ofList [ "W3N1" ])
+                    "its fighter hurt"
+            }
+
+            test "an economy fact decides its colony whole" {
+                let alone reasons =
+                    LightTick.fightOnly ranger pair holders planned split reasons
+
+                let home = LightForce.Home("W3N1", "Trepidimous")
+
+                Expect.isEmpty (alone [ LightForce.HitsLost "miner" ]) "an economy body hurt"
+
+                Expect.isEmpty
+                    (alone [ home; LightForce.OnBorder "miner" ])
+                    "a raid beside a body on the ring"
+
+                Expect.isEmpty
+                    (alone [ home; LightForce.CreepsChanged [ "miner" ] ])
+                    "beside a body gone"
+
+                Expect.isEmpty
+                    (alone [ home; LightForce.ControllerChanged "W3N1" ])
+                    "beside its controller"
+
+                Expect.equal
+                    (alone [ home; LightForce.HitsLost "digger" ])
+                    (Set.ofList [ "W3N1" ])
+                    "another colony's economy fact is that colony's"
+
+                Expect.isEmpty
+                    (LightTick.fightOnly
+                        ranger
+                        (pair @ [ "W7N1", Set.ofList [ "W7N1" ] ])
+                        holders
+                        planned
+                        split
+                        [ LightForce.Fought "W7N1" ])
+                    "a colony with no plan to replay decides whole"
+            }
+
+            test
+                "an economy body a hostile can newly strike decides its colony whole: Flee is the economy's" {
+                let raided =
+                    { split with
+                        Hostiles = [ hostileIn "W4N1" 11 11 "Invader" true ]
+                    }
+
+                Expect.isEmpty
+                    (LightTick.fightOnly
+                        ranger
+                        pair
+                        holders
+                        planned
+                        raided
+                        [ LightForce.Home("W3N1", "Trepidimous") ])
+                    "the miner stands beside it"
+
+                let seen = LightTick.ofPlans raided Set.empty (planned.Plans |> Map.toList)
+
+                Expect.equal
+                    (LightTick.fightOnly
+                        ranger
+                        pair
+                        holders
+                        seen
+                        raided
+                        [ LightForce.Home("W3N1", "Trepidimous") ])
+                    (Set.ofList [ "W3N1" ])
+                    "one the plans already saw reach it is replayed"
+            }
+
+            test
+                "an economy body its replayed step walks into a hostile's reach decides its colony whole" {
+                // The hauler stands at (20,20) and its plan steps it to
+                // (21,20). A melee raider three off reaches neither tile now
+                // nor after its own step from where the hauler stands; both
+                // stepping in, it strikes on the next tick, too late for Flee.
+                let raided x =
+                    { split with
+                        Hostiles = [ hostileIn room x 20 "Invader" true ]
+                    }
+
+                let alone glance =
+                    LightTick.fightOnly
+                        ranger
+                        pair
+                        holders
+                        planned
+                        glance
+                        [ LightForce.Home("W1N1", "Invader") ]
+
+                Expect.isEmpty (alone (raided 23)) "two off the tile the hauler lands on"
+
+                Expect.equal
+                    (alone (raided 24))
+                    (Set.ofList [ "W1N1" ])
+                    "three off it: the fight alone"
+            }
+
+            test
+                "a fight-only colony's economy replays its plan, and its fighters' plan is the fight's" {
+                Expect.equal
+                    (LightTick.replayBodies
+                        (Set.ofList [ "W3N1" ])
+                        (Set.ofList [ "miner" ])
+                        planned
+                        split)
+                    [ HarvestSource("miner", "src-b"); ObserveRoom("obs-1", "W6N1") ]
+                    "the miner's harvest and the observer's look"
+
+                let carried = planned.Plans["W3N1"]
+
+                let fresh =
+                    LightTick.plan
+                        { split with Time = 7 }
+                        (Set.ofList [ "ranger" ])
+                        (Map.ofList [ "ranger", [ RoomPos.at "W5N1" { X = 11; Y = 10 } ] ])
+                        []
+                        []
+                        [ FireTower("tower-1", "h-1"); RangedAttackCreep("ranger", "h-1") ]
+                        [ RangedAttackCreep("ranger", "h-1") ]
+                        Map.empty
+
+                let merged = LightTick.withFight (Set.ofList [ "ranger" ]) fresh carried
+
+                Expect.equal merged.Creeps (Set.ofList [ "miner"; "ranger" ]) "both halves' bodies"
+
+                Expect.equal
+                    merged.Acts
+                    [
+                        HarvestSource("miner", "src-b")
+                        ObserveRoom("obs-1", "W6N1")
+                        RangedAttackCreep("ranger", "h-1")
+                    ]
+                    "the economy's acts, then the fighter's; no tower's"
+
+                Expect.isTrue merged.Fought "its tower fought this tick"
+                Expect.equal merged.At carried.At "the economy's later acts keep their plan's tick"
+                Expect.equal merged.Aims [ RangedAttackCreep("ranger", "h-1") ] "the fighter's aim"
+                Expect.isTrue (Map.containsKey "ranger" merged.Steps) "the fighter's step plan"
             }
         ]
 

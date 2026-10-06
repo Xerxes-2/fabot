@@ -1076,3 +1076,37 @@ let harvestFloorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]
+
+[<Tests>]
+let castOwedTests =
+    testList
+        "a fighting ask a spawn owes"
+        [
+            test
+                "an idle spawn owes a short row's cast; a busy spawn, a filled row or no ask owes none" {
+                let defender: CastAsk =
+                    {
+                        Row = CastRow.Defender
+                        Wanted = 1
+                        Blocks = 1
+                    }
+
+                Expect.isTrue
+                    (castOwed bareRespawn [ defender ])
+                    "no defender stands, the spawn idles"
+
+                Expect.isFalse
+                    (castOwed
+                        { bareRespawn with
+                            Spawns = [ { spawn with IsSpawning = true } ]
+                        }
+                        [ defender ])
+                    "the spawn is busy"
+
+                Expect.isFalse
+                    (castOwed bareRespawn [ { defender with Wanted = 0 } ])
+                    "the row asks for nobody"
+
+                Expect.isFalse (castOwed bareRespawn []) "no ask"
+            }
+        ]

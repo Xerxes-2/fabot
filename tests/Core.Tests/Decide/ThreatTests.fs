@@ -6267,3 +6267,70 @@ let acrossTheBorderTests =
                     "the moved census lays it off the new grid, the site's tile gone"
             }
         ]
+
+/// A fight-only decide's intents (`decideFight`) beside a whole decide's
+/// fighter and structure-fight intents on the same input, the tick after a
+/// whole decide laid the carry.
+let private fightAlike (colony: ColonyView) =
+    let first = decideUnarbitrated colony Map.empty Set.empty None ReplanTurn.Now
+
+    let whole =
+        decideUnarbitrated colony first.Assignments Set.empty (Some first.Memo) ReplanTurn.Now
+
+    let fighters =
+        colony.Creeps |> List.filter isFighterBody |> List.map _.Name |> Set.ofList
+
+    let fightIntent intent =
+        match IntentPlan.actor intent with
+        | Some name -> Set.contains name fighters
+        | None ->
+            match intent with
+            | FireTower _
+            | HealWithTower _
+            | RepairWithTower _
+            | ActivateSafeMode _
+            | SetRampartPublic _ -> true
+            | _ -> false
+
+    match decideFight colony first.Assignments Set.empty first.Memo first.Fight with
+    | Some fight -> fight.Intents, whole.Intents |> List.filter fightIntent
+    | None -> failtest "nothing hands the fight back to a whole decide"
+
+[<Tests>]
+let fightOnlyStructureTests =
+    testList
+        "a fight-only decide's structures"
+        [
+            test "safe mode fires as on a whole decide" {
+                let fight, whole =
+                    fightAlike
+                        { bareRespawn with
+                            Spatial = spatial [ "ctrl-1", { X = 25; Y = 25 } ] []
+                            Hostiles =
+                                [ hostileAt "h-1" { X = 28; Y = 25 } [ BodyPart.Claim; Move ] ]
+                        }
+
+                Expect.equal (activations fight) [ "ctrl-1" ] "premise: the deadline is now"
+                Expect.equal fight whole "the whole decide's"
+            }
+
+            test "a tower heals as on a whole decide" {
+                let fight, whole =
+                    fightAlike (
+                        woundedAt
+                            [ "tower-1", { X = 10; Y = 40 } ]
+                            []
+                            [ "mauled", { X = 30; Y = 30 }, 300 ]
+                    )
+
+                Expect.equal (towerHeals fight) [ "tower-1", "mauled" ] "premise: the tower heals"
+                Expect.equal fight whole "the whole decide's"
+            }
+
+            test "a rampart door opens as on a whole decide" {
+                let fight, whole = fightAlike (doorway false [ allyAt "a-1" { X = 11; Y = 10 } ] [])
+
+                Expect.equal (doorFlips fight) [ "rampart-1", true ] "premise: the door opens"
+                Expect.equal fight whole "the whole decide's"
+            }
+        ]

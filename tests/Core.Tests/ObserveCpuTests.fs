@@ -84,6 +84,7 @@ let cpuSpanTests =
                                             Reason = "border"
                                             Facts = 2
                                             Replayed = 3
+                                            FightOnly = 0
                                         }
                             }
                             2, costing 30.0

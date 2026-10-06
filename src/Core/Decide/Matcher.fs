@@ -25,7 +25,12 @@ type MatchShare =
 /// creep of a share in view order — each preceded, for a creep on the verbose
 /// list, by its Scoring Verdict, the whole pool judged against the same state
 /// its status was decided from.
-let matchCreeps
+///
+/// `pooledElsewhere`: whether a part of the pool not handed in holds Tasks —
+/// a fight-only decide's economy (`decideFight`) — so an idle body there is
+/// never told there are none.
+let matchCreepsBeside
+    (pooledElsewhere: bool)
     (view: ColonyView)
     atlas
     (sizing: RowSizing)
@@ -658,7 +663,7 @@ let matchCreeps
             | RejectReason.TooEarly _ -> true
             | _ -> false
 
-        if List.isEmpty pool then
+        if List.isEmpty pool && not pooledElsewhere then
             IdleReason.NoTasks
         elif rejectedWith isTooEarly then
             IdleReason.NoneInTime
@@ -903,3 +908,16 @@ let matchCreeps
             | Some(status, _) -> [ status ])
 
     next, (released |> List.sortBy fst |> List.map snd) @ statuses
+
+/// `matchCreepsBeside` with the whole pool handed in.
+let matchCreeps
+    (view: ColonyView)
+    atlas
+    (sizing: RowSizing)
+    (threats: Threats)
+    (pool: PooledTask list)
+    (shares: MatchShare list)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    : Assignments * Verdict list =
+    matchCreepsBeside false view atlas sizing threats pool shares assignments verbose

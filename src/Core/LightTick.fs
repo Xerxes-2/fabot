@@ -860,20 +860,18 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
 /// when the light tick may run.
 let forced (last: LastFull) (now: Glance) : LightForce option = forcing last now |> List.tryHead
 
-/// The colonies a forced tick decides (#549), of `colonies` (each home with
-/// the rooms it answers for): each fact's own — a raided home's own colony,
+/// Each fact's colonies, of `colonies` (each home with the rooms it answers
+/// for): a raided home's own colony and each with a fighter standing there,
 /// a hostile's or a controller's room's colonies and the holders of our
 /// bodies standing there, a creep's holder, a fighting structure's colony,
-/// the deferred — and every colony with no plan. A fact no colony owns is
-/// everyone's. `holders`: each creep's colony this tick; a body gone is read
-/// off the plan that held it.
-let deciders
+/// the deferred. A fact no colony owns is everyone's. `holders`: each
+/// creep's colony this tick; a body gone is read off the plan that held it.
+let private scoping
     (colonies: (string * Set<string>) list)
     (holders: Map<string, string>)
     (last: LastFull)
     (now: Glance)
-    (reasons: LightForce list)
-    : Set<string> =
+    : LightForce -> Set<string> =
     let homes = colonies |> List.map fst |> Set.ofList
 
     let answering room =
@@ -903,7 +901,7 @@ let deciders
             |> Option.toList
             |> Set.ofList
 
-    let scope reason =
+    fun reason ->
         let own =
             match reason with
             | LightForce.Home(room, _) when Set.contains room homes ->
@@ -919,14 +917,129 @@ let deciders
 
         if Set.isEmpty own then homes else own
 
+/// The colonies a forced tick decides (#549): each fact's own (`scoping`),
+/// and every colony with no plan.
+let deciders
+    (colonies: (string * Set<string>) list)
+    (holders: Map<string, string>)
+    (last: LastFull)
+    (now: Glance)
+    (reasons: LightForce list)
+    : Set<string> =
+    let homes = colonies |> List.map fst |> Set.ofList
+
     let planless =
         homes |> Set.filter (fun home -> not (Map.containsKey home last.Plans))
 
     reasons
-    |> List.map scope
+    |> List.map (scoping colonies holders last now)
     |> Set.unionMany
     |> Set.union planless
     |> Set.intersect homes
+
+/// The deciders that decide their fight alone and replay their economy
+/// (`Entry.decideFight`): each whose every fact is a fight's — a raider at home, a
+/// hostile newly able to strike, a structure's fight, a fighter's lost hits
+/// (`fighter`) — with a plan to replay. Never one an economy fact concerns (a
+/// creep born, gone, on the ring or hurt, a controller changed, a deferred
+/// decide), nor one with an economy body a hostile can newly strike, from
+/// where it stands or from where its replayed step lands it: Flee is the
+/// economy's to decide. A fight the plans already saw reach one is
+/// replayed, as a light tick replays it.
+let fightOnly
+    (fighter: string -> bool)
+    (colonies: (string * Set<string>) list)
+    (holders: Map<string, string>)
+    (last: LastFull)
+    (now: Glance)
+    (reasons: LightForce list)
+    : Set<string> =
+    let fights reason =
+        match reason with
+        | LightForce.Home _
+        | LightForce.Hostile _
+        | LightForce.Fought _ -> true
+        | LightForce.HitsLost name -> fighter name
+        | LightForce.CreepsChanged _
+        | LightForce.OnBorder _
+        | LightForce.ControllerChanged _
+        | LightForce.Deferred -> false
+
+    let economic =
+        reasons
+        |> List.filter (fights >> not)
+        |> List.map (scoping colonies holders last now)
+        |> Set.unionMany
+
+    // Where an economy body stands and where its replayed step lands it: a
+    // hauler walking in on its plan while a raider walks in on it closes two
+    // tiles a tick, so the reach is read from the tile it lands on, one
+    // hostile step on — from where it stands, two.
+    let steps = (merged now.Time last).Steps
+
+    let landing name (creep: GlanceCreep) =
+        Map.tryFind name steps |> Option.bind (fun path -> onward path creep.Tile)
+
+    let exposed =
+        now.Hostiles
+        |> List.filter (harmless now >> not)
+        |> List.collect (fun hostile ->
+            let seen name =
+                Set.contains (hostile.Id, Reached.Creep(name, true)) last.Hurting
+                || Set.contains (hostile.Id, Reached.Creep(name, false)) last.Hurting
+
+            let walkingIn =
+                match hostile.Weapon with
+                | Some range ->
+                    now.Creeps
+                    |> Map.toList
+                    |> List.filter (fun (name, creep) ->
+                        not (fighter name)
+                        && not (seen name)
+                        && landing name creep
+                           |> Option.exists (strikes hostile range >> Option.isSome))
+                    |> List.map fst
+                | None -> []
+
+            let reachedNow =
+                reached now hostile
+                |> List.choose (fun r ->
+                    match r with
+                    | Reached.Creep(name, _) when
+                        not (fighter name) && not (Set.contains (hostile.Id, r) last.Hurting)
+                        ->
+                        Some name
+                    | _ -> None)
+
+            reachedNow @ walkingIn |> List.choose (fun name -> Map.tryFind name holders))
+        |> Set.ofList
+
+    deciders colonies holders last now reasons - economic - exposed
+    |> Set.filter (fun home -> Map.containsKey home last.Plans)
+
+/// A fight-only colony's plan (`fightOnly`): the plan it carried less its
+/// `fighters`, beside the fight pass's `fresh` plan for them — their steps,
+/// acts, aims and volleys, and whether a structure fought. The carried plan's
+/// tick stays the plan's, so each later act of its economy lands on the tick
+/// it was laid for.
+let withFight (fighters: Set<string>) (fresh: Plan) (carried: Plan) : Plan =
+    let economy = without fighters carried
+
+    let joined part =
+        Seq.append (part economy |> Map.toSeq) (part fresh |> Map.toSeq)
+        |> Fresh.mapOfSeq
+
+    {
+        Creeps = Fresh.setOfSeq (economy.Creeps + fresh.Creeps)
+        Standing = joined _.Standing
+        Steps = joined _.Steps
+        Acts = economy.Acts @ fresh.Acts
+        Later = economy.Later
+        At = carried.At
+        Fought = fresh.Fought
+        Aims = economy.Aims @ fresh.Aims
+        Volleys = joined _.Volleys
+    }
 
 /// The ids the last full tick's acts name, for the glance to look up
 /// (`Glance.Objects`): each act's object and each look's observer. A
@@ -1148,6 +1261,22 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             |> List.choose (fun (actor, act) -> if Option.isNone actor then Some act else None)
     ]
 
+/// `homes`' plans replayed for `bodies` alone: a replayed colony's whole
+/// holding (`replay`), and a fight-only colony's economy bodies
+/// (`fightOnly`), whose fighters the fight pass decides. The plans' looks and
+/// reactions are replayed whole.
+let replayBodies
+    (homes: Set<string>)
+    (bodies: Set<string>)
+    (last: LastFull)
+    (now: Glance)
+    : Intent list =
+    intents
+        (only homes last)
+        { now with
+            Creeps = now.Creeps |> Map.filter (fun name _ -> Set.contains name bodies)
+        }
+
 /// A forced tick's replay of the colonies it does not decide (#549): their
 /// plans exactly as a light tick replays them (`intents`), for the bodies
 /// each holds this tick (`holders`) — a body a deciding colony holds is that
@@ -1161,21 +1290,16 @@ let replay
     let held name =
         Map.tryFind name holders |> Option.exists (fun home -> Set.contains home homes)
 
-    intents
-        (only homes last)
-        { now with
-            Creeps = now.Creeps |> Map.filter (fun name _ -> held name)
-        }
+    replayBodies homes (now.Creeps |> Map.keys |> Seq.filter held |> Set.ofSeq) last now
 
 /// The tiles a replay's steps land on (#562): each `MoveCreep` from where its
 /// body stands in the glance, as the deciding colonies' arbitration reads
 /// them (`Resolver.resolveRooms`) — a step the engine is about to take
 /// whatever that arbitration settles. Never a step that fails anyway: one by
-/// a fatigued walker (`tired`), or onto a hostile or a body the replaying
-/// colonies (`homes`, by `holders`) hold that takes no step of its own.
+/// a fatigued walker (`tired`), or onto a hostile or a replayed body
+/// (`bodies`) that takes no step of its own.
 let claimed
-    (homes: Set<string>)
-    (holders: Map<string, string>)
+    (bodies: Set<string>)
     (tired: Set<string>)
     (now: Glance)
     (replayed: Intent list)
@@ -1191,15 +1315,13 @@ let claimed
 
     let stepping = steps |> List.map (fun (name, _, _) -> name) |> Set.ofList
 
-    let held name =
-        Map.tryFind name holders |> Option.exists (fun home -> Set.contains home homes)
-
     let walls =
         Seq.append
             (now.Hostiles |> Seq.map (fun hostile -> hostile.Tile))
             (now.Creeps
              |> Map.toSeq
-             |> Seq.filter (fun (name, _) -> held name && not (Set.contains name stepping))
+             |> Seq.filter (fun (name, _) ->
+                 Set.contains name bodies && not (Set.contains name stepping))
              |> Seq.map (fun (_, creep) -> creep.Tile))
         |> Set.ofSeq
 
@@ -1208,3 +1330,40 @@ let claimed
         RoomPos.at tile.Room (stepTo (RoomPos.pos tile) direction))
     |> List.filter (fun tile -> not (Set.contains tile walls))
     |> Set.ofList
+
+/// A forced tick's replay beside its decides: every body a replayed colony
+/// (`replaying`) holds (`holders`) and each fight-only colony's economy body
+/// (`economy`) replays its plan (`replayBodies`), with the plans' looks and
+/// reactions; and the tiles their steps claim from the deciding colonies'
+/// arbitration (`claimed`), none by a fatigued walker (`tired`).
+let forcedReplay
+    (replaying: Set<string>)
+    (fightOnly: Set<string>)
+    (holders: Map<string, string>)
+    (economy: Set<string>)
+    (tired: Set<string>)
+    (last: LastFull)
+    (now: Glance)
+    : Intent list * Set<RoomPos> =
+    let homes = Set.union replaying fightOnly
+
+    if Set.isEmpty homes then
+        [], Set.empty
+    else
+        let bodies =
+            holders
+            |> Map.filter (fun _ home -> Set.contains home replaying)
+            |> Map.keys
+            |> Set.ofSeq
+            |> Set.union economy
+
+        let replayed = replayBodies homes bodies last now
+        replayed, claimed bodies (Set.intersect tired bodies) now replayed
+
+/// The plan a forced tick records for a deciding colony: its decide's
+/// (`decided`), or for a fight-only colony — its `fighters` given — theirs
+/// beside the economy it carried (`withFight`).
+let recorded (fighters: Set<string> option) (decided: Plan) (carried: Plan option) : Plan =
+    match fighters, carried with
+    | Some held, Some plan -> withFight held decided plan
+    | _ -> decided

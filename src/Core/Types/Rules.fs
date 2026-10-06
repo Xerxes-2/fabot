@@ -886,6 +886,12 @@ type Tuning =
         /// falls back (`LightTick.bucketCadence`): one line crossed once,
         /// not each tick the bucket wobbles round it.
         CadenceBand: int
+        /// Whether a forced tick lets a colony whose every fact is a fight's
+        /// decide its fight alone and replay its economy
+        /// (`LightTick.fightOnly`). A live override in Memory
+        /// (`ObserveMemory.loadFightOnly`) takes its place. `false` gives back
+        /// the forced tick that decides each such colony whole.
+        FightOnly: bool
         /// The share of the colonies a cold reset decides on its own tick
         /// (`LightTick.resetSplit`), the threatened ones first; the rest
         /// stand that tick and decide on the next. Half: a reset's decide ran
@@ -1047,6 +1053,11 @@ module Tuning =
             CadenceBuckets = [ 5000, 3 ]
             // About a hundred ticks of refill at k = 3 before k = 2 resumes.
             CadenceBand = 1000
+            // On: the fight is decided on the same inputs as a whole decide,
+            // the economy is a light tick's replay at a light tick's latency,
+            // and a raid at home forces every tick, which is what empties the
+            // bucket in a war.
+            FightOnly = true
             ResetFirstShare = 0.5
         }
 

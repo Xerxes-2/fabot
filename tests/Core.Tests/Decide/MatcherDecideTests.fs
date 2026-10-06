@@ -1495,3 +1495,299 @@ let selfHealTests =
                 Expect.equal (run exhausted once) once "never duplicate an existing self-heal"
             }
         ]
+
+/// A home under a melee raid: a guard and a ranger of ours beside it, a
+/// worker at the economy, a full tower.
+let private raidedHome =
+    let room =
+        openRoom 8
+        |> withCreepsAt
+            [
+                "guard", { X = 22; Y = 25 }
+                "ranger", { X = 23; Y = 25 }
+                "w", { X = 26; Y = 27 }
+            ]
+        |> withTargets [ "tower-1", { X = 27; Y = 22 }, Structure BuiltKind.Tower ]
+
+    let colony = atLevel 4 room
+
+    { colony with
+        Bank = bank 800 800
+        Creeps =
+            [
+                creepWith "guard" 0 0 Bodies.guardPattern.Block
+                creepWith "ranger" 0 0 Bodies.rangerPattern.Block
+                worker "w" 0 50
+            ]
+        Refillables =
+            {
+                Id = "tower-1"
+                FreeCapacity = 0
+                Kind = BuiltKind.Tower
+            }
+            :: colony.Refillables
+    }
+    |> facing [ hostileAt "raider" { X = 19; Y = 25 } [ Attack; Move ] ]
+
+/// Whether an intent is a fighter's of `raidedHome` or a structure's fight.
+let private fightIntent intent =
+    match IntentPlan.actor intent with
+    | Some name -> name = "guard" || name = "ranger"
+    | None ->
+        match intent with
+        | FireTower _
+        | HealWithTower _
+        | RepairWithTower _
+        | ActivateSafeMode _
+        | SetRampartPublic _ -> true
+        | _ -> false
+
+[<Tests>]
+let fightOnlyDecideTests =
+    testList
+        "a fight-only decide"
+        [
+            test
+                "it issues a whole decide's fighter and tower intents, and carries the economy's Tasks" {
+                let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
+
+                let whole =
+                    decideUnarbitrated
+                        raidedHome
+                        first.Assignments
+                        Set.empty
+                        (Some first.Memo)
+                        ReplanTurn.Now
+
+                match decideFight raidedHome first.Assignments Set.empty first.Memo first.Fight with
+                | None -> failtest "the asks and the fighters held: the fight decides alone"
+                | Some fight ->
+                    Expect.exists
+                        fight.Intents
+                        (function
+                        | FireTower _ -> true
+                        | _ -> false)
+                        "premise: the tower fires"
+
+                    Expect.equal
+                        fight.Intents
+                        (whole.Intents |> List.filter fightIntent)
+                        "the fighters' and the tower's intents"
+
+                    let fighters (movement: Movement) =
+                        movement.Intents |> List.filter (fun step -> step.Creep <> "w")
+
+                    Expect.equal
+                        fight.Movement.Intents
+                        (fighters whole.Movement)
+                        "the fighters' steps, and no economy body's"
+
+                    Expect.equal
+                        (Map.tryFind "w" fight.Assignments)
+                        (Map.tryFind "w" first.Assignments)
+                        "the worker keeps the Task its plan replays"
+
+                    Expect.equal
+                        (fight.Assignments |> Map.remove "w")
+                        (whole.Assignments |> Map.remove "w")
+                        "the fighters hold what a whole decide gives them"
+
+                    Expect.equal fight.Aims whole.Aims "the same aims"
+            }
+
+            test "a cast ask that moved since the carry decides the colony whole" {
+                let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
+
+                let defender: CastAsk =
+                    {
+                        Row = CastRow.Defender
+                        Wanted = 1
+                        Blocks = 1
+                    }
+
+                Expect.isFalse
+                    (List.contains defender first.Fight.Asks)
+                    "premise: the home asks no defender"
+
+                Expect.isNone
+                    (decideFight
+                        raidedHome
+                        first.Assignments
+                        Set.empty
+                        first.Memo
+                        { first.Fight with
+                            Asks = defender :: first.Fight.Asks
+                        })
+                    "the carry's defender is gone: spawning is the economy's"
+            }
+
+            test "a body across the fighter line decides the colony whole" {
+                let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
+
+                Expect.isNone
+                    (decideFight
+                        raidedHome
+                        first.Assignments
+                        Set.empty
+                        first.Memo
+                        { first.Fight with
+                            Fighters = Set.ofList [ "guard" ]
+                        })
+                    "the ranger was an economy body when the carry was laid"
+            }
+
+            test "a fighter's step an economy body stands in decides the colony whole" {
+                // A one-wide corridor along y = 25, the worker in it between
+                // the guard and the ground it walks to: a choke only a whole
+                // decide's arbitration shoves the worker out of.
+                let worker = { X = 23; Y = 25 }
+
+                let choked =
+                    { raidedHome with
+                        Spatial =
+                            raidedHome.Spatial
+                            |> withCreepsAt
+                                [
+                                    "guard", { X = 22; Y = 25 }
+                                    "ranger", { X = 22; Y = 22 }
+                                    "w", worker
+                                ]
+                            |> withObstacles (
+                                { X = 25; Y = 25 }
+                                :: [
+                                    for x in 17..33 do
+                                        for y in [ 24; 26 ] -> { X = x; Y = y }
+                                ]
+                            )
+                    }
+
+                let first = decideUnarbitrated choked Map.empty Set.empty None ReplanTurn.Now
+
+                Expect.isTrue
+                    (first.Movement.Intents
+                     |> List.exists (fun step ->
+                         step.Creep = "guard"
+                         && List.tryHead step.Candidates = Some(RoomPos.at "W1N1" worker)))
+                    $"premise: the guard wants the worker's tile %A{first.Movement.Intents}"
+
+                Expect.isNone
+                    (decideFight choked first.Assignments Set.empty first.Memo first.Fight)
+                    "the worker stands in the fighter's way"
+            }
+
+            test "a fight-only tick replays the economy's plan beside the fighters' fresh one" {
+                let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
+                let bodies = raidedHome.Creeps |> List.map _.Name |> Set.ofList
+
+                let glance time : LightTick.Glance =
+                    {
+                        Creeps =
+                            raidedHome.Creeps
+                            |> List.choose (fun creep ->
+                                SpatialInfo.creepPlacementOf raidedHome.Spatial creep.Name
+                                |> Option.map (fun tile ->
+                                    creep.Name,
+                                    ({
+                                        Tile = tile
+                                        Hits = creep.Hits.Hits
+                                        Inward = []
+                                        Heals = 0
+                                        Strikes = 0
+                                    }
+                                    : LightTick.GlanceCreep)))
+                            |> Map.ofList
+                        Hostiles = []
+                        Structures = []
+                        Controllers = Map.empty
+                        Time = time
+                        PowerCreeps = []
+                        Objects = Set.empty
+                    }
+
+                let plan =
+                    LightTick.plan
+                        (glance 0)
+                        bodies
+                        first.Steps
+                        first.Next
+                        first.Later
+                        first.Intents
+                        first.Aims
+                        first.Volleys
+
+                let last = LightTick.ofPlans (glance 0) Set.empty [ "W1N1", plan ]
+
+                let now =
+                    { glance 1 with
+                        Objects = LightTick.lookups last |> Set.ofList
+                    }
+
+                let fight =
+                    match
+                        decideFight raidedHome first.Assignments Set.empty first.Memo first.Fight
+                    with
+                    | Some fight -> fight
+                    | None -> failtest "premise: the fight decides alone"
+
+                let replayed, claims =
+                    LightTick.forcedReplay
+                        Set.empty
+                        (Set.singleton "W1N1")
+                        Map.empty
+                        (Set.singleton "w")
+                        Set.empty
+                        last
+                        now
+
+                let worker act = IntentPlan.actor act = Some "w"
+
+                Expect.isNonEmpty (replayed |> List.filter worker) "premise: the worker's plan acts"
+
+                Expect.isTrue
+                    (replayed |> List.forall (fun act -> worker act || IntentPlan.actor act = None))
+                    "the worker's plan replays, no fighter's"
+
+                let moves, _ = resolveRooms claims [ fight.Movement ]
+
+                Expect.isTrue
+                    (moves
+                     |> List.forall (function
+                         | MoveCreep(name, _) -> name <> "w"
+                         | _ -> true))
+                    "the worker's step is its replay's, never the arbitration's"
+
+                let fresh =
+                    LightTick.plan
+                        now
+                        fight.Fight.Fighters
+                        fight.Steps
+                        fight.Next
+                        fight.Later
+                        fight.Intents
+                        fight.Aims
+                        fight.Volleys
+
+                let record =
+                    LightTick.recorded
+                        (Some fight.Fight.Fighters)
+                        fresh
+                        (Map.tryFind "W1N1" last.Plans)
+
+                Expect.equal record.Creeps bodies "both halves' bodies"
+                Expect.equal record.At 0 "the economy's later acts keep their plan's tick"
+
+                Expect.equal
+                    (record.Acts |> List.filter worker)
+                    (plan.Acts |> List.filter worker)
+                    "the worker's acts carried"
+
+                Expect.equal
+                    (record.Acts
+                     |> List.filter (fun act ->
+                         IntentPlan.actor act <> Some "w" && IntentPlan.actor act <> None))
+                    (fresh.Acts |> List.filter (fun act -> IntentPlan.actor act <> None))
+                    "the fighters' acts fresh"
+
+                Expect.equal record.Aims fresh.Aims "the fighters' aims fresh"
+            }
+        ]

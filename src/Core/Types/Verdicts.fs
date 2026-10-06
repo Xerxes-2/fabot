@@ -492,6 +492,73 @@ module Quotas =
             Busy = []
         }
 
+/// The facts the rows whose sizing is not the bank's answer alone read,
+/// derived once for the tick in `decideUnarbitrated`: the casting cascade, the
+/// amortization and the lead must agree on what this colony's rows will cast.
+/// Neither field may be derived from a creep's remaining life: a lead is
+/// priced off this record, so which Posts stand *empty* — an arrival-time
+/// judgement — cannot be a field of it without closing a circle.
+type RowSizing =
+    {
+        /// `postWorkCapsOf`'s answer this tick, keyed by the Post's own tile.
+        AnchorPostCaps: Map<RoomPos, int>
+        /// `reserverClaimsOf`'s answer this tick.
+        ReserverClaims: int list
+        /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing`.
+        MinerWorkPerMove: int
+        /// `rowBlocksWanted`'s guard answer this tick, carried through to
+        /// `BodySizing` so the guard row is sized by the fight and not the bank.
+        GuardBlocks: int
+        /// `rowBlocksWanted`'s ranger answer this tick (#411).
+        RangerBlocks: int
+        /// `minerQuota`'s answer this tick. Here for `ReserverClaims`' reason
+        /// (#304): the addend of the target and the multiplier of the charge
+        /// must be one number, and the walk of the projection is paid once.
+        MinerQuota: int
+        /// `oreMinerQuota`'s answer this tick: the ore digs among them.
+        OreMinerQuota: int
+        /// One while the Reactor delivery's current ground facts stand (#319).
+        CourierQuota: int
+        /// `upgraderWorkOf`'s answer this tick: the Work the upgrader row may
+        /// put on the controller in total, and so in any one body. None while
+        /// the controller takes whatever it is given.
+        UpgraderWork: int option
+    }
+
+/// One ask a fighting row casts for: the row, how many bodies and of how many
+/// blocks. What spawning reads of the fight.
+type CastAsk =
+    {
+        Row: CastRow
+        Wanted: int
+        Blocks: int
+    }
+
+/// What a full decide leaves for the fight-only ticks after it
+/// (`LightTick.fightOnly`): the economy's answers the fight pass reads, carried until the next
+/// full decide, and the fight's own answers that tell a fight-only tick it
+/// would decide the economy differently. It outlives the tick, so every
+/// collection in it is built by `Fresh` (#401).
+type FightCarry =
+    {
+        /// The row sizing: a fighter's relief lead. Its two fighting rows'
+        /// blocks are the cast asks' (`Asks`), so a tick whose asks are these
+        /// sizes the same.
+        Sizing: RowSizing
+        /// Every ask the fighting rows cast for: spawning is the economy's,
+        /// so an ask that moved is a full decide.
+        Asks: CastAsk list
+        /// The bodies the fight pass held: one across the line since is a
+        /// full decide.
+        Fighters: Set<string>
+        /// Whether the economy's pool held any Task: what an idle fighter's
+        /// reason reads (`IdleReason.NoTasks`).
+        EconomyPooled: bool
+        /// The outpost rooms the colony works (`Decision.OutpostRooms`): what
+        /// the Raid log's fold reads on a fight-only tick.
+        OutpostRooms: string list
+    }
+
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, the plan memo to hold in heap
 /// for next tick, the Verdicts explaining them, and this colony's move
@@ -545,4 +612,6 @@ type Decision =
         /// aboard (#530): the Memory the next tick's `CreepInfo.DrawnFrom`
         /// is read off.
         Drawn: Map<string, DrawRecord>
+        /// What the fight-only ticks after this decide read of it.
+        Fight: FightCarry
     }

@@ -4320,8 +4320,9 @@ function printDecideByColony(classes, decideMs, tickMs, lightMs, stages, forcing
   // A forced full tick decides only the colonies its facts are theirs (#549)
   // and replays the rest: the colony decides out of every full tick's whole.
   console.log(
-    `  forced full ticks: ${forcing.forced} of ${tickMs.all.length} (${forcing.partial} partial); colony decides ` +
-      `${forcing.decides} of ${forcing.possible} (the rest replayed)` +
+    `  forced full ticks: ${forcing.forced} of ${tickMs.all.length} (${forcing.partial} partial, ` +
+      `${forcing.fightOnly} fight-only); colony decides ` +
+      `${forcing.decides} of ${forcing.possible} (the rest replayed or fought alone)` +
       (forcing.reasons.size > 0
         ? `; forced by ${[...forcing.reasons].map(([rule, n]) => `${rule} ${n}`).join(", ")}`
         : ""),
@@ -5438,7 +5439,7 @@ const wroteForced = () => {
   const forced = wroteRow()?.forced;
   return typeof forced === "string" ? forced : undefined;
 };
-const forcing = { forced: 0, partial: 0, decides: 0, possible: 0, reasons: new Map() };
+const forcing = { forced: 0, partial: 0, fightOnly: 0, decides: 0, possible: 0, reasons: new Map() };
 for (let i = 0; i < TICKS; i++) {
   const moved = movesCensus();
   if (moved) world.perturb();
@@ -5473,7 +5474,10 @@ for (let i = 0; i < TICKS; i++) {
     forcing.possible += declared.length;
     if (forced !== undefined) {
       forcing.forced++;
-      if ((wroteRow()?.replayed ?? 0) > 0) forcing.partial++;
+      // A fight-only tick is its own kind, whatever else it replayed, as
+      // `observe cpu` reads it.
+      if ((wroteRow()?.fightOnly ?? 0) > 0) forcing.fightOnly++;
+      else if ((wroteRow()?.replayed ?? 0) > 0) forcing.partial++;
       const rule = forced.split(" ")[0];
       forcing.reasons.set(rule, (forcing.reasons.get(rule) ?? 0) + 1);
     }

@@ -45,6 +45,13 @@
 //                                  the bucket's rule decide)
 //   observe.mjs cadence <2..4>     set it: the bot reads it on its next tick
 //   observe.mjs cadence clear      unset it
+//   observe.mjs fight-only         the live fight-only switch as stored (a
+//                                  forced tick whose facts are all a
+//                                  colony's fight decides that fight alone
+//                                  and replays its economy; unset, the
+//                                  tuned switch decides)
+//   observe.mjs fight-only on|off  set it: the bot reads it on its next tick
+//   observe.mjs fight-only clear   unset it
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -100,6 +107,7 @@ const usage =
   "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | cadence [<2..4> | clear] | " +
+  "fight-only [on | off | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
@@ -143,6 +151,7 @@ const ACCEPTS = {
   cpu: ["--json", "--all"],
   verbose: ["--json"],
   cadence: [],
+  "fight-only": [],
   console: ["--seconds"],
   eval: ["--seconds"],
   room: ["--json"],
@@ -181,6 +190,11 @@ if (command === "verbose" && action !== undefined) {
 const CADENCES = ["2", "3", "4"];
 if (command === "cadence" && action !== undefined) {
   if (action !== "clear" && !CADENCES.includes(action)) fail("cadence takes 2, 3 or 4, or clear");
+  if (actionName !== undefined) fail(usage);
+}
+// The bot reads a boolean and nothing else (`loadFightOnly`).
+if (command === "fight-only" && action !== undefined) {
+  if (!["on", "off", "clear"].includes(action)) fail("fight-only takes on, off or clear");
   if (actionName !== undefined) fail(usage);
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
@@ -343,9 +357,13 @@ const cadence = (ticks) => {
   const fulls = ticks.filter((row) => row.light !== true);
   // A forced tick that replayed colonies decided only some (#549): its own
   // population, so the whole full tick's mean is not diluted by it.
-  const isPartial = (row) => typeof row.replayed === "number" && row.replayed > 0;
+  // One where a colony decided its fight alone and replayed its economy
+  // (`fightOnly`) is a kind of its own again, whatever else it replayed.
+  const isFightOnly = (row) => typeof row.fightOnly === "number" && row.fightOnly > 0;
+  const isPartial = (row) => !isFightOnly(row) && typeof row.replayed === "number" && row.replayed > 0;
+  const fightOnlys = fulls.filter(isFightOnly);
   const partials = fulls.filter(isPartial);
-  const wholes = fulls.filter((row) => !isPartial(row));
+  const wholes = fulls.filter((row) => !isPartial(row) && !isFightOnly(row));
   // A reason is the rule's word, then where it fired ("armed W17S26
   // Trepidimous", "border hauler-…"); rows written before the detail carry
   // the word alone. Tallied per rule, with its three commonest places.
@@ -378,6 +396,8 @@ const cadence = (ticks) => {
     fullMean: wholes.length > 0 ? `${mean(wholes).toFixed(2)} ms` : "—",
     partials: partials.length,
     partialMean: partials.length > 0 ? `${mean(partials).toFixed(2)} ms` : "—",
+    fightOnlys: fightOnlys.length,
+    fightOnlyMean: fightOnlys.length > 0 ? `${mean(fightOnlys).toFixed(2)} ms` : "—",
     lightMean: lights.length > 0 ? `${mean(lights).toFixed(2)} ms` : "—",
     forced: ranked.join("; "),
   };
@@ -680,7 +700,8 @@ if (command === "console") {
     const flag = c.mean > MEAN_MS || c.max > TICK_MS ? "  !" : "";
     console.log(
       `cpu      mean ${c.mean.toFixed(1)} ms over ${cpuRows.length} ticks, max ${c.max.toFixed(1)}` +
-        ` · full ${c.fulls - c.partials} at ${c.fullMean} · partial ${c.partials} at ${c.partialMean}` +
+        ` · full ${c.fulls - c.partials - c.fightOnlys} at ${c.fullMean} · partial ${c.partials} at ${c.partialMean}` +
+        ` · fight-only ${c.fightOnlys} at ${c.fightOnlyMean}` +
         ` · light ${c.lights} at ${c.lightMean}` +
         (typeof lastRow.bucket === "number" ? ` · bucket ${lastRow.bucket}` : "") +
         flag,
@@ -888,6 +909,35 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`cadence override is now ${show(wanted)}`);
+  }
+} else if (command === "fight-only") {
+  // ---- fight-only: the live switch for a fight-only forced tick ----------
+
+  // As the bot reads it: a boolean; anything else unset.
+  const readable = (value) => (typeof value === "boolean" ? value : undefined);
+  const show = (value) => (value === undefined ? "unset (the tuned switch)" : value ? "on" : "off");
+
+  if (action === undefined) {
+    console.log(`fight-only override: ${show(readable(await memoryGet("fabot.observe.fightOnly")))}`);
+  } else {
+    const next = action === "clear" ? null : action === "on";
+    const res = await api.userMemorySet("fabot.observe.fightOnly", next, shard).catch((err) => {
+      fail(`memory write failed: ${err.message ?? err}`);
+    });
+    if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
+
+    // Applied on a tick boundary, as `cadence` waits for.
+    const wanted = readable(next);
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const seen = readable(await memoryGet("fabot.observe.fightOnly"));
+      if (seen === wanted) break;
+      if (Date.now() >= deadline) {
+        fail(`write accepted but not visible after 20s; still reading ${show(seen)}`);
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    console.log(`fight-only override is now ${show(wanted)}`);
   }
 } else if (command === "raids") {
   // ---- raids: the Raid log, colony-level and episodic --------------------
@@ -2718,10 +2768,12 @@ if (command === "console") {
     // The cadence's two halves; the trigger line below still reads every
     // tick, because the mean is what the bucket pays.
     {
-      const { fulls, partials, lights, fullMean, partialMean, lightMean, forced } = cadence(ticks);
+      const { fulls, partials, fightOnlys, lights, fullMean, partialMean, fightOnlyMean, lightMean, forced } =
+        cadence(ticks);
       console.log(
-        `full ticks: ${fulls - partials}, mean ${fullMean}  ·  partial (forced, some colonies replayed): ` +
-          `${partials}, mean ${partialMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
+        `full ticks: ${fulls - partials - fightOnlys}, mean ${fullMean}  ·  partial (forced, some colonies replayed): ` +
+          `${partials}, mean ${partialMean}  ·  fight-only (forced, a colony's economy replayed): ` +
+          `${fightOnlys}, mean ${fightOnlyMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
       if (forced) console.log(`  forced full: ${forced}`);
       console.log("");

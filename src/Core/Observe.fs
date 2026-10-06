@@ -2160,12 +2160,14 @@ module FloodCounts =
 /// Why a would-be light tick ran full, and how much of it (#549): the first
 /// fact as `LightTick.tag` spells it, how many facts forced it, and how many
 /// colonies replayed their plans instead of deciding — a partial tick's mean
-/// is not a whole one's.
+/// is not a whole one's — and how many decided their fight alone and
+/// replayed their economy, a fight-only tick (`LightTick.fightOnly`).
 type Forcing =
     {
         Reason: string
         Facts: int
         Replayed: int
+        FightOnly: int
     }
 
 /// What `Game.cpu.getUsed()` answered at each of the loop's phase boundaries,

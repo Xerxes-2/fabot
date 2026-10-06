@@ -549,7 +549,12 @@ type private RoomPass =
 /// Verdict the arbitration does not answer: it compares this creep's priced
 /// first step against the step the same body would take were no tile occupied,
 /// which is a second flood on this colony's Atlas.
-let movementOf
+///
+/// `moves`: the bodies it registers and places, each of the rest a wall where
+/// the Atlas stands it; a fight-only decide (`decideFight`) moves its
+/// fighters alone, the rest stepping on their replayed plans.
+let movementAmong
+    (moves: string -> bool)
     (view: ColonyView)
     atlas
     (threats: Threats)
@@ -571,7 +576,7 @@ let movementOf
         |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None)
         |> Set.ofList
 
-    let placed = Atlas.placedCreeps atlas
+    let placed = Atlas.placedCreeps atlas |> List.filter (fst >> moves)
 
     // Asked only on a tick with a Reach: the mover's one reader of it.
     let runners =
@@ -767,10 +772,16 @@ let movementOf
             | _ -> false)
 
     {
-        Order = view.Creeps |> List.map (fun c -> c.Name)
+        Order = view.Creeps |> List.map (fun c -> c.Name) |> List.filter moves
         Placed = placed
-        Tired = tired
-        Foreign = view.Foreign
+        Tired = Set.filter moves tired
+        // A body it does not move stands where it is, as another colony's.
+        Foreign =
+            Atlas.placedCreeps atlas
+            |> List.filter (fst >> moves >> not)
+            |> List.map snd
+            |> Set.ofList
+            |> Set.union view.Foreign
         Intents =
             placed
             |> List.filter (fun (name, _) -> not (Set.contains name tired))
@@ -802,6 +813,18 @@ let movementOf
                     None)
             |> Set.ofList
     }
+
+/// `movementAmong` over every body of the colony.
+let movementOf
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (pool: PooledTask list)
+    (assigned: Map<string, Task>)
+    (crossings: Map<string, string>)
+    (verbose: Set<string>)
+    : Movement =
+    movementAmong (fun _ -> true) view atlas threats pool assigned crossings verbose
 
 /// Resolver, second half: the room passes, and the move Intents and movement
 /// Verdicts they settle. One pass per room over **every** creep of ours

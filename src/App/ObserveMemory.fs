@@ -806,6 +806,17 @@ let loadCadence () : int option =
                 // Clamped as a float first: a huge number never reaches `int`.
                 Some(Fabot.Core.LightTick.clampCadence (int (max 0.0 (min 99.0 value)))))
 
+/// The live fight-only switch from `Memory.fabot.observe.fightOnly`
+/// (`Tuning.FightOnly`, `LightTick.fightOnly`): set, it takes the tuned one's place.
+/// Read each tick, so a flip through the Memory HTTP API lands on the next;
+/// anything but a boolean reads as unset.
+let loadFightOnly () : bool option =
+    leafOr None (fun () -> observeLeaf "fightOnly") (fun raw ->
+        if jsTypeof raw = "boolean" then
+            Some(unbox<bool> raw)
+        else
+            None)
+
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
 /// full candidate scoring this tick. Read fresh each tick so a flip
 /// through the Memory HTTP API takes effect on the next tick with no
@@ -2077,7 +2088,9 @@ let loadCpu () : CpuState =
                                 // Absent on every row but a forced full tick's;
                                 // `facts` and `replayed` absent on a row
                                 // forced by one fact that replayed nobody, and
-                                // on every row written before #549.
+                                // on every row written before #549;
+                                // `fightOnly` on a row no colony fought alone
+                                // on.
                                 Forced =
                                     if jsTypeof raw?forced = "string" then
                                         Some(
@@ -2085,6 +2098,7 @@ let loadCpu () : CpuState =
                                                 Reason = unbox<string> raw?forced
                                                 Facts = max 1 (numberOrZero raw "facts")
                                                 Replayed = numberOrZero raw "replayed"
+                                                FightOnly = numberOrZero raw "fightOnly"
                                             }
                                             : Forcing
                                         )
@@ -2225,6 +2239,9 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 
         if forcing.Replayed > 0 then
             o?replayed <- forcing.Replayed
+
+        if forcing.FightOnly > 0 then
+            o?fightOnly <- forcing.FightOnly
     | None -> ()
 
     // Written only on a replan's row, as the floods are: one array per home.

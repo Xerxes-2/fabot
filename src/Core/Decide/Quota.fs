@@ -497,6 +497,35 @@ let private asksFor
     @ chaseAsks view threats outposts row
     @ briefAsks threats row
 
+/// Every fighting row's asks this tick, each with its row, bodies and blocks,
+/// in `asksFor`'s order — what spawning reads of the fight —, off the guarded
+/// rooms, the one outpost fact `asksFor` reads: a fight-only decide holds them
+/// against the last whole decide's (`FightCarry.Asks`).
+let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string list) : CastAsk list =
+    let outposts =
+        {
+            Claims = []
+            Declared = []
+            ReservableControllers = []
+            ReservableRooms = []
+            Guarded = guarded
+            Fuelled = []
+        }
+
+    threats.Briefs
+    |> Map.toList
+    |> List.collect (fun (_, brief) -> brief.Asks |> List.map _.Row)
+    |> List.append [ CastRow.Guard; CastRow.Ranger ]
+    |> List.distinct
+    |> List.collect (fun row ->
+        asksFor view threats outposts row
+        |> List.map (fun ask ->
+            {
+                Row = row
+                Wanted = ask.Wanted view threats
+                Blocks = ask.Blocks view
+            }))
+
 /// A fighting row's quota: its asks' counts, summed.
 let internal rowQuota
     (view: ColonyView)
@@ -547,6 +576,17 @@ let private fightingRowStands
         |> List.length
 
     living + inOven >= quota
+
+/// Whether a spawn stands idle while a fighting row the asks size stands short
+/// of what they want — living bodies and bodies in an oven counted, as
+/// `castRowStands` counts them: a fight-only decide casts nothing, so the
+/// colony decides whole and the cast is not a light tick late.
+let castOwed (view: ColonyView) (asks: CastAsk list) : bool =
+    view.Spawns |> List.exists (fun spawn -> not spawn.IsSpawning)
+    && asks
+       |> List.groupBy _.Row
+       |> List.exists (fun (row, asked) ->
+           not (fightingRowStands view (CastRow.cut row) (asked |> List.sumBy _.Wanted)))
 
 /// Whether the guard or the ranger row is filled (#411).
 let private castRowStands
@@ -690,39 +730,6 @@ let internal reserverClaimsOf
                not (Set.contains errand.RoomName withheld && Set.contains errand.RoomName raided)
                && not (Set.contains errand.RoomName allyBurning))
            |> List.map (fun _ -> 1))
-
-/// The facts the rows whose sizing is not the bank's answer alone read,
-/// derived once for the tick in `decideUnarbitrated`: the casting cascade, the
-/// amortization and the lead must agree on what this colony's rows will cast.
-/// Neither field may be derived from a creep's remaining life: a lead is
-/// priced off this record, so which Posts stand *empty* — an arrival-time
-/// judgement — cannot be a field of it without closing a circle.
-type RowSizing =
-    {
-        /// `postWorkCapsOf`'s answer this tick, keyed by the Post's own tile.
-        AnchorPostCaps: Map<RoomPos, int>
-        /// `reserverClaimsOf`'s answer this tick.
-        ReserverClaims: int list
-        /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing`.
-        MinerWorkPerMove: int
-        /// `rowBlocksWanted`'s guard answer this tick, carried through to
-        /// `BodySizing` so the guard row is sized by the fight and not the bank.
-        GuardBlocks: int
-        /// `rowBlocksWanted`'s ranger answer this tick (#411).
-        RangerBlocks: int
-        /// `minerQuota`'s answer this tick. Here for `ReserverClaims`' reason
-        /// (#304): the addend of the target and the multiplier of the charge
-        /// must be one number, and the walk of the projection is paid once.
-        MinerQuota: int
-        /// `oreMinerQuota`'s answer this tick: the ore digs among them.
-        OreMinerQuota: int
-        /// One while the Reactor delivery's current ground facts stand (#319).
-        CourierQuota: int
-        /// `upgraderWorkOf`'s answer this tick: the Work the upgrader row may
-        /// put on the controller in total, and so in any one body. None while
-        /// the controller takes whatever it is given.
-        UpgraderWork: int option
-    }
 
 /// The ceiling on one upgrader body's Work that a `RowSizing` hands to
 /// `BodySizing`.
