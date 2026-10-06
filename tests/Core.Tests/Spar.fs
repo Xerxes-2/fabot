@@ -272,6 +272,89 @@ let private strongholdRangers () : Arena =
             defender
         ]
 
+/// W16S26's bunker2 as the live room held it at t1,002,250: the towers at
+/// 660 and 550, the core's nine 200k ramparts, its two containers and six
+/// roads, its defender on 8,35. No keeper: none reaches the stand tiles.
+let private bunker2Live () : ArenaRoom =
+    room "W16S26"
+    |> withStructures
+        [
+            for x, y in [ 7, 35; 7, 36; 7, 37; 8, 35; 8, 36; 8, 37; 9, 35; 9, 36; 9, 37 ] ->
+                { structureOf "rampart" (Some invader) 200_000 300_000_000 { X = x; Y = y } with
+                    NextDecay = 1_045_681
+                }
+        ]
+    |> withStructures
+        [
+            structureOf "container" None 250_000 250_000 { X = 7; Y = 36 }
+            structureOf "container" None 250_000 250_000 { X = 9; Y = 36 }
+            { structureOf "invaderCore" (Some invader) 100_000 100_000 { X = 8; Y = 36 } with
+                Level = 2
+            }
+            towerOf invader { X = 7; Y = 35 } 660
+            towerOf invader { X = 9; Y = 37 } 550
+        ]
+    |> withRoads
+        [
+            7, 36, 5_000
+            7, 37, 5_000
+            8, 35, 5_000
+            8, 37, 5_000
+            9, 35, 5_000
+            9, 36, 5_000
+        ]
+    |> withTowerDuties [ FocusCore ]
+    |> withStronghold 1_045_681 None
+
+/// The cheapest squad the W16S26 research found to clear the bunker with
+/// every tie of the core's focus: three 25R 25M rangers on the range-3
+/// tiles east of the core and seven 25H 25M healers behind them, standing
+/// from the first tick (no walk-in). Scripted, not our pipeline: the core's
+/// focus is the first ranger (closest, first laid), and every healer heals
+/// it, beside it or at range. No colony decides.
+let private strongholdSquad () : Arena =
+    let core = bunkerCore
+
+    let ranger (id: string) (x: int) (y: int) =
+        body
+            id
+            Side.Ours
+            (parts [ RangedAttack, 25; Move, 25 ])
+            (at "W16S26" x y)
+            (Some(Do [ Act.RangedAttack core ]))
+
+    let healer (id: string) (x: int) (y: int) =
+        let act =
+            if max (abs (x - 11)) (abs (y - 36)) <= 1 then
+                Act.Heal "r0"
+            else
+                Act.RangedHeal "r0"
+
+        body id Side.Ours (parts [ Heal, 25; Move, 25 ]) (at "W16S26" x y) (Some(Do [ act ]))
+
+    let defender =
+        { body "defender0" invader (parts [ Attack, 15; Move, 15 ]) (at "W16S26" 8 35) (Some Defend) with
+            TicksToLive = 43_431
+        }
+
+    arena
+        1_002_251
+        [ bunker2Live () ]
+        []
+        [
+            ranger "r0" 11 36
+            ranger "r1" 11 35
+            ranger "r2" 11 37
+            healer "h0" 12 36
+            healer "h1" 12 35
+            healer "h2" 12 37
+            healer "h3" 12 34
+            healer "h4" 12 38
+            healer "h5" 13 36
+            healer "h6" 13 35
+            defender
+        ]
+
 /// A T3-boosted 10T 15R 10M 15H body of a neutral player walking through
 /// W12S28 from its north exit out of its west one, shooting what stands in
 /// reach of its walk (ADR 0089 S0's boosted pricing).
@@ -337,6 +420,16 @@ let private scenarios () : Scenario list =
             Slug = "stronghold-l2-rangers"
             Ticks = 150
             Start = strongholdRangers
+            Cleared =
+                fun a ->
+                    a.Rooms["W16S26"].Structures |> List.exists (fun s -> s.Id = bunkerCore) |> not
+        }
+        {
+            Slug = "stronghold-w16s26"
+            // The core falls on t399: no tick after it, where xxscreeps hands
+            // the defender to its raid AI and vanilla leaves it idle.
+            Ticks = 400
+            Start = strongholdSquad
             Cleared =
                 fun a ->
                     a.Rooms["W16S26"].Structures |> List.exists (fun s -> s.Id = bunkerCore) |> not

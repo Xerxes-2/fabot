@@ -12,7 +12,8 @@
 //       the periodic cross-check: run scenarios through xxscreeps
 //       (`npm run xx`, our bodies replayed) and compare the two runs' deaths;
 //       exit 1 when a death differs or lands more than T ticks apart
-//       (default 30). Default slugs: outpost-melee, home-melee, home-squad.
+//       (default 30). Default slugs: outpost-melee, home-melee, home-squad,
+//       stronghold-w16s26.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -133,7 +134,7 @@ function crossCheck(args) {
     } else if (/^[a-z0-9][a-z0-9-]*$/.test(a)) slugs.push(a);
     else fail(usage);
   }
-  if (slugs.length === 0) slugs.push("outpost-melee", "home-melee", "home-squad");
+  if (slugs.length === 0) slugs.push("outpost-melee", "home-melee", "home-squad", "stronghold-w16s26");
 
   let drifted = false;
   for (const slug of slugs) {
@@ -158,6 +159,17 @@ function crossCheck(args) {
       const flag = apart > tolerance ? "  DRIFT" : "";
       if (flag) drifted = true;
       console.log(`  ${id.padEnd(20)} died arena ${String(a ?? "-").padStart(4)}  xxscreeps ${String(x ?? "-").padStart(4)}${flag}`);
+    }
+    // An invader core falls like a death: the first tick it is missing.
+    const fell = (rows, key) => rows.find((r, t) => t > 0 && r.structures && !(key in r.structures) && key in (rows[t - 1].structures ?? {}))?.t;
+    const cores = new Set(arena.flatMap((r) => Object.keys(r.structures ?? {}).filter((k) => k.startsWith("invaderCore-"))));
+    for (const key of cores) {
+      const a = fell(arena, key);
+      const x = fell(xx, key);
+      const apart = a === undefined || x === undefined ? (a === x ? 0 : Infinity) : Math.abs(a - x);
+      const flag = apart > tolerance ? "  DRIFT" : "";
+      if (flag) drifted = true;
+      console.log(`  ${key.padEnd(20)} fell arena ${String(a ?? "-").padStart(4)}  xxscreeps ${String(x ?? "-").padStart(4)}${flag}`);
     }
     console.log(`  per-tick diff: ${join(dir, `${name}.replay.diff.txt`)}`);
   }

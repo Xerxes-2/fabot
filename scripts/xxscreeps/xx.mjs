@@ -112,7 +112,7 @@ function must(status, what) {
   if (status !== 0) fail(`${what} failed (exit ${status})`);
 }
 
-function setup() {
+function setup(stronghold = false) {
   mkdirSync(ENGINE, { recursive: true });
   const manifest = {
     name: "fabot-xxscreeps",
@@ -136,24 +136,32 @@ function setup() {
     must(nix(build, "npm", ["rebuild", "isolated-vm", "ivm-inspect", "--foreground-scripts"], { cwd: ENGINE }), "npm rebuild");
     must(node24(probe, ENGINE), "loading isolated-vm");
   }
-  if (!existsSync(join(TEMPLATE, "screeps/shard0/data.json"))) {
-    console.error("importing a world into the template");
-    rmSync(TEMPLATE, { recursive: true, force: true });
-    mkdirSync(TEMPLATE, { recursive: true });
-    writeFileSync(join(TEMPLATE, ".screepsrc.yaml"), screepsrc(false));
-    must(node24([XXSCREEPS, "import"], TEMPLATE), "xxscreeps import");
+  const template = templateOf(stronghold);
+  if (!existsSync(join(template, "screeps/shard0/data.json"))) {
+    console.error(`importing a world into ${template}`);
+    rmSync(template, { recursive: true, force: true });
+    mkdirSync(template, { recursive: true });
+    writeFileSync(join(template, ".screepsrc.yaml"), screepsrc(false, stronghold));
+    must(node24([XXSCREEPS, "import"], template), "xxscreeps import");
   }
+}
+
+// A world's schema is its mods': a scenario with an invader core stands on a
+// template imported with the modern stronghold mod beside the classic ones.
+function templateOf(stronghold) {
+  return stronghold ? `${TEMPLATE}-stronghold` : TEMPLATE;
 }
 
 // One tick a minute when not paused: a pause that missed the first tick
 // shows as a timeout, not as a run that ran on. One processor thread keeps
 // the seeded tie-breaks in one sequence; one runner thread holds every
 // sandbox the snapshot asks for.
-function screepsrc(ours) {
+function screepsrc(ours, stronghold) {
   return [
     "mods:",
     ...(ours ? ["  - ./heapsnap/index.js", "  - ./seed/index.js"] : []),
     "  - xxscreeps/mods/classic",
+    ...(stronghold ? ["  - xxscreeps/mods/modern/stronghold"] : []),
     "game:",
     "  tickSpeed: 60000",
     "  respawnTimeout: 0",
@@ -171,6 +179,8 @@ const VERBS = { AttackCreep: "attack", RangedAttackCreep: "rangedAttack", HealCr
 // Our towers' shots and heals too (#567), by the tower's tile: xxscreeps
 // gives every structure an id of its own.
 const TOWER_VERBS = { FireTower: "attack", HealWithTower: "heal" };
+// A script's acts (`Arena.Act`), as the arena trace prints them.
+const SCRIPT_VERBS = { Attack: "attack", RangedAttack: "rangedAttack", Heal: "heal", RangedHeal: "rangedHeal", RangedMassAttack: "rangedMassAttack", Dismantle: "dismantle" };
 function replayOf(scenario, arena) {
   const ours = new Set(scenario.bodies.filter((b) => b.side === "ours").map((b) => b.id));
   const towers = new Map(scenario.rooms.flatMap((r) => r.structures.filter((s) => s.kind === "tower" && s.owner === "ours").map((s) => [s.id, [r.name, s.x, s.y]])));
@@ -183,6 +193,14 @@ function replayOf(scenario, arena) {
       const [actor, targetName] = [...m[2].matchAll(/"([^"]*)"/g)].map((q) => q[1]);
       if (VERBS[m[1]]) plan[actor]?.acts.push([VERBS[m[1]], targetName ?? null]);
       else if (TOWER_VERBS[m[1]] && towers.has(actor)) plan["#towers"].push([...towers.get(actor), TOWER_VERBS[m[1]], targetName]);
+    }
+    // A scripted body of ours (a spar squad, no pipeline) acts by its
+    // script: `<id> RangedAttack "invaderCore-8-36"`. A structure target is
+    // its arena id, `kind-x-y`, which the bot finds by tile.
+    for (const act of row.acts ?? []) {
+      const m = /^(\S+) (\w+)(?: "([^"]*)")?$/.exec(act);
+      if (!m || !ours.has(m[1]) || !SCRIPT_VERBS[m[2]]) continue;
+      plan[m[1]]?.acts.push([SCRIPT_VERBS[m[2]], m[3] ?? null]);
     }
     return plan;
   });
@@ -215,14 +233,15 @@ const scenario = JSON.parse(readFileSync(scenarioPath, "utf8"));
 const arena = arenaPath ? readTrace(arenaPath) : undefined;
 if (bot === "replay" && !arena) fail("--bot replay needs the arena trace beside the scenario (<slug>.arena.jsonl)");
 
-setup();
+const stronghold = scenario.rooms.some((r) => r.structures.some((s) => s.kind === "invaderCore"));
+setup(stronghold);
 
 const world = join(ENGINE, "worlds", slug);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
-cpSync(TEMPLATE, world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
+cpSync(templateOf(stronghold), world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
 cpSync(join(HERE, "engine"), world, { recursive: true, filter: (src) => !/\/(standin|replay)$/.test(src) });
-writeFileSync(join(world, ".screepsrc.yaml"), screepsrc(true));
+writeFileSync(join(world, ".screepsrc.yaml"), screepsrc(true, stronghold));
 // Mods resolve from the cwd only where a package.json stands (`config/mods.js`).
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);

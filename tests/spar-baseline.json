@@ -142,5 +142,17 @@
     "struck": 0,
     "ticks": 150,
     "towerSpent": 0
+  },
+  "stronghold-w16s26": {
+    "castEnergy": 0,
+    "cleared": 400,
+    "hurt": 0,
+    "kills": 0,
+    "ourDeaths": 0,
+    "safeMode": false,
+    "stoodDown": false,
+    "struck": 0,
+    "ticks": 400,
+    "towerSpent": 0
   }
 }

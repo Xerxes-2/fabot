@@ -4846,9 +4846,13 @@ let crossValidate (name: string) (start: Arena) (trace: TickTrace list) : unit =
                                         energy = s.Energy
                                         isPublic = s.IsPublic
                                         name = Option.toObj s.Name
+                                        level = s.Level
                                     |}
                             ]
                         sites = List.length r.Sites
+                        // A stronghold's collapse tick, 0 for none.
+                        strongholdCollapse =
+                            r.Stronghold |> Option.map _.CollapseAt |> Option.defaultValue 0
                     |}
             ]
 
@@ -4896,6 +4900,13 @@ let crossValidate (name: string) (start: Arena) (trace: TickTrace list) : unit =
                     ]
                 events = t.Events |> List.map (fun e -> flat (box e))
                 acts = t.Theirs |> List.map (fun (id, act) -> $"{id} {flat (box act)}")
+                // The hits of what a stronghold or a home stands behind, by
+                // `kind-x-y`, the key `step.mjs` writes too.
+                structures =
+                    t.Structures
+                    |> Map.filter (fun id _ ->
+                        [ "invaderCore-"; "rampart-"; "tower-" ]
+                        |> List.exists (fun kind -> id.StartsWith kind))
                 // A site is planning, not the fight the two runs are diffed on.
                 ours =
                     t.Ours

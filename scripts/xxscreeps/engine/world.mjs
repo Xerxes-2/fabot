@@ -40,6 +40,10 @@ import * as Extractor from "xxscreeps/mods/classic/mineral/extractor.js";
 
 const [scenarioPath, roomsDir, ourName] = process.argv.slice(2);
 const scenario = JSON.parse(fs.readFileSync(scenarioPath, "utf8"));
+// The modern stronghold mod, loaded only for a scenario with an invader core
+// (`xx.mjs` adds it to the world's mods then).
+const hasCore = scenario.rooms.some((r) => r.structures.some((s) => s.kind === "invaderCore"));
+const InvaderCore = hasCore ? await import("xxscreeps/mods/modern/stronghold/invader-core.js") : null;
 const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
 const warnings = [];
@@ -122,9 +126,20 @@ const withEnergy = (object, energy) => {
   return object;
 };
 
-function structure(s, pos, level) {
+function structure(s, pos, level, room) {
   const owner = s.owner ? ownerOf(s.owner) : null;
   switch (s.kind) {
+    case "invaderCore": {
+      // Already deployed: the scenario's own ramparts, towers, containers
+      // and roads stand for the template's (deploy time 0). A level 1-5
+      // core runs its `bunker<level>` behaviour until the room's collapse
+      // tick; a level-0 one is an expansion core. No deposit type: no loot,
+      // as the live core's "normal" earns none in the vanilla tables.
+      const core = InvaderCore.create(pos, s.level, 0);
+      if (s.level > 0) core["#templateName"] = `bunker${s.level}`;
+      if (room.strongholdCollapse > 0) core["#collapseTime"] = time + (room.strongholdCollapse - scenario.time);
+      return core;
+    }
     case "spawn":
       return withEnergy(Spawn.create(pos, owner, s.name), s.energy);
     case "extension":
@@ -148,6 +163,11 @@ function structure(s, pos, level) {
     case "rampart": {
       const rampart = Rampart.create(pos, owner);
       rampart.isPublic = s.isPublic;
+      // A stronghold's rampart decays only at the collapse
+      // (`stronghold.js` deploy: nextDecayTime is the decay time).
+      if (room.strongholdCollapse > 0 && s.owner === "npc:Invader") {
+        rampart["#nextDecayTime"] = time + (room.strongholdCollapse - scenario.time);
+      }
       return rampart;
     }
     default:
@@ -191,7 +211,7 @@ for (const r of scenario.rooms) {
         }
       }
       for (const s of r.structures) {
-        const object = structure(s, new RoomPosition(s.x, s.y, r.name), level);
+        const object = structure(s, new RoomPosition(s.x, s.y, r.name), level, r);
         if (!object) continue;
         object.hits = s.hits;
         room["#insertObject"](placed(object));
@@ -212,7 +232,12 @@ for (const r of scenario.rooms) {
         if (b.side.startsWith("player:")) warnings.push(`${b.id}: ${b.side} has no code here; it holds`);
         room["#insertObject"](placed(creep));
       }
-      if (scenario.bodies.some((b) => b.room === r.name && b.side === "npc:Invader")) activateNPC(room, kInvaderUserId);
+      if (
+        scenario.bodies.some((b) => b.room === r.name && b.side === "npc:Invader") ||
+        r.structures.some((s) => s.kind === "invaderCore")
+      ) {
+        activateNPC(room, kInvaderUserId);
+      }
       room["#flushObjects"](state);
     }),
   );

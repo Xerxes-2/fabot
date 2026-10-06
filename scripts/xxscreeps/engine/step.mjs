@@ -60,11 +60,15 @@ for (let t = 0; t < ticks; t++) {
       throw new Error(`no tick after a pausedTick at t${t}: the pause missed the first tick; run again`);
     }
   }
-  const row = { t, time, bodies: [], acts: [] };
+  const row = { t, time, bodies: [], acts: [], structures: {} };
   for (const name of rooms) {
     const room = await shard.loadRoom(name, time).catch(() => null);
     if (!room) continue;
     for (const o of room["#objects"]) {
+      // The arena's `kind-x-y` ids for what a stronghold or a home stands behind.
+      if (["invaderCore", "rampart", "tower"].includes(o.structureType)) {
+        row.structures[`${o.structureType}-${o.pos.x}-${o.pos.y}`] = o.hits;
+      }
       if (o.body === undefined) continue;
       row.bodies.push({
         id: o.name,

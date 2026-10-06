@@ -30,10 +30,18 @@ module.exports.loop = function () {
   for (const creep of Object.values(Game.creeps)) {
     const mine = plan[creep.name];
     if (!mine) continue;
-    const byName = (name) => (name === creep.name ? creep : creep.room.find(FIND_CREEPS).find((c) => c.name === name));
+    // A creep by name, or a structure by the arena's `kind-x-y` id.
+    const byName = (name) => {
+      const tile = /^(\w+)-(\d+)-(\d+)$/.exec(name);
+      if (tile) {
+        return creep.room.lookForAt(LOOK_STRUCTURES, Number(tile[2]), Number(tile[3])).find((s) => s.structureType === tile[1]);
+      }
+      return name === creep.name ? creep : creep.room.find(FIND_CREEPS).find((c) => c.name === name);
+    };
     for (const [verb, name] of mine.acts) {
       const target = name && byName(name);
-      if (verb === "attack" && target && creep.pos.isNearTo(target)) creep.attack(target);
+      if (verb === "dismantle" && target && creep.pos.isNearTo(target)) creep.dismantle(target);
+      else if (verb === "attack" && target && creep.pos.isNearTo(target)) creep.attack(target);
       else if (verb === "rangedAttack" && target && creep.pos.inRangeTo(target, 3)) creep.rangedAttack(target);
       else if (verb === "heal" && target && creep.pos.isNearTo(target)) creep.heal(target);
       else if (verb === "rangedHeal" && target && creep.pos.inRangeTo(target, 3)) creep.rangedHeal(target);

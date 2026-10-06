@@ -63,6 +63,33 @@ export function diff(arena, xx, { label = ["arena", "xxscreeps"] } = {}) {
       `${id.padEnd(width)}  ${String(da.get(id) ?? "-").padStart(14)}  ${String(dx.get(id) ?? "-").padStart(18)}  ${hits.padStart(13)}  ${`${same}/${both}`.padStart(9)}  ${(both ? dist / both : 0).toFixed(1).padStart(9)}  ${firstApart === undefined ? "-" : `t${firstApart}`}`,
     );
   }
+  // Structures: each core, rampart and tower both runs wrote, the tick it
+  // fell in each, and the first tick their hits part.
+  const keys = [...new Set([arena, xx].flatMap((rows) => rows.flatMap((r) => Object.keys(r.structures ?? {}))))].sort();
+  if (keys.length > 0) {
+    const fell = (rows, key) => {
+      const seen = rows.findIndex((r) => r.structures && key in r.structures);
+      if (seen < 0) return "-";
+      const gone = rows.findIndex((r, t) => t > seen && r.structures && !(key in r.structures));
+      return gone < 0 ? "-" : `t${rows[gone].t}`;
+    };
+    const sw = Math.max(...keys.map((k) => k.length), 9);
+    lines.push("");
+    lines.push(`${"structure".padEnd(sw)}  ${`fell (${label[0]})`.padStart(14)}  ${`fell (${label[1]})`.padStart(18)}  ${"last hits".padStart(17)}  first apart`);
+    for (const key of keys) {
+      let firstApart;
+      let last = ["-", "-"];
+      for (let t = 0; t < n; t++) {
+        const a = arena[t].structures?.[key];
+        const x = xx[t].structures?.[key];
+        if (a !== undefined || x !== undefined) last = [a ?? "gone", x ?? "gone"];
+        if (a !== x && firstApart === undefined) firstApart = t;
+      }
+      lines.push(
+        `${key.padEnd(sw)}  ${fell(arena, key).padStart(14)}  ${fell(xx, key).padStart(18)}  ${`${last[0]}/${last[1]}`.padStart(17)}  ${firstApart === undefined ? "-" : `t${firstApart}`}`,
+      );
+    }
+  }
   lines.push("");
   lines.push(`per tick, the bodies that differ (${label[0]} | ${label[1]}):`);
   for (let t = 0; t < n; t++) {
