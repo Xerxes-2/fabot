@@ -2346,7 +2346,8 @@ let planLayout
     | _ -> [], [], [], [], [], [], Set.empty
 
 /// The outpost's source containers — the colony's one placement rule that is
-/// not the Layout's: one container per outpost source, on the Seat whose walk
+/// not the Layout's: one container per outpost source, and per [[ore]] deposit
+/// the colony digs past home (the Reactor's room's), on the Seat whose walk
 /// out to the Seam toward home is shortest, the Seam being the only fixed
 /// thing in a room with no spawn to pave a trunk to. The room is the outpost's
 /// own: the Layout stamps the single room it plans onto every site it emits,
@@ -2371,13 +2372,24 @@ let planLayout
 let internal planOutpostContainers (view: ColonyView) atlas : Intent list * WaitingContainer list =
     let home = SpatialInfo.homeName view.Spatial
 
+    // And the ore rooms' deposits the colony digs (`Facts.digWanted`) under
+    // the extractor already standing on them: the miner stands on its
+    // container as on a home mine's, and no spawn there paves a trunk to
+    // seat it against.
+    let mines =
+        Facts.ourDeposits view
+        |> List.filter (fun id ->
+            Atlas.targetRoom atlas id |> Option.exists (fun room -> room <> home)
+            && Facts.digWanted view id
+            && (Atlas.extractorOn atlas id).IsSome)
+
     // Every rock the projection places in a room that is not home and that
     // the colony is looking into this tick — `RoomControl` carries one
     // entry per seen room, and vision is what both the census below and
     // the Executor's own `Game.rooms` lookup are paid for with.
-    view.Sources
-    |> List.choose (fun s ->
-        match Atlas.positionOf atlas s.Id with
+    (view.Sources |> List.map (fun s -> s.Id)) @ mines
+    |> List.choose (fun rockId ->
+        match Atlas.positionOf atlas rockId with
         // Not a nursery's rock its pioneers dig (#473): a container is a
         // third of a spawn, and the child plans its own once it casts.
         // Nor into a room anybody but us reserves (#334): the engine refuses
@@ -2388,7 +2400,7 @@ let internal planOutpostContainers (view: ColonyView) atlas : Intent list * Wait
                |> Option.exists (RoomControlInfo.heldByOther >> Option.isNone)
             && not (List.contains tile.Room view.Borrowed.Rooms)
             ->
-            Some(s.Id, tile)
+            Some(rockId, tile)
         | _ -> None)
     |> List.choose (fun (sourceId, source) ->
         let room = source.Room

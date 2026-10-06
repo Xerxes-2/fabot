@@ -586,3 +586,42 @@ let pickupArrivalTests =
                     "still two off: nothing"
             }
         ]
+
+[<Tests>]
+let heldWalkSweepTests =
+    testList
+        "a held errand's walk"
+        [
+            test "a held errand's walk is crossed for walking alone: no sweep there" {
+                // The hold pauses the Reactor (user, 2026-10-07); the walk to
+                // its room stays projected for the miner, and the ore on that
+                // floor (an ally's courier dies there too) is no errand of ours.
+                let crossing = "W1N2"
+
+                let onTheWay =
+                    { (deliveryColony (Some Ownership.Ours)
+                       |> withPileIn crossing "pile-crossing" 419
+                       |> withTombstoneIn crossing "tomb-crossing" 175) with
+                        Errands = []
+                        OreRooms = Set.empty
+                        Crossed = Set.singleton crossing
+                    }
+
+                let heldBeyond =
+                    { onTheWay with
+                        OreRooms = Set.singleton "W1N3"
+                    }
+
+                Expect.contains
+                    (planTasksOn onTheWay noThreats)
+                    (Pickup("pile-crossing", Thorium))
+                    "the premise: a crossed floor is swept"
+
+                let pooled = planTasksOn heldBeyond noThreats
+
+                Expect.isFalse
+                    (List.contains (Pickup("pile-crossing", Thorium)) pooled
+                     || List.contains (Withdraw("tomb-crossing", Thorium)) pooled)
+                    "on a held errand's walk, neither the pile nor the tombstone"
+            }
+        ]

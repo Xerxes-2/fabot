@@ -174,6 +174,8 @@ type IResource =
 type IFallenCreep =
     abstract id: string
     abstract my: bool
+    /// Whose creep it was.
+    abstract owner: IOwner
 
 /// A tombstone or a ruin: one binding, since the projection reads the same
 /// three fields off both and `creep.withdraw` takes any store.

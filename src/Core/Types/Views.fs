@@ -463,6 +463,8 @@ type ColonyView =
         /// The sources of the children this colony bootstraps past their
         /// nursery: dug by its pioneers standing there, and out of every
         /// quota, which `Sources` feeds and the child's own rows count (#192).
+        /// And an errand room's, dug on the same terms by the bodies building
+        /// or repairing its [[ore]] mine.
         BorrowedSources: SourceInfo list
         /// Every other colony home with a terminal whose Storage holds under
         /// its own [[emergency reserve]], the furthest short of it first: where
@@ -471,6 +473,9 @@ type ColonyView =
         /// `StandDown.ReserveShort`: whether the last decided tick read this
         /// colony's stock under its [[emergency reserve]].
         ReserveShort: bool
+        /// `StandDown.DigOpen`: the [[ore]]s whose dig the last decided tick
+        /// left open.
+        DigOpen: Set<Ore> option
         /// `StandDown.HaulOverflow`: the haul overflow reading the last
         /// decided tick left (#508).
         HaulOverflow: HaulOverflow
@@ -567,8 +572,13 @@ type ColonyView =
         /// (`Errand.routable`), so a rule that reads it can neither pool a
         /// Task nor hire a body for a room no chain of [[seam]]s reaches. Two
         /// rules read it — the [[reclaim]] Task's pool and the re-claimer's
-        /// seat on the reserver row.
+        /// seat on the reserver row. A held one is not here: the hold pauses
+        /// the Reactor's work.
         Errands: Errand list
+        /// The rooms past home whose [[ore]] this colony digs into its home
+        /// terminal: every errand room the scan works, held or not
+        /// (`ColonyView.oreRooms`).
+        OreRooms: Set<string>
         /// The structures standing in this colony's [[salvage]] rooms that its
         /// dismantler takes down (`Salvage.isTarget`), by id: placed in the
         /// projection and classified by nothing (`salvaging`), so a rule names
@@ -700,6 +710,10 @@ type ColonyView =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module ColonyView =
+    /// The rooms past home whose [[ore]] this colony digs into its home
+    /// terminal: its errand rooms, held or not, less a stood-down one.
+    let oreRooms (view: ColonyView) : Set<string> = view.OreRooms
+
     /// The view with the world's vision of these rooms laid in, for each one
     /// it does not project (#534): their hostiles, allies, cores, tombstones
     /// and control, as the cut would have filed them. What the [[raid log]]
@@ -850,6 +864,41 @@ module ColonyView =
             Sources = if digs then facts.Sources else []
         }
 
+    /// A room's facts without an [[ally]]'s loot: the tombstone of an ally's
+    /// creep, and in a room an ally owns or reserves every pile and
+    /// tombstone. The ally rule of what we may strike, applied to what we
+    /// may take: no Task names it, so no body walks for it.
+    let private withoutAllyLoot (facts: RoomFacts) : RoomFacts =
+        let allyHolds =
+            facts.RivalController |> Option.exists (fun rival -> Colony.isAlly rival.Owner)
+            || facts.Control
+               |> Option.bind (fun control -> control.Reservation)
+               |> Option.exists (fun held -> Colony.isAlly held.Username)
+
+        let loot =
+            facts.TargetKinds
+            |> Map.filter (fun id kind ->
+                match kind with
+                | Tombstone -> allyHolds || Set.contains id facts.AllyGraves
+                | Dropped _ -> allyHolds
+                | _ -> false)
+
+        if Map.isEmpty loot then
+            facts
+        else
+            let kept map =
+                map |> Map.filter (fun id _ -> not (Map.containsKey id loot))
+
+            { facts with
+                Layer =
+                    { facts.Layer with
+                        TargetPositions = kept facts.Layer.TargetPositions
+                    }
+                TargetKinds = kept facts.TargetKinds
+                Stores = kept facts.Stores
+                Thorium = kept facts.Thorium
+            }
+
     /// A **transit** room's facts: the ground a chain of [[seam]]s crosses and
     /// the bodies standing on it, and not one thing a rule could work.
     /// `furnitureOf` lays nothing in a transit room, but the tick one of our
@@ -958,11 +1007,12 @@ module ColonyView =
     /// both; the act treats missing ownership as *not ours*, the observation
     /// fold keeps its dated sample as stale.
     ///
-    /// The kind census is **the decaying ore and nothing else** (#356, #359):
+    /// The kind census is **the decaying ore and the ore mine** (#356, #359):
     /// every pool sweeps `TargetKinds`, so a target classified by nothing is
     /// priceable by the errand's own Tasks and enumerable by no pool. What is
     /// classified is what decays and is gone in a few hundred ticks if nothing
-    /// names it. The hits stay out: an errand's target is not a thing this
+    /// names it, and the room's [[ore]] deposit with what digs it (below).
+    /// The target's hits stay out: an errand's target is not a thing this
     /// colony repairs.
     let private erranding (targets: Set<string>) (facts: RoomFacts) : RoomFacts =
         let crossed = transiting facts
@@ -983,17 +1033,66 @@ module ColonyView =
             |> Map.filter (fun id kind ->
                 kind = Dropped Thorium || (kind = Tombstone && Map.containsKey id facts.Thorium))
 
-        let admitted = Set.union targets (decayingOre |> Map.keys |> Set.ofSeq)
+        // **And the room's ore mine**: an ore deposit, the
+        // extractor on its tile, and the containers and our container sites
+        // on its Seats — what the miner digs, the Layout seats and the haul
+        // draws from. Whether it is dug is the colony's (`Facts.digWanted`);
+        // what is carried is only ever the mine.
+        let tileOf id =
+            Map.tryFind id facts.Layer.TargetPositions
+
+        let oreTiles =
+            facts.TargetKinds
+            |> Map.toList
+            |> List.choose (fun (id, kind) ->
+                match kind with
+                | Mineral(Ore _) -> tileOf id
+                | _ -> None)
+
+        let mine =
+            facts.TargetKinds
+            |> Map.filter (fun id kind ->
+                let at reach =
+                    tileOf id
+                    |> Option.exists (fun tile ->
+                        oreTiles |> List.exists (fun rock -> range tile rock <= reach))
+
+                match kind with
+                | Mineral(Ore _) -> true
+                // The room's sources, for the energy the bodies building and
+                // repairing the mine dig where they stand (`ofWorld` files
+                // them as `BorrowedSources`): no Post, haul or row is hung
+                // off them.
+                | Source -> true
+                | Structure BuiltKind.Extractor -> at 0
+                | Structure BuiltKind.Container
+                | Site BuiltKind.Container -> at 1
+                | _ -> false)
+
+        let admitted =
+            Set.unionMany
+                [ targets; decayingOre |> Map.keys |> Set.ofSeq; mine |> Map.keys |> Set.ofSeq ]
 
         let named map =
             map |> Map.filter (fun id _ -> Set.contains id admitted)
+
+        let mined map =
+            map |> Map.filter (fun id _ -> Map.containsKey id mine)
 
         { crossed with
             Layer =
                 { crossed.Layer with
                     TargetPositions = named facts.Layer.TargetPositions
                 }
-            TargetKinds = decayingOre
+            TargetKinds = Map.fold (fun kinds id kind -> Map.add id kind kinds) decayingOre mine
+            // The mine's container decays like an outpost's, and is repaired
+            // like one.
+            Hits = mined facts.Hits
+            Ore = mined facts.Ore
+            ConstructionSites =
+                facts.ConstructionSites
+                |> List.filter (fun site -> Map.containsKey site.Id mine)
+            Sources = facts.Sources
             // **The energy column is the declaration's alone** (#359): a
             // tombstone that also holds energy would otherwise pool an energy
             // Withdraw three crossings from home off a census entry granted
@@ -1328,7 +1427,7 @@ module ColonyView =
         let narrowed =
             scanned
             |> List.map (fun room ->
-                let facts = World.roomOf world room
+                let facts = World.roomOf world room |> withoutAllyLoot
                 let remembered = Map.tryFind room world.Sightings
 
                 if List.contains room bootstrap then
@@ -1450,10 +1549,15 @@ module ColonyView =
             Tuning = tuning
             Bank = homeFacts.Energy
             Refillables = homeFacts.Refillables
-            // Every worked room's sources but a bootstrapped child's (#192),
-            // with the declared outpost rocks laid in beside them.
-            Sources = sourcesWhere (raised >> not) |> Outpost.pooledSources scanned outposts
-            BorrowedSources = sourcesWhere raised
+            // Every worked room's sources but a bootstrapped child's (#192) and
+            // an errand room's, with the declared outpost rocks laid in
+            // beside them. Those two are dug only by a body already standing
+            // there: the child's pioneers, and the bodies building or
+            // repairing the errand room's ore mine.
+            Sources =
+                sourcesWhere (fun room -> not (raised room || errandRooms.Contains room))
+                |> Outpost.pooledSources scanned outposts
+            BorrowedSources = sourcesWhere (fun room -> raised room || errandRooms.Contains room)
             MinedRooms =
                 colonies
                 |> List.collect (fun other -> other.Outposts |> List.map (fun o -> o.RoomName))
@@ -1488,6 +1592,7 @@ module ColonyView =
                 |> List.sort
                 |> List.map snd
             ReserveShort = gate.ReserveShort
+            DigOpen = gate.DigOpen
             HaulOverflow = gate.HaulOverflow
             Controller = homeFacts.Controller
             RoomControl = control
@@ -1571,8 +1676,10 @@ module ColonyView =
             // The scan set's own errand list and never `colony.Errands` read a
             // second time: a refused errand has left the scan set, and a rule
             // pooling off the declaration would name a target in a room the
-            // projection does not hold.
-            Errands = errands
+            // projection does not hold. A held one's room is projected for
+            // its ore alone.
+            Errands = Errand.unheld errands
+            OreRooms = errands |> List.map (fun errand -> errand.RoomName) |> Set.ofList
             Dismantles =
                 (scan.Salvage
                  |> List.collect (fun room ->

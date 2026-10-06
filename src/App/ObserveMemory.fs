@@ -970,6 +970,22 @@ let loadRaids (home: string) : RaidState =
             // non-boolean would latch a colony under its reserve (#505).
             ReserveShort =
                 jsTypeof raids?reserveShort = "boolean" && unbox<bool> raids?reserveShort
+            // The ore dig's latch: the engine's letters, any other entry read
+            // as shut. A missing key or a non-list is a latch never written,
+            // read as every dig open, so a deploy shuts no running dig.
+            DigOpen =
+                if not (JS.Constructors.Array.isArray raids?digOpen) then
+                    None
+                else
+                    raids?digOpen
+                    |> unbox<obj[]>
+                    |> Array.choose (fun letter ->
+                        allOres
+                        |> List.tryFind (fun ore ->
+                            jsTypeof letter = "string"
+                            && unbox<string> letter = resourceName (Ore ore)))
+                    |> Set.ofArray
+                    |> Some
             // The haul overflow reading (#508), on the same terms: a
             // non-number fill reads empty, and one off 0..1 is clamped into
             // it, so a hand-edit cannot hold the extra body for good.
@@ -1032,6 +1048,11 @@ let saveRaids (home: string) (declared: string list) (state: RaidState) =
     // not written here.
     // The emergency reserve's latch (#505).
     raids?reserveShort <- state.ReserveShort
+    // The ore dig's latch, in the engine's letters, `[]` while every dig is
+    // shut; absent only while never written.
+    state.DigOpen
+    |> Option.iter (fun opened ->
+        raids?digOpen <- opened |> Set.toArray |> Array.map (Ore >> resourceName))
     // The haul overflow reading (#508).
     raids?haulFill <- state.HaulOverflow.Fill
     raids?haulOwed <- state.HaulOverflow.Owed

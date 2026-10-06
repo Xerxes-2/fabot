@@ -115,6 +115,31 @@ let outpostTests =
                     "level 1: every room stands down to the collapse, as before"
             }
 
+            test
+                "any raid stands down a held errand's room, dug for its ore and garrisoned by nobody" {
+                // The hold pauses the Reactor (user, 2026-10-07): no row of
+                // ours answers a raid there, so the miner walks home.
+                let oreRoom = "W16S27"
+
+                let raided =
+                    { quiet with
+                        OreRooms = Set.singleton oreRoom
+                        Hostiles = [ raiderIn oreRoom 1 [ Move; Attack ] ]
+                        Bank = { Available = 0; Capacity = 1_500 }
+                    }
+
+                Expect.equal
+                    (shutAt 101 (RaidState.empty |> raidTick 100 raided))
+                    (Set.singleton oreRoom)
+                    "one melee body shuts it"
+
+                Expect.isEmpty
+                    (shutAt
+                        101
+                        (RaidState.empty |> raidTick 100 { raided with OreRooms = Set.empty }))
+                    "the premise: a room we dig nothing in is not ours to shut"
+            }
+
             test "a raid two guards cannot beat stands the room down to its own life" {
                 // #257: a stand-down clocked off an invader *core* alone gave a raid of
                 // plain creeps no deadline; W13S29 stayed open through one and in three

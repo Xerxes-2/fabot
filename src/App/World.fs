@@ -896,6 +896,21 @@ let private seenFacts
 
                 if isNull (box dead) || dead.my then None else Some dead.id)
             |> Array.toList
+        // An ally's tombstones, by tombstone id: its loot, never ours.
+        AllyGraves =
+            graves
+            |> Array.choose (fun grave ->
+                let dead = grave.creep
+
+                if
+                    isNull (box dead)
+                    || isNull (box dead.owner)
+                    || not (Colony.isAlly dead.owner.username)
+                then
+                    None
+                else
+                    Some grave.id)
+            |> Fresh.setOfSeq
     }
 
 /// One room of the world as the engine hands it back this tick, or None

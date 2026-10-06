@@ -471,6 +471,10 @@ type RaidState =
         /// Whether this tick read the stock under its [[emergency reserve]]
         /// (`Facts.belowReserve`, #505): next tick's latch.
         ReserveShort: bool
+        /// The [[ore]]s whose dig this tick left open (`Facts.oresDigOpen`):
+        /// next tick's latch. None for a latch never written (a leaf from
+        /// before it), read as every dig open.
+        DigOpen: Set<Ore> option
         /// The haul overflow reading the last decided tick wrote
         /// (`Decision.HaulOverflow`, #508): next tick's base to smooth on
         /// from. Set by the loop off the decision; the fold leaves it alone.
@@ -513,6 +517,7 @@ module RaidState =
             Probes = Map.empty
             Taken = Map.empty
             ReserveShort = false
+            DigOpen = None
             HaulOverflow = HaulOverflow.none
             HomeRaided = None
             Living = Set.empty
@@ -674,6 +679,10 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
 
     let outpostRooms = Set.ofList declared
 
+    // A held errand's room, dug for its [[ore]] and garrisoned by nobody:
+    // any raid stands it down, since no row of ours is cast to answer one.
+    let unguarded = Set.difference (ColonyView.oreRooms view) rangerRooms
+
     // The raid is the bodies that still hurt something, the one predicate
     // `strikeGone` enrols on (#513): a body whose weapons are shot off, and
     // no heal reaches, neither opens a row nor holds one.
@@ -687,8 +696,9 @@ let private raidDeadlines (view: ColonyView) (declared: string list) =
         && not (HostileInfo.stationary view.Hostiles h))
     |> List.groupBy (fun h -> h.Pos.Room)
     |> List.filter (fun (room, _) ->
-        (Set.contains room rangerRooms || Set.contains room outpostRooms)
-        && Decide.Facts.answer view room = Answer.Lose)
+        Set.contains room unguarded
+        || (Set.contains room rangerRooms || Set.contains room outpostRooms)
+           && Decide.Facts.answer view room = Answer.Lose)
     |> List.map (fun (room, raid) ->
         if Set.contains room view.HarassCast then
             room, (view.Time + view.Tuning.HarassClearTicks, StandDownBasis.HarassSighting)
@@ -1090,6 +1100,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         Fought = state.Fought
         Taken = state.Taken |> Map.keys |> Set.ofSeq
         ReserveShort = state.ReserveShort
+        DigOpen = state.DigOpen
         HaulOverflow = state.HaulOverflow
         HomeRaided = state.HomeRaided
     }
@@ -1437,6 +1448,7 @@ let foldRaids
         Probes = prior.Probes
         Taken = foldTaken view prior.Taken
         ReserveShort = Decide.Facts.belowReserve view
+        DigOpen = Some(Decide.Facts.oresDigOpen view)
         HaulOverflow = prior.HaulOverflow
         HomeRaided =
             if Decide.Facts.raided view (SpatialInfo.homeName view.Spatial) then

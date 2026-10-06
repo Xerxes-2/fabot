@@ -259,7 +259,7 @@ The season's scoring resource (`Resource.Thorium`): a finite deposit read off `F
 _Avoid_: mineral (the engine's word for the object), ore (the room's own, below)
 
 ### Ore
-A room's ordinary mineral — H, O, U, K, L, Z or X (`Resource.Ore`) — dug for the labs (ADR-0089). A home digs it only once no [[thorium]] deposit stands in the room (the room's one extractor is the Thorium's while any does; one left on a mined-out Thorium tile is destroyed once its container is empty, and the ore's placed) and only while a terminal stands there: by the same [[miner]] into its own mineral [[container]], hauled by the [[hauler unit]] row into the home terminal while that terminal holds under `Tuning.OreTarget` and the [[storage]] stands `Tuning.OreEnergyMargin` over the [[emergency reserve]]. A body holding ore takes no energy intake.
+A room's ordinary mineral — H, O, U, K, L, Z or X (`Resource.Ore`) — dug for the labs (ADR-0089). A home digs it only once no [[thorium]] deposit stands in the room (the room's one extractor is the Thorium's while any does; one left on a mined-out Thorium tile is destroyed once its container is empty, and the ore's placed) and only while a terminal stands there: by the same [[miner]] into its own mineral [[container]], hauled by the [[hauler unit]] row into the home terminal while that terminal holds under `Tuning.OreTarget` and the [[storage]] stands `Tuning.OreEnergyMargin` over the [[emergency reserve]] — a dig left shut opens only `Tuning.OreTargetBand` under the target and `Tuning.OreEnergyBand` over the margin (`RaidState.DigOpen`; a latch never written reads open, so a deploy shuts no running dig). An [[errand]] room's ore is dug the same way into the home terminal, held or not, while no [[stand-down]] shuts the room (the Reactor's utrium in W15S25, through its neutral extractor), its container seated as an [[outpost]]'s; never its Thorium. A held errand's room is garrisoned by nobody, so any raid there stands it down, and its walk is crossed for walking alone (no sweep). The room's sources are dug only by the bodies building or repairing its mine, where they stand. An [[ally]]'s tombstone, and every drop in a room an ally holds, is never ours to take. An ore miner is cast behind a short [[courier]] row. A body holding ore takes no energy intake.
 _Avoid_: mineral, compound (a lab's product)
 
 ### Keep
@@ -315,7 +315,7 @@ A room within `Tuning.MaxHops` crossings of the [[home room]] that this colony m
 _Avoid_: remote, franchise, territory
 
 ### Errand
-A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its garrison of [[ranger]]s, kept while there is ore to burn in it (#420), which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
+A room a [[colony]] declares because it must walk a body there and act on one named object in it — a room name, the object's id and tile, and nothing else — so a sector centre with no controller can be declared. Nothing else in it is pooled but its [[ore]] mine and its garrison of [[ranger]]s, kept while there is ore to burn in it (#420), which fights a raid where the ranger's reach wins; a raid that reach loses to makes it a [[stand-down]]. ADR-0060, ADR-0077, ADR-0078.
 _Avoid_: goal, mission, remote target
 
 ### Evacuating room

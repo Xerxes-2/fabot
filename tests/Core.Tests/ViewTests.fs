@@ -3619,7 +3619,8 @@ let errandTests =
     testList
         "an errand carries the ground, the walk, and the one thing declared in it"
         [
-            test "a held errand is worked by nothing and refused by nothing" {
+            test
+                "a held errand pauses the Reactor's work, keeps its room for the ore, and is refused by nothing" {
                 let held =
                     errandDeclared
                     |> List.map (fun colony ->
@@ -3641,9 +3642,13 @@ let errandTests =
                     paused.Errands
                     "held, no rule sees it: no Reclaim, no courier, no delivery"
 
-                Expect.isFalse
+                // User, 2026-10-07: the hold pauses the Reactor alone; the
+                // room's ore is dug through it, so the room stays projected.
+                Expect.isTrue
                     (Map.containsKey errandRoom paused.Spatial.Rooms)
-                    "and its room leaves the projection, as a shut room does"
+                    "its room stays projected"
+
+                Expect.equal paused.OreRooms (Set.singleton errandRoom) "and is an ore room"
 
                 // A declaration no chain reaches is refused loudly (#243) —
                 // unless a human has held it, which is not the same fact.
@@ -3678,6 +3683,166 @@ let errandTests =
                 Expect.isEmpty
                     (viewUnder (unreachable true) errandWorld mother).Refused
                     "held, it is a pause and not a refusal"
+            }
+
+            test
+                "an ally's loot never reaches the view: its creep's tombstone, and every drop in a room it reserves" {
+                // The ally rule of what we may strike, applied to what we may
+                // take: an Odiodin courier dying on the walk leaves its score
+                // to Odiodin.
+                let crossing tombs piles reserver =
+                    let name, facts =
+                        roomOf
+                            errandCrossed
+                            Ownership.Unowned
+                            ([ for id in tombs -> id, { X = 7; Y = 7 }, Tombstone ]
+                             @ [ for id in piles -> id, { X = 8; Y = 8 }, Dropped Thorium ])
+
+                    name,
+                    { facts with
+                        Thorium = (tombs @ piles) |> List.map (fun id -> id, 300) |> Map.ofList
+                        AllyGraves = Set.singleton "tomb-ally"
+                        Control =
+                            facts.Control
+                            |> Option.map (fun control ->
+                                { control with
+                                    Reservation =
+                                        reserver
+                                        |> Option.map (fun who ->
+                                            {
+                                                Holder = ReservationHolder.Rival
+                                                Username = who
+                                                TicksToEnd = 3_000
+                                            })
+                                })
+                    }
+
+                let kindsWith room =
+                    (viewUnder
+                        errandDeclared
+                        { errandWorld with
+                            Rooms = Map.add (fst room) (snd room) errandWorld.Rooms
+                        }
+                        mother)
+                        .Spatial.TargetKinds
+
+                let open' = kindsWith (crossing [ "tomb-ally"; "tomb-other" ] [ "pile-other" ] None)
+
+                Expect.isFalse
+                    (Map.containsKey "tomb-ally" open')
+                    "an ally's creep's tombstone: not ours"
+
+                Expect.isTrue
+                    (Map.containsKey "tomb-other" open')
+                    "anyone else's still is, as before"
+
+                Expect.isTrue (Map.containsKey "pile-other" open') "and the pile beside it"
+
+                let allyHeld =
+                    kindsWith (crossing [ "tomb-other" ] [ "pile-other" ] (Some "Odiodin"))
+
+                Expect.isFalse
+                    (Map.containsKey "tomb-other" allyHeld || Map.containsKey "pile-other" allyHeld)
+                    "in a room an ally reserves, nothing on the floor is ours"
+            }
+
+            test
+                "an errand room's ore mine and its rocks reach the view, and nothing else of the room does" {
+                // The Reactor's room's utrium: the deposit, the
+                // neutral extractor on its tile, the container and our site on
+                // its Seats. The room's own source and the container beside
+                // it stay out, as before.
+                let name, facts = errandSeen
+
+                let mined =
+                    roomOf
+                        name
+                        Ownership.Unowned
+                        [
+                            "min-u", { X = 20; Y = 20 }, Mineral(Ore Utrium)
+                            "ext-u", { X = 20; Y = 20 }, Structure BuiltKind.Extractor
+                            "can-u", { X = 21; Y = 20 }, Structure BuiltKind.Container
+                            "site-u", { X = 20; Y = 21 }, Site BuiltKind.Container
+                            "can-far", { X = 23; Y = 20 }, Structure BuiltKind.Container
+                        ]
+                    |> withSites [ "site-u" ]
+                    |> snd
+
+                let furnished =
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                TargetPositions =
+                                    Map.fold
+                                        (fun placed id pos -> Map.add id pos placed)
+                                        facts.Layer.TargetPositions
+                                        mined.Layer.TargetPositions
+                            }
+                        TargetKinds =
+                            Map.fold
+                                (fun kinds id kind -> Map.add id kind kinds)
+                                facts.TargetKinds
+                                mined.TargetKinds
+                        ConstructionSites = facts.ConstructionSites @ mined.ConstructionSites
+                        Ore =
+                            Map.ofList
+                                [
+                                    "min-u", Map.ofList [ Utrium, 35_000 ]
+                                    "can-u", Map.ofList [ Utrium, 500 ]
+                                ]
+                        Hits =
+                            Map.ofList
+                                [
+                                    "can-u", { Hits = 200_000; HitsMax = 250_000 }
+                                    "can-far", { Hits = 200_000; HitsMax = 250_000 }
+                                    "can-errand", { Hits = 200_000; HitsMax = 250_000 }
+                                ]
+                        Cooldowns = Map.add "ext-u" 2 facts.Cooldowns
+                    }
+
+                let view =
+                    viewUnder
+                        errandDeclared
+                        { errandWorld with
+                            Rooms = Map.add name furnished errandWorld.Rooms
+                        }
+                        mother
+
+                let kinds = view.Spatial.TargetKinds
+
+                for id in [ "min-u"; "ext-u"; "can-u"; "site-u"; "src-errand" ] do
+                    Expect.isTrue
+                        (Map.containsKey id kinds)
+                        $"{id}: the mine's, or the rock its builders dig"
+
+                for id in [ "can-far"; "can-errand"; "site-errand" ] do
+                    Expect.isFalse (Map.containsKey id kinds) $"{id}: not the mine's"
+
+                Expect.equal
+                    (SpatialInfo.heldIn view.Spatial (Ore Utrium) "can-u")
+                    500
+                    "the container's ore"
+
+                Expect.equal
+                    (Map.tryFind "ext-u" view.Spatial.Cooldowns)
+                    (Some 2)
+                    "the extractor's clock"
+
+                Expect.equal
+                    (view.Spatial.Hits
+                     |> Map.keys
+                     |> List.ofSeq
+                     |> List.filter (fun id ->
+                         List.contains id [ "can-u"; "can-far"; "can-errand" ]))
+                    [ "can-u" ]
+                    "the mine's container is repaired like an outpost's, and no other"
+
+                Expect.equal
+                    (view.ConstructionSites
+                     |> List.map (fun site -> site.Id)
+                     |> List.filter (fun id -> id.EndsWith "-u"))
+                    [ "site-u" ]
+                    "our site on its Seat is built"
             }
 
             test
@@ -3815,6 +3980,13 @@ let errandTests =
                     (List.contains "src-errand" (idsOf view))
                     "its rock is not pooled, whatever vision answered"
 
+                // The bodies building its ore mine dig the rock
+                // where they stand, as a child's pioneers dig hers.
+                Expect.contains
+                    (view.BorrowedSources |> List.map (fun s -> s.Id))
+                    "src-errand"
+                    "it is dug only by a body already standing there"
+
                 Expect.isFalse
                     (Map.containsKey "can-errand" view.Spatial.TargetKinds)
                     "its container is classified by nothing, so no Refill or Withdraw is pooled on it"
@@ -3832,8 +4004,11 @@ let errandTests =
                      |> Option.map (fun layer -> layer.TargetPositions)
                      |> Option.defaultValue Map.empty
                      |> Map.filter (fun id _ ->
-                         id <> reactor && id <> "pile-errand" && id <> "tomb-errand"))
-                    "three tiles are placed in that room: the declared one's, the ore on its floor (#356) and the ore in the tombstone on it (#359)"
+                         id <> reactor
+                         && id <> "pile-errand"
+                         && id <> "tomb-errand"
+                         && id <> "src-errand"))
+                    "four tiles are placed in that room: the declared one's, the ore on its floor (#356), the ore in the tombstone on it (#359) and its rock"
             }
 
             test "ore on the errand room's floor is the one thing beside the declaration that rides" {

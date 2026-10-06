@@ -494,13 +494,21 @@ let internal inARoomWeOwn (view: ColonyView) (id: string) : bool =
 /// with its own deposit, extractor and container, and `harvest` refuses a
 /// mineral whose extractor belongs to somebody else: one `ERR_NOT_OWNER` a
 /// tick for the whole of a body's life.
+///
+/// And the ore of the rooms past home the colony digs into its terminal
+/// (`ColonyView.oreRooms`, the errands it works): the Reactor's room has no
+/// controller to own, and its neutral extractor is anybody's to dig through.
 let internal ourDeposits (view: ColonyView) : string list =
+    let oreRooms = ColonyView.oreRooms view
+
     view.Spatial.Rooms
     |> Map.toList
     |> List.filter (fun (room, _) ->
-        Map.tryFind room view.RoomControl
-        |> Option.exists (fun control -> control.Owner = Ownership.Ours))
-    |> List.collect (fun (room, _) -> SpatialInfo.dugMineralsIn view.Spatial room |> List.map fst)
+        Set.contains room oreRooms
+        || Map.tryFind room view.RoomControl
+           |> Option.exists (fun control -> control.Owner = Ownership.Ours))
+    |> List.collect (fun (room, _) ->
+        SpatialInfo.dugMineralsIn view.Spatial oreRooms room |> List.map fst)
 
 /// What a mineral holds, and None for a target that is no mineral.
 let internal mineralResourceOf (view: ColonyView) (id: string) : Resource option =
@@ -1730,6 +1738,20 @@ let internal errandRoomsDeliverable (view: ColonyView) : Set<string> =
 let private oursToSweep (view: ColonyView) (id: string) : bool =
     let errandRooms = errandRooms view
 
+    // A held errand's walk is crossed for the miner's walking alone: the
+    // Reactor's work is paused, and the ore on that floor (an ally's courier
+    // dies there too) is nobody's errand of ours. A room on an unheld
+    // errand's walk as well keeps its sweep.
+    let heldWalks =
+        let home = SpatialInfo.homeName view.Spatial
+
+        let walks rooms =
+            rooms |> Set.toList |> List.collect (RoomName.transitBetween home) |> Set.ofList
+
+        Set.difference
+            (walks (Set.difference (ColonyView.oreRooms view) errandRooms))
+            (walks errandRooms)
+
     inARoomWeOwn view id
     || SpatialInfo.roomOf view.Spatial id
        |> Option.exists (fun room ->
@@ -1742,7 +1764,8 @@ let private oursToSweep (view: ColonyView) (id: string) : bool =
               // Never in an evacuating room: no sweep may walk a body in (#512).
               && not (Set.contains room view.Evacuating)
               // Nor in a child's outpost: its floor is the child's (#517).
-              && not (List.contains room view.Borrowed.ChildOutposts))
+              && not (List.contains room view.Borrowed.ChildOutposts)
+              && not (Set.contains room heldWalks))
 
 /// The Thorium on the ground in a room this colony sweeps, in id order (#311):
 /// the dig that landed on the floor because the container was at its 2,000
@@ -1909,15 +1932,30 @@ let internal givesAid (view: ColonyView) : bool =
 /// `Tuning.OreEnergyMargin` over the [[emergency reserve]] — the dig is paid
 /// for in bodies. No terminal at home, no ore wanted: there is nowhere to put
 /// it.
+///
+/// Latched (`ColonyView.DigOpen`): a dig the last decided tick left shut
+/// opens only once the terminal stands `Tuning.OreTargetBand` under the
+/// target and the Storage `Tuning.OreEnergyBand` over its margin, so a
+/// stock hovering at either line casts the miner row once and not on each
+/// crossing.
 let internal oreWanted (view: ColonyView) (ore: Ore) : bool =
     let terminals =
         SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Terminal)
         |> List.filter (SpatialInfo.placedAway view.Spatial >> not)
 
+    let stockBand, energyBand =
+        // A latch never written reads open: a deploy shuts no running dig.
+        if view.DigOpen |> Option.forall (Set.contains ore) then
+            0, 0
+        else
+            view.Tuning.OreTargetBand, view.Tuning.OreEnergyBand
+
     not (List.isEmpty terminals)
     && terminals |> List.sumBy (SpatialInfo.heldIn view.Spatial (Ore ore)) < view.Tuning.OreTarget
+                                                                             - stockBand
     && homeStock view
-       |> Option.exists (fun stock -> stock > energyReserve view + view.Tuning.OreEnergyMargin)
+       |> Option.exists (fun stock ->
+           stock > energyReserve view + view.Tuning.OreEnergyMargin + energyBand)
 
 /// Whether the colony wants a mineral of ours dug at all this tick: Thorium
 /// always — it keeps priority, and nothing but the extractor rations it — and
@@ -1944,6 +1982,17 @@ let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
 let internal oreDug (view: ColonyView) : string list =
     ourDeposits view
     |> List.filter (fun id -> mineralResourceOf view id <> Some Thorium && digWanted view id)
+
+/// The ores whose dig is open this tick — what the raid log writes back as
+/// next tick's latch (`ColonyView.DigOpen`). Off the deposits dug, so an ore
+/// no rock of ours holds is never latched.
+let internal oresDigOpen (view: ColonyView) : Set<Ore> =
+    oreDug view
+    |> List.choose (fun id ->
+        match mineralResourceOf view id with
+        | Some(Ore ore) -> Some ore
+        | _ -> None)
+    |> Set.ofList
 
 /// Whether more ore is still on its way to the Storage: a diggable Thorium
 /// deposit of ours, or ore already standing in a mineral container. The

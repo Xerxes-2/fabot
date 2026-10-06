@@ -15,9 +15,12 @@ let episodeTests =
             test "a colony nobody is raiding records nothing" {
                 let state = RaidState.empty |> raidTick 10 quiet |> raidTick 11 quiet
 
+                // Bar the dig latch, which every decided tick writes.
                 Expect.equal
                     state
-                    RaidState.empty
+                    { RaidState.empty with
+                        DigOpen = Some Set.empty
+                    }
                     "a tick with no hostile and no open episode leaves the log as it found it"
             }
 
@@ -774,7 +777,9 @@ let lossTests =
 
                 Expect.equal
                     state
-                    RaidState.empty
+                    { RaidState.empty with
+                        DigOpen = Some Set.empty
+                    }
                     "peacetime attrition opens no episode and leaves no loss behind"
             }
 
@@ -1942,6 +1947,24 @@ let reserveLatchTests =
                 Expect.isTrue (latch 10_100 true) "latched, a hundred past the line is still under"
                 Expect.isFalse (latch 10_200 true) "a hauler load past it: released"
                 Expect.isFalse (latch 10_100 false) "unlatched, the line is the reserve itself"
+            }
+
+            test "the fold writes the ores dug this tick as the next tick's dig latch" {
+                let ore = Fabot.Core.Tests.Decide.Fixtures.oreColony
+
+                Expect.equal
+                    (raidTick 100 ore RaidState.empty).DigOpen
+                    (Some(Set.ofList [ Oxygen ]))
+                    "the oxygen dug this tick is latched open"
+
+                Expect.equal
+                    (raidTick
+                        100
+                        (ore |> Fabot.Core.Tests.Decide.Fixtures.withOreIn "term-1" Oxygen 6_000)
+                        RaidState.empty)
+                        .DigOpen
+                    (Some Set.empty)
+                    "a terminal at its target latches it shut"
             }
         ]
 

@@ -547,12 +547,20 @@ let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) 
 /// for 1,500 ticks. The Post is read off `Atlas.postsOf`, the same census the
 /// Work Area narrows to. Summed over `ourDeposits`: only an owned RCL6 room can
 /// hold an extractor, and a rival's is as visible as our own.
-let internal minerQuota (view: ColonyView) atlas : int =
-    ourDeposits view
-    // The first two are `depositIsDiggable`, which the hauler's mine term
-    // reads off the same sentence (#262).
-    |> List.filter (fun id ->
-        depositIsDiggable view atlas id && not (Set.isEmpty (Atlas.postsOf atlas id)))
+///
+/// Beside it, the share of those bodies that dig [[ore]]: the ones the row
+/// casts behind a short courier row (`Spawns.planSpawns`).
+let internal minerQuota (view: ColonyView) atlas : int * int =
+    let mined =
+        ourDeposits view
+        // The first two are `depositIsDiggable`, which the hauler's mine term
+        // reads off the same sentence (#262).
+        |> List.filter (fun id ->
+            depositIsDiggable view atlas id && not (Set.isEmpty (Atlas.postsOf atlas id)))
+
+    List.length mined,
+    mined
+    |> List.filter (fun id -> mineralResourceOf view id <> Some Thorium)
     |> List.length
 
 /// The reserver row's quota and its sizing, one rule with three faces: one
@@ -681,6 +689,8 @@ type RowSizing =
         /// (#304): the addend of the target and the multiplier of the charge
         /// must be one number, and the walk of the projection is paid once.
         MinerQuota: int
+        /// `oreMinerQuota`'s answer this tick: the ore digs among them.
+        OreMinerQuota: int
         /// One while the Reactor delivery's current ground facts stand (#319).
         CourierQuota: int
         /// `upgraderWorkOf`'s answer this tick: the Work the upgrader row may
@@ -722,6 +732,8 @@ let internal rowSizingOf
     (outposts: OutpostFacts)
     (held: HeldTaskFacts)
     : RowSizing =
+    let miners, oreMiners = minerQuota view atlas
+
     {
         UpgraderWork = upgraderWorkOf view atlas held
         AnchorPostCaps = postWorkCapsOf view atlas outposts.ReservableRooms
@@ -729,7 +741,8 @@ let internal rowSizingOf
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         GuardBlocks = rowBlocksWanted view threats outposts CastRow.Guard
         RangerBlocks = rowBlocksWanted view threats outposts CastRow.Ranger
-        MinerQuota = minerQuota view atlas
+        MinerQuota = miners
+        OreMinerQuota = oreMiners
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
     }
 

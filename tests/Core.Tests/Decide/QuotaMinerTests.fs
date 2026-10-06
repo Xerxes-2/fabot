@@ -729,9 +729,11 @@ let oreMinerTests =
                 Expect.equal (quotaOfRow "miner" oreColony) (Some 1) "one body for the ore"
 
                 Expect.equal
-                    (quotaOfRow "miner" (oreColony |> withOreIn "term-1" Oxygen 5_999))
+                    (quotaOfRow
+                        "miner"
+                        (oreColony |> digOpen Oxygen |> withOreIn "term-1" Oxygen 5_999))
                     (Some 1)
-                    "one under the target still digs"
+                    "an open dig one under the target still digs"
             }
 
             test "the terminal at its target hires no ore miner" {
@@ -755,14 +757,81 @@ let oreMinerTests =
                     }
 
                 Expect.equal
-                    (quotaOfRow "miner" (atStock oreColony.Tuning.OreEnergyMargin))
+                    (quotaOfRow "miner" (atStock oreColony.Tuning.OreEnergyMargin |> digOpen Oxygen))
                     (Some 0)
                     "at the margin, no dig"
 
                 Expect.equal
-                    (quotaOfRow "miner" (atStock (oreColony.Tuning.OreEnergyMargin + 1)))
+                    (quotaOfRow
+                        "miner"
+                        (atStock (oreColony.Tuning.OreEnergyMargin + 1) |> digOpen Oxygen))
                     (Some 1)
-                    "one over it, the dig"
+                    "one over it, an open dig runs on"
+            }
+
+            test "a shut dig opens only a band past each line, and an open one runs on to the line" {
+                // The latch (`ColonyView.DigOpen`): a terminal or a Storage
+                // hovering at its line casts the miner row once, not on each
+                // crossing. Pairwise on the latch at every line.
+                let band = oreColony.Tuning.OreTargetBand
+                let target = oreColony.Tuning.OreTarget
+
+                let atOre units latched =
+                    oreColony
+                    |> withOreIn "term-1" Oxygen units
+                    |> fun colony -> if latched then digOpen Oxygen colony else colony
+
+                Expect.equal
+                    (quotaOfRow "miner" (atOre (target - band) false))
+                    (Some 0)
+                    "shut, at the band's edge"
+
+                Expect.equal
+                    (quotaOfRow "miner" (atOre (target - band - 1) false))
+                    (Some 1)
+                    "shut, past it: opens"
+
+                Expect.equal
+                    (quotaOfRow "miner" (atOre (target - 1) true))
+                    (Some 1)
+                    "open, under the target"
+
+                Expect.equal
+                    (quotaOfRow "miner" (atOre target true))
+                    (Some 0)
+                    "open, at the target: shuts"
+
+                let margin = oreColony.Tuning.OreEnergyMargin + oreColony.Tuning.OreEnergyBand
+
+                let atStock energy =
+                    { oreColony with
+                        Spatial =
+                            { oreColony.Spatial with
+                                Stores = Map.add "sto-1" energy oreColony.Spatial.Stores
+                            }
+                    }
+
+                Expect.equal
+                    (quotaOfRow "miner" (atStock margin))
+                    (Some 0)
+                    "shut, the Storage at the band's edge"
+
+                Expect.equal
+                    (quotaOfRow "miner" (atStock (margin + 1)))
+                    (Some 1)
+                    "shut, past it: opens"
+            }
+
+            test "a latch never written reads open, so a deploy shuts no running dig" {
+                // A raid log from before the latch carries no `digOpen`.
+                let unwritten =
+                    { oreColony with DigOpen = None }
+                    |> withOreIn "term-1" Oxygen (oreColony.Tuning.OreTarget - 1)
+
+                Expect.equal
+                    (quotaOfRow "miner" unwritten)
+                    (Some 1)
+                    "inside the band, still digging"
             }
 
             test "an ore deposit regenerating at zero hires nobody" {
@@ -797,5 +866,352 @@ let oreMinerTests =
                     (mineDemand (oreColony |> withOreIn "term-1" Oxygen oreColony.Tuning.OreTarget))
                     0
                     "at the target it asks for none"
+            }
+        ]
+
+/// `oreColony` with its own mine taken away — deposit, extractor and
+/// container — so the only rock left to dig is the one a case lays elsewhere.
+let private withoutHomeMine (colony: ColonyView) =
+    let gone = [ "min-a"; "ext-a"; "can-min" ]
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    gone
+                    |> List.fold (fun kinds id -> Map.remove id kinds) colony.Spatial.TargetKinds
+                Ore = Map.remove "min-a" colony.Spatial.Ore
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    TargetPositions =
+                        gone
+                        |> List.fold (fun placed id -> Map.remove id placed) layer.TargetPositions
+                })
+    }
+
+/// The errand room's utrium deposit and the container Seat beside it.
+let private errandMine = { X = 10; Y = 10 }
+let private errandPost = { X = 11; Y = 10 }
+
+/// The reactor room's ore: `oreColony`'s home — its terminal
+/// empty, its Storage at 100,000 — without its own mine, the sector Reactor
+/// declared as its errand, and in the errand room a 35,000 utrium deposit
+/// under the neutral extractor standing on it and a built container on its
+/// Seat. The room is seen: its control entry is a controller-less room's.
+let private errandOre =
+    let declared = oreColony |> withoutHomeMine |> withReactorErrand
+    let room = reactorErrand.RoomName
+    let layer = SpatialInfo.layerOf declared.Spatial room
+
+    { declared with
+        RoomControl = Map.add room neutralRoom declared.RoomControl
+        Spatial =
+            { declared.Spatial with
+                TargetKinds =
+                    declared.Spatial.TargetKinds
+                    |> Map.add "min-u" (Mineral(Ore Utrium))
+                    |> Map.add "ext-u" (Structure BuiltKind.Extractor)
+                    |> Map.add "can-u" (Structure BuiltKind.Container)
+                Ore = Map.add "min-u" (Map.ofList [ Utrium, 35_000 ]) declared.Spatial.Ore
+                Cooldowns = Map.add "ext-u" 0 declared.Spatial.Cooldowns
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    Obstacles = Set.add errandMine layer.Obstacles
+                    TargetPositions =
+                        layer.TargetPositions
+                        |> Map.add "min-u" errandMine
+                        |> Map.add "ext-u" errandMine
+                        |> Map.add "can-u" errandPost
+                }
+    }
+
+/// The same colony with the errand room's container not yet standing.
+let private withoutErrandContainer (colony: ColonyView) =
+    let room = reactorErrand.RoomName
+    let layer = SpatialInfo.layerOf colony.Spatial room
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                TargetKinds = Map.remove "can-u" colony.Spatial.TargetKinds
+            }
+            |> withNeighbour
+                room
+                { layer with
+                    TargetPositions = Map.remove "can-u" layer.TargetPositions
+                }
+    }
+
+[<Tests>]
+let errandOreTests =
+    testList
+        "the reactor room's ore"
+        [
+            test
+                "the errand room's ore under its extractor hires one miner while the home terminal is short" {
+                // The Reactor's room has no controller and no
+                // keeper, and its neutral extractor stands on the utrium. The
+                // colony that works the errand digs it into its home terminal.
+                Expect.equal (quotaOfRow "miner" errandOre) (Some 1) "one body for the utrium"
+
+                Expect.contains
+                    (planTasksOn errandOre noThreats)
+                    (Harvest "min-u")
+                    "and the dig is pooled"
+            }
+
+            test "the errand room's ore is dug under the home's own gate" {
+                Expect.equal
+                    (quotaOfRow
+                        "miner"
+                        (errandOre |> withOreIn "term-1" Utrium errandOre.Tuning.OreTarget))
+                    (Some 0)
+                    "the terminal at its target: no dig"
+
+                let bare =
+                    { errandOre with
+                        Spatial =
+                            { errandOre.Spatial with
+                                TargetKinds = Map.remove "term-1" errandOre.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal (quotaOfRow "miner" bare) (Some 0) "no terminal at home: no dig"
+            }
+
+            test "a stood-down errand room digs nothing" {
+                // The stand-down takes the room out of the scan, and its rock
+                // goes with it.
+                Expect.equal
+                    (quotaOfRow
+                        "miner"
+                        { errandOre with
+                            Errands = []
+                            OreRooms = Set.empty
+                        })
+                    (Some 0)
+                    "no worked room, no dig there"
+            }
+
+            test
+                "a held errand still digs its ore and seats its container, and does no Reactor work" {
+                // The hold pauses the Reactor alone (user, 2026-10-07): the
+                // view's `Errands` loses it, its room stays an ore room.
+                let held =
+                    { errandOre with
+                        Errands = []
+                        Spatial =
+                            { errandOre.Spatial with
+                                Thorium = Map.add "sto-1" 2997 errandOre.Spatial.Thorium
+                            }
+                    }
+                    |> withReactorOwner (Some Ownership.Unowned)
+
+                Expect.equal (quotaOfRow "miner" held) (Some 1) "the utrium is dug"
+
+                Expect.isNonEmpty
+                    (placementIntents (decideOn (held |> withoutErrandContainer)).Intents
+                     |> List.filter (fun (room, _, kind) ->
+                         room = reactorErrand.RoomName && kind = Container))
+                    "and its container seated"
+
+                Expect.equal
+                    (rowOf "courier" held |> Option.map (fun row -> row.Quota))
+                    (Some 0)
+                    "no delivery"
+
+                Expect.equal
+                    (rowOf "ranger" held |> Option.map (fun row -> row.Quota))
+                    (Some 0)
+                    "no garrison"
+
+                Expect.equal
+                    (rowOf "reserver" held |> Option.map (fun row -> row.Quota))
+                    (Some 0)
+                    "no re-claimer"
+
+                Expect.isFalse
+                    (planTasksOn held noThreats
+                     |> List.exists (function
+                         | Reclaim _ -> true
+                         | Refill(id, Thorium) -> id = reactorId
+                         | _ -> false))
+                    "no claim or delivery pooled"
+            }
+
+            test "an errand room's Thorium is never dug" {
+                // The ore alone: a room that is not ours digs no score.
+                let thorium =
+                    { errandOre with
+                        Spatial =
+                            { errandOre.Spatial with
+                                TargetKinds =
+                                    Map.add "min-u" (Mineral Thorium) errandOre.Spatial.TargetKinds
+                                Thorium = Map.add "min-u" 20_000 errandOre.Spatial.Thorium
+                                Ore = Map.remove "min-u" errandOre.Spatial.Ore
+                            }
+                    }
+
+                Expect.equal (quotaOfRow "miner" thorium) (Some 0) "no Thorium miner out there"
+            }
+
+            test "the errand room's mine is hauled home: its container prices a haul line" {
+                let errandDemand colony =
+                    (decideOn colony).Quotas.HaulerDemand
+                    |> List.filter (fun row -> row.Container.Room = reactorErrand.RoomName)
+                    |> List.sumBy (fun row -> row.Demand)
+
+                Expect.isGreaterThan
+                    (errandDemand errandOre)
+                    0
+                    "dug, the far mine asks for a carrier"
+
+                Expect.equal
+                    (errandDemand (
+                        errandOre |> withOreIn "term-1" Utrium errandOre.Tuning.OreTarget
+                    ))
+                    0
+                    "and none once the dig stops"
+            }
+
+            test "a container is asked for beside the errand room's ore, on the Seat nearest home" {
+                // The outpost container's rule, a rock over: a seen room, the
+                // extractor standing, the dig wanted.
+                let placed colony =
+                    placementIntents (decideOn colony).Intents
+                    |> List.filter (fun (room, _, kind) ->
+                        room = reactorErrand.RoomName && kind = Container)
+
+                Expect.isEmpty (placed errandOre) "the premise: one stands already"
+
+                match placed (errandOre |> withoutErrandContainer) with
+                | [ (_, tile, _) ] ->
+                    Expect.equal (range tile errandMine) 1 "one container, on a Seat"
+                | other -> failtestf "one container site beside the utrium, got %A" other
+
+                Expect.isEmpty
+                    (placed (
+                        errandOre
+                        |> withoutErrandContainer
+                        |> withOreIn "term-1" Utrium errandOre.Tuning.OreTarget
+                    ))
+                    "none while the dig is shut"
+            }
+
+            test
+                "a body building the errand room's mine digs that room's source, and none walks out for it" {
+                // The room's sources are `BorrowedSources`: dug by a body
+                // already standing there, never a walk from home, and no row
+                // is cast for them.
+                let room = reactorErrand.RoomName
+                let rock = { X = 20; Y = 10 }
+
+                let withSource (colony: ColonyView) =
+                    let layer = SpatialInfo.layerOf colony.Spatial room
+
+                    { colony with
+                        BorrowedSources = [ source "src-u" ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = Map.add "src-u" Source colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                room
+                                { layer with
+                                    Obstacles = Set.add rock layer.Obstacles
+                                    TargetPositions = Map.add "src-u" rock layer.TargetPositions
+                                }
+                    }
+
+                let building =
+                    let colony = errandOre |> withoutErrandContainer |> withSource
+                    let layer = SpatialInfo.layerOf colony.Spatial room
+
+                    { colony with
+                        ConstructionSites =
+                            [
+                                {
+                                    Id = "site-u"
+                                    Left = 5_000
+                                    Begun = false
+                                }
+                            ]
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds =
+                                    Map.add
+                                        "site-u"
+                                        (Site BuiltKind.Container)
+                                        colony.Spatial.TargetKinds
+                            }
+                            |> withNeighbour
+                                room
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "site-u" errandPost layer.TargetPositions
+                                }
+                    }
+                    |> standingInErrand [ worker "w-far" 0 50, { X = 15; Y = 10 } ]
+
+                Expect.equal
+                    ((decideOn building).Assignments |> Map.tryFind "w-far")
+                    (Some(taskId (Harvest "src-u")))
+                    "the empty body out there digs the room's source"
+
+                let atHome =
+                    { building with
+                        Creeps = [ worker "w-home" 0 50 ]
+                        Spatial = building.Spatial |> withCreepsAt [ "w-home", { X = 20; Y = 20 } ]
+                    }
+
+                Expect.notEqual
+                    ((decideOn atHome).Assignments |> Map.tryFind "w-home")
+                    (Some(taskId (Harvest "src-u")))
+                    "a body at home is never sent out for it"
+
+                Expect.equal
+                    (quotaOfRow "miner" (errandOre |> withSource))
+                    (Some 1)
+                    "the miner row casts for the utrium alone"
+            }
+
+            test
+                "the ore dig is cast behind a short courier row: the season's score never waits on ore" {
+                // The courier programme open (a load banked, the Reactor ours
+                // with room) and no courier standing: the utrium's miner leaves
+                // the row until the courier stands.
+                let deliveringWith bodies =
+                    { errandOre with
+                        Bank = bank 2300 2300
+                        Spatial =
+                            { errandOre.Spatial with
+                                Thorium = Map.add "sto-1" 2997 errandOre.Spatial.Thorium
+                            }
+                    }
+                    |> withReactorOwner (Some Ownership.Ours)
+                    |> standingInErrand (
+                        (creepWith "relay" 0 0 [ BodyPart.Claim; Move ], reactorRing) :: bodies
+                    )
+
+                let courierBody =
+                    creepWith "courier-1" 0 1000 (List.replicate 20 Carry @ List.replicate 10 Move)
+
+                Expect.equal
+                    (rowOf "courier" (deliveringWith []) |> Option.map (fun row -> row.Quota))
+                    (Some 1)
+                    "the premise: the courier row is open"
+
+                Expect.equal
+                    (quotaOfRow "miner" (deliveringWith []))
+                    (Some 0)
+                    "courier short: no ore miner"
+
+                Expect.equal
+                    (quotaOfRow "miner" (deliveringWith [ courierBody, { X = 25; Y = 40 } ]))
+                    (Some 1)
+                    "the courier standing: the dig casts"
             }
         ]

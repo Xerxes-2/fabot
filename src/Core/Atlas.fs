@@ -26,6 +26,9 @@ type Atlas =
             /// The room every query that names none of its own answers for: the
             /// projection's `RoomName`, empty when it names none.
             Home: string
+            /// The rooms past home whose [[ore]] the colony digs
+            /// (`ColonyView.oreRooms`), which `mineralsIn` reads.
+            OreRooms: Set<string>
             /// The colony's tunables, carried off the view this Atlas was laid from —
             /// here rather than an argument to `trunkPath`, its one reader, because a
             /// number threaded through each ask is one two call sites can disagree
@@ -439,6 +442,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     {
         Spatial = spatial
         Home = home
+        OreRooms = ColonyView.oreRooms view
         Tuning = tuning
         Placed = placed
         Factors = factors
@@ -807,15 +811,17 @@ let extractorCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
         (tilesOfKindIn atlas room (Site BuiltKind.Extractor))
 
 /// The minerals one room digs, each beside its tile, in id order: its Thorium
-/// deposits, or once none stands its [[ore]] at home under a terminal
-/// (`SpatialInfo.dugMineralsBy`). The whole of what the Layout plans an
-/// extractor and a container for. A room the projection places none in
-/// answers with the empty list.
+/// deposits, or once none stands its [[ore]], at home or in an ore room, under
+/// a terminal at home (`SpatialInfo.dugMineralsBy`). The whole of what the
+/// Layout plans an extractor and a container for. A room the projection
+/// places none in answers with the empty list.
 let mineralsIn (atlas: Atlas) (room: string) : (string * Pos) list =
     SpatialInfo.dugMineralsBy
         (targetsOfKind atlas)
-        (fun id -> (tileIn atlas room id).IsSome)
-        (room = atlas.Home)
+        (fun inRoom id -> (tileIn atlas inRoom id).IsSome)
+        atlas.Home
+        atlas.OreRooms
+        room
     |> List.choose (fun (id, _) -> tileIn atlas room id |> Option.map (fun tile -> id, tile))
 
 /// What a mineral holds, and None for a target that is no mineral. The one

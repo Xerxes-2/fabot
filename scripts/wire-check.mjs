@@ -110,6 +110,7 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
     ...emptyRaids,
     episodes: [episode],
     reserveShort: true,
+    digOpen: ["O", "U"],
     haulFill: 0.8125,
     haulOwed: true,
     living: ["w1", "w2"],
@@ -180,6 +181,22 @@ wire("raids: the reserve latch (#505) is true only as a boolean, and a legacy le
 
   const { reserveShort, ...legacy } = emptyRaids;
   assert.equal((await raidsThrough(legacy)).reserveShort, false);
+});
+
+wire("raids: the ore dig's latch (ADR 0089) keeps the engine's ore letters alone, a shut one round-trips as [], and a missing key or a non-list stays unwritten (read open)", async () => {
+  const written = await raidsThrough({ ...emptyRaids, digOpen: ["U", "T", "energy", 3, null, "O", "U"] });
+  assert.deepEqual(written.digOpen, ["O", "U"]);
+
+  for (const value of [[], ["T"]]) {
+    assert.deepEqual((await raidsThrough({ ...emptyRaids, digOpen: value })).digOpen, [], `digOpen ${JSON.stringify(value)}`);
+  }
+
+  for (const value of ["U", { U: true }, null, 1]) {
+    const unwritten = await raidsThrough({ ...emptyRaids, digOpen: value });
+    assert.equal("digOpen" in unwritten, false, `digOpen ${JSON.stringify(value)}`);
+  }
+
+  assert.equal("digOpen" in (await raidsThrough(emptyRaids)), false);
 });
 
 wire("raids: the home's last raided tick (#526) round-trips as a number, and anything else or a legacy leaf reads never", async () => {

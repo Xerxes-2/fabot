@@ -508,32 +508,44 @@ module SpatialInfo =
 
     /// The minerals one room's extractor is for, each beside what it holds, in
     /// id order: the room's Thorium deposits while any stands, and only once
-    /// none does its [[ore]] — at home alone, and only while a terminal stands
-    /// there to dig it into. The engine takes one extractor a room, so this
-    /// one rule is both "Thorium keeps priority" and "the extractor moves onto
-    /// the ore". `ids` answers a kind's ids in id order, `placed` whether an id
-    /// stands in the room: an Atlas asks its census, a bare projection its walk.
+    /// none does its [[ore]] — at home, or in one of the `oreRooms` past it
+    /// (the errands worked), and only while a terminal stands at home to dig
+    /// it into. An ore room's Thorium is nobody's dig of ours. The engine
+    /// takes one extractor a room, so this one rule is both "Thorium keeps
+    /// priority" and "the extractor moves onto the ore". `ids` answers a
+    /// kind's ids in id order, `placedIn` whether an id stands in a room: an
+    /// Atlas asks its census, a bare projection its walk.
     let dugMineralsBy
         (ids: TargetKind -> string list)
-        (placed: string -> bool)
-        (home: bool)
+        (placedIn: string -> string -> bool)
+        (home: string)
+        (oreRooms: Set<string>)
+        (room: string)
         : (string * Resource) list =
         let holding resource =
             ids (Mineral resource)
-            |> List.filter placed
+            |> List.filter (placedIn room)
             |> List.map (fun id -> id, resource)
 
+        let oreRoom = Set.contains room oreRooms
+
         match holding Thorium with
-        | [] when home && ids (Structure BuiltKind.Terminal) |> List.exists placed ->
+        | [] when
+            (room = home || oreRoom)
+            && ids (Structure BuiltKind.Terminal) |> List.exists (placedIn home)
+            ->
             allOres |> List.collect (Ore >> holding) |> List.sortBy fst
+        | _ when oreRoom -> []
         | [] -> []
         | thorium -> thorium
 
     /// `dugMineralsBy` over a bare projection: one walk of the census for the
     /// two kinds the rule reads.
-    let dugMineralsIn (spatial: SpatialInfo) (room: string) : (string * Resource) list =
-        let layer = layerOf spatial room
-
+    let dugMineralsIn
+        (spatial: SpatialInfo)
+        (oreRooms: Set<string>)
+        (room: string)
+        : (string * Resource) list =
         let byKind =
             spatial.TargetKinds
             |> Map.fold
@@ -550,8 +562,10 @@ module SpatialInfo =
 
         dugMineralsBy
             (fun kind -> Map.tryFind kind byKind |> Option.defaultValue [] |> List.rev)
-            (fun id -> Map.containsKey id layer.TargetPositions)
-            (room = homeName spatial)
+            (fun inRoom id -> Map.containsKey id (layerOf spatial inRoom).TargetPositions)
+            (homeName spatial)
+            oreRooms
+            room
 
     /// The ores one store holds any of, as resources.
     let oresIn (spatial: SpatialInfo) (id: string) : Resource list =

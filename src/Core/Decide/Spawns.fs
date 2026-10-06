@@ -295,6 +295,26 @@ let internal planSpawns
         // cascade.
         let rows = quotaRowsOf view atlas threats outposts sizing busy haulerQuota
 
+        // The season's score never waits on [[ore]]: while the courier row is
+        // short — no courier standing past its lead, none in an oven — the
+        // ore digs leave the miner row, which casts ahead of it, so the bank
+        // buys the courier first.
+        let rows =
+            let courierStands =
+                view.Creeps
+                |> List.exists (fun creep ->
+                    patternOf view.Tuning atlas creep = courierPattern
+                    && not (expiring view atlas sizing creep))
+                || view.Casting
+                   |> List.exists (fun cast -> patternOfCast view.Tuning cast = courierPattern)
+
+            if rows.Courier > 0 && not courierStands then
+                { rows with
+                    Miner = rows.Miner - sizing.OreMinerQuota
+                }
+            else
+                rows
+
         let target = workforceTarget view atlas tasks rows
 
         // Read here: `rows` is the specialist table by the seats below.

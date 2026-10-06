@@ -509,10 +509,10 @@ type Errand =
         /// The one object the errand is for, under the id the engine knows it
         /// by. One and not a list: a second entry would be a second errand's.
         Target: string * RoomPos
-        /// A human has paused it: still declared, so its chain and its
-        /// capture stay under test, and worked by nothing — the scan drops it
-        /// as a stand-down drops a shut room. Moved in a commit, like the
-        /// declaration itself.
+        /// A human has paused the Reactor's work: still declared, so its
+        /// chain and its capture stay under test, and no claim, delivery or
+        /// garrison is pooled for it. The room stays projected and its
+        /// [[ore]] dug. Moved in a commit, like the declaration itself.
         Held: bool
     }
 
@@ -523,11 +523,13 @@ module Errand =
     let unheld (errands: Errand list) : Errand list =
         errands |> List.filter (fun errand -> not errand.Held)
 
-    /// The declarations the colony works this tick: the unheld ones, less
-    /// every room a [[stand-down]] is withholding (`Outpost.worked`'s twin).
+    /// The declarations whose room the colony works this tick: every one less
+    /// each room a [[stand-down]] is withholding (`Outpost.worked`'s twin). A
+    /// held one among them: the hold pauses the Reactor's work alone, and the
+    /// room's [[ore]] is dug through it (user, 2026-10-07); the view's
+    /// `Errands` is the unheld ones.
     let worked (shut: Set<string>) (errands: Errand list) : Errand list =
-        unheld errands
-        |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
+        errands |> List.filter (fun errand -> not (Set.contains errand.RoomName shut))
 
     /// `Declaration.withinHopBudget` asked of this errand's room.
     let withinHopBudget (maxHops: int) (home: string) (errand: Errand) : bool =
@@ -1002,6 +1004,12 @@ type StandDown =
         /// that holds the colony under it until it banks one hauler load
         /// past the line.
         ReserveShort: bool
+        /// The [[ore]]s whose dig the last decided tick left open
+        /// (`RaidState.DigOpen`): the latch that runs an open dig on to its
+        /// target and holds a shut one until it falls a band under it. None
+        /// for a latch never written, which reads every dig open, so a deploy
+        /// shuts no dig that was running.
+        DigOpen: Set<Ore> option
         /// The last decided tick's haul overflow reading
         /// (`RaidState.HaulOverflow`, #508): what this tick smooths on from.
         HaulOverflow: HaulOverflow
@@ -1027,6 +1035,7 @@ module StandDown =
             Fought = Map.empty
             Taken = Set.empty
             ReserveShort = false
+            DigOpen = None
             HaulOverflow = HaulOverflow.none
             HomeRaided = None
         }

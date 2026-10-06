@@ -646,6 +646,7 @@ let errandStandDownTests =
                 let guardServedRoom =
                     { errandRaid with
                         Errands = []
+                        OreRooms = Set.empty
                         RoomControl = Map.add errandRoom neutralRoom errandRaid.RoomControl
                         Bank = bank 5600 5600
                     }

@@ -789,6 +789,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        DigOpen = Some Set.empty
         HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller =
@@ -886,6 +887,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // No errand, so no Reclaim is pooled and no reserver seat is the
         // re-claimer's.
         Errands = []
+        OreRooms = Set.empty
         Dismantles = []
         Harass = []
         HarassCast = Set.empty

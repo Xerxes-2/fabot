@@ -157,6 +157,7 @@ let bareRespawn =
         BorrowedSources = []
         AidRooms = []
         ReserveShort = false
+        DigOpen = Some Set.empty
         HaulOverflow = HaulOverflow.none
         MinedRooms = Set.empty
         Controller = Some(controllerAt 1)
@@ -193,6 +194,7 @@ let bareRespawn =
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []
+        OreRooms = Set.empty
         Dismantles = []
         Harass = []
         HarassCast = Set.empty
@@ -882,6 +884,13 @@ let withOreIn id ore units (colony: ColonyView) =
                     else
                         Map.add id held colony.Spatial.Ore
             }
+    }
+
+/// The same colony with one ore's dig latched open, as the last decided tick
+/// left it (`ColonyView.DigOpen`).
+let digOpen ore (colony: ColonyView) =
+    { colony with
+        DigOpen = Some(colony.DigOpen |> Option.defaultValue Set.empty |> Set.add ore)
     }
 
 /// A creep with `units` of one ore aboard, off the free room it was built
@@ -1961,6 +1970,7 @@ let internal withBareReactorErrand (colony: ColonyView) =
 
     { colony with
         Errands = [ reactorErrand ]
+        OreRooms = Set.singleton reactorErrand.RoomName
         Dismantles = []
         Harass = []
         HarassCast = Set.empty

@@ -655,6 +655,12 @@ type Tuning =
         /// for its ore to be dug: the miner and its hauler are bodies paid in
         /// energy.
         OreEnergyMargin: int
+        /// How far under `OreTarget` a shut dig's terminal must fall before
+        /// it opens again; an open dig runs on to the target itself.
+        OreTargetBand: int
+        /// How far over `OreEnergyMargin` a shut dig's Storage must climb
+        /// before it opens again; an open dig runs down to the margin itself.
+        OreEnergyBand: int
         /// The **[[emergency reserve]]** steps (#505): `(level, energy)`, the
         /// Storage energy a colony at that controller level or above keeps
         /// for spawning and defence, the last step at or under the level
@@ -934,6 +940,10 @@ module Tuning =
             OreTarget = 6_000
             // Two miner lives and a hauler's: the dig never eats the reserve.
             OreEnergyMargin = 10_000
+            // Half a miner's life of digging: a shut dig never casts a body for a few hundred units.
+            OreTargetBand = 3_000
+            // Half the margin: a Storage swinging round its margin opens the dig once, not each swing.
+            OreEnergyBand = 5_000
             // User, 2026-10-04: every Storage stood near 0 while the towers were full.
             EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]
             // Half: a 20-40 e/t surplus refills a 10-20k reserve inside about a creep's life.

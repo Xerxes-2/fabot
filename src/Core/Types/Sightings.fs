@@ -639,6 +639,9 @@ type RoomFacts =
         InvaderCores: InvaderCoreInfo list
         /// The ids of the creeps not ours whose tombstones lie here.
         Fallen: string list
+        /// The tombstones here of an [[ally]]'s creeps, by tombstone id: an
+        /// ally's loot, never ours to take.
+        AllyGraves: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -672,6 +675,7 @@ module RoomFacts =
             HostileFatigue = Map.empty
             InvaderCores = []
             Fallen = []
+            AllyGraves = Set.empty
         }
 
 /// One creep of ours, in the world's reading, before any colony has claimed
