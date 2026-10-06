@@ -125,7 +125,7 @@ type Behaviour =
     /// Keep every enemy melee at range 2 or more and the focused enemy at
     /// `keep`, shooting it.
     | Kite of Focus * keep: int
-    /// The NPC raid creep, as the engine drives user '2' (`invaderActs`): a
+    /// The NPC raid creep, as the engine drives user '2' (`invaderTurn`): a
     /// body with a HEAL part heals, one without attacks, and either shoots.
     | Invader
     /// A stronghold's defender, as its core drives it (`stronghold/creeps.js`
@@ -177,8 +177,20 @@ type Body =
         TicksToLive: int
         /// None for a body of ours, which the decision pipeline drives.
         Script: Behaviour option
-        /// Whether a `Retreat` is falling back; the one piece of script state.
+        /// Whether a `Retreat` is falling back.
         Retreating: bool
+        /// An `Invader`'s `memory_move`: the path its last search found.
+        MovePath: MovePath option
+    }
+
+/// `fake-runtime.js` `moveTo`'s `memory_move`: a path to `Dest`, searched
+/// at game tick `Time` and walked until `reusePath` (5) ticks pass or the
+/// destination moves.
+and MovePath =
+    {
+        Dest: RoomPos
+        Path: RoomPos list
+        Time: int
     }
 
 /// A controller in an arena room. `Owner` is the room's ownership, and
@@ -472,6 +484,7 @@ let body
         TicksToLive = Engine.creepLifetime
         Script = script
         Retreating = false
+        MovePath = None
     }
 
 /// A body spelt as part counts in order, head first: `parts [ Move, 21; RangedAttack, 14 ]`.
@@ -2006,13 +2019,24 @@ type private InvaderPathing =
         /// wall walked at its terrain's cost.
         IgnoreFortifications: bool
         IgnoreDestructibleStructures: bool
+        /// Plain 1, swamp 5, a road its ground's; without it plain 2,
+        /// swamp 10 and a road 1 (`findPath`). Only `findAttack.js` passes it.
+        IgnoreRoads: bool
     }
 
+/// The options `{}`: what `healer.js`, `flee.js` and `checkPath` search with.
 let private invaderPathing =
     {
         IgnoreCreeps = false
         IgnoreFortifications = false
         IgnoreDestructibleStructures = false
+        IgnoreRoads = false
+    }
+
+/// `findAttack.js`' `{ ignoreRoads: true }` and the options built on it.
+let private attackPathing =
+    { invaderPathing with
+        IgnoreRoads = true
     }
 
 /// The kinds `ignoreDestructibleStructures` takes off the obstacles
@@ -2064,13 +2088,14 @@ let private dist (p: RoomPos) (q: RoomPos) = max (abs (p.X - q.X)) (abs (p.Y - q
 /// a tile within a goal's range, or with `flee` out of every goal's range.
 /// The matrix bars terrain walls, rocks, the controller, obstacle
 /// structures, others' closed ramparts, the mover's side's obstacle sites
-/// and, unless ignored, creeps; an exit tile is walkable, an NPC never being
-/// carried off it. Plain 1, swamp 5, a road its ground's (`ignoreRoads`). A
-/// goal out of reach gives the path to the nearest tile reached, as
-/// PathFinder's incomplete result does.
-/// Dijkstra where PathFinder runs A* at heuristic weight 1.2: the two can
-/// break a tie between equal paths differently. The path leaves the start
-/// out.
+/// and, unless ignored, creeps, the mover among them; a road is 1 unless
+/// `ignoreRoads` (the engine's object order can let a road reopen a barred
+/// tile; here the bar holds). A goal out of reach gives the path to the
+/// nearest tile reached, as PathFinder's incomplete result does.
+/// The search is the driver's native one (`native/src/pf.cc`) line by
+/// line: jump point search under A* at heuristic weight 1.2, its binary
+/// heap's ties, 2000 ops, and its border rule, so a path never runs along
+/// an exit edge. The path leaves the start out.
 let private roomPath
     (a: Arena)
     (mover: Body)
@@ -2081,16 +2106,23 @@ let private roomPath
     let r = Map.find mover.At.Room a.Rooms
     let side = Engine.roomSide
     let index (p: Pos) = p.X * side + p.Y
+    let obstacle = System.Int32.MaxValue
+    let plainCost, swampCost = if opts.IgnoreRoads then 1, 5 else 2, 10
 
     let terrainCost =
         Array.init (side * side) (fun n ->
             match terrainAt r { X = n / side; Y = n % side } with
-            | Wall -> -1
-            | Swamp -> 5
-            | _ -> 1)
+            | Wall -> obstacle
+            | Swamp -> swampCost
+            | _ -> plainCost)
 
     let cost = Array.copy terrainCost
-    let block (p: Pos) = cost[index p] <- -1
+    // The tiles an object bars, so a road reopens a tunnel and not them.
+    let barred = HashSet<int>()
+
+    let block (p: Pos) =
+        cost[index p] <- obstacle
+        barred.Add(index p) |> ignore
 
     for _, p in r.Capture.Rocks @ Option.toList r.Capture.RealController do
         block p
@@ -2113,9 +2145,14 @@ let private roomPath
             if site.Owner = mover.Side && Set.contains site.Kind obstacleKinds then
                 block site.At
 
+    if not opts.IgnoreRoads then
+        for s in r.Structures do
+            if s.Kind = "road" && not (barred.Contains(index s.At)) then
+                cost[index s.At] <- 1
+
     if not opts.IgnoreCreeps then
         for o in a.Bodies do
-            if o.Id <> mover.Id && o.At.Room = mover.At.Room then
+            if o.At.Room = mover.At.Room then
                 block (RoomPos.pos o.At)
 
     if opts.IgnoreFortifications then
@@ -2123,85 +2160,424 @@ let private roomPath
             if s.Kind = "rampart" || s.Kind = "constructedWall" then
                 cost[index s.At] <- terrainCost[index s.At]
 
+    // Another room is barred (`maxRooms: 1`).
+    let look (x: int) (y: int) =
+        if x < 0 || y < 0 || x >= side || y >= side then
+            obstacle
+        else
+            cost[x * side + y]
+
+    let isBorder (v: int) = v <= 0 || v >= side - 1
+    let isNearBorder (v: int) = v <= 1 || v >= side - 2
+
     // How far a tile is from done: to the nearest goal's range, or with
     // `flee` into the deepest one's.
-    let h (n: int) =
-        let x, y = n / side, n % side
+    let h (x: int) (y: int) =
         let d (g: RoomPos) = max (abs (x - g.X)) (abs (y - g.Y))
 
         if flee then
-            goals |> List.fold (fun acc (g, reach) -> max acc (reach - d g)) 0
+            goals
+            |> List.fold
+                (fun acc (g, reach) -> if d g < reach then max acc (reach - d g) else acc)
+                0
         else
             goals
             |> List.fold (fun acc (g, reach) -> min acc (max 0 (d g - reach))) System.Int32.MaxValue
 
-    let start = index (RoomPos.pos mover.At)
-    let distTo = Array.create (side * side) System.Int32.MaxValue
-    let parent = Array.create (side * side) -1
-    let queue = PriorityQueue<int, struct (int * int)>()
-    let mutable order = 0
-    let mutable best = start
-    let mutable bestH = h start
-    distTo[start] <- 0
-    queue.Enqueue(start, struct (0, 0))
+    let weighted (hc: int) = int (float hc * 1.2)
+    let n = side * side
+    // 0 unseen, 1 open, 2 closed (`open_closed_t`).
+    let state = Array.zeroCreate<byte> n
+    let parents = Array.zeroCreate<int> n
+    let priorities = Array.zeroCreate<int> n
+    // `heap_t`: 1-based, its ties as the driver's.
+    let heap = Array.zeroCreate<int> (n + 1)
+    let size = ref 0
 
-    while bestH > 0 && queue.Count > 0 do
-        let mutable n = start
-        let mutable priority = struct (0, 0)
-        queue.TryDequeue(&n, &priority) |> ignore
-        let struct (g, _) = priority
+    let swap (i: int) (j: int) =
+        let t = heap[i]
+        heap[i] <- heap[j]
+        heap[j] <- t
 
-        if g = distTo[n] then
-            let hn = h n
+    let bubbleUp (from: int) =
+        let mutable i = from
 
-            if hn < bestH then
-                best <- n
-                bestH <- hn
+        while i <> 1 && priorities[heap[i]] <= priorities[heap[i >>> 1]] do
+            swap i (i >>> 1)
+            i <- i >>> 1
 
-            if hn > 0 then
-                let x, y = n / side, n % side
+    let pop () =
+        let top = heap[1]
+        heap[1] <- heap[size.Value]
+        size.Value <- size.Value - 1
+        let mutable v = 1
+        let mutable sifting = true
 
-                for dx in -1 .. 1 do
-                    for dy in -1 .. 1 do
-                        let nx, ny = x + dx, y + dy
+        while sifting do
+            let u = v
 
-                        if (dx <> 0 || dy <> 0) && nx >= 0 && ny >= 0 && nx < side && ny < side then
-                            let m = nx * side + ny
-                            let c = cost[m]
+            if (u <<< 1) + 1 <= size.Value then
+                if priorities[heap[u]] >= priorities[heap[u <<< 1]] then
+                    v <- u <<< 1
 
-                            if c > 0 && g + c < distTo[m] then
-                                distTo[m] <- g + c
-                                parent[m] <- n
-                                order <- order + 1
-                                queue.Enqueue(m, struct (g + c, order))
+                if priorities[heap[v]] >= priorities[heap[(u <<< 1) + 1]] then
+                    v <- (u <<< 1) + 1
+            elif u <<< 1 <= size.Value then
+                if priorities[heap[u]] >= priorities[heap[u <<< 1]] then
+                    v <- u <<< 1
 
-    let rec unwind (n: int) (acc: RoomPos list) =
-        if n = start then
-            acc
+            if u <> v then swap u v else sifting <- false
+
+        top, priorities[top]
+
+    let push (parent: int) (x: int) (y: int) (g: int) =
+        let i = x * side + y
+
+        if state[i] <> 2uy then
+            let f = weighted (h x y) + g
+
+            if state[i] = 1uy then
+                if priorities[i] > f then
+                    let mutable at = size.Value
+
+                    while at > 0 && heap[at] <> i do
+                        at <- at - 1
+
+                    priorities[i] <- f
+                    bubbleUp at
+                    parents[i] <- parent
+            else
+                priorities[i] <- f
+                size.Value <- size.Value + 1
+                heap[size.Value] <- i
+                bubbleUp size.Value
+                state[i] <- 1uy
+                parents[i] <- parent
+
+    // `jump_x`, `jump_y`, `jump_xy`: None where the run meets an obstacle.
+    let jumpX (c: int) (x0: int) (y: int) (dx: int) =
+        let mutable x = x0
+        let mutable prevU = look x (y - 1)
+        let mutable prevD = look x (y + 1)
+        let mutable result = None
+        let mutable going = true
+
+        while going do
+            if h x y = 0 || isNearBorder x then
+                result <- Some(x, y)
+                going <- false
+            else
+                let costU = look (x + dx) (y - 1)
+                let costD = look (x + dx) (y + 1)
+
+                if (costU <> obstacle && prevU <> c) || (costD <> obstacle && prevD <> c) then
+                    result <- Some(x, y)
+                    going <- false
+                else
+                    prevU <- costU
+                    prevD <- costD
+                    x <- x + dx
+                    let jc = look x y
+
+                    if jc = obstacle then
+                        going <- false
+                    elif jc <> c then
+                        result <- Some(x, y)
+                        going <- false
+
+        result
+
+    let jumpY (c: int) (x: int) (y0: int) (dy: int) =
+        let mutable y = y0
+        let mutable prevL = look (x - 1) y
+        let mutable prevR = look (x + 1) y
+        let mutable result = None
+        let mutable going = true
+
+        while going do
+            if h x y = 0 || isNearBorder y then
+                result <- Some(x, y)
+                going <- false
+            else
+                let costL = look (x - 1) (y + dy)
+                let costR = look (x + 1) (y + dy)
+
+                if (costL <> obstacle && prevL <> c) || (costR <> obstacle && prevR <> c) then
+                    result <- Some(x, y)
+                    going <- false
+                else
+                    prevL <- costL
+                    prevR <- costR
+                    y <- y + dy
+                    let jc = look x y
+
+                    if jc = obstacle then
+                        going <- false
+                    elif jc <> c then
+                        result <- Some(x, y)
+                        going <- false
+
+        result
+
+    let jumpXY (c: int) (x0: int) (y0: int) (dx: int) (dy: int) =
+        let mutable x = x0
+        let mutable y = y0
+        let mutable prevX = look (x - dx) y
+        let mutable prevY = look x (y - dy)
+        let mutable result = None
+        let mutable going = true
+
+        while going do
+            if h x y = 0 || isNearBorder x || isNearBorder y then
+                result <- Some(x, y)
+                going <- false
+            elif
+                (look (x - dx) (y + dy) <> obstacle && prevX <> c)
+                || (look (x + dx) (y - dy) <> obstacle && prevY <> c)
+            then
+                result <- Some(x, y)
+                going <- false
+            else
+                prevX <- look x (y + dy)
+                prevY <- look (x + dx) y
+
+                if
+                    (prevY <> obstacle && (jumpX c (x + dx) y dx).IsSome)
+                    || (prevX <> obstacle && (jumpY c x (y + dy) dy).IsSome)
+                then
+                    result <- Some(x, y)
+                    going <- false
+                else
+                    x <- x + dx
+                    y <- y + dy
+                    let jc = look x y
+
+                    if jc = obstacle then
+                        going <- false
+                    elif jc <> c then
+                        result <- Some(x, y)
+                        going <- false
+
+        result
+
+    let jumpNeighbor (x: int) (y: int) (i: int) (nx: int) (ny: int) (g: int) (c: int) (nc: int) =
+        if nc <> c || isBorder nx || isBorder ny then
+            if nc <> obstacle then
+                push i nx ny (g + nc)
         else
-            unwind parent[n] (RoomPos.at mover.At.Room { X = n / side; Y = n % side } :: acc)
+            let dx, dy = nx - x, ny - y
 
-    unwind best []
+            let jumped =
+                if dx <> 0 then
+                    if dy <> 0 then jumpXY nc nx ny dx dy else jumpX nc nx ny dx
+                else
+                    jumpY nc nx ny dy
 
-/// `fake-runtime.js` `moveTo` toward a body or tile: the first step of the
-/// path to within `reach`, beside that path; None where it already stands
-/// in reach or no step leads closer. The engine keeps a path `reusePath` (5)
-/// ticks while its destination holds; the arena paths afresh every tick.
+            match jumped with
+            | Some(jx, jy) ->
+                push i jx jy (g + nc * (max (abs (jx - x)) (abs (jy - y)) - 1) + look jx jy)
+            | None -> ()
+
+    // `astar`, the origin's first ring: from an exit tile only back into
+    // the room, never along the edge.
+    let astar (i: int) (x: int) (y: int) (g: int) =
+        for dx, dy in [ 0, -1; 1, -1; 1, 0; 1, 1; 0, 1; -1, 1; -1, 0; -1, -1 ] do
+            let nx, ny = x + dx, y + dy
+
+            let barred =
+                if x = 0 then nx < 0 && y <> ny || x = nx
+                elif x = side - 1 then nx >= side && y <> ny || x = nx
+                elif y = 0 then ny < 0 && x <> nx || y = ny
+                elif y = side - 1 then ny >= side && x <> nx || y = ny
+                else false
+
+            if not barred then
+                let nc = look nx ny
+
+                if nc <> obstacle then
+                    push i nx ny (g + nc)
+
+    let jps (i: int) (x: int) (y: int) (g: int) =
+        let px, py = parents[i] / side, parents[i] % side
+        let dx, dy = sign (x - px), sign (y - py)
+
+        // Onto or off an exit tile: the only ways on.
+        let edge =
+            if x = 0 then
+                if dx = -1 then [ x - 1, y ]
+                elif dx = 1 then [ x + 1, y - 1; x + 1, y; x + 1, y + 1 ]
+                else []
+            elif x = side - 1 then
+                if dx = 1 then [ x + 1, y ]
+                elif dx = -1 then [ x - 1, y - 1; x - 1, y; x - 1, y + 1 ]
+                else []
+            elif y = 0 then
+                if dy = -1 then [ x, y - 1 ]
+                elif dy = 1 then [ x - 1, y + 1; x, y + 1; x + 1, y + 1 ]
+                else []
+            elif y = side - 1 then
+                if dy = 1 then [ x, y + 1 ]
+                elif dy = -1 then [ x - 1, y - 1; x, y - 1; x + 1, y - 1 ]
+                else []
+            else
+                []
+
+        if not (List.isEmpty edge) then
+            for nx, ny in edge do
+                let nc = look nx ny
+
+                if nc <> obstacle then
+                    push i nx ny (g + nc)
+        else
+            let borderDx =
+                if x = 1 then -1
+                elif x = side - 2 then 1
+                else 0
+
+            let borderDy =
+                if y = 1 then -1
+                elif y = side - 2 then 1
+                else 0
+
+            let c = look x y
+
+            if dx <> 0 then
+                let nc = look (x + dx) y
+
+                if nc <> obstacle then
+                    if borderDy = 0 then
+                        jumpNeighbor x y i (x + dx) y g c nc
+                    else
+                        push i (x + dx) y (g + nc)
+
+            if dy <> 0 then
+                let nc = look x (y + dy)
+
+                if nc <> obstacle then
+                    if borderDx = 0 then
+                        jumpNeighbor x y i x (y + dy) g c nc
+                    else
+                        push i x (y + dy) (g + nc)
+
+            let forced (nx: int) (ny: int) =
+                jumpNeighbor x y i nx ny g c (look nx ny)
+
+            if dx <> 0 then
+                if dy <> 0 then
+                    let nc = look (x + dx) (y + dy)
+
+                    if nc <> obstacle then
+                        jumpNeighbor x y i (x + dx) (y + dy) g c nc
+
+                    if look (x - dx) y <> c then
+                        forced (x - dx) (y + dy)
+
+                    if look x (y - dy) <> c then
+                        forced (x + dx) (y - dy)
+                else
+                    if borderDy = 1 || look x (y + 1) <> c then
+                        forced (x + dx) (y + 1)
+
+                    if borderDy = -1 || look x (y - 1) <> c then
+                        forced (x + dx) (y - 1)
+            else
+                if borderDx = 1 || look (x + 1) y <> c then
+                    forced (x + 1) (y + dy)
+
+                if borderDx = -1 || look (x - 1) y <> c then
+                    forced (x - 1) (y + dy)
+
+    let ox, oy = mover.At.X, mover.At.Y
+    let origin = ox * side + oy
+
+    if h ox oy = 0 then
+        []
+    else
+        astar origin ox oy 0
+        let mutable best = origin
+        let mutable bestH = System.Int32.MaxValue
+        let mutable ops = 2000
+        let mutable searching = true
+
+        while searching && size.Value > 0 && ops > 0 do
+            let i, f = pop ()
+            state[i] <- 2uy
+            let x, y = i / side, i % side
+            let hc = h x y
+            let g = f - weighted hc
+
+            if hc = 0 then
+                best <- i
+                searching <- false
+            else
+                if hc < bestH then
+                    best <- i
+                    bestH <- hc
+
+                jps i x y g
+                ops <- ops - 1
+
+        // Unwound from the end, a jump's skipped tiles filled in.
+        let tile (i: int) =
+            RoomPos.at mover.At.Room { X = i / side; Y = i % side }
+
+        let mutable path = []
+        let mutable at = best
+
+        while at <> origin do
+            path <- tile at :: path
+            let next = parents[at]
+            let mutable x, y = at / side, at % side
+            let nx, ny = next / side, next % side
+
+            if max (abs (nx - x)) (abs (ny - y)) > 1 then
+                let sx, sy = sign (nx - x), sign (ny - y)
+
+                while max (abs (nx - x)) (abs (ny - y)) > 1 do
+                    x <- x + sx
+                    y <- y + sy
+                    path <- tile (x * side + y) :: path
+
+            at <- next
+
+        path
+
+/// `fake-runtime.js` `moveTo` toward a tile, with the body's `memory_move`:
+/// None where it already stands in reach. The path is searched afresh when
+/// the destination moved or `reusePath` (5) ticks passed, else the kept one
+/// is walked (`nextDirectionByPath`): the tile after the body's on it, the
+/// first while it stands on none and beside it, none at its end or off it.
 let private invaderMove
     (a: Arena)
     (b: Body)
     (opts: InvaderPathing)
+    (memory: MovePath option)
     (target: RoomPos)
     (reach: int)
-    : (Direction * RoomPos list) option =
+    : Direction option * MovePath option =
     if dist b.At target <= reach then
-        None
+        None, memory
     else
-        match roomPath a b opts false [ target, reach ] with
-        | first :: _ as path ->
-            directionTo (RoomPos.pos b.At) (RoomPos.pos first)
-            |> Option.map (fun d -> d, path)
-        | [] -> None
+        let kept =
+            match memory with
+            | Some m when m.Dest = target && a.Time <= m.Time + 5 -> m
+            | _ ->
+                {
+                    Dest = target
+                    Path = roomPath a b opts false [ target, reach ]
+                    Time = a.Time
+                }
+
+        let next =
+            match kept.Path |> List.tryFindIndex ((=) b.At) with
+            | Some i when i = List.length kept.Path - 1 -> None
+            | Some i -> Some kept.Path[i + 1]
+            | None ->
+                match kept.Path with
+                | first :: _ when dist b.At first <= 1 -> Some first
+                | _ -> None
+
+        next |> Option.bind (fun p -> directionTo (RoomPos.pos b.At) (RoomPos.pos p)), Some kept
 
 /// `fake-runtime.js` `findClosestByPath`: one standing on the body's tile,
 /// else the last of `objects` beside the end of the search to range 1 of
@@ -2238,7 +2614,8 @@ let private invaderFlee (a: Arena) (b: Body) (hostiles: Body list) (reach: int) 
 /// other `findAttack.js`, and both then `shootAtWill.js`. The acts stand in
 /// the order the engine sets them, the last of a name winning (`admitted`),
 /// and the room is ordered by id where the engine's is its object order.
-let private invaderActs (a: Arena) (b: Body) : Act list =
+/// With the acts, the body's `memory_move` after them.
+let private invaderTurn (a: Arena) (b: Body) : Act list * MovePath option =
     let here =
         a.Bodies
         |> List.filter (fun o -> o.At.Room = b.At.Room)
@@ -2253,6 +2630,13 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
 
     let acts = ResizeArray<Act>()
     let step (d: Direction) = acts.Add(Act.Move d)
+    let memory = ref b.MovePath
+
+    let moveTo (opts: InvaderPathing) (target: RoomPos) (reach: int) =
+        let d, kept = invaderMove a b opts memory.Value target reach
+        memory.Value <- kept
+        d
+
     // `creep.hits < creep.hitsMax / 2`
     let halfDown (o: Body) = 2 * o.Hits < hitsMax o
 
@@ -2278,8 +2662,8 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
                 invaders
                 |> List.filter (fun c -> c.Id <> b.Id && activeCount c Heal > 0)
                 |> closestByPath a b invaderPathing
-                |> Option.bind (fun t -> invaderMove a b invaderPathing t.At 1)
-                |> Option.iter (fst >> step)
+                |> Option.bind (fun t -> moveTo invaderPathing t.At 1)
+                |> Option.iter step
         else
             // To the nearest hurt invader; with none, flee 4, else to the
             // nearest invader without HEAL; with none of those, suicide.
@@ -2307,8 +2691,7 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
             | Choice1Of2(Some t) when dist b.At t.At <= 1 ->
                 // Beside it: a step onto its tile, which lands if it moves off.
                 directionTo (RoomPos.pos b.At) (RoomPos.pos t.At) |> Option.iter step
-            | Choice1Of2(Some t) ->
-                invaderMove a b invaderPathing t.At 1 |> Option.iter (fst >> step)
+            | Choice1Of2(Some t) -> moveTo invaderPathing t.At 1 |> Option.iter step
     else
         // findAttack.js
         let haveAttack = activeCount b Attack > 0
@@ -2323,18 +2706,15 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
         | Some d -> step d
         | None ->
             let mutable target: Body option = None
-            // The path `moveTo` walked this tick (`memory_move.path`).
-            let mutable path: RoomPos list = []
 
             // A shooter below half walks to the nearest healer.
             if halfDown b && not (List.isEmpty healers) && not haveAttack then
-                closestByPath a b invaderPathing healers
+                closestByPath a b attackPathing healers
                 |> Option.iter (fun healer ->
-                    match invaderMove a b invaderPathing healer.At 0 with
-                    | Some(d, p) ->
+                    match moveTo attackPathing healer.At 0 with
+                    | Some d ->
                         step d
                         target <- Some healer
-                        path <- p
                     | None -> ())
 
             if haveAttack then
@@ -2347,13 +2727,13 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
             // a melee walks onto it, a shooter only from beyond 3.
             for opts in
                 [
-                    { invaderPathing with
+                    { attackPathing with
                         IgnoreCreeps = true
                     }
-                    { invaderPathing with
+                    { attackPathing with
                         IgnoreFortifications = true
                     }
-                    { invaderPathing with
+                    { attackPathing with
                         IgnoreDestructibleStructures = true
                     }
                 ] do
@@ -2362,10 +2742,7 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
 
                     match target with
                     | Some t when haveAttack || dist b.At t.At > 3 ->
-                        invaderMove a b opts t.At 0
-                        |> Option.iter (fun (d, p) ->
-                            step d
-                            path <- p)
+                        moveTo opts t.At 0 |> Option.iter step
                     | _ -> ()
 
             let r = Map.find b.At.Room a.Rooms
@@ -2391,15 +2768,13 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
                 | [] when r.Controller |> Option.exists (fun c -> c.Owner <> Ownership.Unowned) ->
                     acts.Add Act.Suicide
                 | spawn :: _ ->
-                    invaderMove
-                        a
-                        b
-                        { invaderPathing with
+                    moveTo
+                        { attackPathing with
                             IgnoreDestructibleStructures = true
                         }
                         spawn
                         0
-                    |> Option.iter (fst >> step)
+                    |> Option.iter step
                 | [] -> ()
             | Some t ->
                 // The engine sets this attack whatever the body carries; one
@@ -2408,10 +2783,12 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
                 if haveAttack then
                     acts.Add(Act.Attack t.Id)
 
-                // A melee or WORK body breaks what stands on its path's next
-                // tile.
+                // A melee or WORK body breaks what stands on its kept path's
+                // first tile (`memory_move.path[0]`, however old).
                 if haveAttack || activeCount b Work > 0 then
-                    match path with
+                    match
+                        memory.Value |> Option.map (fun m -> m.Path) |> Option.defaultValue []
+                    with
                     | next :: _ ->
                         r.Structures
                         |> List.tryFind (fun s ->
@@ -2432,7 +2809,7 @@ let private invaderActs (a: Arena) (b: Body) : Act list =
         | [] -> ()
         | targets -> acts.Add(Act.RangedAttack (targets |> List.minBy (fun c -> c.Hits)).Id)
 
-    List.ofSeq acts
+    List.ofSeq acts, memory.Value
 
 /// The invader core of a side standing in a room.
 let private coreOf (r: ArenaRoom) (side: Side) : ArenaStructure option =
@@ -2673,7 +3050,7 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
                     []
 
             shoot @ heal @ move (kiteStep a b target keep)
-    | Invader -> invaderActs a b
+    | Invader -> invaderTurn a b |> fst
     | Defend -> defendActs a b
     | Breach goal ->
         match firstBarrier a b goal with
@@ -2761,8 +3138,9 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
     | Phases _
     | Retreat _ -> []
 
-/// Every scripted body's acts, leaders before followers.
-let private theirActs (a: Arena) : (string * Act) list =
+/// Every scripted body's acts, leaders before followers, and each
+/// `Invader`'s `memory_move` after them.
+let private theirActs (a: Arena) : (string * Act) list * Map<string, MovePath option> =
     let scripted =
         a.Bodies
         |> List.filter (fun b -> b.Script.IsSome)
@@ -2775,7 +3153,21 @@ let private theirActs (a: Arena) : (string * Act) list =
 
     let leaders, followers = scripted |> List.partition (isFollower >> not)
 
-    let acted = leaders |> List.map (fun b -> b, scriptActs a Map.empty b)
+    let turns =
+        leaders
+        |> List.map (fun b ->
+            match b.Script |> Option.map (current a.Tick b) with
+            | Some Invader ->
+                let acts, kept = invaderTurn a b
+                b, acts, Some kept
+            | _ -> b, scriptActs a Map.empty b, None)
+
+    let acted = turns |> List.map (fun (b, acts, _) -> b, acts)
+
+    let kept =
+        turns
+        |> List.choose (fun (b, _, kept) -> kept |> Option.map (fun k -> b.Id, k))
+        |> Map.ofList
 
     let planned =
         acted
@@ -2787,7 +3179,8 @@ let private theirActs (a: Arena) : (string * Act) list =
         |> Map.ofList
 
     acted @ (followers |> List.map (fun b -> b, scriptActs a planned b))
-    |> List.collect (fun (b, acts) -> acts |> List.map (fun act -> b.Id, act))
+    |> List.collect (fun (b, acts) -> acts |> List.map (fun act -> b.Id, act)),
+    kept
 
 // ---------------------------------------------------------------------------
 // The engine
@@ -3499,7 +3892,7 @@ let step (a: Arena) : Arena * TickTrace =
         else
             decideOurs a
 
-    let theirs = theirActs a
+    let theirs, movePaths = theirActs a
     let events = ResizeArray<ArenaEvent>()
     let byId = a.Bodies |> List.map (fun b -> b.Id, b) |> Map.ofList
 
@@ -4127,6 +4520,7 @@ let step (a: Arena) : Arena * TickTrace =
                                | _ -> 0)
                         TicksToLive = b.TicksToLive - 1
                         Retreating = retreatLatch a.Tick { b with Hits = hits } script
+                        MovePath = movePaths |> Map.tryFind b.Id |> Option.defaultValue b.MovePath
                     }))
 
     // `spawns/create-creep.js`: an idle spawn of ours takes a cast of a row

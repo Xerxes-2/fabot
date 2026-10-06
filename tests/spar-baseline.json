@@ -73,7 +73,7 @@
   },
   "home-towerless-melee": {
     "castEnergy": 750,
-    "cleared": 41,
+    "cleared": 40,
     "hurt": 340,
     "kills": 1,
     "ourDeaths": 0,
@@ -85,20 +85,20 @@
   },
   "outpost-melee": {
     "castEnergy": 0,
-    "cleared": 16,
-    "hurt": 340,
+    "cleared": 17,
+    "hurt": 350,
     "kills": 1,
     "ourDeaths": 0,
     "safeMode": false,
     "stoodDown": false,
     "struck": 0,
     "ticks": 500,
-    "towerSpent": 30
+    "towerSpent": 40
   },
   "outpost-melee-healer": {
     "castEnergy": 1500,
-    "cleared": 91,
-    "hurt": 1540,
+    "cleared": 116,
+    "hurt": 1690,
     "kills": 2,
     "ourDeaths": 1,
     "safeMode": false,
@@ -109,8 +109,8 @@
   },
   "outpost-ranged-healer": {
     "castEnergy": 2800,
-    "cleared": 161,
-    "hurt": 1332,
+    "cleared": 169,
+    "hurt": 1458,
     "kills": 3,
     "ourDeaths": 1,
     "safeMode": false,
@@ -121,8 +121,8 @@
   },
   "outpost-squad": {
     "castEnergy": 4900,
-    "cleared": 427,
-    "hurt": 3000,
+    "cleared": 411,
+    "hurt": 2940,
     "kills": 5,
     "ourDeaths": 1,
     "safeMode": false,
