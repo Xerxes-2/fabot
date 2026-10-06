@@ -444,20 +444,39 @@ let plan
         Volleys = volleys |> Map.toSeq |> Fresh.mapOfSeq
     }
 
-/// A plan's acts on the game tick `time`: its `Acts`, each later act planned
-/// for that many ticks after the plan's own (`Plan.Later`) superseding one on
-/// its channel.
-let private actsAt (time: int) (plan: Plan) : Intent list =
-    let light = time - plan.At
+/// A plan's acts on the glance `now`: its `Acts`, each creep's later act
+/// (`Plan.Later`) superseding one of its own on its channel — a walker's the
+/// one planned for the tile of its step plan it stands on, so a body a tick
+/// late (blocked, fatigued) acts where it is (#574); one off its plan, none;
+/// a body with no step plan stands still, so its own come a light tick each.
+let private actsAt (now: Glance) (plan: Plan) : Intent list =
+    let light = now.Time - plan.At
 
-    match
-        (if light < 2 then
-             None
-         else
-             List.tryItem (light - 2) plan.Later)
-    with
-    | Some later -> actsOf later plan.Acts
-    | None -> plan.Acts
+    let laterOf (creep: string) =
+        let index =
+            match Map.tryFind creep plan.Steps with
+            | Some path ->
+                Map.tryFind creep now.Creeps
+                |> Option.bind (fun body -> List.tryFindIndex ((=) body.Tile) path)
+            | None -> Some(light - 1)
+
+        index
+        |> Option.filter (fun i -> i >= 1)
+        |> Option.bind (fun i -> List.tryItem (i - 1) plan.Later)
+        |> Option.defaultValue []
+        |> List.filter (fun act -> replayed act |> Option.bind fst = Some creep)
+
+    match plan.Later with
+    | [] -> plan.Acts
+    | _ ->
+        let later =
+            plan.Later
+            |> List.concat
+            |> List.choose (replayed >> Option.bind fst)
+            |> List.distinct
+            |> List.collect laterOf
+
+        actsOf later plan.Acts
 
 /// Whether a hostile strikes a tile at `range` now (`Some true`), after one
 /// step (`Some false`), or not by then (`None`): its weapon's range, one step
@@ -606,13 +625,15 @@ let only (homes: Set<string>) (last: LastFull) : LastFull =
         Plans = last.Plans |> Map.filter (fun home _ -> Set.contains home homes)
     }
 
-/// Every plan as one on the game tick `time`, each plan's acts those of that
+/// Every plan as one on the glance `now`, each plan's acts those of that
 /// tick (`actsAt`): the bodies are disjoint (`ofPlans`), so nothing is
 /// overwritten. Read within the tick.
-let private merged (time: int) (last: LastFull) : Plan =
+let private merged (now: Glance) (last: LastFull) : Plan =
+    let time = now.Time
+
     match Map.toList last.Plans with
     | [ _, plan ] when List.isEmpty plan.Later -> plan
-    | [ _, plan ] -> { plan with Acts = actsAt time plan }
+    | [ _, plan ] -> { plan with Acts = actsAt now plan }
     | plans ->
         let plans = List.map snd plans
 
@@ -623,7 +644,7 @@ let private merged (time: int) (last: LastFull) : Plan =
             Creeps = plans |> List.map _.Creeps |> Set.unionMany
             Standing = mapOf _.Standing
             Steps = mapOf _.Steps
-            Acts = plans |> List.collect (actsAt time)
+            Acts = plans |> List.collect (actsAt now)
             Later = []
             At = time
             Fought = plans |> List.exists _.Fought
@@ -806,7 +827,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             [ LightForce.CreepsChanged(Set.toList changed) ]
 
     let onBorder =
-        let stepping = inwardSteps (merged now.Time last).Steps now
+        let stepping = inwardSteps (merged now last).Steps now
 
         now.Creeps
         |> Map.toList
@@ -975,7 +996,7 @@ let fightOnly
     // hauler walking in on its plan while a raider walks in on it closes two
     // tiles a tick, so the reach is read from the tile it lands on, one
     // hostile step on — from where it stands, two.
-    let steps = (merged now.Time last).Steps
+    let steps = (merged now last).Steps
 
     let landing name (creep: GlanceCreep) =
         Map.tryFind name steps |> Option.bind (fun path -> onward path creep.Tile)
@@ -1063,7 +1084,7 @@ let lookups (last: LastFull) : string list =
 /// its aim again the same way (#528), on a channel no act of its holds. A
 /// creep standing on a tile of its step plan steps toward the next.
 let intents (record: LastFull) (now: Glance) : Intent list =
-    let last = merged now.Time record
+    let last = merged now record
     let seen = now.Hostiles |> List.map (fun hostile -> hostile.Id) |> Set.ofList
 
     let stands (actor: string option) (target: Stands) =

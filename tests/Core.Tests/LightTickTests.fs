@@ -823,6 +823,52 @@ let replayTests =
                     "and the later act's object is looked up"
             }
 
+            test
+                "a walker's later act is the one planned for the tile it stands on, a blocked body issuing its first tile's on the second light tick (#574)" {
+                // Cadence 3: the hauler steps onto (21,20) and pours into the
+                // extension there, then onto (22,20) and pours into the spawn.
+                let walk =
+                    LightTick.ofPlans
+                        quiet
+                        Set.empty
+                        [
+                            room,
+                            LightTick.plan
+                                quiet
+                                (Set.ofList [ "hauler" ])
+                                (Map.ofList [ "hauler", [ tile 21 20; tile 22 20 ] ])
+                                [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                                [ [ TransferEnergyToStructure("hauler", "spawn", Energy) ] ]
+                                []
+                                []
+                                Map.empty
+                        ]
+
+                let at x y =
+                    { quiet with
+                        Time = 2
+                        Creeps = Map.ofList [ "hauler", creepAt x y 500 ]
+                    }
+
+                Expect.equal
+                    (LightTick.intents walk (at 22 20))
+                    [ TransferEnergyToStructure("hauler", "spawn", Energy) ]
+                    "on time at the second tile: the pour planned there"
+
+                Expect.equal
+                    (LightTick.intents walk (at 21 20))
+                    [
+                        TransferEnergyToStructure("hauler", "ext-9", Energy)
+                        MoveCreep("hauler", Right)
+                    ]
+                    "blocked a tick on the first tile: the pour planned there, and on"
+
+                Expect.equal
+                    (LightTick.intents walk (at 20 20))
+                    [ TransferEnergyToStructure("hauler", "ext-9", Energy) ]
+                    "off its plan: no later act"
+            }
+
             test "a light tick issues in creep-name order" {
                 let many =
                     LightTick.lastFull
