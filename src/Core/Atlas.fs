@@ -3206,6 +3206,12 @@ let dropStep (atlas: Atlas) (creep: string) = atlas.Steps.Remove creep |> ignore
 let stepPlans (atlas: Atlas) : (string * (RoomPos * RoomPos)) list =
     [ for KeyValue(creep, plan) in atlas.Steps -> creep, plan ] |> List.sortBy fst
 
+/// One creep's step plan as the mover left it this tick, if it has one.
+let stepPlanOf (atlas: Atlas) (creep: string) : (RoomPos * RoomPos) option =
+    match atlas.Steps.TryGetValue creep with
+    | true, plan -> Some plan
+    | _ -> None
+
 /// ADR-0018
 /// The first step the same body would take were no tile occupied — the
 /// traffic-blind route, otherwise priced exactly like `firstStep`. The Resolver

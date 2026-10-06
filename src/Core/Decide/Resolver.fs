@@ -66,6 +66,14 @@ let private moveIntentFor
             Rank = rank
             Candidates = candidates |> List.map here
             Area = area
+            // Read after the branch priced its step, which filed the plan.
+            Onward =
+                match candidates with
+                | head :: _ when head <> pos ->
+                    Atlas.stepPlanOf atlas creep
+                    |> Option.filter (fun (first, _) -> first = here head)
+                    |> Option.map snd
+                | _ -> None
         }
 
     // A parked body has a Task it cannot reach, so it is standing where its
@@ -346,6 +354,26 @@ let private arbitrate
         else
             0
 
+    // A body with no Task standing where it is: its tile is anybody's (#562).
+    // Not a parked body, which has a Task and chose its tile — a Defend
+    // holder waiting inside its line.
+    let idle (intent: MoveIntent) =
+        staying intent && intent.Rank = idleRank
+
+    // Where an idle body is tried once a mover shoves it off its tile:
+    // anywhere else first, then the mover's own tile (a swap), and the
+    // mover's way on last (#562) — up the lane ahead of it is where the mover
+    // shoves it again the next tick, and the tick after. Every other body
+    // keeps its own order.
+    let rehouse (mover: MoveIntent) (occupant: MoveIntent) (tiles: RoomPos list) =
+        if idle occupant then
+            let last = List.choose id [ Some mover.Pos; mover.Onward ]
+
+            (tiles |> List.filter (fun tile -> not (List.contains tile last)))
+            @ (last |> List.filter (fun tile -> List.contains tile tiles))
+        else
+            tiles
+
     // `visited` is threaded through and never rolled back, the one thing the
     // search borrows from its mutable original: a creep the chain has already
     // tried to rehouse is not tried again inside the same outer search, which
@@ -389,7 +417,9 @@ let private arbitrate
                                     visited
                                     (score - cost occupant tile)
                                     occupant
-                                    (occupant.Candidates |> List.filter ((<>) tile))
+                                    (occupant.Candidates
+                                     |> List.filter ((<>) tile)
+                                     |> rehouse intent occupant)
                                     m
 
                             match outcome with
@@ -414,16 +444,18 @@ let private arbitrate
 
     // Whether an intent has nothing left to ask for: it holds the tile it
     // asked for, or it is an arrived body an earlier chain shuffled within its
-    // own area. Re-initiating the second would collect its rank's whole weight
+    // own area, or an idle body an earlier chain shoved anywhere. Re-initiating the second would collect its rank's whole weight
     // for being put back on a tile it never chose to leave, and three such
-    // phantom gains in one chain buy the very eviction `gain` prices.
+    // phantom gains in one chain buy the very eviction `gain` prices; the
+    // third would walk off the tile `rehouse` chose onto the mover's way on
+    // (#562).
     let asked (intent: MoveIntent) (m: Matching) =
         let held = Map.tryFind intent.Creep m.Tile
 
         held = headOf intent
         || (staying intent
             && (match held with
-                | Some tile -> Set.contains tile intent.Area
+                | Some tile -> idle intent || Set.contains tile intent.Area
                 | None -> false))
 
     let settled =

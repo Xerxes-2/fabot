@@ -8,12 +8,13 @@ module Fabot.Core.LightTick
 open Fabot.Core.Types
 
 /// One creep of ours as the glance reads it: where it stands, its hits, and —
-/// for a creep on its room's border ring — the step off it (`inward`).
+/// for a creep on its room's border ring — the steps off it the terrain
+/// allows (`inward`).
 type GlanceCreep =
     {
         Tile: RoomPos
         Hits: int
-        Inward: Direction option
+        Inward: Direction list
         /// Its HEAL parts with hits left: what it heals a tick.
         Heals: int
         /// Its ATTACK and RANGED_ATTACK parts with hits left: a fighter's
@@ -150,8 +151,8 @@ type LightForce =
     | Fought of home: string
     /// Creeps of ours born or gone since the plans.
     | CreepsChanged of creeps: string list
-    /// A creep of ours on its room's border ring with no ground to step onto
-    /// (`inward`): the engine carries a body that ends a tick there into the
+    /// A creep of ours on its room's border ring with no free ground to step
+    /// onto (`inward`, `inwardSteps`): the engine carries a body that ends a tick there into the
     /// neighbour, so one that crossed on the full tick and stood still on the
     /// light one would be carried straight back.
     | OnBorder of creep: string
@@ -176,14 +177,29 @@ let tag (reason: LightForce) : string =
     | LightForce.ControllerChanged room -> $"controller {room}"
     | LightForce.Deferred -> "deferred"
 
-/// The step off the border ring into the room, for a creep standing on it: a
+/// The tile one step from `tile` in `direction`.
+let private stepTo (tile: Pos) (direction: Direction) : Pos =
+    let dx, dy =
+        match direction with
+        | Top -> 0, -1
+        | TopRight -> 1, -1
+        | Right -> 1, 0
+        | BottomRight -> 1, 1
+        | Bottom -> 0, 1
+        | BottomLeft -> -1, 1
+        | Left -> -1, 0
+        | TopLeft -> -1, -1
+
+    { X = tile.X + dx; Y = tile.Y + dy }
+
+/// The steps off the border ring into the room, for a creep standing on it: a
 /// body on the ring at the start of a tick has always just crossed in (the
 /// engine carries one that ends a tick there), so the room it stands in is the
-/// one it is walking into. Straight in, else either inward diagonal, onto
-/// ground the terrain lets it stand on; None off the ring, or with all three
-/// walled. A body on the tile it steps to costs the crossing one tick: the
-/// engine carries it back, and the next full tick sends it again.
-let inward (walkable: Pos -> bool) (tile: Pos) : Direction option =
+/// one it is walking into. Straight in, then either inward diagonal, onto
+/// ground the terrain lets it stand on; none off the ring, or with all three
+/// walled. Which of them is free of bodies is the light tick's to read
+/// (`inwardSteps`).
+let inward (walkable: Pos -> bool) (tile: Pos) : Direction list =
     let last = Engine.roomSide - 1
 
     let candidates =
@@ -193,24 +209,59 @@ let inward (walkable: Pos -> bool) (tile: Pos) : Direction option =
         elif tile.Y = last then [ Top; TopRight; TopLeft ]
         else []
 
-    let stepTo direction =
-        let dx, dy =
-            match direction with
-            | Top -> 0, -1
-            | TopRight -> 1, -1
-            | Right -> 1, 0
-            | BottomRight -> 1, 1
-            | Bottom -> 0, 1
-            | BottomLeft -> -1, 1
-            | Left -> -1, 0
-            | TopLeft -> -1, -1
-
-        { X = tile.X + dx; Y = tile.Y + dy }
-
     candidates
-    |> List.tryFind (fun direction ->
-        let next = stepTo direction
+    |> List.filter (fun direction ->
+        let next = stepTo tile direction
         not (Seam.onRing next) && walkable next)
+
+/// The step each creep on the ring takes this tick: the first of its `inward`
+/// steps onto a tile no creep stands on, ours or not, and that no other step
+/// of this tick lands on — a replayed step plan's (`steps`), or an earlier
+/// crosser's, in name order (#562). A body on the tile it steps to fails the
+/// step, and a creep ending its tick on the ring is carried back across —
+/// every other tick, while the body stands. A creep on the ring missing from
+/// the map has every inward tile walled or held: the tick is full
+/// (`LightForce.OnBorder`) and the arbitration settles it.
+let private inwardSteps
+    (steps: Map<string, RoomPos * RoomPos>)
+    (now: Glance)
+    : Map<string, Direction> =
+    let onRing (creep: GlanceCreep) = Seam.onRing (RoomPos.pos creep.Tile)
+
+    let standing =
+        Set.ofSeq (
+            Seq.append
+                (now.Creeps |> Map.values |> Seq.map (fun c -> c.Tile))
+                (now.Hostiles |> Seq.map (fun h -> h.Tile))
+        )
+
+    let replayed =
+        now.Creeps
+        |> Map.toSeq
+        |> Seq.choose (fun (name, creep) ->
+            match Map.tryFind name steps with
+            | Some(first, second) when first = creep.Tile && not (onRing creep) -> Some second
+            | _ -> None)
+        |> Set.ofSeq
+
+    now.Creeps
+    |> Map.toList
+    |> List.filter (snd >> onRing)
+    |> List.fold
+        (fun (claimed, chosen) (name, creep) ->
+            creep.Inward
+            |> List.tryPick (fun direction ->
+                let tile = RoomPos.at creep.Tile.Room (stepTo (RoomPos.pos creep.Tile) direction)
+
+                if Set.contains tile claimed then
+                    None
+                else
+                    Some(direction, tile))
+            |> function
+                | Some(direction, tile) -> Set.add tile claimed, Map.add name direction chosen
+                | None -> claimed, chosen)
+        (Set.union standing replayed, Map.empty)
+    |> snd
 
 /// What a replayed act needs still standing in the glance besides its actor.
 [<RequireQualifiedAccess>]
@@ -683,10 +734,12 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             [ LightForce.CreepsChanged(Set.toList changed) ]
 
     let onBorder =
+        let stepping = inwardSteps (merged last).Steps now
+
         now.Creeps
         |> Map.toList
-        |> List.filter (fun (_, creep) ->
-            Seam.onRing (RoomPos.pos creep.Tile) && Option.isNone creep.Inward)
+        |> List.filter (fun (name, creep) ->
+            Seam.onRing (RoomPos.pos creep.Tile) && not (Map.containsKey name stepping))
         |> List.map (fst >> LightForce.OnBorder)
 
     // Who could have struck the creep where it stands: a body whose weapon
@@ -895,12 +948,11 @@ let intents (record: LastFull) (now: Glance) : Intent list =
         | RangedMassAttack _ -> true
         | _ -> false
 
+    let stepping = inwardSteps last.Steps now
+
     [
         for KeyValue(name, creep) in now.Creeps do
-            let inward =
-                match creep.Inward with
-                | Some direction when Seam.onRing (RoomPos.pos creep.Tile) -> Some direction
-                | _ -> None
+            let inward = Map.tryFind name stepping
 
             match inward with
             | Some direction -> yield MoveCreep(name, direction)

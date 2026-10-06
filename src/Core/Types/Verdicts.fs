@@ -367,6 +367,11 @@ type MoveIntent =
         /// business. The candidate list holds the same tiles in preference
         /// order and cannot say which are still the Work Area.
         Area: Set<RoomPos>
+        /// The tile after its head on the walk it is taking (its step plan's
+        /// second), for a body walking somewhere: what a body it shoves off
+        /// its head is put off last (#562), or that body walks up the lane
+        /// ahead of it and is shoved again the next tick.
+        Onward: RoomPos option
     }
 
 /// One colony's movement for the tick, before a tile of it is arbitrated. It

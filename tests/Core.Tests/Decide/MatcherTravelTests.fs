@@ -567,6 +567,28 @@ let movementTests =
             }
         ]
 
+/// #562: an idle body's tile is yieldable to a ranked mover of ours, and the
+/// body steps out of the mover's way rather than up the lane ahead of it, to
+/// be shoved again next tick. A lane up x = 10 to the rock's Seat (10,10),
+/// the worker "h" walking up it and "i" idle; `side` adds (11,13), beside the
+/// idle body's (10,12) and the mover's (10,13) and on no way up.
+let private laneUp side idle mover =
+    let terrain =
+        [
+            yield { X = 10; Y = 9 }, Wall
+            for y in 10..13 -> { X = 10; Y = y }, Plain
+            if side then
+                yield { X = 11; Y = 13 }, Plain
+        ]
+
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Creeps = [ worker "h" 0 50; worker "i" 50 0 ]
+        Spatial =
+            spatial [ "src-a", { X = 10; Y = 9 } ] terrain
+            |> withCreepsAt [ "h", mover; "i", idle ]
+    }
+
 [<Tests>]
 let arbitrationTests =
     testList
@@ -687,6 +709,125 @@ let arbitrationTests =
                 Expect.isTrue
                     (moves |> List.exists (fun (name, _) -> name = "w2"))
                     "the idler is displaced out of the way"
+            }
+
+            test "#562 the idle body in a hauler's only way in steps aside, off the hauler's way on" {
+                let moves =
+                    resolveOn
+                        (laneUp true { X = 10; Y = 12 } { X = 10; Y = 13 })
+                        [ "h", Harvest "src-a" ]
+                    |> moveIntents
+                    |> List.sort
+
+                Expect.equal
+                    moves
+                    [ "h", Top; "i", BottomRight ]
+                    "the mover takes the idle body's tile and the idle body the tile beside the lane, not (10,11) ahead of it"
+            }
+
+            test
+                "#562 with nowhere beside the lane, the idle body swaps with the mover rather than walk ahead of it" {
+                let moves =
+                    resolveOn
+                        (laneUp false { X = 10; Y = 12 } { X = 10; Y = 13 })
+                        [ "h", Harvest "src-a" ]
+                    |> moveIntents
+                    |> List.sort
+
+                Expect.equal moves [ "h", Top; "i", Bottom ] "the two exchange tiles"
+            }
+
+            test
+                "#562 an idle body with no free tile beside it holds, and the mover goes round or waits" {
+                // Inside one room the mover's own tile is always a swap, so
+                // the dead end is a mover on the border ring, which is no
+                // ground to swap onto: it stands on (10,0) and steps in onto
+                // the idle body's (10,1), whose every other tile — the way
+                // on (10,2) and (11,1) — a fatigued body holds.
+                let ringLane wayRound =
+                    { bareRespawn with
+                        Spawns = []
+                        Controller = None
+                        Refillables = []
+                        Sources = [ source "src-a" ]
+                        Creeps =
+                            [
+                                worker "h" 0 50
+                                worker "i" 50 0
+                                { worker "f1" 50 0 with Fatigue = 4 }
+                                { worker "f2" 50 0 with Fatigue = 4 }
+                            ]
+                        Spatial =
+                            { SpatialInfo.empty with
+                                RoomName = Some "W1N1"
+                            }
+                            |> withHome (fun layer ->
+                                { layer with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                yield { X = 10; Y = 5 }, Wall
+                                                for y in 1..4 -> { X = 10; Y = y }, Plain
+                                                yield { X = 11; Y = 1 }, Plain
+                                                if wayRound then
+                                                    yield { X = 9; Y = 1 }, Plain
+                                            ]
+                                    TargetPositions = Map.ofList [ "src-a", { X = 10; Y = 5 } ]
+                                    CreepPositions =
+                                        Map.ofList
+                                            [
+                                                "h", { X = 10; Y = 0 }
+                                                "i", { X = 10; Y = 1 }
+                                                "f1", { X = 10; Y = 2 }
+                                                "f2", { X = 11; Y = 1 }
+                                            ]
+                                })
+                    }
+
+                let assigned = [ "h", Harvest "src-a" ]
+
+                Expect.equal
+                    (resolveOn (ringLane true) assigned |> moveIntents)
+                    [ "h", BottomLeft ]
+                    "the idle body holds and the mover takes the way round it"
+
+                Expect.isEmpty
+                    (resolveOn (ringLane false) assigned |> moveIntents)
+                    "and with no way round nobody moves: the mover waits"
+            }
+
+            test "#562 a parked body an idle body shoves takes its tile back" {
+                // The rule is the idle body's: a parked body (a pooled Task
+                // it cannot reach, the shape of a Defend holder waiting
+                // inside its line) stands where it chose to. The idle body on
+                // the pocket's mouth steps off onto (20,14), where it stands.
+                let colony =
+                    pocketColony
+                        [ upgrader "u"; worker "p" 0 50 ]
+                        [ "u", { X = 21; Y = 14 }; "p", { X = 20; Y = 14 } ]
+
+                let pool = poolOn colony
+
+                let unreachable =
+                    { List.head pool with
+                        Task = Harvest "src-x"
+                    }
+
+                let moves =
+                    resolve
+                        colony
+                        (Atlas.ofView colony)
+                        noThreats
+                        (unreachable :: pool)
+                        (Map.ofList [ "p", Harvest "src-x" ])
+                        Map.empty
+                        Set.empty
+                    |> fst
+                    |> moveIntents
+
+                Expect.isFalse
+                    (moves |> List.exists (fun (name, _) -> name = "p"))
+                    $"the parked body keeps its tile: %A{moves}"
             }
 
             test "a contested tile goes to the higher task rank" {

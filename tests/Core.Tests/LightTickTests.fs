@@ -14,7 +14,7 @@ let private creepAt x y hits : GlanceCreep =
     {
         Tile = tile x y
         Hits = hits
-        Inward = None
+        Inward = []
         Heals = 0
         Strikes = 0
     }
@@ -841,7 +841,7 @@ let forcedTests =
                                 {
                                     Tile = RoomPos.at harassed { X = 10; Y = 10 }
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -908,7 +908,7 @@ let forcedTests =
                                 {
                                     Tile = at harassed 10
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -917,7 +917,7 @@ let forcedTests =
                                 {
                                     Tile = at outpost 10
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -980,7 +980,7 @@ let forcedTests =
                                 {
                                     Tile = at harassed 30
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -989,7 +989,7 @@ let forcedTests =
                                 {
                                     Tile = at harassed 32
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -1026,7 +1026,7 @@ let forcedTests =
                                 {
                                     Tile = at x
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -1399,7 +1399,7 @@ let forcedTests =
                                     {
                                         Tile = RoomPos.at "W2N1" { X = x; Y = y }
                                         Hits = 500
-                                        Inward = None
+                                        Inward = []
                                         Heals = 0
                                         Strikes = 0
                                     }
@@ -1423,7 +1423,7 @@ let forcedTests =
                                 {
                                     Tile = RoomPos.at "W2N1" { X = 0; Y = 20 }
                                     Hits = 500
-                                    Inward = Some Right
+                                    Inward = [ Right ]
                                     Heals = 0
                                     Strikes = 0
                                 }
@@ -1440,28 +1440,133 @@ let forcedTests =
                     "and it takes it"
             }
 
+            // #562, live t987,159-987,529: a hauler crossing into W17S25
+            // stepped straight in onto an idle guard's tile, failed, ended on
+            // the ring and was carried back, every light tick.
+            test
+                "#562 a creep on the ring takes an inward tile no body stands on, and forces a full tick when none is free" {
+                // The digger is the body of ours in the way, an unarmed
+                // stranger the body not ours.
+                let crossed (digger: int * int) (strangers: (int * int) list) =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add "digger" (creepAt (fst digger) (snd digger) 1000)
+                            |> Map.add
+                                "hauler"
+                                { creepAt 0 20 500 with
+                                    Inward = [ Right; TopRight; BottomRight ]
+                                }
+                        Hostiles = strangers |> List.map (fun (x, y) -> hostile x y "Someone" false)
+                    }
+
+                let straightHeld = crossed (1, 20) []
+
+                Expect.equal
+                    (LightTick.forced last straightHeld)
+                    None
+                    "a free diagonal: the tick stays light"
+
+                Expect.contains
+                    (LightTick.intents last straightHeld)
+                    (MoveCreep("hauler", TopRight))
+                    "and the hauler takes it rather than the guard's tile"
+
+                Expect.isFalse
+                    (LightTick.intents last straightHeld
+                     |> List.contains (MoveCreep("hauler", Right)))
+                    "never the step into the guard"
+
+                Expect.contains
+                    (LightTick.intents last (crossed (1, 20) [ 1, 19 ]))
+                    (MoveCreep("hauler", BottomRight))
+                    "a body not ours holds a tile too"
+
+                Expect.equal
+                    (LightTick.forced last (crossed (1, 20) [ 1, 19; 1, 21 ]))
+                    (Some(LightForce.OnBorder "hauler"))
+                    "all three held: the tick is full, and the arbitration settles it"
+            }
+
+            test
+                "#562 two crossers never pick one inward tile: the second picks another or forces a full tick" {
+                // The digger on (0,22) and the hauler on (0,20) share (1,21)
+                // as a diagonal; strangers hold the rest but (1,19).
+                let crossed strangers =
+                    { stepped with
+                        Creeps =
+                            stepped.Creeps
+                            |> Map.add
+                                "digger"
+                                { creepAt 0 22 1000 with
+                                    Inward = [ Right; TopRight; BottomRight ]
+                                }
+                            |> Map.add
+                                "hauler"
+                                { creepAt 0 20 500 with
+                                    Inward = [ Right; TopRight; BottomRight ]
+                                }
+                        Hostiles = strangers |> List.map (fun (x, y) -> hostile x y "Someone" false)
+                    }
+
+                let oneFree = crossed [ 1, 20; 1, 22; 1, 23 ]
+                let moves = LightTick.intents last oneFree
+
+                Expect.contains
+                    moves
+                    (MoveCreep("digger", TopRight))
+                    "the digger, first by name, takes (1,21)"
+
+                Expect.contains
+                    moves
+                    (MoveCreep("hauler", TopRight))
+                    "and the hauler (1,19), not (1,21) behind it"
+
+                Expect.equal
+                    (LightTick.forcing last (crossed [ 1, 19; 1, 20; 1, 22; 1, 23 ]))
+                    [ LightForce.OnBorder "hauler" ]
+                    "with (1,19) held too the hauler has nothing: the tick is full"
+            }
+
             test "inward is straight in, else an inward diagonal, onto ground, never onto the ring" {
                 let open' _ = true
                 let wall (walled: Pos list) (tile: Pos) = not (List.contains tile walled)
 
-                Expect.equal (LightTick.inward open' { X = 0; Y = 20 }) (Some Right) "west edge"
-                Expect.equal (LightTick.inward open' { X = 49; Y = 20 }) (Some Left) "east edge"
-                Expect.equal (LightTick.inward open' { X = 20; Y = 0 }) (Some Bottom) "north edge"
-                Expect.equal (LightTick.inward open' { X = 20; Y = 49 }) (Some Top) "south edge"
+                // #562: every step the terrain allows, in that order, so the
+                // light tick can pass over one a body stands on.
+                Expect.equal
+                    (LightTick.inward open' { X = 0; Y = 20 })
+                    [ Right; TopRight; BottomRight ]
+                    "west edge"
+
+                Expect.equal
+                    (LightTick.inward open' { X = 49; Y = 20 })
+                    [ Left; TopLeft; BottomLeft ]
+                    "east edge"
+
+                Expect.equal
+                    (LightTick.inward open' { X = 20; Y = 0 })
+                    [ Bottom; BottomRight; BottomLeft ]
+                    "north edge"
+
+                Expect.equal
+                    (LightTick.inward open' { X = 20; Y = 49 })
+                    [ Top; TopRight; TopLeft ]
+                    "south edge"
 
                 Expect.equal
                     (LightTick.inward (wall [ { X = 1; Y = 20 } ]) { X = 0; Y = 20 })
-                    (Some TopRight)
-                    "straight in walled: the first diagonal"
+                    [ TopRight; BottomRight ]
+                    "straight in walled: the diagonals"
 
                 Expect.equal
                     (LightTick.inward
                         (wall [ { X = 1; Y = 20 }; { X = 1; Y = 19 } ])
                         { X = 0; Y = 20 })
-                    (Some BottomRight)
+                    [ BottomRight ]
                     "and the other"
 
-                Expect.isNone
+                Expect.isEmpty
                     (LightTick.inward
                         (wall [ { X = 1; Y = 19 }; { X = 1; Y = 20 }; { X = 1; Y = 21 } ])
                         { X = 0; Y = 20 })
@@ -1469,10 +1574,10 @@ let forcedTests =
 
                 Expect.equal
                     (LightTick.inward open' { X = 0; Y = 1 })
-                    (Some Right)
+                    [ Right; BottomRight ]
                     "beside a corner, the diagonal onto the ring is never offered"
 
-                Expect.isNone
+                Expect.isEmpty
                     (LightTick.inward open' { X = 20; Y = 20 })
                     "off the ring there is no inward step"
             }
@@ -1952,7 +2057,7 @@ let private split: Glance =
                 {
                     Tile = RoomPos.at "W4N1" { X = 10; Y = 10 }
                     Hits = 1000
-                    Inward = None
+                    Inward = []
                     Heals = 0
                     Strikes = 0
                 }
@@ -1961,7 +2066,7 @@ let private split: Glance =
                 {
                     Tile = RoomPos.at "W5N1" { X = 10; Y = 10 }
                     Hits = 500
-                    Inward = None
+                    Inward = []
                     Heals = 0
                     Strikes = 0
                 }
@@ -2033,7 +2138,7 @@ let decidersTests =
                                 {
                                     Tile = RoomPos.at "W1N1" { X = 10; Y = 10 }
                                     Hits = 500
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = strikes
                                 }
@@ -2087,7 +2192,7 @@ let decidersTests =
                                 {
                                     Tile = tile 15 15
                                     Hits = 900
-                                    Inward = None
+                                    Inward = []
                                     Heals = 0
                                     Strikes = 0
                                 }
