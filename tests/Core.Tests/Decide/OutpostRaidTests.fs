@@ -2229,10 +2229,16 @@ let shutChaseTests =
                     }
                     |> withGuards [ ranger "r-1", { X = 22; Y = 47 } ]
 
+                Expect.isTrue
+                    (Facts.rowAnswer shut "W1N2").Wins
+                    "the guard row the bank buys would win it"
+
+                // The stand-down withholds that row's Guard, so its win binds
+                // nobody (#573): the room is the rangers' that kite it.
                 Expect.equal
                     (Facts.answer shut "W1N2")
-                    Answer.Win
-                    "the guard row the bank buys would win it"
+                    Answer.Kite
+                    "and the room's verdict is the kite"
 
                 let decision = decide shut Map.empty Set.empty None
 

@@ -1543,8 +1543,15 @@ let private priceAmong
             |> List.map (fun (p, priced) -> p.Home, rowAnswer priced room)
             |> Map.ofList
 
+        // A row never answers a room its colony shut on a raid
+        // (`ColonyView.RaidedOutposts`): the stand-down withholds that row's
+        // Guard, so its Win would bind the room to a body nobody casts and
+        // keep the rangers that kite it down from pooling the chase (#573).
         let rowed =
-            casters |> List.filter (fun (p, _) -> rows.[p.Home].Wins) |> List.map fst
+            casters
+            |> List.filter (fun (p, _) ->
+                rows.[p.Home].Wins && not (p.View.RaidedOutposts.Contains room))
+            |> List.map fst
 
         if not (List.isEmpty rowed) then
             verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) [] rowed
