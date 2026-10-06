@@ -8058,17 +8058,19 @@ let arenaBorderTests =
 
             // Characterisation (movement S0): pins how a body
             // released inside a Reach walks out of it, which reads no time:
-            // its way home to W17S25 runs through (48,14), beside Idol768,
-            // and the melee strikes it there three times (t8-t10); flips at
-            // S2 (walk-round reads the arrival map), whose acceptance is the
-            // #533 pin. Live (t973,268-973,294) the ranger stood idle on
-            // (46,14) and was struck to death: that was before #533, which
-            // gave a released fighter a Task the same tick, so the live
-            // outcome no longer reproduces by design. Here it takes the
-            // home's Guard at t0, the towers kill Shade461 on the exit tile,
-            // and it comes back to kill Idol768.
+            // its way home to W17S25 runs through (48,14), beside Idol768;
+            // flips at S2 (walk-round reads the arrival map), whose
+            // acceptance is the #533 pin. Live (t973,268-973,294) the ranger
+            // stood idle on (46,14) and was struck to death: that was before
+            // #533, which gave a released fighter a Task the same tick, so
+            // the live outcome no longer reproduces by design. Here it takes
+            // the home's Guard at t0 and, standing outside the Guard's room,
+            // shoots Idol768 by the weapon reflex from t0 (#563): it dies at
+            // t7, before the ranger passes it (struck t8-t10 before #563,
+            // when the ranger struck nothing on its way and came back to
+            // kill it); the towers kill Shade461 on the exit tile.
             test
-                "#533 capture t973,267: a ranger released beside a melee walks home past it, is struck, and survives" {
+                "#533 capture t973,267: a ranger released beside a melee shoots it dead on its way home, and is never struck" {
                 let ranger = "ranger-972464-Spawn8"
 
                 let tasks, trace =
@@ -8094,8 +8096,13 @@ let arenaBorderTests =
                         if now.Hits < before.Hits then Some tick else None)
                     |> List.filter (fun tick -> tick < 12)
 
-                Expect.equal struck [ 8; 9; 10 ] $"the melee strikes it on its way out\n{failure}"
-                Expect.isSome (diedOn "Idol768" trace) $"Idol768 dies\n{failure}"
+                Expect.equal struck [] $"the melee never strikes it on its way out\n{failure}"
+
+                Expect.equal
+                    (diedOn "Idol768" trace)
+                    (Some 7)
+                    $"Idol768 dies of its shots on the way\n{failure}"
+
                 Expect.isNone (diedOn ranger trace) $"and the ranger lives\n{failure}"
             }
         ]

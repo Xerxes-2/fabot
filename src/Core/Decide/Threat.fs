@@ -168,6 +168,10 @@ type Selector =
         /// The colony, the room, the walk and the shots; each rank priced once.
         /// What a holder strikes is `Emitter.pickStrike`'s choice off it.
         Order: ColonyView -> string -> (HostileInfo -> int) -> HostileInfo list -> HostileInfo list
+        /// Each shot's band of that order (`Facts.killBand`), first band
+        /// first, the colony and the room applied once: a mass attack counts
+        /// only what it deals the band of the shot it would replace (#563).
+        Band: ColonyView -> string -> HostileInfo -> int
     }
 
 /// The ground each source laid in one room this tick, before the room's kind
@@ -464,6 +468,7 @@ module Brief =
                     | _ ->
                         let rank = killRank view room
                         shots |> List.sortBy (fun h -> rank h, walk h, h.Id)
+            Band = killBand
         }
 
     /// An outpost a ranger answers (`ranged`, #535) holds the kite ground
@@ -953,6 +958,7 @@ module Brief =
                 {
                     Shoots = fun _ _ _ hostile -> Set.contains hostile.Id line
                     Order = fun _ _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
+                    Band = fun _ _ _ -> 0
                 }
             Admits =
                 fun _ _ creep ->

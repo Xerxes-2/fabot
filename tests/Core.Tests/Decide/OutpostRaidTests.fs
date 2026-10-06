@@ -1946,6 +1946,83 @@ let chaseCallTests =
             }
         ]
 
+[<Tests>]
+let transitStrikeTests =
+    testList
+        "a Guard's holder walking through another room (#563)"
+        [
+            // Live t986,014 (W17S26): a ranger holding W17S25's Guard walked
+            // past Trepidimous' melee three off and struck it nothing but a
+            // mass attack's 2, its kill order standing in the Guard's room.
+            test "strikes by the weapon reflex what it may strike and reaches there" {
+                // W1N3, a room that is none of ours: the body stands at
+                // (25,25), a raider of the declared enemy at `pos`.
+                let held raid body pos =
+                    let colony = declaredRaid raid
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    let floor =
+                        TerrainGrid.ofList
+                            [
+                                for x in 1..48 do
+                                    for y in 1..48 -> { X = x; Y = y }, Plain
+                            ]
+
+                    let colony =
+                        { colony with
+                            Creeps = colony.Creeps @ [ body ]
+                            Hostiles =
+                                raid
+                                @ [
+                                    { hostileIn "W1N3" pos [ Move; Carry ] with
+                                        Id = "passer"
+                                        Owner = "Trepidimous"
+                                    }
+                                ]
+                            Spatial =
+                                { colony.Spatial with
+                                    Borders = colony.Spatial.Borders |> Map.add "W1N3" plainRing
+                                }
+                                |> withNeighbour "W1N2" { outpost with Terrain = floor }
+                                |> withNeighbour
+                                    "W1N3"
+                                    { RoomLayer.empty with
+                                        Terrain = floor
+                                        CreepPositions =
+                                            Map.ofList [ body.Name, { X = 25; Y = 25 } ]
+                                    }
+                        }
+
+                    decide colony (Map.ofList [ body.Name, taskId (Guard "W1N2") ]) Set.empty None
+
+                // The ranger answers a plodder's raid, the melee guard a
+                // smallMelee's.
+                let shot = held [ plodderAt { X = 25; Y = 44 } ] (ranger "r-1") { X = 25; Y = 27 }
+
+                Expect.equal
+                    (Map.tryFind "r-1" shot.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the ranger holds the outpost's Guard on its way"
+
+                Expect.contains
+                    shot.Intents
+                    (RangedAttackCreep("r-1", "passer"))
+                    "and shoots the declared enemy two off on its way"
+
+                let swung = held raiders (guard "g-1") { X = 25; Y = 26 }
+
+                Expect.equal
+                    (Map.tryFind "g-1" swung.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the melee guard holds it too"
+
+                Expect.contains
+                    swung.Intents
+                    (AttackCreep("g-1", "passer"))
+                    "and swings at the one beside it"
+            }
+        ]
+
 /// The raided field widened to x 15..35, y 35..48, room for a ranger to come
 /// at the melee from the north.
 let private withField (colony: ColonyView) =

@@ -136,13 +136,15 @@ type Intent =
 
 /// What the light tick's strike choice reads of a fighter that the glance
 /// does not carry (#537): the room it stood in, its live RANGED_ATTACK parts,
-/// and the tiles there a mass attack may not reach (`Emitter.shields`). A
+/// the tiles there a mass attack may not reach (`Emitter.shields`), and each
+/// target it aims at's band in its kill order (`Selector.Band`, #563). A
 /// body that has left the room fires none.
 type Volley =
     {
         Room: string
         Guns: int
         Shields: Set<Pos>
+        Bands: Map<string, int>
     }
 
 /// Creep name -> task id. The only state remembered between ticks (anti-thrash).

@@ -324,6 +324,64 @@ let strikeChoiceTests =
             }
 
             test
+                "a raider at range 2 and a hauler beside it take the shot at the raider: the mass counts only the raid's band (#563)" {
+                let hauler =
+                    { hostileIn "W1N2" { X = 25; Y = 42 } [ Move; Carry ] with
+                        Id = "hauler"
+                        Owner = "Trepidimous"
+                    }
+
+                Expect.equal
+                    (strikesAmong (raidedOutpost [ raiderAt "h-1" { X = 26; Y = 43 }; hauler ]))
+                    [ RangedAttackCreep("r-1", "h-1") ]
+                    "the mass deals the raider 8 and the hauler 20, the shot the raider 20"
+            }
+
+            // Live t986,014 (W17S26): a ranger whose kill order stood in
+            // another room mass-attacked the melee three off, for 2.
+            test "with no target of its kill order in reach: never a mass attack (#563)" {
+                Expect.equal
+                    (Emitter.pickStrike
+                        (fun _ -> false)
+                        (fun _ -> 20)
+                        (fun _ -> 0)
+                        (Some(fun _ -> 2))
+                        [ "far" ])
+                    (Some(Emitter.At("far", false)))
+                    "the head out of reach, whatever else stands within three"
+            }
+
+            test
+                "a broken healer and its melee both beside it take a mass attack: the healer loses nothing, the melee gains a blow (#563)" {
+                // The order's bands: the broken healer 1, the melee 2; two
+                // guns, both at range 1.
+                let band =
+                    function
+                    | "healer" -> 1
+                    | _ -> 2
+
+                Expect.equal
+                    (Emitter.pickStrike
+                        (fun _ -> true)
+                        (fun _ -> 20)
+                        band
+                        (Some(fun _ -> 20))
+                        [ "healer"; "melee" ])
+                    (Some Emitter.Mass)
+                    "20 on the healer as the shot, and 20 on the melee besides"
+
+                Expect.equal
+                    (Emitter.pickStrike
+                        (fun _ -> true)
+                        (fun _ -> 20)
+                        band
+                        (Some(fun t -> if t = "healer" then 8 else 20))
+                        [ "healer"; "melee" ])
+                    (Some(Emitter.At("healer", true)))
+                    "the healer at range 2: 8 on it against the shot's 20, the melee's 20 notwithstanding"
+            }
+
+            test
                 "a hostile beside it with 5 hits left and one at range 3 take a shot: damage is capped by hits" {
                 let struck =
                     strikesAmong (

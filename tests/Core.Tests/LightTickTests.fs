@@ -348,6 +348,7 @@ let replayTests =
                                 Room = room
                                 Guns = 2
                                 Shields = Set.empty
+                                Bands = Map.ofList [ "h-1", 2; "h-2", 2 ]
                             }
                         ]
 
@@ -402,6 +403,54 @@ let replayTests =
                     (ofRanger (full Map.empty) (shooting []))
                     [ RangedAttackCreep("ranger", "h-1") ]
                     "no volley recorded: the shot"
+            }
+
+            test
+                "a ranger with its head at range 2 and a lower band's aim beside it shoots the head (#563)" {
+                // The full tick's bands (`Volley.Bands`): the mass's 20 on
+                // the hauler beside it is no blow to the raid, whose melee
+                // at range 2 it deals 8 where the shot deals 20.
+                let glance =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "ranger" (creepAt 12 10 1000)
+                        Hostiles =
+                            [
+                                { hostile 14 10 "Trepidimous" true with
+                                    Id = "melee"
+                                }
+                                { hostile 11 10 "Trepidimous" false with
+                                    Id = "hauler"
+                                }
+                            ]
+                    }
+
+                let record =
+                    LightTick.lastFull glance Map.empty [ RangedAttackCreep("ranger", "melee") ]
+                    |> aiming
+                        [
+                            RangedAttackCreep("ranger", "melee")
+                            RangedAttackCreep("ranger", "hauler")
+                        ]
+                        (Map.ofList
+                            [
+                                "ranger",
+                                {
+                                    Room = room
+                                    Guns = 2
+                                    Shields = Set.empty
+                                    Bands = Map.ofList [ "melee", 2; "hauler", 4 ]
+                                }
+                            ])
+
+                Expect.equal
+                    (LightTick.intents record glance
+                     |> List.filter (fun intent ->
+                         match intent with
+                         | RangedAttackCreep("ranger", _)
+                         | RangedMassAttack "ranger" -> true
+                         | _ -> false))
+                    [ RangedAttackCreep("ranger", "melee") ]
+                    "the shot at the melee"
             }
 
             test

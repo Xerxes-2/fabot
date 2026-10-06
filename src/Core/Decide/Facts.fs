@@ -1003,6 +1003,19 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
                 EffectiveHits = HostileInfo.effectiveHits hostile + heal - damage
             }
 
+/// Each target's band of the kill order (`killRank`'s tier), first band
+/// first: what a mass attack is weighed against a shot by (#563).
+let internal killBand (view: ColonyView) (room: string) : HostileInfo -> int =
+    let rank = killRank view room
+
+    fun hostile ->
+        match (rank hostile).Tier with
+        | Claimer -> 0
+        | BrokenHealer -> 1
+        | Raid -> 2
+        | Reserver -> 3
+        | Bystander -> 4
+
 /// A raid's price at a window (`raidPrice`). Its armed bodies' hits come in
 /// two phases: `Tough`, the damage that breaks their boosted TOUGH still
 /// standing, while a hit healed costs `ToughHealing` of it; then `Hits`, the

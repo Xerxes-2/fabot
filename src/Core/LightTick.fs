@@ -965,7 +965,8 @@ let intents (record: LastFull) (now: Glance) : Intent list =
 
             // The full tick's strike choice again off the glance (#535, #537):
             // the first aim in reach, else the head, or the mass attack where
-            // it deals more (`Emitter.pickStrike`) — never with a body within
+            // it deals the strike's band more (`Emitter.pickStrike`, the full
+            // tick's bands, `Volley.Bands`) — never with a body within
             // three that is none of its aims. It replaces the full tick's own
             // strike, which named the target in reach where the bodies stood
             // then.
@@ -984,19 +985,33 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                         volley
                         |> Option.bind (fun volley ->
                             now.Hostiles
-                            |> List.map (fun h -> h.Tile, h.Hits, Set.contains h.Id targets)
-                            |> Decide.Emitter.massDamage
+                            |> List.map (fun h -> h.Tile, Set.contains h.Id targets)
+                            |> Decide.Emitter.massOn
                                 volley.Guns
                                 creep.Tile
                                 (Set.union
                                     volley.Shields
                                     (RoomPos.inRoom volley.Room (Set.ofList now.PowerCreeps))))
+                        |> Option.map (fun deals aim ->
+                            match
+                                aimed aim,
+                                aimedAt aim |> Option.bind (fun t -> Map.tryFind t hits)
+                            with
+                            | Some(tile, _), Some left -> deals tile left
+                            | _ -> 0)
 
                     let dealt aim =
                         aimedAt aim
                         |> Option.bind (fun target -> Map.tryFind target hits)
                         |> Option.map (fun left -> min left (guns * Engine.rangedAttackPower))
                         |> Option.defaultValue 0
+
+                    let band aim =
+                        Option.map2
+                            (fun (volley: Volley) target -> Map.tryFind target volley.Bands)
+                            volley
+                            (aimedAt aim)
+                        |> Option.flatten
 
                     held
                     |> Decide.Emitter.pickStrike
@@ -1006,6 +1021,7 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                                 RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
                             |> Option.defaultValue false)
                         dealt
+                        band
                         mass
                     |> Option.map (function
                         | Decide.Emitter.At(aim, reaches) -> aim, reaches
