@@ -740,6 +740,13 @@ type ColonyView =
         /// The hostiles in sight standing on the tile they stood on the full
         /// tick before (`HostileStep.Since`, #552): parked, not walking in.
         Parked: Set<string>
+        /// The tiles, world-wide, of our bodies this tick's arbitration shoves
+        /// for free (#600): rested, holding no Task at the last match, and
+        /// moved by a colony deciding this tick (`Entry.looseTiles`). Empty
+        /// off the shell and in every hand-built fixture, which price every
+        /// standing body as occupied; the decide settles it before the Atlas
+        /// is built. The one reader is the Atlas's occupancy grid.
+        Loose: Set<RoomPos>
         /// What this colony may take of a neighbour's, explicitly and
         /// bounded.
         Borrowed: BorrowedWork
@@ -1968,6 +1975,7 @@ module ColonyView =
                     |> Option.exists (fun step -> step.At = h.Pos && step.Since < world.Time))
                 |> List.map (fun h -> h.Id)
                 |> Set.ofList
+            Loose = Set.empty
             Borrowed =
                 {
                     Rooms = bootstrap

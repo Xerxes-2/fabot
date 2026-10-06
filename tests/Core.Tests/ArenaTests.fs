@@ -8130,7 +8130,9 @@ let arenaBorderTests =
                 // ranger held (25,10), out of reach of its ground, and the
                 // reserver's walk priced round it took the swamp at (25,9).
                 // Since #595 that ranger closes on its ground by (26,8), the
-                // reserver walks (26,9) on plain and lives; the anchor steps to
+                // reserver walks (26,9) on plain and lives (unchanged by #600,
+                // which prices a loose body's tile at its step: the ranger
+                // swaps onto (26,8) as the reserver steps); the anchor steps to
                 // (26,8) at t6 as the melee steps beside it, and dies at t8
                 // (as before S3).
                 let reserver = pathOf "reserver-985957-Spawn11" trace
@@ -16968,34 +16970,42 @@ let w18s25CrippledTests =
 
             // #599: per colony the mother's big ranger takes the chase at t36
             // from W17S25's east side, 40 steps and a swamp choke from the
-            // cripple, and crosses into W18S25 at t88, after the W17S29 ranger
-            // has it dying (t92). Every rested tick it holds the chase it steps:
-            // the 12 ticks it stands are swamp fatigue, 8 of them the choke's
-            // two columns and 4 a swamp step round an idle defender on the
-            // choke's one road (the occupancy surcharge). Arriving too late
-            // is the seat's (#596), not the walk's.
+            // cripple. Every rested tick it holds the chase it steps. #600:
+            // an idle body's tile is priced at its step, since the arbitration
+            // shoves it for free, so the 8 ticks it stands are the choke's two
+            // swamp columns alone; before, the walk priced another colony's
+            // idle defender on the choke's one road (32,31) as occupied and
+            // took a swamp step round it, 4 ticks more, and crossed at t88.
+            // Now the defender idles further west and the ranger walks onto
+            // its tile (25,31) at t57, shoving it off, and crosses at t82.
+            // Arriving too late is the seat's (#596), not the walk's.
             test
-                "#573 capture t994,917: the mother's ranger holding the chase steps toward W18S25 every tick it is rested, and crosses at t88" {
+                "#573 capture t994,917: the mother's ranger holding the chase steps toward W18S25 every tick it is rested, through an idle body, and crosses at t82" {
                 let ranger = "ranger-993409-Spawn3"
+                let defender = "defender-994619-Spawn11"
 
                 let ticks =
-                    // Ticks 0 to 88.
-                    ((w18s25Crippled (), []), List.replicate 89 ())
+                    // Ticks 0 to 82.
+                    ((w18s25Crippled (), []), List.replicate 83 ())
                     ||> List.fold (fun (a, acc) () ->
                         let next, trace = stepIn FightLane.PerColony a
                         let body = trace.Bodies |> List.find (fun b -> b.Id = ranger)
+                        let idle = trace.Bodies |> List.find (fun b -> b.Id = defender)
 
                         next,
-                        (trace.Tick, body, Map.tryFind ranger next.Carried.Assignments) :: acc)
+                        (trace.Tick, body, idle, Map.tryFind ranger next.Carried.Assignments)
+                        :: acc)
                     |> snd
                     |> List.rev
 
-                Expect.exists
+                let chasing =
                     ticks
-                    (fun (_, _, task) -> task = Some "guard:W18S25")
-                    "it holds the cripple's chase"
+                    |> List.filter (fun (_, body, _, task) ->
+                        task = Some "guard:W18S25" && body.At.Room <> "W18S25")
 
-                for (_, before, _), (tick, after, task) in List.pairwise ticks do
+                Expect.isNonEmpty chasing "it holds the cripple's chase"
+
+                for (_, before, _, _), (tick, after, _, task) in List.pairwise ticks do
                     if
                         task = Some "guard:W18S25"
                         && before.At.Room <> "W18S25"
@@ -17006,8 +17016,21 @@ let w18s25CrippledTests =
                             before.At
                             $"t{tick}: rested and holding the chase, it steps"
 
-                let _, last, _ = List.last ticks
-                Expect.equal last.At.Room "W18S25" "it stands in W18S25 by t88"
+                Expect.equal
+                    (chasing |> List.filter (fun (_, body, _, _) -> body.Fatigue > 0) |> List.length)
+                    8
+                    "it stands 8 ticks, the choke's two swamp columns, and none round a body"
+
+                Expect.isTrue
+                    (List.pairwise ticks
+                     |> List.exists (fun ((_, _, idleBefore, _), (_, after, idleAfter, task)) ->
+                         task = Some "guard:W18S25"
+                         && after.At = idleBefore.At
+                         && idleAfter.At <> idleBefore.At))
+                    "it walks onto the idle defender's tile and the arbitration shoves the defender off"
+
+                let _, last, _, _ = List.last ticks
+                Expect.equal last.At.Room "W18S25" "it stands in W18S25 by t82"
             }
 
             test

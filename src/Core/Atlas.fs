@@ -334,10 +334,20 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     // initial -1 answers every tile outside the projection. The occupancy
     // surcharge marks **standing** traffic (#225) — a body that did not move
     // last tick, a fatigued one, and every body of another colony's — because
-    // two travellers each pricing the other's tile never pass.
+    // two travellers each pricing the other's tile never pass. A loose body
+    // (`ColonyView.Loose`), this colony's or another's, is not traffic
+    // (#600): the arbitration shoves an idle body for free, the same tick, so
+    // its tile costs the walk its step and no more. One handed a Task this
+    // tick is not shoved off it (#562): the walker takes its detour then.
+    let loose =
+        placed
+        |> List.filter (fun (_, room, pos) -> Set.contains (RoomPos.at room pos) view.Loose)
+        |> List.map (fun (name, _, _) -> name)
+        |> Set.ofList
+
     let standing =
         view.Creeps
-        |> List.filter (fun c -> not c.Moved || c.Fatigue > 0)
+        |> List.filter (fun c -> (not c.Moved || c.Fatigue > 0) && not (Set.contains c.Name loose))
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 
@@ -412,9 +422,15 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
 
         grid
 
+    let foreign =
+        if Set.isEmpty view.Loose then
+            view.Foreign
+        else
+            Set.difference view.Foreign view.Loose
+
     let grids =
         spatial.Rooms
-        |> Map.map (fun room layer -> gridOf room (RoomPos.inRoom room view.Foreign) layer)
+        |> Map.map (fun room layer -> gridOf room (RoomPos.inRoom room foreign) layer)
 
     let ground = grids |> Map.map (fun _ (bare, _, _) -> bare)
     let weights = grids |> Map.map (fun _ (_, grid, _) -> grid)

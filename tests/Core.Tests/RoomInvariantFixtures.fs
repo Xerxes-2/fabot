@@ -264,6 +264,7 @@ let internal colonyOf (room: LoadedRoom) level =
         // child, declares no errand, and every tick has vision.
         Foreign = Set.empty
         Parked = Set.empty
+        Loose = Set.empty
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []

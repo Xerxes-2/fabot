@@ -653,6 +653,30 @@ let private laneUpHolding side held =
 let private laneUp side idle mover =
     laneUpHolding side [ worker "h" 0 50, mover; worker "i" 50 0, idle ]
 
+/// #600: the lane with a swamp at (11,12) beside the idle body's (10,12),
+/// one step round it onto (10,11) for the walker on (10,13); `loose` puts
+/// the idle body's tile in `ColonyView.Loose`.
+let private laneUpSwamp loose =
+    let terrain =
+        [
+            yield { X = 10; Y = 9 }, Wall
+            for y in 10..13 -> { X = 10; Y = y }, Plain
+            yield { X = 11; Y = 12 }, Swamp
+        ]
+
+    { bareRespawn with
+        Sources = [ source "src-a" ]
+        Creeps = [ worker "h" 0 50; worker "i" 50 0 ]
+        Spatial =
+            spatial [ "src-a", { X = 10; Y = 9 } ] terrain
+            |> withCreepsAt [ "h", { X = 10; Y = 13 }; "i", { X = 10; Y = 12 } ]
+        Loose =
+            if loose then
+                Set.singleton (RoomPos.at "" { X = 10; Y = 12 })
+            else
+                Set.empty
+    }
+
 /// The same lane worked by two colonies (#562): one holds the hauler on
 /// (10,13), the other the idle body on (10,12), each the other's foreign
 /// body.
@@ -990,6 +1014,106 @@ let arbitrationTests =
                 Expect.isFalse
                     (moves |> List.exists (fun (name, _) -> name = "p"))
                     $"the parked body keeps its tile: %A{moves}"
+            }
+
+            test
+                "#600 a walker prices a loose body's tile at its step, not round it through a swamp" {
+                let lane loose = laneUpSwamp loose
+
+                Expect.equal
+                    (resolveOn (lane true) [ "h", Harvest "src-a" ] |> moveIntents |> List.sort)
+                    [ "h", Top; "i", Right ]
+                    "the walk takes the loose body's tile and the arbitration shoves it onto the swamp"
+
+                Expect.equal
+                    (resolveOn (lane false) [ "h", Harvest "src-a" ] |> moveIntents)
+                    [ "h", TopRight ]
+                    "a body that held a Task at the last match is still priced as occupied: the walk goes round"
+            }
+
+            test "#600 another colony's loose body is priced and shoved as this colony's is" {
+                // The lane split between two colonies, as `laneUpShared`
+                // splits it, each the other's foreign body; `Loose` is the
+                // world's one set, so both views carry it.
+                let split loose =
+                    let lane = laneUpSwamp loose
+                    let tile pos = Set.singleton (RoomPos.at "" pos)
+
+                    let holding name =
+                        { lane with
+                            Creeps = lane.Creeps |> List.filter (fun c -> c.Name = name)
+                            Spatial =
+                                lane.Spatial
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        CreepPositions =
+                                            layer.CreepPositions
+                                            |> Map.filter (fun n _ -> n = name)
+                                    })
+                        }
+
+                    { holding "h" with
+                        Foreign = tile { X = 10; Y = 12 }
+                    },
+                    { holding "i" with
+                        Foreign = tile { X = 10; Y = 13 }
+                    }
+
+                let moves loose =
+                    let hauling, idling = split loose
+
+                    resolveRooms
+                        Set.empty
+                        [ movementFor hauling [ "h", Harvest "src-a" ]; movementFor idling [] ]
+                    |> fst
+                    |> moveIntents
+                    |> List.sort
+
+                Expect.equal
+                    (moves true)
+                    [ "h", Top; "i", Right ]
+                    "the walk takes its tile and the pass shoves it"
+
+                Expect.equal
+                    (moves false)
+                    [ "h", TopRight ]
+                    "not loose, it is a foreign body priced as occupied"
+            }
+
+            test "#600 a loose body handed a Task this tick keeps it as any Task holder does" {
+                // The shape of an idle defender handed Defend on its own
+                // rampart the tick a raid starts: loose (no Task at the last
+                // match), it stands on (10,10), the rock's one Seat and the
+                // whole of its new Work Area, and an equal-rank body on
+                // (10,11) asks for it. It is not shoved off its area.
+                let seat =
+                    let terrain =
+                        [
+                            yield { X = 10; Y = 9 }, Wall
+                            for y in 10..12 -> { X = 10; Y = y }, Plain
+                        ]
+
+                    { bareRespawn with
+                        Sources = [ source "src-a" ]
+                        Creeps = [ worker "h" 0 50; worker "i" 0 50 ]
+                        Spatial =
+                            spatial [ "src-a", { X = 10; Y = 9 } ] terrain
+                            |> withCreepsAt [ "h", { X = 10; Y = 11 }; "i", { X = 10; Y = 10 } ]
+                        Loose = Set.singleton (RoomPos.at "" { X = 10; Y = 10 })
+                    }
+
+                Expect.isEmpty
+                    (resolveOn seat [ "h", Harvest "src-a"; "i", Harvest "src-a" ] |> moveIntents)
+                    "the holder keeps its Seat and the walker waits"
+            }
+
+            test "#600 the decide settles who is loose off the carried assignments" {
+                let sticky = Map.ofList [ "h", taskId (Harvest "src-a") ]
+
+                Expect.contains
+                    (decideFrom sticky (laneUpSwamp false) |> _.Intents |> moveIntents)
+                    ("h", Top)
+                    "the idle body held no Task at the last match, so the walk prices its tile as the arbitration does"
             }
 
             test "a contested tile goes to the higher task rank" {

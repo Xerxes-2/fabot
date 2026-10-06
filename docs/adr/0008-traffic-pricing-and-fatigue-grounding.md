@@ -1,8 +1,10 @@
 # Traffic re-prices a route; fatigue grounds a creep
 
-> **Status:** amended by #436
+> **Status:** amended by #436, #600
 
 > **Amended by #436**: a creep standing on the crossing its walk takes is no longer bounced along the border but waits on it, since the engine carries it across for free.
+
+> **Amended by #600**: the surcharge leaves out a **loose** body's tile: one of ours, rested, holding no Task at the last match, of a colony deciding this tick (only its fighters, for a colony that may decide its fight alone). The arbitration shoves an idle body for free, the same tick, so pricing its tile at 5 ticks sent walkers into swamps it would have cleared for them (#599: a ranger's swamp step round an idle defender on a choke's one road). One set, `ColonyView.Loose`, settled once per tick for every colony, is what the flood leaves unpriced. The arbitration is unchanged: a loose body still idle this tick is shoved as #562 shoves any idle body, whatever rank pushes. One the Matcher hands a Task this tick keeps #562's protection (a defender handed Defend on its own rampart the tick a raid starts is not shoved off its line), so there, and only there, the walk may plan through a body the arbitration then holds, and the walker takes its detour. A parked or working body is still priced as standing traffic: whether the arbitration moves it depends on the walker's rank, and the flood is shared by every walker from a tile.
 
 A live jam: builders stalled behind seated harvesters while the console
 spammed `MoveCreep failed: -11` (ERR_TIRED) every tick. ADR 0001's

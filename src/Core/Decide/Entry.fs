@@ -332,6 +332,31 @@ let private withDrawn (view: ColonyView) (assignments: Assignments) : ColonyView
                 })
     }
 
+/// The tiles of our bodies this tick's one room pass shoves for free (#600,
+/// `ColonyView.Loose`), every colony's, by home: a body rested and holding no
+/// Task at the last match (`holding`), of a colony deciding this tick (`idle`
+/// names those replaying, whose bodies are the pass's walls), and of a
+/// colony that may decide its fight alone, a fighter, the one body such a
+/// decide moves (`joinFight`). The one statement of who is loose, which every
+/// colony's walk reads off the view; the pass shoves such a body as it
+/// shoves any idle one (#562).
+let private looseTiles
+    (holding: Assignments)
+    (idle: Set<string>)
+    (fightAlone: Set<string>)
+    (views: (string * ColonyView) list)
+    : Set<RoomPos> =
+    views
+    |> List.filter (fun (home, _) -> not (Set.contains home idle))
+    |> List.collect (fun (home, view) ->
+        view.Creeps
+        |> List.filter (fun creep ->
+            creep.Fatigue = 0
+            && not (Map.containsKey creep.Name holding)
+            && (not (Set.contains home fightAlone) || isFighterBody creep))
+        |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name))
+    |> Set.ofList
+
 /// The Atlas a decide prices from, its tables recalled off the memo and each
 /// room's evicted where its census moved, beside the per-room and flat
 /// signatures and the tables handed to it.
@@ -1472,6 +1497,16 @@ let decide
     : Decision =
     // One colony alone is always its own turn to re-plan: the budget #357
     // added staggers colonies against each other.
+    let view =
+        { view with
+            Loose =
+                looseTiles
+                    assignments
+                    Set.empty
+                    Set.empty
+                    [ SpatialInfo.homeName view.Spatial, view ]
+        }
+
     let decision = decideUnarbitrated view assignments verbose memo ReplanTurn.Now
     let moveIntents, moveVerdicts = resolveRooms Set.empty [ decision.Movement ]
 
@@ -1884,6 +1919,15 @@ let decideColonies
                             FightLane = inputs.Lane
                         }
                 })
+
+    // And on the one set of loose tiles the tick's room pass shoves for free.
+    let loose =
+        colonies
+        |> List.map (fun (colony, view) -> colony.Home, view)
+        |> looseTiles inputs.Holding inputs.Idle inputs.FightAlone
+
+    let colonies =
+        colonies |> List.map (fun (colony, view) -> colony, { view with Loose = loose })
 
     let judged = judgeColonies inputs.Hops inputs.Holding inputs.Idle colonies
 
