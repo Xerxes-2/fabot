@@ -1195,6 +1195,9 @@ let foldRaids
     (declared: string list)
     (prior: RaidState)
     : RaidState =
+    // A sighting is folded, never a raid recalled through blind ticks (#569).
+    let view = ColonyView.sightedOnly view
+
     // The rooms this log stands down from on a raid, read off the world's
     // vision, an observer's included, where the view no longer projects them
     // (#534): shut is not forgotten. The raid rows' re-read alone takes it —

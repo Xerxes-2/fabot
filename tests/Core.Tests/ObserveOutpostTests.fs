@@ -2119,6 +2119,39 @@ let watchedShutTests =
                     "last seen at 150, the clock its own"
             }
 
+            test
+                "a look that finds the raid one our own row wins and a ranger kites chases it: the row is shut out of the room, its kill is not (#569)" {
+                // Four ATTACK on one MOVE: a ranger holds its range on it, on
+                // road too.
+                let lone = [ raiderIn outpostRoom 0 [ Attack; Attack; Attack; Attack; Move ] ]
+
+                let shut =
+                    { observedShut lone with
+                        RaidedOutposts = Set.singleton outpostRoom
+                    }
+
+                Expect.equal
+                    (standDown Tuning.defaults 151 (raidTick 150 shut shutOnRaid)).ChasedOutposts
+                    (Set.singleton outpostRoom)
+                    "the stand-down stands, and its raid is a ranger's chase"
+            }
+
+            test
+                "a raid recalled through a blind tick is no sighting: the row is left as it stood (#569)" {
+                let raider = raiderIn outpostRoom 0 [ Attack; Move ]
+
+                let recalled =
+                    { quiet with
+                        Hostiles = [ raider ]
+                        RecalledRaiders = [ raider ]
+                    }
+
+                Expect.equal
+                    (standDowns (raidTick 150 recalled shutOnRaid))
+                    [ outpostRoom, 100, 100, 600, StandDownBasis.InvaderRaid ]
+                    "last seen at 100 still"
+            }
+
             test "with no vision of the room at all, the row is left as it stood" {
                 Expect.equal
                     (standDowns (raidTick 150 quiet shutOnRaid))

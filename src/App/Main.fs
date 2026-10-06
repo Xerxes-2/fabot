@@ -74,6 +74,10 @@ let mutable private healers: Map<string, HealerSeen list> = Map.empty
 // heap only, a reset forgetting one step.
 let mutable private hostileSteps: Map<string, HostileStep> = Map.empty
 
+// Each room's raid as last seen (`World.Raiders`, #569): heap only, a reset
+// falling back on the danger log's threat memory.
+let mutable private raiders: Map<string, RaidSeen> = Map.empty
+
 // The last tick an armed rival stood in each room (`World.ArmedSeen`, #485):
 // heap state seeded off the `rooms` leaf on a cold heap, so the deploy before
 // a walk does not forget the room the walk goes round.
@@ -454,6 +458,7 @@ let private fullTick
         |> World.watchExits Tuning.defaults exitWatches
         |> World.recallHealers Tuning.defaults healers
         |> World.recallHostiles hostileSteps
+        |> World.recallRaiders raiders
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
 
@@ -462,6 +467,7 @@ let private fullTick
     exitWatches <- world.ExitWatches
     healers <- world.Healers
     hostileSteps <- world.HostileSteps
+    raiders <- world.Raiders
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers
 

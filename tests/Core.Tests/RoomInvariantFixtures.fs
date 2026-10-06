@@ -280,6 +280,7 @@ let internal colonyOf (room: LoadedRoom) level =
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
         RecalledHealers = []
+        RecalledRaiders = []
         SafeModeRunning = false
         Crossed = Set.empty
         Evacuating = Set.empty

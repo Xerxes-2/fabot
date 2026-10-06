@@ -638,6 +638,14 @@ type ColonyView =
         /// the exit is back next tick. And in each child's home this colony
         /// raises (#552), whose line its garrison holds.
         RecalledHealers: HostileInfo list
+        /// The raid last seen in each room this colony works, or chases a
+        /// raid in, that nothing sees this tick (`World.Raiders`, #569), at
+        /// its last tiles, its life counted down since: laid into `Hostiles`
+        /// too, so a raider stays the room's raid — its Guard, verdict and
+        /// targets — through the ticks between two looks. What the [[raid
+        /// log]] folds is a sighting, so it reads `Hostiles` less these
+        /// (`sightedOnly`).
+        RecalledRaiders: HostileInfo list
         /// Whether safe mode is running in any room of ours this tick
         /// (`World.safeModeRunning`), the same answer handed to every colony:
         /// the engine runs one per shard and refuses a second with ERR_BUSY.
@@ -744,6 +752,20 @@ module ColonyView =
                 RoomControl =
                     (view.RoomControl, seen)
                     ||> List.fold (fun control (room, r) -> Map.add room r.Control control)
+            }
+
+    /// The view with only what was seen this tick in `Hostiles`, the raids
+    /// recalled from earlier sightings (`RecalledRaiders`, #569) taken out:
+    /// what the [[raid log]] folds, since a memory is no sighting.
+    let sightedOnly (view: ColonyView) : ColonyView =
+        match view.RecalledRaiders with
+        | [] -> view
+        | recalled ->
+            let ids = recalled |> List.map (fun h -> h.Id) |> Set.ofList
+
+            { view with
+                Hostiles = view.Hostiles |> List.filter (fun h -> not (Set.contains h.Id ids))
+                RecalledRaiders = []
             }
 
     /// What a colony may see of a room it carries for a child of its own: the
@@ -1490,6 +1512,32 @@ module ColonyView =
 
         let collected (select: RoomFacts -> 'a list) = worked |> List.collect (snd >> select)
 
+        // The raid last seen in each room it works, an assault's aside (its
+        // own clocks read what the room was seen to hold), chases a raid in,
+        // or watches for a child of its own, where nothing sees it this tick
+        // (#569): a raider is the room's raid until a sighting finds it gone.
+        let recalled =
+            match world.Raiders with
+            | raiders when Map.isEmpty raiders -> []
+            | raiders ->
+                let childOutposts = Set.ofList scan.ChildOutposts
+
+                worked
+                |> List.filter (fun (room, _) ->
+                    (scan.Worked.Contains room && not (assaultRooms.Contains room)
+                     || gate.ChasedOutposts.Contains room
+                     || childOutposts.Contains room)
+                    && not (World.seenNow world room))
+                |> List.collect (fun (room, _) ->
+                    match Map.tryFind room raiders with
+                    | Some last ->
+                        last.Raid
+                        |> List.map (fun h ->
+                            { h with
+                                TicksToLive = h.TicksToLive - (world.Time - last.Tick)
+                            })
+                    | None -> [])
+
         // A child past its nursery: its rock is borrowed, never the mother's.
         let raised room =
             List.contains room bootstrap && Map.tryFind room stages <> Some Nursery
@@ -1619,8 +1667,9 @@ module ColonyView =
             // An ally's creep is no hostile (#412): this is the one entry every
             // rule that fires, flees, stands down or counts a rival reads.
             Hostiles =
-                collected (fun facts -> facts.Hostiles)
-                |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner))
+                (collected (fun facts -> facts.Hostiles)
+                 |> List.filter (fun hostile -> not (Colony.isAlly hostile.Owner)))
+                @ recalled
             Allies =
                 collected (fun facts -> facts.Hostiles)
                 |> List.filter (fun hostile -> Colony.isAlly hostile.Owner)
@@ -1749,6 +1798,7 @@ module ColonyView =
                     Map.tryFind room world.Healers |> Option.defaultValue [])
                 |> List.filter (fun seen -> seen.Tick < world.Time)
                 |> List.map (fun seen -> seen.Healer)
+            RecalledRaiders = recalled
             SafeModeRunning = World.safeModeRunning world
             Crossed = transit
             Evacuating = Set.ofList scan.Evacuating

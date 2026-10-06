@@ -1611,8 +1611,11 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
 /// own row, whichever colony's; or, where a ranger already holds the room's
 /// Guard (`kept`), by rangers at all, so a raid worn down to what the row's
 /// cast would win is not handed from the ranger at it to a body still to be
-/// cast. Read once a tick into the chase's `Brief`, off the room's `verdict`
-/// (`answered`).
+/// cast. In a room shut on a raid (`ColonyView.RaidedOutposts`) the row's own
+/// answer is withheld with its Guard (#569), so rangers that kite it or win it
+/// chase it there, held or not: the stand-down shuts the economy, not the
+/// kill. Read once a tick into the chase's `Brief`, off the
+/// room's `verdict` (`answered`).
 let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))
@@ -1620,7 +1623,9 @@ let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (ro
     && (match verdict with
         | Answer.Lose, _ -> false
         | _, false -> true
-        | _, true -> kept && (kitedByRanger view room || Option.isSome (rangersWin view room)))
+        | _, true ->
+            (kept || Set.contains room view.RaidedOutposts)
+            && (kitedByRanger view room || Option.isSome (rangersWin view room)))
 
 /// Whether nothing of ours wins the raid standing in a room (`Answer.Lose`):
 /// in a ranger room, the raid its row casts nobody into, and the residents

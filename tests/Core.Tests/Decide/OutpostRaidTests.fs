@@ -1084,6 +1084,86 @@ let private holdOf (world: World) =
     | Some(ExitWatch.Held hold) -> Some hold
     | _ -> None
 
+/// The raid memory carried through a run of ticks, from none.
+let private recallThrough (worlds: World list) : World =
+    worlds
+    |> List.fold
+        (fun (previous: World) world -> World.recallRaiders previous.Raiders world)
+        World.empty
+
+/// The ids W1N2's raid memory holds, and the tick it was seen.
+let private recalledIn (world: World) =
+    Map.tryFind "W1N2" world.Raiders
+    |> Option.map (fun seen -> seen.Raid |> List.map (fun h -> h.Id), seen.Tick)
+
+[<Tests>]
+let raidMemoryTests =
+    testList
+        "a raider stays its room's raid until seen gone (#569)"
+        [
+            test "a raider seen is remembered through the blind ticks after" {
+                let raider = kiterAt { X = 25; Y = 25 } 1500
+
+                Expect.equal
+                    (recallThrough [ watched 100 [ raider ]; dark 101; dark 108 ] |> recalledIn)
+                    (Some([ "h-1" ], 100))
+                    "dark, the room holds the raid as last seen"
+            }
+
+            test "a look that finds the room empty of raiders forgets it" {
+                let scout =
+                    { hostileIn "W1N2" { X = 20; Y = 20 } [ Move ] with
+                        Id = "s-1"
+                    }
+
+                Expect.isNone
+                    (recallThrough
+                        [ watched 100 [ kiterAt { X = 25; Y = 25 } 1500 ]; watched 108 [ scout ] ]
+                     |> recalledIn)
+                    "seen gone, gone: the scout left there is no raid"
+
+                Expect.isNone
+                    (recallThrough [ watched 100 [ scout ] ] |> recalledIn)
+                    "and a room no raider was seen in holds nothing"
+            }
+
+            test "a raider seen fallen, or standing in another room, is gone from it" {
+                let raider = kiterAt { X = 1; Y = 22 } 1500
+
+                Expect.isNone
+                    (recallThrough [ watched 100 [ raider ]; dark 101 |> withFallen [ "h-1" ] ]
+                     |> recalledIn)
+                    "its tombstone lies there"
+
+                Expect.isNone
+                    (recallThrough
+                        [
+                            watched 100 [ raider ]
+                            dark 101
+                            |> withWestSeen
+                                [
+                                    { raider with
+                                        Pos = RoomPos.at "W2N2" { X = 48; Y = 22 }
+                                    }
+                                ]
+                        ]
+                     |> recalledIn)
+                    "it stands across the exit"
+            }
+
+            test "the memory ends with the raider's life" {
+                let raider = kiterAt { X = 25; Y = 25 } 30
+
+                Expect.isSome
+                    (recallThrough [ watched 100 [ raider ]; dark 129 ] |> recalledIn)
+                    "a tick of life left, it is remembered"
+
+                Expect.isNone
+                    (recallThrough [ watched 100 [ raider ]; dark 130 ] |> recalledIn)
+                    "its thirty ticks run out, it is not"
+            }
+        ]
+
 [<Tests>]
 let exitHoldTests =
     testList
@@ -2130,6 +2210,36 @@ let shutChaseTests =
                     "in sight it holds it"
 
                 Expect.contains seen.Intents (RangedAttackCreep("r-1", "h-1")) "and shoots"
+            }
+
+            test
+                "a raid the stand-down shuts that the colony's own row would win is the ranger's chase all the same: it shuts the economy, not the kill (#569)" {
+                // Four ATTACK on one MOVE: the guard row wins it, and a ranger
+                // holds its range on it, on road too.
+                let shut =
+                    { raidedOutpost
+                          [
+                              hostileIn
+                                  "W1N2"
+                                  { X = 25; Y = 42 }
+                                  [ Attack; Attack; Attack; Attack; Move ]
+                          ] with
+                        RaidedOutposts = Set.singleton "W1N2"
+                        Bank = { Available = 1_300; Capacity = 1_300 }
+                    }
+                    |> withGuards [ ranger "r-1", { X = 22; Y = 47 } ]
+
+                Expect.equal
+                    (Facts.answer shut "W1N2")
+                    Answer.Win
+                    "the guard row the bank buys would win it"
+
+                let decision = decide shut Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "but the room is shut to the row, so the ranger takes its Guard"
             }
 
             test

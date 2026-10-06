@@ -901,6 +901,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         FirstSpawns = Map.empty
         LoadedTowers = Map.empty
         RecalledHealers = []
+        RecalledRaiders = []
         SafeModeRunning = false
         Crossed = Set.empty
         Evacuating = Set.empty

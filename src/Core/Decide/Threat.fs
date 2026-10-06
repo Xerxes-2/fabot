@@ -356,17 +356,19 @@ let noThreats =
 /// How many guards one guarded room wants: one, two where one block loses
 /// the exchange. The count reads the raid and never our own answer to it
 /// (#272): priced against the guards standing in the room it was not monotone,
-/// and the reinforcement it bought was evicted on arrival. Vision is the whole
-/// of what this reads: an outpost the colony cannot see carries no hostiles.
-/// A room remembered and not seen is one guard (#366): a room with no
-/// `RoomControl` entry contributes no hostile to the view, so neither number
-/// of the two-guard clause exists. Written as its own clause rather than left
-/// to `guardBlocksBeat`'s zero-damage arm: that one is a statement about a
+/// and the reinforcement it bought was evicted on arrival. Vision, and the raid
+/// last seen through the blind ticks since (`ColonyView.RecalledRaiders`,
+/// #569), is the whole of what this reads. A room remembered as threatened
+/// with no raid recalled is one guard (#366): a room with no `RoomControl`
+/// entry contributes no hostile of its own to the view, so neither number of
+/// the two-guard clause exists. Written as its own clause rather than left to
+/// `guardBlocksBeat`'s zero-damage arm: that one is a statement about a
 /// visible raid dealing nothing.
 let internal guardsWanted (view: ColonyView) (room: string) : int =
     if
         Set.contains room view.ThreatenedOutposts
         && not (Map.containsKey room view.RoomControl)
+        && not (view.RecalledRaiders |> List.exists (fun h -> h.Pos.Room = room))
     then
         1
     elif guardBlocksBeat view room 1 then
@@ -377,8 +379,8 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the
 /// smallest count `guardBlocksBeat` answers yes to, the largest body where
-/// none wins. A room the colony is blind in prices at one, since `view.Hostiles`
-/// carries nothing of its raid: enough to go and look. A room holding a
+/// none wins. A room the colony is blind in prices its raid as last seen
+/// (#569), or at one where none is recalled: enough to go and look. A room holding a
 /// level-0 core takes the biggest body the bank buys (#487): one block's 90 a
 /// tick spends most of a body's life on the core's 100,000 hits.
 let internal guardBlocksFor (view: ColonyView) (room: string) : int =
