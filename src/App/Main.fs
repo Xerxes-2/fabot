@@ -1136,9 +1136,11 @@ let loop () =
     let atEntry = Game.cpu.getUsed ()
     // The flood counters start the tick at zero, so each colony's reading
     // below is cumulative from here and `foldCpu` can difference it; and the
-    // last tick's hostile sides go (`HostileInfo.forgetSides`).
+    // last tick's hostile sides go (`HostileInfo.forgetSides`), and with them
+    // its projections' indexes (`TickMemo.forgetAll`).
     Grid.Counters.reset ()
     HostileInfo.forgetSides ()
+    TickMemo.forgetAll ()
 
     // ADR-0082
     // Light only within the cadence after a full tick (`cadence` ticks a

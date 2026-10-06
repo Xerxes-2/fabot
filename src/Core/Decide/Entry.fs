@@ -17,6 +17,106 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
     |> List.choose (fun (name, tid) -> Map.tryFind tid byId |> Option.map (fun t -> name, t))
     |> Map.ofList
 
+/// One room's signed census as last joined: the kind and tile of each id it
+/// signs, in the layer's id order, beside the three joins they made. The
+/// joins are a function of those pairs and the room's name alone, so a room
+/// walked to the same pairs is the same three strings, recalled rather than
+/// formatted and sorted again — a fixture's id holds its kind and tile, and
+/// most ticks a room's pairs do not move.
+type private SignedCensus =
+    {
+        Kinds: TargetKind[]
+        Tiles: Pos[]
+        Standing: string
+        Pending: string
+        Minerals: string
+    }
+
+/// The last `SignedCensus` per colony and room. Across ticks, so it holds
+/// strings and the census's own kind and tile values and nothing else of a
+/// tick; checked pair by pair, so a stale entry is a miss and never a wrong
+/// answer; emptied when it outgrows `signedKept`. A `Fresh` tree, so `Map.add`
+/// keeps a comparer that captures nothing (#401), and swapped whole, so a
+/// reader on another thread sees one map or the other.
+let mutable private signedCensuses: Map<string, SignedCensus> = Fresh.mapOfList []
+
+/// More colony-rooms than the world projects: a sweep, not a ceiling.
+let private signedKept = 256
+
+/// The three joins of one room's census (`signaturesOf`): each signed id's
+/// kind and tile formatted, sorted, and joined, recalled when the pairs are
+/// the last walk's.
+let private signedCensusOf
+    (home: string)
+    (room: string)
+    (positions: Map<string, Pos>)
+    (kinds: Map<string, TargetKind>)
+    : SignedCensus =
+    let signedKinds = ResizeArray<TargetKind>()
+    let signedTiles = ResizeArray<Pos>()
+
+    for KeyValue(id, tile) in positions do
+        match Map.tryFind id kinds with
+        | Some(Structure _ as kind)
+        | Some(Site _ as kind)
+        | Some(Mineral _ as kind) ->
+            signedKinds.Add kind
+            signedTiles.Add tile
+        | _ -> ()
+
+    let key = $"{home}|{room}"
+
+    let same (held: SignedCensus) =
+        let mutable alike = held.Kinds.Length = signedKinds.Count
+        let mutable i = 0
+
+        while alike && i < signedKinds.Count do
+            alike <-
+                (obj.ReferenceEquals(held.Kinds.[i], signedKinds.[i])
+                 || held.Kinds.[i] = signedKinds.[i])
+                && (obj.ReferenceEquals(held.Tiles.[i], signedTiles.[i])
+                    || held.Tiles.[i] = signedTiles.[i])
+
+            i <- i + 1
+
+        alike
+
+    match Map.tryFind key signedCensuses with
+    | Some held when same held -> held
+    | _ ->
+        let standingIds = ResizeArray<string>()
+        let pendingIds = ResizeArray<string>()
+        let mineralIds = ResizeArray<string>()
+
+        for i in 0 .. signedKinds.Count - 1 do
+            let tile = signedTiles.[i]
+
+            match signedKinds.[i] with
+            | Structure built -> standingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
+            | Site built -> pendingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
+            | _ -> mineralIds.Add $"Mineral@{room}:{tile.X},{tile.Y}"
+
+        let joined (ids: ResizeArray<string>) =
+            ids |> List.ofSeq |> List.sort |> String.concat ";"
+
+        let signed =
+            {
+                Kinds = signedKinds.ToArray()
+                Tiles = signedTiles.ToArray()
+                Standing = joined standingIds
+                Pending = joined pendingIds
+                Minerals = joined mineralIds
+            }
+
+        let kept =
+            if Map.count signedCensuses >= signedKept then
+                Fresh.mapOfList []
+            else
+                signedCensuses
+
+        signedCensuses <- Map.add key signed kept
+        signed
+
 /// ADR-0017
 /// ADR-0044
 /// The census signature: a string over exactly the inputs the census-derived
@@ -36,9 +136,6 @@ let private assignedTasks (tasks: Task list) (assignments: Assignments) : Map<st
 let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     let spatial = view.Spatial
     let home = SpatialInfo.homeName spatial
-
-    let joined (ids: ResizeArray<string>) =
-        ids |> List.ofSeq |> List.sort |> String.concat ";"
 
     // The home controller's level: it gates the allowance the placement
     // filters on and, derived, the horizon the clustered placement is sized
@@ -79,22 +176,13 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
         |> List.filter (fun (room, _) -> not (Set.contains room spatial.StrayRooms))
         |> List.map (fun (room, layer) ->
             room,
-            let standingIds = ResizeArray<string>()
-            let pendingIds = ResizeArray<string>()
-            let mineralIds = ResizeArray<string>()
-
             // The Thorium deposits on their tiles: the Layout reads them
             // twice (the extractor's tile and the mineral container's Seats)
             // and `Atlas.workingGroundIn` at every level. The mod deletes an
             // exhausted deposit outright, and unsigned, the memo would keep
             // handing back a plan naming a container on the Seat of a rock
             // that is gone.
-            for KeyValue(id, tile) in layer.TargetPositions do
-                match Map.tryFind id spatial.TargetKinds with
-                | Some(Structure built) -> standingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
-                | Some(Site built) -> pendingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
-                | Some(Mineral _) -> mineralIds.Add $"Mineral@{room}:{tile.X},{tile.Y}"
-                | _ -> ()
+            let signed = signedCensusOf home room layer.TargetPositions spatial.TargetKinds
 
             // The tiles another player's construction sites hold (#248), with
             // the one thing known about such a site in the kind slot: a
@@ -119,7 +207,7 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             // changing moves every route the walk tables were priced along.
             let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
 
-            $"{home}|{level}|{stage}|{taken}|{joined standingIds}|{joined pendingIds}|{rivals}|{joined mineralIds}")
+            $"{home}|{level}|{stage}|{taken}|{signed.Standing}|{signed.Pending}|{rivals}|{signed.Minerals}")
         |> Fresh.mapOfList
 
     // The rate a room's sources are priced at, and the empty rate for a room

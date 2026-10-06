@@ -289,8 +289,17 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
 
         found
 
+    // The creeps' join is the Atlas's own: `standingAt` writes into it.
     let creepsFound = locate (fun (layer: RoomLayer) -> layer.CreepPositions)
-    let targetsFound = locate (fun (layer: RoomLayer) -> layer.TargetPositions)
+
+    // The targets' join is the projection's, derived once a tick and shared
+    // with `SpatialInfo.placementOf`, which keeps the first room of a doubled
+    // id where this keeps the last: a projection that doubles one walks its
+    // own.
+    let targetsFound =
+        match SpatialInfo.targetPlacements spatial with
+        | placements when not placements.Doubled -> placements.Found
+        | _ -> locate (fun (layer: RoomLayer) -> layer.TargetPositions)
 
     // The kind census inverted, once. `Map.fold` walks the census in ascending
     // id order and each id is prepended, so reversing each bucket leaves the

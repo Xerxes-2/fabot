@@ -428,13 +428,58 @@ module SpatialInfo =
     let layerOf (spatial: SpatialInfo) (room: string) : RoomLayer =
         Map.tryFind room spatial.Rooms |> Option.defaultValue RoomLayer.empty
 
+    /// One column of every layer joined by id: each id beside its room and
+    /// tile, the first room in name order winning as `Map.tryPick` does, and
+    /// whether any id stood in two rooms. Derived once per `Rooms` a tick
+    /// (`TickMemo`), where the walk it replaces searched every room per ask.
+    type internal Placements =
+        {
+            Found: System.Collections.Generic.Dictionary<string, string * Pos>
+            Doubled: bool
+        }
+
+    let private placementsIn
+        (select: RoomLayer -> Map<string, Pos>)
+        (rooms: Map<string, RoomLayer>)
+        =
+        let found = System.Collections.Generic.Dictionary<string, string * Pos>()
+        let mutable doubled = false
+
+        for KeyValue(room, layer) in rooms do
+            for KeyValue(id, pos) in select layer do
+                if found.ContainsKey id then
+                    doubled <- true
+                else
+                    found.[id] <- (room, pos)
+
+        { Found = found; Doubled = doubled }
+
+    let private targetPlacementMemo: TickMemo.Memo<Map<string, RoomLayer>, Placements> =
+        TickMemo.create 16 TickMemo.byReference
+
+    let private creepPlacementMemo: TickMemo.Memo<Map<string, RoomLayer>, Placements> =
+        TickMemo.create 16 TickMemo.byReference
+
+    /// Every target id of the projection beside its room and tile. Never
+    /// written to: the Atlas reads it as its `TargetAt` when no id is doubled.
+    let internal targetPlacements (spatial: SpatialInfo) : Placements =
+        TickMemo.recall
+            targetPlacementMemo
+            spatial.Rooms
+            (placementsIn (fun (layer: RoomLayer) -> layer.TargetPositions))
+
+    let private placedBy (placements: Placements) (id: string) : RoomPos option =
+        if placements.Found.ContainsKey id then
+            let room, pos = placements.Found.[id]
+            Some(RoomPos.at room pos)
+        else
+            None
+
     /// The room the projection files a target id under, with its tile there,
     /// and None for a target it does not place. The projection-side twin of
     /// the Atlas's `TargetAt`; the two answer alike.
     let placementOf (spatial: SpatialInfo) (id: string) : RoomPos option =
-        spatial.Rooms
-        |> Map.tryPick (fun room (layer: RoomLayer) ->
-            Map.tryFind id layer.TargetPositions |> Option.map (RoomPos.at room))
+        placedBy (targetPlacements spatial) id
 
     /// Whether a target is placed in a room other than the home: a rampart
     /// of a child's home its mother carries as ground (#467), which is the
@@ -453,31 +498,71 @@ module SpatialInfo =
     /// for a body it does not place — `placementOf`'s twin down the
     /// `CreepPositions` column.
     let creepPlacementOf (spatial: SpatialInfo) (name: string) : RoomPos option =
-        spatial.Rooms
-        |> Map.tryPick (fun room (layer: RoomLayer) ->
-            Map.tryFind name layer.CreepPositions |> Option.map (RoomPos.at room))
+        placedBy
+            (TickMemo.recall
+                creepPlacementMemo
+                spatial.Rooms
+                (placementsIn (fun (layer: RoomLayer) -> layer.CreepPositions)))
+            name
 
     /// `creepPlacementOf` with the tile dropped.
     let creepRoomOf (spatial: SpatialInfo) (name: string) : string option =
         creepPlacementOf spatial name |> Option.map (fun tile -> tile.Room)
 
+    let private structureHitsMemo
+        : TickMemo.Memo<
+              Map<string, HitsInfo> * Map<string, TargetKind>,
+              (string * BuiltKind * HitsInfo) list
+           > =
+        TickMemo.create 16 (fun (hits, kinds) (hits', kinds') ->
+            obj.ReferenceEquals(hits, hits') && obj.ReferenceEquals(kinds, kinds'))
+
     /// Every target the projection carries hits for, joined to the structure
     /// kind it is filed under, in id order. Hits with no kind, and hits on a
     /// target of a non-structure kind, drop out. The Repair pool's hungry
     /// census and the Raid log's damage differencing both key off these ids
-    /// and must agree on the ordering.
+    /// and must agree on the ordering. Joined once per census a tick.
     let structureHits (spatial: SpatialInfo) : (string * BuiltKind * HitsInfo) list =
-        spatial.Hits
-        |> Map.toList
-        |> List.choose (fun (id, hits) ->
-            match Map.tryFind id spatial.TargetKinds with
-            | Some(Structure kind) -> Some(id, kind, hits)
-            | _ -> None)
+        TickMemo.recall structureHitsMemo (spatial.Hits, spatial.TargetKinds) (fun (hits, kinds) ->
+            hits
+            |> Map.toList
+            |> List.choose (fun (id, hits) ->
+                match Map.tryFind id kinds with
+                | Some(Structure kind) -> Some(id, kind, hits)
+                | _ -> None))
 
-    /// The ids the projection files under one kind, in id order.
+    /// The kinds of one census asked so far this tick, each beside its
+    /// answer. Swapped whole, so a reader on another thread sees one list or
+    /// the other.
+    type private KindAnswers =
+        {
+            mutable Answers: (TargetKind * string list) list
+        }
+
+    /// Room by room the views ask a census once or twice, so this keeps more
+    /// than a colony's projections.
+    let private kindAnswersMemo: TickMemo.Memo<Map<string, TargetKind>, KindAnswers> =
+        TickMemo.create 32 TickMemo.byReference
+
+    let rec private answerOf (kind: TargetKind) (answers: (TargetKind * string list) list) =
+        match answers with
+        | [] -> None
+        | (asked, ids) :: rest -> if sameKind asked kind then Some ids else answerOf kind rest
+
+    /// The ids the projection files under one kind, in id order: one walk of
+    /// a census per kind a tick, every later ask of that kind recalled.
     let idsOfKindIn (kinds: Map<string, TargetKind>) (kind: TargetKind) : string list =
-        // A fold, not `Map.toList`: the whole census as pairs, a tick, per ask.
-        Map.foldBack (fun id k ids -> if sameKind k kind then id :: ids else ids) kinds []
+        let held = TickMemo.recall kindAnswersMemo kinds (fun _ -> { Answers = [] })
+
+        match answerOf kind held.Answers with
+        | Some ids -> ids
+        | None ->
+            // A fold, not `Map.toList`: the whole census as pairs, per ask.
+            let ids =
+                Map.foldBack (fun id k ids -> if sameKind k kind then id :: ids else ids) kinds []
+
+            held.Answers <- (kind, ids) :: held.Answers
+            ids
 
     /// The same walk over a whole projection's census.
     let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =
@@ -546,29 +631,15 @@ module SpatialInfo =
         | [] -> []
         | thorium -> thorium
 
-    /// `dugMineralsBy` over a bare projection: one walk of the census for the
-    /// two kinds the rule reads.
+    /// `dugMineralsBy` over a bare projection, its kinds asked of the census
+    /// (`idsOfKindIn`).
     let dugMineralsIn
         (spatial: SpatialInfo)
         (oreRooms: Set<string>)
         (room: string)
         : (string * Resource) list =
-        let byKind =
-            spatial.TargetKinds
-            |> Map.fold
-                (fun (found: Map<TargetKind, string list>) id kind ->
-                    match kind with
-                    | Mineral _
-                    | Structure BuiltKind.Terminal ->
-                        Map.add
-                            kind
-                            (id :: (Map.tryFind kind found |> Option.defaultValue []))
-                            found
-                    | _ -> found)
-                Map.empty
-
         dugMineralsBy
-            (fun kind -> Map.tryFind kind byKind |> Option.defaultValue [] |> List.rev)
+            (idsOfKindIn spatial.TargetKinds)
             (fun inRoom id -> Map.containsKey id (layerOf spatial inRoom).TargetPositions)
             (homeName spatial)
             oreRooms

@@ -710,12 +710,68 @@ let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hosti
     not (HostileInfo.shoots side hostile)
     && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait side hostile)
 
+/// The tiles of one projected room the strike rules ask after, read off its
+/// layer once: its sources', its controller's, and its standing ramparts not
+/// ours (`underForeignRampart`), these by tile index (`indexOf`) where the
+/// tile is on the grid.
+type private StrikeTiles =
+    {
+        Sources: Pos list
+        Controllers: Pos list
+        ForeignRamparts: System.Collections.Generic.HashSet<int>
+        ForeignRampartsOffGrid: Pos list
+    }
+
+let private strikeTilesIn (spatial: SpatialInfo, room: string) : StrikeTiles =
+    let ramparts = System.Collections.Generic.HashSet<int>()
+    let mutable offGrid = []
+    let mutable sources = []
+    let mutable controllers = []
+
+    for KeyValue(id, tile) in (SpatialInfo.layerOf spatial room).TargetPositions do
+        match Map.tryFind id spatial.TargetKinds with
+        | Some Source -> sources <- tile :: sources
+        | Some Controller -> controllers <- tile :: controllers
+        | Some(Structure BuiltKind.Rampart) when not (Map.containsKey id spatial.Hits) ->
+            if inGrid tile then
+                ramparts.Add(indexOf tile) |> ignore
+            else
+                offGrid <- tile :: offGrid
+        | _ -> ()
+
+    {
+        Sources = sources
+        Controllers = controllers
+        ForeignRamparts = ramparts
+        ForeignRampartsOffGrid = offGrid
+    }
+
+/// One projection's rooms' `StrikeTiles`, a room's derived once it has been
+/// asked `strikeTilesAsks` times a tick: `canStrike` asks per fighter,
+/// candidate and hostile, and a room's derivation costs about that many
+/// direct asks.
+let private strikeTilesAsks = 4
+
+let private strikeTilesMemo: TickMemo.Memo<SpatialInfo * string, StrikeTiles> =
+    TickMemo.create 32 (fun (spatial, room) (spatial', room') ->
+        obj.ReferenceEquals(spatial, spatial') && room = room')
+
+let private strikeTilesOf (view: ColonyView) (room: string) : StrikeTiles option =
+    TickMemo.recallAfter strikeTilesAsks strikeTilesMemo (view.Spatial, room) strikeTilesIn
+
 /// Whether a hostile stands within a step of a target of this kind in its room.
 let private besideTargetOf (view: ColonyView) (kind: TargetKind) (hostile: HostileInfo) =
-    (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
-    |> Map.exists (fun id tile ->
-        Map.tryFind id view.Spatial.TargetKinds = Some kind
-        && range tile (RoomPos.pos hostile.Pos) <= 1)
+    let beside (tiles: Pos list) =
+        tiles |> List.exists (fun tile -> range tile (RoomPos.pos hostile.Pos) <= 1)
+
+    match kind, strikeTilesOf view hostile.Pos.Room with
+    | Source, Some tiles -> beside tiles.Sources
+    | Controller, Some tiles -> beside tiles.Controllers
+    | _ ->
+        (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
+        |> Map.exists (fun id tile ->
+            Map.tryFind id view.Spatial.TargetKinds = Some kind
+            && range tile (RoomPos.pos hostile.Pos) <= 1)
 
 /// Whether an unarmed worker stands on a seat it digs from: WORK in effect,
 /// no weapon, within a step of a source of its room.
@@ -737,11 +793,15 @@ let internal rootedAtWork (view: ColonyView) (hostile: HostileInfo) =
 let internal underForeignRampart (view: ColonyView) (hostile: HostileInfo) =
     let at = RoomPos.pos hostile.Pos
 
-    (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
-    |> Map.exists (fun id tile ->
-        tile = at
-        && Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Rampart)
-        && not (Map.containsKey id view.Spatial.Hits))
+    match strikeTilesOf view hostile.Pos.Room with
+    | Some tiles when inGrid at -> tiles.ForeignRamparts.Contains(indexOf at)
+    | Some tiles -> List.contains at tiles.ForeignRampartsOffGrid
+    | None ->
+        (SpatialInfo.layerOf view.Spatial hostile.Pos.Room).TargetPositions
+        |> Map.exists (fun id tile ->
+            tile = at
+            && Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Rampart)
+            && not (Map.containsKey id view.Spatial.Hits))
 
 /// Whether a body of these live part counts can strike a hostile to kill it
 /// (#531): the one rule every kill's admission and its verdict read. A body
