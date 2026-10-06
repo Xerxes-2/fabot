@@ -152,7 +152,7 @@ let private withThorium (world: World) (room: string) : World =
                             }
                         TargetKinds =
                             facts.TargetKinds
-                            |> Map.add $"min-{room}" Mineral
+                            |> Map.add $"min-{room}" (Mineral Thorium)
                             |> Map.add $"ext-{room}" (Structure BuiltKind.Extractor)
                         Thorium = Map.ofList [ $"min-{room}", 22_000 ]
                         Cooldowns = Map.ofList [ $"ext-{room}", 3 ]
@@ -209,6 +209,7 @@ let private creep name room : WorldCreep =
                 Fatigue = 0
                 Energy = 0
                 Thorium = 0
+                Ore = Map.empty
                 FreeCapacity = 50
                 Moved = false
                 DrawnFrom = None

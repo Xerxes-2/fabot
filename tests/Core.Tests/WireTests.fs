@@ -25,10 +25,10 @@ let private sampleNumbers = Some(sampleField 0, sampleField 1)
 let private sampleName = Some(sampleText 0)
 
 /// Every case of a closed union, read off the union's own metadata. Numbers,
-/// names and a `Resource` are sampled; any other field type throws, which is
-/// the next author's notice to widen this. The Resource sample is `Energy`,
-/// so two resources at one store is the cross-product the Task test below
-/// walks by hand.
+/// names, a `Resource` and an `Ore` are sampled; any other field type throws,
+/// which is the next author's notice to widen this. The Resource sample is
+/// `Energy`, so two resources at one store is the cross-product the Task test
+/// below walks by hand.
 let private casesOf<'a> () =
     FSharpType.GetUnionCases typeof<'a>
     |> Array.map (fun case ->
@@ -41,6 +41,8 @@ let private casesOf<'a> () =
                     box (sampleText i)
                 elif field.PropertyType = typeof<Resource> then
                     box Energy
+                elif field.PropertyType = typeof<Ore> then
+                    box Hydrogen
                 else
                     failwith $"no sample value for a {field.PropertyType.Name} field")
 
@@ -156,12 +158,24 @@ let wireVocabularyTests =
 
                 // The resources are `store` keys and the argument of every `withdraw` and
                 // `transfer`. Thorium's is the season mod's one-letter "T", which is also
-                // what `mineralType` reads on the deposit.
+                // what `mineralType` reads on the deposit; an ore's is the
+                // engine's own letter. Every ore, not `casesOf`'s one sample.
                 roundTrips
                     "Resource"
-                    (casesOf<Resource> ())
+                    (Array.ofList allResources)
                     resourceName
                     (reverseOf resourceName allResources)
+
+                Expect.equal
+                    (Set.ofList allOres)
+                    (Set.ofArray (casesOf<Ore> ()))
+                    "allOres is every Ore"
+
+                for resource in casesOf<Resource> () do
+                    Expect.contains
+                        allResources
+                        resource
+                        $"allResources holds every case: %A{resource}"
             }
 
             test "a name outside a vocabulary decodes to nothing, never to a case" {

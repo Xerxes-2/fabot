@@ -95,6 +95,8 @@ let private channels =
     | HealWithTower _
     | RepairWithTower _
     | SetRampartPublic _
+    | DestroyStructure _
+    | RemoveSite _
     | ObserveRoom _
     // A structure's verb and no creep's: nothing to de-duplicate per body, and
     // two sends in one tick are the engine's business to refuse (#349).

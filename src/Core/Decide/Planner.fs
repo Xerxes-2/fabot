@@ -469,8 +469,10 @@ let planTasks
     // (#261): `FIND_MINERALS` carries every owner's, `harvest` refuses a
     // mineral whose extractor is somebody else's, and nothing in the shape of
     // a deposit, extractor and container says whose they are. `ourDeposits`
-    // is that join, read here and by the miner row's quota alike.
-    let deposits = ourDeposits view |> List.map Harvest
+    // is that join, read here and by the miner row's quota alike. An ore
+    // deposit only while the colony wants it dug (`digWanted`): a living
+    // miner would otherwise dig on past the terminal's target.
+    let deposits = ourDeposits view |> List.filter (digWanted view) |> List.map Harvest
 
     // The flow's sink, as one Task (ADR-0054): the refill cluster is pooled
     // under the spawn's id and stands while any member has room.
@@ -566,12 +568,12 @@ let planTasks
     let containers = idsOfKind (Structure BuiltKind.Container)
     let storages = idsOfKind (Structure BuiltKind.Storage)
 
-    // The room left in a Storage, over both resources it holds: a store's
+    // The room left in a Storage, over every resource it holds: a store's
     // capacity is one number, so the energy sink and the Thorium sink read one
     // free-capacity question rather than two that can each be satisfied by
     // ignoring the other.
     let storageRoom id =
-        Engine.storageCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
+        Engine.storageCapacity - SpatialInfo.heldAllIn view.Spatial id
 
     // A tombstone and a ruin are stores the same way, so they pool through the
     // same line: the engine's `withdraw` takes either object, and the cap and
@@ -634,10 +636,17 @@ let planTasks
     let mineralContainers =
         ourMineralContainers view |> List.filter (inABorrowedRoom >> not)
 
+    // One per resource the container holds: its Thorium, and the ore an ore
+    // mine fills it with.
     let mineWithdraws =
         mineralContainers
-        |> List.filter (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
-        |> List.map (fun id -> Withdraw(id, Thorium))
+        |> List.collect (fun id ->
+            (if SpatialInfo.heldIn view.Spatial Thorium id > 0 then
+                 [ Thorium ]
+             else
+                 [])
+            @ SpatialInfo.oresIn view.Spatial id
+            |> List.map (fun resource -> Withdraw(id, resource)))
 
     // And the same intake off the floor (#311): every tick the haul lags, the
     // next dig lands on the ground as a pile decaying at `ceil(amount / 1000)`
@@ -750,7 +759,21 @@ let planTasks
     let terminals = idsOfKind (Structure BuiltKind.Terminal)
 
     let terminalRoom id =
-        Engine.terminalCapacity - stored id - SpatialInfo.heldIn view.Spatial Thorium id
+        Engine.terminalCapacity - SpatialInfo.heldAllIn view.Spatial id
+
+    // The ore's sink is the home terminal, pooled off the bodies
+    // holding ore and off no fact about the mine, for `mineRefills`' reason:
+    // a body already holding ore must have somewhere to put it down.
+    let oreRefills =
+        let carried =
+            view.Creeps
+            |> List.collect (fun creep -> creep.Ore |> Map.toList |> List.map fst)
+            |> List.distinct
+
+        terminals
+        |> List.filter (fun id ->
+            not (SpatialInfo.placedAway view.Spatial id) && terminalRoom id > 0)
+        |> List.collect (fun id -> carried |> List.map (fun ore -> Refill(id, Ore ore)))
 
     // Outbound, and only for a colony that declares a consignee: the ore goes
     // from the Storage into the terminal. Gated on room in the terminal and on
@@ -958,5 +981,6 @@ let planTasks
     @ tombstoneOre
     @ mineWithdraws
     @ mineRefills
+    @ oreRefills
     @ deliveryWithdraws
     @ reactorRefills

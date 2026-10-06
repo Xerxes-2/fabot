@@ -997,7 +997,7 @@ let private oreBesideEnergy =
             }
             |> withTargets
                 [
-                    "min-a", minePos, Mineral
+                    "min-a", minePos, Mineral Thorium
                     "ext-a", minePos, Structure BuiltKind.Extractor
                     "can-min", minePost, Structure BuiltKind.Container
                     "can-e", { X = 44; Y = 10 }, Structure BuiltKind.Container

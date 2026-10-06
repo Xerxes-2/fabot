@@ -75,7 +75,7 @@ let private rivalMine =
             { mineColony.Spatial with
                 TargetKinds =
                     mineColony.Spatial.TargetKinds
-                    |> Map.add "min-r" Mineral
+                    |> Map.add "min-r" (Mineral Thorium)
                     |> Map.add "ext-r" (Structure BuiltKind.Extractor)
                     |> Map.add "can-r" (Structure BuiltKind.Container)
                 Thorium = Map.add "min-r" 22_000 mineColony.Spatial.Thorium
@@ -584,7 +584,7 @@ let mineHaulTests =
                             |> withRoads [ for x in 11..18 -> { X = x; Y = 10 } ]
                             |> withTargets
                                 [
-                                    "min-a", minePos, Mineral
+                                    "min-a", minePos, Mineral Thorium
                                     "ext-a", minePos, Structure BuiltKind.Extractor
                                     "can-min", minePost, Structure BuiltKind.Container
                                     "sto-1", storageAt, Structure BuiltKind.Storage
@@ -713,5 +713,89 @@ let mineRoundingTests =
                 // The split adds no body where there is nothing to split from: the
                 // mine-only colony hires what the one rounding always hired it.
                 Expect.equal (quotaOf mineHaulColony) 1 "one mine, no energy haul, one body"
+            }
+        ]
+
+[<Tests>]
+let oreMinerTests =
+    testList
+        "the ore's dig"
+        [
+            test
+                "an ore deposit under a standing extractor hires one miner while its terminal is short" {
+                // The Thorium miner reused: the same row, the same mine Post, the
+                // same extractor — over the room's oxygen, dug into the terminal
+                // while it holds under `Tuning.OreTarget`.
+                Expect.equal (quotaOfRow "miner" oreColony) (Some 1) "one body for the ore"
+
+                Expect.equal
+                    (quotaOfRow "miner" (oreColony |> withOreIn "term-1" Oxygen 5_999))
+                    (Some 1)
+                    "one under the target still digs"
+            }
+
+            test "the terminal at its target hires no ore miner" {
+                Expect.equal
+                    (quotaOfRow
+                        "miner"
+                        (oreColony |> withOreIn "term-1" Oxygen oreColony.Tuning.OreTarget))
+                    (Some 0)
+                    "at the target the dig stops"
+            }
+
+            test "a Storage inside its margin over the reserve digs no ore" {
+                // No controller, so the reserve is 0 and the floor is the margin
+                // alone: the dig is paid in bodies, and never out of the reserve.
+                let atStock energy =
+                    { oreColony with
+                        Spatial =
+                            { oreColony.Spatial with
+                                Stores = Map.add "sto-1" energy oreColony.Spatial.Stores
+                            }
+                    }
+
+                Expect.equal
+                    (quotaOfRow "miner" (atStock oreColony.Tuning.OreEnergyMargin))
+                    (Some 0)
+                    "at the margin, no dig"
+
+                Expect.equal
+                    (quotaOfRow "miner" (atStock (oreColony.Tuning.OreEnergyMargin + 1)))
+                    (Some 1)
+                    "one over it, the dig"
+            }
+
+            test "an ore deposit regenerating at zero hires nobody" {
+                Expect.equal
+                    (quotaOfRow "miner" (oreColony |> withOreIn "min-a" Oxygen 0))
+                    (Some 0)
+                    "nothing to give, nobody cast"
+            }
+
+            test "no terminal at home, no ore dug" {
+                // The ore goes into the terminal and nowhere else.
+                let bare =
+                    { oreColony with
+                        Spatial =
+                            { oreColony.Spatial with
+                                TargetKinds = Map.remove "term-1" oreColony.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.equal (quotaOfRow "miner" bare) (Some 0) "no sink, no dig"
+            }
+
+            test "the ore mine's haul is priced while it is dug and drops out when the dig stops" {
+                let mineDemand colony =
+                    (decideOn colony).Quotas.HaulerDemand
+                    |> List.filter (fun row -> RoomPos.pos row.Container = minePost)
+                    |> List.sumBy (fun row -> row.Demand)
+
+                Expect.isGreaterThan (mineDemand oreColony) 0 "dug, the mine asks for a carrier"
+
+                Expect.equal
+                    (mineDemand (oreColony |> withOreIn "term-1" Oxygen oreColony.Tuning.OreTarget))
+                    0
+                    "at the target it asks for none"
             }
         ]

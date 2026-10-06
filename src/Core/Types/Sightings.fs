@@ -518,6 +518,10 @@ type CreepInfo =
         /// three agree, and a hand-built fixture is free to state a body no
         /// engine would hand back.
         Thorium: int
+        /// The [[ore]] currently carried, by ore, and empty for a body holding
+        /// none — beside `Thorium` for its reason: a body carries one resource
+        /// at a time, and a body holding ore takes no other intake.
+        Ore: Map<Ore, int>
         /// Carry capacity still free (0 = full) — the **whole** store's: a
         /// body holding 999 Thorium of 1,200 reports 201 free and no energy.
         FreeCapacity: int
@@ -535,6 +539,17 @@ type CreepInfo =
         /// gate, so a load does not go straight back where it came from.
         DrawnFrom: DrawRecord option
     }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module CreepInfo =
+    /// Every unit of [[ore]] aboard, whatever the ore.
+    let oreAboard (creep: CreepInfo) : int =
+        creep.Ore |> Map.fold (fun total _ held -> total + held) 0
+
+    /// Whether the body carries anything but energy: Thorium or ore. What
+    /// shuts every energy intake, a mixed load being one no sink takes whole.
+    let carriesMineral (creep: CreepInfo) : bool =
+        creep.Thorium > 0 || oreAboard creep > 0
 
 /// A creep already paid for and still in a spawn's oven. Its generated name is
 /// retained because two rows may buy the same part counts (#319).
@@ -566,6 +581,9 @@ type RoomFacts =
         /// amount of the Thorium mineral itself. A second map beside `Stores`
         /// for the reason `SpatialInfo.Thorium` gives.
         Thorium: Map<string, int>
+        /// The [[ore]] held per store standing here, and an ore deposit's own
+        /// remaining amount (`SpatialInfo.Ore`).
+        Ore: Map<string, Map<Ore, int>>
         /// Ticks before a structure standing here may act again — the
         /// extractor's cooldown, the one clock a decision reads off a
         /// structure.
@@ -636,6 +654,7 @@ module RoomFacts =
             Hits = Map.empty
             Stores = Map.empty
             Thorium = Map.empty
+            Ore = Map.empty
             Cooldowns = Map.empty
             PublicRamparts = Set.empty
             Owners = Map.empty

@@ -1607,6 +1607,90 @@ let private planOutpostRoads
 
     sites, records, Set.ofList tiles
 
+/// The extractors, standing or pending, that stand off every mineral the room
+/// digs (`minerals`, `Atlas.mineralsIn`), in id order: the engine allows a
+/// room one, and the one a mined-out Thorium tile still holds keeps the room's
+/// ore from its own. None while the room digs nothing, so a room with no rock
+/// to move onto keeps what stands.
+let private strayExtractorsIn (atlas: Atlas.Atlas) (room: string) (minerals: (string * Pos) list) =
+    if List.isEmpty minerals then
+        []
+    else
+        let rocks = minerals |> List.map snd |> Set.ofList
+
+        [ Structure BuiltKind.Extractor; Site BuiltKind.Extractor ]
+        |> List.collect (Atlas.idsOfKind atlas)
+        |> List.filter (fun id ->
+            Atlas.positionOf atlas id
+            |> Option.exists (fun at ->
+                at.Room = room && not (Set.contains (RoomPos.pos at) rocks)))
+        |> List.sort
+
+/// The extractor moved onto the room's ore (ADR-0089): a stray one
+/// (`strayExtractorsIn`) standing in our home is destroyed, and the Layout
+/// asks for the one on the ore once the census no longer holds it. Only once
+/// the mine it served is empty — its container holds no Thorium — because the
+/// container is that mine's only while the extractor marks it
+/// (`Facts.ourMineralContainerPairs`). Beside the memoised Layout and never
+/// inside it: the container's stock is no census fact.
+///
+/// Only while the room's dig is wanted (`Facts.digWanted`): a room that will
+/// not dig keeps what stands and spends no rebuild. Then a stray site is
+/// removed, and the old mine's container goes down with its extractor when
+/// it holds nothing and serves nothing else — no source, the controller, nor
+/// the rock now dug: a container left standing is repaired for ever and holds
+/// one of the room's five.
+let internal planExtractorMove (view: ColonyView) atlas : Intent list =
+    match view.Controller, view.Spatial.RoomName with
+    | Some controller, Some room when controller.Level >= view.Tuning.ExtractorLevel ->
+        let minerals = Atlas.mineralsIn atlas room
+
+        if minerals |> List.exists (fst >> Facts.digWanted view) |> not then
+            []
+        else
+            let unemptied =
+                Facts.ourMineralContainerPairs view
+                |> List.filter (fun (_, containerId) ->
+                    SpatialInfo.heldIn view.Spatial Thorium containerId > 0)
+                |> List.map fst
+                |> Set.ofList
+
+            let tileOf id =
+                Atlas.positionOf atlas id
+                |> Option.filter (fun at -> at.Room = room)
+                |> Option.map RoomPos.pos
+
+            // What a container may still serve: a source, the rock now dug.
+            let served =
+                (view.Sources |> List.choose (fun s -> tileOf s.Id))
+                @ (minerals |> List.map snd)
+
+            let buffers = Atlas.controllerContainers atlas
+
+            let spentContainersBeside tile =
+                Atlas.idsOfKind atlas (Structure BuiltKind.Container)
+                |> List.filter (fun id ->
+                    match tileOf id with
+                    | Some at ->
+                        range at tile <= 1
+                        && SpatialInfo.heldAllIn view.Spatial id = 0
+                        && not (Set.contains id buffers)
+                        && served |> List.forall (fun rock -> range at rock > 1)
+                    | None -> false)
+
+            strayExtractorsIn atlas room minerals
+            |> List.collect (fun id ->
+                match Map.tryFind id view.Spatial.TargetKinds with
+                | Some(Structure BuiltKind.Extractor) when not (Set.contains id unemptied) ->
+                    DestroyStructure id
+                    :: (tileOf id
+                        |> Option.map spentContainersBeside
+                        |> Option.defaultValue []
+                        |> List.map DestroyStructure)
+                | Some(Site BuiltKind.Extractor) -> [ RemoveSite id ]
+                | _ -> [])
+    | _ -> []
+
 /// Colony-level planning step beside the Planner/Matcher pipeline: the
 /// deterministic Layout (ADR-0011), computed whole from the Atlas every tick
 /// and placed all at once — no persisted plan, no pacing. One ordering rule
@@ -1929,17 +2013,26 @@ let planLayout
             else
                 []
 
+        // The ones built for: an ore only while its dig is wanted, so a room
+        // that will not dig spends nothing on its extractor or its container
+        // (the census signature signs the gate, `Facts.oreDug`).
+        let wanted = minerals |> List.filter (fst >> Facts.digWanted view)
+
         // The extractor, on the mineral's own tile. One per room ever, so the
-        // census is the whole of the gap. The tile clause is still owed below
-        // (`extractorGap`): a road site is the one kind Screeps allows on a
-        // natural wall, and the extractor is the one kind whose tile can never
-        // move to dodge one.
+        // census is the whole of the gap, and none is asked for while a stray
+        // one still holds the room's allowance (`planExtractorMove` takes it
+        // down). The tile clause is still owed below (`extractorGap`): a road
+        // site is the one kind Screeps allows on a natural wall, and the
+        // extractor is the one kind whose tile can never move to dodge one.
         let extractorTiles =
             let census = Atlas.extractorCensusIn atlas room
 
-            minerals
-            |> List.map snd
-            |> List.filter (fun tile -> not (Set.contains tile census))
+            if List.isEmpty (strayExtractorsIn atlas room minerals) then
+                wanted
+                |> List.map snd
+                |> List.filter (fun tile -> not (Set.contains tile census))
+            else
+                []
 
         // The mineral container, on the deposit's Seat nearest the Storage's
         // trunk: the source container's rule with the source swapped out. A
@@ -1949,7 +2042,7 @@ let planLayout
         // wall mouth this is a choice between one and three tiles and never a
         // search.
         let mineralContainerPicks =
-            minerals
+            wanted
             |> List.choose (fun (mineralId, _) ->
                 let seats = Atlas.seatTilesOf atlas mineralId |> RoomPos.inRoom room
 
@@ -2409,13 +2502,14 @@ let internal planSignatures (view: ColonyView) atlas (textFor: string -> string)
 let internal planPickups (view: ColonyView) atlas (assigned: Map<string, Task>) : Intent list =
     let oreBound name =
         match Map.tryFind name assigned with
-        | Some(Withdraw(_, Thorium))
-        | Some(Pickup(_, Thorium)) -> true
+        | Some(Withdraw(_, (Thorium | Ore _)))
+        | Some(Pickup(_, (Thorium | Ore _))) -> true
         | _ -> false
 
     let hungry =
         view.Creeps
-        |> List.filter (fun c -> c.FreeCapacity > 0 && c.Thorium = 0 && not (oreBound c.Name))
+        |> List.filter (fun c ->
+            c.FreeCapacity > 0 && not (CreepInfo.carriesMineral c) && not (oreBound c.Name))
         |> List.map (fun c -> c.Name)
         |> Set.ofList
 

@@ -239,6 +239,7 @@ let creepWith name energy freeCapacity body =
         // Energy unless a case says otherwise: `carrying` below is the one
         // builder that puts the season's ore in a body.
         Thorium = 0
+        Ore = Map.empty
         FreeCapacity = freeCapacity
         Moved = false
         DrawnFrom = None
@@ -747,7 +748,7 @@ let mineColony =
             |> withObstacles [ { X = 15; Y = 10 } ]
             |> withTargets
                 [
-                    "min-a", minePos, Mineral
+                    "min-a", minePos, Mineral Thorium
                     "ext-a", minePos, Structure BuiltKind.Extractor
                     "can-min", minePost, Structure BuiltKind.Container
                     "spawn-1", { X = 15; Y = 10 }, Structure BuiltKind.Spawn
@@ -839,6 +840,56 @@ let mineHaulColony =
             }
             |> withObstacles [ { X = 14; Y = 10 } ]
             |> withTargets [ "sto-1", { X = 14; Y = 10 }, Structure BuiltKind.Storage ]
+    }
+
+/// The mine dug for its **ore** and not for Thorium: `mineHaulColony` with
+/// the deposit holding 70,000 oxygen and no Thorium anywhere, the Storage at
+/// 100,000 energy, and an empty terminal standing at (13,9) beside the
+/// Storage's Seat. No controller, so no reserve: every case moves one fact of
+/// the dig gate — the terminal's stock, the Storage's, the deposit's own.
+let oreColony =
+    { mineHaulColony with
+        Spatial =
+            { mineHaulColony.Spatial with
+                TargetKinds =
+                    Map.add "min-a" (Mineral(Ore Oxygen)) mineHaulColony.Spatial.TargetKinds
+                Thorium = Map.empty
+                Stores = Map.add "sto-1" 100_000 mineHaulColony.Spatial.Stores
+                Ore = Map.ofList [ "min-a", Map.ofList [ Oxygen, 70_000 ] ]
+            }
+            |> withObstacles [ { X = 13; Y = 9 } ]
+            |> withTargets [ "term-1", { X = 13; Y = 9 }, Structure BuiltKind.Terminal ]
+    }
+
+/// The same colony with `units` of one ore held in one store (or deposit),
+/// and the entry gone at zero, as the shell files it.
+let withOreIn id ore units (colony: ColonyView) =
+    let held =
+        Map.tryFind id colony.Spatial.Ore
+        |> Option.defaultValue Map.empty
+        |> fun held ->
+            if units > 0 then
+                Map.add ore units held
+            else
+                Map.remove ore held
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Ore =
+                    if Map.isEmpty held then
+                        Map.remove id colony.Spatial.Ore
+                    else
+                        Map.add id held colony.Spatial.Ore
+            }
+    }
+
+/// A creep with `units` of one ore aboard, off the free room it was built
+/// with — `carrying`'s twin one resource over.
+let carryingOre ore units (creep: CreepInfo) =
+    { creep with
+        Ore = Map.ofList [ ore, units ]
+        FreeCapacity = max 0 (creep.FreeCapacity - units)
     }
 
 /// The same colony under a named home room, geometry and all. Every fixture

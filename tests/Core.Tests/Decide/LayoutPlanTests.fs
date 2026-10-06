@@ -692,6 +692,40 @@ let layoutTests =
             }
         ]
 
+/// Where a mined-out Thorium deposit stood: a tile of the trunk fixture well
+/// off the cluster, the deposit's mineral gone and only its extractor left.
+let private spentTile = { X = 40; Y = 40 }
+
+/// The RCL6 deposit fixture with its deposit holding **ore** — oxygen — and a
+/// terminal standing at (40,10), with `extra` targets standing beside.
+let private oreRoom extra =
+    let colony = mineralColony 6
+
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Stores = Map.add "sto-x" 100_000 colony.Spatial.Stores
+                Ore = Map.ofList [ "min-a", Map.ofList [ Oxygen, 70_000 ] ]
+            }
+            |> withTargets (
+                [
+                    "min-a", mineralPos, Mineral(Ore Oxygen)
+                    "term-1", { X = 40; Y = 10 }, Structure BuiltKind.Terminal
+                    "sto-x", { X = 40; Y = 12 }, Structure BuiltKind.Storage
+                ]
+                @ extra
+            )
+    }
+
+/// The same room with its Storage at `energy`: the dig gate's other half.
+let private stockedAt energy (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Stores = Map.add "sto-x" energy colony.Spatial.Stores
+            }
+    }
+
 [<Tests>]
 let extractorTests =
     testList
@@ -733,6 +767,162 @@ let extractorTests =
                     Expect.isEmpty
                         (sitesOfKind StructureKind.Extractor (decideOn standing).Intents)
                         $"%A{kind} on the deposit's tile claims it: nothing re-drops"
+            }
+
+            test "an extractor left on a mined-out Thorium tile is destroyed for the room's ore" {
+                // Live 2026-10-07: every home extractor stood on a deposit the
+                // mod had deleted, none on the room's O or H. The engine allows
+                // a room one, so the stray goes first and the ore's is asked for
+                // once the census no longer holds it.
+                let stray = oreRoom [ "ext-old", spentTile, Structure BuiltKind.Extractor ]
+                let { Intents = intents } = decideOn stray
+
+                Expect.contains intents (DestroyStructure "ext-old") "the stray comes down"
+
+                Expect.isEmpty
+                    (sitesOfKind StructureKind.Extractor intents)
+                    "and nothing is asked for while it still holds the room's one"
+
+                Expect.equal
+                    (sitesOfKind StructureKind.Extractor (decideOn (oreRoom [])).Intents)
+                    [ mineralPos ]
+                    "with it gone, the ore's own tile"
+            }
+
+            test "a stray extractor whose container still holds Thorium is kept" {
+                // The container is that mine's only while its extractor marks it:
+                // ore left in it is drawn first.
+                let unemptied =
+                    oreRoom
+                        [
+                            "ext-old", spentTile, Structure BuiltKind.Extractor
+                            "can-old",
+                            { spentTile with X = spentTile.X + 1 },
+                            Structure BuiltKind.Container
+                        ]
+
+                let held =
+                    { unemptied with
+                        Spatial =
+                            { unemptied.Spatial with
+                                Thorium = Map.ofList [ "can-old", 500 ]
+                            }
+                    }
+
+                Expect.contains
+                    (decideOn unemptied).Intents
+                    (DestroyStructure "ext-old")
+                    "the premise: an empty container lets it go"
+
+                Expect.isFalse
+                    ((decideOn held).Intents |> List.contains (DestroyStructure "ext-old"))
+                    "500 Thorium beside it keeps it"
+            }
+
+            test "a room whose dig is shut keeps its stray extractor and asks for nothing" {
+                // No rebuild is spent on a room that will not dig: a Storage
+                // under the reserve plus the margin keeps what stands.
+                let stray = oreRoom [ "ext-old", spentTile, Structure BuiltKind.Extractor ]
+                let poor = stray |> stockedAt 25_000
+
+                Expect.contains
+                    (decideOn stray).Intents
+                    (DestroyStructure "ext-old")
+                    "the premise: stocked, the stray comes down"
+
+                let { Intents = intents } = decideOn poor
+
+                Expect.isFalse
+                    (intents |> List.contains (DestroyStructure "ext-old"))
+                    "shut: it stands"
+
+                let bare = oreRoom [] |> stockedAt 25_000
+
+                Expect.isEmpty
+                    (sitesOfKind StructureKind.Extractor (decideOn bare).Intents)
+                    "and with none standing, none is asked for on the ore"
+
+                Expect.isFalse
+                    (sitesOfKind StructureKind.Container (decideOn bare).Intents
+                     |> List.exists (fun tile -> range tile mineralPos <= 1))
+                    "nor the ore's container"
+            }
+
+            test "the old mine's empty container goes down with its extractor" {
+                // Left standing it is repaired for ever and holds one of the
+                // room's five: nothing reads it once the extractor goes.
+                let spent =
+                    oreRoom
+                        [
+                            "ext-old", spentTile, Structure BuiltKind.Extractor
+                            "can-old",
+                            { spentTile with X = spentTile.X + 1 },
+                            Structure BuiltKind.Container
+                        ]
+
+                let { Intents = intents } = decideOn spent
+
+                Expect.contains intents (DestroyStructure "can-old") "the empty container goes"
+
+                let stocked =
+                    { spent with
+                        Spatial =
+                            { spent.Spatial with
+                                Stores = Map.add "can-old" 50 spent.Spatial.Stores
+                            }
+                    }
+
+                Expect.isFalse
+                    ((decideOn stocked).Intents |> List.contains (DestroyStructure "can-old"))
+                    "one still holding something stays"
+            }
+
+            test "a stray extractor site is removed when the room digs its ore" {
+                let site = oreRoom [ "ext-site", spentTile, Site BuiltKind.Extractor ]
+
+                Expect.contains
+                    (decideOn site).Intents
+                    (RemoveSite "ext-site")
+                    "the stray site goes"
+
+                Expect.isFalse
+                    ((decideOn (site |> stockedAt 25_000)).Intents
+                     |> List.contains (RemoveSite "ext-site"))
+                    "and stays while the dig is shut"
+            }
+
+            test "the ore is no rock of the room's without a terminal, and while Thorium stands" {
+                let stray = oreRoom [ "ext-old", spentTile, Structure BuiltKind.Extractor ]
+
+                let noTerminal =
+                    { stray with
+                        Spatial =
+                            { stray.Spatial with
+                                TargetKinds = Map.remove "term-1" stray.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.isFalse
+                    ((decideOn noTerminal).Intents |> List.contains (DestroyStructure "ext-old"))
+                    "nowhere to put the ore: the stray stands"
+
+                // Thorium keeps priority: a deposit still standing holds the
+                // room's extractor, wherever the ore lies.
+                let thorium = oreRoom [ "min-t", spentTile, Mineral Thorium ]
+
+                let { Intents = intents } = decideOn thorium
+
+                Expect.isFalse
+                    (intents
+                     |> List.exists (function
+                         | DestroyStructure _ -> true
+                         | _ -> false))
+                    "nothing to destroy"
+
+                Expect.equal
+                    (sitesOfKind StructureKind.Extractor intents)
+                    [ spentTile ]
+                    "the extractor is the Thorium's, and the ore is left alone"
             }
 
             test "the deposit's container takes the Seat nearest the Storage's trunk" {

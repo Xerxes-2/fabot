@@ -88,14 +88,15 @@ let internal applicable
     // light body's Harvest this prices the walk alone; see the Harvest arm.
     let halfEmpty = creep.FreeCapacity * 2 >= creep.Energy + creep.FreeCapacity
 
-    // Thorium aboard shuts every energy intake: a mixed load pours energy into a
-    // reactor that refuses it. Zero for every body in a colony with no mine.
-    let carryingThorium = creep.Thorium > 0
+    // Thorium or ore aboard shuts every energy intake: a mixed load pours energy
+    // into a reactor or a terminal that refuses it. False for every body in a
+    // colony with no mine.
+    let carryingMineral = CreepInfo.carriesMineral creep
 
-    // Read as the two holdings and not as `FreeCapacity` against the body's
-    // carry: a hand-built body is free to state a store the engine would never
-    // hand back.
-    let emptyHanded = creep.Energy = 0 && creep.Thorium = 0
+    // Read as the holdings and not as `FreeCapacity` against the body's carry:
+    // a hand-built body is free to state a store the engine would never hand
+    // back.
+    let emptyHanded = creep.Energy = 0 && not carryingMineral
 
     // A delivery of Work. Refill carries rather than works, so it keeps its own
     // `has Carry`.
@@ -171,7 +172,7 @@ let internal applicable
         // A body carrying ore does not dig energy into the same store. Never
         // true of a garrison; what it refuses is a light body that took a load
         // off the mineral container and would outrank its own delivery.
-        && not carryingThorium
+        && not carryingMineral
     // The body half of this gate is read a second time by `canRefill`, the
     // supply floor's arming condition: a clause narrowing what a body may draw
     // with belongs in front of both readers.
@@ -271,10 +272,13 @@ let internal applicable
             && not heavy
             && not standing
             && (not deliveryDraw || (carriesOnly && outlivesTheLoadedLeg))
+        // The ore haul is the mine haul one resource over: an empty carrier, a
+        // few tiles from the mine to the terminal.
+        | Ore _ -> has Carry && emptyHanded && worthTheTrip && not heavy && not standing
         | Energy ->
             has Carry
             && (halfEmpty || tops storeId stock)
-            && not carryingThorium
+            && not carryingMineral
             && worthTheTrip
             && not heavy
             && (has Work || not buffer)
@@ -285,13 +289,14 @@ let internal applicable
     // The Withdraw gate without its target-shaped clauses: a pile is nobody's
     // buffer, and it drops `worthTheTrip` because a pile decays and a store does
     // not, so there is no later body to leave it for (#311).
-    | Pickup(_, Thorium) -> has Carry && emptyHanded && not heavy && not standing
+    | Pickup(_, Thorium)
+    | Pickup(_, Ore _) -> has Carry && emptyHanded && not heavy && not standing
     // A child's floor is the ferry's drop (#473): a Work body's to build and
     // upgrade with, and never a hauler's to carry back out.
     | Pickup(pileId, Energy) ->
         has Carry
         && (halfEmpty || tops pileId (SpatialInfo.heldIn view.Spatial Energy pileId))
-        && not carryingThorium
+        && not carryingMineral
         && not heavy
         && not standing
         && (has Work
@@ -322,7 +327,7 @@ let internal applicable
             Map.tryFind targetId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage)
 
         has Carry
-        && carryingThorium
+        && creep.Thorium > 0
         && not standing
         // A mine carrier above the decade-safe load must bank first; only the
         // Storage draw is capped to 999 (#319).
@@ -344,6 +349,12 @@ let internal applicable
         && (not storage
             || creep.Thorium <> view.Tuning.ReactorLoad
             || Set.isEmpty (Facts.errandRoomsDeliverable view))
+    // What a body took is what it puts down: the ore it holds, into the
+    // terminal.
+    | Refill(_, Ore ore) ->
+        has Carry
+        && Map.tryFind ore creep.Ore |> Option.exists (fun held -> held > 0)
+        && not standing
     // A Build is a walk a colony-wide rank cannot thin (#157, #234): light
     // bodies' work, and neither a heavy body's nor a standing one's. The one
     // exception is a container site under the body's own feet, on its own Post
@@ -953,7 +964,8 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
                 | Error _ -> plan, owed)
     |> fst
 
-/// Whether a Thorium harvest is held this tick by the extractor's clock.
+/// Whether a mineral harvest — Thorium or ore — is held this tick by the
+/// extractor's clock.
 /// `EXTRACTOR_COOLDOWN` is 5 and the engine runs the intent pass before the
 /// object pass — `extractors/tick.js` writes the 5 at the end of the harvest
 /// tick and decrements it once per tick after — so successive harvests land
@@ -976,7 +988,7 @@ let private heldByCooldown atlas task =
         | None -> true
     | _ -> false
 
-/// Whether a Thorium harvest is held this tick by its mine's container (#497):
+/// Whether a mineral harvest is held this tick by its mine's container (#497):
 /// less room in it than one dig yields. The miner has no Carry, so the dig
 /// lands on the floor, where Thorium decays; the deposit does not regenerate,
 /// so the wait loses nothing. Withheld here and not in applicability, for the
@@ -990,11 +1002,7 @@ let private heldByFullContainer (view: ColonyView) atlas (creep: CreepInfo) task
         Facts.ourMineralContainerPairs view
         |> List.tryFind (fun (markId, _) -> markId = rockId)
         |> Option.exists (fun (_, containerId) ->
-            let held =
-                SpatialInfo.heldIn view.Spatial Thorium containerId
-                + SpatialInfo.storedIn view.Spatial containerId
-
-            Engine.containerCapacity - held < dig)
+            Engine.containerCapacity - SpatialInfo.heldAllIn view.Spatial containerId < dig)
     | _ -> false
 
 /// The standing upgrader's draw beside its Upgrade (#498): a standing body

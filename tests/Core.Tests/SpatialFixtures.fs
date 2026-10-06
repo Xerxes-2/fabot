@@ -121,7 +121,7 @@ type ShapeViolation =
 let private admitsOre =
     function
     | Some(Structure built) -> isStored built
-    | Some Mineral
+    | Some(Mineral Thorium)
     | Some Tombstone
     | Some(Dropped Thorium) -> true
     | _ -> false

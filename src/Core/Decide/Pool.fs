@@ -645,7 +645,9 @@ let planPoolHolding
     // the floor, where the ore bleeds.
     let overflowing storeId =
         Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Container)
-        && SpatialInfo.heldIn view.Spatial Thorium storeId * 10
+        && (SpatialInfo.heldAllIn view.Spatial storeId
+            - SpatialInfo.storedIn view.Spatial storeId)
+           * 10
            >= Engine.containerCapacity * 9
 
     // The ferry's sinks (`ferryBuffers`): what a mother lends a bootstrapping
@@ -716,7 +718,8 @@ let planPoolHolding
                 creep.Name,
                 match resource with
                 | Energy -> creep.Energy
-                | Thorium -> creep.Thorium)
+                | Thorium -> creep.Thorium
+                | Ore ore -> Map.tryFind ore creep.Ore |> Option.defaultValue 0)
             |> Map.ofList
 
         tasks
@@ -771,11 +774,7 @@ let planPoolHolding
         lazy
             (Atlas.idsOfKind atlas (Structure BuiltKind.Terminal)
              |> List.sumBy (fun id ->
-                 max
-                     0
-                     (Engine.terminalCapacity
-                      - stored id
-                      - SpatialInfo.heldIn view.Spatial Thorium id)))
+                 max 0 (Engine.terminalCapacity - SpatialInfo.heldAllIn view.Spatial id)))
 
     // The rescue budget (#284): the decaying structures this colony has let
     // fall so far below their own trigger that a repair is no longer surplus
@@ -987,6 +986,12 @@ let planPoolHolding
         // spawn is waiting on. Asked before the kind, because the store it
         // names is a container and would otherwise answer Feeding.
         | Withdraw(_, Thorium) -> StockDraw
+        // The ore haul one resource over, and never the season's score: an
+        // overflowing ore mine is Feeding for the floor's reason, any other at
+        // the Storage's tier.
+        | Withdraw(storeId, Ore _) when overflowing storeId && not spawnEmpty -> Feeding
+        | Withdraw(_, Ore _)
+        | Pickup(_, Ore _) -> StockDraw
         // ADR-0023. The Storage is stock, drawn a tier below the containers.
         // The stock feeds a starved cluster at the flow's own rank: a tie with
         // the containers and not a rank over them, so travel cost sends the

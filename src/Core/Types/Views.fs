@@ -748,7 +748,7 @@ module ColonyView =
         | Tombstone
         // A child's deposit is the child's: the mother's [[pioneer]]s mine
         // nothing out there.
-        | Mineral
+        | Mineral _
         | Structure _ -> false
 
     /// The one store of a bootstrapped child's the mother may carry: **the
@@ -844,6 +844,7 @@ module ColonyView =
             // reason, and so do the owners (#318): what a mother may act on
             // is the explicit list `borrowable` holds.
             Thorium = Map.empty
+            Ore = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
             Sources = if digs then facts.Sources else []
@@ -910,6 +911,9 @@ module ColonyView =
             // The ownership that survives a crossing is the **room**'s, on
             // `Control`.
             Thorium = oreOf facts.Thorium
+            // The room's own [[ore]] is no score: it decays on the floor as
+            // anything does, and goes out with the work.
+            Ore = Map.empty
             Cooldowns = Map.empty
             Owners = Map.empty
             Reactors = []
@@ -1536,6 +1540,7 @@ module ColonyView =
                     Hits = mergedBy (fun facts -> facts.Hits)
                     Stores = mergedBy (fun facts -> facts.Stores)
                     Thorium = mergedBy (fun facts -> facts.Thorium)
+                    Ore = mergedBy (fun facts -> facts.Ore)
                     Cooldowns = mergedBy (fun facts -> facts.Cooldowns)
                     PublicRamparts =
                         worked

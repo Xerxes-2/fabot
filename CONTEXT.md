@@ -255,8 +255,12 @@ The [[storage]] energy a colony keeps for spawning and defence, by its controlle
 _Avoid_: floor (the upgrader row's own), buffer
 
 ### Thorium
-The season's scoring resource and the one resource beside energy this colony names (`Resource = Energy | Thorium`): a finite deposit read off `FIND_MINERALS`, dug by the [[miner]] through an extractor from `Tuning.ExtractorLevel`, moved by the [[hauler unit]] row at the [[storage]]'s tiers, banked in the [[storage]] and carried to the Reactor by the [[courier]]. A body carries one resource at a time. ADR-0057, ADR-0060, ADR-0067.
-_Avoid_: mineral (the engine's word for the object), ore
+The season's scoring resource (`Resource.Thorium`): a finite deposit read off `FIND_MINERALS`, dug by the [[miner]] through an extractor from `Tuning.ExtractorLevel`, moved by the [[hauler unit]] row at the [[storage]]'s tiers, banked in the [[storage]] and carried to the Reactor by the [[courier]]. A body carries one resource at a time. ADR-0057, ADR-0060, ADR-0067.
+_Avoid_: mineral (the engine's word for the object), ore (the room's own, below)
+
+### Ore
+A room's ordinary mineral — H, O, U, K, L, Z or X (`Resource.Ore`) — dug for the labs (ADR-0089). A home digs it only once no [[thorium]] deposit stands in the room (the room's one extractor is the Thorium's while any does; one left on a mined-out Thorium tile is destroyed once its container is empty, and the ore's placed) and only while a terminal stands there: by the same [[miner]] into its own mineral [[container]], hauled by the [[hauler unit]] row into the home terminal while that terminal holds under `Tuning.OreTarget` and the [[storage]] stands `Tuning.OreEnergyMargin` over the [[emergency reserve]]. A body holding ore takes no energy intake.
+_Avoid_: mineral, compound (a lab's product)
 
 ### Keep
 The structures worth defending — the spawn, every tower, the [[storage]] and the terminal (#422): each ramparted, repaired to full, and a reason to fire the [[safe-mode reflex]] when damaged, from `Independent` up. ADR-0034.

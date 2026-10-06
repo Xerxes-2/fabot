@@ -116,6 +116,7 @@ let ours name : CreepInfo =
         Fatigue = 0
         Energy = 0
         Thorium = 0
+        Ore = Map.empty
         FreeCapacity = 50
         Moved = false
         DrawnFrom = None

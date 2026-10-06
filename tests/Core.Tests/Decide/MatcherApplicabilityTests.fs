@@ -399,6 +399,34 @@ let thoriumApplicabilityTests =
                     "with the ore aboard the same body has one Task: put it down"
             }
 
+            test "a carrier holding ore pours into the terminal, and takes no energy on the way" {
+                // The same pairwise one resource over: the room's own ore
+                // aboard shuts every energy intake as the season's does, and its
+                // one sink is the home terminal.
+                let colony load =
+                    { oreColony with
+                        Spatial =
+                            { oreColony.Spatial with
+                                Stores = Map.add "can-min" 600 oreColony.Spatial.Stores
+                            }
+                            |> withCreepsAt [ "h1", { X = 13; Y = 10 } ]
+                        Creeps = [ load ]
+                    }
+
+                Expect.equal
+                    (Map.tryFind "h1" (decideOn (colony (hauler "h1" 0 200))).Assignments)
+                    (Some(taskId (Withdraw("can-min", Energy))))
+                    "the premise: an empty body beside that container draws its energy"
+
+                Expect.equal
+                    (Map.tryFind
+                        "h1"
+                        (decideOn (colony (hauler "h1" 0 200 |> carryingOre Oxygen 150)))
+                            .Assignments)
+                    (Some(taskId (Refill("term-1", Ore Oxygen))))
+                    "with oxygen aboard the same body has one Task: put it in the terminal"
+            }
+
             test "a light body carrying Thorium is offered no rock either" {
                 // The third energy intake: a Work-carrying worker half empty
                 // of ore would otherwise outrank its own delivery with a

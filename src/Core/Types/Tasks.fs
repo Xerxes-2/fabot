@@ -322,18 +322,25 @@ let partName =
 
 /// Every Resource the colony names — the closed set, for building tables over
 /// the vocabulary, and closed by `Core.Tests` exactly as `allBodyParts` is.
-let allResources = [ Energy; Thorium ]
+let allResources = [ Energy; Thorium ] @ List.map Ore allOres
 
 /// Screeps RESOURCE_* strings as the engine spells them, in `store` keys and in
 /// the `withdraw`/`transfer` calls that have taken one all along — the one
 /// place the spelling lives (its reverse is derived from this table).
 /// `RESOURCE_THORIUM` is the season mod's own one-letter key, which is what
 /// `mineralType` reads on the deposit and what the reactor's store is filed
-/// under.
+/// under; an ore's is the engine's own one letter.
 let resourceName =
     function
     | Energy -> "energy"
     | Thorium -> "T"
+    | Ore Hydrogen -> "H"
+    | Ore Oxygen -> "O"
+    | Ore Utrium -> "U"
+    | Ore Keanium -> "K"
+    | Ore Lemergium -> "L"
+    | Ore Zynthium -> "Z"
+    | Ore Catalyst -> "X"
 
 /// Every BuiltKind the engine spells — the modelled set. Other is not one of
 /// them: it is the absence of a modelled kind. Closed by `Core.Tests`.

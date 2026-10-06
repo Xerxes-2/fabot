@@ -89,7 +89,7 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
                 match Map.tryFind id spatial.TargetKinds with
                 | Some(Structure built) -> standingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
                 | Some(Site built) -> pendingIds.Add $"{built}@{room}:{tile.X},{tile.Y}"
-                | Some Mineral -> mineralIds.Add $"Mineral@{room}:{tile.X},{tile.Y}"
+                | Some(Mineral _) -> mineralIds.Add $"Mineral@{room}:{tile.X},{tile.Y}"
                 | _ -> ()
 
             // The tiles another player's construction sites hold (#248), with
@@ -171,7 +171,11 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // the count moves with every colony's sites, the side of the line rarely.
     let full = view.PlayerSites >= view.Tuning.OutpostRoadSiteCeiling
 
-    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}"
+    // The ore dug this tick: the hauler quota's mine term opens and shuts with
+    // the dig gate, which reads stores no census carries.
+    let ore = Facts.oreDug view |> String.concat ","
+
+    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}"
 
 let censusSignature (view: ColonyView) : string = snd (signaturesOf view)
 
@@ -424,7 +428,8 @@ let decideUnarbitrated
 
         planAid view sending
 
-    let consignmentIntents = consigned @ aidIntents @ planObserver view
+    let consignmentIntents =
+        consigned @ aidIntents @ planObserver view @ planExtractorMove view atlas
 
     // The pool is derived before the spawns, and the dependency runs one way:
     // the worker row's floor asks the pool, and nothing in the pool reads a

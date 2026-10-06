@@ -1480,3 +1480,75 @@ let withdrawArrivalTests =
                     "a step that leaves it out of reach: nothing"
             }
         ]
+
+[<Tests>]
+let oreLegTests =
+    testList
+        "the ore leg's pool"
+        [
+            test "a mineral container holding ore is drawn in that ore" {
+                // The Thorium leg one resource over, out of the same container.
+                let tasks = planTasksOn (oreColony |> withOreIn "can-min" Oxygen 800) noThreats
+
+                Expect.contains
+                    tasks
+                    (Withdraw("can-min", Ore Oxygen))
+                    "the container is drawn in oxygen"
+
+                Expect.isFalse
+                    (List.contains (Withdraw("can-min", Thorium)) tasks)
+                    "and in no Thorium it does not hold"
+
+                Expect.equal
+                    (taskId (Withdraw("can-min", Ore Oxygen)))
+                    "withdraw:can-min:O"
+                    "the ore draw is its own identity at that store"
+            }
+
+            test "a body holding ore finds the home terminal its sink, and nothing else" {
+                let loaded = hauler "h1" 0 100 |> carryingOre Oxygen 100
+
+                let tasks = planTasksOn { oreColony with Creeps = [ loaded ] } noThreats
+
+                Expect.contains tasks (Refill("term-1", Ore Oxygen)) "the terminal takes the ore"
+
+                Expect.isFalse
+                    (List.contains (Refill("sto-1", Ore Oxygen)) tasks)
+                    "the Storage never does"
+
+                Expect.isFalse
+                    (planTasksOn oreColony noThreats |> List.contains (Refill("term-1", Ore Oxygen)))
+                    "and with nobody holding ore there is no sink to pool"
+            }
+
+            test
+                "the ore's Harvest is pooled while the terminal is short and withdrawn at its target" {
+                Expect.contains (planTasksOn oreColony noThreats) (Harvest "min-a") "short: dig"
+
+                Expect.isFalse
+                    (planTasksOn
+                        (oreColony |> withOreIn "term-1" Oxygen oreColony.Tuning.OreTarget)
+                        noThreats
+                     |> List.contains (Harvest "min-a"))
+                    "at the target the living miner has nothing to dig"
+            }
+
+            test "a room still holding Thorium digs it and never its ore" {
+                // Thorium keeps priority: the room's one extractor is the
+                // deposit's while any Thorium stands, so the ore beside it is
+                // no rock of the room's at all.
+                let both =
+                    { oreColony with
+                        Spatial =
+                            { oreColony.Spatial with
+                                Thorium = Map.ofList [ "min-t", 22_000 ]
+                            }
+                            |> withTargets [ "min-t", { X = 20; Y = 10 }, Mineral Thorium ]
+                    }
+
+                let tasks = planTasksOn both noThreats
+
+                Expect.contains tasks (Harvest "min-t") "the Thorium is dug"
+                Expect.isFalse (List.contains (Harvest "min-a") tasks) "the ore is not"
+            }
+        ]

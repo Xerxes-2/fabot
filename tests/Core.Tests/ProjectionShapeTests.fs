@@ -100,7 +100,7 @@ let private homeFacts =
             "sto-1", { X = 5; Y = 5 }, Structure BuiltKind.Storage
             "can-1", { X = 6; Y = 5 }, Structure BuiltKind.Container
             "term-1", { X = 7; Y = 5 }, Structure BuiltKind.Terminal
-            "min-1", { X = 8; Y = 5 }, Mineral
+            "min-1", { X = 8; Y = 5 }, Mineral Thorium
             "ext-1", { X = 8; Y = 5 }, Structure BuiltKind.Extractor
             "tomb-1", { X = 9; Y = 5 }, Tombstone
             "pile-1", { X = 10; Y = 5 }, Dropped Thorium
@@ -310,7 +310,7 @@ let projectionShapeTests =
                                         [
                                             "can-1", Structure BuiltKind.Container
                                             "spawn-1", Structure BuiltKind.Spawn
-                                            "min-1", Mineral
+                                            "min-1", Mineral Thorium
                                             "pile-1", Dropped Thorium
                                         ]
                                 Thorium =
@@ -348,11 +348,12 @@ let kindCensusTests =
                 // Fable's generic union equality; every case of every field,
                 // enumerated, so a case added later is covered too.
                 let kinds =
-                    [ Source; Controller; Tombstone; Mineral ]
+                    [ Source; Controller; Tombstone ]
                     @ (casesOf typeof<BuiltKind>
                        |> List.map unbox<BuiltKind>
                        |> List.collect (fun built -> [ Structure built; Site built ]))
-                    @ (casesOf typeof<Resource> |> List.map unbox<Resource> |> List.map Dropped)
+                    @ (allResources
+                       |> List.collect (fun resource -> [ Dropped resource; Mineral resource ]))
 
                 let census =
                     kinds |> List.mapi (fun index kind -> $"id-{index:D3}", kind) |> Map.ofList

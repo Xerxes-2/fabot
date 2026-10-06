@@ -806,22 +806,30 @@ let extractorCensusIn (atlas: Atlas) (room: string) : Set<Pos> =
         (tilesOfKindIn atlas room (Structure BuiltKind.Extractor))
         (tilesOfKindIn atlas room (Site BuiltKind.Extractor))
 
-/// The Thorium minerals one room holds, each beside its tile, in id order.
-/// Only Thorium is ever projected, the shell filtering `FIND_MINERALS` on
-/// `mineralType`, so this is the whole of what the Layout plans an extractor
-/// and a container for. A room the projection places none in answers with the
-/// empty list.
+/// The minerals one room digs, each beside its tile, in id order: its Thorium
+/// deposits, or once none stands its [[ore]] at home under a terminal
+/// (`SpatialInfo.dugMineralsBy`). The whole of what the Layout plans an
+/// extractor and a container for. A room the projection places none in
+/// answers with the empty list.
 let mineralsIn (atlas: Atlas) (room: string) : (string * Pos) list =
-    targetsOfKind atlas Mineral
-    |> List.choose (fun id -> tileIn atlas room id |> Option.map (fun tile -> id, tile))
+    SpatialInfo.dugMineralsBy
+        (targetsOfKind atlas)
+        (fun id -> (tileIn atlas room id).IsSome)
+        (room = atlas.Home)
+    |> List.choose (fun (id, _) -> tileIn atlas room id |> Option.map (fun tile -> id, tile))
 
-/// Whether a target id is a Thorium deposit. The one join between a Task's
-/// bare id and the fact that decides which set of rules answers for it: a
-/// `Harvest` names a rock, and a rock is a source or a deposit, which share
-/// the act and share almost nothing else — no regeneration, no store to
+/// What a mineral holds, and None for a target that is no mineral. The one
+/// join between a Task's bare id and the fact that decides which set of rules
+/// answers for it: a `Harvest` names a rock, and a rock is a source or a
+/// mineral, which share the act and share almost nothing else — no store to
 /// overflow into, and an extractor's cooldown between one dig and the next.
-let isMineral (atlas: Atlas) (targetId: string) : bool =
-    Map.tryFind targetId atlas.Spatial.TargetKinds = Some Mineral
+let mineralResource (atlas: Atlas) (targetId: string) : Resource option =
+    match Map.tryFind targetId atlas.Spatial.TargetKinds with
+    | Some(Mineral resource) -> Some resource
+    | _ -> None
+
+/// Whether a target id is a mineral, Thorium or ore.
+let isMineral (atlas: Atlas) (targetId: string) : bool = (mineralResource atlas targetId).IsSome
 
 /// The extractor standing on a deposit's own tile, whose cooldown decides
 /// whether this tick's harvest is issued at all. The extractor's tile **is**
@@ -1782,7 +1790,7 @@ let arrivalGroundIn (atlas: Atlas) (room: string) (hostile: bool) : int[] option
                 tilesWhereIn atlas room (function
                     | Structure kind -> not (isWalkable kind)
                     | Controller
-                    | Mineral -> true
+                    | Mineral _ -> true
                     | _ -> false)
 
         layer.Obstacles

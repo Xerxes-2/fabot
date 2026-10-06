@@ -48,6 +48,27 @@ let boostsOf (body: IBodyPartDef[]) : Boost list =
 
         if List.forall ((=) Unboosted) boosts then [] else boosts
 
+/// The resource a `RESOURCE_*` string names, and None for one no decision of
+/// ours names (a compound, a commodity).
+let private resourceOf = reverseOf resourceName allResources
+
+/// The [[ore]] one store holds, by ore, and empty for a store holding none.
+/// Its keys are walked only when the store holds more than its energy and
+/// Thorium, which is almost never.
+let private oreHeldBy (store: IStore) (energy: int) (thorium: int) : Map<Ore, int> =
+    if storeUsedTotal store - energy - thorium <= 0 then
+        Map.empty
+    else
+        storeKeys store
+        |> Array.choose (fun key ->
+            match resourceOf key with
+            | Some(Ore ore) ->
+                match store.getUsedCapacity key with
+                | held when held > 0 -> Some(ore, held)
+                | _ -> None
+            | _ -> None)
+        |> Fresh.mapOfArray
+
 /// Classify an engine STRUCTURE_* string into the Core's built kinds; a
 /// string the table lacks is Other. Classified once so the rules stay in Core.
 let private builtKindOf =
@@ -345,14 +366,17 @@ let private seenFacts
             r.store.getUsedCapacity (resourceName Energy) > 0
             || r.store.getUsedCapacity (resourceName Thorium) > 0)
 
-    // The season's Thorium deposits only; the ordinary ore beside them is
-    // never extracted, so `TargetKind.Mineral` carries no resource. The mod
-    // deletes an exhausted deposit outright, so a mineral that leaves this
-    // array is gone, not at zero.
+    // The season's Thorium deposits and the room's own ore, each beside what
+    // it holds. The mod deletes an exhausted Thorium deposit outright, so one
+    // that leaves this array is gone, not at zero.
     let minerals =
         room.find findMinerals
         |> Array.map (fun o -> o :?> IMineral)
-        |> Array.filter (fun m -> m.mineralType = resourceName Thorium)
+        |> Array.choose (fun m ->
+            match resourceOf m.mineralType with
+            | Some Energy
+            | None -> None
+            | Some resource -> Some(m, resource))
 
     // The only sweep that can answer with a reactor (`findReactors`). Normally
     // empty: one room in a sector holds one, seen only while a body of ours
@@ -401,7 +425,7 @@ let private seenFacts
         for c in controllers do
             note c.id
 
-        for m in minerals do
+        for (m, _) in minerals do
             note m.id
 
         for r in reactors do
@@ -429,7 +453,8 @@ let private seenFacts
                                     |> Array.map (fun (st, kind) -> st.id, Structure kind)
                                     sites |> Array.map (fun (site, kind) -> site.id, Site kind)
                                     controllers |> Array.map (fun c -> c.id, Controller)
-                                    minerals |> Array.map (fun m -> m.id, Mineral)
+                                    minerals
+                                    |> Array.map (fun (m, resource) -> m.id, Mineral resource)
                                 ]
                         )
                     Positions =
@@ -440,7 +465,7 @@ let private seenFacts
                                     structures |> Array.map (fun (st, _) -> st.id, posOf st.pos)
                                     sites |> Array.map (fun (site, _) -> site.id, posOf site.pos)
                                     controllers |> Array.map (fun c -> c.id, posOf c.pos)
-                                    minerals |> Array.map (fun m -> m.id, posOf m.pos)
+                                    minerals |> Array.map (fun (m, _) -> m.id, posOf m.pos)
                                 ]
                         )
                     // Structures a creep cannot stand on block their tile; the
@@ -467,7 +492,7 @@ let private seenFacts
                                     // deposits stand on wall tiles, so this
                                     // subtracts nothing today; it is here
                                     // because it is what the engine does.
-                                    minerals |> Array.map (fun m -> posOf m.pos)
+                                    minerals |> Array.map (fun (m, _) -> posOf m.pos)
                                 ]
                         )
                     // Built roads only: a road site is not yet a road.
@@ -582,7 +607,12 @@ let private seenFacts
                     storedStructures
                     |> Array.map (fun (st, _) ->
                         st.id, st.store.getUsedCapacity (resourceName Thorium))
-                    minerals |> Array.map (fun m -> m.id, m.mineralAmount)
+                    minerals
+                    |> Array.choose (fun (m, resource) ->
+                        if resource = Thorium then
+                            Some(m.id, m.mineralAmount)
+                        else
+                            None)
                     // A dropped pile holds its amount in `object[resourceType]`
                     // rather than a `store`, which is why the mod's contact
                     // penalty skips it.
@@ -604,6 +634,25 @@ let private seenFacts
                     room.name
                     (Array.map fst column)
                     (Array.map snd column)
+        // The ore beside them: what each standing store holds, and an ore
+        // deposit's own remaining amount. A store holding none has no entry.
+        Ore =
+            Array.append
+                (storedStructures
+                 |> Array.map (fun (st, _) ->
+                     st.id,
+                     oreHeldBy
+                         st.store
+                         (st.store.getUsedCapacity (resourceName Energy))
+                         (st.store.getUsedCapacity (resourceName Thorium))))
+                (minerals
+                 |> Array.choose (fun (m, resource) ->
+                     match resource with
+                     | Ore ore when m.mineralAmount > 0 ->
+                         Some(m.id, Fresh.mapOfList [ ore, m.mineralAmount ])
+                     | _ -> None))
+            |> Array.filter (fun (_, held) -> not (Map.isEmpty held))
+            |> Fresh.mapOfArray
         // The extractor's cooldown: `cooldown` is undefined on every other
         // kind we build, and 0 is a real answer ("this tick"), so the map is
         // not filtered the way the Thorium above is.
@@ -1111,6 +1160,9 @@ let ofGame
         Creeps =
             standing
             |> List.map (fun c ->
+                let energy = c.store.getUsedCapacity (resourceName Energy)
+                let thorium = c.store.getUsedCapacity (resourceName Thorium)
+
                 {
                     Room = c.room.name
                     Info =
@@ -1119,8 +1171,9 @@ let ofGame
                             TicksToLive = c.ticksToLive
                             Fatigue = c.fatigue
                             Hits = { Hits = c.hits; HitsMax = c.hitsMax }
-                            Energy = c.store.getUsedCapacity (resourceName Energy)
-                            Thorium = c.store.getUsedCapacity (resourceName Thorium)
+                            Energy = energy
+                            Thorium = thorium
+                            Ore = oreHeldBy c.store energy thorium
                             // The whole store's free room: a creep's store is
                             // general, so this is the capacity less everything
                             // aboard and not the energy's own share.

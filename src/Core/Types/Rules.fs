@@ -648,6 +648,13 @@ type Tuning =
         /// energy a thousand units over three rooms, so 4,000 ships the whole
         /// 36,484 T banked in the two shipping colonies with room to spare.
         TerminalEnergy: int
+        /// The [[ore]] a home's terminal is dug up to: under it the colony
+        /// digs its own ore, at or over it the dig stops.
+        OreTarget: int
+        /// How far over its [[emergency reserve]] a home's Storage must stand
+        /// for its ore to be dug: the miner and its hauler are bodies paid in
+        /// energy.
+        OreEnergyMargin: int
         /// The **[[emergency reserve]]** steps (#505): `(level, energy)`, the
         /// Storage energy a colony at that controller level or above keeps
         /// for spawning and defence, the last step at or under the level
@@ -923,6 +930,10 @@ module Tuning =
             // Under Trepidimous' 300-500-tick crossing cadence; since #512 an early reopen only costs a walk.
             PlayerRaidHold = 200
             TerminalEnergy = 4_000
+            // A lab chain's inputs, not a hoard (user, 2026-10-07).
+            OreTarget = 6_000
+            // Two miner lives and a hauler's: the dig never eats the reserve.
+            OreEnergyMargin = 10_000
             // User, 2026-10-04: every Storage stood near 0 while the towers were full.
             EnergyReserves = [ 4, 10_000; 6, 20_000; 7, 30_000; 8, 50_000 ]
             // Half: a 20-40 e/t surplus refills a 10-20k reserve inside about a creep's life.

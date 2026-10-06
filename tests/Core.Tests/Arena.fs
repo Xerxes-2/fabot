@@ -992,6 +992,7 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
         Hits = { Hits = b.Hits; HitsMax = hitsMax b }
         Energy = b.Energy
         Thorium = b.Thorium
+        Ore = Map.empty
         FreeCapacity = max 0 (carry - b.Energy - b.Thorium)
         Body = active |> List.countBy id |> Map.ofList
         Moved =
@@ -1042,7 +1043,7 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 for s, kind in structures -> s.Id, s.At, Structure kind
                 for site in sites -> site.Id, site.At, Site(builtKindOf site.Kind)
                 for id, pos in Option.toList controller -> id, pos, Controller
-                for id, pos in r.Capture.RealMinerals -> id, pos, Mineral
+                for id, pos in r.Capture.RealMinerals -> id, pos, Mineral Thorium
             ]
 
         let here = a.Bodies |> List.filter (fun b -> b.At.Room = name)

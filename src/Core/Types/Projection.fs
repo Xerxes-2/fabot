@@ -213,13 +213,13 @@ type TargetKind =
     /// engine objects, because the only thing any reader decides on is that it
     /// holds energy and will be gone, and `Withdraw` is the verb for either.
     | Tombstone
-    /// A Thorium mineral — a fact read off `FIND_MINERALS`, not a declaration.
-    /// Only Thorium ever reaches the projection, the shell filtering on
-    /// `mineralType`, so the case carries no resource. What it has left to give
-    /// rides in `SpatialInfo.Thorium`. The day the mod deletes an exhausted
-    /// deposit the target leaves the projection, which retires everything hung
-    /// off it.
-    | Mineral
+    /// A mineral — a fact read off `FIND_MINERALS`, not a declaration — and
+    /// **what it holds**: `Thorium`, or the room's [[ore]], never `Energy`.
+    /// What it has left to give rides in `SpatialInfo.Thorium` or
+    /// `SpatialInfo.Ore`. The day the mod deletes an exhausted Thorium deposit
+    /// the target leaves the projection, which retires everything hung off it;
+    /// an ore deposit stays, at zero while it regenerates.
+    | Mineral of resource: Resource
 
 /// `a = b` over two kinds, the case matched first: Fable's generic union
 /// equality is a constructor check and a field walk per call, and the census
@@ -229,11 +229,11 @@ let internal sameKind (a: TargetKind) (b: TargetKind) : bool =
     match a, b with
     | Source, Source
     | Controller, Controller
-    | Tombstone, Tombstone
-    | Mineral, Mineral -> true
+    | Tombstone, Tombstone -> true
     | Structure x, Structure y
     | Site x, Site y -> x = y
-    | Dropped x, Dropped y -> x = y
+    | Dropped x, Dropped y
+    | Mineral x, Mineral y -> x = y
     | _ -> false
 
 /// Whether a projected target is one of the two transient kinds — a pile or a
@@ -249,7 +249,7 @@ let isTransient =
     | Controller
     | Structure _
     | Site _
-    | Mineral -> false
+    | Mineral _ -> false
 
 /// One room's geometry, filed under that room's name: every container the
 /// projection keys by `Pos`, gathered into one record so reading a room's
@@ -351,9 +351,13 @@ type SpatialInfo =
         /// is deliberately **not** among them: its store and streak ride
         /// `RoomFacts.Reactors`. A second id-keyed map beside `Stores` and not
         /// a `Map<string, Map<Resource, int>>`, which would make every energy
-        /// reader ask a question it never asks; the generalisation is one
-        /// commit away on the day a third resource has a reader.
+        /// reader ask a question it never asks.
         Thorium: Map<string, int>
+        /// Target id -> the [[ore]] held there, by ore: a store's, a pile's, a
+        /// tombstone's, and an ore deposit's own remaining amount. A store
+        /// holding none has no entry. Nested by id first so every narrowing
+        /// that filters the id-keyed maps filters this one the same way.
+        Ore: Map<string, Map<Ore, int>>
         /// Target id -> ticks before this structure may act again — today the
         /// extractor's alone (`EXTRACTOR_COOLDOWN` is 5, so successive
         /// harvests land six ticks apart). Absent per entry: a structure with
@@ -398,6 +402,7 @@ module SpatialInfo =
             Hits = Map.empty
             Stores = Map.empty
             Thorium = Map.empty
+            Ore = Map.empty
             Cooldowns = Map.empty
             PublicRamparts = Set.empty
             Owners = Map.empty
@@ -485,6 +490,78 @@ module SpatialInfo =
         match resource with
         | Energy -> storedIn spatial id
         | Thorium -> spatial.Thorium |> Map.tryFind id |> Option.defaultValue 0
+        | Ore ore ->
+            spatial.Ore
+            |> Map.tryFind id
+            |> Option.bind (Map.tryFind ore)
+            |> Option.defaultValue 0
+
+    /// Everything one store holds, every resource summed: a store's capacity
+    /// is one number, so every "is there room" question reads this.
+    let heldAllIn (spatial: SpatialInfo) (id: string) : int =
+        storedIn spatial id
+        + heldIn spatial Thorium id
+        + (spatial.Ore
+           |> Map.tryFind id
+           |> Option.map (Map.fold (fun total _ held -> total + held) 0)
+           |> Option.defaultValue 0)
+
+    /// The minerals one room's extractor is for, each beside what it holds, in
+    /// id order: the room's Thorium deposits while any stands, and only once
+    /// none does its [[ore]] — at home alone, and only while a terminal stands
+    /// there to dig it into. The engine takes one extractor a room, so this
+    /// one rule is both "Thorium keeps priority" and "the extractor moves onto
+    /// the ore". `ids` answers a kind's ids in id order, `placed` whether an id
+    /// stands in the room: an Atlas asks its census, a bare projection its walk.
+    let dugMineralsBy
+        (ids: TargetKind -> string list)
+        (placed: string -> bool)
+        (home: bool)
+        : (string * Resource) list =
+        let holding resource =
+            ids (Mineral resource)
+            |> List.filter placed
+            |> List.map (fun id -> id, resource)
+
+        match holding Thorium with
+        | [] when home && ids (Structure BuiltKind.Terminal) |> List.exists placed ->
+            allOres |> List.collect (Ore >> holding) |> List.sortBy fst
+        | [] -> []
+        | thorium -> thorium
+
+    /// `dugMineralsBy` over a bare projection: one walk of the census for the
+    /// two kinds the rule reads.
+    let dugMineralsIn (spatial: SpatialInfo) (room: string) : (string * Resource) list =
+        let layer = layerOf spatial room
+
+        let byKind =
+            spatial.TargetKinds
+            |> Map.fold
+                (fun (found: Map<TargetKind, string list>) id kind ->
+                    match kind with
+                    | Mineral _
+                    | Structure BuiltKind.Terminal ->
+                        Map.add
+                            kind
+                            (id :: (Map.tryFind kind found |> Option.defaultValue []))
+                            found
+                    | _ -> found)
+                Map.empty
+
+        dugMineralsBy
+            (fun kind -> Map.tryFind kind byKind |> Option.defaultValue [] |> List.rev)
+            (fun id -> Map.containsKey id layer.TargetPositions)
+            (room = homeName spatial)
+
+    /// The ores one store holds any of, as resources.
+    let oresIn (spatial: SpatialInfo) (id: string) : Resource list =
+        spatial.Ore
+        |> Map.tryFind id
+        |> Option.map (
+            Map.toList
+            >> List.choose (fun (ore, held) -> if held > 0 then Some(Ore ore) else None)
+        )
+        |> Option.defaultValue []
 
     /// Whether one **object** is ours this tick (#318): an entry that says
     /// `Ours`, and false for a rival's, nobody's, and the entry missing

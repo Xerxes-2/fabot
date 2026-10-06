@@ -110,6 +110,13 @@ type Intent =
     /// engine runs repair after heal and before attack, so it is planned only
     /// on a tick the tower neither fires nor heals.
     | RepairWithTower of towerId: string * structureId: string
+    /// A structure of ours taken down by its owner, at once and for nothing
+    /// back: the extractor standing on a mined-out Thorium tile, which holds
+    /// the room's one extractor off its ore.
+    | DestroyStructure of structureId: string
+    /// A construction site of ours taken back: an extractor's, left off the
+    /// rock its room now digs.
+    | RemoveSite of siteId: string
     /// A rampart of ours opened to every creep or shut to all but ours (#482):
     /// the engine's `setPublic` has no per-player list.
     | SetRampartPublic of rampartId: string * isPublic: bool

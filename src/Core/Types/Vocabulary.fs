@@ -135,18 +135,33 @@ let isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
 let partCountIn (body: BodyPart list) part =
     body |> List.filter ((=) part) |> List.length
 
+/// A room's ordinary **[[ore]]**: the seven base minerals a `FIND_MINERALS`
+/// deposit can hold beside the season's Thorium. The compounds a lab makes
+/// out of them are not ore and are not here.
+type Ore =
+    | Hydrogen
+    | Oxygen
+    | Utrium
+    | Keanium
+    | Lemergium
+    | Zynthium
+    | Catalyst
+
+/// Every Ore — the closed set, closed by `Core.Tests` as `allBodyParts` is.
+let allOres = [ Hydrogen; Oxygen; Utrium; Keanium; Lemergium; Zynthium; Catalyst ]
+
 /// What a store holds, as this colony reads it: the energy every Task in the
-/// pool is about, and the season's Thorium beside it. ADR-0057
+/// pool is about, the season's Thorium beside it (ADR-0057), and the room's
+/// own ore, dug into the terminal to a target.
 ///
-/// Two cases and not the engine's whole `RESOURCE_*` table: a resource belongs
-/// here when a decision of ours names it. The room's ordinary ore is never
-/// extracted and never reaches the projection (`World` filters
-/// `FIND_MINERALS` to `mineralType = "T"`). Declared beside the body parts
-/// because it is the engine's vocabulary: `withdraw` and `transfer` have taken
-/// one of these strings all along.
+/// Not the engine's whole `RESOURCE_*` table: a resource belongs here when a
+/// decision of ours names it. Declared beside the body parts because it is the
+/// engine's vocabulary: `withdraw` and `transfer` have taken one of these
+/// strings all along.
 type Resource =
     | Energy
     | Thorium
+    | Ore of Ore
 
 /// A unit of work in this tick's Task pool; creeps are interchangeable
 /// executors that get matched to Tasks.

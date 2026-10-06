@@ -116,7 +116,7 @@ let workAreaForTests =
 
             let minedKinds =
                 [
-                    "min-a", Mineral
+                    "min-a", Mineral Thorium
                     "ext-a", Structure BuiltKind.Extractor
                     "can-min", Structure BuiltKind.Container
                 ]
@@ -144,7 +144,7 @@ let workAreaForTests =
             test "a deposit with no container keeps no fallback, even at home" {
                 // Pairwise against the source case, one target kind apart.
                 let atlas =
-                    mined [ "min-a", Mineral ] [ "m", { X = 21; Y = 20 } ]
+                    mined [ "min-a", Mineral Thorium ] [ "m", { X = 21; Y = 20 } ]
                     |> snapshotWith [ minerBody "m" ]
                     |> ofView
 
@@ -579,7 +579,7 @@ let workingGroundTests =
                               { X = 21; Y = 20 }, Swamp
                               { X = 20; Y = 19 }, Wall
                           ] with
-                        TargetKinds = Map.ofList [ "min-a", Mineral ]
+                        TargetKinds = Map.ofList [ "min-a", Mineral Thorium ]
                     }
                     |> snapshotWith []
                     |> ofView
@@ -597,7 +597,10 @@ let workingGroundTests =
                           [ { X = 19; Y = 20 }, Plain; { X = 20; Y = 20 }, Wall ] with
                         TargetKinds =
                             Map.ofList
-                                [ "min-a", Mineral; "can-min", Structure BuiltKind.Container ]
+                                [
+                                    "min-a", Mineral Thorium
+                                    "can-min", Structure BuiltKind.Container
+                                ]
                     }
                     |> snapshotWith []
                     |> ofView
@@ -625,7 +628,7 @@ let workingGroundTests =
                     { spatial
                           [ "min-a", { X = 20; Y = 20 }; "can-min", { X = 19; Y = 20 } ]
                           [ { X = 19; Y = 20 }, Plain; { X = 20; Y = 20 }, Wall ] with
-                        TargetKinds = Map.ofList [ "min-a", Mineral; "can-min", kind ]
+                        TargetKinds = Map.ofList [ "min-a", Mineral Thorium; "can-min", kind ]
                     }
                     |> snapshotWith []
                     |> ofView

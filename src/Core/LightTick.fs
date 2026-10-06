@@ -326,6 +326,9 @@ let private replayed (intent: Intent) : (string option * Stands) option =
     | PlaceSpawnSite _
     // A state, already set.
     | SetRampartPublic _
+    // Gone, once it lands.
+    | DestroyStructure _
+    | RemoveSite _
     // A structure's fight: the next tick is full (`fights`).
     | ActivateSafeMode _
     | FireTower _
@@ -382,6 +385,8 @@ let private fights (intent: Intent) : bool =
     | MoveCreep _
     | SayCreep _
     | SetRampartPublic _
+    | DestroyStructure _
+    | RemoveSite _
     | ObserveRoom _
     | SendFromTerminal _ -> false
 

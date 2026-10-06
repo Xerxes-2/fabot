@@ -16,6 +16,7 @@ let private resourceSuffix =
     function
     | Energy -> ""
     | Thorium -> ":Thorium"
+    | Ore _ as ore -> $":{resourceName ore}"
 
 /// Stable identity of a Task across ticks; what Assignments point at.
 let taskId =
@@ -486,13 +487,32 @@ let internal inARoomWeOwn (view: ColonyView) (id: string) : bool =
     |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
     |> Option.exists (fun control -> control.Owner = Ownership.Ours)
 
-/// The Thorium deposits standing in a room this colony owns, in id order — the
-/// list both the Task pool and the miner row's quota are read off. A scanned
-/// neighbour arrives in the projection with its own deposit, extractor and
-/// container, and `harvest` refuses a mineral whose extractor belongs to
-/// somebody else: one `ERR_NOT_OWNER` a tick for the whole of a body's life.
+/// The minerals our extractors are for, in the rooms this colony owns — each
+/// room's Thorium deposits, or once none stands its ore
+/// (`SpatialInfo.dugMineralsIn`) — the list both the Task pool and the miner
+/// row's quota are read off. A scanned neighbour arrives in the projection
+/// with its own deposit, extractor and container, and `harvest` refuses a
+/// mineral whose extractor belongs to somebody else: one `ERR_NOT_OWNER` a
+/// tick for the whole of a body's life.
 let internal ourDeposits (view: ColonyView) : string list =
-    SpatialInfo.idsOfKind view.Spatial Mineral |> List.filter (inARoomWeOwn view)
+    view.Spatial.Rooms
+    |> Map.toList
+    |> List.filter (fun (room, _) ->
+        Map.tryFind room view.RoomControl
+        |> Option.exists (fun control -> control.Owner = Ownership.Ours))
+    |> List.collect (fun (room, _) -> SpatialInfo.dugMineralsIn view.Spatial room |> List.map fst)
+
+/// What a mineral holds, and None for a target that is no mineral.
+let internal mineralResourceOf (view: ColonyView) (id: string) : Resource option =
+    match Map.tryFind id view.Spatial.TargetKinds with
+    | Some(Mineral resource) -> Some resource
+    | _ -> None
+
+/// What a mineral has left to give, read down its own resource's column.
+let internal mineralLeft (view: ColonyView) (id: string) : int =
+    mineralResourceOf view id
+    |> Option.map (fun resource -> SpatialInfo.heldIn view.Spatial resource id)
+    |> Option.defaultValue 0
 
 /// The rooms this colony has declared an errand in, as a set — the join four
 /// rules of the season's ore make, written once (#378).
@@ -1811,15 +1831,6 @@ let internal ourMineralContainerPairs (view: ColonyView) : (string * string) lis
 let internal ourMineralContainers (view: ColonyView) : string list =
     ourMineralContainerPairs view |> List.map snd
 
-/// Whether a deposit of ours is one the colony can actually dig this tick: it
-/// still holds Thorium, and its extractor stands. Only the digger reads this
-/// (#361): the carrier's load comes out of a Storage, which outlives the
-/// deposit that filled it. A site is not an extractor: `harvest.js` refuses a
-/// mineral with none on it.
-let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
-    Map.tryFind depositId view.Spatial.Thorium |> Option.defaultValue 0 > 0
-    && (Atlas.extractorOn atlas depositId).IsSome
-
 /// The energy standing in this colony's Storages — its stock, as against
 /// `ColonyView.Bank`'s spawn account. Read by the worker row's backlog term
 /// (#364), which is paid out of the stock and not out of income. Folded over
@@ -1880,11 +1891,54 @@ let internal givesAid (view: ColonyView) : bool =
     && homeStock view
        |> Option.exists (fun stock -> stock >= energyReserve view + view.Tuning.AidDonorMargin)
 
-/// Whether more ore is still on its way to the Storage: a diggable deposit of
-/// ours, or ore already standing in a mineral container. The question the last
-/// load turns on.
+/// Whether the colony wants an [[ore]] dug this tick: its home terminal holds
+/// under `Tuning.OreTarget` of it, and its home Storage stands
+/// `Tuning.OreEnergyMargin` over the [[emergency reserve]] — the dig is paid
+/// for in bodies. No terminal at home, no ore wanted: there is nowhere to put
+/// it.
+let internal oreWanted (view: ColonyView) (ore: Ore) : bool =
+    let terminals =
+        SpatialInfo.idsOfKindIn view.Spatial.TargetKinds (Structure BuiltKind.Terminal)
+        |> List.filter (SpatialInfo.placedAway view.Spatial >> not)
+
+    not (List.isEmpty terminals)
+    && terminals |> List.sumBy (SpatialInfo.heldIn view.Spatial (Ore ore)) < view.Tuning.OreTarget
+    && homeStock view
+       |> Option.exists (fun stock -> stock > energyReserve view + view.Tuning.OreEnergyMargin)
+
+/// Whether the colony wants a mineral of ours dug at all this tick: Thorium
+/// always — it keeps priority, and nothing but the extractor rations it — and
+/// an ore while it has some left to give and `oreWanted` holds. The Harvest
+/// pool's gate, beneath the extractor and container a dig also needs.
+let internal digWanted (view: ColonyView) (depositId: string) : bool =
+    match mineralResourceOf view depositId with
+    | Some Thorium -> true
+    | Some(Ore ore) -> mineralLeft view depositId > 0 && oreWanted view ore
+    | _ -> false
+
+/// Whether a deposit of ours is one the colony can actually dig this tick: it
+/// is wanted, it still holds something, and its extractor stands. Only the
+/// digger reads this (#361): the carrier's load comes out of a Storage, which
+/// outlives the deposit that filled it. A site is not an extractor:
+/// `harvest.js` refuses a mineral with none on it.
+let internal depositIsDiggable (view: ColonyView) atlas (depositId: string) =
+    digWanted view depositId
+    && mineralLeft view depositId > 0
+    && (Atlas.extractorOn atlas depositId).IsSome
+
+/// The ore deposits of ours the colony digs this tick, in id order — what the
+/// census signature reads, so the memoised hauler quota hears the dig gate.
+let internal oreDug (view: ColonyView) : string list =
+    ourDeposits view
+    |> List.filter (fun id -> mineralResourceOf view id <> Some Thorium && digWanted view id)
+
+/// Whether more ore is still on its way to the Storage: a diggable Thorium
+/// deposit of ours, or ore already standing in a mineral container. The
+/// question the last load turns on.
 let internal oreStillComing (view: ColonyView) atlas : bool =
-    ourDeposits view |> List.exists (depositIsDiggable view atlas)
+    ourDeposits view
+    |> List.exists (fun id ->
+        mineralResourceOf view id = Some Thorium && depositIsDiggable view atlas id)
     || ourMineralContainers view
        |> List.exists (fun id -> SpatialInfo.heldIn view.Spatial Thorium id > 0)
 

@@ -126,7 +126,7 @@ let mineralColonyAt pos level =
                 { layer with
                     Terrain = TerrainGrid.add pos Wall layer.Terrain
                 })
-            |> withStanding "min-a" pos Mineral
+            |> withStanding "min-a" pos (Mineral Thorium)
     }
     |> withRoadsBuilt
 

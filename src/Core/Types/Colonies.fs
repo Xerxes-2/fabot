@@ -655,7 +655,7 @@ module Salvage =
         | Site _
         | Dropped _
         | Tombstone
-        | Mineral -> false
+        | Mineral _ -> false
 
     /// The rooms the colony works this tick: the declared list, less every
     /// room a [[stand-down]] is withholding (`Outpost.worked`'s twin).

@@ -149,7 +149,7 @@ let censusSignatureTests =
                                 { layer with
                                     Terrain = TerrainGrid.add mineralPos Wall layer.Terrain
                                 })
-                            |> withStanding "min-a" mineralPos Mineral
+                            |> withStanding "min-a" mineralPos (Mineral Thorium)
                     }
 
                 Expect.notEqual
@@ -403,7 +403,7 @@ let censusSignatureTests =
                 Expect.notEqual
                     (censusSignature { colony with RoomControl = Map.empty })
                     (censusSignature (holding neutralRoom))
-                    "and no vision at all is a third answer, not the neutral one (ADR 0004)"
+                    "and no vision at all is a third answer, not the neutral one"
             }
 
             test "the ticks left on a reservation leave the signature alone" {

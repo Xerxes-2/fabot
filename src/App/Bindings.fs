@@ -123,14 +123,16 @@ type IOwner =
     abstract username: string
 
 /// A mineral deposit standing in a room. Density and `ticksToRegeneration`
-/// are not bound: a Thorium deposit never regenerates.
+/// are not bound: a Thorium deposit never regenerates, and an ore deposit at
+/// zero is simply not dug.
 type IMineral =
     abstract id: string
     abstract pos: IRoomPosition
     /// Screeps RESOURCE_* string; "T" for the season's Thorium.
     abstract mineralType: string
     /// How much is left in the deposit. The mod deletes a Thorium deposit
-    /// outright the tick this hits zero, so it is never read as 0 here.
+    /// outright the tick this hits zero; an ore deposit reads 0 while it
+    /// regenerates.
     abstract mineralAmount: int
 
 type IStructure =
@@ -403,6 +405,15 @@ let objectValues<'T> (_o: obj) : 'T[] = jsNative
 [<Emit("Object.entries($0)")>]
 let objectEntries (_o: obj) : (string * obj)[] = jsNative
 
+/// The resource keys a store holds: its own enumerable properties.
+[<Emit("Object.keys($0)")>]
+let storeKeys (_store: IStore) : string[] = jsNative
+
+/// Everything a general-purpose store holds: `getUsedCapacity` with no
+/// resource.
+[<Emit("$0.getUsedCapacity()")>]
+let storeUsedTotal (_store: IStore) : int = jsNative
+
 /// One value out of a JS hash by key, or null when the hash holds no such
 /// entry. Against `Game.rooms` a null is exactly "no vision".
 [<Emit("$0[$1]")>]
@@ -423,6 +434,16 @@ let createSpawnSite (_room: IRoom) (_x: int) (_y: int) (_name: string) : int = j
 /// `rampart.setPublic` (`game/structures.js`): ERR_NOT_OWNER on one not ours.
 [<Emit("$0.setPublic($1)")>]
 let setPublic (_rampart: obj) (_isPublic: bool) : int = jsNative
+
+/// `structure.destroy` (`game/structures.js`): ERR_NOT_OWNER on one not ours,
+/// ERR_BUSY while a hostile creep stands in the room.
+[<Emit("$0.destroy()")>]
+let destroyStructure (_structure: obj) : int = jsNative
+
+/// `constructionSite.remove` (`game/construction-sites.js`): ERR_NOT_OWNER on
+/// one not ours.
+[<Emit("$0.remove()")>]
+let removeSite (_site: obj) : int = jsNative
 
 /// `observer.observeRoom` (`game/structures.js`): ERR_NOT_IN_RANGE past
 /// OBSERVER_RANGE, ERR_RCL_NOT_ENOUGH below RCL8.

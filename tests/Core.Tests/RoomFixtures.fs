@@ -294,7 +294,7 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
             // blocks its tile; free on these captures, every season deposit
             // standing on a wall tile already.
             for id, pos in capture.Minerals do
-                yield id, pos, Mineral
+                yield id, pos, Mineral Thorium
         ]
 
     {
@@ -317,7 +317,7 @@ let project (capture: RoomCapture) (spawn: Pos) (fallbackController: Pos option)
                                         match kind with
                                         | Structure built when not (isWalkable built) -> Some pos
                                         | Controller
-                                        | Mineral -> Some pos
+                                        | Mineral _ -> Some pos
                                         | _ -> None)
                                     |> Set.ofList
                             }
@@ -523,6 +523,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
         // No fixture carries Thorium: a captured room's creeps are the
         // colony's energy fleet.
         Thorium = 0
+        Ore = Map.empty
         FreeCapacity = capacity - carried
         Moved = false
         DrawnFrom = None
