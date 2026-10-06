@@ -1651,6 +1651,189 @@ let private approachOf colony =
 
 let private rangeTo (pos: Pos) (tile: RoomPos) = range pos (RoomPos.pos tile)
 
+/// A ranger of `shots` RANGED_ATTACK on as many MOVE.
+let private rangerOf name shots =
+    creepWith name 0 0 (List.replicate shots RangedAttack @ List.replicate shots Move)
+
+/// The cripple raid with these rangers standing in W1N2, laid into the
+/// world's fleet as `WorldView.ofWorld` lays it.
+let private kitedBy (raid: HostileInfo list) (rangers: (CreepInfo * Pos) list) =
+    let colony = declaredRaid raid |> withGuards rangers
+
+    { colony with
+        World =
+            { colony.World with
+                Bodies = lazy (Map.ofList [ "W1N2", rangers ])
+            }
+    }
+
+[<Tests>]
+let seatTests =
+    testList
+        "who ends a raid soonest, and how many a kite seats (#596)"
+        [
+            test
+                "a body's end is its walk to its range and its kill alone, its TOUGH and its life read" {
+                let cripple = crippledAt { X = 25; Y = 44 }
+                let ranger = rangerOf "r-1" 4
+
+                let ends at body raid =
+                    Facts.endsIn (kitedBy raid [ body, at ]) "W1N2" body
+
+                Expect.equal
+                    (ends { X = 22; Y = 44 } ranger [ cripple ])
+                    (Some(0, 37))
+                    "in range: 1,454 hits at 40 a tick"
+
+                Expect.equal
+                    (ends { X = 16; Y = 44 } ranger [ cripple ])
+                    (Some(6, 37))
+                    "nine tiles off: six to its range"
+
+                Expect.equal
+                    (ends { X = 22; Y = 44 } { ranger with TicksToLive = 30 } [ cripple ])
+                    (Some(0, Engine.creepLifetime))
+                    "a body that ages out before the kill never ends it"
+
+                Expect.equal
+                    (ends { X = 22; Y = 44 } ranger [ cripple; strongHealerAt { X = 26; Y = 44 } ])
+                    (Some(0, Engine.creepLifetime))
+                    "nor one the raid's heal out-heals"
+
+                Expect.isNone (ends { X = 22; Y = 44 } ranger []) "no raider, nothing to end"
+
+                let brute =
+                    hostileIn
+                        "W1N2"
+                        { X = 25; Y = 44 }
+                        (List.replicate 5 Tough @ List.replicate 10 Attack @ List.replicate 5 Move)
+
+                let killOf raider =
+                    ends { X = 22; Y = 44 } (rangerOf "r-1" 10) [ raider ]
+                    |> Option.map snd
+                    |> Option.defaultValue 0
+
+                Expect.isGreaterThan
+                    (killOf (boostedAt Tier3 brute))
+                    (killOf brute)
+                    "a T3 TOUGH takes longer to shoot through"
+            }
+
+            test
+                "a kite seats the fewest that kill before the raider ages out, and those at the fight" {
+                // 1,454 hits; each 10-RANGED ranger 100 a tick, four ticks off.
+                let cripple =
+                    { crippledAt { X = 25; Y = 44 } with
+                        TicksToLive = 14
+                    }
+
+                let away name y = rangerOf name 10, { X = 18; Y = y }
+
+                let seats raid rangers holding =
+                    Facts.kiteSeats (kitedBy raid rangers) "W1N2" holding
+
+                Expect.equal
+                    (seats
+                        [ { cripple with TicksToLive = 1500 } ]
+                        [ away "r-1" 44; away "r-2" 43 ]
+                        Set.empty)
+                    1
+                    "one kills it long before it ages out"
+
+                Expect.equal
+                    (seats [ cripple ] [ away "r-1" 44; away "r-2" 43; away "r-3" 45 ] Set.empty)
+                    2
+                    "alone it would age out first, two kill it in time, the third is not needed"
+
+                Expect.equal
+                    (seats
+                        [ cripple ]
+                        [ away "r-1" 44; away "r-2" 43; rangerOf "r-3" 2, { X = 22; Y = 44 } ]
+                        Set.empty)
+                    3
+                    "a small one standing in range, last to end it alone, shoots at no walk's cost"
+
+                Expect.equal
+                    (seats
+                        [ cripple ]
+                        [ away "r-1" 44; away "r-2" 43; away "r-3" 45 ]
+                        (set [ "r-3" ]))
+                    3
+                    "one holding the kite keeps its seat while it dances out past its range"
+
+                Expect.equal
+                    (seats
+                        [ cripple ]
+                        [ away "r-1" 44; away "r-2" 43; rangerOf "r-3" 10, { X = 14; Y = 44 } ]
+                        (set [ "r-3" ]))
+                    2
+                    "but not once it is far off"
+
+                Expect.equal (seats [] [ away "r-1" 44 ] Set.empty) 1 "no raider: one"
+            }
+
+            // The kill orders one Task's bodies, never one body's Tasks: in the
+            // key a raid no body kills alone would price every candidate a
+            // lifetime's kill and send it to any other Task of its rank.
+            test
+                "on the world lane the kill seats a Task's bodies and leaves each body's key its walk" {
+                let raid = [ crippledAt { X = 25; Y = 44 } ]
+
+                let rangers =
+                    [
+                        rangerOf "r-weak" 2, { X = 22; Y = 44 }
+                        rangerOf "r-strong" 10, { X = 20; Y = 44 }
+                    ]
+
+                let onLane lane =
+                    let colony = kitedBy raid rangers
+
+                    { colony with
+                        Tuning = { colony.Tuning with FightLane = lane }
+                    }
+
+                let world = onLane FightLane.World
+
+                Expect.equal
+                    (rangers |> List.map (fun (r, _) -> Facts.endsIn world "W1N2" r))
+                    [ Some(0, 73); Some(2, 15) ]
+                    "the weak one in range ends it at t73, the strong one two tiles off at t17"
+
+                let guard = taskId (Guard "W1N2")
+                let verbose = set [ "r-weak"; "r-strong" ]
+
+                let costs lane =
+                    let result = decide (onLane lane) Map.empty verbose None
+
+                    result.Verdicts
+                    |> List.choose (function
+                        | Verdict.Scoring(name, rows) ->
+                            rows
+                            |> List.tryPick (function
+                                | Candidate.Scored(tid, _, cost, _) when tid = guard ->
+                                    Some(name, cost)
+                                | _ -> None)
+                        | _ -> None),
+                    result.Assignments
+
+                let worldCosts, assigned = costs FightLane.World
+
+
+                Expect.equal
+                    worldCosts
+                    [ "r-weak", 0; "r-strong", 4 ]
+                    "each key's cost is its walk alone, in half-ticks, no kill in it"
+
+                Expect.equal
+                    (fst (costs FightLane.PerColony) |> List.tryHead)
+                    (List.tryHead worldCosts)
+                    "as per colony"
+
+                for name in verbose do
+                    Expect.equal (Map.tryFind name assigned) (Some guard) $"{name} takes the kite"
+            }
+        ]
+
 [<Tests>]
 let kiteTests =
     testList
@@ -3707,6 +3890,20 @@ let private coreBeyond level : InvaderCoreInfo =
         Level = level
     }
 
+/// `watchingBeyond` on the colony's lane, whose lend rule (`rangerMayKill`)
+/// keeps every resident home while any raider reaches it inside the window.
+/// The world lane's HomeHold weighs the bodies left there instead (its own
+/// case below).
+let private lendingBeyond hostiles =
+    let colony = watchingBeyond hostiles
+
+    { colony with
+        Tuning =
+            { colony.Tuning with
+                FightLane = FightLane.PerColony
+            }
+    }
+
 /// The same with the resident gone and a melee guard of ours standing in
 /// the outpost instead.
 let private guardedBeyond hostiles =
@@ -4228,7 +4425,7 @@ let childOutpostTests =
                 // The mother's view: the child's home W1N3 between W1N4, her
                 // outpost, and W2N3.
                 let mother hostiles =
-                    { watchingBeyond hostiles with
+                    { lendingBeyond hostiles with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->
@@ -4937,7 +5134,7 @@ let childOutpostTests =
                 // The mother's view: the child's home W1N3, the kill in W1N4
                 // beyond it, W2N3 on its other side.
                 let mother others =
-                    { watchingBeyond (harasser :: others) with
+                    { lendingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->
@@ -5007,7 +5204,7 @@ let childOutpostTests =
                          @ List.replicate 7 Heal)
 
                 let mother towers others =
-                    { watchingBeyond (harasser :: others) with
+                    { lendingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> withOurTowers "W1N3" (List.replicate towers { X = 25; Y = 25 })
@@ -5128,7 +5325,7 @@ let childOutpostTests =
                          @ List.replicate 7 Heal)
 
                 let mother others =
-                    { watchingBeyond (harasser :: others) with
+                    { lendingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->

@@ -575,6 +575,46 @@ let matchAcross
                )
            | None -> false
 
+    // On the world lane a fight's seat goes to the body that ends its raid
+    // soonest (#596): its walk and then its kill, alone, as the Task's Brief
+    // prices them (`Brief.Ends`), in half-ticks as travel cost is, the walk
+    // the travel cost where its colony's Atlas places it; a body that never
+    // kills alone, or ages out first, after every one that does. Travel
+    // cost alone where no raider stands, and on the colony's lane.
+    // Beside it, whether the body is at the fight already (`Facts.atFight`).
+    let endTimes =
+        System.Collections.Generic.Dictionary<struct (string * string), (bool * int) option>()
+
+    let byName = lazy (creeps |> List.map (fun c -> c.Name, c) |> Map.ofList)
+
+    let ending k (name: string) task =
+        let ctx = contexts.[k]
+
+        match fightRoomOf task with
+        | Some _ when ctx.View.Tuning.FightLane = FightLane.World ->
+            let key = struct (name, taskId task)
+
+            match endTimes.TryGetValue key with
+            | true, ends -> ends
+            | _ ->
+                let ends =
+                    match Map.tryFind name byName.Value, Threats.briefFor ctx.Threats task with
+                    | Some creep, Some brief ->
+                        brief.Ends creep
+                        |> Option.map (fun (walk, kill) ->
+                            let travel =
+                                match tileOf name with
+                                | Some _ -> travelCostOf ctx.Threats ctx.Atlas name task
+                                | None -> None
+
+                            Facts.atFight walk,
+                            (travel |> Option.defaultValue (2 * walk)) + 2 * kill)
+                    | _ -> None
+
+                endTimes.[key] <- ends
+                ends
+        | _ -> None
+
     // One gate cascade judges every (creep, Task) pair, for both readings of
     // one: the fresh candidate the Matcher scores and the assignment it is
     // deciding whether to keep. Rejected at the first gate it fails
@@ -737,13 +777,21 @@ let matchAcross
     // take the slot on its name. The creep name breaks a tie so the fold stays
     // a function of the view. Sorting it last also keeps the reason right: it
     // meets the cap the kept holders filled and is released `CapacityFull`.
+    // On the world lane a fight's holders are read those at the fight first,
+    // its shots begun, then soonest done (`ending`, #596), wherever the
+    // fleet stands them: a far holder yields to one that ends the raid
+    // sooner, and none takes the seat of one striking it.
     let tier (pooled: PooledTask) (name: string) =
-        match tileOf name with
-        | Some _ ->
-            match walkOf name pooled.Task with
-            | Some walk -> 0, walk
-            | None -> 1, 0
-        | None -> 1, 0
+        match sideOf name |> Option.bind (fun k -> ending k name pooled.Task) with
+        | Some(true, ends) -> 0, ends
+        | Some(false, ends) -> 1, ends
+        | None ->
+            match tileOf name with
+            | Some _ ->
+                match walkOf name pooled.Task with
+                | Some walk -> 1, walk
+                | None -> 2, 0
+            | None -> 2, 0
 
     let remembered =
         assignments
@@ -812,8 +860,7 @@ let matchAcross
             // stands and losing its own exchange there (a guard shot
             // rooted beside shooters it can no longer reach). On the world
             // lane the hold keeps a seat the caps still have, holders read
-            // nearest first (`remembered`): a far holder yields to one at
-            // the fight.
+            // at the fight first, then soonest done (`remembered`).
             | Some pooled when
                 Threats.holdsFight view atlas threats creep pooled.Task
                 && (view.Tuning.FightLane = FightLane.PerColony
@@ -991,7 +1038,27 @@ let matchAcross
 
             acc, loads, (decided, idle) ||> List.fold (fun m (name, entry) -> Map.add name entry m)
         | _ ->
-            let _, (i, k, creep, _, _, rows, keyed, top) = best |> List.minBy fst
+            // The pair ranked best names the Task matched next; of the
+            // bodies whose best it is, on the world lane a fight's seat goes
+            // to the one that ends its raid soonest (`ending`, #596). Each
+            // body's own choice among Tasks stays its key's.
+            let _, (_, side, first, _, _, _, _, firstTop) = best |> List.minBy fst
+            let (_, next, _) = Option.get firstTop
+
+            let soonest (_, (_, k, (creep: CreepInfo), _, _, _, _, _)) =
+                match ending k creep.Name next with
+                | Some(_, ends) -> ends
+                | None -> System.Int32.MaxValue
+
+            let _, (i, k, creep, _, _, rows, keyed, top) =
+                match ending side first.Name next with
+                | None -> best |> List.minBy fst
+                | Some _ ->
+                    best
+                    |> List.filter (fun (_, (_, _, _, _, _, _, _, top)) ->
+                        top |> Option.exists (fun (_, task, _) -> task = next))
+                    |> List.minBy (fun entry -> soonest entry, fst entry)
+
             let (_, task, _) as top = Option.get top
             let tid = taskId task
             let acc = Map.add creep.Name tid acc

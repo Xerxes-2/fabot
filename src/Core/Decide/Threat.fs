@@ -246,6 +246,11 @@ type Brief =
         /// Whether a body may take it: the Emitter's gate. The walk to the
         /// ground is what travel cost prices.
         Admits: CreepInfo -> bool
+        /// How a body ends the raid it is fought against alone, its walk's
+        /// ticks and its kill's (`Facts.endsIn`, #596): what the world lane
+        /// seats its soonest done by. None where no raider stands, and for
+        /// an Assault, which is not priced so.
+        Ends: CreepInfo -> (int * int) option
         /// For a kill, how far a holder of another room's Guard is called off
         /// it (the Pool's `RecallPolicy.Kill`).
         Recall: Recall option
@@ -822,6 +827,7 @@ module Brief =
         (room: string)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
+        (holding: Set<string>)
         (asks: RowAsk list)
         (view: ColonyView)
         (threats: Threats)
@@ -844,7 +850,9 @@ module Brief =
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
         | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
-        // One ranger kites what cannot close on it (#510); a raid the rangers
+        // One ranger kites what cannot close on it (#510), on the world lane
+        // as many as kill it before it ages out and every one at the fight
+        // (`Facts.kiteSeats`, #596); a raid the rangers
         // there and beside it win together takes as many as win it; one a row
         // casts for, as many as it asks.
         | BriefKind.Chase ->
@@ -852,6 +860,8 @@ module Brief =
             | Answer.Win when not (List.isEmpty asks) ->
                 Capacity.fighters (max (wanted ()) (rangers.Value |> Option.defaultValue 1))
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
+            | Answer.Kite when view.Tuning.FightLane = FightLane.World ->
+                Capacity.fighters (Facts.kiteSeats view room holding)
             | Answer.Kite
             | Answer.Lose -> Capacity.fighters 1
         // One body kills a trespasser, which strikes nothing back (#516): its
@@ -923,6 +933,7 @@ module Brief =
         (ranger: Lazy<bool>)
         (casts: Lazy<bool>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
+        (holding: Set<string>)
         (claims: BriefKind list)
         (laid: Laid)
         : Brief =
@@ -945,6 +956,7 @@ module Brief =
             Claims = claims
             Targets = guardTargets view
             Admits = admitsOf kind room verdict ranged rangers answered view atlas
+            Ends = Facts.endsIn view room
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind ranged laid
@@ -962,7 +974,7 @@ module Brief =
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind room verdict rangers ask view
+            Capacity = capacityOf kind room verdict rangers holding ask view
             Verdict = verdict
             Formation = None
             Stances = Map.empty
@@ -985,6 +997,7 @@ module Brief =
             (lazy false)
             (lazy false)
             (lazy [])
+            Set.empty
             []
             bare
 
@@ -1126,6 +1139,7 @@ module Brief =
             Admits =
                 fun creep ->
                     answered |> List.exists (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
+            Ends = Facts.endsIn view (SpatialInfo.homeName view.Spatial)
             Recall = None
             Laid = bare
             Ground = ground
@@ -1175,6 +1189,7 @@ module Brief =
             Claims = []
             Targets = guardTargets view
             Admits = fun creep -> Map.containsKey creep.Name formation.Roles
+            Ends = fun _ -> None
             Recall = None
             Laid = bare
             Ground = None
@@ -3049,6 +3064,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                           view
                           (HeldTaskFacts.holdersOf held (taskId (Guard room)))
                           room))
+                  (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
                   (claimsIn room)
                   {
                       Kite = Map.tryFind room kite |> Option.map fst

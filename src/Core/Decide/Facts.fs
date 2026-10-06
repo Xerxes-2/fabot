@@ -1505,6 +1505,155 @@ let internal kitedByRanger (view: ColonyView) (room: string) : bool =
     let blocks = max 1 (rangerBlocksReach view)
     kitedDown view (fun part -> blocks * partCountIn rangerPattern.Block part) room
 
+/// The ticks bodies of these live parts take, together and beside our towers
+/// there, to kill the raid standing in a room once they stand at it (#596):
+/// its armed bodies' hits, TOUGH first, against their damage net of the
+/// raid's heal (`raidPrice`). Our clock alone: what the raid deals back is
+/// the exchange's question, not this one. `Some 0` where no armed body
+/// stands there; None where the damage never out-heals the raid.
+let private killTicks
+    (view: ColonyView)
+    (room: string)
+    (bodies: (BodyPart -> int) list)
+    : int option =
+    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let price = raidPrice view Reaction.strike raid
+
+    let dealt =
+        ourTowersOn view room raid + List.sumBy (borneDamage view.Hostiles raid) bodies
+
+    if price.Tough = 0 && price.Hits = 0 then
+        Some 0
+    elif not (outHeals price dealt) then
+        None
+    else
+        let tough =
+            if price.Tough = 0 then
+                0.0
+            else
+                float price.Tough / float (dealt - price.ToughHealing)
+
+        Some(int (ceil (tough + float price.Hits / float (dealt - price.Healing))))
+
+/// The raiders standing in a room.
+let private raidersIn (view: ColonyView) (room: string) =
+    view.Hostiles
+    |> List.filter (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
+
+/// A body's walk to a raid, a tile a tick from where it stands — this view's
+/// placement, else where the fleet stands it — to its weapon's range of the
+/// nearest raider. None where neither places it.
+let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: CreepInfo) =
+    let reach =
+        if partCount creep.Body RangedAttack > 0 then
+            Engine.rangedRange
+        else
+            1
+
+    SpatialInfo.creepPlacementOf view.Spatial creep.Name
+    |> Option.orElse (
+        view.World.Bodies.Value
+        |> Map.toSeq
+        |> Seq.tryPick (fun (here, bodies) ->
+            bodies
+            |> List.tryPick (fun (body, pos) ->
+                if body.Name = creep.Name then
+                    Some(RoomPos.at here pos)
+                else
+                    None))
+    )
+    |> Option.bind (fun at ->
+        match raid |> List.choose (fun h -> RoomName.tileRange at h.Pos) with
+        | [] -> None
+        | tiles -> Some(max 0 (List.min tiles - reach)))
+
+/// Whether a body this walk (`walkToRaid`) off its raid is at the fight: a
+/// kiter's dance about its range, three steps either way.
+let internal atFight (walk: int) = walk <= Engine.rangedRange
+
+/// How a body of ours ends the raid standing in a room alone (#596): its
+/// walk there (`walkToRaid`) and then its kill (`killTicks`), the kill
+/// `Engine.creepLifetime` where it never kills the raid alone or ages out
+/// first. None where no raider stands there, or nothing places the body.
+let endsIn (view: ColonyView) (room: string) (creep: CreepInfo) : (int * int) option =
+    match raidersIn view room with
+    | [] -> None
+    | raid ->
+        walkToRaid view raid creep
+        |> Option.map (fun walk ->
+            walk,
+            killTicks view room [ partCount creep.Body ]
+            |> Option.filter (fun kill -> walk + kill <= creep.TicksToLive)
+            |> Option.defaultValue Engine.creepLifetime)
+
+/// How many bodies a kite in a room seats on the world lane (#596): of the
+/// fleet's rangers standing in it or beside it that kite its raid down
+/// (`kitedDown`), soonest done first (`endsIn`), the fewest that kill it
+/// before its first raider ages out — every body's damage from its walk's
+/// end while it lives, beside our towers, against the raid's hits and heal
+/// — or all of them where none so does; and beside them every one already
+/// at the fight (`atFight`), whose shots end it sooner at no walk's cost,
+/// and every one `holding` the kite within twice that: a seat taken at the
+/// fight stays while its holder dances out past it. A kited raid strikes no kiter, so
+/// none falls and no focus is priced.
+let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
+    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+    match raidersIn view room with
+    | [] -> 1
+    | raid ->
+        let price = raidPrice view Reaction.strike inRoom
+        let towers = ourTowersOn view room inRoom
+        let heal = max price.Healing price.ToughHealing
+        let deadline = raid |> List.map _.TicksToLive |> List.min
+        let near = Set.ofList (room :: RoomName.adjacent room)
+
+        let kiters =
+            view.World.Bodies.Value
+            |> Map.toList
+            |> List.filter (fst >> near.Contains)
+            |> List.collect snd
+            |> List.map fst
+            |> List.filter (fun creep ->
+                isRangerRowBody creep && kitedDown view (partCount creep.Body) room)
+            |> List.sortBy (fun creep ->
+                endsIn view room creep
+                |> Option.map (fun (walk, kill) -> walk + kill)
+                |> Option.defaultValue System.Int32.MaxValue,
+                creep.Name)
+            |> List.map (fun creep ->
+                let walk = walkToRaid view raid creep |> Option.defaultValue deadline
+
+                (atFight walk
+                 || Set.contains creep.Name holding && atFight (walk - Engine.rangedRange)),
+                (walk, creep.TicksToLive, borneDamage view.Hostiles inRoom (partCount creep.Body)))
+
+        // The tick these bodies end the raid on.
+        let endOf chosen =
+            let rec go tick left =
+                if tick >= deadline then
+                    deadline
+                else
+                    let dealt =
+                        towers
+                        + List.sumBy
+                            (fun (walk, life, damage) ->
+                                if walk <= tick && tick < life then damage else 0)
+                            chosen
+
+                    let left = left - max 0 (dealt - heal)
+                    if left <= 0 then tick else go (tick + 1) left
+
+            go 0 (price.Tough + price.Hits)
+
+        let enough =
+            seq { 1 .. List.length kiters }
+            |> Seq.tryFind (fun n -> endOf (kiters |> List.truncate n |> List.map snd) < deadline)
+            |> Option.defaultValue (List.length kiters)
+
+        let standing = kiters |> List.skip enough |> List.filter fst |> List.length
+        max 1 (enough + standing)
+
 /// A home's middle: what a raid on it strikes, its spawn, store and
 /// controller standing about there.
 let private homeMiddle = Engine.roomSide / 2
