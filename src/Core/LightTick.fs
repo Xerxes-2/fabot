@@ -1026,14 +1026,11 @@ let intents (record: LastFull) (now: Glance) : Intent list =
 
             // A melee body steps onto the target it swings at, as on the full
             // tick (`Emitter.glueStep`), in place of its step plan's step:
-            // never a squad's cast, whose movement is its Formation's, nor
-            // off our structure's tile (a rampart), and never onto a tile
-            // another melee body of theirs swings at.
+            // never off our structure's tile (a rampart), and never onto a
+            // tile another melee body of theirs swings at.
             let glued =
                 match issued with
-                | Some(AttackCreep _ as aim, true) when
-                    Option.isNone (Decide.Bodies.squadRoleByName name)
-                    ->
+                | Some(AttackCreep _ as aim, true) ->
                     let melee =
                         now.Hostiles
                         |> List.filter (fun h -> h.Armed && h.Weapon = Some Engine.meleeRange)

@@ -440,28 +440,6 @@ type RowQuota =
         Casting: int
     }
 
-/// One catalogue squad's price against one room's raid (#452): its energy,
-/// and whether it wins standing in contact and kiting out of melee reach.
-type SquadPrice =
-    {
-        Squad: string
-        Cost: int
-        Stand: bool
-        /// None for a squad with a melee member, which cannot kite.
-        Kite: bool option
-    }
-
-/// The squad exchange beside the single-body one, for one resident room a
-/// raid stands in (#452). Report-only: nothing casts or engages off it yet.
-type FightReport =
-    {
-        Room: string
-        /// Whether the largest ranger body wins the raid alone, beside the
-        /// room's loaded towers: `Facts.outmatched`'s reading, negated.
-        Ranger: bool
-        Squads: SquadPrice list
-    }
-
 /// Why a colony is **busy** this tick (#523): other work wants the energy the
 /// upgrade would take. Each is its own case because the worker row reads
 /// them apart: a broken line and owed sites are work the freed surplus buys
@@ -496,8 +474,6 @@ type Quotas =
         /// haul lines: a copy of `Decision.HaulOverflow`, which is the one the
         /// loop carries on.
         Overflow: HaulOverflow
-        /// The squad exchange, per raided resident room (#452).
-        Fights: FightReport list
         /// Why the colony is busy this tick, empty when it is not (#523).
         Busy: BusyReason list
     }
@@ -513,7 +489,6 @@ module Quotas =
             HaulerLoad = 0
             HaulerDemand = []
             Overflow = HaulOverflow.none
-            Fights = []
             Busy = []
         }
 

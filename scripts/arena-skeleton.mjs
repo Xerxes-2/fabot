@@ -511,7 +511,7 @@ function liveFields(live, tick, rooms) {
       parts.push(
         "Fought =",
         `    Map.ofList [ ${fought
-          .map(([room, v]) => `${fsString(room)}, ({ Seen = ${fsInt(v.seen)}; Squad = ${typeof v.squad === "string" ? `Some ${fsString(v.squad)}` : "None"}; Raiders = ${idSet(v.raiders)} }: FightLatch)`)
+          .map(([room, v]) => `${fsString(room)}, ({ Seen = ${fsInt(v.seen)}; Raiders = ${idSet(v.raiders)} }: FightRecord)`)
           .join("; ")} ]`,
       );
     }

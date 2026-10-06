@@ -2247,12 +2247,7 @@ let worldDangerTests =
             // already stands.
             test
                 "the reset tick's adoption lays each room's latest fight record, earliest taken tick and latest probe into the world log" {
-                let fight seen squad =
-                    {
-                        Seen = seen
-                        Squad = squad
-                        Raiders = Set.empty
-                    }
+                let fight seen = { Seen = seen; Raiders = Set.empty }
 
                 let probe first =
                     {
@@ -2268,14 +2263,14 @@ let worldDangerTests =
 
                 let mother =
                     { RaidState.empty with
-                        Fought = Map.ofList [ "W17S25", fight 900 (Some "duo") ]
+                        Fought = Map.ofList [ "W17S25", fight 900 ]
                         Taken = Map.ofList [ "W18S26", 800 ]
                         Probes = Map.ofList [ "W18S26", probe 700 ]
                     }
 
                 let child =
                     { RaidState.empty with
-                        Fought = Map.ofList [ "W17S25", fight 950 None ]
+                        Fought = Map.ofList [ "W17S25", fight 950 ]
                         Taken = Map.ofList [ "W18S26", 850 ]
                         Probes = Map.ofList [ "W18S26", probe 750 ]
                     }
@@ -2302,7 +2297,7 @@ let worldDangerTests =
 
                 Expect.equal
                     (laid.Fought, laid.Taken, laid.Probes |> Map.map (fun _ log -> log.FirstHit))
-                    (Map.ofList [ "W17S25", fight 950 None ],
+                    (Map.ofList [ "W17S25", fight 950 ],
                      Map.ofList [ "W18S26", 800 ],
                      Map.ofList [ "W18S26", 750 ])
                     "the latest record, the earliest taken tick, the latest probe"

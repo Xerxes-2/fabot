@@ -50,9 +50,9 @@
 //            controller at t880,341 (`docs/research/squads.md` §1.2:
 //            2 × 18M17A, 2 × 11M7H and a 3-CLAIM tapper) standing on the
 //            child's: a raised home under a raid no ranger wins. The
-//            kill order, the kite ground, the safe-mode reflex, the
-//            resident stand-down and the squad exchange (ADR 0083) are
-//            paths no other scenario's ms include. The child is in its
+//            kill order, the kite ground, the safe-mode reflex and the
+//            resident stand-down are paths no other scenario's ms
+//            include. The child is in its
 //            bootstrap window rather than a spawnless nursery, because
 //            this harness furnishes a home off its spawn; every raised
 //            home is read by the same rules.
@@ -1265,10 +1265,8 @@ function buildStubWorld() {
       // `hireFleet` says so if the row is ever cast here.
       guard: [],
       ranger: [],
-      // A squad fights in a room the colony raises: none here.
-      brawler: [],
+      // A squad assaults a declared rival room: none here.
       medic: [],
-      kiter: [],
     },
     // One room, so one claimed-tile set: everything the colony already
     // stands on, which `taken` has collected as the room was furnished.
@@ -2668,10 +2666,8 @@ function buildOutpostWorld() {
       // same ring.
       guard: raidStations(outpostRooms),
       ranger: [],
-      // A squad fights in a room the colony raises: none here.
-      brawler: [],
+      // A squad assaults a declared rival room: none here.
       medic: [],
-      kiter: [],
     },
     // One claimed-tile set per room of the world: the home room's is what
     // furnishing it collected, each outpost's is the obstacles it holds.
@@ -2792,12 +2788,9 @@ function homeStations(furnished) {
     // No ranger either: the row holds a declared errand room (#411), and only
     // the reactor scenario declares one.
     ranger: [],
-    // A squad is cast only where a raid stands in a room the colony
-    // raises and its bank holds a medic's 5,400; it musters short of the
-    // raid, so the spawn is where a frozen world stands it.
-    brawler: at([furnished.spawnPos]),
+    // A squad is cast only for a declared assault, which musters at home,
+    // so the spawn is where a frozen world stands it.
     medic: at([furnished.spawnPos]),
-    kiter: at([furnished.spawnPos]),
   };
 }
 
@@ -2946,9 +2939,7 @@ function furnishSiege(home, register) {
   return hostiles;
 }
 
-// What the siege did, read off the bundle's own Memory as `printRaid` reads
-// its raid: the hostiles, and each colony's squad exchange as the `quotas`
-// leaf wrote it (#452) — so a run that never reached the exchange says so.
+// What the siege stood: the hostiles, as `printRaid` names its raid.
 function printSiege(world) {
   if (!world.siege) return;
   const { room, hostiles } = world.siege;
@@ -2956,22 +2947,6 @@ function printSiege(world) {
     `\nsiege — ${room} holds ${SIEGE_OWNER}'s t880,341 raid at ` +
       `${hostiles.map((h) => `${h.name} ${keyOf(h.pos)}`).join(", ")}`,
   );
-  const colonies = globalThis.Memory?.fabot?.observe?.colonies ?? {};
-  const reports = Object.entries(colonies).flatMap(([home, leaves]) =>
-    (leaves?.quotas?.fights ?? []).map((fight) => ({ home, fight })),
-  );
-  if (reports.length === 0) {
-    console.log("  squad exchange: no colony reported a fight, so this run never priced one");
-  }
-  for (const { home, fight } of reports) {
-    const verdict = (b) => (b == null ? "n/a" : b ? "wins" : "loses");
-    console.log(
-      `  ${home} prices ${fight.room}: the largest ranger with the towers ${verdict(fight.ranger)}; ` +
-        fight.squads
-          .map((s) => `${s.squad} standing ${verdict(s.stand)}, kiting ${verdict(s.kite)}`)
-          .join("; "),
-    );
-  }
 }
 
 // Two colonies in one tick, which is what every live tick has been since

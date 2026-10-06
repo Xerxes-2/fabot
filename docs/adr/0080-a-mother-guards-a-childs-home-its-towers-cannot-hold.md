@@ -2,6 +2,8 @@
 
 > **Status:** accepted, amended by 0083
 
+> **0083 superseded by 0090** (#564) on 2026-10-07: no squad is cast. The amendment below no longer holds; where no single body wins, the stand-down and safe mode stand.
+
 > **Amended by 0083** (#452) on 2026-10-02: once muster exists (#453), a defended home whose raid no single body wins is answered by the catalogue's cheapest winning squad, not by `Engine.guardCap` bodies of the size that would win alone; where no squad wins, the stand-down and safe mode stand.
 
 > **Accepted 2026-09-29** on #428, under a live threat: a Trepidimous squad (`18M17A` and two `11M7H`, 168 heal a tick) staged two rooms from W17S29, an RCL4 child with one tower and safe mode on cooldown.

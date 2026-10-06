@@ -578,13 +578,13 @@ let incomeWorkforceTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "a squad cast standing with no Fight takes no worker's seat" {
-                // The same fleet a worker short, and a brawler left over from
-                // a fight: counted against its own row and nowhere else.
+            test "a squad cast standing with no Assault takes no worker's seat" {
+                // The same fleet a worker short, and a medic left over from
+                // an assault: counted against its own row and nowhere else.
                 let snapshot =
                     { richestIncomeColony with
                         Creeps =
-                            creepWith "brawler-1" 0 0 Bodies.brawlerPattern.Block
+                            creepWith "medic-1" 0 0 Bodies.medicPattern.Block
                             :: richestIncomeFleet 1
                     }
 

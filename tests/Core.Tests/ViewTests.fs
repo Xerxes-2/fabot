@@ -4401,7 +4401,6 @@ let private namedBy task =
     | Withdraw(id, _)
     | Refill(id, _) -> Some id
     | Guard _
-    | Fight _
     | Defend _
     | Assault _
     | Flee -> None

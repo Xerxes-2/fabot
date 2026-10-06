@@ -409,7 +409,7 @@ let private afterClaim =
     ]
 
 /// The rows the arena casts for W15S28: the pioneers' and the fighters'.
-let private claimRows = [ "worker"; "ranger"; "brawler"; "medic" ]
+let private claimRows = [ "worker"; "ranger"; "medic" ]
 
 /// W15S28 as it stands live at t921,063 — RCL7, a 5,600 bank, Spawn3 at
 /// 18,30 and Spawn8 at 17,35, 137,274 energy in the Storage at 17,29 — the
@@ -743,8 +743,8 @@ let private westRaid =
         }
     ]
 
-/// The relief's rows: the residents and the duo the mother casts for them.
-let private reliefRows = [ "ranger-"; "brawler-"; "medic-" ]
+/// The relief's rows: the residents the mother casts for them.
+let private reliefRows = [ "ranger-" ]
 
 let private isRelief (id: string) =
     reliefRows |> List.exists (fun row -> id.StartsWith row)
@@ -1119,9 +1119,9 @@ let arenaClaimTests =
             }
 
             test
-                "scenario 3, G2 with G1 under the live cooldown: the residents kill the tapper before it taps, at least one resident dies, and the duo's Fight pools" {
+                "scenario 3, G2 with G1 under the live cooldown: the residents kill the tapper before it taps, all live, and neither a squad nor a reserver is cast into the raid" {
                 for arrival in [ 20; 100; 300 ] do
-                    let _, final, trace =
+                    let _, _, trace =
                         claimWorld
                             0
                             beforeClaim
@@ -1135,44 +1135,43 @@ let arenaClaimTests =
                     Expect.isEmpty m.Taps $"never taps\n{failure}"
 
                     // Measured: dead at arrival + 45, three ticks under both
-                    // residents' fire; one resident dead at +63 or +63/+176.
+                    // residents' fire.
                     match Map.tryFind "Rune908" m.Died with
                     | Some died -> Expect.isLessThanOrEqual died (arrival + 50) failure
                     | None -> failtest $"the tapper dies\n{failure}"
 
-                    Expect.isTrue
-                        (residents |> List.exists (fun r -> m.Died.ContainsKey r.Id))
-                        $"the melee catch a resident\n{failure}"
+                    // No CLAIM body is cast into the raid the residents lose
+                    // (#564: the seat waits on that, not on squad rows).
+                    let reserverCast =
+                        trace
+                        |> List.tryFind (fun t ->
+                            t.Tick >= arrival
+                            && t.Ours
+                               |> List.exists (function
+                                   | SpawnCreep(_, _, n) -> n.StartsWith "reserver-"
+                                   | _ -> false))
+                        |> Option.map (fun t -> t.Tick)
 
-                    // The duo's Fight pools on sight: its brawler cast within
-                    // ten ticks of the raid's arrival, its record latched.
+                    Expect.isNone reserverCast $"reserver cast: {reserverCast}\n{failure}"
+
+                    // Measured: no resident dies. Before #564 the duo reached
+                    // the raid ~480 ticks after it arrived and killed it, and
+                    // both residents died in that fight beside it; the
+                    // rangers alone never close on it.
+                    for r in residents do
+                        Expect.isFalse (m.Died.ContainsKey r.Id) $"{r.Id} lives\n{failure}"
+
+                    // The Fight squad is retired (#564): no medic is cast.
                     let squadCast =
                         trace
                         |> List.tryFind (fun t ->
                             t.Ours
                             |> List.exists (function
-                                | SpawnCreep(_, _, n) ->
-                                    n.StartsWith "brawler-" || n.StartsWith "medic-"
+                                | SpawnCreep(_, _, n) -> n.StartsWith "medic-"
                                 | _ -> false))
                         |> Option.map (fun t -> t.Tick)
 
-                    Expect.isTrue
-                        (squadCast |> Option.exists (fun t -> t <= arrival + 10))
-                        $"cast: {squadCast}\n{failure}"
-
-                    Expect.equal
-                        (final.Carried.Raids
-                         |> Map.tryFind "W15S28"
-                         |> Option.bind (fun r -> Map.tryFind "W17S25" r.Fought)
-                         |> Option.bind (fun latch -> latch.Squad))
-                        (Some "duo")
-                        "the duo latched"
-
-                    // Measured: the duo in the room ~490 ticks after the cast
-                    // and the raid dead by +530 for the two early arrivals.
-                    if arrival < 300 then
-                        for id in raidIds do
-                            Expect.isTrue (m.Died.ContainsKey id) $"{id} dies\n{failure}"
+                    Expect.isNone squadCast $"cast: {squadCast}\n{failure}"
             }
 
             // #472: an unarmed pioneer of the mother's, sent to the nursery's
@@ -1305,7 +1304,7 @@ let arenaClaimTests =
             }
 
             test
-                "#478, one tower: an Independent child with no residents loses its 100k perimeter before the mother's relief arrives, which then kills the melee" {
+                "#478, one tower: an Independent child with no residents loses its 100k perimeter before the mother's relief arrives, whose rangers alone kill no melee" {
                 let report, _, trace = independentWorld [ childTower ] |> lineReport 600
                 let failure = $"{report}\n{describe trace}"
 
@@ -1316,7 +1315,8 @@ let arenaClaimTests =
                 // check sends the unkillable ones to repair)
                 // (t215 before #480, t200 before #477), one melee's 510 a tick
                 // on rampart 2,24; the tapper shot dead at t244 from the
-                // reserve, so no tap; all four dead by t530.
+                // reserve, so no tap. The duo killed all four by t530; since
+                // #564 the two rangers, in at t336, kill none of them by t600.
                 Expect.isTrue
                     (report.ReliefCast |> Option.exists (fun t -> t <= 10))
                     $"#468: the raid's entry reverts the stage and the mother casts\n{failure}"
@@ -1331,9 +1331,9 @@ let arenaClaimTests =
                     Expect.isLessThan fell relief $"the line falls first\n{failure}"
 
                     for id in [ "Eternity536"; "Prime803" ] do
-                        Expect.isTrue
-                            (Map.tryFind id report.Died |> Option.exists (fun t -> t > relief))
-                            $"{id} dies to the relief\n{failure}"
+                        Expect.isFalse
+                            (Map.containsKey id report.Died)
+                            $"{id} outlives the rangers' relief\n{failure}"
                 | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
 
                 Expect.isGreaterThan

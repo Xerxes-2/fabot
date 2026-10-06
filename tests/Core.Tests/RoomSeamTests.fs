@@ -1651,7 +1651,7 @@ let armedRoomTests =
                     "a fighter's walk is every shortest chain, as before"
 
                 Expect.equal (walkerOf (Guard "W17S25")) Walker.Bold "a Guard is a fighter's walk"
-                Expect.equal (walkerOf (Fight "W17S25")) Walker.Bold "and so is a Fight"
+                Expect.equal (walkerOf (Defend "W17S25")) Walker.Bold "and so is a Defend"
 
                 Expect.equal
                     (walkerOf (Claim "ctrl"))

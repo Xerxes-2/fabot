@@ -487,7 +487,7 @@ smoke("arena-skeleton seats live Memory up to the tick and names a caster it lac
     "Basis = StandDownBasis.PlayerRaidHold",
     "PlayerSince = Some 980",
     '"W18S25", ({ Until = 2_490 }: Fabot.Core.Observe.ThreatLatch)',
-    '"W17S25", ({ Seen = 995; Squad = Some "duo"; Raiders = Set.ofList [ "x" ] }: FightLatch)',
+    '"W17S25", ({ Seen = 995; Raiders = Set.ofList [ "x" ] }: FightRecord)',
     "not seated unless said: Threatened W17S25/W17S26 seen t1,100, Fought W17S25/W17S24 t1,090, HomeRaided W17S25 t1,090.",
   ]) {
     assert.ok(text.includes(line), `missing:\n${line}\n---\n${text}`);

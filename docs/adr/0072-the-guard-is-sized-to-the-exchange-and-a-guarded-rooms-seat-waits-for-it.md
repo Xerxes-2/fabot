@@ -2,6 +2,8 @@
 
 > **Status:** accepted, amended by 0077, 0078, 0083
 
+> **0083 superseded by 0090** (#564) on 2026-10-07: no squad is mustered, so "one body and never the row's two summed" stands everywhere again.
+
 > **Amended by 0083** (#452) on 2026-10-02: "one body and never the row's two summed" is replaced by a squad's whole price (`squadWins`) only where a squad is mustered complete before it engages (#453); everywhere bodies still arrive one by one it stands. Report-only until then.
 
 > **Amended by 0078** (#411) on 2026-09-25: the exchange is asked of a ranger's block too, and a ranged block's heal is taken off the raid's damage, since the engine lets it act beside a ranged attack; a melee block's arithmetic is unchanged.

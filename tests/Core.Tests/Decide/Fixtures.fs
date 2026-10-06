@@ -2300,8 +2300,8 @@ let w17s25RaidIn room =
 /// `ferryMother` raising W1N2 at `Bootstrapping` and able to cast a squad:
 /// two idle spawns, an RCL7 bank, a wide plain floor on both sides of
 /// the border, this raid in the child's home and seen there the tick before
-/// too (an unlatched fight record, `Tuning.FightConfirmTicks`), and these
-/// bodies of hers each on its tile in either room.
+/// too (a fight record), and these bodies of hers each on its tile in either
+/// room.
 let fightingMother raid (bodies: (CreepInfo * RoomPos) list) =
     let colony = ferryMother Bootstrapping
 
@@ -2311,7 +2311,6 @@ let fightingMother raid (bodies: (CreepInfo * RoomPos) list) =
             hostile.Pos.Room,
             {
                 Seen = colony.Time - 1
-                Squad = None
                 Raiders = Set.empty
             })
         |> Map.ofList

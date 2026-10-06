@@ -521,7 +521,7 @@ type ColonyView =
         /// (`StandDown.ChasedOutposts`, #510).
         ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`StandDown.Fought`).
-        Fought: Map<string, FightLatch>
+        Fought: Map<string, FightRecord>
         /// The last tick a raider stood in the home (`StandDown.HomeRaided`).
         HomeRaided: int option
         /// Our construction sites in every room this colony works and has

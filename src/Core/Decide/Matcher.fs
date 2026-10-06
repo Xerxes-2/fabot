@@ -48,10 +48,10 @@ let matchCreeps
 
     let classOf name = Map.tryFind name classes
 
-    // Each living body's squad role, for a Fight's per-role caps.
+    // Each living body's squad role, for an Assault's per-role caps.
     let roles =
         view.Creeps
-        |> List.choose (fun c -> squadRoleOf c.Name c.Body |> Option.map (fun role -> c.Name, role))
+        |> List.choose (fun c -> squadRoleByName c.Name |> Option.map (fun role -> c.Name, role))
         |> Map.ofList
 
     let roleOf name = Map.tryFind name roles
@@ -529,8 +529,7 @@ let matchCreeps
                         fleeing
                         |> Option.exists (fun flee -> applicable view threats atlas creep flee)
                         && (match pooled.Task with
-                            | Guard room
-                            | Fight room ->
+                            | Guard room ->
                                 not (
                                     Facts.bodyWins view room (partCount creep.Body) creep.Hits.Hits
                                 )

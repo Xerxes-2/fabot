@@ -23,7 +23,7 @@
 ///
 /// **The physics is the engine's** (`@screeps/engine/src/processor`), cited
 /// per rule below, with `Engine`'s constants and `Engine.liveParts` shared
-/// with `Facts.squadFight` rather than re-spelt. Structures of either side
+/// with the bot rather than re-spelt. Structures of either side
 /// stand in a room (#465): ramparts, walls, towers, spawns and the rest,
 /// placed or loaded off a capture's `[structures]`. A body spends the
 /// energy it carries on a repair or a transfer, and nothing refills it. The
@@ -918,7 +918,7 @@ let landingOf (at: RoomPos) : (string * Pos) option =
 // ---------------------------------------------------------------------------
 
 /// The parts that act at these hits (`calcBodyEffectiveness` over
-/// `_recalc-body`'s head-first loss), shared with `squadFight`.
+/// `_recalc-body`'s head-first loss), shared with `Engine.liveParts`.
 let live (b: Body) = Engine.liveParts b.Parts b.Hits
 
 let private activeCount (b: Body) (part: BodyPart) = partCountIn (live b) part

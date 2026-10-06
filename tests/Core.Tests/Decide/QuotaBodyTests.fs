@@ -179,11 +179,7 @@ let patternTableTests =
                             Name = "defender"
                             Block = [ Move; Attack ]
                         }
-                        // The squad's four roles, each one fixed body.
-                        {
-                            Name = "brawler"
-                            Block = List.replicate 25 Move @ List.replicate 25 Attack
-                        }
+                        // An assault's three roles, each one fixed body.
                         {
                             Name = "sapper"
                             Block = List.replicate 25 Move @ List.replicate 25 Work
@@ -198,13 +194,6 @@ let patternTableTests =
                         {
                             Name = "medic"
                             Block = List.replicate 18 Move @ List.replicate 18 Heal
-                        }
-                        {
-                            Name = "kiter"
-                            Block =
-                                List.replicate 16 RangedAttack
-                                @ List.replicate 24 Move
-                                @ List.replicate 8 Heal
                         }
                         {
                             Name = "miner"
@@ -710,15 +699,6 @@ let squadRoleBodyTests =
     testList
         "the squad role bodies"
         [
-            test "the brawler is 25 MOVE then 25 ATTACK, 3,250 energy" {
-                Expect.equal
-                    brawlerPattern.Block
-                    (List.replicate 25 Move @ List.replicate 25 Attack)
-                    "legs first: a brawler in contact is already standing on its target"
-
-                Expect.equal (bodyCost brawlerPattern.Block) 3250 "25 × 50 + 25 × 80"
-            }
-
             test "the medic is 18 MOVE then 18 HEAL, 5,400 energy" {
                 Expect.equal
                     medicPattern.Block
@@ -726,16 +706,6 @@ let squadRoleBodyTests =
                     "legs first, so its heal is the last thing damage takes"
 
                 Expect.equal (bodyCost medicPattern.Block) 5400 "18 × 50 + 18 × 250"
-            }
-
-            test
-                "the kiter is 16 RANGED_ATTACK, then 24 MOVE, then 8 HEAL: guns before legs, 5,600 energy" {
-                Expect.equal
-                    kiterPattern.Block
-                    (List.replicate 16 RangedAttack @ List.replicate 24 Move @ List.replicate 8 Heal)
-                    "damage disarms it before it lames it, the ranger's order reversed"
-
-                Expect.equal (bodyCost kiterPattern.Block) 5600 "an RCL7 bank, exactly"
             }
 
             test "the probe is 4 TOUGH, 5 WORK, then 9 MOVE: legs last, 990 energy (#493)" {
@@ -748,7 +718,7 @@ let squadRoleBodyTests =
             }
 
             test "every role body walks a plain tile a tick: one MOVE per other part" {
-                for role in [ brawlerPattern; probePattern; medicPattern; kiterPattern ] do
+                for role in [ probePattern; medicPattern ] do
                     let parts = partCountIn role.Block
                     Expect.equal (parts Move) (List.length role.Block - parts Move) role.Name
             }

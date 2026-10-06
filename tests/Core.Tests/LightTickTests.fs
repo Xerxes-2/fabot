@@ -465,7 +465,7 @@ let replayTests =
             // onto the target's tile from range 1, blind to where the target can
             // step next. Flips at S3, glue keeping contact after its best step.
             test
-                "the melee's step onto its target never lands on an exit, off our rampart, beside a second melee, nor for a squad's cast" {
+                "the melee's step onto its target never lands on an exit, off our rampart, nor beside a second melee" {
                 // `Emitter.glueStep`, the one rule both ticks read (#535).
                 Expect.equal
                     (Decide.Emitter.glueStep (tile 12 10) (tile 13 10) false [])
@@ -510,10 +510,6 @@ let replayTests =
                     (stepsOf "guard-1")
                     [ MoveCreep("guard-1", Right) ]
                     "a guard steps onto it"
-
-                Expect.isEmpty
-                    (stepsOf "brawler-1-Spawn1")
-                    "a squad's brawler does not: its Formation moves it"
             }
 
             test "a light tick never lays two acts on one channel of one creep" {

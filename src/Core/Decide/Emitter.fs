@@ -375,12 +375,10 @@ let internal applicable
     | Dismantle _ -> isNamedFor dismantlerPattern creep.Name
     // Spelled through the row predicates the body-class ladder reads, so the
     // gate and `bodyClassOf` cannot disagree; which row is the Brief's.
-    // A Fight admits a squad cast, or once the squad launches a resident of
-    // the room whose parts fit a slot; an Assault a cast of a role its squad
-    // casts (`Formation.Roles`), how many of each role being the capacity's.
-    // A Defend admits its row's bodies and no other (#504, #546).
+    // An Assault admits a cast of a role its squad casts (`Formation.Roles`),
+    // how many of each role being the capacity's. A Defend admits its row's
+    // bodies and no other (#504, #546).
     | Guard _
-    | Fight _
     | Defend _
     | Assault _ ->
         Threats.briefFor threats task
@@ -564,7 +562,6 @@ let private intentFor
     // The Guard's attack names a hostile chosen at arrival, rather than a
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
     | Guard _
-    | Fight _
     | Defend _
     | Assault _ -> None
 
@@ -588,7 +585,6 @@ let private glyphFor =
     | Dismantle _ -> "🪓"
     | Flee -> "🏃"
     | Guard _ -> "⚔️"
-    | Fight _ -> "🛡️"
     | Defend _ -> "🧱"
     | Assault _ -> "🏰"
 
@@ -1104,12 +1100,6 @@ let private actionIntents
     | Guard room ->
         guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
         |> Option.toList
-    // A medic's act is the heal reflex's; a brawler swings and a kiter shoots
-    // as a guard and a ranger do, at the room's Guard's targets.
-    | Fight _ when Threats.squadRoleOf threats task creep.Name = Some Medic -> []
-    | Fight room ->
-        guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
-        |> Option.toList
     | Defend room when isRangerBody creep ->
         Threats.briefFor threats task
         |> Option.bind (fun brief -> guardIntent view atlas brief.Targets fighting creep room)
@@ -1195,8 +1185,7 @@ let arrival
 
 /// How a body strikes this tick (#535): the room and the Selector it picks
 /// its target by, and whether that strike is its Task's own act (a fighter)
-/// or the weapon reflex. A Guard's or a Fight's holder, a medic aside, by its
-/// Task's room; any other body with a weapon — on Flee, idle, at work — by the
+/// or the weapon reflex. A Guard's holder by its Task's room; any other body with a weapon — on Flee, idle, at work — by the
 /// room it stands in and that room's Guard's targets, as the heal reflex heals
 /// beside any Task. A ranger holding the home's Defend by its line. None for
 /// a melee defender, whose swing from its rampart is its own, a squad's
@@ -1230,8 +1219,6 @@ let private strikesBy
     | Some(Guard room) when Map.containsKey creep.Name (Threats.briefOf threats room).Stances ->
         if isRangerBody creep then reflex () else None
     | Some(Guard room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
-    | Some(Fight _ as task) when Threats.squadRoleOf threats task creep.Name = Some Medic -> None
-    | Some(Fight room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
     // A ranger holding the home's Defend shoots its line as a Guard's
     // holder its room's (#546).
     | Some(Defend room as task) when isRangerBody creep ->
@@ -1248,13 +1235,13 @@ let private mustering (threats: Threats) (assigned: Map<string, Task>) (creep: C
     | Some(Guard room) -> Map.containsKey creep.Name (Threats.briefOf threats room).Stances
     | _ -> false
 
-/// Each fighter's aims (#528, #535): a holder of a Guard or a Fight, not
-/// mustering, aims at every target of its kill order (`strikeOrder`), head
-/// first. The light ticks after pick one of them again off the glance, the
-/// one in reach first, else the head (`pickStrike`, `LightTick.intents`), so a
-/// body that steps beside a target between full ticks swings at it; out of
-/// reach the engine refuses it, and a refused act costs no CPU. A medic aims
-/// at nothing, and nor does a body striking by the reflex alone.
+/// Each fighter's aims (#528, #535): a holder of a Guard, not mustering, aims
+/// at every target of its kill order (`strikeOrder`), head first. The light
+/// ticks after pick one of them again off the glance, the one in reach
+/// first, else the head (`pickStrike`, `LightTick.intents`), so a body that
+/// steps beside a target between full ticks swings at it; out of reach the
+/// engine refuses it, and a refused act costs no CPU. A body striking by the
+/// reflex alone aims at nothing.
 let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
     match view.Hostiles with
     | [] -> []
@@ -1323,8 +1310,8 @@ let strikeReflex
 
 /// Each melee fighter's step onto the target it reaches (`glueStep`, #535):
 /// a Guard's holder with no gun, not mustering, beside the swing
-/// `guardIntent` issues at the same target; never a squad's member, whose
-/// movement is its Formation's. The mover leaves these bodies standing.
+/// `guardIntent` issues at the same target. The mover leaves these bodies
+/// standing.
 let glue (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) : Intent list =
     match view.Hostiles with
     | [] -> []

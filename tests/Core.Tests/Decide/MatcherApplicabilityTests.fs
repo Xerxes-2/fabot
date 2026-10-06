@@ -487,34 +487,57 @@ let thoriumApplicabilityTests =
         ]
 
 [<Tests>]
-let fightCapacityTests =
+let squadCapacityTests =
     testList
-        "a Fight's capacity per role"
+        "a squad's capacity per role"
         [
-            test "a two-role capacity admits a brawler and a medic and refuses a second brawler" {
+            test "a one-probe capacity admits one probe and refuses a second" {
                 let at x = RoomPos.at "W1N1" { X = x; Y = 8 }
 
                 let squad =
                     [
-                        creepWith "brawler-1" 0 0 brawlerPattern.Block, at 10
-                        creepWith "brawler-2" 0 0 brawlerPattern.Block, at 12
-                        creepWith "medic-1" 0 0 medicPattern.Block, at 11
+                        creepWith "probe-1" 0 0 probePattern.Block, at 10
+                        creepWith "probe-2" 0 0 probePattern.Block, at 12
                     ]
 
-                let decision = decideOn (fightingMother (w17s25RaidIn "W1N2") squad)
+                // A probe Provoke (#493) on the child's room as a rival's.
+                let colony =
+                    let mother = fightingMother [] squad
+
+                    { mother with
+                        Assaults =
+                            [
+                                {
+                                    Assault =
+                                        { Assault.w18s26 with
+                                            RoomName = "W1N2"
+                                            Breach = [ { X = 20; Y = 30 } ]
+                                            Entry = None
+                                            Active = true
+                                        }
+                                    Targets = None
+                                    Taken = false
+                                    Towers = []
+                                    SafeMode = false
+                                    BarredUntil = Some(mother.Time + 20_000)
+                                }
+                            ]
+                        Spatial =
+                            { mother.Spatial with
+                                RivalRooms = Set.ofList [ "W1N2" ]
+                            }
+                    }
 
                 let holders =
-                    decision.Assignments
-                    |> Map.filter (fun _ tid -> tid = taskId (Fight "W1N2"))
+                    (decideOn colony).Assignments
+                    |> Map.filter (fun _ tid -> tid = taskId (Assault "W1N2"))
                     |> Map.keys
                     |> List.ofSeq
 
-                Expect.contains holders "medic-1" "the medic takes the medic's slot"
-
                 Expect.equal
-                    (holders |> List.filter (fun name -> name.StartsWith "brawler") |> List.length)
+                    (List.length holders)
                     1
-                    "one brawler takes the brawler's slot, and the second is refused"
+                    "one probe takes the slot, the second is refused"
             }
         ]
 

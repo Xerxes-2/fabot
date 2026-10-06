@@ -466,9 +466,9 @@ let internal planSpawns
                     Quota = rows.Ranger
                     Census = isRangerRowBody
                 }
-                // A pooled Fight's squad (#453), its roles in the order they
-                // cast: the brawler the medic walks behind, then the medic,
-                // then the kiters. Each row's census is its casts, by name.
+                // A pooled Assault's squad (#490), its roles in the order they
+                // cast: the sappers the medic walks behind, then the medic.
+                // Each row's census is its casts, by name.
                 yield! squadRows
                 {
                     Name = "reserver"
@@ -557,7 +557,6 @@ let internal planSpawns
                 HaulerLoad = 0
                 HaulerDemand = []
                 Overflow = HaulOverflow.none
-                Fights = []
                 Busy = []
                 Rows =
                     (filled

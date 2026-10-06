@@ -46,8 +46,7 @@ let private w15s28 (x: int) (y: int) = RoomPos.at "W15S28" { X = x; Y = y }
 
 /// The rows the arena casts for W15S28: the fighting rows and the
 /// re-claimer. Its economy is staffed live, and none of it is here.
-let private fightingRows =
-    [ "guard"; "ranger"; "brawler"; "medic"; "kiter"; "reserver" ]
+let private fightingRows = [ "guard"; "ranger"; "medic"; "reserver" ]
 
 /// W15S28 as it stands live at t898,728: RCL7, a 5,600 bank, Spawn3 at
 /// 18,30 and Spawn8 at 17,35, the Storage at 17,29 holding the 21,885 T the
@@ -389,62 +388,6 @@ let reactorHoldTests =
                 Expect.equal (reactorOf final).Owner (Some Side.Ours) "ours"
 
                 for id in residentIds do
-                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
-            }
-
-            test
-                "scenario 3, the squad it would have priced, scripted on both sides — our decide does not run: the duo catches three kiting longbows in the Reactor's corner" {
-                // The catalogue's pick on the tick the raid stood whole: the
-                // cheapest squad that wins standing (`Facts.pricedSquad`).
-                let seen, _ =
-                    reactorWorld (Some Side.Ours) 500 (residents @ stealSquad 3 2) |> run 5
-
-                let view = viewOf seen "W15S28"
-
-                let duo = squadCatalogue |> List.find (fun squad -> squad.Name = "duo")
-
-                Expect.isTrue
-                    (Facts.squadWins view "W15S25" duo.Members false)
-                    "the duo wins standing"
-
-                let fabot = Side.Player "fabot"
-
-                let bodies =
-                    [
-                        yield
-                            body
-                                "brawler-1"
-                                fabot
-                                brawlerPattern.Block
-                                (w15s25 42 12)
-                                (Some(Chase(Nearest, None)))
-                        yield
-                            body
-                                "medic-1"
-                                fabot
-                                medicPattern.Block
-                                (w15s25 42 13)
-                                (Some(Follow "brawler-1"))
-                        for i in 1..3 ->
-                            body
-                                $"Longbow{i}"
-                                shibdib
-                                longbowParts
-                                (w15s25 (43 + i) 4)
-                                (Some(Kite(Nearest, 3)))
-                    ]
-
-                let _, trace = arena start [ room "W15S25"; room "W15S24" ] [] bodies |> run 300
-
-                let failure = describe trace
-
-                // Measured: t7, t20, t32. The Reactor stands in the room's
-                // north-east corner, walled east, and the arena's kiter never
-                // leaves by an exit: whether SlothBot's does is not on record.
-                for i in 1..3 do
-                    Expect.isSome (diedOn $"Longbow{i}" trace) $"Longbow{i} is caught\n{failure}"
-
-                for id in [ "brawler-1"; "medic-1" ] do
                     Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
             }
 

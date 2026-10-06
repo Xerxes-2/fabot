@@ -261,7 +261,7 @@ wire("danger: a well-formed leaf round-trips unchanged", async () => {
     W1N2: { down: outpost, hold, threat, watch: heldWatch },
     W1N3: { watch: seenWatch },
     W1N4: { threat },
-    W1N6: { fight: { seen: 700, squad: "duo", raiders: ["inv-1", "inv-2"] } },
+    W1N6: { fight: { seen: 700, raiders: ["inv-1", "inv-2"] } },
     W1N7: { fight: { seen: 690 } },
     W18S26: { taken: 930_120, probe: probeOut },
     W17S24: { probe: probeProbing },
@@ -272,13 +272,15 @@ wire("danger: a well-formed leaf round-trips unchanged", async () => {
 
 // The parts the world layer's S5 moved out of each colony's log: a fight
 // record, a taken tick and a probe log, each read alone.
-wire("danger: a fought room with no seen tick costs its part, and one with no squad or a squad that is no name reads unlatched", async () => {
+// #564: the Fight squad is retired; a record a bundle before it wrote carries
+// the `squad` it latched, which is read as nothing and dropped.
+wire("danger: a fought room with no seen tick costs its part, and a legacy squad key is dropped whatever it holds", async () => {
   const written = await dangerThrough(
     {
       W1N5: { fight: { seen: "soon" }, threat },
       W1N6: { fight: { seen: 700 } },
       W1N7: { fight: { seen: 690, squad: 3 } },
-      W1N8: { fight: { seen: 680, squad: "duo" } },
+      W1N8: { fight: { seen: 680, squad: "duo", raiders: ["inv-1"] } },
       W1N9: { fight: null },
     },
     undefined,
@@ -292,7 +294,7 @@ wire("danger: a fought room with no seen tick costs its part, and one with no sq
       W1N5: { threat },
       W1N6: { fight: { seen: 700 } },
       W1N7: { fight: { seen: 690 } },
-      W1N8: { fight: { seen: 680, squad: "duo" } },
+      W1N8: { fight: { seen: 680, raiders: ["inv-1"] } },
     }),
   );
 });
@@ -1679,7 +1681,6 @@ wire("quotas: silence writes the shape observe.mjs destructures", async () => {
       load: 0,
       haul: [],
       overflow: { fill: 0, owed: false },
-      fights: [],
     }),
   );
 });
@@ -1697,7 +1698,7 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
     s.HaulerLoad,
     s.HaulerDemand,
     new HaulOverflow(0.8125, true),
-    s.Fights,
+    s.Busy,
   );
 
   globalThis.Memory = memoryWith("quotas", undefined);
@@ -1706,47 +1707,6 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
   assert.equal(
     stable(globalThis.Memory.fabot.observe.colonies[home].quotas.overflow),
     stable({ fill: 0.8125, owed: true }),
-  );
-});
-
-wire("quotas: a fight row writes the room, the ranger answer and each squad's price, kite null for melee", async () => {
-  const { saveQuotas } = await import(MODULE);
-  const { QuotasModule_silent, Quotas, FightReport, SquadPrice } = await import(
-    "../build/fable/Core/Types/Verdicts.js"
-  );
-  const { ofArray } = await import(LIST);
-  const s = QuotasModule_silent;
-  const fight = new FightReport(
-    "W17S25",
-    false,
-    ofArray([new SquadPrice("duo", 8650, true, undefined), new SquadPrice("3×kiter", 16800, false, true)]),
-  );
-  const quotas = new Quotas(
-    s.Target,
-    s.Living,
-    s.Casting,
-    s.Rows,
-    s.HaulerLoad,
-    s.HaulerDemand,
-    s.Overflow,
-    ofArray([fight]),
-  );
-
-  globalThis.Memory = memoryWith("quotas", undefined);
-  saveQuotas(home, quotas);
-
-  assert.equal(
-    stable(globalThis.Memory.fabot.observe.colonies[home].quotas.fights),
-    stable([
-      {
-        room: "W17S25",
-        ranger: false,
-        squads: [
-          { squad: "duo", cost: 8650, stand: true, kite: null },
-          { squad: "3×kiter", cost: 16800, stand: false, kite: true },
-        ],
-      },
-    ]),
   );
 });
 

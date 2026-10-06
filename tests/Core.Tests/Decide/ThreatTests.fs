@@ -688,9 +688,7 @@ let rampartDefenderTests =
                         guardPattern
                         rangerPattern
                         defenderPattern
-                        brawlerPattern
                         medicPattern
-                        kiterPattern
                         sapperPattern
                         probePattern
                      ]
@@ -3081,7 +3079,6 @@ let rampartDoorTests =
                                     "",
                                     {
                                         Seen = open'.Time - ago
-                                        Squad = None
                                         Raiders = Set.empty
                                     }
                                 ]

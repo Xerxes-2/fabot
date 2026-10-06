@@ -40,9 +40,6 @@ let taskId =
     // stands in it: a raid that loses a creep is the same fight and must be
     // the same identity, or anti-thrash would re-match the guard mid-swing.
     | Guard room -> $"guard:{room}"
-    // Keyed on the room for the Guard's reason: a squad that loses a member
-    // is the same fight.
-    | Fight room -> $"fight:{room}"
     | Defend room -> $"defend:{room}"
     | Assault room -> $"assault:{room}"
 
@@ -176,10 +173,6 @@ type HeldTaskFacts =
         WithThorium: Set<string>
         /// Each held Task id's living holders, by name.
         Holders: Map<string, string list>
-        /// Every resident room a Fight is pooled for this tick, with the squad
-        /// priced for it (`fights`): derived once off the holders, and read by
-        /// the ground, the pool, the caps and the rows alike.
-        Fights: Map<string, Squad>
     }
 
 [<RequireQualifiedAccess>]
@@ -189,7 +182,6 @@ module HeldTaskFacts =
             All = Set.empty
             WithThorium = Set.empty
             Holders = Map.empty
-            Fights = Map.empty
         }
 
     /// One Task id's living holders.
@@ -642,12 +634,11 @@ let internal trespasser (view: ColonyView) (engaged: Set<string>) (hostile: Host
     && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
 
 /// What a Guard in its room may shoot, every target reader's one predicate
-/// (`Emitter.strikeOrder`, the kite's head, a squad's targets): an armed
+/// (`Emitter.strikeOrder`, the kite's head): an armed
 /// hostile we may strike (`mayStrike`, #535: in a harassment room a keeper or
 /// a third party's is no target), a rival's claimer or a raid's healer (#451)
 /// in a resident room, and the declared enemy's creep in a harassment room. In
-/// a room whose fight we hold (`fighting`: a pooled Fight, or a held Guard,
-/// #535), any healer we may strike: one whose raid is dead is still the
+/// a room whose fight we hold (`fighting`: a held Guard, #535), any healer we may strike: one whose raid is dead is still the
 /// raid's. And a trespasser (#516), last in the kill order. Whether a hostile
 /// breaks a room's quiet is `disturbs`, not this.
 let internal guardShoots
@@ -879,8 +870,7 @@ type private KillFacts =
         DamageOn: int
     }
 
-/// One target's band in the kill order: the one rule the Emitter's live order
-/// (`killRank`) and `squadFight`'s simulated one share.
+/// One target's band in the kill order (`killRank`).
 let private killTier (target: KillFacts) =
     if target.ClaimsAFlag then
         Claimer
@@ -1596,296 +1586,8 @@ let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (ro
 /// already there hold the room's safe ground against.
 let internal outmatched (view: ColonyView) (room: string) : bool = answer view room = Answer.Lose
 
-/// One body in `squadFight`: its parts, head first, and the hits it has
-/// left, which is the engine's whole account of which parts still act.
-[<Struct>]
-type private Combatant =
-    {
-        Parts: BodyPart list
-        Left: int
-        /// Its hits whole: the cap on its heal.
-        Full: int
-        /// A rival's CLAIM body in a resident room: the kill order's first band.
-        Claims: bool
-    }
-
-/// The longest fight `squadFight` plays out: one not won in sixty ticks is
-/// not won.
-let private squadTicksMost = 60
-
-/// The most bodies, both sides together, `squadFight` prices; a bigger field
-/// is priced lost.
-let private squadBodiesMost = 10
-
-/// Whom our side shoots in `squadFight`: the kill order the Emitter plays
-/// (`killTier`), or the raid's armed bodies ahead of its healers — the order
-/// the research priced the duo losing with, kept to show the order matters.
-type SquadAim =
-    | KillOrder
-    | MeleeFirst
-
-/// How a squad fight ends: whether we hold a weapon when the raid holds
-/// none, and the tick it is decided on.
-type SquadFight = { Won: bool; Ticks: int }
-
-/// What one combatant's live parts do this tick, counted once: the ATTACK,
-/// RANGED_ATTACK and HEAL parts its hits still cover.
-[<Struct>]
-type private Strength = { Swings: int; Shots: int; Heals: int }
-
-let private strengthOf (c: Combatant) : Strength =
-    let none = { Swings = 0; Shots = 0; Heals = 0 }
-
-    if c.Left <= 0 then
-        none
-    else
-        Engine.liveParts c.Parts c.Left
-        |> List.fold
-            (fun s part ->
-                match part with
-                | Attack -> { s with Swings = s.Swings + 1 }
-                | RangedAttack -> { s with Shots = s.Shots + 1 }
-                | Heal -> { s with Heals = s.Heals + 1 }
-                | _ -> s)
-            none
-
-let private armedWith (s: Strength) = s.Swings > 0 || s.Shots > 0
-
-/// The kill order's bands as numbers, first band smallest.
-let private bandOf =
-    function
-    | Claimer -> 0
-    | BrokenHealer -> 1
-    | Raid -> 2
-    | Reserver -> 3
-    | Bystander -> 4
-
-/// One side's heal this tick, given the damage each of its bodies takes:
-/// each healer in turn pre-heals the body most threatened — the damage
-/// coming plus the hits already missing, less the heal already given it —
-/// all heal adjacent. A body that swings this tick heals nothing, its attack
-/// suppressing its heal.
-let private healsOf
-    (side: Combatant array)
-    (strength: Strength array)
-    (incoming: int array)
-    (swung: bool array)
-    =
-    let n = Array.length side
-    let given = Array.zeroCreate n
-
-    let need j =
-        incoming[j] + side[j].Full - side[j].Left - given[j]
-
-    for i in 0 .. n - 1 do
-        let power = Engine.healPower * strength[i].Heals
-
-        if side[i].Left > 0 && power > 0 && not swung[i] then
-            let mutable best = -1
-
-            for j in 0 .. n - 1 do
-                if side[j].Left > 0 && (best < 0 || need j > need best) then
-                    best <- j
-
-            if best >= 0 && need best > 0 then
-                given[best] <- given[best] + power
-
-    given
-
-/// ADR-0083
-/// How this squad, cast whole and arriving together, fights the raid standing
-/// in one room, beside the room's loaded towers: the bounded simulation the
-/// ADR describes, on start-of-tick parts. Our fire re-picks the kill order's
-/// head each tick as the Emitter does, with no lock: every body reaching
-/// every body, effective hits order as hits do, so the target we hurt stays
-/// the head unless a band above it opens. Source Keepers are no part of it.
-let squadFight
-    (view: ColonyView)
-    (room: string)
-    (members: BodyPart list list)
-    (kite: bool)
-    (aim: SquadAim)
-    : SquadFight =
-    let resident = residentRooms view
-
-    let combatant parts hits claims =
-        {
-            Parts = parts
-            Left = hits
-            Full = Engine.partHits * List.length parts
-            Claims = claims
-        }
-
-    let raid =
-        view.Hostiles
-        |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
-        |> List.map (fun h -> combatant h.Body h.Hits (claimsAFlag view.Hostiles resident h))
-        |> Array.ofList
-
-    let ours =
-        members
-        |> List.map (fun body -> combatant body (Engine.partHits * List.length body) false)
-        |> Array.ofList
-
-    let towers = towerDamageIn view room
-
-    let melee (s: Strength) =
-        if kite then 0 else Engine.attackPower * s.Swings
-
-    let shot (s: Strength) =
-        melee s + Engine.rangedAttackPower * s.Shots
-
-    let bandFor (c: Combatant) (s: Strength) raidHeal ourDamage =
-        let armed = armedWith s
-
-        match aim with
-        | KillOrder ->
-            bandOf (
-                killTier
-                    {
-                        ClaimsAFlag = c.Claims
-                        RaidHealer = s.Heals > 0 && not armed
-                        Armed = armed
-                        HealOn = raidHeal
-                        DamageOn = ourDamage
-                    }
-            )
-        | MeleeFirst ->
-            if c.Claims then 0
-            elif armed then 1
-            else 2
-
-    // The kill order's head: band, then hits, then the first standing.
-    let targetOf (raid: Combatant array) (raidS: Strength array) raidHeal ourDamage =
-        let mutable best = -1
-        let mutable bestBand = 0
-
-        for i in 0 .. Array.length raid - 1 do
-            if raid[i].Left > 0 then
-                let band = bandFor raid[i] raidS[i] raidHeal ourDamage
-
-                if
-                    best < 0 || band < bestBand || band = bestBand && raid[i].Left < raid[best].Left
-                then
-                    best <- i
-                    bestBand <- band
-
-        best
-
-    // The raid's front: our first standing body with ATTACK, else our lowest.
-    let frontOf (ours: Combatant array) (oursS: Strength array) =
-        let mutable brawler = -1
-        let mutable lowest = -1
-
-        for i in 0 .. Array.length ours - 1 do
-            if ours[i].Left > 0 then
-                if brawler < 0 && oursS[i].Swings > 0 then
-                    brawler <- i
-
-                if lowest < 0 || ours[i].Left < ours[lowest].Left then
-                    lowest <- i
-
-        if brawler >= 0 then brawler else lowest
-
-    let settle (side: Combatant array) (strength: Strength array) (damage: int array) =
-        let swung = strength |> Array.map (fun s -> melee s > 0)
-        let heal = healsOf side strength damage swung
-
-        side
-        |> Array.mapi (fun i c ->
-            if c.Left <= 0 then
-                c
-            else
-                { c with
-                    Left = min c.Full (c.Left - damage[i] + heal[i]) |> max 0
-                })
-
-    let tick (ours: Combatant array) oursS (raid: Combatant array) raidS =
-        let toOurs = Array.zeroCreate (Array.length ours)
-        let toRaid = Array.zeroCreate (Array.length raid)
-        let raidHeal = raidS |> Array.sumBy (fun s -> Engine.healPower * s.Heals)
-        let ourDamage = towers + (oursS |> Array.sumBy shot)
-        let target = targetOf raid raidS raidHeal ourDamage
-        toRaid[target] <- toRaid[target] + ourDamage
-
-        if not kite then
-            for i in 0 .. Array.length ours - 1 do
-                if oursS[i].Swings > 0 then
-                    toOurs[i] <- toOurs[i] + Engine.attackPower * raidS[target].Swings
-
-        let front = frontOf ours oursS
-        toOurs[front] <- toOurs[front] + (raidS |> Array.sumBy shot)
-
-        if not kite then
-            for i in 0 .. Array.length raid - 1 do
-                if raidS[i].Swings > 0 then
-                    toRaid[i] <- toRaid[i] + Engine.attackPower * oursS[front].Swings
-
-        settle ours oursS toOurs, settle raid raidS toRaid
-
-    // Ours asked first: a trade that disarms both sides on one tick is lost.
-    let rec fight t ours raid =
-        let oursS = Array.map strengthOf ours
-        let raidS = Array.map strengthOf raid
-
-        if not (Array.exists armedWith oursS) || t >= squadTicksMost then
-            { Won = false; Ticks = t }
-        elif not (Array.exists armedWith raidS) then
-            { Won = true; Ticks = t }
-        else
-            let ours, raid = tick ours oursS raid raidS
-            fight (t + 1) ours raid
-
-    if Array.length ours + Array.length raid <= squadBodiesMost then
-        fight 0 ours raid
-    else
-        { Won = false; Ticks = 0 }
-
-/// Whether this squad wins the raid in one room (`squadFight`, the kill
-/// order's aim): what prices a Fight's squad (`fightSquadIn`).
-let squadWins (view: ColonyView) (room: string) (members: BodyPart list list) (kite: bool) : bool =
-    (squadFight view room members kite KillOrder).Won
-
-/// Whether this squad can keep out of the raid's melee reach for the whole
-/// fight (`docs/research/squads.md` §4.8): no member carries ATTACK, the
-/// slowest walks a plain tile at least as fast as the raid's fastest melee,
-/// and `safe`, the room's ground no Threat reaches, is not empty.
-let kiteHolds
-    (view: ColonyView)
-    (safe: Set<RoomPos>)
-    (room: string)
-    (members: BodyPart list list)
-    : bool =
-    // Whole ticks a plain tile takes: a MOVE pays off two fatigue a tick, and
-    // every other part makes two.
-    let ticksOf (fatigue: int) (moves: int) =
-        if moves = 0 then
-            System.Int32.MaxValue
-        else
-            max 1 ((fatigue + moves - 1) / moves)
-
-    let plainTicks (body: BodyPart list) =
-        let factor = Grid.emptyFactorOf body
-        ticksOf factor.FatigueParts factor.MoveParts
-
-    // Each melee raider's plain ticks, its MOVE at its boosts
-    // (`HostileInfo.effectivePower`).
-    let raidMelee =
-        view.Hostiles
-        |> List.filter (fun h -> h.Pos.Room = room && not (HostileInfo.isKeeper h))
-        |> List.filter (HostileInfo.melee view.Hostiles)
-        |> List.map (fun h ->
-            let factor = Grid.emptyFactorOf (HostileInfo.effectiveParts view.Hostiles h)
-            ticksOf factor.FatigueParts (HostileInfo.effectivePower view.Hostiles h Move))
-
-    not (Set.isEmpty safe)
-    && not (List.isEmpty members)
-    && members |> List.forall (List.contains Attack >> not)
-    && (List.isEmpty raidMelee
-        || (members |> List.map plainTicks |> List.max) <= List.min raidMelee)
-
 /// Whether the resident garrison loses the raid standing in a room beside its
-/// loaded towers: what pools a Fight there. Both the garrison's size and the
+/// loaded towers: what opens its fight record. Both the garrison's size and the
 /// rangers actually standing there, priced together, lose.
 let internal residentsLose (view: ColonyView) (room: string) : bool =
     let towers = towerDamageIn view room
@@ -1908,99 +1610,6 @@ let internal residentsLose (view: ColonyView) (room: string) : bool =
     not standingWin
     && not (blocksBeat rangerPattern.Block true towers view room view.Tuning.RangerResidentBlocks)
 
-/// The squad a room's fight record latched (`FightLatch.Squad`), or None.
-let private latchedSquad (view: ColonyView) (room: string) : Squad option =
-    Map.tryFind room view.Fought
-    |> Option.bind (fun latch -> latch.Squad)
-    |> Option.bind (fun name -> squadCatalogue |> List.tryFind (fun squad -> squad.Name = name))
-
-/// Ticks since a room's latched fight record last saw its raid, or None for a
-/// room with no record, or one that latched no squad.
-let private sinceFightSeen (view: ColonyView) (room: string) : int option =
-    match Map.tryFind room view.Fought, latchedSquad view room with
-    | Some latch, Some _ -> Some(view.Time - latch.Seen)
-    | _ -> None
-
-/// Whether the raid record keeps a room's Fight pooled: its squad latched and
-/// its raid seen within `Tuning.FightHoldTicks`.
-let internal fightHeld (view: ColonyView) (room: string) : bool =
-    sinceFightSeen view room
-    |> Option.exists (fun since -> since <= view.Tuning.FightHoldTicks)
-
-/// Whether a room's Fight dropped less than `Tuning.FightHoldTicks` ago, so no
-/// squad is cast for it: a raid that comes back as each squad lands is not
-/// paid 8,650 a time.
-let internal fightCooling (view: ColonyView) (room: string) : bool =
-    sinceFightSeen view room
-    |> Option.exists (fun since ->
-        since > view.Tuning.FightHoldTicks && since < 2 * view.Tuning.FightHoldTicks)
-
-/// Whether a raid the residents lose stands in a room for a second time inside
-/// `Tuning.FightConfirmTicks`, its first on the record: what first pools its
-/// Fight, and what the record latches its squad on.
-let private fightConfirmed (view: ColonyView) (room: string) : bool =
-    raided view room
-    && Map.tryFind room view.Fought
-       |> Option.exists (fun latch -> view.Time - latch.Seen <= view.Tuning.FightConfirmTicks)
-    && residentsLose view room
-
-/// The cheapest catalogue squad that wins a room's raid standing
-/// (`squadWins`) and whose every body this colony's bank holds, or None.
-/// Standing and never kiting: a launched squad meets the raid in contact.
-let internal pricedSquad (view: ColonyView) (room: string) : Squad option =
-    let castable (squad: Squad) =
-        not (List.isEmpty view.Spawns)
-        && squad.Members |> List.forall (fun body -> bodyCost body <= view.Bank.Capacity)
-
-    squadCatalogue
-    |> List.filter castable
-    |> List.sortBy (fun squad -> List.sumBy bodyCost squad.Members)
-    |> List.tryFind (fun squad -> squadWins view room squad.Members false)
-
-/// The squad a resident room's raid is fought with, or None: the one its
-/// record latched, else the one `pricedSquad` names. Pooled once its raid is
-/// confirmed (`fightConfirmed`), and kept while the latched record holds it,
-/// or while a holder stands by it with a raider or the tapper still there.
-let private fightSquadIn (view: ColonyView) (holders: Map<string, string list>) (room: string) =
-    let resident = residentRooms view
-    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let raided = raided view room
-
-    let held =
-        Map.tryFind (taskId (Fight room)) holders |> Option.exists (List.isEmpty >> not)
-
-    let latched = latchedSquad view room
-
-    let pooled =
-        raided && residentsLose view room && Option.isSome latched
-        || fightConfirmed view room
-        || fightHeld view room
-        || held && (raided || inRoom |> List.exists (claimsAFlag view.Hostiles resident))
-
-    if Set.contains room resident && pooled then
-        latched |> Option.orElse (pricedSquad view room)
-    else
-        None
-
-/// Every resident room a Fight is pooled for this tick, with its squad. A
-/// quiet colony with no record and no holder asks no room.
-let private fights (view: ColonyView) (holders: Map<string, string list>) : Map<string, Squad> =
-    let resident = residentRooms view
-
-    let asked =
-        (view.Hostiles |> List.map (fun h -> h.Pos.Room))
-        @ (view.Fought |> Map.keys |> List.ofSeq)
-        @ (resident
-           |> Set.toList
-           |> List.filter (fun room -> Map.containsKey (taskId (Fight room)) holders))
-        |> List.distinct
-        |> List.filter (fun room -> Set.contains room resident)
-
-    asked
-    |> List.choose (fun room ->
-        fightSquadIn view holders room |> Option.map (fun squad -> room, squad))
-    |> Map.ofList
-
 /// The Planner's narrow view of the assignment table, filtered to the living:
 /// `Assignments` arrives from Memory and may name a creep that died last tick,
 /// the Matcher drops those silently, but `planTasks` runs first. Not filtered
@@ -2009,32 +1618,22 @@ let private fights (view: ColonyView) (holders: Map<string, string list>) : Map<
 let heldTaskFacts (view: ColonyView) (assignments: Assignments) : HeldTaskFacts =
     let living = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
 
-    let held =
-        assignments
-        |> Map.fold
-            (fun facts name tid ->
-                match Map.tryFind name living with
-                | None -> facts
-                | Some creep ->
-                    { facts with
-                        All = Set.add tid facts.All
-                        WithThorium =
-                            if creep.Thorium > 0 then
-                                Set.add tid facts.WithThorium
-                            else
-                                facts.WithThorium
-                        Holders =
-                            Map.add tid (name :: HeldTaskFacts.holdersOf facts tid) facts.Holders
-                    })
-            HeldTaskFacts.empty
-
-    { held with
-        Fights = fights view held.Holders
-    }
-
-/// The roles one squad's bodies fill, in its cast order.
-let internal squadRoles (squad: Squad) : SquadRole list =
-    squad.Members |> List.choose (partsOf >> squadRoleOfParts)
+    assignments
+    |> Map.fold
+        (fun facts name tid ->
+            match Map.tryFind name living with
+            | None -> facts
+            | Some creep ->
+                { facts with
+                    All = Set.add tid facts.All
+                    WithThorium =
+                        if creep.Thorium > 0 then
+                            Set.add tid facts.WithThorium
+                        else
+                            facts.WithThorium
+                    Holders = Map.add tid (name :: HeldTaskFacts.holdersOf facts tid) facts.Holders
+                })
+        HeldTaskFacts.empty
 
 /// The errand rooms a raid stands in this tick (#414): an armed hostile that is
 /// not a Source Keeper, or a rival's CLAIM body. What the guard is kept there

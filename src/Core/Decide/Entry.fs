@@ -390,9 +390,9 @@ let decideUnarbitrated
             }
 
     // The narrow facts the Planner reads about the colony's own decisions:
-    // the task ids its living creeps hold, their holders, which still carry
-    // Thorium, and the Fights pooled off them, off the table the Matcher wrote
-    // last tick. Derived before the Threats, which lay each Fight's ground.
+    // the task ids its living creeps hold, their holders and which still
+    // carry Thorium, off the table the Matcher wrote last tick. Derived
+    // before the Threats, which lay each Assault's ground.
     let held = heldTaskFacts view assignments
 
     // The tick's Threats, derived once and shared by every reader.
@@ -669,7 +669,6 @@ let decideUnarbitrated
                 HaulerLoad = plan.HaulerLoad
                 HaulerDemand = plan.HaulerDemand
                 Overflow = overflow
-                Fights = fightReports view threats
                 Busy = busy
             }
         HaulOverflow = overflow

@@ -403,8 +403,7 @@ let private upgradeDrainOf body =
 let internal isGuardBody (creep: CreepInfo) = isGuardParts creep.Body
 
 /// Whether a body is a squad's medic.
-let internal isMedicBody (creep: CreepInfo) =
-    squadRoleOf creep.Name creep.Body = Some Medic
+let internal isMedicBody (creep: CreepInfo) = squadRoleByName creep.Name = Some Medic
 
 let internal isRangerBody (creep: CreepInfo) = isRangerParts creep.Body
 
@@ -454,7 +453,7 @@ let private guardedAsks
             [])
 
 /// Every other Brief's ask of a row — the home's Defend's (#504), each
-/// Fight's and Assault's per squad role —: a Brief exists only while its
+/// Assault's per squad role —: a Brief exists only while its
 /// Task is pooled, so each is read whole.
 let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
     threats.Briefs
@@ -503,44 +502,6 @@ let internal rowBlocksWanted
         | CastRow.Squad _ -> 1
     | blocks -> List.max blocks
 
-/// The squad exchange beside the single-body one, for `observe quotas` alone
-/// (#452): per resident room a raider stands in, whether the largest ranger
-/// wins it beside the room's towers (`outmatched`'s reading), and what each
-/// catalogue squad does standing and, for an all-ranged one, kiting. A
-/// harassment room is the enemy's, under its towers, and is not priced.
-let internal fightReports (view: ColonyView) (threats: Threats) : FightReport list =
-    let rooms = residentRooms view
-
-    view.Hostiles
-    |> List.filter (fun hostile ->
-        Set.contains hostile.Pos.Room rooms && HostileInfo.raider view.Hostiles hostile)
-    |> List.map (fun hostile -> hostile.Pos.Room)
-    |> List.distinct
-    |> List.sort
-    |> List.map (fun room ->
-        let safe = Threats.safeIn threats room
-
-        {
-            Room = room
-            Ranger = not (outmatched view room)
-            Squads =
-                squadCatalogue
-                |> List.map (fun squad ->
-                    {
-                        Squad = squad.Name
-                        Cost = List.sumBy bodyCost squad.Members
-                        Stand = squadWins view room squad.Members false
-                        Kite =
-                            if squad.Members |> List.exists (List.contains Attack) then
-                                None
-                            else
-                                Some(
-                                    kiteHolds view safe room squad.Members
-                                    && squadWins view room squad.Members true
-                                )
-                    })
-        })
-
 /// Whether a fighting row is filled — every body it wants standing or in an
 /// oven. Read by the reserver row. Counted over every living body of the row
 /// and not the census less its expiring ones: a fighter inside its lead still
@@ -571,18 +532,11 @@ let private castRowStands
     : bool =
     fightingRowStands view (CastRow.cut row) (rowQuota view threats outposts row)
 
-/// One squad role's row quota: every pooled Fight's and Assault's ask of the
-/// role (`Brief.formed`).
+/// One squad role's row quota: every pooled Assault's ask of the role
+/// (`Brief.formed`).
 let internal squadQuota (view: ColonyView) (threats: Threats) (role: SquadRole) : int =
     briefAsks threats (CastRow.Squad role)
     |> List.sumBy (fun ask -> ask.Wanted view threats)
-
-/// Whether the squad rows are filled: every role's casts standing or in an
-/// oven.
-let private squadStands (view: ColonyView) (threats: Threats) : bool =
-    SquadRole.all
-    |> List.forall (fun role ->
-        fightingRowStands view (CastRow.cut (CastRow.Squad role)) (squadQuota view threats role))
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -642,20 +596,29 @@ let internal reserverClaimsOf
     // has a gap, the rooms it is hired for are not this row's to hire for.
     // The Reserve Task is untouched; what stops is the buying of bodies the
     // raider is eating. Keyed to the guard gap and not to the spending, so it
-    // flips once and not every cast.
+    // flips once and not every cast. And no CLAIM body is cast into a
+    // resident room whose residents lose its raid (`Facts.residentsLose`):
+    // the raid eats it whatever the rows stand at.
     let withheld =
         let castFor row =
             guardedAsks view threats outposts row |> List.map fst |> Set.ofList
 
-        Set.union
-            (if castRowStands view threats outposts CastRow.Guard then
-                 Set.empty
-             else
-                 castFor CastRow.Guard)
-            (if castRowStands view threats outposts CastRow.Ranger && squadStands view threats then
-                 Set.empty
-             else
-                 castFor CastRow.Ranger)
+        let lost =
+            residentRooms view
+            |> Set.filter (fun room -> raided view room && Facts.residentsLose view room)
+
+        Set.unionMany
+            [
+                (if castRowStands view threats outposts CastRow.Guard then
+                     Set.empty
+                 else
+                     castFor CastRow.Guard)
+                (if castRowStands view threats outposts CastRow.Ranger then
+                     Set.empty
+                 else
+                     castFor CastRow.Ranger)
+                lost
+            ]
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
         []
@@ -931,7 +894,7 @@ type QuotaRows =
         Guard: int
         /// One resident ranger per worked errand room, two where one loses (#411).
         Ranger: int
-        /// A pooled Fight's squad, role by role (`squadQuota`).
+        /// A pooled Assault's squad, role by role (`squadQuota`).
         Squad: Map<SquadRole, int>
         Anchor: int
         Hauler: int

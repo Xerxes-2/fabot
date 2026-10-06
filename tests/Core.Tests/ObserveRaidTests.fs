@@ -1490,13 +1490,12 @@ let private raidersOf (raid: HostileInfo list) =
     |> Set.ofList
 
 /// One record of the child's home.
-let private recordOf seen squad raid =
+let private recordOf seen raid =
     Map.ofList
         [
             "W1N2",
             {
                 Seen = seen
-                Squad = squad
                 Raiders = raidersOf raid
             }
         ]
@@ -1507,73 +1506,39 @@ let fightRecordTests =
         "raid fold: the fight record"
         [
             test
-                "opened unlatched by a raid the residents lose, and latched with its squad on a second sighting inside FightConfirmTicks" {
-                let confirm = Tuning.defaults.FightConfirmTicks
+                "opened by a raid the residents lose, moved on by any raid after, and dropped FightHoldTicks after its raid was last seen" {
+                let hold = Tuning.defaults.FightHoldTicks
                 let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
 
                 let opened = foldFights (fightRecordAt 1_000 lost) Map.empty
 
-                Expect.equal
-                    opened
-                    (recordOf 1_000 None lost)
-                    "a raid the residents lose opens it, latching nothing"
+                Expect.equal opened (recordOf 1_000 lost) "a raid the residents lose opens it"
 
                 Expect.isEmpty
                     (foldFights (fightRecordAt 1_000 (meleeOf 2)) Map.empty)
                     "one they win opens nothing"
 
                 Expect.equal
-                    (foldFights (fightRecordAt (1_000 + confirm) lost) opened)
-                    (recordOf (1_000 + confirm) (Some "duo") lost)
-                    "seen again inside FightConfirmTicks, it latches the squad the Fight is pooled with"
-
-                Expect.equal
-                    (foldFights (fightRecordAt (1_001 + confirm) lost) opened)
-                    (recordOf (1_001 + confirm) None lost)
-                    "seen again later, it opens afresh"
-
-                Expect.isEmpty
-                    (foldFights (fightRecordAt (1_001 + confirm) []) opened)
-                    "and with no second sighting it is dropped"
-            }
-
-            test
-                "a latched record keeps its squad: moved on while it holds, left alone while it bars a cast" {
-                let hold = Tuning.defaults.FightHoldTicks
-                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
-
-                let latched = recordOf 1_000 (Some "3×kiter") lost
-
-                let at seen =
-                    recordOf seen (Some "3×kiter") (meleeOf 2)
-
-                Expect.equal
-                    (foldFights (fightRecordAt 1_100 []) latched)
-                    latched
+                    (foldFights (fightRecordAt 1_100 []) opened)
+                    opened
                     "a quiet tick keeps it as it was"
 
                 Expect.equal
-                    (foldFights (fightRecordAt (1_000 + hold) (meleeOf 2)) latched)
-                    (at (1_000 + hold))
-                    "any raid moves it on while it holds the Fight, a shrunk one too, and the squad stays"
-
-                Expect.equal
-                    (foldFights (fightRecordAt (1_001 + hold) lost) latched)
-                    latched
-                    "while it bars a second cast, a raid moves nothing"
+                    (foldFights (fightRecordAt (1_000 + hold) (meleeOf 2)) opened)
+                    (recordOf (1_000 + hold) (meleeOf 2))
+                    "any raid moves it on while it stands, a shrunk one too"
 
                 Expect.isEmpty
-                    (foldFights (fightRecordAt (1_000 + 2 * hold) []) latched)
-                    "and it is dropped once the bar runs out"
+                    (foldFights (fightRecordAt (1_001 + hold) []) opened)
+                    "and it is dropped a tick past FightHoldTicks"
             }
 
             // The Brief's S7 (live t970,260, W17S25): an invader the residents
-            // and the tower killed in the room within a few ticks held the duo's
-            // Fight pooled for FightHoldTicks, and the duo walked there for
-            // nothing. The hold is for a raid that left.
+            // and the tower killed in the room within a few ticks held the
+            // record for FightHoldTicks. The hold is for a raid that left.
             test "a raid killed in the room drops its record at once; one that stepped out keeps it" {
                 let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
-                let latched = recordOf 1_000 (Some "duo") lost
+                let latched = recordOf 1_000 lost
                 let dead = raidersOf lost |> Set.toList
 
                 Expect.isEmpty
@@ -1631,16 +1596,16 @@ let fightRecordTests =
 
                 Expect.isEmpty
                     (foldFights (at [ resident "r-1" 24; resident "r-2" 26 ]) Map.empty)
-                    "the two standing there win it together: no Fight"
+                    "the two standing there win it together: no record"
             }
 
             // The world layer's S5: the records are one world map, so a colony
             // that is not resident in a room never judges its record off its own
             // vision; the clocks end it whoever folds.
-            test "a record of a room this colony is not resident in moves by its clocks alone" {
+            test "a record of a room this colony is not resident in moves by its clock alone" {
                 let hold = Tuning.defaults.FightHoldTicks
                 let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
-                let latched = recordOf 1_000 (Some "duo") lost
+                let latched = recordOf 1_000 lost
 
                 let neighbour time =
                     { quiet with
@@ -1654,8 +1619,8 @@ let fightRecordTests =
                     "every raider lies dead where it can see, and the record is not its to drop"
 
                 Expect.isEmpty
-                    (foldFights (neighbour (1_000 + 2 * hold)) latched)
-                    "but the bar runs out for it as for anybody"
+                    (foldFights (neighbour (1_001 + hold)) latched)
+                    "but the hold runs out for it as for anybody"
             }
 
             // B6 of the world layer's inventory: a garrisoned child home's record
@@ -1676,7 +1641,7 @@ let fightRecordTests =
 
                 Expect.equal
                     (gateAt 1_001 danger).Fought
-                    (recordOf 1_000 None lost)
+                    (recordOf 1_000 lost)
                     "the child's gate holds the record the mother opened"
             }
         ]

@@ -453,12 +453,12 @@ type RaidState =
         /// down. Bounded by the declared outposts.
         Threatened: Map<string, ThreatLatch>
         /// The resident rooms a raid their residents lose was seen in
-        /// (`foldFights`), each against the last tick it was: what holds a
-        /// Fight pooled through the ticks its raid steps out, and then bars a
-        /// second cast. Bounded by the resident rooms. This and the two below,
+        /// (`foldFights`), each against the last tick it was: what keeps a
+        /// home's rampart doors private through the ticks its raid steps out.
+        /// Bounded by the resident rooms. This and the two below,
         /// like the four above, are the world danger log's, laid in
         /// (`Danger.into`): every colony reads one record a room.
-        Fought: Map<string, FightLatch>
+        Fought: Map<string, FightRecord>
         /// Each [[assault]] room's last probe (`foldProbes`, #493): what
         /// `observe.mjs raids` prints of what raised its safe mode. Bounded
         /// by the declared assaults.
@@ -1094,20 +1094,16 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         HomeRaided = state.HomeRaided
     }
 
-/// The fight half of the Raid-log fold: a resident room's record is opened,
-/// latching nothing, on a tick a raid its residents lose stands there, and
-/// latches the squad its Fight is pooled with (`Facts.pricedSquad`) when that
-/// raid is seen again inside `Tuning.FightConfirmTicks`
-/// (`Facts.fightConfirmed`); an unlatched record no raid confirms in time is
-/// dropped. A latched record is moved on by every tick a raid stands there
-/// while it still holds the Fight, left alone while it bars a second cast
-/// (`Facts.fightCooling`), and dropped once that bar runs out. A record
-/// whose room holds no raider, and every one of whose last-seen raiders lies
-/// dead, is dropped at once: the raid was killed there, and the hold is for
-/// one that left. Rooms the colony cannot see this tick keep what they had.
-/// The records are the world's: a room this colony is not resident in is
-/// moved by the clocks alone, never by this colony's vision.
-let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string, FightLatch> =
+/// The fight half of the Raid-log fold: a resident room's record is opened on
+/// a tick a raid its residents lose stands there, moved on by every tick a
+/// raid stands there after, and dropped once its raid was last seen more than
+/// `Tuning.FightHoldTicks` ago. A record whose room holds no raider, and
+/// every one of whose last-seen raiders lies dead, is dropped at once: the
+/// raid was killed there, and the hold is for one that left. Rooms the colony
+/// cannot see this tick keep what they had. The records are the world's: a
+/// room this colony is not resident in is moved by the clock alone, never by
+/// this colony's vision.
+let foldFights (view: ColonyView) (prior: Map<string, FightRecord>) : Map<string, FightRecord> =
     let hold = view.Tuning.FightHoldTicks
 
     let raiders =
@@ -1118,51 +1114,36 @@ let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string,
 
     let fallen = Set.ofList view.Fallen
 
-    let killed room (latch: FightLatch) =
+    let killed room (record: FightRecord) =
         not (Map.containsKey room raiders)
-        && not (Set.isEmpty latch.Raiders)
-        && Set.isSubset latch.Raiders fallen
+        && not (Set.isEmpty record.Raiders)
+        && Set.isSubset record.Raiders fallen
 
     let resident = Decide.Facts.residentRooms view
 
-    // The clocks run out for every record, whoever's room it is; only a room
+    // The clock runs out for every record, whoever's room it is; only a room
     // this colony is resident in is judged killed off its vision.
     let standing =
         prior
-        |> Map.filter (fun room latch ->
-            let since = view.Time - latch.Seen
-
-            not (resident.Contains room && killed room latch)
-            && match latch.Squad with
-               | Some _ -> since < 2 * hold
-               | None -> since <= view.Tuning.FightConfirmTicks)
+        |> Map.filter (fun room record ->
+            not (resident.Contains room && killed room record)
+            && view.Time - record.Seen <= hold)
 
     raiders
     |> Map.filter (fun room _ -> Set.contains room resident)
     |> Map.toList
     |> List.fold
         (fun rooms (room, raid) ->
-            let seen squad =
-                {
-                    Seen = view.Time
-                    Squad = squad
-                    Raiders = raid |> Seq.map (fun hostile -> hostile.Id) |> Fresh.setOfSeq
-                }
-
-            match Map.tryFind room rooms with
-            | Some({ Squad = Some _ } as latch) when view.Time - latch.Seen <= hold ->
-                Map.add room (seen latch.Squad) rooms
-            | Some { Squad = Some _ } -> rooms
-            | _ when not (Decide.Facts.residentsLose view room) -> rooms
-            // Unlatched and still standing: the raid's second sighting in time.
-            | Some _ ->
+            if Map.containsKey room rooms || Decide.Facts.residentsLose view room then
                 Map.add
                     room
-                    (seen (
-                        Decide.Facts.pricedSquad view room |> Option.map (fun squad -> squad.Name)
-                    ))
+                    {
+                        Seen = view.Time
+                        Raiders = raid |> Seq.map (fun hostile -> hostile.Id) |> Fresh.setOfSeq
+                    }
                     rooms
-            | None -> Map.add room (seen None) rooms)
+            else
+                rooms)
         standing
 
 /// ADR-0028
@@ -1592,7 +1573,7 @@ type DangerRoom =
         Watch: ExitWatch option
         /// The resident room's fight record (`foldFights`): a raised child's
         /// home's is the mother's to fold and the child's to read.
-        Fight: FightLatch option
+        Fight: FightRecord option
         /// The tick an assault room's targets were first seen all down
         /// (`foldTaken`).
         Taken: int option

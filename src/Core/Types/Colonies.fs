@@ -896,19 +896,15 @@ module Assault =
             Active = false
         }
 
-/// One resident room's [[fight]] record (`RaidState.Fought`).
-type FightLatch =
+/// One resident room's [[fight]] record (`RaidState.Fought`): a raid its
+/// residents lose stood there, which keeps the home's rampart doors private.
+type FightRecord =
     {
         /// The last tick its raid was seen there.
         Seen: int
-        /// The catalogue name of the squad its Fight was first pooled with
-        /// (`Bodies.squadCatalogue`): every reader of the Fight reads this
-        /// squad until the record drops. None until the raid is seen a second
-        /// time inside `Tuning.FightConfirmTicks`, which is what pools it.
-        Squad: string option
         /// The ids of the raiders standing there when it was last seen: a
         /// raid every one of whose bodies then lies dead was killed in the
-        /// room, not stepped out of it, and holds the Fight no longer.
+        /// room, not stepped out of it, and holds the record no longer.
         Raiders: Set<string>
     }
 
@@ -994,9 +990,9 @@ type StandDown =
         ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`RaidState.Fought`),
         /// whichever colony is resident there (the world danger log's): what
-        /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
-        /// was last seen, and casts nothing for the room as long again.
-        Fought: Map<string, FightLatch>
+        /// keeps a home's rampart doors private for `Tuning.FightHoldTicks`
+        /// after its raid was last seen.
+        Fought: Map<string, FightRecord>
         /// The [[assault]] rooms whose declared targets were all down at the
         /// last look (`RaidState.Taken`, #496): what keeps a dark room's
         /// assault from casting again for them.

@@ -596,11 +596,11 @@ if (command === "console") {
 
   // Standing still over every sample while holding a Task that is done on
   // the way somewhere — a haul, a pickup, a claim, a flight. Work done in
-  // place (harvest, build, repair, upgrade, reserve, dismantle, guard, fight,
+  // place (harvest, build, repair, upgrade, reserve, dismantle, guard,
   // assault — a squad waits at its rally ground) is
   // still by design, and an idle creep already has its line above.
   const assignments = (await memoryGet("fabot.assignments")) ?? {};
-  const IN_PLACE = ["harvest", "build", "repair", "upgrade", "reserve", "reclaim", "dismantle", "guard", "fight", "assault"];
+  const IN_PLACE = ["harvest", "build", "repair", "upgrade", "reserve", "reclaim", "dismantle", "guard", "assault"];
   for (const name of names) {
     const kind = typeof assignments[name] === "string" ? assignments[name].split(":")[0] : undefined;
     if (idle.has(name) || IN_PLACE.includes(kind)) continue;
@@ -1711,7 +1711,7 @@ if (command === "console") {
   // ---- quotas: the cascade's workforce arithmetic ------------------------
   // Wire shape written by ObserveMemory.saveQuotas:
   //   { target, living, casting, rows: [{ row, quota, living, casting }],
-  //     load, haul: [...], overflow: { fill, owed }, fights: [...] }
+  //     load, haul: [...], overflow: { fill, owed } }
   // One tick's reading, no history. rows: [] with target 0 is the cascade's
   // silence — a spawn's doorstep stood inside a Reach — and is said as such
   // rather than as "nothing to hire".
@@ -1771,25 +1771,6 @@ if (command === "console") {
         );
       } else {
         console.log("  overflow: not recorded (a bundle older than #508)");
-      }
-    }
-    // The squad exchange (#452, ADR 0083), report-only: per resident room a
-    // raid stands in, the largest ranger beside the room's towers, and each
-    // catalogue squad standing in contact and kiting (`n/a` for a squad with
-    // melee, which cannot kite). A bundle older than the leaf writes no
-    // `fights`, said as such rather than as "no raid".
-    if (!Array.isArray(stored.fights)) {
-      console.log("  fights: not recorded (a bundle older than #452)");
-    } else {
-      const yn = (b) => (b == null ? "n/a" : b ? "wins" : "loses");
-      for (const f of stored.fights) {
-        console.log(`  fight ${f.room}: the largest ranger with the towers ${yn(f.ranger)}`);
-        for (const s of f.squads ?? []) {
-          console.log(
-            `    ${String(s.squad).padEnd(9)} ${String(s.cost).padStart(6)}e  ` +
-              `standing ${yn(s.stand).padEnd(5)}  kiting ${yn(s.kite)}`,
-          );
-        }
       }
     }
   }

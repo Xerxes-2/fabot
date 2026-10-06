@@ -99,16 +99,6 @@ let rangerPattern =
 /// The most whole ranger blocks one body carries under the engine's part cap.
 let rangerBlocksMost = Engine.maxBodyParts / List.length rangerPattern.Block
 
-/// The squad's melee front (`docs/research/squads.md` §4.6): one fixed
-/// body, MOVE then ATTACK, so damage lames it before it disarms it — a
-/// brawler in contact is already standing on its target. Its ATTACK strikes
-/// back at every melee that hits it.
-let brawlerPattern =
-    {
-        Name = "brawler"
-        Block = List.replicate 25 Move @ List.replicate 25 Attack
-    }
-
 /// The home's [[defender]] (#504): MOVE and ATTACK one to one, a tile a tick
 /// on plain to its rampart, MOVE first so damage lames it before it disarms
 /// it.
@@ -118,25 +108,16 @@ let defenderPattern =
         Block = [ Move; Attack ]
     }
 
-/// The squad's healer: one fixed body, MOVE then HEAL, walking behind the
-/// brawler it pre-heals.
+/// An [[assault]]'s healer: one fixed body, MOVE then HEAL, walking behind
+/// the sapper it pre-heals.
 let medicPattern =
     {
         Name = "medic"
         Block = List.replicate 18 Move @ List.replicate 18 Heal
     }
 
-/// The squad's ranged member, which out-walks melee rather than holding a
-/// ring: guns before legs, so damage disarms it before it lames it — the
-/// ranger's order reversed. 5,600, an RCL7 bank.
-let kiterPattern =
-    {
-        Name = "kiter"
-        Block = List.replicate 16 RangedAttack @ List.replicate 24 Move @ List.replicate 8 Heal
-    }
-
 /// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
-/// MOVE then WORK as the brawler is, so damage lames it on the rampart it
+/// MOVE then WORK, so damage lames it on the rampart it
 /// stands beside before it slows the dismantle. 3,750. Its own name and row,
 /// apart from the salvage dismantler's.
 let sapperPattern =
@@ -195,11 +176,9 @@ let patternTable =
         guardPattern
         rangerPattern
         defenderPattern
-        brawlerPattern
         sapperPattern
         probePattern
         medicPattern
-        kiterPattern
         minerPattern
         dismantlerPattern
     ]
@@ -300,9 +279,8 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
 
 /// The rows whose casts are read back off the name the cascade gives them
 /// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
-/// also a hauler, a kiter's counts are an eight-block ranger's, a brawler and
-/// a defender are ATTACK bodies as a guard is, a sapper and a probe a
-/// dismantler's, and a medic has no part a row reads. The dismantler's own
+/// also a hauler, a defender is an ATTACK body as a guard is, a sapper and a
+/// probe a dismantler's, and a medic has no part a row reads. The dismantler's own
 /// `[W;M]` blocks are also a miner's once damage has stripped it to Work = Move
 /// (#426), so no reading of the standing parts can tell the two apart.
 let private namedRows =
@@ -310,11 +288,9 @@ let private namedRows =
         courierPattern
         dismantlerPattern
         defenderPattern
-        brawlerPattern
         sapperPattern
         probePattern
         medicPattern
-        kiterPattern
     ]
 
 /// Whether a creep's name says it was cast by this row.
@@ -327,11 +303,9 @@ let patternByName (name: string) : BodyPattern option =
 /// The row that casts one squad role.
 let squadPatternOf (role: SquadRole) : BodyPattern =
     match role with
-    | Brawler -> brawlerPattern
     | Sapper -> sapperPattern
     | Probe -> probePattern
     | Medic -> medicPattern
-    | Kiter -> kiterPattern
 
 /// The squad role a cast carries in its name.
 let squadRoleByName (name: string) : SquadRole option =
@@ -349,7 +323,7 @@ let isSquadPattern (pattern: BodyPattern) =
     SquadRole.all
     |> List.exists (fun role -> (squadPatternOf role).Name = pattern.Name)
 
-/// Whether a cast answers to its own row alone: a squad's (#453) or a
+/// Whether a cast answers to its own row alone: a squad's (#490) or a
 /// [[defender]] (#504), which no other row's census counts and the fleet
 /// the workforce target is a number about leaves out.
 let ownRowOnly (name: string) =
@@ -371,34 +345,12 @@ let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.
 let internal isRangerParts (parts: Map<BodyPart, int>) =
     partCount parts RangedAttack > 0 && partCount parts Attack = 0
 
-/// The ranger row's own cut: a ranger body that is no kiter cast
+/// The ranger row's own cut: a ranger body that answers to no row of its own
 /// (`ownRowOnly`).
 let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
     isRangerParts parts && not (ownRowOnly name)
 
 let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
-
-/// The slot a body's parts fit, for a body that is no squad cast — a resident
-/// ranger: ATTACK and no HEAL, HEAL and no weapon, or no ATTACK and the
-/// kiter's guns (an eight-block ranger's). A smaller ranger fits no slot.
-let squadRoleOfParts (parts: Map<BodyPart, int>) : SquadRole option =
-    let attack = partCount parts Attack
-    let ranged = partCount parts RangedAttack
-    let heal = partCount parts Heal
-
-    if attack > 0 && heal = 0 then
-        Some Brawler
-    elif heal > 0 && attack = 0 && ranged = 0 then
-        Some Medic
-    elif attack = 0 && ranged >= partCountIn kiterPattern.Block RangedAttack then
-        Some Kiter
-    else
-        None
-
-/// A creep's squad role: its name's, and its parts' only where its name
-/// carries none.
-let squadRoleOf (name: string) (parts: Map<BodyPart, int>) : SquadRole option =
-    squadRoleByName name |> Option.orElse (squadRoleOfParts parts)
 
 /// Whether a body can take energy out of a store and put it into an extension:
 /// the body half of `Refill`'s gate and of `Withdraw`'s read back together,
@@ -684,7 +636,7 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         dismantlerBodyFor capacity
     elif pattern.Name = defenderPattern.Name then
         defenderBodyWithin sizing.DefenderBlocks capacity
-    // The squad's bodies are fixed: the catalogue priced these.
+    // A squad's bodies are fixed: its research priced these.
     elif isSquadPattern pattern then
         pattern.Block
     else
@@ -698,27 +650,3 @@ let bodyFor pattern capacity =
 /// The generalist body: the worker row of the pattern table, sized to
 /// capacity.
 let workerBodyFor capacity = bodyFor workerPattern capacity
-
-/// One composition `Facts.squadWins` prices: the bodies cast together.
-type Squad =
-    {
-        Name: string
-        Members: BodyPart list list
-    }
-
-/// The compositions a raid no single body wins is priced against, cheapest
-/// first: the melee duo, the duo with a kiter, and three kiters.
-let squadCatalogue =
-    let duo = [ brawlerPattern.Block; medicPattern.Block ]
-
-    [
-        { Name = "duo"; Members = duo }
-        {
-            Name = "duo+kiter"
-            Members = duo @ [ kiterPattern.Block ]
-        }
-        {
-            Name = "3×kiter"
-            Members = List.replicate 3 kiterPattern.Block
-        }
-    ]

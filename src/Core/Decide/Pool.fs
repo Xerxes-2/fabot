@@ -138,7 +138,6 @@ let internal restockWait (view: ColonyView) task =
     | Reclaim _
     | Dismantle _
     | Guard _
-    | Fight _
     | Defend _
     | Assault _
     | Flee -> 0
@@ -177,17 +176,15 @@ let internal outlivesTheStay
     | Some stay -> outlivesWalk creep stay walk.Value
     | None -> true
 
-/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Fight,
-/// Defend and Assault. A predicate, because the rules that turn on it
-/// (`areaFor` skipping the Reach subtraction, `threatened` written beneath
-/// it, the Matcher's fight over Flee) are asked before `planPool` ranks
-/// anything, and `tierOf` ranks exactly these into `Safety`. Exhaustive on
-/// purpose.
+/// ADR-0056. Whether a Task stands in the Safety tier: Flee, Guard, Defend
+/// and Assault. A predicate, because the rules that turn on it (`areaFor`
+/// skipping the Reach subtraction, `threatened` written beneath it, the
+/// Matcher's fight over Flee) are asked before `planPool` ranks anything,
+/// and `tierOf` ranks exactly these into `Safety`. Exhaustive on purpose.
 let internal safetyTier task =
     match task with
     | Flee
     | Guard _
-    | Fight _
     | Defend _
     | Assault _ -> true
     | Harvest _
@@ -221,7 +218,6 @@ let private roomOfWork atlas task =
     | Withdraw(id, _)
     | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room
-    | Fight room
     | Defend room
     | Assault room -> Some room
     | Flee -> None
@@ -286,7 +282,6 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
                 | ring -> ring)
         // The member's own ground, rally or fight, by its role
         // (`Threats.squadGroundIn`).
-        | Fight _
         | Assault _ -> Threats.squadGroundIn threats task creep
         | Defend room -> Threats.defendGroundFor threats room creep
         | _ -> Atlas.workAreaFor atlas creep task
@@ -301,8 +296,8 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
 let internal mayActNow (threats: Threats) atlas (creep: string) task =
     Atlas.mayAct atlas creep task (areaFor threats atlas creep task)
 
-/// The room a Fight's or an Assault's ground lies in: the rally ground's room until launch,
-/// the Task's own after. Read off the tiles, which name it.
+/// The room an Assault's or a muster's ground lies in: the rally ground's
+/// room until launch, the Task's own after. Read off the tiles, which name it.
 let private groundRoom (room: string) (area: Set<RoomPos>) =
     if Set.isEmpty area then
         room
@@ -332,7 +327,6 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
         Atlas.travelCostToward atlas creep task (groundRoom room area) area
     | Guard room
     | Defend room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
-    | Fight room
     | Assault room ->
         let area = areaFor threats atlas creep task
         Atlas.travelCostToward atlas creep task (groundRoom room area) area
@@ -350,8 +344,7 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
 let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
     | Guard room
-    | Defend room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
-    | Fight room
+    | Defend room
     | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | _ -> Atlas.firstStep atlas creep task area
 
@@ -477,7 +470,7 @@ let private insideDowngradeDeadline (view: ColonyView) =
 /// with the constants and `Rung` below because the ladder is one fact, and
 /// the test that walks every rank and rung of it (#237) reads it here.
 type Tier =
-    /// Flee, Guard and Fight: above every other tier and above the downgrade
+    /// Flee, Guard, Defend and Assault: above every other tier and above the downgrade
     /// deadline too, because no other work matters while a creep is being
     /// killed.
     | Safety
@@ -949,13 +942,11 @@ let planPoolHolding
     let tierOf task =
         match task with
         | Flee -> Safety
-        // The tier holds five Tasks and no rank between them: a fight Task a
+        // The tier holds four Tasks and no rank between them: a fight Task a
         // fighter passes outranks Flee in the Matcher (#533), a Guard, a
-        // Fight, a Defend and an Assault admit a Fighter alone, and a room's
-        // Guard and its Fight admit different bodies until its squad
-        // launches; a Defend admits its row's bodies alone.
+        // Defend and an Assault admit a Fighter alone, and a Defend admits its
+        // row's bodies alone.
         | Guard _
-        | Fight _
         | Defend _
         | Assault _ -> Safety
         | Harvest _ -> Feeding
@@ -1212,10 +1203,8 @@ let planPoolHolding
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
             // A kill over a quiet holder's own Guard (#510, #516), and a raid's
-            // Guard over a kill (#528): its Brief's. The room's Fight ranks
-            // alike (`withFights`), a resident in a squad slot taking either.
-            | Guard _
-            | Fight _ ->
+            // Guard over a kill (#528): its Brief's.
+            | Guard _ ->
                 Threats.briefFor threats task
                 |> Option.map (fun brief -> brief.Rung)
                 |> Option.defaultValue OnTheTier
@@ -1287,7 +1276,6 @@ let planPoolHolding
         // their row's own count, a squad's its slots, one cap per role.
         | Guard _
         | Defend _
-        | Fight _
         | Assault _ ->
             Threats.briefFor threats task
             |> Option.map (fun brief -> brief.Capacity view threats)

@@ -788,17 +788,11 @@ type Tuning =
         /// downgrade timer (an upgrade restores it) — and answers Unknown
         /// (#489). The clocks it saw still refuse: none of them ends early.
         RivalIntelTicks: int
-        /// How long a [[fight]] stays pooled after its raid was last seen, and
-        /// how long after that no squad is cast for the room again: 300, the
-        /// duo's two casts (150 and 108 ticks in one oven) and its walk to the
-        /// rally ground, so a raid that steps out while the squad is on its way
-        /// does not strand it.
+        /// How long a resident room's [[fight]] record holds after its raid
+        /// was last seen, keeping the home's rampart doors private: 300, a
+        /// raid that steps out over an exit and comes back inside one walk
+        /// from the next room.
         FightHoldTicks: int
-        /// How close together a raid's two sightings must fall for its
-        /// [[fight]] to be pooled: 20. A raid that means to stay is seen
-        /// again the next tick; one that flicks over an exit tile and back is
-        /// seen once, and is not worth the squad's 8,650.
-        FightConfirmTicks: int
         /// How often a [[stand-down]] latched on another player's **ownership**
         /// is looked at again (#165): the room is re-admitted to the scan set
         /// for one tick, and to nothing else, so one tick of vision can clear
@@ -964,7 +958,6 @@ module Tuning =
             // level-up in the dark is rarer still.
             RivalIntelTicks = Engine.creepLifetime
             FightHoldTicks = 300
-            FightConfirmTicks = 20
             RivalRecheck = 5000
             QuietGap = 50
             VisionGrace = 150

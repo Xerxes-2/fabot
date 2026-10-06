@@ -553,46 +553,34 @@ let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
                 None)
         |> Map.ofArray
 
-// One fought room on the wire: `{ seen, squad, raiders }`, the tick its raid
-// was last seen, the catalogue name of the squad it latched, `squad` absent
-// while it latched none, and the ids standing at that sighting, `raiders`
-// absent while none are known. An object for `encodeThreat`'s reason.
-let private encodeFight (latch: FightLatch) =
+// One fought room on the wire: `{ seen, raiders }`, the tick its raid was
+// last seen and the ids standing at that sighting, `raiders` absent while
+// none are known. An object for `encodeThreat`'s reason.
+let private encodeFight (record: FightRecord) =
     let o = createEmpty<obj>
-    o?seen <- latch.Seen
-
-    match latch.Squad with
-    | Some name -> o?squad <- name
-    | None -> ()
+    o?seen <- record.Seen
 
     // Written only while known, so a legacy row reads as none: a hold that
     // runs its clock, as before.
-    if not (Set.isEmpty latch.Raiders) then
-        o?raiders <- latch.Raiders |> Set.toArray
+    if not (Set.isEmpty record.Raiders) then
+        o?raiders <- record.Raiders |> Set.toArray
 
     o
 
-// A checker and not a cast: a `seen` that is not a number would hold a Fight,
-// or bar its cast, for ever. A dropped entry costs the room its record. A
-// `squad` that is no string reads as none latched, which re-prices the squad
-// and costs the room nothing else.
-let private decodeFight (value: obj) : FightLatch =
+// A checker and not a cast: a `seen` that is not a number would hold the
+// doors for ever. A dropped entry costs the room its record. The `squad` a
+// record from before the squad's retirement carries is not read, and not
+// written back.
+let private decodeFight (value: obj) : FightRecord =
     if isNull value || jsTypeof value <> "object" then
         failwith "not a fight record"
     else
-        let squad =
-            if jsTypeof value?squad = "string" then
-                Some(unbox<string> value?squad)
-            else
-                None
-
         {
             Seen = numberOf value "seen"
-            Squad = squad
             Raiders = idsOf value?raiders |> Fresh.setOfSeq
         }
 
-let private fightMapOf (raw: obj) : Map<string, FightLatch> =
+let private fightMapOf (raw: obj) : Map<string, FightRecord> =
     if isNull raw then
         Map.empty
     else
@@ -1136,7 +1124,7 @@ let private decodeWatch (raw: obj) : ExitWatch =
 // One room of the world danger log on the wire: `{ down?, hold?, threat?,
 // watch?, fight?, taken?, probe? }`, each part written only while it holds
 // and read alone, so a bad part costs that part and never the room's others.
-// `fight` is a fought room's `{ seen, squad?, raiders? }`, `taken` the tick an
+// `fight` is a fought room's `{ seen, raiders? }`, `taken` the tick an
 // assault room's targets were first seen down, `probe` its probe log.
 let private encodeDangerRoom (entry: DangerRoom) =
     let o = createEmpty<obj>
@@ -1363,9 +1351,8 @@ let private tileObject (tile: RoomPos) =
 
 /// The cascade's workforce arithmetic this tick, one leaf per colony
 /// beside the Layout record: `{ target, living, casting, rows: [{ row,
-/// quota, living, casting }], load, haul, overflow: { fill, owed }, fights:
-/// [{ room, ranger, squads: [{ squad, cost, stand, kite }] }] }`, `kite` null
-/// for a squad with a melee member. Written every tick and read by
+/// quota, living, casting }], load, haul, overflow: { fill, owed } }`.
+/// Written every tick and read by
 /// `observe.mjs quotas`; silence writes `rows: []` and `target 0`.
 let saveQuotas (home: string) (quotas: Quotas) =
     let o = createEmpty<obj>
@@ -1418,27 +1405,6 @@ let saveQuotas (home: string) (quotas: Quotas) =
     overflow?fill <- quotas.Overflow.Fill
     overflow?owed <- quotas.Overflow.Owed
     o?overflow <- overflow
-
-    o?fights <-
-        quotas.Fights
-        |> List.map (fun fight ->
-            let f = createEmpty<obj>
-            f?room <- fight.Room
-            f?ranger <- fight.Ranger
-
-            f?squads <-
-                fight.Squads
-                |> List.map (fun price ->
-                    let s = createEmpty<obj>
-                    s?squad <- price.Squad
-                    s?cost <- price.Cost
-                    s?stand <- price.Stand
-                    s?kite <- price.Kite |> Option.map box |> Option.defaultValue null
-                    s)
-                |> List.toArray
-
-            f)
-        |> List.toArray
 
     writeColonyLeaf home "quotas" o
 

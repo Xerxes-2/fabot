@@ -1119,7 +1119,6 @@ let private actionOn =
     | Upgrade id -> Some(id, 3)
     | Flee
     | Guard _
-    | Fight _
     | Defend _
     | Assault _ -> None
 
@@ -1912,12 +1911,11 @@ let routesFor
 let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list =
     routesFor atlas Walker.Wary fromRoom toRoom
 
-/// Whose walk a Task asks for: a Guard's, a Fight's or a Defend's is a
-/// fighter's, an Assault's a siege's.
+/// Whose walk a Task asks for: a Guard's or a Defend's is a fighter's, an
+/// Assault's a siege's.
 let walkerOf (task: Task) : Walker =
     match task with
     | Guard _
-    | Fight _
     | Defend _ -> Walker.Bold
     | Assault _ -> Walker.Siege
     | _ -> Walker.Wary

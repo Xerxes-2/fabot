@@ -387,10 +387,6 @@ let planTasks
     // And one per held exit a living guard already holds the Guard of (#450):
     // the hold keeps that guard on the exit, and is no room the row hires for.
     //
-    // And one Fight per room a squad fights in (#453), beside the room's
-    // Guard: its residents hold the Guard while the squad musters, and those
-    // no slot fits go on holding it once it launches.
-    //
     // And one per chased room (#510): an outpost shut on a raid a ranger
     // kites down pools its chase and nothing else.
     //
@@ -452,7 +448,6 @@ let planTasks
             |> Set.toList
 
         (guarded @ holding @ killing @ fought |> List.map Guard)
-        @ briefedAs Duty.Fight
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault
         // And the home's Defend while it wants a defender (#504): the row
