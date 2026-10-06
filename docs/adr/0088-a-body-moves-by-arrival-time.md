@@ -2,6 +2,8 @@
 
 > **Status:** accepted
 
+> **Noted 2026-10-07** (ADR 0091 W5): substance unchanged. On the world fight lane our fighters' floods are still each colony's Atlas memo, a fighter priced in its own colony's Atlas, now inside the fight lane's one match over the fleet; HomeHold reads a garrisoned home's arrival maps (`Threats.Arrivals`) for the raiders that reach its middle inside a lend's window, beside the name-off reading of #531.
+
 > **Proposed 2026-10-06** on main d3903da7 and the parked #524 (jj `zmvlsltl`). **Accepted by the user 2026-10-07**, with the five open questions settled as under "Decided" below. Builds on ADR 0086 S4/S6. It will amend ADR 0033 (Reach, Flee) and 0085 (`Brief.Avoid`, Kite ground) stage by stage, each amended ADR getting its banner in the stage that changes it. Folds in #524 and #527.
 
 ## Context

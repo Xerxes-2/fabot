@@ -4771,13 +4771,17 @@ function printReport(classes, pooled, world, allTicks) {
 // rather than only the two-colony one, so the four scenarios stay
 // comparable with each other.
 //
-// What it wraps is `decideUnarbitrated` and not `decide` (#216 R2b): a
-// room's movement is arbitrated once for the whole tick over every creep
-// of ours standing in it, so it is nobody's column — it sits outside every
-// row here and inside the whole-tick number underneath them, which is why
-// the rows now sum to less than that number by more than the projection.
-// `decide` itself is the single-colony seam the suite drives and the shell
-// does not call it, so the bundle no longer carries it at all.
+// What it wraps is a whole decide's three phases and not `decide` (#216
+// R2b): `openWhole`, which opens one row, and `joinWhole` and
+// `finishWhole`, which add to it (on the world lane every
+// colony is opened, then the fleet is matched once, then every colony is
+// finished, so a colony's decide is no one span). A room's movement is
+// arbitrated once for the whole tick over every creep of ours standing in
+// it, and the world's one match is the fleet's, so neither is any colony's
+// column — they sit outside every row here and inside the whole-tick number
+// underneath them, which is why the rows sum to less than that number by
+// more than the projection. `decide` itself is the single-colony seam the
+// suite drives and the shell does not call it.
 //
 // The row's label is the colony's home room, read off the colony view
 // the call was handed (`SpatialInfo.RoomName`, which `ColonyView.ofWorld`
@@ -4796,21 +4800,31 @@ const DECIDE_PROBE = `
 // ---- appended by scripts/profile.mjs: one timing per decide call --------
 globalThis.__fabotDecideCalls = [];
 {
-  const inner = decideUnarbitrated;
+  const opening = openWhole;
+  const joining = joinWhole;
+  const finishing = finishWhole;
   const stageOf = (snapshot, home) => {
     const stages = snapshot && snapshot.Stages;
     if (!home || !stages || typeof stages[Symbol.iterator] !== "function") return null;
     for (const [room, stage] of stages) if (room === home) return String(stage);
     return null;
   };
+  const homeOf = (snapshot) =>
+    (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)";
+  // The row a later phase adds to: the last one its colony opened.
+  const rowOf = (home) => {
+    const calls = globalThis.__fabotDecideCalls;
+    for (let i = calls.length - 1; i >= 0; i--) if (calls[i].home === home) return calls[i];
+    return null;
+  };
   // Every argument passed on, not a named four: a dropped fifth (the
   // ReplanTurn) arrived as undefined and put every colony on its turn,
   // re-planning all of them on the reset tick (#486).
-  decideUnarbitrated = function decideProbe(snapshot, ...rest) {
+  openWhole = function decideProbe(snapshot, ...rest) {
     const started = globalThis.__fabotClock();
-    const home = (snapshot && snapshot.Spatial && snapshot.Spatial.RoomName) || "(unnamed)";
+    const home = homeOf(snapshot);
     try {
-      return inner(snapshot, ...rest);
+      return opening(snapshot, ...rest);
     } finally {
       globalThis.__fabotDecideCalls.push({
         home,
@@ -4819,6 +4833,18 @@ globalThis.__fabotDecideCalls = [];
       });
     }
   };
+  const adding = (inner, viewOf) =>
+    function decidePhaseProbe(first, ...rest) {
+      const started = globalThis.__fabotClock();
+      try {
+        return inner(first, ...rest);
+      } finally {
+        const row = rowOf(homeOf(viewOf(first)));
+        if (row) row.ms += globalThis.__fabotClock() - started;
+      }
+    };
+  joinWhole = adding(joining, (head) => head && head.View);
+  finishWhole = adding(finishing, (tail) => tail && tail.Head && tail.Head.View);
 }
 `;
 
@@ -4827,7 +4853,7 @@ globalThis.__fabotDecideCalls = [];
 // `getRoomTerrain` the bot will make without a human keeping a list in step
 // (#287). `World.worldRooms` is private to the shell and exported by
 // nothing — the bundle exports `loop` and only `loop` — so it is reached
-// the way `decideUnarbitrated` above is: the appended source runs in the
+// the way `openWhole` above is: the appended source runs in the
 // bundle's own top-level scope, where every module-level binding esbuild
 // emitted is in scope. Nothing is wrapped and nothing is called, so this
 // costs the measured tick nothing.
@@ -4958,7 +4984,7 @@ globalThis.__fabotReactorCodec = {
 // declaration probe rather than the room set.
 //
 // **Exactly one** top-level declaration each, the way
-// `function decideUnarbitrated(` below is counted and for its reason: esbuild
+// `function openWhole(` below is counted and for its reason: esbuild
 // hands out bare names by collision order, so a second module bringing its own
 // `maskedIndicesIn` would take the bare name or be given `maskedIndicesIn_1` — a
 // guard that only asks whether the name exists would pass while the probe
@@ -5023,15 +5049,17 @@ function loadBundle(file, dir = "probe") {
 // hands it the warm one.
 function writeProbed(file, dir) {
   const source = readFileSync(file, "utf8");
-  const declarations = source.match(/^function decideUnarbitrated\(/gm) ?? [];
-  if (declarations.length !== 1) {
-    throw new Error(
-      `${path.relative(process.cwd(), file)} holds ${declarations.length} top-level ` +
-        "`function decideUnarbitrated(` declarations and this harness needs exactly one to time each " +
-        "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
-        "Fable or esbuild upgrade, a rename in src/Core/Decide/Entry.fs — is what this probe " +
-        "has to be re-pointed at",
-    );
+  for (const phase of ["openWhole", "joinWhole", "finishWhole"]) {
+    const declarations = source.match(new RegExp(`^function ${phase}\\(`, "gm")) ?? [];
+    if (declarations.length !== 1) {
+      throw new Error(
+        `${path.relative(process.cwd(), file)} holds ${declarations.length} top-level ` +
+          `\`function ${phase}(\` declarations and this harness needs exactly one to time each ` +
+          "colony's decide (ADR 0052's CPU row per colony). Whatever renamed or inlined it — a " +
+          "Fable or esbuild upgrade, a rename in src/Core/Decide/Entry.fs — is what this probe " +
+          "has to be re-pointed at",
+      );
+    }
   }
   for (const [binding, where, purpose] of PROBE_BINDINGS) {
     let found = 0;

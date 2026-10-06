@@ -1410,7 +1410,7 @@ wire("fightOnly: a boolean reads as itself, and anything else reads as unset", a
 
 // ---- the live fight-lane switch ------------------------------------------
 
-wire("fightLane: the three lane names read as their lane, and anything else reads as unset", async () => {
+wire("fightLane: the two lane names read as their lane, and anything else reads as unset", async () => {
   const { loadFightLane } = await import(MODULE);
   // A lane comes back as the F# union; its case name is what the switch set.
   const caseOf = (lane) => (lane === undefined ? undefined : lane.name);
@@ -1418,7 +1418,7 @@ wire("fightLane: the three lane names read as their lane, and anything else read
   for (const [what, value, read] of [
     ["absent", undefined, undefined],
     ["percolony", "percolony", "PerColony"],
-    ["parity", "parity", "WorldParity"],
+    ["parity, the lane that never shipped", "parity", undefined],
     ["world", "world", "World"],
     ["a case name", "World", undefined],
     ["a boolean", true, undefined],

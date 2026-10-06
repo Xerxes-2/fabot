@@ -1563,16 +1563,119 @@ let internal rangerMayKill (view: ColonyView) (kill: string) (standing: string o
        |> Option.forall (fun here ->
            not (Set.contains here resident) || RoomName.neighbouring here kill)
 
+/// HomeHold: whether a garrison body may stand away from its homes for a
+/// fight in `kill`, the lend rule (`rangerMayKill`) over the fleet's bodies
+/// left. A colony's resident rooms are its garrisoned homes and its
+/// ranger-row bodies their garrison, nothing a ranger carries saying which
+/// home it holds. Each garrisoned home beside the kill is quiet (no
+/// disturber in it or bouncing into it) and holds without it: its loaded
+/// towers, standing at their hits, and every body of the fleet standing
+/// there that stays — whoever's, less the ones `leaving` names for that
+/// home — beat every raider but the kill's own that reaches its middle
+/// inside a lend's window (`arrivesWithin`), priced together at that
+/// window. And one standing in a garrisoned home leaves only for a room
+/// beside it, which is all the window prices. Any other body leaves no
+/// home.
+let homeHoldReleases
+    (view: ColonyView)
+    (kill: string)
+    (standing: string option)
+    (leaving: CreepInfo -> string -> bool)
+    (maps: string -> ArrivalMaps option)
+    (creep: CreepInfo)
+    : bool =
+    not (isRangerRowBody creep)
+    || (let resident = residentRooms view
+
+        let staying (home: string) =
+            let fleet =
+                Map.tryFind home view.World.Bodies.Value
+                |> Option.defaultValue []
+                |> List.map fst
+
+            let own =
+                view.Creeps
+                |> List.filter (fun body ->
+                    SpatialInfo.creepPlacementOf view.Spatial body.Name
+                    |> Option.exists (fun at -> at.Room = home))
+
+            own @ fleet
+            |> List.distinctBy (fun body -> body.Name)
+            |> List.filter (fun body -> body.Name <> creep.Name && not (leaving body home))
+            |> List.map (fun body -> partCount body.Body, body.Hits.Hits)
+
+        let holds (home: string) =
+            let quiet = bouncingInto view home |> List.forall (disturbs view resident >> not)
+
+            // And every member of a class whose arrival map reaches the
+            // home's middle inside the window, where the home's maps are laid.
+            let mapped =
+                match maps home with
+                | None -> Set.empty
+                | Some maps ->
+                    maps.Classes
+                    |> List.filter (fun map ->
+                        Arrival.ticksAt map.Ticks { X = homeMiddle; Y = homeMiddle }
+                        |> Option.exists (fun ticks -> ticks <= Reaction.lend))
+                    |> List.collect (fun map -> map.Members)
+                    |> Set.ofList
+
+            let arriving =
+                view.Hostiles
+                |> List.filter (fun h ->
+                    h.Pos.Room <> kill
+                    && h.Pos.Room <> home
+                    && (arrivesWithin view home h || Set.contains h.Id mapped))
+
+            quiet
+            && (List.isEmpty arriving
+                || exchangeAgainst
+                    view
+                    Reaction.lend
+                    arriving
+                    (ourTowersOn view home arriving)
+                    (List.length (ourTowersIn view home) * Engine.towerHits)
+                    (staying home))
+
+        resident
+        |> Set.forall (fun home -> not (RoomName.neighbouring home kill) || holds home)
+        && standing
+           |> Option.forall (fun here ->
+               not (Set.contains here resident)
+               || here = kill
+               || RoomName.neighbouring here kill))
+
+/// Whether a body standing in a room may leave it for a fight in `kill`, by
+/// the lane's rule (`Tuning.FightLane`): the world lane's HomeHold, the body
+/// itself the one leaving (`homeHoldReleases`; the FightMatch counts the
+/// rest it matches out), else the lend rule (`rangerMayKill`).
+let internal mayLeaveFor
+    (view: ColonyView)
+    (kill: string)
+    (standing: string option)
+    (creep: CreepInfo)
+    =
+    match view.Tuning.FightLane with
+    | FightLane.World ->
+        homeHoldReleases view kill standing (fun _ _ -> false) (fun _ -> None) creep
+    | FightLane.PerColony -> rangerMayKill view kill standing
+
 /// Whether the holder of a room's Guard may be called off it for a kill in
 /// another (#510, #516), the bodies the kill admits being the gate's to say.
-/// A resident only as it may be lent (`rangerMayKill`); any other holder
+/// A resident only as it may leave (`mayLeaveFor`); any other holder
 /// while nothing its Guard shoots stands in its room, and never off another
 /// kill.
-let internal mayBeCalled (view: ColonyView) (kills: Set<string>) (held: string) (kill: string) =
+let internal mayBeCalled
+    (view: ColonyView)
+    (kills: Set<string>)
+    (held: string)
+    (kill: string)
+    (creep: CreepInfo)
+    =
     let resident = residentRooms view
 
     if Set.contains held resident then
-        rangerMayKill view kill (Some held)
+        mayLeaveFor view kill (Some held) creep
     else
         not (Set.contains held kills)
         && view.Hostiles
@@ -1615,8 +1718,8 @@ let rangerAnswers (view: ColonyView) (room: string) : bool = (rowAnswer view roo
 
 /// One colony's rangers that may answer the raid in `room`, each with the
 /// room it stands in (`placed`, the world's fleet): its own standing in the
-/// room, the garrison among them, and its own standing beside it, lent by its
-/// own colony's rule (`rangerMayKill`) out of a room where nothing its Guard
+/// room, the garrison among them, and its own standing beside it, let go by
+/// its own colony's rule (`mayLeaveFor`) out of a room where nothing its Guard
 /// would shoot stands; each a body that strikes every raider there and that
 /// its colony sends this tick (`sends`). Asked in the lender's own view with
 /// the world's vision of the room laid in, so its quiet is read on its side.
@@ -1639,8 +1742,8 @@ let private lendableTo
         && isRangerRowBody creep
         && sends creep
         && strikesEvery view (partCount creep.Body) (HostileInfo.raider view.Hostiles) room)
-    |> List.filter (fun (_, here) ->
-        here = room || quiet here && rangerMayKill view room (Some here))
+    |> List.filter (fun (creep, here) ->
+        here = room || quiet here && mayLeaveFor view room (Some here) creep)
 
 /// The fewest rangers that win the raid in `room` together, among every
 /// lender's (`lendableTo`), each by name with its colony's home; None where
@@ -1812,7 +1915,7 @@ let private priceAmong
             let parts = partCount creep.Body
 
             p.Sends room creep
-            && rangerMayKill priced room (Some here)
+            && mayLeaveFor priced room (Some here) creep
             && strikesEvery priced parts (HostileInfo.raider priced.Hostiles) room
             && wins priced creep parts)
 

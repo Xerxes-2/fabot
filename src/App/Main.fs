@@ -550,6 +550,15 @@ let private fullTick
         WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
         |> WorldView.sharingSafeGround
 
+    // The lane that matches the fight (`Tuning.FightLane`, or its live
+    // override), on the Tuning every view carries: the projection reads it,
+    // and every rule of the fight.
+    let lane =
+        ObserveMemory.loadFightLane () |> Option.defaultValue Tuning.defaults.FightLane
+
+    if tuning.FightLane <> lane then
+        tuning <- { tuning with FightLane = lane }
+
     let views =
         colonies
         |> List.map (fun colony ->
@@ -706,8 +715,7 @@ let private fullTick
         views
         |> Decide.Entry.decideColonies
             {
-                Lane =
-                    ObserveMemory.loadFightLane () |> Option.defaultValue Tuning.defaults.FightLane
+                Lane = lane
                 Hops = fun home room -> hops.Value home room
                 Holding = assignments
                 Verbose = verbose

@@ -2175,6 +2175,54 @@ let defendedHomeTests =
                     "12 HEAL parts put back 144, which one tower out-damages"
             }
 
+            // On the world lane a contested room another colony
+            // declares, within `Tuning.LaneHops` of a fighter of hers, is one
+            // her Atlas must price, so a world Brief there may seat that
+            // fighter; in peace nothing is added.
+            test
+                "on the world lane a fighter's colony projects a contested room next door, and nothing in peace" {
+                let viewIn lane world =
+                    let colony = declared |> List.find (fun colony -> colony.Home = mother)
+
+                    let holders =
+                        World.creepColonies
+                            Tuning.defaults
+                            declared
+                            (World.living declared world)
+                            noneShut
+                            world
+
+                    ColonyView.ofWorld
+                        { Tuning.defaults with
+                            FightLane = lane
+                        }
+                        declared
+                        StandDown.none
+                        holders
+                        world
+                        colony
+
+                let held = raided 6 |> withGuard hers mother
+                let quiet = independentChild [ 1000 ] |> withGuard hers mother
+
+                Expect.isEmpty
+                    (viewIn FightLane.World held).Borrowed.Defended
+                    "the premise: the child's tower holds this raid, so she defends nothing"
+
+                Expect.isFalse
+                    (Map.containsKey child (viewIn FightLane.PerColony held).Spatial.Rooms)
+                    "per colony she projects nothing of the child"
+
+                Expect.isTrue
+                    (Map.containsKey child (viewIn FightLane.World held).Spatial.Rooms)
+                    "on the world lane her guard next door has the raided home projected"
+
+                Expect.equal
+                    ((viewIn FightLane.World quiet).Spatial.Rooms |> Map.keys |> List.ofSeq)
+                    ((viewIn FightLane.PerColony quiet).Spatial.Rooms |> Map.keys |> List.ofSeq)
+                    "in peace the two lanes project the same rooms"
+            }
+
             test "an ally's squad is no raid" {
                 Expect.isEmpty
                     (viewOf (independentChild [ 1000 ] |> raidedBy "Odiodin" 7) mother)

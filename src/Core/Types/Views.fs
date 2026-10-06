@@ -196,7 +196,7 @@ type WorldRoom =
     }
 
 /// The world layer's read of this tick, built once off the `World` and handed
-/// to every colony (ADR-0091).
+/// to every colony.
 type WorldView =
     {
         /// Every room vision answered for this tick, by name.
@@ -1480,7 +1480,50 @@ module ColonyView =
             scan.Assaults |> List.map (fun assault -> assault.RoomName) |> Set.ofList
 
         let bootstrap = scan.Borrowed
-        let scanned = scan.Scanned
+
+        // On the world lane (`Tuning.FightLane`), each contested room another
+        // colony declares — a raider seen or recalled there — within
+        // `Tuning.LaneHops` crossings of a fighter of this colony, with the
+        // rooms a walk to it crosses, projected as transit rooms: the room a
+        // world Brief may hand this colony's fighter must be one its Atlas
+        // prices. None in peace.
+        let contested =
+            match tuning.FightLane with
+            | FightLane.PerColony -> []
+            | FightLane.World ->
+                let fighting =
+                    mine
+                    |> List.filter (fun creep ->
+                        isGuardParts creep.Info.Body || partCount creep.Info.Body RangedAttack > 0)
+                    |> List.map (fun creep -> creep.Room)
+                    |> List.distinct
+
+                let raided (room: string) =
+                    Map.containsKey room world.Raiders
+                    || (World.roomOf world room).Hostiles
+                       |> List.exists (fun hostile -> not (Colony.isAlly hostile.Owner))
+
+                match fighting with
+                | [] -> []
+                | _ ->
+                    let hops = World.hopsUnder gate joins tuning world
+                    let held = Set.ofList scan.Scanned
+
+                    colonies
+                    |> List.filter (fun other -> other.Home <> home)
+                    |> Seq.collect Colony.declaredRooms
+                    |> Seq.distinct
+                    |> Seq.filter (fun room -> not (held.Contains room) && raided room)
+                    |> Seq.collect (fun room ->
+                        fighting
+                        |> List.filter (fun at ->
+                            hops at room |> Option.exists (fun n -> n <= tuning.LaneHops))
+                        |> List.collect (fun at -> room :: RoomName.transitBetween at room))
+                    |> Seq.filter (fun room -> not (held.Contains room))
+                    |> Seq.distinct
+                    |> List.ofSeq
+
+        let scanned = scan.Scanned @ contested
 
         // The `elif` chain below reads this after the bootstrap and transit
         // branches and before the worked ones, which **presumes the two

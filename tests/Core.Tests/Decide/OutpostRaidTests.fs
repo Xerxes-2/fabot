@@ -145,6 +145,93 @@ let guardTaskTests =
                     "and a raid healing 120 against the 90 one guard block deals admits the second"
             }
 
+            // The world lane's FightMatch: two colonies pooling
+            // one Guard capped at one body are matched in one pass, the
+            // Task's holders counted whichever colony's, so the body that
+            // lands first takes it and no other colony's body doubles it.
+            test
+                "one match over two colonies' fighters seats a Guard's one body, the one that lands first" {
+                let sizing =
+                    {
+                        AnchorPostCaps = Map.empty
+                        ReserverClaims = []
+                        MinerWorkPerMove = 1
+                        GuardBlocks = 1
+                        RangerBlocks = 1
+                        MinerQuota = 0
+                        OreMinerQuota = 0
+                        CourierQuota = 0
+                        UpgraderWork = None
+                    }
+
+                let side (colony: ColonyView) =
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let pool = planPool colony atlas threats [] (planTasksOn colony threats)
+
+                    let context: MatchContext =
+                        {
+                            View = colony
+                            Atlas = atlas
+                            Sizing = sizing
+                            Threats = threats
+                            Pool = pool
+                            PooledElsewhere = false
+                        }
+
+                    context,
+                    {
+                        Bodies = colony.Creeps |> List.filter isFighterBody
+                        Offered =
+                            pool
+                            |> List.filter (fun pooled ->
+                                match pooled.Task with
+                                | Flee
+                                | Guard _
+                                | Defend _ -> true
+                                | _ -> false)
+                    }
+
+                let near = declaredRaid raiders |> withGuards [ guard "g-near", beside ]
+                let far = declaredRaid raiders |> withBodyAtHome (guard "g-far") atSpawn
+
+                Expect.equal
+                    (entryFor (Guard "W1N2") (pooledOf near)
+                     |> Option.bind (fun entry -> Capacity.capOf CapScope.Fighters entry.Capacity))
+                    (Some 1)
+                    "the premise: one body"
+
+                let holders (sides: (MatchContext * MatchShare) list) =
+                    let outcome =
+                        matchAcross
+                            (List.map fst sides)
+                            []
+                            Map.empty
+                            [ sides |> List.mapi (fun k (_, share) -> k, share) ]
+                            Map.empty
+                            Set.empty
+
+                    outcome.Assigned
+                    |> Map.filter (fun _ tid -> tid = taskId (Guard "W1N2"))
+                    |> Map.keys
+                    |> List.ofSeq
+
+                Expect.equal
+                    (holders [ side far ])
+                    [ "g-far" ]
+                    "alone, the far colony's body takes it"
+
+                Expect.equal
+                    (holders [ side far; side near ])
+                    [ "g-near" ]
+                    "together, the near one, once"
+
+                Expect.equal
+                    (holders [ side near; side far ])
+                    [ "g-near" ]
+                    "whichever colony is read first"
+            }
+
             test "a Fighter standing in the raided room is matched to the Guard" {
                 // Pairwise against the same guard in the same room with nothing to
                 // fight, which is matched to nothing at all.
@@ -4731,6 +4818,78 @@ let childOutpostTests =
                     (Facts.answer (mother 1 [ wraith ]) "W1N4")
                     Answer.Win
                     "one loaded tower beats it, so the home is quiet and the residents are lent"
+            }
+
+            // HomeHold: what a garrisoned home keeps is the
+            // fleet's bodies left there, so one of two residents may leave
+            // while the other beats the raider arriving, and neither once the
+            // other is matched out (the world lane's FightMatch counts it).
+            test
+                "HomeHold keeps a garrison home while the bodies left lose, and releases it while they win" {
+                let resident name =
+                    creepWith
+                        name
+                        0
+                        0
+                        (List.replicate 21 Move
+                         @ List.replicate 14 RangedAttack
+                         @ List.replicate 7 Heal)
+
+                let harasser =
+                    { hostileIn
+                          "W1N4"
+                          { X = 25; Y = 20 }
+                          (List.replicate 7 Move @ List.replicate 13 RangedAttack) with
+                        Id = "Synapse673"
+                        Owner = "Trepidimous"
+                    }
+
+                let mother =
+                    { watchingBeyond [ harasser; wraithAt "W2N3" { X = 25; Y = 20 } ] with
+                        Bank = bank 5600 5600
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [ resident "r-1"; resident "r-2" ]
+                        }
+                    |> standingIn "W1N3" ("r-1", { X = 25; Y = 26 })
+                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
+
+                let r1 = mother.Creeps |> List.find (fun creep -> creep.Name = "r-1")
+
+                let unmapped _ = None
+
+                Expect.isTrue
+                    (Facts.homeHoldReleases
+                        mother
+                        "W1N4"
+                        (Some "W1N3")
+                        (fun _ _ -> false)
+                        unmapped
+                        r1)
+                    "r-2 staying beats Wraith403 arriving: r-1 may go"
+
+                Expect.isFalse
+                    (Facts.homeHoldReleases
+                        mother
+                        "W1N4"
+                        (Some "W1N3")
+                        (fun body _ -> body.Name = "r-2")
+                        unmapped
+                        r1)
+                    "with r-2 matched out the home keeps nothing but no tower: r-1 stays"
+
+                Expect.isFalse
+                    (Facts.homeHoldReleases
+                        mother
+                        "W1N6"
+                        (Some "W1N3")
+                        (fun _ _ -> false)
+                        unmapped
+                        r1)
+                    "and a garrison body standing at home leaves only for a room beside it"
             }
 
             // One window for one question (#531): a raider's arms for the

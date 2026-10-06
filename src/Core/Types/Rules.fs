@@ -424,13 +424,12 @@ module Engine =
     /// flat `x * 50 + y` grid the Atlas lays.
     let roomSide = 50
 
-/// Where the fight is matched (the world-first epic's W5): each colony's own fighters over
-/// its own Briefs, the world's lane matched to give the same answer, or the
-/// world's lane over every fighter.
+/// Where the fight is matched (the world-first epic's W5): each colony's own
+/// fighters over its own Briefs, under the lend rule; or the world's lane,
+/// one match over every fighter of every colony under HomeHold.
 [<RequireQualifiedAccess>]
 type FightLane =
     | PerColony
-    | WorldParity
     | World
 
 /// The colony's **tunables**, in one record: every number the bot chose
@@ -923,6 +922,10 @@ type Tuning =
         /// Which lane matches the fight (`FightLane`). A live override in
         /// Memory (`ObserveMemory.loadFightLane`) takes its place.
         FightLane: FightLane
+        /// On the world lane, how many crossings from one of its fighters a
+        /// contested room another colony declares lies inside to be projected
+        /// for it (`ColonyView.ofWorldRecalling`).
+        LaneHops: int
         /// The share of the colonies a cold reset decides on its own tick
         /// (`LightTick.resetSplit`), the threatened ones first; the rest
         /// stand that tick and decide on the next. Half: a reset's decide ran
@@ -1096,7 +1099,15 @@ module Tuning =
             // and a raid at home forces every tick, which is what empties the
             // bucket in a war.
             FightOnly = true
+            // Per colony while the world lane loses the movement S3 capture
+            // (ArenaTests, "arena captures on the world lane"): its one kite
+            // seat goes to a ranger that parks and never shoots, a kite
+            // approach fault per colony masks. The live A/B window is
+            // `observe fight-lane world`, `percolony` (or clear) its kill switch.
             FightLane = FightLane.PerColony
+            // Two: a room beside the room beside, the window a body is lent
+            // over (`Reaction.lend`).
+            LaneHops = 2
             ResetFirstShare = 0.5
         }
 

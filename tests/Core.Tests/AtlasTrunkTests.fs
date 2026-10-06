@@ -596,6 +596,6 @@ let controllerContainerTests =
                         atlasWith [ "can-ctrl", Structure BuiltKind.Container ] None
                     ))
                     Set.empty
-                    "no controller, no buffer — the empty answer opens the gate (ADR 0004)"
+                    "no controller, no buffer — the empty answer opens the gate"
             }
         ]

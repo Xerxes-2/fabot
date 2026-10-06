@@ -55,7 +55,7 @@
 //   observe.mjs fight-lane         the live fight-lane switch as stored
 //                                  (which lane matches the fight; unset,
 //                                  the tuned one decides)
-//   observe.mjs fight-lane percolony|parity|world  set it
+//   observe.mjs fight-lane percolony|world  set it
 //   observe.mjs fight-lane clear   unset it
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
@@ -112,7 +112,7 @@ const usage =
   "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | fight-lane [percolony | parity | world | clear] | " +
+  "fight-only [on | off | clear] | fight-lane [percolony | world | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
@@ -203,10 +203,10 @@ if (command === "fight-only" && action !== undefined) {
   if (!["on", "off", "clear"].includes(action)) fail("fight-only takes on, off or clear");
   if (actionName !== undefined) fail(usage);
 }
-// The bot reads these three strings and nothing else (`loadFightLane`).
-const LANES = ["percolony", "parity", "world"];
+// The bot reads these two strings and nothing else (`loadFightLane`).
+const LANES = ["percolony", "world"];
 if (command === "fight-lane" && action !== undefined) {
-  if (action !== "clear" && !LANES.includes(action)) fail("fight-lane takes percolony, parity or world, or clear");
+  if (action !== "clear" && !LANES.includes(action)) fail("fight-lane takes percolony or world, or clear");
   if (actionName !== undefined) fail(usage);
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
@@ -954,7 +954,7 @@ if (command === "console") {
 } else if (command === "fight-lane") {
   // ---- fight-lane: the live switch for which lane matches the fight -------
 
-  // As the bot reads it: one of the three strings; anything else unset.
+  // As the bot reads it: one of the two strings; anything else unset.
   const readable = (value) => (LANES.includes(value) ? value : undefined);
   const show = (value) => (value === undefined ? "unset (the tuned lane)" : value);
 

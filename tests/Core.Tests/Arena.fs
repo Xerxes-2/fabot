@@ -1427,9 +1427,17 @@ let private dangerOf (a: Arena) =
 
 /// Every living colony's view cut from this tick's world, as
 /// `Main.fullTick` cuts them, beside the world and its crossings.
-let private cut (a: Arena) : World * (string -> string -> int option) * (Colony * ColonyView) list =
+let private cut
+    (lane: FightLane)
+    (a: Arena)
+    : World * (string -> string -> int option) * (Colony * ColonyView) list =
     let world = worldOf a
-    let tuning = Tuning.defaults
+
+    let tuning =
+        { Tuning.defaults with
+            FightLane = lane
+        }
+
     let living = World.living a.Colonies world
     let joins = JoinTable()
     let casting = HarassCasting.none
@@ -1471,10 +1479,10 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
             world
             c)
 
-/// The view one living colony decides this tick off: judged and aimed as
-/// `Entry.decideColonies` lays them.
-let viewOf (a: Arena) (home: string) : ColonyView =
-    let _, hops, views = cut a
+/// The view one living colony decides this tick off on `lane`: judged and
+/// aimed as `Entry.decideColonies` lays them.
+let viewOfIn (lane: FightLane) (a: Arena) (home: string) : ColonyView =
+    let _, hops, views = cut lane a
 
     judgeColonies hops a.Carried.Assignments Set.empty views
     |> Layout.aimObservers Set.empty
@@ -1482,11 +1490,15 @@ let viewOf (a: Arena) (home: string) : ColonyView =
     |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)
     |> Option.defaultWith (fun () -> failwithf "%s is no living colony" home)
 
+/// `viewOfIn` on the tuned lane.
+let viewOf (a: Arena) (home: string) : ColonyView =
+    viewOfIn Tuning.defaults.FightLane a home
+
 /// Our side's tick: every living colony's view cut from the world and decided,
 /// every room's moves arbitrated once. The Intents, the next assignments and
 /// memos, and the world's carried memory.
-let private decideOurs (a: Arena) : Intent list * Carried =
-    let world, hops, views = cut a
+let private decideOurs (lane: FightLane) (a: Arena) : Intent list * Carried =
+    let world, hops, views = cut lane a
 
     let alive =
         a.Bodies
@@ -1499,7 +1511,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
     let decisions =
         (decideColonies
             {
-                Lane = Tuning.defaults.FightLane
+                Lane = lane
                 Hops = hops
                 Holding = a.Carried.Assignments
                 Verbose = Set.empty
@@ -3883,14 +3895,15 @@ let private activated (time: int) (rooms: Map<string, ArenaRoom>) (c: ArenaContr
     else
         None
 
-/// One tick of the arena: our pipeline and the scripts decide off the
-/// start-of-tick state, the engine performs both, and the tick's trace.
-let step (a: Arena) : Arena * TickTrace =
+/// One tick of the arena, our fight matched on `lane` (`Tuning.FightLane`):
+/// our pipeline and the scripts decide off the start-of-tick state, the
+/// engine performs both, and the tick's trace.
+let stepIn (lane: FightLane) (a: Arena) : Arena * TickTrace =
     let ours, carried =
         if List.isEmpty a.Colonies then
             [], a.Carried
         else
-            decideOurs a
+            decideOurs lane a
 
     let theirs, movePaths = theirActs a
     let events = ResizeArray<ArenaEvent>()
@@ -4736,17 +4749,33 @@ let step (a: Arena) : Arena * TickTrace =
             |> Map.ofSeq
     }
 
-/// Run `ticks` steps, or until `stop` holds of the arena, returning the final
-/// arena and the trace in tick order.
-let runUntil (stop: Arena -> bool) (ticks: int) (a: Arena) : Arena * TickTrace list =
+/// One tick of the arena on the tuned lane (`stepIn`).
+let step (a: Arena) : Arena * TickTrace = stepIn Tuning.defaults.FightLane a
+
+/// Run `ticks` steps on `lane`, or until `stop` holds of the arena, returning
+/// the final arena and the trace in tick order.
+let runUntilIn
+    (lane: FightLane)
+    (stop: Arena -> bool)
+    (ticks: int)
+    (a: Arena)
+    : Arena * TickTrace list =
     let rec go n (a: Arena) acc =
         if n = 0 || stop a then
             a, List.rev acc
         else
-            let next, trace = step a
+            let next, trace = stepIn lane a
             go (n - 1) next (trace :: acc)
 
     go ticks a []
+
+/// `runUntilIn` on the tuned lane.
+let runUntil (stop: Arena -> bool) (ticks: int) (a: Arena) : Arena * TickTrace list =
+    runUntilIn Tuning.defaults.FightLane stop ticks a
+
+/// Run exactly `ticks` steps on `lane`.
+let runIn (lane: FightLane) (ticks: int) (a: Arena) : Arena * TickTrace list =
+    runUntilIn lane (fun _ -> false) ticks a
 
 /// Run exactly `ticks` steps.
 let run (ticks: int) (a: Arena) : Arena * TickTrace list = runUntil (fun _ -> false) ticks a

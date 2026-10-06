@@ -508,18 +508,155 @@ let private fightActs
 
     intents @ glued, movement
 
-/// The decision seam: a colony view in, Decision out, with this colony's
-/// movement left unarbitrated on it — a room's traffic is not one colony's
-/// decision, so the caller folds every colony's together and arbitrates each
-/// room once (`resolveRooms`). Plan, match, emit, move, beside the colony steps
-/// (spawns, sites), all pricing from one Atlas built up front.
-let decideUnarbitrated
+/// What the world's fight hands one colony (`worldFights`): the Briefs of the
+/// world's combat Tasks it pools none of itself but may send a fighter to,
+/// those Tasks, and each world Task's caps, its owner's. Lives within the
+/// tick.
+[<NoEquality; NoComparison>]
+type private WorldFight =
+    {
+        Briefs: Map<Task, Brief>
+        Tasks: Task list
+        Caps: Map<Task, Capacity>
+    }
+
+/// A colony alone in the world: its own fight.
+let private ownFight =
+    {
+        Briefs = Map.empty
+        Tasks = []
+        Caps = Map.empty
+    }
+
+/// A colony's decide opened as far as its fight's head: its Threats and its
+/// own combat Tasks, which the world's Brief table reads, and the rest of
+/// the decide once the world's fight is known (`Join`). Lives within the
+/// tick.
+[<NoEquality; NoComparison>]
+type private Opening =
+    {
+        Home: string
+        View: ColonyView
+        Threats: Threats
+        /// Flee and its own combat Tasks (`planFightTasks`), on first read.
+        FightTasks: Lazy<Task list>
+        Fighters: CreepInfo list
+        Join: WorldFight -> Joining
+    }
+
+/// A colony's decide joined to the world's fight: its side of the match and
+/// the shares it brings, and the rest of the decide off the matches its
+/// bodies were judged in (`Finish`) — None for a fight-only decide the
+/// economy hands back.
+and [<NoEquality; NoComparison>] private Joining =
+    {
+        Context: MatchContext
+        Fight: MatchShare
+        Economy: MatchShare option
+        Finish: MatchOutcome list -> Decision option
+    }
+
+/// The Threats a colony's fighters are priced, emitted and moved in: its
+/// own, the world's Briefs it pools none of laid in beside them.
+let private foughtThreats (threats: Threats) (world: WorldFight) : Threats =
+    if Map.isEmpty world.Briefs then
+        threats
+    else
+        { threats with
+            Briefs =
+                (threats.Briefs, world.Briefs)
+                ||> Map.fold (fun briefs task brief ->
+                    if Map.containsKey task briefs then
+                        briefs
+                    else
+                        Map.add task brief briefs)
+        }
+
+/// The fight pool over the world's Tasks too, each of the world's combat
+/// Tasks capped as its owner caps it: one count of holders over the fleet.
+let private worldPool
+    (threats: Threats)
+    (tasks: Task list)
+    (world: WorldFight)
+    (own: Lazy<PooledTask list>)
+    : PooledTask list =
+    if List.isEmpty world.Tasks && Map.isEmpty world.Caps then
+        own.Value
+    else
+        planFightPool threats tasks
+        |> List.map (fun pooled ->
+            match Map.tryFind pooled.Task world.Caps with
+            | Some capacity -> { pooled with Capacity = capacity }
+            | None -> pooled)
+
+/// A colony's assignments off the matches its bodies were judged in.
+let private nextOf (creeps: CreepInfo list) (outcomes: MatchOutcome list) : Assignments =
+    creeps
+    |> List.choose (fun creep ->
+        outcomes
+        |> List.tryPick (fun outcome -> Map.tryFind creep.Name outcome.Assigned)
+        |> Option.map (fun tid -> creep.Name, tid))
+    |> Map.ofList
+
+/// One colony's match alone: its fighters, then its economy from the
+/// holdings they left.
+let private matchAlone (joining: Joining) (assignments: Assignments) (verbose: Set<string>) =
+    matchAcross
+        [ joining.Context ]
+        []
+        Map.empty
+        ([ [ 0, joining.Fight ] ]
+         @ (joining.Economy |> Option.map (fun share -> [ 0, share ]) |> Option.toList))
+        assignments
+        verbose
+
+/// A whole decide as far as its fight's head: what the rest of it reads.
+[<NoEquality; NoComparison>]
+type private WholeHead =
+    {
+        View: ColonyView
+        Atlas: Atlas.Atlas
+        Plan: PlanMemo
+        Held: HeldTaskFacts
+        Outposts: OutpostFacts
+        Fight: FightPass
+        Verbose: Set<string>
+    }
+
+/// A whole decide up to its match: what the rest of it reads.
+[<NoEquality; NoComparison>]
+type private WholeTail =
+    {
+        Head: WholeHead
+        /// The Threats its fighters are priced, emitted and moved in
+        /// (`foughtThreats`).
+        Fought: Threats
+        Defense: Intent list
+        Consignment: Intent list
+        Spawn: Intent list
+        OutpostSites: Intent list
+        Waiting: WaitingContainer list
+        Quotas: Quotas
+        Overflow: HaulOverflow
+        Busy: BusyReason list
+        Sizing: RowSizing
+        /// Every Task the match may assign, the world's among them.
+        Tasks: Task list
+        Pool: PooledTask list
+        EconomyPool: PooledTask list
+        Fighters: CreepInfo list
+        EconomyBodies: CreepInfo list
+    }
+
+/// A whole decide opened (`Opening`): plan, match, emit, move, beside the
+/// colony steps (spawns, sites), all pricing from one Atlas built up front.
+let rec private openWhole
     (view: ColonyView)
     (assignments: Assignments)
     (verbose: Set<string>)
     (memo: PlanMemo option)
     (turn: ReplanTurn)
-    : Decision =
+    : Opening =
     let view = withDrawn view assignments
 
     // The signature is read before the Atlas is built, because the Atlas is
@@ -639,7 +776,33 @@ let decideUnarbitrated
     // and shared by every reader, the structures' fight, the fight Tasks and
     // their pool.
     let fight = fightPass view atlas held outposts.Guarded
+
+    let head =
+        {
+            View = view
+            Atlas = atlas
+            Plan = plan
+            Held = held
+            Outposts = outposts
+            Fight = fight
+            Verbose = verbose
+        }
+
+    {
+        Home = SpatialInfo.homeName view.Spatial
+        View = view
+        Threats = fight.Threats
+        FightTasks = fight.Tasks
+        Fighters = view.Creeps |> List.filter isFighterBody
+        Join = joinWhole head
+    }
+
+/// A whole decide joined to the world's fight (`Joining`).
+and private joinWhole (head: WholeHead) (world: WorldFight) : Joining =
+    let view, atlas, plan = head.View, head.Atlas, head.Plan
+    let held, outposts, fight = head.Held, head.Outposts, head.Fight
     let threats = fight.Threats
+    let fought = foughtThreats threats world
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
@@ -696,8 +859,11 @@ let decideUnarbitrated
 
     // Every entry's priority and capacity, set once here and read by the
     // Matcher and the mover: the fight pass's off the Briefs, the economy's
-    // after them, and the whole pool the two in pool order (`planPools`).
-    let fightPool = fight.Pool.Value
+    // after them, and the whole pool the two in pool order (`planPools`). The
+    // fight pass's over the world's combat Tasks too, each capped as its
+    // owner caps it (`worldPool`).
+    let fightTasks = fight.Tasks.Value @ world.Tasks
+    let fightPool = worldPool fought fightTasks world fight.Pool
 
     let economyPool =
         planPoolHolding held view atlas busy (List.filter (safetyTier >> not) tasks)
@@ -708,7 +874,7 @@ let decideUnarbitrated
     // census never evicts (#392). Every far leg priced this tick — by the
     // Matcher off the pool, by the mover off the assignments — is a Task in
     // this list; a graced crossing (#151) prices none.
-    Atlas.evictFarFieldsExcept atlas (Set.ofList tasks)
+    Atlas.evictFarFieldsExcept atlas (Set.ofList (tasks @ world.Tasks))
 
     // The overflow term rides beside the memoised flow number and never
     // inside it: it reads the containers' stock, which moves every tick.
@@ -727,26 +893,68 @@ let decideUnarbitrated
 
     let fighters, economyBodies = view.Creeps |> List.partition isFighterBody
 
-    let next, verdicts =
-        matchCreeps
-            view
-            atlas
-            sizing
-            threats
-            pool
-            [
-                {
-                    Bodies = fighters
-                    Offered = fightPool
-                }
+    let tail =
+        {
+            Head = head
+            Fought = fought
+            Defense = defenseIntents
+            Consignment = consignmentIntents
+            Spawn = spawnIntents
+            OutpostSites = outpostSiteIntents
+            Waiting = waitingContainers
+            Quotas = quotas
+            Overflow = overflow
+            Busy = busy
+            Sizing = sizing
+            Tasks = fightTasks @ List.filter (safetyTier >> not) tasks
+            Pool = pool
+            EconomyPool = economyPool
+            Fighters = fighters
+            EconomyBodies = economyBodies
+        }
+
+    {
+        Context =
+            {
+                View = view
+                Atlas = atlas
+                Sizing = sizing
+                Threats = fought
+                Pool = pool
+                PooledElsewhere = false
+            }
+        Fight =
+            {
+                Bodies = fighters
+                Offered = fightPool
+            }
+        Economy =
+            Some
                 {
                     Bodies = economyBodies
                     // Flee is both sides': the fight pool's entry, ahead.
                     Offered = List.filter (fun pooled -> pooled.Task = Flee) fightPool @ economyPool
                 }
-            ]
-            assignments
-            verbose
+        Finish = finishWhole tail
+    }
+
+/// A whole decide finished off the matches its bodies were judged in.
+and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decision option =
+    let head = tail.Head
+    let view, atlas, plan, outposts = head.View, head.Atlas, head.Plan, head.Outposts
+    let verbose = head.Verbose
+    let threats = tail.Fought
+    let tasks, pool, economyPool = tail.Tasks, tail.Pool, tail.EconomyPool
+    let fighters, economyBodies = tail.Fighters, tail.EconomyBodies
+    let defenseIntents, consignmentIntents = tail.Defense, tail.Consignment
+    let spawnIntents, outpostSiteIntents = tail.Spawn, tail.OutpostSites
+
+    let quotas, overflow, busy, sizing =
+        tail.Quotas, tail.Overflow, tail.Busy, tail.Sizing
+
+    let waitingContainers = tail.Waiting
+    let next = nextOf view.Creeps outcomes
+    let verdicts = verdictsOf view.Creeps outcomes
 
     let assigned = assignedTasks tasks next
 
@@ -946,6 +1154,10 @@ let decideUnarbitrated
     // name two rooms is no plan a light tick could walk.
     let steps = Atlas.stepPlans atlas |> Fresh.mapOfSeq
 
+    // What the colony casts for and parks are its own Threats' answers: a
+    // world Brief laid in is another colony's to cast for.
+    let own = head.Fight.Threats
+
     {
         Intents = intents
         Assignments = next
@@ -980,7 +1192,7 @@ let decideUnarbitrated
         Fight =
             {
                 Sizing = carriedSizing sizing
-                Asks = castAsks view threats outposts.Guarded
+                Asks = castAsks view own outposts.Guarded
                 Fighters = fighters |> Seq.map _.Name |> Fresh.setOfSeq
                 EconomyPooled = not (List.isEmpty economyPool)
                 OutpostRooms = outposts.Declared
@@ -991,7 +1203,7 @@ let decideUnarbitrated
                         |> Option.map (fun task -> creep.Name, task))
                     |> Fresh.mapOfSeq
                 Parked =
-                    (let walledOff = walledOffBy view atlas threats
+                    (let walledOff = walledOffBy view atlas own
 
                      view.Creeps
                      |> Seq.filter (fun creep ->
@@ -1000,6 +1212,26 @@ let decideUnarbitrated
                      |> Fresh.setOfSeq)
             }
     }
+    |> Some
+
+/// The decision seam: a colony view in, Decision out, with this colony's
+/// movement left unarbitrated on it — a room's traffic is not one colony's
+/// decision, so the caller folds every colony's together and arbitrates each
+/// room once (`resolveRooms`). Plan, match, emit, move, beside the colony steps
+/// (spawns, sites), all pricing from one Atlas built up front; a colony alone
+/// in the world (`openWhole`, `matchAlone`).
+let decideUnarbitrated
+    (view: ColonyView)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo option)
+    (turn: ReplanTurn)
+    : Decision =
+    let joining = (openWhole view assignments verbose memo turn).Join ownFight
+
+    match joining.Finish [ matchAlone joining assignments verbose ] with
+    | Some decision -> decision
+    | None -> invalidOp "A whole decide is never handed back"
 
 /// A fight-only decide (`LightTick.fightOnly`): the fight pass alone, on the inputs a
 /// whole decide reads — the Threats, the structures' fight (`defenseIntents`'
@@ -1016,14 +1248,16 @@ let decideUnarbitrated
 /// colony whole this tick: a body across the fighter line since the carry,
 /// a cast ask moved or owed a spawn standing idle — spawning is the
 /// economy's —, an economy body a Reach has walled off from its Task since
-/// (`walledOffBy`), or a fighter's step an economy body stands in.
-let decideFight
+/// (`walledOffBy`), or a fighter's step an economy body stands in. The last
+/// is read once the match is made, so the opening is None for the rest and
+/// the joined decide's `Finish` None for it.
+let rec private openFight
     (view: ColonyView)
     (assignments: Assignments)
     (verbose: Set<string>)
     (memo: PlanMemo)
     (carry: FightCarry)
-    : Decision option =
+    : Opening option =
     let view = withDrawn view assignments
     let fighters, economyBodies = view.Creeps |> List.partition isFighterBody
     let fighting = fighters |> List.map _.Name |> Set.ofList
@@ -1066,116 +1300,160 @@ let decideFight
         then
             None
         else
+            Some
+                {
+                    Home = SpatialInfo.homeName view.Spatial
+                    View = view
+                    Threats = threats
+                    FightTasks = fight.Tasks
+                    Fighters = fighters
+                    Join = joinFight view assignments verbose memo carry signedRooms atlas fight
+                }
 
-            let defenseIntents = fight.Towers.Value
-            let tasks = fight.Tasks.Value
-            let pool = fight.Pool.Value
+/// A fight-only decide joined to the world's fight (`Joining`).
+and private joinFight
+    (view: ColonyView)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo)
+    (carry: FightCarry)
+    (signedRooms: Map<string, string>)
+    atlas
+    (fight: FightPass)
+    (world: WorldFight)
+    : Joining =
+    let fighters, economyBodies = view.Creeps |> List.partition isFighterBody
+    let fighting = fighters |> List.map _.Name |> Set.ofList
+    let threats = foughtThreats fight.Threats world
+    let tasks = fight.Tasks.Value @ world.Tasks
+    let pool = worldPool threats tasks world fight.Pool
 
-            let next, verdicts =
-                matchCreepsBeside
-                    carry.EconomyPooled
-                    view
-                    atlas
-                    carry.Sizing
-                    threats
-                    pool
-                    [ { Bodies = fighters; Offered = pool } ]
-                    assignments
-                    verbose
+    let finish (outcomes: MatchOutcome list) : Decision option =
+        let defenseIntents = fight.Towers.Value
+        let next = nextOf view.Creeps outcomes
+        let verdicts = verdictsOf view.Creeps outcomes
 
-            let assigned = assignedTasks tasks next
+        let assigned = assignedTasks tasks next
 
-            // `decideUnarbitrated`'s crossings, of the fighters: a graced keep's last
-            // room, else home for an idle one standing away.
-            let crossings =
-                let home = SpatialInfo.homeName view.Spatial
+        // `decideUnarbitrated`'s crossings, of the fighters: a graced keep's last
+        // room, else home for an idle one standing away.
+        let crossings =
+            let home = SpatialInfo.homeName view.Spatial
 
-                let graced =
-                    next
-                    |> Map.toList
-                    |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
-                    |> List.choose (fun (name, tid) ->
-                        lastSeenIn view tid |> Option.map (fun room -> name, room))
+            let graced =
+                next
+                |> Map.toList
+                |> List.filter (fun (name, _) -> not (Map.containsKey name assigned))
+                |> List.choose (fun (name, tid) ->
+                    lastSeenIn view tid |> Option.map (fun room -> name, room))
 
-                let homeward =
-                    fighters
-                    |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
-                    |> List.choose (fun creep ->
-                        Atlas.creepRoom atlas creep.Name
-                        |> Option.filter (fun room -> room <> home)
-                        |> Option.map (fun _ -> creep.Name, home))
+            let homeward =
+                fighters
+                |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
+                |> List.choose (fun creep ->
+                    Atlas.creepRoom atlas creep.Name
+                    |> Option.filter (fun room -> room <> home)
+                    |> Option.map (fun _ -> creep.Name, home))
 
-                homeward @ graced |> Map.ofList
+            homeward @ graced |> Map.ofList
 
-            // The reflexes run over every body as on a whole decide, so a fighter's
-            // heal still reaches an economy body; an economy body's own reflex is its
-            // replay's.
-            let intents, movement =
-                fightActs
-                    view
-                    atlas
-                    threats
-                    pool
-                    assigned
-                    crossings
-                    verbose
-                    (Some(fun name -> Set.contains name fighting))
-                    (fun emitted -> defenseIntents @ emitted)
+        // The reflexes run over every body as on a whole decide, so a fighter's
+        // heal still reaches an economy body; an economy body's own reflex is its
+        // replay's.
+        let intents, movement =
+            fightActs
+                view
+                atlas
+                threats
+                pool
+                assigned
+                crossings
+                verbose
+                (Some(fun name -> Set.contains name fighting))
+                (fun emitted -> defenseIntents @ emitted)
 
-            let economy = economyBodies |> List.map _.Name |> Set.ofList
+        let economy = economyBodies |> List.map _.Name |> Set.ofList
 
-            // A fighter whose wanted tile an economy body stands on: only a
-            // whole decide's arbitration shoves or swaps that body, and here
-            // it is a wall — a worker parked on a rampart, a hauler in a choke.
-            let blocked =
-                let walls =
-                    Atlas.placedCreeps atlas
-                    |> List.filter (fun (name, _) -> Set.contains name economy)
-                    |> List.map snd
-                    |> Set.ofList
+        // A fighter whose wanted tile an economy body stands on: only a
+        // whole decide's arbitration shoves or swaps that body, and here
+        // it is a wall — a worker parked on a rampart, a hauler in a choke.
+        let blocked =
+            let walls =
+                Atlas.placedCreeps atlas
+                |> List.filter (fun (name, _) -> Set.contains name economy)
+                |> List.map snd
+                |> Set.ofList
 
-                movement.Intents
-                |> List.exists (fun step ->
-                    match step.Candidates with
-                    | wanted :: _ -> wanted <> step.Pos && Set.contains wanted walls
-                    | [] -> false)
+            movement.Intents
+            |> List.exists (fun step ->
+                match step.Candidates with
+                | wanted :: _ -> wanted <> step.Pos && Set.contains wanted walls
+                | [] -> false)
 
-            if blocked then
-                None
-            else
+        if blocked then
+            None
+        else
 
-                Some
-                    {
-                        Intents = intents
-                        Assignments =
-                            (next, assignments)
-                            ||> Map.fold (fun acc name tid ->
-                                if Set.contains name economy then
-                                    Map.add name tid acc
-                                else
-                                    acc)
-                        Memo = stamped view signedRooms memo
-                        Verdicts = verdicts
-                        Movement = movement
-                        Quotas = Quotas.silent
-                        HaulOverflow = HaulOverflow.none
-                        OutpostRooms = carry.OutpostRooms
-                        WaitingContainers = []
-                        Steps =
-                            Atlas.stepPlans atlas
-                            |> Seq.filter (fun (name, _) -> Set.contains name fighting)
-                            |> Fresh.mapOfSeq
-                        Next = []
-                        Later = []
-                        Aims = aims view atlas threats assigned
-                        Volleys = volleys view atlas threats assigned
-                        Drawn =
-                            view.Creeps
-                            |> List.choose (fun creep ->
-                                creep.DrawnFrom |> Option.map (fun store -> creep.Name, store))
-                            |> Map.ofList
-                        Fight = carry
-                    }
+            Some
+                {
+                    Intents = intents
+                    Assignments =
+                        (next, assignments)
+                        ||> Map.fold (fun acc name tid ->
+                            if Set.contains name economy then
+                                Map.add name tid acc
+                            else
+                                acc)
+                    Memo = stamped view signedRooms memo
+                    Verdicts = verdicts
+                    Movement = movement
+                    Quotas = Quotas.silent
+                    HaulOverflow = HaulOverflow.none
+                    OutpostRooms = carry.OutpostRooms
+                    WaitingContainers = []
+                    Steps =
+                        Atlas.stepPlans atlas
+                        |> Seq.filter (fun (name, _) -> Set.contains name fighting)
+                        |> Fresh.mapOfSeq
+                    Next = []
+                    Later = []
+                    Aims = aims view atlas threats assigned
+                    Volleys = volleys view atlas threats assigned
+                    Drawn =
+                        view.Creeps
+                        |> List.choose (fun creep ->
+                            creep.DrawnFrom |> Option.map (fun store -> creep.Name, store))
+                        |> Map.ofList
+                    Fight = carry
+                }
+
+    {
+        Context =
+            {
+                View = view
+                Atlas = atlas
+                Sizing = carry.Sizing
+                Threats = threats
+                Pool = pool
+                PooledElsewhere = carry.EconomyPooled
+            }
+        Fight = { Bodies = fighters; Offered = pool }
+        Economy = None
+        Finish = finish
+    }
+
+/// A fight-only decide (`openFight`) of a colony alone in the world.
+let decideFight
+    (view: ColonyView)
+    (assignments: Assignments)
+    (verbose: Set<string>)
+    (memo: PlanMemo)
+    (carry: FightCarry)
+    : Decision option =
+    openFight view assignments verbose memo carry
+    |> Option.bind (fun opening ->
+        let joining = opening.Join ownFight
+        joining.Finish [ matchAlone joining assignments verbose ])
 
 /// The decision seam a shell with one colony — and the whole suite — asks for:
 /// `decideUnarbitrated`'s answer with this colony's movement folded back in
@@ -1202,7 +1480,8 @@ let decide
 type ColonyInputs =
     {
         /// Which lane matches the fight (`Tuning.FightLane`, or its live
-        /// override). Read by none yet: the world lane's later slices.
+        /// override): every view is put on it, and the world lane decides
+        /// the colonies together (`decideWorld`).
         Lane: FightLane
         /// Crossings from a colony's home to a room, as `Facts.judge` ranks
         /// a raided room's answerer by.
@@ -1263,6 +1542,304 @@ let judgeColonies
         : Facts.Judged))
     |> Facts.judge hops assignments
 
+/// ADR-0091
+/// The world's fight, one Brief per combat Task world-wide: of the colonies
+/// that pool a Guard or a Defend, its owner's — a home's Defend the home's;
+/// a Guard its declarer's, else the room's verdict's Defender or answerer,
+/// else the fewest crossings from it, then by home. Each Task is capped as
+/// its owner caps it, whichever colony pools it, so one count of holders
+/// over the fleet fills it. A colony with a fighter is handed the owner's
+/// Brief of each such Task it pools none of in a room it projects. An
+/// Assault stays its declarer's alone.
+let private worldFights
+    (hops: string -> string -> int option)
+    (openings: (Colony * Opening) list)
+    : Map<string, WorldFight> =
+    let claims =
+        openings
+        |> List.collect (fun (colony, opening) ->
+            opening.FightTasks.Value
+            |> List.choose (fun task ->
+                match task with
+                | Guard room
+                | Defend room ->
+                    Threats.briefFor opening.Threats task
+                    |> Option.map (fun brief -> task, (room, colony, opening, brief))
+                | _ -> None))
+        |> List.groupBy fst
+        |> List.map (fun (task, claimed) -> task, List.map snd claimed)
+
+    let owned =
+        claims
+        |> List.map (fun (task, claimed) ->
+            let room, _, _, _ = List.head claimed
+
+            // A room's kind is the first claim down `BriefKind.order`, every
+            // colony's claims read as one room's: a resident room's Guard is
+            // its residents' colony's.
+            let rank (brief: Brief) =
+                match brief.Duty with
+                | Duty.Guard kind ->
+                    BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
+                | _ -> 0
+
+            let first = claimed |> List.map (fun (_, _, _, brief) -> rank brief) |> List.min
+
+            let ranked = claimed |> List.filter (fun (_, _, _, brief) -> rank brief = first)
+
+            let named home =
+                ranked |> List.tryFind (fun (_, colony, _, _) -> colony.Home = home)
+
+            let judged () =
+                ranked
+                |> List.tryPick (fun (_, _, opening, _) ->
+                    Map.tryFind room opening.View.World.Answers)
+                |> Option.bind (fun verdict ->
+                    verdict.Value.Defender |> Option.orElse verdict.Value.Answerer)
+                |> Option.bind named
+
+            let owner =
+                (match task with
+                 | Defend home -> named home
+                 | _ -> None)
+                |> Option.orElse (
+                    ranked
+                    |> List.tryFind (fun (_, colony, _, _) ->
+                        Set.contains room (Colony.declaredRooms colony))
+                )
+                |> Option.orElse (judged ())
+                |> Option.defaultWith (fun () ->
+                    ranked
+                    |> List.minBy (fun (_, colony, _, _) ->
+                        hops colony.Home room |> Option.defaultValue System.Int32.MaxValue,
+                        colony.Home))
+
+            let _, ownerColony, ownerOpening, brief = owner
+
+            // Its caps: the owner's crowds, never fewer, each at the most any
+            // colony that caps it asks — each colony's Brief counts only the
+            // rows its own bodies answer (a hauler's kill asks a ranger only
+            // of the colony that has one).
+            let capacity = brief.Capacity ownerOpening.Threats
+
+            let caps =
+                claimed
+                |> List.map (fun (_, _, opening, claim) -> (claim.Capacity opening.Threats).Caps)
+
+            let merged =
+                capacity.Caps
+                |> Map.map (fun scope limit ->
+                    caps |> List.choose (Map.tryFind scope) |> List.fold max limit)
+
+            task,
+            (room, ownerColony.Home, brief, { capacity with Caps = merged }),
+            List.length claimed > 1)
+
+    openings
+    |> List.map (fun (colony, opening) ->
+        let own = opening.FightTasks.Value |> Set.ofList
+        let fights = not (List.isEmpty opening.Fighters)
+
+        let handed =
+            owned
+            |> List.filter (fun (task, (room, owner, _, _), shared) ->
+                (shared || owner <> colony.Home)
+                && (Set.contains task own
+                    || fights && Map.containsKey room opening.View.Spatial.Rooms))
+
+        // Its own Briefs of each room's fight: a body one of them admits
+        // answers the room through it, so another colony's Brief there
+        // admits it not (a resident keeps its Guard of a child's home, never
+        // the child's Defend beside it; a melee guard its Guard admits none
+        // of may still take that Defend).
+        let briefedIn (room: string) =
+            own
+            |> List.ofSeq
+            |> List.choose (fun task ->
+                match task with
+                | Guard at
+                | Defend at when at = room -> Threats.briefFor opening.Threats task
+                | _ -> None)
+
+        let laid = handed |> List.filter (fun (task, _, _) -> not (Set.contains task own))
+
+        let narrowed (room: string) (brief: Brief) =
+            match briefedIn room with
+            | [] -> brief
+            | briefs ->
+                { brief with
+                    Admits =
+                        fun creep ->
+                            brief.Admits creep
+                            && not (briefs |> List.exists (fun mine -> mine.Admits creep))
+                }
+
+        colony.Home,
+        {
+            Briefs =
+                laid
+                |> List.map (fun (task, (room, _, brief, _), _) -> task, narrowed room brief)
+                |> Map.ofList
+            Tasks = laid |> List.map (fun (task, _, _) -> task)
+            Caps =
+                handed
+                |> List.map (fun (task, (_, _, _, capacity), _) -> task, capacity)
+                |> Map.ofList
+        })
+    |> Map.ofList
+
+/// The world lane's tick (`FightLane.World`): every deciding colony opened —
+/// the fight-only ones (`openFight`) off the judged views, every other whole
+/// (`openWhole`) off the aimed ones —, the world's fight laid in
+/// (`worldFights`), one match over every fighter of every colony
+/// (`matchAcross`, a colony that decides nothing counting the holdings its
+/// fighters keep), then each colony's economy matched from the holdings its
+/// fighters left, and each decide finished, its fighters' acts and steps
+/// its own. A fight-only colony a fighter's step hands back to a whole
+/// decide is decided whole, and the lane run again without it.
+let private decideWorld
+    (inputs: ColonyInputs)
+    (stamp: unit -> 'Stamp)
+    (colonies: (Colony * ColonyView) list)
+    (judged: ColonyView list)
+    : ColonyDecisions<'Stamp> =
+    let rec lane (alone: Set<string>) =
+        let fought =
+            List.zip colonies judged
+            |> List.filter (fun ((colony, _), _) -> Set.contains colony.Home alone)
+            |> List.choose (fun ((colony, _), view) ->
+                Option.map2
+                    (fun memo carry -> openFight view inputs.Holding inputs.Verbose memo carry)
+                    (Map.tryFind colony.Home inputs.PlanMemos)
+                    (Map.tryFind colony.Home inputs.Carries)
+                |> Option.flatten
+                |> Option.map (fun opening -> colony, view, opening))
+
+        let fightOnly = fought |> List.map (fun (colony, _, _) -> colony.Home) |> Set.ofList
+
+        let turnWaits =
+            match inputs.TurnIndex with
+            | Some turn ->
+                colonies
+                |> List.tryItem turn
+                |> Option.exists (fun (colony, _) ->
+                    Set.contains colony.Home inputs.Idle || Set.contains colony.Home fightOnly)
+            | None -> false
+
+        let turn =
+            match inputs.TurnIndex with
+            | Some turn when not turnWaits -> turn
+            | _ -> -1
+
+        let views =
+            judged
+            |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
+            |> List.zip (colonies |> List.map fst)
+
+        let whole =
+            views
+            |> List.indexed
+            |> List.filter (fun (_, (colony, _)) ->
+                not (Set.contains colony.Home inputs.Idle)
+                && not (Set.contains colony.Home fightOnly))
+            |> List.map (fun (index, (colony, view)) ->
+                let whose =
+                    match inputs.TurnIndex with
+                    | Some _ when index <> turn -> ReplanTurn.Waiting
+                    | _ -> ReplanTurn.Now
+
+                colony,
+                view,
+                openWhole
+                    view
+                    inputs.Holding
+                    inputs.Verbose
+                    (Map.tryFind colony.Home inputs.PlanMemos)
+                    whose)
+
+        let opened = fought @ whole
+
+        let fights =
+            worldFights
+                inputs.Hops
+                (opened |> List.map (fun (colony, _, opening) -> colony, opening))
+
+        let joined =
+            opened
+            |> List.map (fun (colony, view, opening) ->
+                colony, view, opening, opening.Join fights.[colony.Home])
+
+        // The fighters of a colony that decides nothing keep their Tasks,
+        // counted against the world's caps.
+        let bystanders =
+            colonies
+            |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.Idle)
+            |> List.collect (fun (_, view) -> view.Creeps |> List.filter isFighterBody)
+
+        let seed =
+            bystanders
+            |> List.choose (fun creep ->
+                Map.tryFind creep.Name inputs.Holding |> Option.map (fun tid -> creep.Name, tid))
+            |> Map.ofList
+
+        let fleet =
+            matchAcross
+                (joined |> List.map (fun (_, _, _, joining) -> joining.Context))
+                bystanders
+                seed
+                [ joined |> List.mapi (fun k (_, _, _, joining) -> k, joining.Fight) ]
+                inputs.Holding
+                inputs.Verbose
+
+        let finished =
+            joined
+            |> List.map (fun (colony, view, opening, joining) ->
+                let economy =
+                    joining.Economy
+                    |> Option.map (fun share ->
+                        let fighters =
+                            opening.Fighters
+                            |> List.choose (fun creep ->
+                                Map.tryFind creep.Name fleet.Assigned
+                                |> Option.map (fun tid -> creep.Name, tid))
+                            |> Map.ofList
+
+                        matchAcross
+                            [ joining.Context ]
+                            []
+                            fighters
+                            [ [ 0, share ] ]
+                            inputs.Holding
+                            inputs.Verbose)
+
+                let decision = joining.Finish(fleet :: Option.toList economy)
+                colony, view, decision, decision |> Option.map (fun _ -> stamp ()))
+
+        match
+            finished
+            |> List.choose (fun (colony, _, decision, _) ->
+                match decision with
+                | None -> Some colony.Home
+                | Some _ -> None)
+        with
+        | [] ->
+            {
+                Views = views
+                Decided =
+                    finished
+                    |> List.choose (fun (colony, view, decision, stamped) ->
+                        Option.map2
+                            (fun decision stamped -> colony, view, decision, stamped)
+                            decision
+                            stamped)
+                FoughtAlone = fightOnly
+                Turn = turn
+                TurnWaits = turnWaits
+            }
+        | handed -> lane (Set.difference fightOnly (Set.ofList handed))
+
+    lane inputs.FightAlone
+
 /// Every colony's tick decided: the views judged (`judgeColonies`), the
 /// fight-only decides first (`decideFight`), so the turn and the observers'
 /// looks read the colonies that did fight alone, never the candidates a
@@ -1275,68 +1852,87 @@ let decideColonies
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     : ColonyDecisions<'Stamp> =
+    // Every view on the inputs' lane, which its rules read off its Tuning.
+    let colonies =
+        colonies
+        |> List.map (fun (colony, view) ->
+            colony,
+            if view.Tuning.FightLane = inputs.Lane then
+                view
+            else
+                { view with
+                    Tuning =
+                        { view.Tuning with
+                            FightLane = inputs.Lane
+                        }
+                })
+
     let judged = judgeColonies inputs.Hops inputs.Holding inputs.Idle colonies
 
-    let fought =
-        List.zip (colonies |> List.map fst) judged
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.FightAlone)
-        |> List.choose (fun (colony, view) ->
-            Option.map2
-                (fun memo carry -> decideFight view inputs.Holding inputs.Verbose memo carry)
-                (Map.tryFind colony.Home inputs.PlanMemos)
-                (Map.tryFind colony.Home inputs.Carries)
-            |> Option.flatten
-            |> Option.map (fun decision -> colony, view, decision, stamp ()))
+    match inputs.Lane with
+    | FightLane.World -> decideWorld inputs stamp colonies judged
+    | FightLane.PerColony ->
 
-    let fightOnly =
-        fought |> List.map (fun (colony, _, _, _) -> colony.Home) |> Set.ofList
+        let fought =
+            List.zip (colonies |> List.map fst) judged
+            |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.FightAlone)
+            |> List.choose (fun (colony, view) ->
+                Option.map2
+                    (fun memo carry -> decideFight view inputs.Holding inputs.Verbose memo carry)
+                    (Map.tryFind colony.Home inputs.PlanMemos)
+                    (Map.tryFind colony.Home inputs.Carries)
+                |> Option.flatten
+                |> Option.map (fun decision -> colony, view, decision, stamp ()))
 
-    let turnWaits =
-        match inputs.TurnIndex with
-        | Some turn ->
-            colonies
-            |> List.tryItem turn
-            |> Option.exists (fun (colony, _) ->
-                Set.contains colony.Home inputs.Idle || Set.contains colony.Home fightOnly)
-        | None -> false
+        let fightOnly =
+            fought |> List.map (fun (colony, _, _, _) -> colony.Home) |> Set.ofList
 
-    let turn =
-        match inputs.TurnIndex with
-        | Some turn when not turnWaits -> turn
-        | _ -> -1
+        let turnWaits =
+            match inputs.TurnIndex with
+            | Some turn ->
+                colonies
+                |> List.tryItem turn
+                |> Option.exists (fun (colony, _) ->
+                    Set.contains colony.Home inputs.Idle || Set.contains colony.Home fightOnly)
+            | None -> false
 
-    let views =
-        judged
-        |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
-        |> List.zip (colonies |> List.map fst)
+        let turn =
+            match inputs.TurnIndex with
+            | Some turn when not turnWaits -> turn
+            | _ -> -1
 
-    // The decision is bound and then tupled, and the turn is a DU
-    // (`ReplanTurn`), because the first shape shipped broken: as an expression
-    // inside the tuple with a `bool` last argument, the turn arrived as
-    // JavaScript `undefined`, `not undefined` is `true`, and no layout was
-    // planned at all (#357). Only `npm run profile` caught it.
-    let whole =
-        views
-        |> List.indexed
-        |> List.filter (fun (_, (colony, _)) ->
-            not (Set.contains colony.Home inputs.Idle)
-            && not (Set.contains colony.Home fightOnly))
-        |> List.map (fun (index, (colony, view)) ->
-            let memo = Map.tryFind colony.Home inputs.PlanMemos
+        let views =
+            judged
+            |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
+            |> List.zip (colonies |> List.map fst)
 
-            let whose =
-                match inputs.TurnIndex with
-                | Some _ when index <> turn -> ReplanTurn.Waiting
-                | _ -> ReplanTurn.Now
+        // The decision is bound and then tupled, and the turn is a DU
+        // (`ReplanTurn`), because the first shape shipped broken: as an expression
+        // inside the tuple with a `bool` last argument, the turn arrived as
+        // JavaScript `undefined`, `not undefined` is `true`, and no layout was
+        // planned at all (#357). Only `npm run profile` caught it.
+        let whole =
+            views
+            |> List.indexed
+            |> List.filter (fun (_, (colony, _)) ->
+                not (Set.contains colony.Home inputs.Idle)
+                && not (Set.contains colony.Home fightOnly))
+            |> List.map (fun (index, (colony, view)) ->
+                let memo = Map.tryFind colony.Home inputs.PlanMemos
 
-            let decision = decideUnarbitrated view inputs.Holding inputs.Verbose memo whose
+                let whose =
+                    match inputs.TurnIndex with
+                    | Some _ when index <> turn -> ReplanTurn.Waiting
+                    | _ -> ReplanTurn.Now
 
-            colony, view, decision, stamp ())
+                let decision = decideUnarbitrated view inputs.Holding inputs.Verbose memo whose
 
-    {
-        Views = views
-        Decided = fought @ whole
-        FoughtAlone = fightOnly
-        Turn = turn
-        TurnWaits = turnWaits
-    }
+                colony, view, decision, stamp ())
+
+        {
+            Views = views
+            Decided = fought @ whole
+            FoughtAlone = fightOnly
+            Turn = turn
+            TurnWaits = turnWaits
+        }

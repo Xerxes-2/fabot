@@ -473,7 +473,7 @@ let outpostHaulTests =
                 Expect.equal
                     (quotaOf (haulHome |> withHaulOutpost None))
                     0
-                    "and a room the colony cannot see prices no rock at all (ADR 0004)"
+                    "and a room the colony cannot see prices no rock at all"
             }
 
             test "two containers across the same Seam are one sum, rounded once" {

@@ -819,7 +819,7 @@ let loadFightOnly () : bool option =
 
 /// The live fight-lane switch from `Memory.fabot.observe.fightLane`
 /// (`Tuning.FightLane`): set, it takes the tuned one's place. Read each tick;
-/// anything but `"percolony"`, `"parity"` or `"world"` reads as unset.
+/// anything but `"percolony"` or `"world"` reads as unset.
 let loadFightLane () : FightLane option =
     leafOr None (fun () -> observeLeaf "fightLane") (fun raw ->
         if jsTypeof raw <> "string" then
@@ -827,7 +827,6 @@ let loadFightLane () : FightLane option =
         else
             match unbox<string> raw with
             | "percolony" -> Some FightLane.PerColony
-            | "parity" -> Some FightLane.WorldParity
             | "world" -> Some FightLane.World
             | _ -> None)
 

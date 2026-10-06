@@ -92,6 +92,15 @@ The pure step that reads a [[colony view]] and generates this tick's full Task p
 ### Matcher
 The pure step that assigns creeps to Tasks by greedy matching — the best pair of any idle body first, so a contested Task goes to the nearest body that ranks it there (#530) — remembering only current assignments between ticks (anti-thrash). It knows no kinds of Task: it compares [[priority]] and [[travel cost]] and counts holders against [[capacity]]. ADR-0052.
 
+### Fight lane
+Where the fight is matched (`Tuning.FightLane`, live override `observe fight-lane`): per colony, each colony's fighters over its own Briefs under the lend rule; or the world's, every deciding colony opened, one [[FightMatch]] over every fighter of every colony, then each colony's economy matched from the holdings its fighters left. A fighter's acts and steps stay its colony's, priced in its colony's view and Atlas. Per colony by default until the live A/B window. ADR-0091.
+
+### FightMatch
+The world lane's one greedy pass over the fleet's fighters (`Matcher.matchAcross`): each body priced in its own colony's view, Atlas and Threats, every combat Task's holders counted whichever colony's, its load keyed by the Task alone and its caps the world's — each crowd every briefing colony caps, at the most any asks. One Brief per combat Task world-wide is handed to a colony with a fighter that briefs nothing in that room and projects it (a room's kind the first claim down `BriefKind.order` over every colony; then a home's Defend the home's, a Guard its declarer's, the verdict's Defender or answerer, fewest crossings). [[HomeHold]] is its gate. ADR-0091.
+
+### HomeHold
+The world lane's rule a garrison body leaves its home by, in place of the lend rule: a colony's ranger-row bodies garrison its resident rooms, and one may take a fight elsewhere only while every resident home beside the fight is quiet and its loaded towers and the fleet's bodies left there — less those already matched out of it this tick — beat every raider that reaches its middle inside a lend's window (by name, and by the home's arrival maps); one standing in a resident home leaves only for a room beside it. ADR-0091.
+
 ### Emitter
 The pure step that turns the tick's assigned Tasks into each creep's action Intent and [[chat bubble]], judged from tick-start geometry off the same [[atlas]] as the Matcher and Resolver.
 
