@@ -586,6 +586,9 @@ type ColonyView =
         Fought: Map<string, FightRecord>
         /// The last tick a raider stood in the home (`StandDown.HomeRaided`).
         HomeRaided: int option
+        /// The home's Keep and rampart hits the tick before
+        /// (`StandDown.KeepHitsBefore`).
+        KeepHitsBefore: Map<string, int>
         /// Our construction sites in every room this colony works and has
         /// vision in: the Build pool is this list one to one.
         ConstructionSites: ConstructionSiteInfo list
@@ -1724,6 +1727,7 @@ module ColonyView =
             ChasedOutposts = gate.ChasedOutposts
             Fought = gate.Fought
             HomeRaided = gate.HomeRaided
+            KeepHitsBefore = gate.KeepHitsBefore
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             PlayerSites = world.Sites
             Creeps = mine |> List.map (fun creep -> creep.Info)

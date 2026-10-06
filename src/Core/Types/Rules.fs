@@ -406,6 +406,9 @@ module Engine =
 
     let roadDecayTime = 1000
 
+    /// RAMPART_DECAY_AMOUNT: what a rampart loses each RAMPART_DECAY_TIME.
+    let rampartDecayAmount = 300
+
     /// ROAD_WEAROUT: the decay-timer ticks a creep's step onto a road brings
     /// the next decay forward by, per body part (the engine's move
     /// processor: `road.nextDecayTime -= ROAD_WEAROUT * body.length`).

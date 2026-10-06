@@ -1979,6 +1979,24 @@ let private raidedBy owner (heals: int) =
 let private raided heals =
     independentChild [ 1000 ] |> raidedBy "Trepidimous" heals
 
+/// The same squad with a pure dismantler (WORK and MOVE, no weapon) in the
+/// melee's place.
+let private breached heals =
+    raided heals
+    |> inChild (fun facts ->
+        { facts with
+            Hostiles =
+                facts.Hostiles
+                |> List.map (fun h ->
+                    if h.Id = "atk" then
+                        { h with
+                            Body = [ Work; Work; Move; Move ]
+                            Hits = 4 * Engine.partHits
+                        }
+                    else
+                        h)
+        })
+
 let private underSafeMode =
     inChild (fun facts ->
         { facts with
@@ -2105,6 +2123,19 @@ let defendedHomeTests =
                 Expect.isFalse
                     (List.contains child raided.Borrowed.Rooms)
                     "and it is no room she raises"
+            }
+
+            test
+                "a dismantler the healers keep alive under the towers beats the home as a melee does" {
+                // #429: the breacher deals a creep nothing and razes the home.
+                Expect.equal
+                    (viewOf (breached 7) mother).Borrowed.Defended
+                    [ child ]
+                    "the child's home is hers to defend"
+
+                Expect.isEmpty
+                    (viewOf (breached 0) mother).Borrowed.Defended
+                    "and one the towers kill is none of hers"
             }
 
             test

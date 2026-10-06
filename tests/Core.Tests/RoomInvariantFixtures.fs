@@ -224,6 +224,7 @@ let internal colonyOf (room: LoadedRoom) level =
         ChasedOutposts = Set.empty
         Fought = Map.empty
         HomeRaided = None
+        KeepHitsBefore = Map.empty
         RoomControl =
             Map.ofList
                 [

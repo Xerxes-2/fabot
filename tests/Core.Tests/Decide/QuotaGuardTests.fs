@@ -376,6 +376,75 @@ let guardRowTests =
                     "one nothing refills is lost to the raid"
             }
 
+            test "a dismantler at home its healers keep alive under the tower hires a guard" {
+                // #429: the breacher shape at W18S23 — WORK and MOVE, no
+                // weapon, healed past the tower's shot — razes the home, and
+                // nothing of ours answered it but the towers. Its dismantle
+                // is priced against the towers as a swing is. A neutral's is
+                // answered only caught dismantling: the rampart beside it 100
+                // down since the last tick.
+                let breachedBy owner caught healers =
+                    let colony = guardColony [] []
+
+                    { colony with
+                        Hostiles =
+                            { hostileIn "W1N1" { X = 8; Y = 9 } [ Work; Work; Move; Move ] with
+                                Id = "breacher"
+                                Owner = owner
+                            }
+                            :: [
+                                for i in 1..healers ->
+                                    { hostileIn
+                                          "W1N1"
+                                          { X = 8; Y = 10 }
+                                          (List.replicate 7 Heal @ List.replicate 7 Move) with
+                                        Id = $"med-{i}"
+                                        Owner = owner
+                                    }
+                            ]
+                        KeepHitsBefore =
+                            (if caught then
+                                 Map.ofList [ "ram-1", 100_100 ]
+                             else
+                                 Map.empty)
+                        Refillables =
+                            colony.Refillables
+                            @ [
+                                {
+                                    Id = "tower-1"
+                                    FreeCapacity = 0
+                                    Kind = BuiltKind.Tower
+                                }
+                            ]
+                        Spatial =
+                            { colony.Spatial with
+                                RoomName = Some "W1N1"
+                            }
+                            |> withTargets
+                                [ "ram-1", { X = 8; Y = 8 }, Structure BuiltKind.Rampart ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 100_000 3_000_000
+
+                let breached = breachedBy "Trepidimous" false
+
+                Expect.equal (guardQuotaOf (breached 0)) (Some 0) "alone, the tower kills it"
+
+                Expect.equal
+                    (guardQuotaOf (breached 2))
+                    (Some 2)
+                    "168 healed a tick against the tower's 150: the guard row answers it, sized to outpace the heal (two blocks' 180)"
+
+                Expect.equal
+                    (guardQuotaOf (breachedBy "raider" true 2))
+                    (Some 2)
+                    "a neutral's caught dismantling: the same"
+
+                Expect.equal
+                    (guardQuotaOf (breachedBy "raider" false 2))
+                    (Some 0)
+                    "a neutral's passing with its healers: nothing"
+            }
+
             test "a melee guard cannot count self-heal toward surviving a healer-backed raid" {
                 let raid healers = guardColony (raidOf healers) []
 

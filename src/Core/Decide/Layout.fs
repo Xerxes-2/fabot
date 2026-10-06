@@ -485,8 +485,10 @@ let private economyRazed (view: ColonyView) atlas (held: HeldTaskFacts) : bool =
 /// not only a Threat, a WORK-only dismantler hurting a structure without ever
 /// qualifying as one. The economy arm: `razed` (`economyRazed`, #545), a
 /// Keep behind its ramparts says nothing while the extensions and the
-/// refillers die. The undefended arm (#217): no tower standing and an
-/// armed hostile in the room, unless one armed body of ours there wins the
+/// refillers die. The undefended arm (#217): no tower standing and a
+/// hostile in the room that endangers it (`Facts.endangersOurs`, #429: a
+/// neutral's WORK body only caught dismantling ours, so one crossing a
+/// Nursery never spends the activation), unless one armed body of ours there wins the
 /// exchange alone (`Quota.homeHolds`, #448), and only while `guarded` — a
 /// Nursery's is a begun site, so a squad crossing an empty claimed room does
 /// not spend the shard's one activation. The gates are the stock, no cooldown
@@ -533,7 +535,7 @@ let private safeModeIn
         let undefended =
             guarded
             && Atlas.builtIn atlas room BuiltKind.Tower = 0
-            && here |> List.exists (HostileInfo.armed here)
+            && here |> List.exists (endangersOurs view)
             && not (Quota.homeHolds view room)
 
         // Last: the economy's reckoning is the dearest question, asked only

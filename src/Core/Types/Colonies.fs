@@ -1020,6 +1020,10 @@ type StandDown =
         /// #526), None for never: what holds the full rampart floors through
         /// the gaps between a raid's visits.
         HomeRaided: int option
+        /// The last decided tick's hits per Keep structure and rampart of the
+        /// home (`RaidState.Hits`), carried while a hostile stands there:
+        /// what tells a body dismantling ours from one passing (#429).
+        KeepHitsBefore: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1041,6 +1045,7 @@ module StandDown =
             DigOpen = None
             HaulOverflow = HaulOverflow.none
             HomeRaided = None
+            KeepHitsBefore = Map.empty
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

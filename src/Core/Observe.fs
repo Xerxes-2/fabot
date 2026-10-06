@@ -1125,6 +1125,7 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         DigOpen = state.DigOpen
         HaulOverflow = state.HaulOverflow
         HomeRaided = state.HomeRaided
+        KeepHitsBefore = state.Hits
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened on

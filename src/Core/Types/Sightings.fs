@@ -393,7 +393,9 @@ module HostileInfo =
         weaponRangeOf (effectiveParts side hostile)
 
     /// ADR-0033. Whether it fights with an ATTACK or RANGED_ATTACK: a
-    /// [[threat]] (`weaponRange` asked as a yes/no).
+    /// [[threat]] to a creep (`weaponRange` asked as a yes/no). A WORK body
+    /// is not armed — it hurts no creep — but it razes what we built: what
+    /// stands in a room of ours is `endangers`'.
     let armed (side: HostileInfo list) (hostile: HostileInfo) : bool =
         weaponRange side hostile |> Option.isSome
 
@@ -431,6 +433,14 @@ module HostileInfo =
             | RangedAttack
             | Work -> true
             | _ -> false)
+
+    /// Whether it endangers a room of ours it stands in, whatever it is
+    /// doing there (#429): armed, or working with a WORK for an owner we
+    /// strike anywhere (`Colony.strikesAnywhere`: an enemy's, an Invader's).
+    /// A neutral's WORK body endangers only while it dismantles ours, which
+    /// the body alone does not say (`Facts.endangersOurs`).
+    let endangers (side: HostileInfo list) (hostile: HostileInfo) : bool =
+        armed side hostile || Colony.strikesAnywhere hostile.Owner && works side hostile
 
     /// What it heals a tick, its live HEAL at their boosts: a rate, read now,
     /// as the window's restoring is.
@@ -1039,7 +1049,9 @@ module World =
         |> List.choose (fun r -> Map.tryFind r.Id facts.Layer.TargetPositions)
 
     /// Whether a colony's home cannot hold the raid standing in it this tick:
-    /// the room is ours, an armed hostile that is not an ally is there, safe
+    /// the room is ours, a hostile that is not an ally endangers it there
+    /// (`HostileInfo.endangers`, an enemy's or an Invader's dismantler too:
+    /// a neutral's is never seen dismantling off one tick's facts), safe
     /// mode is off, and the raid heals at least what the towers holding a
     /// shot's energy land at the falloff range, through the TOUGH of the
     /// body of the raid they land most on.
@@ -1052,7 +1064,7 @@ module World =
 
         facts.Control
         |> Option.exists (fun control -> control.Owner = Ownership.Ours && not control.SafeMode)
-        && List.exists (HostileInfo.armed facts.Hostiles) raid
+        && List.exists (HostileInfo.endangers facts.Hostiles) raid
         && List.sumBy (HostileInfo.healing facts.Hostiles) raid
            >= (raid |> List.map (fun h -> HostileInfo.damageTaken h shot) |> List.max)
 
@@ -1516,7 +1528,7 @@ module World =
             let raided () =
                 facts.Hostiles
                 |> List.exists (fun h ->
-                    HostileInfo.armed facts.Hostiles h && not (Colony.isAlly h.Owner))
+                    HostileInfo.endangers facts.Hostiles h && not (Colony.isAlly h.Owner))
                 || match Map.tryFind name world.ExitWatches with
                    | Some(ExitWatch.Seen _) -> true
                    | Some(ExitWatch.Held hold) -> ExitHold.stands world.Time hold

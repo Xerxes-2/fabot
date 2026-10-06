@@ -945,6 +945,26 @@ let repairTests =
                     [ "ram-1" ]
                     "a raider in the home: the full floor"
 
+                // #429: a WORK body razes the ramparts it stands beside; a
+                // neutral's crossing the home dismantles nothing.
+                let worker owner =
+                    quiet
+                    |> facing
+                        [
+                            { hostileAt "h-1" { X = 40; Y = 40 } [ Work; Work; Move ] with
+                                Owner = owner
+                            }
+                        ]
+
+                Expect.equal
+                    (repairTasks (planTasksOn (worker "Trepidimous" |> at buildFloor) noThreats))
+                    [ "ram-1" ]
+                    "an enemy's dismantler in the home: the full floor"
+
+                Expect.isEmpty
+                    (repairTasks (planTasksOn (worker "raider" |> at buildFloor) noThreats))
+                    "a neutral's worker passing: the build floor stands"
+
                 let healed =
                     { quiet with
                         RecalledHealers = [ hostileAt "med-1" { X = 40; Y = 40 } [ Heal; Move ] ]
@@ -1032,6 +1052,20 @@ let repairTests =
                     (repairTasks (planTasksOn struck noThreats))
                     [ "ram-1" ]
                     "200,000 hits, far over both floors: struck, it is hungry to its max; the unstruck 50,000 waits under the cap"
+
+                // #429: caught at it — the rampart beside it 50 down on the
+                // last tick — the neutral's body raids the home, and the
+                // cap lifts.
+                Expect.equal
+                    (repairTasks (
+                        planTasksOn
+                            { struck with
+                                KeepHitsBefore = Map.ofList [ "ram-1", 200_050 ]
+                            }
+                            noThreats
+                    ))
+                    [ "ram-1"; "ram-2" ]
+                    "dismantling, the unstruck 50,000 is under the full floor"
             }
 
             test "below the bootstrap level a rampart has no floor: it decays away unrepaired" {

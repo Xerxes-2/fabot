@@ -2698,6 +2698,26 @@ let raisedHomeGarrisonTests =
                     (shot (tapper :: homeRaid))
                     [ "tapper" ]
                     "a CLAIM body beside our controller first"
+
+                // #429: an Invader's pure dismantler hurts no creep, and
+                // razes the home it stands in. A neutral's WORK body there is
+                // a target only caught dismantling, which this colony reads
+                // in its own home alone.
+                let breacher owner =
+                    { hostileIn
+                          "W1N2"
+                          { X = 11; Y = 45 }
+                          (List.replicate 10 Work @ List.replicate 10 Move) with
+                        Id = "breacher"
+                        Owner = owner
+                    }
+
+                Expect.equal
+                    (shot [ breacher "Invader" ])
+                    [ "breacher" ]
+                    "an Invader's dismantler in a home of ours is a target"
+
+                Expect.isEmpty (shot [ breacher "raider" ]) "a neutral's passing is not"
             }
 
             test "a healer our damage breaks is shot before a melee body with fewer hits" {

@@ -276,10 +276,75 @@ let internal homeBuilding (view: ColonyView) =
     || homeSiteStands view BuiltKind.Storage
     || homeSiteStands view BuiltKind.Tower
 
-/// Whether a raider stands in a room (`HostileInfo.raider`).
+/// Whether a room is one of ours: the home, or one whose controller this
+/// colony sees ours.
+let internal ourRoom (view: ColonyView) (room: string) : bool =
+    room = SpatialInfo.homeName view.Spatial
+    || Map.tryFind room view.RoomControl
+       |> Option.exists (fun control -> control.Owner = Ownership.Ours)
+
+/// Whether a hostile is dismantling ours (#429): it works with a WORK in the
+/// home, beside a Keep structure or rampart there that lost hits since the
+/// last decided tick (`ColonyView.KeepHitsBefore`) — never a rampart's loss
+/// of whole decays, nor a loss under an armed hostile's reach, which is
+/// that one's. The evidence a neutral's body is read by: one crossing the
+/// home, a pioneer or a miner, dismantles nothing.
+let dismantling (view: ColonyView) (hostile: HostileInfo) : bool =
+    let home = SpatialInfo.homeName view.Spatial
+
+    not (Map.isEmpty view.KeepHitsBefore)
+    && hostile.Pos.Room = home
+    && HostileInfo.works view.Hostiles hostile
+    && (let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
+        let at = RoomPos.pos hostile.Pos
+
+        // Whoever's weapon reaches the tile takes the blame for its loss.
+        let armedNear (tile: Pos) =
+            view.Hostiles
+            |> List.exists (fun h ->
+                h.Pos.Room = home
+                && HostileInfo.armed view.Hostiles h
+                && range tile (RoomPos.pos h.Pos) <= Engine.rangedRange)
+
+        SpatialInfo.structureHits view.Spatial
+        |> List.exists (fun (id, kind, hits) ->
+            match Map.tryFind id view.KeepHitsBefore, Map.tryFind id tiles with
+            | Some before, Some tile ->
+                hits.Hits < before
+                // A baseline a light colony left some ticks old has seen
+                // whole decays: any whole number of them is no dismantle.
+                && not (
+                    kind = BuiltKind.Rampart
+                    && (before - hits.Hits) % Engine.rampartDecayAmount = 0
+                )
+                && range tile at <= Engine.meleeRange
+                && not (armedNear tile)
+            | _ -> false))
+
+/// Whether a hostile endangers the room of ours it stands in (#429):
+/// `HostileInfo.endangers` (armed, or an enemy's or an Invader's WORK body),
+/// or any other's but an ally's caught dismantling ours (`dismantling`).
+let internal endangersOurs (view: ColonyView) (hostile: HostileInfo) : bool =
+    HostileInfo.endangers view.Hostiles hostile
+    || not (Colony.isAlly hostile.Owner)
+       && not (HostileInfo.isKeeper hostile)
+       && dismantling view hostile
+
+/// Whether a hostile threatens the room it stands in (#429): an armed one
+/// anywhere, and in a room of ours one that endangers it (`endangersOurs`).
+let internal threatens (view: ColonyView) (hostile: HostileInfo) : bool =
+    HostileInfo.armed view.Hostiles hostile
+    || ourRoom view hostile.Pos.Room && endangersOurs view hostile
+
+/// Whether a raider stands in a room (`HostileInfo.raider`), or in a room of
+/// ours a body that endangers it (`endangersOurs`, #429).
 let internal raided (view: ColonyView) (room: string) : bool =
+    let owned = ourRoom view room
+
     view.Hostiles
-    |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
+    |> List.exists (fun h ->
+        h.Pos.Room = room
+        && (HostileInfo.raider view.Hostiles h || owned && endangersOurs view h))
 
 /// The **build floor** (#526): `Tuning.BuildRampartFloor`, capping every
 /// rampart floor while an extension or Storage site stands in a quiet home;
@@ -603,8 +668,7 @@ let internal raidHealer (view: ColonyView) (hostile: HostileInfo) : bool =
 let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
     not (HostileInfo.armed view.Hostiles hostile)
     && HostileInfo.heals view.Hostiles hostile
-    && Map.tryFind hostile.Pos.Room view.RoomControl
-       |> Option.exists (fun control -> control.Owner = Ownership.Ours)
+    && ourRoom view hostile.Pos.Room
 
 /// Whether a hostile's body trespasses wherever it stands (#516), among
 /// `side`: unarmed in effect, and shot disarmed — a weapon on paper and none
@@ -643,13 +707,17 @@ let internal struckUsFirst (_hostile: HostileInfo) = false
 /// an NPC Invader's creep anywhere; any other armed one — a weapon on paper,
 /// so a cripple shot disarmed counts — only where it stands in a room we
 /// work or hold (`trespassRooms`, our home, a room whose fight we hold, in
-/// `engaged`); and a neutral that struck us first (`struckUsFirst`).
+/// `engaged`); a neutral's WORK body only caught dismantling ours
+/// (`dismantling`, #429: the narrow rule until the user rules on a wider
+/// one), never one crossing the home; and a neutral that struck us first
+/// (`struckUsFirst`).
 let internal mayStrike (view: ColonyView) (engaged: Set<string>) (hostile: HostileInfo) =
     not (HostileInfo.isKeeper hostile)
     && not (Colony.isAlly hostile.Owner)
     && (Colony.strikesAnywhere hostile.Owner
         || Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
            && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
+        || dismantling view hostile
         || struckUsFirst hostile)
 
 /// Whether a hostile is a [[trespasser]] (#516): its body trespasses, we may
@@ -663,9 +731,10 @@ let internal trespasser (view: ColonyView) (engaged: Set<string>) (hostile: Host
     && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
 
 /// What a Guard in its room may shoot, every target reader's one predicate
-/// (`Emitter.strikeOrder`, the kite's head): an armed
-/// hostile we may strike (`mayStrike`, #535: in a harassment room a keeper or
-/// a third party's is no target), a rival's claimer or a raid's healer (#451)
+/// (`Emitter.strikeOrder`, the kite's head): a threat (`threatens`, a
+/// dismantler in a room of ours too) we may strike (`mayStrike`, #535: in a
+/// harassment room a keeper or a third party's is no target), a rival's
+/// claimer or a raid's healer (#451)
 /// in a resident room, and the declared enemy's creep in a harassment room. In
 /// a room whose fight we hold (`fighting`: a held Guard, #535), any healer we may strike: one whose raid is dead is still the
 /// raid's. And a trespasser (#516), last in the kill order. Whether a hostile
@@ -676,7 +745,7 @@ let internal guardShoots
     (fighting: Set<string>)
     (hostile: HostileInfo)
     =
-    HostileInfo.armed view.Hostiles hostile
+    threatens view hostile
     && mayStrike view (Set.union residentRooms fighting) hostile
     || claimsAFlag view.Hostiles residentRooms hostile
     || harassTarget view hostile
@@ -689,12 +758,13 @@ let internal guardShoots
     || trespasser view fighting hostile
 
 /// Whether a hostile breaks the quiet of the room it stands in (#516): any
-/// armed one, whoever's — an armed neutral is still a threat to a home its
-/// garrison would leave —, a rival's claimer or a raid's healer in a resident
-/// room, the declared enemy's creep in a harassment room, or a trespasser.
-/// The threat question, apart from the target one (`guardShoots`, #535).
+/// threat (`threatens`), whoever's — an armed neutral is still a threat to a
+/// home its garrison would leave —, a rival's claimer or a raid's healer in a
+/// resident room, the declared enemy's creep in a harassment room, or a
+/// trespasser. The threat question, apart from the target one
+/// (`guardShoots`, #535).
 let internal disturbs (view: ColonyView) (residentRooms: Set<string>) (hostile: HostileInfo) =
-    HostileInfo.armed view.Hostiles hostile
+    threatens view hostile
     || claimsAFlag view.Hostiles residentRooms hostile
     || harassTarget view hostile
     || Set.contains hostile.Pos.Room residentRooms
@@ -968,7 +1038,8 @@ type KillTier =
     | Claimer
     /// A raid's healer whose heal our damage reaching it outpaces.
     | BrokenHealer
-    /// The rest of the raid: an armed body, or a healer we do not break.
+    /// The rest of the raid: a threat (`threatens`), or a healer we do not
+    /// break.
     | Raid
     /// A CLAIM body outside a ranger's room (#550): a reservation against
     /// ours shuts the room's sources, so it goes first of the bodies that
@@ -995,7 +1066,7 @@ type private KillFacts =
     {
         ClaimsAFlag: bool
         RaidHealer: bool
-        Armed: bool
+        Threatens: bool
         HealOn: int
         DamageOn: int
     }
@@ -1006,7 +1077,7 @@ let private killTier (target: KillFacts) =
         Claimer
     elif target.RaidHealer && target.DamageOn > target.HealOn then
         BrokenHealer
-    elif target.Armed || target.RaidHealer then
+    elif target.Threatens || target.RaidHealer then
         Raid
     else
         Bystander
@@ -1084,7 +1155,7 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
         fun hostile ->
             {
                 Tier =
-                    (if HostileInfo.armed view.Hostiles hostile then Raid
+                    (if threatens view hostile then Raid
                      elif HostileInfo.claims view.Hostiles hostile then Reserver
                      else Bystander)
                 EffectiveHits = 0
@@ -1106,7 +1177,7 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
                         {
                             ClaimsAFlag = claimsAFlag view.Hostiles resident hostile
                             RaidHealer = raidHealer view hostile
-                            Armed = HostileInfo.armed view.Hostiles hostile
+                            Threatens = threatens view hostile
                             HealOn = heal
                             DamageOn = damage
                         }
@@ -1134,6 +1205,10 @@ type private RaidPrice =
         ToughHealing: int
         Tough: int
         Hits: int
+        /// Whether it endangers a room of ours it stands in
+        /// (`endangersOurs`, #429): a dismantler there deals our creeps
+        /// nothing and razes the room all the same.
+        Breaches: bool
     }
 
 /// A raid's price at a window: the damage it deals a tick, each raider with
@@ -1155,6 +1230,7 @@ let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) 
     let tough = armed |> List.filter (fun h -> HostileInfo.toughHits h > 0)
 
     {
+        Breaches = raid |> List.exists (fun h -> ourRoom view h.Pos.Room && endangersOurs view h)
         Damage =
             raid
             |> List.sumBy (fun h -> damageOf (HostileInfo.powerWithin window view.Hostiles h))
@@ -1167,13 +1243,20 @@ let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) 
         Hits = armed |> List.sumBy (fun h -> h.Hits - HostileInfo.toughHits h)
     }
 
+/// Whether this damage outpaces a priced raid's heal, through its TOUGH.
+let private outHeals (price: RaidPrice) (ourDamage: int) =
+    ourDamage > price.Healing && (price.Tough = 0 || ourDamage > price.ToughHealing)
+
 /// Whether our side — this damage, healing and hits — wins against a priced
 /// raid: two clocks compared, cross-multiplied to stay in whole numbers. A
 /// raid that out-heals our damage is never killed, nor one whose TOUGH it
-/// never breaks; past its TOUGH our clock runs in two phases.
+/// never breaks; past its TOUGH our clock runs in two phases. A raid that
+/// deals our creeps nothing is won, but where it breaches a room of ours
+/// (`RaidPrice.Breaches`, #429) only by damage that outpaces its heal: a
+/// dismantler left standing razes the room.
 let private wonAgainst (price: RaidPrice) ourDamage ourHealing ourHits =
     if price.Damage = 0 then
-        true
+        not price.Breaches || outHeals price ourDamage
     elif
         ourDamage <= price.Healing
         || (price.Tough > 0 && ourDamage <= price.ToughHealing)
@@ -1199,7 +1282,7 @@ let private focusedAgainst (price: RaidPrice) beside (bodies: int) damage heal h
     let dealt alive = float (beside + alive * damage)
 
     if price.Damage = 0 then
-        true
+        not price.Breaches || outHeals price (beside + bodies * damage)
     elif price.Damage <= heal then
         // The raid never kills one: ours wins where it out-damages the heal.
         dealt bodies > float price.Healing
@@ -2652,26 +2735,28 @@ let private guardedErrandsOf (fuelled: Errand list) : string list =
     |> List.sort
 
 /// The other colonies' homes this colony defends (`BorrowedWork.Defended`)
-/// that an armed hostile stands in this tick, where the verdict has this
-/// colony defend it (`RoomVerdict.Defender`, #589).
+/// that a hostile endangers this tick (`endangersOurs`, #429), where the
+/// verdict has this colony defend it (`RoomVerdict.Defender`, #589).
 let private defendedHomesOf (view: ColonyView) : string list =
     let home = SpatialInfo.homeName view.Spatial
 
     view.Borrowed.Defended
     |> List.filter (fun room ->
         view.Hostiles
-        |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.armed view.Hostiles h)
+        |> List.exists (fun h -> h.Pos.Room = room && endangersOurs view h)
         && (verdictOf view room).Defender = Some home)
 
 /// Whether the home stands raided by bodies nothing of ours answers but its
-/// own row's cast (#568): an armed body we may strike, out of safe mode,
-/// that no Defend meets — one inside the line, or any where the home holds
-/// no line a defender stands on (`raidAtLine`, `perimeterRamparts`) —
-/// priced with the healers beside it against the home's towers, which lose
-/// it; and the verdict has the home's own row defend it
-/// (`RoomVerdict.Defender`, #589): what it casts wins, and lands sooner
-/// than any other colony's that defends the home (`defendedHomesOf`). A row
-/// whose cast loses casts nothing.
+/// own row's cast (#568): a body we may strike that endangers it
+/// (`endangersOurs`, #429), out of safe mode, that no Defend meets — one
+/// inside the line, or any where the home holds no line a defender stands
+/// on (`raidAtLine`, `perimeterRamparts`) — priced with the healers beside
+/// it against the home's towers, which lose it — a dismantler's raid where
+/// their damage does not outpace its heal (`RaidPrice.Breaches`); and the
+/// verdict has the home's own row
+/// defend it (`RoomVerdict.Defender`, #589): what it casts wins, and lands
+/// sooner than any other colony's that defends the home
+/// (`defendedHomesOf`). A row whose cast loses casts nothing.
 let private homeUnheld (view: ColonyView) atlas : bool =
     let home = SpatialInfo.homeName view.Spatial
 
@@ -2683,7 +2768,7 @@ let private homeUnheld (view: ColonyView) atlas : bool =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = home && not (HostileInfo.isKeeper h))
 
-    if shielded || inHome |> List.forall (HostileInfo.armed view.Hostiles >> not) then
+    if shielded || inHome |> List.forall (endangersOurs view >> not) then
         false
     else
         let lined = keepsRamparts view && not (List.isEmpty (perimeterRamparts view))
@@ -2698,7 +2783,7 @@ let private homeUnheld (view: ColonyView) atlas : bool =
             inHome
             |> List.filter (fun h ->
                 not (Set.contains h.Id atLine)
-                && (HostileInfo.armed view.Hostiles h && mayStrike view Set.empty h
+                && (endangersOurs view h && mayStrike view Set.empty h
                     || HostileInfo.heals view.Hostiles h))
 
         // The home's own towers, more than `WorldRoom.OurTowers`' loaded
@@ -2715,15 +2800,13 @@ let private homeUnheld (view: ColonyView) atlas : bool =
             List.length loaded
             + min (List.length dry) (stockedEnergy view / Engine.towerCapacity)
 
-        raid |> List.exists (HostileInfo.armed view.Hostiles)
+        raid |> List.exists (endangersOurs view)
         && not (
-            exchangeAgainst
-                view
-                Reaction.strike
-                raid
+            wonAgainst
+                (raidPrice view Reaction.strike raid)
                 (towers * Engine.towerAttackAt Engine.towerFalloffRange)
+                0
                 (towers * Engine.towerHits)
-                []
         )
         && (verdictOf view home).Defender = Some home
 

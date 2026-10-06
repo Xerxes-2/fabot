@@ -1593,6 +1593,117 @@ let safeModeTests =
                     "and with nobody at home the undefended arm fires as before"
             }
 
+            test
+                "with no tower and nobody at home, a dismantler fires the undefended arm, a neutral's only caught at it" {
+                // #429: a WORK body hurts no creep, but it razes the home a
+                // towerless room has nothing to keep it off. A neutral's
+                // counts only beside a rampart of ours that lost hits since
+                // the last tick, never its decay: a pioneer crossing the
+                // home spends nothing.
+                let fires colony =
+                    let { Intents = intents } = decideOn colony
+                    activations intents
+
+                let worker owner =
+                    { hostile [ Work; Work; Move ] with
+                        Owner = owner
+                    }
+
+                let beside lost =
+                    { towerless with
+                        Spatial =
+                            towerless.Spatial
+                            |> withTargets
+                                [ "ram-1", { X = 25; Y = 26 }, Structure BuiltKind.Rampart ]
+                        KeepHitsBefore = Map.ofList [ "ram-1", 100_000 ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart (100_000 - lost) 3_000_000
+
+                Expect.equal
+                    (fires (towerless |> facing [ worker "Trepidimous" ]))
+                    [ "ctrl-1" ]
+                    "an enemy's dismantler: the spawn is its to raze"
+
+                Expect.isEmpty
+                    (fires (towerless |> facing [ worker "raider" ]))
+                    "a neutral's crossing: nothing"
+
+                Expect.equal
+                    (fires (beside 100 |> facing [ worker "raider" ]))
+                    [ "ctrl-1" ]
+                    "a neutral's beside a rampart of ours it took 100 off: dismantling"
+
+                Expect.isEmpty
+                    (fires (beside Engine.rampartDecayAmount |> facing [ worker "raider" ]))
+                    "a rampart's decay is no dismantle"
+
+                Expect.isEmpty
+                    (fires (beside (3 * Engine.rampartDecayAmount) |> facing [ worker "raider" ]))
+                    "nor three decays on a baseline a light colony left stale"
+
+                Expect.isEmpty (fires (beside 100 |> facing [ worker "Odiodin" ])) "an ally's never"
+
+                // An armed body within three of the rampart takes the blame:
+                // the neutral beside it is not caught. Asked of the fact
+                // itself, since the shooter would fire the arm on its own.
+                let shooter =
+                    { hostileAt "h-2" { X = 25; Y = 29 } [ RangedAttack; Move ] with
+                        Owner = "raider"
+                    }
+
+                let caught colony =
+                    Fabot.Core.Decide.Facts.dismantling
+                        colony
+                        (colony.Hostiles |> List.find (fun h -> h.Id = "h-1"))
+
+                Expect.isTrue
+                    (caught (beside 100 |> facing [ worker "raider" ]))
+                    "the premise: caught alone"
+
+                Expect.isFalse
+                    (caught (beside 100 |> facing [ worker "raider"; shooter ]))
+                    "a shooter three off the rampart struck it"
+            }
+
+            test
+                "with no tower, a weak body of ours does not hold a dismantler its healers keep alive" {
+                // #429 review: a WORK raid priced as a creep fight dealt
+                // nothing, so any body of ours "won" it and the undefended
+                // arm stayed silent while the home was razed.
+                let weak =
+                    { towerless with
+                        Defenders =
+                            Map.ofList
+                                [
+                                    SpatialInfo.homeName towerless.Spatial,
+                                    [ creepWith "guard-1" 0 0 [ RangedAttack; Move ] ]
+                                ]
+                    }
+
+                let raid =
+                    [
+                        { hostileAt
+                              "h-1"
+                              { X = 25; Y = 27 }
+                              (List.replicate 10 Work @ List.replicate 10 Move) with
+                            Owner = "Trepidimous"
+                        }
+                        { hostileAt
+                              "med-1"
+                              { X = 25; Y = 28 }
+                              (List.replicate 7 Heal @ List.replicate 7 Move) with
+                            Owner = "Trepidimous"
+                        }
+                    ]
+
+                let { Intents = intents } = decideOn (weak |> facing raid)
+
+                Expect.equal
+                    (activations intents)
+                    [ "ctrl-1" ]
+                    "10 a tick against 84 healed: the home is razed"
+            }
+
             test "a garrison standing in another room is no defence of this one" {
                 // #448: the exchange is the home room's.
                 let { Intents = intents } =
@@ -2225,6 +2336,19 @@ let fireReflexTests =
 
                 let { Intents = intents } = decideOn snapshot
                 Expect.equal (shots intents) [ "tower-1", "h-1" ] "any hostile is fired on"
+            }
+
+            test "a tower shoots a pure dismantler at our rampart" {
+                // #429: WORK and MOVE, no weapon: it strikes the rampart, so
+                // the towers read it by its dismantle (`strikeOn`).
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 }; "rampart-1", { X = 31; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 30; Y = 40 } [ Work; Work; Move; Move ] ]
+                    |> withHits "rampart-1" BuiltKind.Rampart 1_000_000 30_000_000
+
+                let { Intents = intents } = decideOn snapshot
+                Expect.equal (shots intents) [ "tower-1", "h-1" ] "the dismantler is the target"
             }
 
             test "the nearest hostile is shot — damage decays with range" {
@@ -4109,6 +4233,22 @@ let fleeTests =
                     verdicts
                     (Verdict.Matched("w1", taskId Flee, MatchFactor.Rank))
                     "and rank is what decided it against the deadline Upgrade"
+            }
+
+            test "a dismantler beside a hauler makes it flee from nothing" {
+                // #429: a dismantler endangers our home, and a WORK hurts no
+                // creep: the hauler keeps its Refill.
+                let held = taskId (Refill("spawn-1", Energy))
+
+                let colony =
+                    { laneColony [ worker "w1" 50 0 ] [ "w1", { X = 25; Y = 22 } ] with
+                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 21 } [ Work; Work; Move; Move ] ]
+
+                let { Assignments = assignments } = decideFrom (Map.ofList [ "w1", held ]) colony
+
+                Expect.equal (Map.tryFind "w1" assignments) (Some held) "it keeps its Refill"
             }
 
             test "a holder whose Task's ground is safe still flees when it stands in a Reach itself" {
