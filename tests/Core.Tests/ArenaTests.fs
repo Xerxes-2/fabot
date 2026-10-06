@@ -1421,6 +1421,102 @@ let arenaScenarioTests =
                     "nor ends a tick beside it"
             }
 
+            // #571, the user's cripple nobody chased: an Invader shot down to
+            // its ATTACK and one HEAL in an outpost the stand-down shuts, no
+            // body of ours there, no ranger anywhere, an observer's look on
+            // the room. The owner's guard row wins it, so that row casts the
+            // guard while the room is shut, and the guard hunts it down.
+            test
+                "#571: a cripple in a shut outpost its owner's guard row wins is hunted by the guard that row casts" {
+                let home =
+                    room "W12S28"
+                    |> withController Ownership.Ours None 7 0
+                    |> withSpawn "Spawn1" { X = 12; Y = 38 } 5_600
+
+                let outpost = room "W12S27"
+
+                let declared =
+                    { colony "W12S28" with
+                        Outposts = [ outpostOf outpost.Capture ]
+                    }
+
+                let lair = RoomPos.at "W12S27" { X = 20; Y = 30 }
+
+                // 2 TOUGH, 4 MOVE, 4 ATTACK, 1 HEAL at 700 of 1,100 hits: the
+                // TOUGH and two MOVE are gone.
+                let cripple =
+                    { body
+                          "invader-cripple"
+                          (Side.Npc "Invader")
+                          (parts [ Tough, 2; Move, 4; Attack, 4; Heal, 1 ])
+                          lair
+                          (Some(Chase(Nearest, Some(lair, 4)))) with
+                        Hits = 700
+                        TicksToLive = 1_000
+                    }
+
+                // The economy is staffed: one hauler stands for it, so no
+                // supply floor jumps the fighting row's queue.
+                let hauler =
+                    body
+                        "hauler-1-Spawn1"
+                        Side.Ours
+                        (parts [ Carry, 32; Move, 16 ])
+                        (RoomPos.at "W12S28" { X = 17; Y = 34 })
+                        None
+
+                let start =
+                    let a =
+                        arena 900_000 [ home; outpost ] [ declared ] [ cripple; hauler ]
+                        |> withCasts [ "guard" ]
+
+                    { a with
+                        Lookout = Set.singleton "W12S27"
+                        Carried =
+                            { a.Carried with
+                                Raids =
+                                    Map.ofList
+                                        [
+                                            "W12S28",
+                                            { Fabot.Core.Observe.RaidState.empty with
+                                                Outposts =
+                                                    [
+                                                        {
+                                                            Fabot.Core.Observe.OutpostEpisode.RoomName =
+                                                                "W12S27"
+                                                            Opened = 899_900
+                                                            LastSeen = 899_999
+                                                            Expiry = 901_000
+                                                            Basis = StandDownBasis.InvaderRaid
+                                                            Stronghold = false
+                                                            Bounced = false
+                                                            Raiders =
+                                                                Set.singleton "invader-cripple"
+                                                            PlayerSince = None
+                                                            Chased = false
+                                                        }
+                                                    ]
+                                            }
+                                        ]
+                            }
+                    }
+
+                let _, trace = start |> run 300
+                let failure = describe trace
+
+                let born =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | Born id -> Some id
+                            | _ -> None))
+
+                Expect.exists born (fun id -> id.StartsWith "guard-") $"a guard is cast\n{failure}"
+
+                Expect.isSome (diedOn "invader-cripple" trace) $"and the cripple dies\n{failure}"
+            }
+
             test
                 "W17S22 replay: two garrisons on Genie669 beside Vibe199 take 188 a tick, the replay's own hits" {
                 // t878,960: Genie669 (6M4H) at 672, healing itself, Vibe199
@@ -16692,16 +16788,19 @@ let w18s25CrippledTests =
             // bound its Guard to W17S29: its melee guard was offered the
             // chase and could not take it, its ranger walked round from
             // W19S25, and W17S25's residents next door were never counted
-            // (t994,918-995,026). The kill time is the small rangers' either
-            // way in the arena (t93 at writing); what this pins is the binding.
+            // (t994,918-995,026). The stand-down had withheld W17S25's own
+            // row: now its row is priced, shut or not, and
+            // the room is the kite its biggest ranger answers. The kill time is the small
+            // rangers' either way in the arena (t93 at writing); what this
+            // pins is the binding.
             test
-                "#573 capture t994,917: a row the stand-down withholds wins nothing, so the cripple is the kite every seeing colony pools" {
+                "#573 capture t994,917: the stand-down withholds no row, so the owner's ranger prices the cripple a kite every seeing colony pools" {
                 let run = w18s25Crippled () |> crippledRun 50
 
                 for tick, verdict, _ in run do
                     match verdict with
                     | Some(Answer.Win, Some answerer) ->
-                        failtest $"t{tick}: a Win bound to {answerer}'s withheld row"
+                        failtest $"t{tick}: a Win bound to {answerer}"
                     | _ -> ()
 
                 Expect.exists

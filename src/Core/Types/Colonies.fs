@@ -988,9 +988,10 @@ type StandDown =
         /// a raid nobody can see any more, the last body out having taken our
         /// vision with it, which may walk on to the home beside it.
         RaidedOutposts: Set<string>
-        /// The rooms of `RaidedOutposts` whose raid a ranger kites down
-        /// (`OutpostEpisode.Chased`, #510): projected still as a transit room,
-        /// where a ranger's chase is pooled and nothing else is.
+        /// The rooms of `RaidedOutposts` whose raid, last seen, the verdict
+        /// does not lose (`OutpostEpisode.Chased`, `Facts.chased`, #510,
+        /// #571): projected still as a transit room, where the chase is
+        /// pooled, and cast for by a row that wins it, and nothing else is.
         ChasedOutposts: Set<string>
         /// Each resident room's [[fight]] record (`RaidState.Fought`),
         /// whichever colony is resident there (the world danger log's): what

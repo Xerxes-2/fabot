@@ -662,9 +662,10 @@ let private fullTick
     // Every colony that does not decide this tick.
     let idle = Set.union waiting replaying
 
-    // Each raided room's one verdict, priced once over every colony's view and
-    // laid in each (`Facts.judge`): a colony that does not decide sends only
-    // the bodies its plan already holds there; the answerer is ranked by
+    // Each raided room's one verdict, priced once over the fleet and the
+    // world's vision and laid in each view (`Facts.judge`): a colony that does
+    // not decide sends only the bodies its plan already holds there; the
+    // answerer is ranked by
     // crossings as a harassment room's caster is, the table built only where
     // two colonies answer one room. Then every observer's one look, aimed
     // together so no two spend a tick on one room (`Layout.aimObservers`).
@@ -673,17 +674,9 @@ let private fullTick
 
         views
         |> List.map (fun (colony, view) ->
-            let owned = Colony.declaredRooms colony
-
             ({
                 Cut = view
-                OutOfSight =
-                    Observe.Danger.outOfSight
-                        owned
-                        view
-                        (laid
-                         |> Map.tryFind colony.Home
-                         |> Option.defaultValue Observe.RaidState.empty)
+                Owns = Colony.declaredRooms colony
                 Decides = not (Set.contains colony.Home idle)
             }
             : Decide.Facts.Judged))

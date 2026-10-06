@@ -557,6 +557,7 @@ module Brief =
         (room: string)
         (verdict: Lazy<Answer>)
         (ranged: bool)
+        (rangers: Lazy<int option>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (view: ColonyView)
         (atlas: Atlas.Atlas)
@@ -568,16 +569,31 @@ module Brief =
         match kind with
         | BriefKind.Resident
         | BriefKind.Harass -> isRangerRowBody creep
-        // A ranger the resident rule lends (#516): under a kite (#510), one
-        // that kites the raid down with its own live parts; to a raid the
-        // rangers there and beside it win together (`Facts.rangersWin`), or
-        // one out of sight, any.
+        // A ranger the resident rule lends (#516), on its own fitness: under
+        // a kite (#510), one that kites the raid down with its own live parts;
+        // under a Win, one that kites it down or wins it alone, or any where
+        // rangers win it together (`Facts.rangersWin`) or it is out of sight.
+        // And under a Win, a guard row's body that wins the raid alone (#571):
+        // a stand-down shuts the economy, never the kill.
         | BriefKind.Chase ->
-            isRangerRowBody creep
-            && (match verdict.Value with
-                | Answer.Kite -> Facts.kitedDown view (partCount creep.Body) room
-                | Answer.Win
-                | Answer.Lose -> true)
+            let parts = partCount creep.Body
+
+            let alone () =
+                Facts.bodyWins view room parts creep.Hits.Hits
+
+            (isRangerRowBody creep
+             && (match verdict.Value with
+                 | Answer.Kite -> Facts.kitedDown view parts room
+                 | Answer.Win ->
+                     not (Facts.raided view room)
+                     || rangers.Value |> Option.exists (fun n -> n > 1)
+                     || Facts.kitedDown view parts room
+                     || alone ()
+                 | Answer.Lose -> true)
+             || isGuardRowBody creep
+                && verdict.Value = Answer.Win
+                && Facts.raided view room
+                && alone ())
             && Facts.rangerMayKill view room (Atlas.creepRoom atlas creep.Name)
             && strikes (HostileInfo.raider view.Hostiles)
         // A trespass's kill (#516): the guard row's body that strikes every
@@ -662,6 +678,7 @@ module Brief =
     let private askOf
         (kind: BriefKind)
         (ranged: bool)
+        (rowCast: Lazy<CastRow option>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (room: string)
         : RowAsk list =
@@ -733,7 +750,29 @@ module Brief =
                     Blocks = fun view -> guardBlocksFor view room
                 }
             ]
-        | BriefKind.Chase -> []
+        // A chase is cast for by nobody, but in a room shut on a raid the
+        // colony's own row wins (`rowCast`, #571): the stand-down shuts that
+        // room's Guard out of the pool, never the row's cast, so the chase
+        // carries the row's ask.
+        | BriefKind.Chase ->
+            match rowCast.Value with
+            | Some CastRow.Ranger ->
+                [
+                    {
+                        Row = CastRow.Ranger
+                        Wanted = fun _ _ -> 1
+                        Blocks = fun view -> rangerBlocksFor 1 view room
+                    }
+                ]
+            | Some _ ->
+                [
+                    {
+                        Row = CastRow.Guard
+                        Wanted = fun view _ -> guardsWanted view room
+                        Blocks = fun view -> guardBlocksFor view room
+                    }
+                ]
+            | None -> []
 
     /// The bodies a kind's room admits and nobody else at all: its row ask's
     /// count is the row's own arithmetic, read here a second time so the number
@@ -767,9 +806,12 @@ module Brief =
         // (`Capacity.Relieved`).
         | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
         // One ranger kites what cannot close on it (#510); a raid the rangers
-        // there and beside it win together takes as many as win it.
+        // there and beside it win together takes as many as win it; one a row
+        // casts for, as many as it asks.
         | BriefKind.Chase ->
             match verdict.Value with
+            | Answer.Win when not (List.isEmpty asks) ->
+                Capacity.fighters (max (wanted ()) (rangers.Value |> Option.defaultValue 1))
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
             | Answer.Kite
             | Answer.Lose -> Capacity.fighters 1
@@ -829,14 +871,16 @@ module Brief =
     /// never goes to a kill, and only one the raid leaves free does (#528).
     /// A harassment room's Threat is the enemy's own. The room's verdict, the
     /// rangers that win it (`Facts.rangersWin`) and whether a ranger answers
-    /// it (`Facts.rangerAnswers`, read for an outpost alone) come priced
-    /// lazily, once a tick.
+    /// it (`Facts.rangerAnswers`, read for an outpost alone) and whether the
+    /// colony's own row casts for its chase (`casts`) come priced lazily,
+    /// once a tick.
     let internal claimed
         (room: string)
         (raided: bool)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
         (ranger: Lazy<bool>)
+        (casts: Lazy<bool>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (claims: BriefKind list)
         (laid: Laid)
@@ -844,13 +888,21 @@ module Brief =
         let kind = kindOf claims
         let kill = BriefKind.isKill kind
         let ranged = kind = BriefKind.Outpost && ranger.Value
-        let ask = askOf kind ranged answered room
+
+        let rowCast =
+            lazy
+                (if kind = BriefKind.Chase && casts.Value then
+                     Some(if ranger.Value then CastRow.Ranger else CastRow.Guard)
+                 else
+                     None)
+
+        let ask = askOf kind ranged rowCast answered room
 
         {
             Duty = Duty.Guard kind
             Claims = claims
             Targets = guardTargets ()
-            Admits = admitsOf kind room verdict ranged answered
+            Admits = admitsOf kind room verdict ranged rangers answered
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
             Ground = groundOf kind ranged laid
@@ -881,7 +933,7 @@ module Brief =
     /// on no ground, the one a remembered raid pools in a room the colony is
     /// blind in (#366). No raider stands in it, so its verdict is `Win`.
     let unclaimed (room: string) : Brief =
-        claimed room false (lazy Answer.Win) (lazy None) (lazy false) (lazy []) [] bare
+        claimed room false (lazy Answer.Win) (lazy None) (lazy false) (lazy false) (lazy []) [] bare
 
     /// How many [[defender]]s the home wants this tick (#504): one a body of
     /// the raid at its line, at most `Tuning.DefenderCap`; none in a home
@@ -2775,6 +2827,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                   verdict
                   winners
                   (lazy (answeredByRanger room))
+                  (lazy
+                      (Set.contains room view.RaidedOutposts
+                       && Map.tryFind room judged
+                          |> Option.exists (fun verdict -> verdict.Value.Casting.Contains home)))
                   (lazy
                       (Brief.trespassSplit
                           view

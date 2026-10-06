@@ -433,7 +433,8 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
 /// The guarded rooms a fighting row casts for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
-/// melee guard. A chased room (#510) asks neither row, nor a raided room
+/// melee guard. A chased room (#510) asks neither row but where its own row
+/// wins a room the stand-down shuts (`chaseAsks`), nor a raided room
 /// another colony answers (the world layer's S4): the answerer casts for it.
 let private guardedAsks
     (view: ColonyView)
@@ -463,14 +464,38 @@ let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
         | Guard _ -> []
         | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
 
-/// A fighting row's asks: its guarded rooms' and every other Brief's.
+/// The chases outside the guarded rooms that a row casts for: a room shut on
+/// a raid this colony's own row wins (#571), whose Guard the stand-down keeps
+/// out of the guarded rooms but whose cast it never withholds.
+let private chaseAsks
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    (row: CastRow)
+    : RowAsk list =
+    threats.Briefs
+    |> Map.toList
+    |> List.collect (fun (task, brief) ->
+        match task with
+        | Guard room when
+            brief.Duty = Duty.Guard BriefKind.Chase
+            && not (List.contains room outposts.Guarded)
+            && Threats.answers view brief
+            ->
+            brief.Asks |> List.filter (fun ask -> ask.Row = row)
+        | _ -> [])
+
+/// A fighting row's asks: its guarded rooms', its cast chases' and every
+/// other Brief's.
 let private asksFor
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : RowAsk list =
-    (guardedAsks view threats outposts row |> List.map snd) @ briefAsks threats row
+    (guardedAsks view threats outposts row |> List.map snd)
+    @ chaseAsks view threats outposts row
+    @ briefAsks threats row
 
 /// A fighting row's quota: its asks' counts, summed.
 let internal rowQuota

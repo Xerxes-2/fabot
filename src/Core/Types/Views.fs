@@ -88,8 +88,8 @@ type Answer =
 /// whether its biggest cast wins the room alone (`Facts.rowAnswer`).
 type RowAnswer = { Ranger: bool; Wins: bool }
 
-/// One raided room's verdict, priced once a tick over every colony's bodies
-/// (`Facts.judge`) and read by every colony alike.
+/// One raided room's verdict, priced once a tick over our fleet and the
+/// world's vision (`Facts.judge`) and read by every colony alike.
 type RoomVerdict =
     {
         Answer: Answer
@@ -102,6 +102,9 @@ type RoomVerdict =
         /// where none does and it is no home of ours, every colony that sees
         /// it (`Facts.rowAnswer`).
         Own: Set<string>
+        /// Those of `Own` whose row casts for the room, not only binds it
+        /// through a fighter of theirs that takes the raid.
+        Casting: Set<string>
         /// The fewest rangers that win the raid together, of every colony
         /// that sees it and would send them, standing in the room or lent to
         /// it by their own colony's rule; None where all of them lose.
@@ -204,10 +207,11 @@ type WorldView =
         /// is aimed over its own view alone.
         Looks: Map<string, string> option
         /// Every body of ours by the room it stands in, and its tile there,
-        /// whoever holds it. Read on first use: one reader, a home's Defend.
+        /// whoever holds it. Read on first use: by a home's Defend, and by the
+        /// world's verdicts as the fleet (`Facts.judge`).
         Bodies: Lazy<Map<string, (CreepInfo * Pos) list>>
         /// Each room a raider stands in, its one verdict, priced on first
-        /// read over every colony's view (`Facts.judge`). Empty until the
+        /// read over the fleet and this vision (`Facts.judge`). Empty until the
         /// views are cut, and in every fixture of one colony, which prices
         /// a room over its own view alone.
         Answers: Map<string, Lazy<RoomVerdict>>

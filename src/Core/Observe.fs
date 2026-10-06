@@ -833,8 +833,7 @@ let private raidClocked (episode: OutpostEpisode) =
 
 /// The rooms of a log's standing raid rows (`raidClocked`) among `prices`:
 /// the stand-down rows a colony prices out of sight with the world's look
-/// laid in, one reading for its raid log's fold (`foldRaids`) and the world's
-/// verdicts (`Facts.judge`).
+/// laid in, what its raid log's fold re-reads (`foldRaids`).
 let pricedRaidRows (prices: string -> bool) (tick: int) (outposts: OutpostEpisode list) =
     outposts
     |> List.filter (fun episode ->
@@ -1855,8 +1854,7 @@ module Danger =
     /// The rooms of the standing raid rows a colony prices (`Facts.pricedRooms`
     /// over the rooms it declares, `owned`), off its own log with the world's
     /// laid in (`into`): the rows its fold re-reads off the world's look
-    /// (`foldColony`), and the world's verdicts (`Facts.judge`) price beside
-    /// its view. The priced set is read only where a raid row stands.
+    /// (`foldColony`). The priced set is read only where a raid row stands.
     let outOfSight (owned: Set<string>) (view: ColonyView) (laid: RaidState) =
         match pricedRaidRows (fun _ -> true) view.Time laid.Outposts with
         | [] -> []

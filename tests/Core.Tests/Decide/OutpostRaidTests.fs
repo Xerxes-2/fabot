@@ -2233,19 +2233,90 @@ let shutChaseTests =
                     (Facts.rowAnswer shut "W1N2").Wins
                     "the guard row the bank buys would win it"
 
-                // The stand-down withholds that row's Guard, so its win binds
-                // nobody (#573): the room is the rangers' that kite it.
+                // The stand-down withholds no row from the verdict: the room
+                // is the row's Win, and its kill the chase.
                 Expect.equal
                     (Facts.answer shut "W1N2")
-                    Answer.Kite
-                    "and the room's verdict is the kite"
+                    Answer.Win
+                    "and the room's verdict is the row's Win"
 
                 let decision = decide shut Map.empty Set.empty None
 
                 Expect.equal
                     (Map.tryFind "r-1" decision.Assignments)
                     (Some(taskId (Guard "W1N2")))
-                    "but the room is shut to the row, so the ranger takes its Guard"
+                    "but the room is shut to the row's economy, so its kill is the chase, and the ranger takes its Guard"
+            }
+
+            test
+                "a raid the stand-down shuts that the colony's own guard row wins, with no ranger to chase it, is the guard's kill all the same (#571)" {
+                let shut =
+                    { raidedOutpost
+                          [
+                              hostileIn
+                                  "W1N2"
+                                  { X = 25; Y = 42 }
+                                  [ Attack; Attack; Attack; Attack; Move ]
+                          ] with
+                        RaidedOutposts = Set.singleton "W1N2"
+                        Bank = { Available = 1_300; Capacity = 1_300 }
+                    }
+                    |> withGuards [ guard "g-1", { X = 22; Y = 47 } ]
+
+                Expect.isTrue
+                    (Facts.rowAnswer shut "W1N2").Wins
+                    "the premise: the guard row the bank buys wins it"
+
+                let decision = decide shut Map.empty Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "g-1" decision.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the stand-down shuts the economy, never the kill: the guard takes the room's Guard"
+
+                // Each body on its own fitness, not the row's: beside it, a
+                // two-ATTACK guard that loses this raid alone.
+                let weak = creepWith "g-weak" 0 0 [ Attack; Attack; Move; Move ]
+                let both = shut |> withGuards [ weak, { X = 20; Y = 47 } ]
+                let atlas = Atlas.ofView both
+                let brief = Threats.briefOf (threatsOf both atlas) "W1N2"
+
+                Expect.isTrue
+                    (brief.Admits both atlas (guard "g-1"))
+                    "the guard that wins alone is admitted"
+
+                Expect.isFalse
+                    (brief.Admits both atlas weak)
+                    "and one that loses the raid alone is not, though its row wins"
+            }
+
+            test
+                "a raid the stand-down shuts that the colony's guard row wins, with no fighter of ours anywhere, casts the guard that hunts it (#571)" {
+                let shut =
+                    { raidedOutpost
+                          [
+                              hostileIn
+                                  "W1N2"
+                                  { X = 25; Y = 42 }
+                                  [ Attack; Attack; Attack; Attack; Move ]
+                          ] with
+                        RaidedOutposts = Set.singleton "W1N2"
+                        Bank = { Available = 5_600; Capacity = 5_600 }
+                    }
+
+                Expect.equal (Facts.answer shut "W1N2") Answer.Win "the premise: the row wins it"
+
+                let brief = Threats.briefOf (threatsOf shut (Atlas.ofView shut)) "W1N2"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Guard ]
+                    "the stand-down withholds no cast: the chase asks the guard row"
+
+                Expect.exists
+                    (spawnIntents (decide shut Map.empty Set.empty None).Intents)
+                    (fun (_, _, name) -> name.StartsWith "guard-")
+                    "and the colony casts the guard"
             }
 
             test
@@ -3225,6 +3296,36 @@ let private smallResident name =
         0
         (List.replicate 10 Move @ List.replicate 7 RangedAttack @ List.replicate 3 Heal)
 
+/// `Facts.judge` over these colonies with the world's fleet laid into each
+/// view, as `WorldView.ofWorld` lays it in the shell: every body any of them
+/// places, by the room it stands in.
+let private judgeOverFleet hops held (colonies: Facts.Judged list) =
+    let fleet =
+        colonies
+        |> List.collect (fun colony ->
+            colony.Cut.Creeps
+            |> List.choose (fun creep ->
+                SpatialInfo.creepPlacementOf colony.Cut.Spatial creep.Name
+                |> Option.map (fun at -> creep.Name, (at.Room, (creep, RoomPos.pos at)))))
+        |> List.distinctBy fst
+        |> List.map snd
+        |> List.groupBy fst
+        |> List.map (fun (room, placed) -> room, List.map snd placed)
+        |> Map.ofList
+
+    colonies
+    |> List.map (fun colony ->
+        { colony with
+            Cut =
+                { colony.Cut with
+                    World =
+                        { colony.Cut.World with
+                            Bodies = lazy fleet
+                        }
+                }
+        })
+    |> Facts.judge hops held
+
 /// The mother's view and the child's with the world's verdicts priced over
 /// both (`Facts.judge`), a crossing a room apart.
 let private judgedBoth (mother: ColonyView) (child: ColonyView) =
@@ -3235,11 +3336,11 @@ let private judgedBoth (mother: ColonyView) (child: ColonyView) =
     let deciding view : Facts.Judged =
         {
             Cut = view
-            OutOfSight = []
+            Owns = Set.empty
             Decides = true
         }
 
-    match Facts.judge crossings Map.empty [ deciding mother; deciding child ] with
+    match judgeOverFleet crossings Map.empty [ deciding mother; deciding child ] with
     | [ mother; child ] -> mother, child
     | _ -> failwith "two views in, two out"
 
@@ -3731,6 +3832,234 @@ let childOutpostTests =
                     "the mother, the answerer, pools it for her resident"
             }
 
+            // The user's complaint, a cripple nobody chases: the owner's row
+            // wins its shut outpost with no body of hers standing, so her row
+            // casts the body that does (the stand-down is an economy gate).
+            test
+                "a row that wins its own shut outpost with nothing standing casts for it: the Win binds the child and her chase asks her guard row (#571)" {
+                let raid =
+                    hostileIn "W1N4" { X = 25; Y = 20 } [ Attack; Attack; Attack; Attack; Move ]
+
+                let shut (view: ColonyView) =
+                    { view with
+                        RaidedOutposts = Set.singleton "W1N4"
+                    }
+
+                let mother = shut (watchingBeyond [ raid ])
+                let child = shut (childBeside mother 5600 [])
+
+                Expect.isTrue
+                    (Facts.rowAnswer child "W1N4").Wins
+                    "the premise: the child's row, cast, would win it"
+
+                let crossings (home: string) (room: string) =
+                    RoomName.offsetOf home room
+                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+                let _, child =
+                    match
+                        judgeOverFleet
+                            crossings
+                            Map.empty
+                            [
+                                {
+                                    Cut = mother
+                                    Owns = Set.empty
+                                    Decides = true
+                                }
+                                {
+                                    Cut = child
+                                    Owns = Set.ofList [ "W1N3"; "W1N4" ]
+                                    Decides = true
+                                }
+                            ]
+                    with
+                    | [ mother; child ] -> mother, child
+                    | _ -> failwith "two views in, two out"
+
+                Expect.equal
+                    (Facts.answer child "W1N4", (Facts.verdictOf child "W1N4").Answerer)
+                    (Answer.Win, Some "W1N3")
+                    "the Win binds the child, whose row casts for her own room, shut or not"
+
+                let threats = threatsOf child (Atlas.ofView child)
+                let brief = Threats.briefOf threats "W1N4"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row))
+                    [ CastRow.Guard ]
+                    "and her chase asks her guard row for the body that wins it"
+
+                Expect.isTrue (Threats.wants child threats (Guard "W1N4") >= 1) "at least one"
+            }
+
+            // #573's shape: the owner can neither cast a winning row nor a
+            // ranger that kites the healed cripple, and the mother's resident
+            // next door kites it but loses it standing. The fleet's kite is
+            // the room's.
+            test
+                "a healed cripple in a shut outpost its owner cannot answer is the kite of any colony's ranger standing by" {
+                // Fourteen ATTACK and three HEAL on one MOVE: a one-block
+                // ranger's shot never out-heals it, a big one's does.
+                let cripple =
+                    hostileIn
+                        "W1N4"
+                        { X = 25; Y = 20 }
+                        (List.replicate 14 Attack @ List.replicate 3 Heal @ [ Move ])
+
+                let shut (view: ColonyView) =
+                    { view with
+                        RaidedOutposts = Set.singleton "W1N4"
+                    }
+
+                let mother =
+                    watchingBeyond [ cripple ]
+                    |> fun colony ->
+                        { colony with
+                            Creeps =
+                                (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
+                                @ [
+                                    creepWith
+                                        "r-1"
+                                        0
+                                        0
+                                        (List.replicate 21 Move
+                                         @ List.replicate 14 RangedAttack
+                                         @ List.replicate 7 Heal)
+                                ]
+                        }
+                    |> shut
+
+                let child = shut (childBeside mother 300 [])
+
+                let crossings (home: string) (room: string) =
+                    RoomName.offsetOf home room
+                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+                let judgedWith (child: ColonyView) =
+                    match
+                        judgeOverFleet
+                            crossings
+                            Map.empty
+                            [
+                                {
+                                    Cut = mother
+                                    Owns = Set.empty
+                                    Decides = true
+                                }
+                                {
+                                    Cut = child
+                                    Owns = Set.ofList [ "W1N3"; "W1N4" ]
+                                    Decides = true
+                                }
+                            ]
+                    with
+                    | [ mother; child ] -> mother, child
+                    | _ -> failwith "two views in, two out"
+
+                let mother, judged = judgedWith child
+
+                Expect.equal
+                    (Facts.answer judged "W1N4")
+                    Answer.Kite
+                    "the mother's resident kites it: a Kite, binding nobody"
+
+                Expect.equal
+                    (Map.tryFind "r-1" (decide mother Map.empty Set.empty None).Assignments)
+                    (Some(taskId (Guard "W1N4")))
+                    "and the resident next door takes the chase"
+
+                // A tower not ours seen firing in the room: the exchange prices
+                // none, so no body standing by kites or wins the raid there.
+                let towered =
+                    { child with
+                        World =
+                            { child.World with
+                                Rooms =
+                                    child.World.Rooms
+                                    |> Map.add
+                                        "W1N4"
+                                        {
+                                            Hostiles = [ cripple ]
+                                            HostileFatigue = Map.empty
+                                            InvaderCores = []
+                                            Towers = [ "tower-1", { X = 10; Y = 10 } ]
+                                            Fallen = []
+                                            Control = neutralRoom
+                                        }
+                            }
+                    }
+
+                Expect.equal
+                    (Facts.answer (snd (judgedWith towered)) "W1N4")
+                    Answer.Lose
+                    "under a tower not ours, the resident's kite is no answer"
+            }
+
+            // A raid fled into a room no row casts for: a colony that only
+            // passes a small ranger beside it is no answer, its row's paper
+            // Win aside, or that ranger would go in alone and lose.
+            test
+                "a raid in a room no row casts for binds no colony whose ranger beside it neither wins nor kites it" {
+                let child =
+                    let beside =
+                        childBeside
+                            (watchingBeyond [])
+                            5600
+                            [ smallResident "c-1", { X = 25; Y = 2 } ]
+
+                    { beside with
+                        Hostiles = [ synapse "W1N4" ]
+                        Spatial =
+                            { beside.Spatial with
+                                TargetKinds = Map.remove "ctl-W1N4" beside.Spatial.TargetKinds
+                            }
+                    }
+
+                Expect.isFalse
+                    (List.contains
+                        "W1N4"
+                        (Planner.outpostFactsOf child (Atlas.ofView child)).Declared)
+                    "the premise: W1N4 is no outpost of hers"
+
+                let verdictHeld held =
+                    match
+                        judgeOverFleet
+                            (fun _ _ -> None)
+                            held
+                            [
+                                {
+                                    Cut = child
+                                    Owns = Set.singleton "W1N3"
+                                    Decides = true
+                                }
+                            ]
+                    with
+                    | [ judged ] -> Facts.verdictOf judged "W1N4"
+                    | _ -> failwith "one view in, one out"
+
+                let verdict = verdictHeld Map.empty
+
+                Expect.isTrue
+                    (verdict.Rows |> Map.tryFind "W1N3" |> Option.exists (fun row -> row.Wins))
+                    "the premise: her row, cast, would win it"
+
+                Expect.equal
+                    (verdict.Answer, verdict.Own)
+                    (Answer.Lose, Set.empty)
+                    "but nothing of hers casts for the room or takes the raid: no Win binds her"
+
+                // The binding's hysteresis: a body already holding the room's
+                // Guard binds her until the Guard lets it go, so a tick its live
+                // parts dip under the price does not reshuffle the pools.
+                let held = verdictHeld (Map.ofList [ "c-1", taskId (Guard "W1N4") ])
+
+                Expect.equal
+                    (held.Answer, held.Own)
+                    (Answer.Win, Set.singleton "W1N3")
+                    "a ranger of hers already on the raid binds her row's Win"
+            }
+
             // The world layer's S3: a raid the room's own row answers is no
             // other colony's chase.
             test
@@ -3876,18 +4205,18 @@ let childOutpostTests =
                     "and two such bodies win it"
 
                 let judged =
-                    Facts.judge
+                    judgeOverFleet
                         (fun _ _ -> None)
                         Map.empty
                         [
                             {
                                 Cut = mother
-                                OutOfSight = []
+                                Owns = Set.empty
                                 Decides = true
                             }
                             {
                                 Cut = neighbour
-                                OutOfSight = []
+                                Owns = Set.empty
                                 Decides = true
                             }
                         ]
@@ -3914,18 +4243,18 @@ let childOutpostTests =
                 let child = childBeside mother 850 [ ranger "r-own", { X = 24; Y = 26 } ]
 
                 let answerHeld held =
-                    Facts.judge
+                    judgeOverFleet
                         (fun _ _ -> None)
                         held
                         [
                             {
                                 Cut = mother
-                                OutOfSight = []
+                                Owns = Set.empty
                                 Decides = false
                             }
                             {
                                 Cut = child
-                                OutOfSight = []
+                                Owns = Set.empty
                                 Decides = true
                             }
                         ]

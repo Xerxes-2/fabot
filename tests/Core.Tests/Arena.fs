@@ -1459,11 +1459,7 @@ let private cut (a: Arena) : World * (Colony * ColonyView) list =
 
         ({
             Cut = view
-            OutOfSight =
-                Observe.Danger.outOfSight
-                    (Colony.declaredRooms c)
-                    view
-                    (Observe.Danger.into danger (raidsOf a c.Home))
+            Owns = Colony.declaredRooms c
             Decides = true
         }
         : Facts.Judged))

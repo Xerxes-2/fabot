@@ -2807,7 +2807,7 @@ let worldSeamTests =
                 let deciding view : Facts.Judged =
                     {
                         Cut = view
-                        OutOfSight = []
+                        Owns = Set.empty
                         Decides = true
                     }
 
