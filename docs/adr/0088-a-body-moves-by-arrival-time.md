@@ -67,6 +67,36 @@ The symptoms of 2026-10-05..07, each the same missing rule:
 
 **Order.** S0 can start now. S1 waits for world S4, and the unseen seeding for world S6. A stage deletes what it subsumes in the same change (the ADR citation cap holds).
 
+**S0 as built** (tests only; no profile fingerprint can move). Each pin is commented `Characterisation (movement S0 …)` and names the stage that flips it.
+
+- **Pins, one or more per rule row.** New tests:
+  - Reach radius: ThreatTests "a Reach is the whole square about the hostile, off the ground too, and five ticks a tile is the cut to a step past its swing" (S2). It pins the square past the ground's edge, and 4A1M keeping +2 while 5A1M gets +1.
+  - Half-tick step units: AtlasWalkTests "an unloaded ranger at a MOVE a part takes the road lane over an equally quick plain one" (S2). The road wins whichever lane is paved.
+  - Avoid kinds: OutpostRaidTests "each flavour's walk-round arm" (S2–S3). Trespass gets `Reach`; both chases get `MeleeStepAndSwing`; every other flavour gets `Runner`.
+  - Kite fatigue: OutpostRaidTests "the kite ground is the same for a lamed, tired ranger as for a quick one" (S3).
+
+  Existing tests, tagged:
+  - Cross-border reach: "a melee within its margin of an exit reaches the first two columns across it, and no further" (S2).
+  - Flee area: "the Move Intent walks toward a safe tile, and no action is emitted", and `outDamaged` in "a ranger whose Guard went this tick, beside an 8A melee, takes Flee and steps out" (S2).
+  - Kite ground: "a ranger is matched to kill it from range three, and the melee guard is not sent" (S3).
+  - Kiter walk-round and exit camp: "it walks onto the ring three from the melee, inside its Reach, and shoots from there" and "the chase crosses the border at an exit three or more from the one the target left by" (S3).
+  - Walk-round: "a body Flee applies to walks round a Reach to its work, never into it" and "a trespass's killer waits at the edge of a Reach that covers the kill's ground" (S2).
+  - Shelter and exit band: "the ground it walks to is behind the declared line, else five in from the exits, never beside a spawn" (S4).
+  - Defend line: "a melee at the rampart beside a kiter: the defender answers the melee, a ranger the kiter, each on its own ground" (S4).
+  - Melee glue: LightTickTests "the melee's step onto its target never lands on an exit, …" (S3).
+  - Moving blockers: ViewTests "a hostile that stepped since the last full tick also stands on the tile it left" (S5).
+  - Catchability: "a kill admits no body its target outruns on every ground; equal pace on one is a chase" (S6).
+  - Light-tick forcing: "a stationary hostile is near only within its weapon's range; a mobile one a step past it" (S5).
+- **Captures** (ArenaTests, "arena border play"):
+  - **W17S26 t986,005** (`rangerIntoMelee`, S3): reproduced. Our code gives ranger-984393-Spawn3 guard:W17S26 on its own, and it steps within two of HalfLife847 (17M17A) and is struck. The melee's first two steps are scripted to its live tiles. The pin is one 426 strike where live there were four: the arena's ranger then outwalks the melee, which live stalled on plain.
+  - **#527 W18S25 t971,045** (`slowMeleeHaulers`, S2): partly reproduced. hauler-970335-Spawn11 takes Flee at each step Virtual458 takes and rematches refill:tower-13-29, and only it is pinned. hauler-969730-Spawn11 walks round at once, because the arena lays no roads; live, the road made the path past the melee the cheaper one. The tick is too old for live Memory, so the Raid log is empty and the residents later kill Virtual458, which they did not do live.
+  - **Doorway t972,061** (`doorwayJam`, S4): partly reproduced. guard-970892-Spawn11 stands idle on W17S25 (1,15) for all 20 ticks, and only it is pinned. Live, hauler-971381-Spawn11 bounced on (49,15)/(0,15); in the arena it walks in, the road path again being the likely difference.
+  - **#533 W18S25 t973,267** (`idleRangerInReach`, S2): cannot reproduce by design, because live it ran before the #533 fix. The pin is main's outcome: the ranger takes guard:W17S25, walks home through the melee's Reach, is struck three times, then returns, kills Idol768 and survives. S2's walk-round should keep it out of the Reach. `shutOutpostCripple` (t973,320) comes after the death and does not cover it.
+  - **#551**: the existing `swayingTrespassers` (t979,950) is tagged S5. The mechanism moves there, but the outcome must hold.
+  - **#558 t985,660**: #558's own capture, `haulerBesideCore`, landed with `RoomFacts.InvaderCores` in the arena. It reproduced the live core-ring park before #558's fix and pins the fixed outcome: both rangers shoot Obsidian522, then the core from range 3. It is tagged S4, where the stand-tile picker takes over the ring and must keep that outcome.
+  - **Findings about the arena:** it lays no roads, which moves path choice and road gait. Its `Chase` script steps onto swamp where a live melee kept to plain, so a faithful capture scripts waypoints. An old tick seats no Raid log.
+- **Flood timing.** One multi-source Dial's bucket-queue flood over a real 50×50 room (W17S25 terrain), integer costs per tile, plus a separable Chebyshev dilation by the strike range. It was compiled by Fable 5.18 to Int32Array loops and run on Node 22 (Ryzen 9950X3D), each figure averaging 5,000 runs: ~0.10 ms for 1 or 6 melee seeds (swing 1), ~0.15 ms for 6 shooter seeds (range 3), and ~0.165 ms for 20 mixed seeds. That is inside S1's 0.3 ms locally; the MMO's slower cores leave about 2× headroom.
+
 ## Consequences
 
 - Most per-feature constants and `Avoid` arms go, and ADR 0085's ground builders shrink.

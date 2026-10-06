@@ -1082,6 +1082,9 @@ let colonyViewTests =
                     "the mother's pioneer, the invader and the ally alike"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): a moving blocker
+            // is its tile and its last one (`Left`), no more. Flips at S5, which
+            // adds the `A <= 1` surcharge beside `Left`.
             test "a hostile that stepped since the last full tick also stands on the tile it left" {
                 // #551: a trespasser swaying between two tiles every tick was
                 // entering the tile our hauler stepped into, every tick.

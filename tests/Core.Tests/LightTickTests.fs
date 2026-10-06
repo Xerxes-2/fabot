@@ -461,6 +461,9 @@ let replayTests =
                     "with none in reach, the head, and the plan's step toward it"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): melee glue steps
+            // onto the target's tile from range 1, blind to where the target can
+            // step next. Flips at S3, glue keeping contact after its best step.
             test
                 "the melee's step onto its target never lands on an exit, off our rampart, beside a second melee, nor for a squad's cast" {
                 // `Emitter.glueStep`, the one rule both ticks read (#535).
@@ -1171,6 +1174,9 @@ let forcedTests =
                     "a hauler at the gate takes nothing down"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): light-tick forcing
+            // at the weapon's range plus one step (`LightTick.strikes`). Flips at
+            // S5, where it reads the margin recorded at the planned tile.
             test
                 "a stationary hostile is near only within its weapon's range; a mobile one a step past it" {
                 // Live t964,5xx: Trepidimous' 14A1M sat 4 tiles from our hauler in

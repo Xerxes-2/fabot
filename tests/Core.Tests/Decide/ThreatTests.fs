@@ -940,6 +940,9 @@ let rampartDefenderTests =
                     "the defender's ask alone"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): the Defend's line
+            // ground (`defendGroundOf`), each row's ramparts within its swing or
+            // its shot of the raid. Flips at S4, the one stand-tile picker.
             test
                 "a melee at the rampart beside a kiter: the defender answers the melee, a ranger the kiter, each on its own ground" {
                 let raid = [ raidMeleeAt "h-2" { X = 19; Y = 34 }; shooterAt { X = 17; Y = 33 } ]
@@ -3365,6 +3368,42 @@ let threatTests =
                     "a body carrying both weapons reaches the farther of them"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): pins the Reach
+            // as a square blind to the ground and to the hostile's pace short
+            // of the stationary cut (`reachRadius`, `ReachMargin`,
+            // `Gait.stationary`). Flips at S2, where a tile is in reach when the
+            // hostile's arrival map says it can strike there in time.
+            test
+                "a Reach is the whole square about the hostile, off the ground too, and five ticks a tile is the cut to a step past its swing" {
+                // openRoom 8's ground ends at y = 33: the hostile on its edge.
+                let at = { X = 25; Y = 33 }
+
+                let square r =
+                    Set.ofList
+                        [
+                            for x in at.X - r .. at.X + r do
+                                for y in at.Y - r .. at.Y + r -> { X = x; Y = y }
+                        ]
+
+                let reachOf attacks =
+                    reachIn (facingBody at (List.replicate attacks Attack @ [ Move ]))
+
+                Expect.equal
+                    (reachOf 1)
+                    (square 3)
+                    "a melee on its legs: every tile within three, the rows past the ground's edge too"
+
+                Expect.equal
+                    (reachOf 4)
+                    (square 3)
+                    "four ATTACK on one MOVE, four ticks a plain tile: still the room's margin"
+
+                Expect.equal
+                    (reachOf 5)
+                    (square 2)
+                    "five ATTACK on one MOVE, five ticks a plain tile: a step past its swing"
+            }
+
             test
                 "a tile under one of our standing ramparts is in no Reach; a foreign one covers nothing" {
                 // The projection carries hits for an ownable kind only when it is
@@ -3896,6 +3935,9 @@ let fleeTests =
                 Expect.equal (Map.tryFind "w1" assignments) (Some(taskId Flee)) "and it runs"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): the walk round
+            // (`moveIntentFor.round`, `Atlas.firstStepAvoiding`) takes the Reach
+            // as a wall. Flips at S2, where a walk avoids `A <= T_b + held`.
             test "a body Flee applies to walks round a Reach to its work, never into it" {
                 // #472: an open floor, the source walled in at (25,14), its
                 // Seats along y = 15; a melee body at (25,20) whose Reach
@@ -4108,6 +4150,9 @@ let fleeTests =
                     "and one idle beside a lone 1-RA scout it out-heals is not forced off"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): who flees reads
+            // `Emitter.outDamaged`, each armed hostile within its `reachRadius`.
+            // Flips at S2, with the Reach it reads.
             test "a ranger whose Guard went this tick, beside an 8A melee, takes Flee and steps out" {
                 // #533, live at W18S25 t973,267: the Guard went `task-gone` beside
                 // Idol768 and the ranger stood idle, taking 240 a tick against its
@@ -4229,6 +4274,9 @@ let fleeTests =
                     $"along the Reach's edge, never into it: {step}"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): the Flee area is
+            // `Threats.Safe`, the ground outside every Reach. Flips at S2, where
+            // Flee steps to the nearest tile with `T_b < A`.
             test "the Move Intent walks toward a safe tile, and no action is emitted" {
                 // The Threat holds the lane's north end, so every tile within
                 // three of it is hot and the safe ground is south: the creep
@@ -5304,6 +5352,9 @@ let acrossTheBorderTests =
     testList
         "a Threat across the border"
         [
+            // Characterisation (movement S0, `docs/adr/0088`): the cross-border
+            // Reach (`reachAcross`), the radius less the walk to the exit and the
+            // carry. Flips at S2, where floods carry through `Atlas.seams`.
             test
                 "a melee within its margin of an exit reaches the first two columns across it, and no further" {
                 // #514, live t958,965: the 18A melee on W18S25's east edge put no
@@ -5405,6 +5456,9 @@ let acrossTheBorderTests =
                     $"it walks in along the corridor, away from the exit: {step}"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): the shelter and
+            // its exit band (`shelterOf`, `shelterDepth` 5). Flips at S4, where
+            // the band is a map reading.
             test
                 "the ground it walks to is behind the declared line, else five in from the exits, never beside a spawn" {
                 let raid = [ meleeWestAt { X = 46; Y = 34 } ]

@@ -1502,6 +1502,9 @@ let kiteTests =
                     "and is read as no healer by the same parts"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): the kite ground's
+            // constants (`stepAndSwing`, `holdReach`): a ring at exactly three
+            // even about a melee that cannot step. Flips at S3.
             test "a ranger is matched to kill it from range three, and the melee guard is not sent" {
                 let at = { X = 25; Y = 44 }
 
@@ -1539,6 +1542,34 @@ let kiteTests =
                 Expect.isTrue
                     (ground |> Set.forall (fun tile -> rangeTo at tile >= 3 && rangeTo at tile <= 3))
                     "its ground is in range of the melee and out of its step and swing"
+            }
+
+            // Characterisation (movement S0, `docs/adr/0088`): the kite ground
+            // is one set for the room, laid off the hostiles alone
+            // (`kiteGroundIn`): neither the ranger's legs nor its fatigue enter
+            // it, the parked #524. Flips at S3, where a kite tile is one the
+            // melee cannot reach before this ranger has shot and stepped on.
+            test "the kite ground is the same for a lamed, tired ranger as for a quick one" {
+                let at = { X = 25; Y = 44 }
+                let quick = ranger "r-1"
+
+                let lamed =
+                    { quick with
+                        Body = Map.add Move 1 quick.Body
+                        Fatigue = 20
+                    }
+
+                let groundWith body =
+                    groundOf (
+                        declaredRaid [ crippledAt at ] |> withGuards [ body, { X = 22; Y = 47 } ]
+                    )
+
+                Expect.isNonEmpty (groundWith quick) "the premise: the quick ranger has ground"
+
+                Expect.equal
+                    (groundWith lamed)
+                    (groundWith quick)
+                    "one MOVE acting and twenty fatigue to pay: the same ring"
             }
 
             test "the speed and not the paper picks the target" {
@@ -1587,6 +1618,9 @@ let kiteTests =
                     "and nothing in it is in the melee's step and swing"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): a kiter's exit
+            // camp (`Resolver.avoidOf`), a step and a swing about the held exit.
+            // Flips at S3.
             test
                 "the chase crosses the border at an exit three or more from the one the target left by" {
                 // The raid left the home by (25,0) and waits across it; the ranger
@@ -1776,6 +1810,9 @@ let kiteStepTests =
     testList
         "a kiting ranger's step (#510)"
         [
+            // Characterisation (movement S0, `docs/adr/0088`): a kiter walks
+            // round a step and a swing about each melee (`Resolver.avoidOf`),
+            // not its Reach. Flips at S3.
             test
                 "it walks onto the ring three from the melee, inside its Reach, and shoots from there" {
                 let melee = { X = 25; Y = 44 }
@@ -4075,6 +4112,32 @@ let guardPrecedenceTests =
                     "each alone"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): what each
+            // flavour's holder walks round on its way (`Brief.Avoid`): a chase's
+            // ranger a step and a swing about each melee, a trespass's killer the
+            // whole Reach, every other the runner's Reach. Flips at S2-S3, where
+            // every walk reads the arrival map and the arms go.
+            test "each flavour's walk-round arm" {
+                let avoidOf flavour =
+                    let colony = withFlavour precedenceBasis flavour
+                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Avoid
+
+                Expect.equal
+                    ([ Raid; Core; Hold; Trespasser; Resident; Harassed; ChaseSeen; ChaseDark ]
+                     |> List.map (fun flavour -> flavour, avoidOf flavour))
+                    [
+                        Raid, Avoid.Runner
+                        Core, Avoid.Runner
+                        Hold, Avoid.Runner
+                        Trespasser, Avoid.Reach
+                        Resident, Avoid.Runner
+                        Harassed, Avoid.Runner
+                        ChaseSeen, Avoid.MeleeStepAndSwing
+                        ChaseDark, Avoid.MeleeStepAndSwing
+                    ]
+                    "each alone"
+            }
+
             // Characterisation (the Brief's S0): `guard:<room>` is one Task id over
             // every flavour, and which one answers is the precedence `threatsHeldBy`
             // writes across its exclusion lists and `guardGroundIn`'s order. Each
@@ -4645,7 +4708,9 @@ let killAdmissionTests =
             }
 
             // `Gait.outruns`, the kill's one catch rule (#531): strictly quicker
-            // on road, plain and swamp alike.
+            // on road, plain and swamp alike. Characterisation (movement S0,
+            // `docs/adr/0088`): catchability read off two gaits alone, blind to
+            // the ground between. Flips at S6, pursuit on evidence.
             test
                 "a kill admits no body its target outruns on every ground; equal pace on one is a chase" {
                 let hauler =
@@ -4764,6 +4829,9 @@ let killAdmissionTests =
                     "its step plan is the step it issued, and the next one round"
             }
 
+            // Characterisation (movement S0, `docs/adr/0088`): with the Reach a
+            // wall and no way round, the walker waits at its edge
+            // (`moveIntentFor.round`). Flips at S2.
             test "a trespass's killer waits at the edge of a Reach that covers the kill's ground" {
                 // The same raider reaches every tile beside a digger at (27,1):
                 // the kill's ground less the Reach is empty, so there is no

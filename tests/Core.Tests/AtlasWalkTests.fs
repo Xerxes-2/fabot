@@ -70,6 +70,49 @@ let walkTests =
     testList
         "atlas walk"
         [
+            // Characterisation (movement S0, `docs/adr/0088`): the half-tick step
+            // units (`stepUnits`) price a road below plain for every body, so an
+            // unloaded 1:1 ranger, a tile a tick on both, takes the road lane.
+            // Flips at S2, where a walk is priced by arrival time.
+            test
+                "an unloaded ranger at a MOVE a part takes the road lane over an equally quick plain one" {
+                // Two three-step lanes from (10,14) to the Seat (10,11): up
+                // x = 10, or by (11,13) and (11,12); `paved` is the lane's x.
+                let stepWith paved =
+                    let atlas =
+                        spatial
+                            [ "src-a", { X = 10; Y = 10 } ]
+                            [
+                                { X = 10; Y = 10 }, Wall
+                                { X = 10; Y = 11 }, Plain
+                                { X = 10; Y = 12 }, Plain
+                                { X = 10; Y = 13 }, Plain
+                                { X = 10; Y = 14 }, Plain
+                                { X = 11; Y = 12 }, Plain
+                                { X = 11; Y = 13 }, Plain
+                            ]
+                        |> withHome (fun layer ->
+                            { layer with
+                                Roads = Set.ofList [ { X = paved; Y = 12 }; { X = paved; Y = 13 } ]
+                            })
+                        |> withCreepsAt [ "w", { X = 10; Y = 14 } ]
+                        |> snapshotWith [ creepWith "w" 0 [ RangedAttack; Move ] ]
+                        |> ofView
+
+                    let seat = RoomPos.setAt (atlasHome atlas) (Set.singleton { X = 10; Y = 11 })
+                    firstStepAvoiding atlas "w" Set.empty seat |> stepOf atlas "w"
+
+                Expect.equal
+                    (stepWith 11)
+                    (Some { X = 11; Y = 13 })
+                    "onto the road: four half-tick units against plain's six, three ticks either way"
+
+                Expect.equal
+                    (stepWith 10)
+                    (Some { X = 10; Y = 13 })
+                    "and the road again when x = 10 is paved"
+            }
+
             test "the walk is at least the Chebyshev distance to the tile it reaches" {
                 // Every body against every source in a room of mixed
                 // terrain, roads and scattered walls (#79 as a property).
