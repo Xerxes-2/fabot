@@ -136,7 +136,7 @@ let internal stepTable (stepPrice: int -> int option) : int[] =
 let internal at (index: int) (array: int[]) : int = array.[index]
 
 [<Emit("$1[$0] = $2")>]
-let private setAt (index: int) (array: int[]) (value: int) : unit = array.[index] <- value
+let internal setAt (index: int) (array: int[]) (value: int) : unit = array.[index] <- value
 
 [<Emit("$1[$0]")>]
 let internal flagAt (index: int) (array: bool[]) : bool = array.[index]

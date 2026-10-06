@@ -118,12 +118,60 @@ type RoomVerdict =
         Answerer: string option
     }
 
+/// The whole ticks a tile of road, plain and swamp takes one body
+/// (`Gait.ticks`): exact, the engine carrying no fatigue over a fraction.
+type Pace = { Road: int; Plain: int; Swamp: int }
+
+/// One hostile class (`Arrival`): the range its weapon strikes from and its
+/// pace; no pace for a body with no MOVE acting, which never arrives.
+type HostileClass = { Strike: int; Pace: Pace option }
+
+/// One class's hostile map over a room: by tile index, the ticks until one
+/// of `Members` (the hostiles' ids, the room's own and those carried across
+/// its borders) can strike the tile; `Int32.MaxValue` where none ever can.
+type ClassArrival =
+    {
+        Class: HostileClass
+        Members: string list
+        Ticks: int[]
+    }
+
+/// A room's hostile maps: one a class, and the risk an unseen neighbour's
+/// remembered danger lands on its exits, timed for the quickest unknown body
+/// (`Arrival`).
+type ArrivalMaps =
+    {
+        Classes: ClassArrival list
+        Unseen: int[] option
+    }
+
+/// One class's flood over a room from the room's own hostiles that cross
+/// exits, undilated: by tile index, the tick a member can stand on it. What a
+/// neighbour carries over.
+type ArrivalFlood =
+    {
+        Class: HostileClass
+        Members: string list
+        Arrive: int[]
+    }
+
+/// One room's arrival floods (`Arrival`), each built on first read: its own
+/// crossing hostiles' (`ArrivalFlood`) and its maps, borders carried in.
+type RoomArrival =
+    {
+        Own: Lazy<ArrivalFlood list>
+        Maps: Lazy<ArrivalMaps>
+    }
+
 /// One room as this tick's vision answered for it, to every colony: a creep's
 /// look, a structure's or an observer's.
 type WorldRoom =
     {
         /// Every creep not ours standing there, allies included.
         Hostiles: HostileInfo list
+        /// Each of those creeps' fatigue by id, as glanced this tick
+        /// (`Arrival`: a hostile's arrival waits on it); absent is none.
+        HostileFatigue: Map<string, int>
         InvaderCores: InvaderCoreInfo list
         /// The ids of the creeps not ours whose tombstones lie there.
         Fallen: string list
@@ -172,6 +220,13 @@ type WorldView =
         /// alone, which is every fixture's.
         ReachGround:
             (string -> (Pos * int) list -> Set<Pos> -> (unit -> Set<Pos>) -> Set<Pos>) option
+        /// The tick's shared hostile maps (`sharingSafeGround`): given a
+        /// room and the grounds its floods read (its own hostile ground and
+        /// each neighbour's, None where the projection carries none), the
+        /// floods an earlier colony built off the same grounds, else what the
+        /// builder answers, kept. None builds each alone, which is every
+        /// fixture's.
+        ArrivalGround: (string -> int[] option list -> (unit -> RoomArrival) -> RoomArrival) option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -188,6 +243,7 @@ module WorldView =
             Answers = Map.empty
             SafeGround = None
             ReachGround = None
+            ArrivalGround = None
         }
 
     /// The one observer whose look a room of `Danger` is: the nearest in
@@ -273,9 +329,39 @@ module WorldView =
                 reached.[room] <- (standing, ramparts, tiles) :: entries
                 tiles
 
+        // And a room's hostile maps (`Arrival`), once for every colony whose
+        // projection lays the room's ground alike.
+        let arrived =
+            System.Collections.Generic.Dictionary<string, (int[] option list * RoomArrival) list>()
+
+        let sameGrounds (grounds: int[] option list) (others: int[] option list) =
+            List.length grounds = List.length others
+            && List.forall2
+                (fun ground other ->
+                    match ground, other with
+                    | Some ground, Some other -> sameGrid ground other
+                    | None, None -> true
+                    | _ -> false)
+                grounds
+                others
+
+        let arrivalOf (room: string) (grounds: int[] option list) (build: unit -> RoomArrival) =
+            let entries =
+                match arrived.TryGetValue room with
+                | true, entries -> entries
+                | _ -> []
+
+            match entries |> List.tryFind (fun (others, _) -> sameGrounds grounds others) with
+            | Some(_, floods) -> floods
+            | None ->
+                let floods = build ()
+                arrived.[room] <- (grounds, floods) :: entries
+                floods
+
         { watch with
             SafeGround = Some share
             ReachGround = Some reachOf
+            ArrivalGround = Some arrivalOf
         }
 
     /// Whether vision answers for a room this tick, whoever's.
@@ -306,6 +392,7 @@ module WorldView =
                         room,
                         {
                             Hostiles = facts.Hostiles
+                            HostileFatigue = facts.HostileFatigue
                             InvaderCores = facts.InvaderCores
                             Fallen = facts.Fallen
                             Control = control
@@ -342,6 +429,7 @@ module WorldView =
             Answers = Map.empty
             SafeGround = None
             ReachGround = None
+            ArrivalGround = None
         }
 
 /// One colony's whole reading of this tick: its home room's projection, the

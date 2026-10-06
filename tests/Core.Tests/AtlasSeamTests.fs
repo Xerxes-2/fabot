@@ -953,7 +953,7 @@ let routeTests =
                 Expect.equal
                     (RoomName.routeBy anywhere 2 "W13S28" "W15S29")
                     None
-                    "three hops under a budget of two is no route at all (ADR 0004)"
+                    "three hops under a budget of two is no route at all"
 
                 // W13S29's border is walled end to end, so the only chain to
                 // W14S29 is the one through W14S28.

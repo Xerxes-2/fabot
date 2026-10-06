@@ -1750,6 +1750,65 @@ let seams (atlas: Atlas) (fromRoom: string) (toRoom: string) : (Pos * Pos) list 
             fromRoom
             toRoom)
 
+/// The ground a body's arrival is timed over (`Arrival`), border ring
+/// included, as step weights: road 1, plain 2, swamp 10, -1 impassable. A
+/// hostile's (`hostile`) is the raw terrain, unmasked (the [[keeper margin]]
+/// is our caution, not a wall), paved where we see roads (a road on a wall is
+/// a tunnel, walked at a road's pace) and blocked by every obstacle and by
+/// each private rampart of ours, but never by a construction site of ours,
+/// which the engine blocks only to us and a hostile walks over and destroys;
+/// ours is the walking grid with the ring laid in. None for a room the
+/// projection does not carry. A fresh array a call.
+let arrivalGroundIn (atlas: Atlas) (room: string) (hostile: bool) : int[] option =
+    if not (Map.containsKey room atlas.Weights) then
+        None
+    elif hostile then
+        let layer = layerOf atlas room
+        let grid = Array.copy layer.Terrain.Weights
+
+        Map.tryFind room atlas.Spatial.Borders
+        |> Option.iter (Map.iter (fun tile terrain -> grid.[indexOf tile] <- terrainWeight terrain))
+
+        layer.Roads |> Set.iter (fun tile -> grid.[indexOf tile] <- 1)
+
+        let sites =
+            tilesWhereIn atlas room (function
+                | Site kind -> not (isWalkable kind)
+                | _ -> false)
+
+        let blockers =
+            if Set.isEmpty sites then
+                Set.empty
+            else
+                tilesWhereIn atlas room (function
+                    | Structure kind -> not (isWalkable kind)
+                    | Controller
+                    | Mineral -> true
+                    | _ -> false)
+
+        layer.Obstacles
+        |> Set.iter (fun tile ->
+            if not (Set.contains tile sites) || Set.contains tile blockers then
+                grid.[indexOf tile] <- -1)
+
+        targetsOfKind atlas (Structure BuiltKind.Rampart)
+        |> List.filter (fun id ->
+            Map.containsKey id atlas.Spatial.Hits
+            && not (Set.contains id atlas.Spatial.PublicRamparts))
+        |> tilesOfIdsIn atlas room
+        |> Set.iter (fun tile -> grid.[indexOf tile] <- -1)
+
+        Some grid
+    else
+        let grid = Array.copy (weightsOf atlas room)
+        let ring = ringOf atlas room
+
+        for index in 0 .. tileCount - 1 do
+            if ring.[index] >= 0 then
+                grid.[index] <- ring.[index]
+
+        Some grid
+
 /// The cheapest walk from a tile to every tile of its room, each step priced
 /// at the tile's walking weight times `price` of the tile (one at least) —
 /// a walk under fire, priced by what lands on it rather than by its ticks

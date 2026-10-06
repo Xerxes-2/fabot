@@ -17,6 +17,7 @@
     <Compile Include="AtlasTrunkTests.fs" />
     <Compile Include="AtlasSeamTests.fs" />
     <Compile Include="AtlasCrossRoomTests.fs" />
+    <Compile Include="ArrivalTests.fs" />
     <Compile Include="Decide/Fixtures.fs" />
     <Compile Include="Decide/LayoutFixtures.fs" />
     <Compile Include="Decide/LayoutPlacementTests.fs" />

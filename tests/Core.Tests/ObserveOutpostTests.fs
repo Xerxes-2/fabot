@@ -2025,6 +2025,7 @@ let private observedShut (hostiles: HostileInfo list) =
                             outpostRoom,
                             {
                                 Hostiles = hostiles
+                                HostileFatigue = Map.empty
                                 InvaderCores = []
                                 Fallen = []
                                 Control =

@@ -320,6 +320,8 @@ let private seenFacts
     // bleeds on the floor at `ceil(amount / 1000)` a tick.
     let graves = room.find findTombstones |> Array.map (fun o -> o :?> ITombstone)
 
+    let hostileCreeps = room.find findHostileCreeps |> Array.map (fun o -> o :?> ICreep)
+
     let tombstones =
         Array.append graves (room.find findRuins |> Array.map (fun o -> o :?> ITombstone))
         |> Array.filter (fun r ->
@@ -779,10 +781,8 @@ let private seenFacts
             |> Array.toList
         // The hostiles standing here, read for every room the world can see.
         Hostiles =
-            room.find findHostileCreeps
-            |> Array.map (fun o ->
-                let c = o :?> ICreep
-
+            hostileCreeps
+            |> Array.map (fun c ->
                 {
                     Id = c.id
                     Owner = c.owner.username
@@ -795,6 +795,12 @@ let private seenFacts
                 }
                 : HostileInfo)
             |> Array.toList
+        // And the fatigue each of them waits out before its next step.
+        HostileFatigue =
+            hostileCreeps
+            |> Array.filter (fun c -> c.fatigue > 0)
+            |> Array.map (fun c -> c.id, c.fatigue)
+            |> Map.ofArray
         // The invader cores standing here. A core is a structure, so
         // `FIND_HOSTILE_CREEPS` cannot answer with one; `FIND_HOSTILE_STRUCTURES`
         // answers with every structure a rival owns, so the kind is checked.

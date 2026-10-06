@@ -2018,6 +2018,7 @@ let shutChaseTests =
                                             "W1N2",
                                             {
                                                 Hostiles = []
+                                                HostileFatigue = Map.empty
                                                 InvaderCores = []
                                                 Fallen = []
                                                 Control = neutralRoom

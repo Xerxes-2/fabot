@@ -20,6 +20,7 @@
     <Compile Include="IntentPlan.fs" />
     <Compile Include="Grid.fs" />
     <Compile Include="Atlas.fs" />
+    <Compile Include="Arrival.fs" />
     <Compile Include="Decide/Bodies.fs" />
     <Compile Include="Decide/Facts.fs" />
     <Compile Include="Decide/Threat.fs" />

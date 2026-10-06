@@ -543,6 +543,8 @@ type RoomFacts =
         ConstructionSites: ConstructionSiteInfo list
         /// Hostile creeps standing here this tick.
         Hostiles: HostileInfo list
+        /// Each of those hostiles' fatigue by id, where it has any.
+        HostileFatigue: Map<string, int>
         /// The invader cores standing here.
         InvaderCores: InvaderCoreInfo list
         /// The ids of the creeps not ours whose tombstones lie here.
@@ -576,6 +578,7 @@ module RoomFacts =
             Sources = []
             ConstructionSites = []
             Hostiles = []
+            HostileFatigue = Map.empty
             InvaderCores = []
             Fallen = []
         }
