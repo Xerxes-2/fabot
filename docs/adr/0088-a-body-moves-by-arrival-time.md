@@ -10,6 +10,7 @@ Each rule that picks a step or stand tile against hostiles has its own geometry 
 
 | Rule | Locator | Constant |
 |---|---|---|
+| Exit hold (#528, #561): a threat that vanished beside an exit is held for at that exit for a fixed clock, a guard standing on it (user, 2026-10-07: generalise) | `World.watchExits` Sightings.fs:970, `ExitHoldTicks`, `BriefKind.ExitHold` | `ExitHoldTicks` |
 | Half-tick step units (ADR 0010): a road is always cheaper than plain, even for an unloaded 1:1 body that walks both at one tile a tick; a ranger takes the road into a melee walking it (user, 2026-10-07) | `stepUnits` Grid.fs:103 | road 1 unit, plain 2 |
 | Reach radius, stationary (#510, #521) | `reachRadius` Threat.fs:1671, `ReachMargin` Rules.fs:811, `Gait.stationary` Sightings.fs:93 | +2; +1 at ≥5 ticks/tile |
 | Cross-border reach (#514) | `reachAcross` Threat.fs:1627 | same radius |
@@ -61,7 +62,7 @@ The symptoms of 2026-10-05..07, each the same missing rule:
 | S3 | Kite and glue: `kiteGroundIn` constants, `avoidOf`, `MeleeStepAndSwing`, `holdReach`, #524, `lamedIn`, `glueStep`'s `struck` | W17S26: melee killed untouched; W18S25 chase and siege suites unchanged | `escapeRoom` floods go: net ≤ 0 |
 | S4 | One stand-tile picker; `shelterDepth` and the exit band become map readings | Doorway, worker (1,15), #558 | ≤ +0.5 ms |
 | S5 | Light-tick forcing reads the margin; `A ≤ 1` collision surcharge (Decided 4) | #549 tests; light share no worse | light +0 |
-| S6 | Pursuit on evidence; `outruns` and `slowerOnPlain` retire | Trep-style evader cornered or dropped within budget | one flood per chasing body, chase rooms only |
+| S6 | Pursuit on evidence; `outruns` and `slowerOnPlain` retire; an unseen threat is a region grown from its last sighting by its gait, and the exit hold becomes pursuit's interception of that region (which exit, how long, which body), `ExitHoldTicks` retiring | Trep-style evader cornered or dropped within budget | one flood per chasing body, chase rooms only |
 
 **CPU frame.** The live full tick is ~150 ms, with ~1.5 floods per moving body (#553). By #553's attribution, ~10 extra priced floods cost ~20 ms. An integer arrival flood without plan filing must come in near 0.3 ms, or S1 revisits the design. The ceiling is **≤ +3 ms per war tick (~2%), +0 on a quiet or light tick**. It is counted in floods: ~2 classes × ≤3 rooms, plus endangered or chasing bodies. Each stage is checked by an interleaved A/B with identical fingerprints.
 
